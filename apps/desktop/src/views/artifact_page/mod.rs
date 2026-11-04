@@ -36,7 +36,7 @@ use crate::{
     data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
-        self, Sym, MemberAvatar, Ring,
+        self, MemberAvatar, Ring, Sym,
         web_embed::{WebEmbed, WebEmbedSpec},
     },
     views::{
@@ -1076,7 +1076,11 @@ impl ArtifactPage {
         let view_item = |grid: bool, cx: &mut Context<Self>| {
             let on = self.grid == grid;
             sym_toolbar_item(
-                if grid { "artifacts-view-grid" } else { "artifacts-view-list" },
+                if grid {
+                    "artifacts-view-grid"
+                } else {
+                    "artifacts-view-list"
+                },
                 if grid { Sym::Grid } else { Sym::List },
                 if grid {
                     c::ARTIFACTS_VIEW_GRID
@@ -1108,14 +1112,16 @@ impl ArtifactPage {
             move |mut menu, _, _| {
                 for s in ListSort::ALL {
                     let this = this.clone();
-                    menu = menu.item(PopupMenuItem::new(s.label()).checked(s == current).on_click(
-                        move |_, _, cx| {
-                            let _ = this.update(cx, |v, cx| {
-                                v.sort = s;
-                                cx.notify();
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new(s.label())
+                            .checked(s == current)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |v, cx| {
+                                    v.sort = s;
+                                    cx.notify();
+                                });
+                            }),
+                    );
                 }
                 menu
             }
@@ -1517,7 +1523,11 @@ fn thumbnail(
         ),
         None => well.child(
             kind_sym(a.kind)
-                .icon(crate::ui::sf_symbols::SymSize::new(32., 40., crate::ui::sf_symbols::Weight::Light))
+                .icon(crate::ui::sf_symbols::SymSize::new(
+                    32.,
+                    40.,
+                    crate::ui::sf_symbols::Weight::Light,
+                ))
                 .text_color(n.tertiary),
         ),
     };

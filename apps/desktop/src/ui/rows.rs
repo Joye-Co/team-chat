@@ -286,8 +286,8 @@ pub fn tab(
                     .child(CountBadge::cap(count)),
             )
         })
-        // v12/kit: never underline tabs (NATIVE.md §5.5); the active tab
-        // reads by its weight until the screen moves to a segmented control.
+    // v12/kit: never underline tabs (NATIVE.md §5.5); the active tab
+    // reads by its weight until the screen moves to a segmented control.
 }
 
 /// The height of a row kind, for virtual lists.

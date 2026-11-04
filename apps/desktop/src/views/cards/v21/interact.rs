@@ -28,8 +28,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, App, Entity, IntoElement, ParentElement, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Entity, IntoElement, ParentElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use serde_json::Value;
 

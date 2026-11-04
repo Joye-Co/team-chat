@@ -332,11 +332,10 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
         if live && !dimmed {
             let (form, block, option) = (ctx.form.clone(), id.clone(), oid.clone());
             let node_ptr = PickTarget::of(node);
-            row = row
-                .on_click(move |_, _, cx| {
-                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                    node_ptr.after(&block, cx);
-                });
+            row = row.on_click(move |_, _, cx| {
+                form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                node_ptr.after(&block, cx);
+            });
         }
         col = col.child(row);
         if on && oid == form21::OTHER {
@@ -618,11 +617,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     })
                 })
                 .child(ui::icon(
-                    if up {
-                        Sym::ChevronUp
-                    } else {
-                        Sym::ChevronDown
-                    },
+                    if up { Sym::ChevronUp } else { Sym::ChevronDown },
                     px(14.),
                     if can { k.ink_2 } else { k.ink_3 },
                 ))
@@ -737,10 +732,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let changed = order != initial;
     let mut out = div().flex().flex_col().gap(space::S8).child(col);
     if live {
-        let mut line = div()
-            .flex()
-            .items_center()
-            .gap(space::S8);
+        let mut line = div().flex().items_center().gap(space::S8);
         if changed {
             let (form, block, initial, target) = (
                 ctx.form.clone(),
@@ -890,9 +882,9 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .text_color(if on { nk.on_accent } else { nk.label })
             .when(live, |el| {
                 el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
-                        target.after(&block, cx);
-                    })
+                    form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
+                    target.after(&block, cx);
+                })
             })
             .child(n.to_string())
     }));
@@ -1083,9 +1075,11 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                             )
                         }),
                 )
-                .child(
-                    b20::option_title(&o.label, o.recommended.unwrap_or(false), cx),
-                )
+                .child(b20::option_title(
+                    &o.label,
+                    o.recommended.unwrap_or(false),
+                    cx,
+                ))
         }));
     framed(node, b, grid.into_any_element(), cx)
 }
@@ -1299,9 +1293,9 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .justify_center()
             .when(live, |el| {
                 el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                        target.after(&block, cx);
-                    })
+                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                    target.after(&block, cx);
+                })
             })
             .child(
                 b20::small(div())
@@ -1444,15 +1438,14 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .w(px(16.))
                 .flex()
                 .justify_center()
-                .when(on, |el| el.child(Sym::Check.inline().text_color(n_ink.label)))
+                .when(on, |el| {
+                    el.child(Sym::Check.inline().text_color(n_ink.label))
+                })
                 .into_any_element()
         } else {
-            crate::ui::native::NativeRadio::new(
-                eid(node, format!("poll-{id}-{}-c", o.id)),
-                on,
-            )
-            .disabled(!can)
-            .into_any_element()
+            crate::ui::native::NativeRadio::new(eid(node, format!("poll-{id}-{}-c", o.id)), on)
+                .disabled(!can)
+                .into_any_element()
         };
         col = col.child(
             div()
@@ -1594,7 +1587,11 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
         let rec = o.recommended.unwrap_or(false);
         let pick = b20::option_button(
             eid(node, format!("cmp-{id}-{}", o.id)),
-            if on { c::COMPARE_CHOSEN } else { c::COMPARE_CHOOSE },
+            if on {
+                c::COMPARE_CHOSEN
+            } else {
+                c::COMPARE_CHOOSE
+            },
             rec,
             on,
             live,
@@ -1618,7 +1615,9 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                         .flex()
                         .flex_col()
                         .gap(space::S6)
-                        .child(b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD))
+                        .child(
+                            b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD),
+                        )
                         .children(lines(&o.pros, "+", k.ok_ink))
                         .children(lines(&o.cons, "−", k.ink_3))
                         .children(kids)
@@ -2380,7 +2379,11 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         return None;
     }
     let k = theme::colors(cx);
-    let bar = |items: Vec<AnyElement>| crate::views::cards::v2::card_footer(cx).children(items).into_any_element();
+    let bar = |items: Vec<AnyElement>| {
+        crate::views::cards::v2::card_footer(cx)
+            .children(items)
+            .into_any_element()
+    };
     let note = |t: String| {
         meta(div())
             .ml_auto()

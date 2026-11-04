@@ -313,7 +313,15 @@ impl MembersPage {
             );
             let n = group.len();
             for (i, e) in group.into_iter().enumerate() {
-                list = list.child(self.row(e, selected, me.as_deref(), focused, active, i + 1 == n, cx));
+                list = list.child(self.row(
+                    e,
+                    selected,
+                    me.as_deref(),
+                    focused,
+                    active,
+                    i + 1 == n,
+                    cx,
+                ));
             }
         }
         if !any {
@@ -414,7 +422,11 @@ impl MembersPage {
         };
         let second = if let Some(st) = state {
             let rest = parts.join(" · ");
-            rows::state_line(Some(st), Some(rest).filter(|r| !r.is_empty()), ink.secondary)
+            rows::state_line(
+                Some(st),
+                Some(rest).filter(|r| !r.is_empty()),
+                ink.secondary,
+            )
         } else {
             rows::line(parts.join(" · ")).into_any_element()
         };
@@ -574,9 +586,10 @@ impl MembersPage {
                     )
                     .on_click(move |_, _, _| {
                         if let Some(r) = &run {
-                            let _ = services
-                                .provider
-                                .take_over_run(&r.group_id, &r.topic_id, &r.id);
+                            let _ =
+                                services
+                                    .provider
+                                    .take_over_run(&r.group_id, &r.topic_id, &r.id);
                         }
                     }),
                     e.run.is_none(),
@@ -594,7 +607,11 @@ impl MembersPage {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .child(rows::line(m.name.clone()).n_large_title().text_color(k.label))
+                    .child(
+                        rows::line(m.name.clone())
+                            .n_large_title()
+                            .text_color(k.label),
+                    )
                     .when(!parts.is_empty(), |el| {
                         el.child(
                             rows::line(parts.join(" · "))
@@ -653,8 +670,11 @@ impl MembersPage {
             }
         }
         for q in &e.extras.queued {
-            let mut row = FormRow::new(q.title.clone())
-                .leading(rows::sym(Sym::Waiting, SymSize::INLINE, k.secondary));
+            let mut row = FormRow::new(q.title.clone()).leading(rows::sym(
+                Sym::Waiting,
+                SymSize::INLINE,
+                k.secondary,
+            ));
             row = match &q.note {
                 Some(n) => row.detail(n.clone()).value(c::MEMBERS_QUEUED, cx),
                 None => row.value(c::MEMBERS_QUEUED, cx),
@@ -703,30 +723,35 @@ impl MembersPage {
         let cost_value = match budget {
             Some(b) => fill(
                 c::MEMBERS_COST_OF,
-                &[("cost", &money(cost, currency)), ("limit", &money(b, currency))],
+                &[
+                    ("cost", &money(cost, currency)),
+                    ("limit", &money(b, currency)),
+                ],
             ),
             None => money(cost, currency),
         };
         // No row when no run reported a cost: ¥0 or $0 would be a wrong number.
-        let cost_row = e.stats.cost_cents_this_week.map(|_| FormRow::new(c::MEMBERS_COST).control(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.))
-                .children(budget.map(|b| {
-                    let pct = (cost as f32 / b as f32).clamp(0., 1.);
-                    // Over 80 % of the limit the bar shows the problem color.
-                    let color = (pct >= 0.8).then_some(k.amber);
-                    div().w(COST_BAR).child(determinate_bar(pct, color, cx))
-                }))
-                .child(
-                    div()
-                        .n_body()
-                        .n_figures()
-                        .text_color(k.secondary)
-                        .child(cost_value),
-                ),
-        ));
+        let cost_row = e.stats.cost_cents_this_week.map(|_| {
+            FormRow::new(c::MEMBERS_COST).control(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .children(budget.map(|b| {
+                        let pct = (cost as f32 / b as f32).clamp(0., 1.);
+                        // Over 80 % of the limit the bar shows the problem color.
+                        let color = (pct >= 0.8).then_some(k.amber);
+                        div().w(COST_BAR).child(determinate_bar(pct, color, cx))
+                    }))
+                    .child(
+                        div()
+                            .n_body()
+                            .n_figures()
+                            .text_color(k.secondary)
+                            .child(cost_value),
+                    ),
+            )
+        });
         GroupedForm::new()
             .header(c::MEMBERS_THIS_WEEK)
             .row(FormRow::new(c::MEMBERS_DONE_TOPICS).value(done, cx))
@@ -920,22 +945,24 @@ impl MembersPage {
                 })
             })
         });
-        let mut row = FormRow::new(mc.name.clone())
-            .detail(detail)
-            .leading(
-                div()
-                    .relative()
-                    .child(rows::sym(machine_sym(&mc.name), SymSize::SIDEBAR, k.secondary))
-                    .children(dot.map(|d| {
-                        div()
-                            .absolute()
-                            .right(px(-2.))
-                            .bottom(px(-1.))
-                            .size(px(7.))
-                            .rounded_full()
-                            .bg(d)
-                    })),
-            );
+        let mut row = FormRow::new(mc.name.clone()).detail(detail).leading(
+            div()
+                .relative()
+                .child(rows::sym(
+                    machine_sym(&mc.name),
+                    SymSize::SIDEBAR,
+                    k.secondary,
+                ))
+                .children(dot.map(|d| {
+                    div()
+                        .absolute()
+                        .right(px(-2.))
+                        .bottom(px(-1.))
+                        .size(px(7.))
+                        .rounded_full()
+                        .bg(d)
+                })),
+        );
         if let Some(b) = open {
             row = row.control(b);
         }
@@ -957,7 +984,11 @@ impl MembersPage {
             GroupedForm::new()
                 .header(c::MEMBERS_NEEDS_APPROVAL)
                 .rows(e.stats.needs_approval.iter().map(|a| {
-                    FormRow::new(a.clone()).leading(rows::sym(Sym::Lock, SymSize::INLINE, k.secondary))
+                    FormRow::new(a.clone()).leading(rows::sym(
+                        Sym::Lock,
+                        SymSize::INLINE,
+                        k.secondary,
+                    ))
                 }))
                 .footer(fill(c::MEMBERS_APPROVAL_NOTE, &[("name", &e.member.name)]))
                 .below(

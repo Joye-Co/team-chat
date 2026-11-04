@@ -8,8 +8,7 @@
 
 use gpui::{
     AnyElement, App, Context, ElementId, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement as _, Styled, Window,
-    div, prelude::FluentBuilder as _,
+    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
     WindowExt as _,
@@ -106,11 +105,7 @@ pub fn ask_row(
     let done = page
         .local_answer(&key)
         .map(|l| (l.record.clone(), l.at, l.undoable))
-        .or_else(|| {
-            a.answered
-                .as_ref()
-                .map(|r| (r.record.clone(), r.at, false))
-        });
+        .or_else(|| a.answered.as_ref().map(|r| (r.record.clone(), r.at, false)));
     let ink = RowInk::new(None, cx);
     let from = fill(
         c::DESK_ASK_FROM,
@@ -215,7 +210,10 @@ pub fn ask_row(
     .on_click(move |_, _, cx| open_topic(&nav, &g, &t, cx))
     .context_menu(move |menu, _, _| {
         let services = menu_services.clone();
-        let (g, t) = (menu_ask.item.group_id.clone(), menu_ask.item.topic_id.clone());
+        let (g, t) = (
+            menu_ask.item.group_id.clone(),
+            menu_ask.item.topic_id.clone(),
+        );
         let menu = menu.item(
             PopupMenuItem::new(c::DESK_OPEN_TOPIC)
                 .on_click(move |_, _, cx| open_topic(&services, &g, &t, cx)),
@@ -223,9 +221,11 @@ pub fn ask_row(
         match menu_quick.clone() {
             Some(quick) => {
                 let (page, ask) = (menu_page.clone(), menu_ask.clone());
-                menu.item(PopupMenuItem::new(quick.label.clone()).on_click(
-                    move |_, window, cx| press(page.clone(), ask.clone(), quick.clone(), window, cx),
-                ))
+                menu.item(
+                    PopupMenuItem::new(quick.label.clone()).on_click(move |_, window, cx| {
+                        press(page.clone(), ask.clone(), quick.clone(), window, cx)
+                    }),
+                )
             }
             None => menu,
         }

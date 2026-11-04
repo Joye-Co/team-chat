@@ -2174,15 +2174,18 @@ pub fn watch_system_accent(cx: &mut App) {
     });
     // SAFETY: valid notification names; the block only sends on a channel.
     let observers = unsafe {
-        let local = NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
-            Some(NSSystemColorsDidChangeNotification),
-            None,
-            None,
-            &block,
-        );
+        let local = NSNotificationCenter::defaultCenter()
+            .addObserverForName_object_queue_usingBlock(
+                Some(NSSystemColorsDidChangeNotification),
+                None,
+                None,
+                &block,
+            );
         let distributed = NSDistributedNotificationCenter::defaultCenter()
             .addObserverForName_object_queue_usingBlock(
-                Some(&NSString::from_str("AppleColorPreferencesChangedNotification")),
+                Some(&NSString::from_str(
+                    "AppleColorPreferencesChangedNotification",
+                )),
                 None,
                 None,
                 &block,
@@ -2219,13 +2222,19 @@ mod tests {
         }
         let blue: Hsla = rgba(0x007AFFFF).into();
         assert!(set_system_accent(Some(blue)));
-        assert!(!set_system_accent(Some(blue)), "the same accent is no change");
+        assert!(
+            !set_system_accent(Some(blue)),
+            "the same accent is no change"
+        );
         let back = gpui::Rgba::from(app_accent(false));
         assert!((back.b - 1.).abs() < 0.01 && back.r < 0.01);
         assert_eq!(accent_ink(false), rgba(0xFFFFFFFF).into());
         set_system_accent(None);
         // The halo: half of the ring over `under` is 35 % accent.
-        let ring = gpui::Rgba::from(focus_ring_color(rgba(0x000000FF).into(), rgba(0xFFFFFFFF).into()));
+        let ring = gpui::Rgba::from(focus_ring_color(
+            rgba(0x000000FF).into(),
+            rgba(0xFFFFFFFF).into(),
+        ));
         assert!((ring.r - 0.3).abs() < 0.01 && ring.a == 1.);
     }
     // --- end v12/shell ---

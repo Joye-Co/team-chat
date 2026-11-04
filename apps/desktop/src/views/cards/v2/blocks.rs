@@ -1360,12 +1360,11 @@ pub(crate) fn input_control(
                             }),
                         )
                         .when(lock, |el| {
-                            el.child(ui::icon(Sym::Lock, px(14.), k.ink_3)).tooltip(
-                                |window, cx| {
+                            el.child(ui::icon(Sym::Lock, px(14.), k.ink_3))
+                                .tooltip(|window, cx| {
                                     gpui_component::tooltip::Tooltip::new(c::FORM_LOCKED)
                                         .build(window, cx)
-                                },
-                            )
+                                })
                         })
                 }))
                 .into_any_element()

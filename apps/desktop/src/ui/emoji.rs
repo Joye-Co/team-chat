@@ -151,11 +151,7 @@ pub fn reaction_add(id: impl Into<ElementId>, cx: &App) -> Button {
         .w(px(34.))
         .rounded(size::REACTION / 2.)
         .bg(k.field)
-        .child(icon(
-            Sym::Emoji,
-            theme::icon::ROW,
-            k.text_2,
-        ))
+        .child(icon(Sym::Emoji, theme::icon::ROW, k.text_2))
 }
 
 /// The pill label (§7.5): the names for one or two members (`Joye、Tata`),

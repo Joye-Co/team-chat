@@ -73,11 +73,7 @@ impl TimelineView {
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
                         ui::icon_button(
                             "topic-follow",
-                            if following {
-                                Sym::BellBadge
-                            } else {
-                                Sym::Bell
-                            },
+                            if following { Sym::BellBadge } else { Sym::Bell },
                         )
                         .named(if following { t::UNFOLLOW } else { t::FOLLOW })
                         .on_click(move |_, _, _| {

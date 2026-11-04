@@ -113,11 +113,7 @@ pub fn popup_row(id: impl Into<ElementId>, active: bool, cx: &App) -> gpui::Stat
 
 /// The return glyph at the end of the active popup row.
 pub fn return_hint(cx: &App) -> impl IntoElement {
-    icon(
-        Sym::Return,
-        theme::icon::CHIP,
-        theme::colors(cx).text_3,
-    )
+    icon(Sym::Return, theme::icon::CHIP, theme::colors(cx).text_3)
 }
 
 /// The tone of a toast or banner.

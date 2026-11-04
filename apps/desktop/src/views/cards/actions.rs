@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ParentElement,
-    Styled, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, ElementId, IntoElement, ParentElement, Styled, Window, div,
+    prelude::FluentBuilder as _,
 };
 use gpui_component::{Disableable as _, WindowExt as _, button::ButtonVariant};
 
@@ -208,14 +208,7 @@ fn option_row(
     let chosen = mine == Some(action.id.as_str()) || sending == Some(action.id.as_str());
     let blocked = sending.is_some();
     let press = press_of(action, message, provider);
-    let b = nk::push_button(
-        id,
-        "",
-        nk::PushStyle::Standard,
-        nk::PushSize::Regular,
-        cx,
-    )
-    .child(
+    let b = nk::push_button(id, "", nk::PushStyle::Standard, nk::PushSize::Regular, cx).child(
         div()
             .flex()
             .items_center()

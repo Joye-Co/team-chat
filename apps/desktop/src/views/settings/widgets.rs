@@ -397,11 +397,7 @@ pub fn status_line(id: impl Into<ElementId>, status: &Status, cx: &App) -> Optio
             div().into_any_element()
         } else if failed {
             line(text, color)
-                .child(crate::ui::icon(
-                    Sym::Alert,
-                    theme::icon::CHIP,
-                    k.danger,
-                ))
+                .child(crate::ui::icon(Sym::Alert, theme::icon::CHIP, k.danger))
                 .into_any_element()
         } else {
             line(text, color).into_any_element()
@@ -416,11 +412,7 @@ pub fn error_row(text: impl Into<SharedString>, retry: Button, cx: &App) -> Div 
     let k = theme::colors(cx);
     table(cx).child(
         table_row()
-            .child(crate::ui::icon(
-                Sym::Alert,
-                theme::icon::ROW,
-                k.danger,
-            ))
+            .child(crate::ui::icon(Sym::Alert, theme::icon::ROW, k.danger))
             .child(
                 div()
                     .flex_1()
@@ -495,11 +487,7 @@ pub fn select_button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
                 .one_line()
                 .child(label.into()),
         )
-        .child(crate::ui::icon(
-            Sym::PopUp,
-            theme::icon::CHIP,
-            k.text_3,
-        ))
+        .child(crate::ui::icon(Sym::PopUp, theme::icon::CHIP, k.text_3))
 }
 
 /// A presence dot of the settings tables (§8.4): 8 pt; filled for a live
@@ -705,7 +693,13 @@ pub fn native_status(status: &Status, cx: &App) -> Option<Div> {
         Status::Busy(t) | Status::Done(t) => (t.clone(), k.secondary),
         Status::Failed(t) => (t.clone(), k.red),
     };
-    Some(div().px(px(2.)).n_subheadline().text_color(color).child(text))
+    Some(
+        div()
+            .px(px(2.))
+            .n_subheadline()
+            .text_color(color)
+            .child(text),
+    )
 }
 
 /// A `secondary` Subheadline line (a footer of my own, a field's help).
@@ -772,7 +766,11 @@ pub fn open_sheet(
     cx: &mut App,
     width: crate::ui::native::SheetWidth,
     floor: Pixels,
-    build: impl Fn(gpui_component::dialog::Dialog, &mut Window, &mut App) -> gpui_component::dialog::Dialog
+    build: impl Fn(
+        gpui_component::dialog::Dialog,
+        &mut Window,
+        &mut App,
+    ) -> gpui_component::dialog::Dialog
     + 'static,
 ) {
     use gpui_component::WindowExt as _;
@@ -792,8 +790,8 @@ pub fn open_alert(
     cx: &mut App,
     build: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
 ) {
-    use gpui_component::WindowExt as _;
     use crate::ui::native::metrics;
+    use gpui_component::WindowExt as _;
     super::window_fit::sheet_floor(px(420.));
     window.open_dialog(cx, move |dialog, window, cx| {
         crate::ui::native::native_sheet(dialog, crate::ui::native::SheetWidth::Form, cx)
@@ -882,14 +880,16 @@ pub fn time_popup(
         cx,
     )
     .dropdown_menu(move |menu, _, _| {
-        times.iter().fold(menu.scrollable(true).max_h(px(264.)), |menu, t| {
-            let (t, pick) = (*t, pick.clone());
-            menu.item(
-                PopupMenuItem::new(t.wire())
-                    .checked(t == current)
-                    .on_click(move |_, window, cx| pick(t, window, cx)),
-            )
-        })
+        times
+            .iter()
+            .fold(menu.scrollable(true).max_h(px(264.)), |menu, t| {
+                let (t, pick) = (*t, pick.clone());
+                menu.item(
+                    PopupMenuItem::new(t.wire())
+                        .checked(t == current)
+                        .on_click(move |_, window, cx| pick(t, window, cx)),
+                )
+            })
     })
 }
 

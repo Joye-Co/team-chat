@@ -6,9 +6,8 @@
 use std::cell::Cell;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
-    px,
+    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement,
+    Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     Sizable as _, WindowExt as _,
@@ -127,17 +126,12 @@ pub(crate) fn sheet(
                 .flex()
                 .flex_col()
                 .gap(space::S6)
-                .child(
-                    div()
-                        .n_body()
-                        .text_color(n.label)
-                        .child(format!(
-                            "{} {} {}",
-                            c::CONFIRM_TYPE_BEFORE,
-                            code,
-                            fill(c::CONFIRM_TYPE_AFTER, &[("verb", &verb)])
-                        )),
-                )
+                .child(div().n_body().text_color(n.label).child(format!(
+                    "{} {} {}",
+                    c::CONFIRM_TYPE_BEFORE,
+                    code,
+                    fill(c::CONFIRM_TYPE_AFTER, &[("verb", &verb)])
+                )))
                 .children(field),
         );
     }
@@ -255,11 +249,8 @@ pub(crate) fn open(
     });
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::native::native_sheet(
-            dialog,
-            crate::ui::native::SheetWidth::Form,
-            cx,
-        );
+        let dialog =
+            crate::ui::native::native_sheet(dialog, crate::ui::native::SheetWidth::Form, cx);
         if first.replace(false) {
             let handle = form.read(cx).input.read(cx).focus_handle(cx);
             handle.focus(window, cx);

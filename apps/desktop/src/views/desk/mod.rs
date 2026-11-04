@@ -330,9 +330,12 @@ impl Render for DeskPage {
                     Some(n.to_string()),
                     cx,
                 ))
-                .children(snap.runs.iter().enumerate().map(|(i, r)| {
-                    list::run_row(i, r, i + 1 == n, &snap, &self.services, cx)
-                }));
+                .children(
+                    snap.runs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, r)| list::run_row(i, r, i + 1 == n, &snap, &self.services, cx)),
+                );
         }
         if !snap.done.is_empty() {
             let n = snap.done.len();
@@ -342,9 +345,12 @@ impl Render for DeskPage {
                     Some(c::DESK_TODAY.to_string()),
                     cx,
                 ))
-                .children(snap.done.iter().enumerate().map(|(i, d)| {
-                    list::done_row(i, d, i + 1 == n, &snap, &self.services, cx)
-                }));
+                .children(
+                    snap.done
+                        .iter()
+                        .enumerate()
+                        .map(|(i, d)| list::done_row(i, d, i + 1 == n, &snap, &self.services, cx)),
+                );
         }
         if quiet {
             body = body.child(

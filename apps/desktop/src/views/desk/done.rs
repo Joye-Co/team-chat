@@ -42,11 +42,13 @@ pub fn proof_line(proof: &[Proof], snap: &Snapshot) -> Option<String> {
                 artifact_id,
                 title,
                 version,
-            } => fill(
-                m::MEMBERS_ARTIFACT,
-                &[("title", title), ("v", &version.to_string())],
-            ) + " · "
-                + kind_name(snap.artifact_kinds.get(artifact_id).copied()),
+            } => {
+                fill(
+                    m::MEMBERS_ARTIFACT,
+                    &[("title", title), ("v", &version.to_string())],
+                ) + " · "
+                    + kind_name(snap.artifact_kinds.get(artifact_id).copied())
+            }
             Proof::Checks { passed, total } if passed == total => {
                 fill(c::DESK_CHECKS_ALL, &[("n", &total.to_string())])
             }

@@ -1192,7 +1192,11 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                     .children(p.action),
             )
             .when_some(p.bar, |el, f| {
-                el.child(ui::native::determinate_bar(f.clamp(0.02, 1.), Some(n.blue), cx))
+                el.child(ui::native::determinate_bar(
+                    f.clamp(0.02, 1.),
+                    Some(n.blue),
+                    cx,
+                ))
             })
             .into_any_element(),
     )
@@ -1328,11 +1332,11 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .children(path)
             .children(conflict)
             .when_some(bar, |el, f| {
-                el.child(
-                    div()
-                        .pt(space::S8)
-                        .child(ui::native::determinate_bar(f.clamp(0.02, 1.), Some(n.blue), cx)),
-                )
+                el.child(div().pt(space::S8).child(ui::native::determinate_bar(
+                    f.clamp(0.02, 1.),
+                    Some(n.blue),
+                    cx,
+                )))
             })
             .into_any_element(),
     )

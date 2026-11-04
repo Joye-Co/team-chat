@@ -15,7 +15,7 @@ use crate::{
     copy::refs as c,
     data::{ChatProvider, DraftRef, Message},
     theme::{self, Type as _, radius, space},
-    ui::{self, Sym, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
     views::timeline::extras::{ExtrasContext, MessageExtra, Placement},
 };
 
@@ -166,13 +166,7 @@ pub fn composer_chip(
                     )
                 })
                 // The part stays whole (`fit` already cut it); the lead gives way.
-                .child(
-                    div()
-                        .flex_none()
-                        .one_line()
-                        .text_color(k.ink)
-                        .child(part),
-                ),
+                .child(div().flex_none().one_line().text_color(k.ink).child(part)),
         )
         .when(updated, |d| {
             d.child(div().flex_none().text_color(k.ink_3).child(c::UPDATED))

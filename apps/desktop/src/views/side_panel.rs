@@ -33,7 +33,7 @@ use crate::{
         create_key,
     },
     theme::{self, Type as _, size, space},
-    ui::{self, Sym, MemberAvatar},
+    ui::{self, MemberAvatar, Sym},
     views::{
         artifacts::panel::TopicOutputs,
         cards::{is_ask, waits_for_viewer},
@@ -478,20 +478,12 @@ impl SidePanel {
                 .map(|item| {
                     let (glyph, color, current) = match item.status {
                         Some(CardListStatus::Done) => (Sym::Done, k.success, false),
-                        Some(CardListStatus::InProgress) => (
-                            if waits {
-                                Sym::Watch
-                            } else {
-                                Sym::Live
-                            },
-                            k.text_1,
-                            true,
-                        ),
+                        Some(CardListStatus::InProgress) => {
+                            (if waits { Sym::Watch } else { Sym::Live }, k.text_1, true)
+                        }
                         Some(CardListStatus::Failed) => (Sym::Failed, k.danger, false),
                         Some(CardListStatus::Skipped) => (Sym::Minus, k.text_3, false),
-                        Some(CardListStatus::Todo) | None => {
-                            (Sym::Todo, k.text_3, false)
-                        }
+                        Some(CardListStatus::Todo) | None => (Sym::Todo, k.text_3, false),
                     };
                     PlanRow {
                         glyph,

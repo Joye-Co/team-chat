@@ -24,7 +24,7 @@ use crate::{
     copy::{common, fill, nav, realtime as r},
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
     theme::{self, Type as _, size, space},
-    ui::{self, BadgeKind, CountBadge, Sym, RowSurface, StatusChip},
+    ui::{self, BadgeKind, CountBadge, RowSurface, StatusChip, Sym},
     views::{
         sidebar::{edge_fade, scroll_edges, topic_line, watch_scroll_edges},
         topic_menu,

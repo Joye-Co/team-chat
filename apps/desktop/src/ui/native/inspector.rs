@@ -172,7 +172,14 @@ pub fn label_value_with(
                 .text_color(k.label)
                 .whitespace_nowrap()
                 .text_ellipsis()
-                .child(div().min_w(px(0.)).max_w_full().overflow_hidden().text_ellipsis().child(value)),
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .max_w_full()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(value),
+                ),
         )
 }
 
@@ -306,6 +313,10 @@ pub fn determinate_bar(value: f32, color: Option<Hsla>, cx: &App) -> gpui::Div {
 /// A plan of `done` out of `total` steps as a determinate bar (never a
 /// row of segments).
 pub fn steps_bar(done: usize, total: usize, color: Option<Hsla>, cx: &App) -> gpui::Div {
-    let value = if total == 0 { 0. } else { done as f32 / total as f32 };
+    let value = if total == 0 {
+        0.
+    } else {
+        done as f32 / total as f32
+    };
     determinate_bar(value, color, cx)
 }
