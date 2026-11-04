@@ -195,12 +195,13 @@ impl TopicRail {
                 .children(state),
         );
         if let Some((id, at)) = by {
+            // A long name truncates at the tail; it never runs under the label.
             section = section.row(label_value(
                 c::INSPECTOR_ASKED,
-                fill(
+                div().min_w(px(0.)).truncate().child(fill(
                     c::DECISION_BY,
                     &[("name", &d.name(&id)), ("time", &clock(at))],
-                ),
+                )),
                 cx,
             ));
         }

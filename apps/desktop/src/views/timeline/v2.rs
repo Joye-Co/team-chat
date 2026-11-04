@@ -42,8 +42,15 @@ use crate::{
 pub const GUTTER: Pixels = px(28.);
 /// The column of a v2 timeline (and of the pinned card and composer).
 pub const COLUMN: Pixels = px(720.);
-/// Side padding of the v2 column (NATIVE.md §9.2: 24 pt side insets).
+/// Trailing padding of the v2 column (NATIVE.md §9.2: 24 pt side insets).
 pub const SIDE: Pixels = px(24.);
+// --- v12/fx-topic: one leading content inset (coordinator decision) ---
+/// The shared leading inset: the toolbar title, transcript avatars, the
+/// decision bar and the composer start 20 pt after the sidebar panel. The
+/// content view starts after the panel's 8 pt inset, so the inset inside
+/// it is 12 pt. Use the shell's token once it lands.
+pub const LEADING: Pixels = px(12.);
+// --- end v12/fx-topic ---
 /// The widest message text and card (NATIVE.md §9.2).
 pub const TEXT_MAX: Pixels = px(680.);
 /// Rows drawn this soon after a 话题 opens rise in (first paint).

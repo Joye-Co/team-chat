@@ -18,7 +18,13 @@ use crate::{
     copy::{common, fill, topic_rail as c},
     data::v2::ArtifactPreview,
     theme::{self, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, Sym, NamedButton as _},
+    ui::{
+        self, NamedButton as _, Sym,
+        native::{
+            NativeType as _, PushSize, PushStyle, borderless_variant, metrics, native_colors,
+            push_button,
+        },
+    },
     views::shell::clock,
 };
 
@@ -286,9 +292,30 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// The 产出 pane for one 产出 (`version` or its latest).
+/// A borderless 24 pt symbol button of the pane header (NATIVE.md §5.2).
+fn header_button(
+    id: &'static str,
+    sym: Sym,
+    name: &'static str,
+    cx: &App,
+) -> gpui_component::button::Button {
+    use gpui_component::{Sizable as _, button::ButtonVariants as _};
+    let n = native_colors(cx);
+    gpui_component::button::Button::new(id)
+        .custom(borderless_variant(cx))
+        .with_size(gpui_component::Size::Small)
+        .size(metrics::BUTTON_REGULAR)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .child(ui::icon(sym, px(15.), n.secondary))
+        .named(name)
+}
+
+/// The 产出 pane for one 产出 (`version` or its latest): a 52 pt header in
+/// the toolbar style (Title 3 title over a `secondary` subtitle, borderless
+/// 在窗口打开 and close), then the page edge to edge on `content`.
 pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> Option<AnyElement> {
-    let k = theme::colors(cx);
+    let n = native_colors(cx);
     let p = &services.provider;
     let detail = p.artifact(id)?;
     let v = version.unwrap_or(detail.summary.version);
@@ -303,78 +330,79 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
     let open_id = id.to_string();
     let header = div()
         .flex_none()
-        .h(px(48.))
-        .pl(space::S20)
-        .pr(space::S12)
+        .h(metrics::TOOLBAR_ROW)
+        .pl(space::S16)
+        .pr(space::S10)
         .flex()
         .items_center()
         .gap(space::S8)
-        .child(ui::icon(Sym::Document, px(16.), k.ink_3))
         .child(
             div()
+                .flex_1()
                 .min_w_0()
-                .one_line()
-                .t_small()
-                .semibold()
-                .text_color(k.ink)
-                .child(detail.summary.title.clone()),
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .min_w_0()
+                        .one_line()
+                        .n_title3()
+                        .text_color(n.label)
+                        .child(detail.summary.title.clone()),
+                )
+                .child(
+                    div()
+                        .one_line()
+                        .n_subheadline()
+                        .n_figures()
+                        .text_color(n.secondary)
+                        .child(fill(
+                            c::OUTPUT_VERSION,
+                            &[("v", &v.to_string()), ("time", &clock(at))],
+                        )),
+                ),
         )
-        .child(div().flex_none().t_mono().text_color(k.ink_3).child(fill(
-            c::OUTPUT_VERSION,
-            &[("v", &v.to_string()), ("time", &clock(at))],
-        )))
-        .child(div().flex_1())
         .child(
-            ui::icon_button_sm("out-open-window", Sym::OpenExternal)
-                .named(c::OPEN_WINDOW)
-                .on_click({
-                    let nav = nav.clone();
-                    let id = open_id.clone();
-                    move |_: &ClickEvent, _, cx| {
-                        nav.update(cx, |nav, cx| nav.open_artifact(id.clone(), Some(v), cx));
-                    }
-                }),
+            header_button("out-open-window", Sym::OpenExternal, c::OPEN_WINDOW, cx).on_click({
+                let nav = nav.clone();
+                let id = open_id.clone();
+                move |_: &ClickEvent, _, cx| {
+                    nav.update(cx, |nav, cx| nav.open_artifact(id.clone(), Some(v), cx));
+                }
+            }),
         )
         .child(
-            ui::icon_button_sm("out-close", Sym::Close)
-                .named(common::CLOSE)
-                .on_click({
-                    let nav = nav.clone();
-                    move |_: &ClickEvent, _, cx| {
-                        nav.update(cx, |nav, cx| nav.set_right_pane(RightPane::TopicRail, cx));
-                    }
-                }),
+            header_button("out-close", Sym::Close, common::CLOSE, cx).on_click({
+                let nav = nav.clone();
+                move |_: &ClickEvent, _, cx| {
+                    nav.update(cx, |nav, cx| nav.set_right_pane(RightPane::TopicRail, cx));
+                }
+            }),
         );
     let body: AnyElement = match preview {
         Some(preview) => div()
             .id("out-sheet")
             .size_full()
             .overflow_y_scroll()
-            .rounded(theme::radius::LG)
-            .border_1()
-            .border_color(k.line)
-            .bg(k.bg)
-            .shadow(k.lift())
-            .pt(space::S24)
-            .px(space::S24)
+            .pt(space::S8)
+            .px(space::S16)
             .pb(px(28.))
             .child(page(&preview, id, cx))
             .into_any_element(),
-        None => ui::card(cx)
+        None => div()
             .size_full()
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
             .gap(space::S12)
-            .child(ui::icon(Sym::Document, theme::icon::EMPTY, k.ink_3))
-            .child(div().t_small().text_color(k.ink_2).child(c::PANE_EMPTY))
+            .child(div().n_body().text_color(n.secondary).child(c::PANE_EMPTY))
             .child(
-                ui::button(
+                push_button(
                     "out-open-window-empty",
                     c::OPEN_WINDOW,
-                    ButtonKind::Secondary,
-                    ButtonSize::Md,
+                    PushStyle::Standard,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(move |_: &ClickEvent, _, cx| {
@@ -390,16 +418,9 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
             .size_full()
             .flex()
             .flex_col()
-            .bg(k.rail)
+            .bg(n.content)
             .child(header)
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .px(space::S16)
-                    .pb(space::S16)
-                    .child(body),
-            )
+            .child(div().flex_1().min_h(px(0.)).child(body))
             .into_any_element(),
     )
 }

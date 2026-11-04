@@ -27,6 +27,9 @@ mod model;
 pub mod plan;
 pub mod preview;
 mod row;
+// --- v12/fx-topic: Messages-style tapbacks ---
+mod tapback;
+// --- end v12/fx-topic ---
 pub mod selftest;
 pub mod v2;
 
@@ -629,11 +632,14 @@ impl TimelineView {
         if !self.v2 {
             return el;
         }
+        // `el` (the typing line) starts its text 38 pt in; move it so the
+        // text lines up with message text: the shared leading inset, the
+        // 28 pt avatar and the 12 pt gap.
         div()
             .w_full()
-            .px(v2::SIDE - theme::CONTENT_GUTTER)
-            .flex()
-            .justify_center()
+            .relative()
+            .left(v2::LEADING + v2::GUTTER + space::S12 - theme::CONTENT_GUTTER - space::S14)
+            .pr(v2::SIDE - theme::CONTENT_GUTTER)
             .child(
                 div()
                     .w_full()
@@ -819,12 +825,7 @@ impl Render for TimelineView {
 }
 
 /// A 28 pt level-1 pill: the jump to the first unread or to the latest.
-fn jump_pill(
-    id: &'static str,
-    label: String,
-    glyph: Sym,
-    cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+fn jump_pill(id: &'static str, label: String, glyph: Sym, cx: &App) -> gpui::Stateful<gpui::Div> {
     let colors = theme::colors(cx);
     ui::float_surface(cx)
         .id(id)

@@ -35,13 +35,14 @@ impl ArtifactPane {
 
 impl PaneView for ArtifactPane {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::ARTIFACT_PANE_WIDTH
+        // --- v12/fx-topic: one wide trailing pane width (400 pt) ---
+        crate::views::topic_rail::PANE_WIDE
+        // --- end v12/fx-topic ---
     }
 }
 
 impl Render for ArtifactPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-
         let RightPane::Artifact { id, version } = self.services.nav.read(cx).visible_pane() else {
             return stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };

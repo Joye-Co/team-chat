@@ -60,4 +60,7 @@ crate::copy! {
     MENU_COPY = "复制",
     MENU_COPY_LINK = "复制链接",
     DELETE_CONFIRM_DETAIL = "删除后其他成员只会看到“此消息已删除”。",
+    // --- v12/fx-topic: the plan card's stop button (opens the alert) ---
+    PLAN_STOP = "停止…",
+    // --- end v12/fx-topic ---
 }

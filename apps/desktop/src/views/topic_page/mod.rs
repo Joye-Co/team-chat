@@ -321,7 +321,8 @@ impl Render for TopicPage {
             .as_ref()
             .and_then(|(g, t)| self.render_pinned(g, t, window, cx));
         // NATIVE.md §9.2: the decision bar and the composer take the full
-        // content width with the transcript's 24 pt side insets.
+        // content width, from the shared leading inset to the transcript's
+        // 24 pt trailing inset.
         div()
             .size_full()
             .flex()
@@ -332,7 +333,8 @@ impl Render for TopicPage {
                 div()
                     .flex_none()
                     .w_full()
-                    .px(timeline_v2::SIDE)
+                    .pl(timeline_v2::LEADING)
+                    .pr(timeline_v2::SIDE)
                     .pt(space::S8)
                     .pb(space::S16)
                     .flex()
