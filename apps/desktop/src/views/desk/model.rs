@@ -152,6 +152,12 @@ impl Snapshot {
             .map(|m| m.name.clone())
             .unwrap_or_default()
     }
+
+    /// The name as a row shows it beside the member's avatar: no leading
+    /// emoji (the avatar already shows one, X-01).
+    pub fn name_by_avatar(&self, id: &str) -> String {
+        crate::ui::avatar::name_beside_avatar(&self.name(id)).to_string()
+    }
 }
 
 impl Snapshot {

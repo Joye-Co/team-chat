@@ -169,7 +169,7 @@ pub fn render(
     }
     for (i, q) in snap.queue.iter().enumerate().filter(|_| !failed) {
         let member = snap.member(&q.member_id);
-        let full = format!("{} {}", snap.name(&q.member_id), q.title);
+        let full = format!("{} {}", snap.name_by_avatar(&q.member_id), q.title);
         queue = queue.row(
             div()
                 .id(SharedString::from(format!("desk-queue-{i}")))

@@ -311,7 +311,10 @@ impl GroupPage {
             .or_else(|| t.owner_id.clone())
             .unwrap_or_else(|| t.created_by.clone());
         let glance = p.topic_glance(&t.group_id, &t.id);
-        let owner_name = member_name(&self.services, &owner_id);
+        // X-01: the name beside the member's avatar drops a leading emoji.
+        let owner_name =
+            crate::ui::avatar::name_beside_avatar(&member_name(&self.services, &owner_id))
+                .to_string();
         let with_note = |first: String| match &glance.state_note {
             Some(n) => format!("{first} · {n}"),
             None => first,
@@ -460,7 +463,13 @@ impl GroupPage {
             .map(|(i, d)| {
                 let nav = self.services.nav.clone();
                 let (gid, tid) = (d.group_id.clone(), d.topic_id.clone());
-                let mut rest = vec![member_name(&self.services, &d.member_id)];
+                let mut rest = vec![
+                    crate::ui::avatar::name_beside_avatar(&member_name(
+                        &self.services,
+                        &d.member_id,
+                    ))
+                    .to_string(),
+                ];
                 rest.extend(d.note.clone());
                 let title = d.title.clone();
                 page::PageRow {

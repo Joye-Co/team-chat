@@ -135,7 +135,7 @@ pub fn ask_row(
     let from = fill(
         c::DESK_ASK_FROM,
         &[
-            ("name", &isolate(&snap.name(&a.item.from))),
+            ("name", &isolate(&snap.name_by_avatar(&a.item.from))),
             ("topic", &isolate(&topic)),
         ],
     );
@@ -280,7 +280,7 @@ pub fn run_row(
 ) -> AnyElement {
     let member = snap.member(&r.run.bot_id);
     let (n, m) = r.step();
-    let mut rest = vec![snap.name(&r.run.bot_id)];
+    let mut rest = vec![snap.name_by_avatar(&r.run.bot_id)];
     rest.extend(r.current_text());
     let started = r.run.started_at.unwrap_or(r.run.created_at);
     // One clock (A5): the run's start on the provider's clock, as on 群
@@ -341,7 +341,7 @@ pub fn done_row(
     cx: &App,
 ) -> AnyElement {
     let member = snap.member(&d.member_id);
-    let mut rest = vec![snap.name(&d.member_id)];
+    let mut rest = vec![snap.name_by_avatar(&d.member_id)];
     rest.extend(proof_line(&d.proof, snap));
     let (s1, s2) = (services.clone(), services.clone());
     let (g, t) = (d.group_id.clone(), d.topic_id.clone());
