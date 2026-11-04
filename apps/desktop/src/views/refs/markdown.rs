@@ -107,11 +107,12 @@ impl TableRefs {
     /// The row's look: the hover fill while one of its cells shows 问这里, and the focus
     /// ring while the keyboard part focus is on the whole row.
     pub fn row(&self, el: Div, row: usize, window: &Window, cx: &App) -> Div {
-        let k = theme::colors(cx);
-        let shown = self.hovered_in(row, cx).is_some_and(|(_, s)| s);
+        let n = crate::ui::native::native_colors(cx);
+        // §2.6: the row hover is muted at 50 %, as soon as the pointer is on the row.
+        let hovered = self.hovered_in(row, cx).is_some();
         let focused = super::keyboard::part_focused(&self.row_id(row), window, cx);
         el.relative()
-            .when(shown, |el| el.bg(k.hover))
+            .when(hovered, |el| el.bg(n.fill.opacity(0.5)))
             .when(focused, |el| {
                 el.child(super::keyboard::ring(theme::radius::MARK, cx))
             })
@@ -204,6 +205,36 @@ impl TableRefs {
                 .into_any_element();
         }
         self.row_end(row, cx)
+    }
+
+    /// 问这里 for the hovered cell over the row's right end (16 in, centered on the h40
+    /// row, 6 px clear above and below): the columns keep the whole frame width.
+    pub fn row_end_overlay(&self, row: usize, beside: bool, cx: &App) -> Option<AnyElement> {
+        if beside {
+            return None;
+        }
+        let Some((col, true)) = self.hovered_in(row, cx) else {
+            return None;
+        };
+        let target = self.target.clone();
+        let id = self.cell_id(row, col);
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right(space::S16)
+                .flex()
+                .items_center()
+                .child(super::affordance::inline_button(
+                    &id,
+                    Rc::new(move |_: &App| {
+                        target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
+                    }),
+                    cx,
+                ))
+                .into_any_element(),
+        )
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
@@ -482,8 +513,11 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
     (longest * 7.0 + 24.0).clamp(64.0, 280.0)
 }
 
-/// A table in the card table's look (header `meta` medium `text-3`, hairlines between rows,
-/// `small` tabular text) with cell and column references, scrolling sideways when wide.
+/// A table (§2.7): a frame (radius 10, 1 px border), a header row h40 on the muted fill
+/// (12 medium muted, compact in a thread), rows h40 with a line between them, cells px 12
+/// (16 at the frame's edges). The first text column takes the free width, so the columns
+/// fill the frame; number columns keep the width of their longest value and never
+/// truncate. A table wider than the frame scrolls sideways inside it.
 pub fn table(
     key: &str,
     columns: &[String],
@@ -493,7 +527,7 @@ pub fn table(
     window: &Window,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     let mut widths: Vec<f32> = (0..columns.len())
         .map(|i| column_width(columns, rows, i))
         .collect();
@@ -502,48 +536,68 @@ pub fn table(
     {
         *w += NAME_ROOM;
     }
-    let cell = |text: String, width: f32, right: bool| -> Div {
+    let last = columns.len().saturating_sub(1);
+    // The column that takes the free width: the first one that is not a number column.
+    let grow = (0..columns.len())
+        .find(|i| !right.get(*i).copied().unwrap_or(false))
+        .unwrap_or(0);
+    let cell = |text: String, i: usize, width: f32, right: bool| -> Div {
         div()
-            .w(px(width))
-            .flex_none()
-            .px(space::S10)
-            .py(space::S6)
+            .when(i == grow, |d| d.flex_1().min_w(px(width)))
+            .when(i != grow, |d| d.w(px(width)).flex_none())
+            .h_full()
+            .px(space::S12)
+            .when(i == 0, |d| d.pl(space::S16))
+            .when(i == last, |d| d.pr(space::S16))
             .flex()
             .items_center()
+            .overflow_hidden()
+            .whitespace_nowrap()
             .when(right, |d| d.justify_end())
             .child(text)
     };
-    let mut header = div().flex().t_meta_medium().text_color(k.text_3);
+    let row_h = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
+    let mut header = div()
+        .h(row_h)
+        .flex()
+        .items_center()
+        .bg(n.fill)
+        .border_b_1()
+        .border_color(n.separator)
+        .t_meta_medium()
+        .text_color(n.secondary);
     for (i, (name, w)) in columns.iter().zip(&widths).enumerate() {
-        let el = cell(name.clone(), *w, right.get(i).copied().unwrap_or(false));
+        let el = cell(name.clone(), i, *w, right.get(i).copied().unwrap_or(false));
         header = header.child(match refs {
             Some(r) => r.header(el, i, window, cx),
             None => el.into_any_element(),
         });
     }
-    if refs.is_some() {
-        header = header.child(div().ml_auto().w(px(ROW_BUTTON_SLOT)).flex_none());
-    }
+    let count = rows.len();
     let body = rows.iter().enumerate().map(|(ri, row)| {
         let mut line = div()
+            .h(row_h)
             .flex()
-            .border_t(theme::HAIRLINE)
-            .border_color(k.sep)
+            .items_center()
+            .when(ri + 1 < count, |d| d.border_b_1().border_color(n.separator))
             .t_small()
             .tnum()
-            .text_color(k.text_1);
+            .text_color(n.label);
         if let Some(r) = refs {
             line = r.row(line, ri, window, cx);
         }
         // 问这里 after the row's name when the first column holds both (Refs.dc.html).
         let name = row.first().cloned().unwrap_or_default();
         let beside = refs.is_some_and(|r| {
-            let inner = widths.first().map(|w| w - 2. * f32::from(space::S10));
+            let inner = widths
+                .first()
+                .map(|w| w - f32::from(space::S16) - f32::from(space::S12));
             !right.first().copied().unwrap_or(false) && r.beside(&name, inner, window)
         });
         for (ci, w) in widths.iter().enumerate() {
             let mut el = cell(
                 row.get(ci).cloned().unwrap_or_default(),
+                ci,
                 *w,
                 right.get(ci).copied().unwrap_or(false),
             );
@@ -556,19 +610,30 @@ pub fn table(
             });
         }
         if let Some(r) = refs {
-            line = line.child(r.row_end_unless(ri, beside, cx));
+            line = line.children(r.row_end_overlay(ri, beside, cx));
         }
         line
     });
     div()
         .w_full()
-        .py(space::S4)
+        .my(space::S4)
+        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+        .border_1()
+        .border_color(n.separator)
+        .overflow_hidden()
         .child(
             div()
                 .id(ElementId::Name(format!("{key}-scroll").into()))
                 .w_full()
                 .overflow_x_scroll()
-                .child(div().flex().flex_col().child(header).children(body)),
+                .child(
+                    div()
+                        .min_w(gpui::relative(1.))
+                        .flex()
+                        .flex_col()
+                        .child(header)
+                        .children(body),
+                ),
         )
         .into_any_element()
 }

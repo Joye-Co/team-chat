@@ -190,9 +190,10 @@ pub fn part_focused(id: &str, window: &Window, cx: &App) -> bool {
     }
 }
 
-/// The 2 pt `ink-3` focus ring over a part (outside it, so nothing moves).
+/// The focus ring over a part (§1.2, E3): 3 px of `ring` at 50 %, outside the part so
+/// nothing moves, inside the card's padding.
 pub fn ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     div()
         .absolute()
         .top(px(-3.))
@@ -200,8 +201,8 @@ pub fn ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
         .left(px(-3.))
         .right(px(-3.))
         .rounded(radius + px(3.))
-        .border_2()
-        .border_color(k.ink_3)
+        .border(px(3.))
+        .border_color(n.focus)
 }
 
 /// The focused part of block `key`, as an index into `parts`.
