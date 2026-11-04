@@ -8,7 +8,7 @@ use crate::proto::machine::RunLogEntry;
 use crate::proto::{
     AnswerEdits, AnswerInputs, ArtifactDataResponse, ArtifactEventFrame, ArtifactEventKind, BotRun,
     CardActionKind, CardEventFrame, ClientFrame, EVENT_ACTION_PRESS, EVENT_ANSWER_RETRACT,
-    GroupDecision, GroupKind, MemberKind, PartRef, TopicContext, TopicLink,
+    GroupDecision, GroupKind, MemberKind, Message, PartRef, TopicContext, TopicLink,
 };
 use crate::runs::{TerminalLine, terminal_lines};
 use crate::store::{CardAnswerRow, DecisionRow, OutboxOp, OutboxState, TopicRow};
@@ -561,6 +561,11 @@ impl Client {
     /// Active runs of every group (正在做), newest change first.
     pub fn active_runs(&self) -> Result<Vec<BotRun>, ClientError> {
         Ok(self.store().active_runs()?)
+    }
+
+    /// Card v2 asks of every group, newest first (需要你拍板).
+    pub fn ask_messages(&self, limit: usize) -> Result<Vec<Message>, ClientError> {
+        Ok(self.store().ask_messages(limit)?)
     }
 
     /// Runs of every group created at or after `since` (ms): member stats (这周).

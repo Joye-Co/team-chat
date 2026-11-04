@@ -46,6 +46,7 @@ fn migrations_are_named_and_run_once() {
     assert_eq!(
         names,
         vec![
+            "asks-1",
             "characters-1",
             "core-1",
             "ext-1",

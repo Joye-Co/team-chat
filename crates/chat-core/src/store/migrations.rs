@@ -178,6 +178,11 @@ ALTER TABLE members ADD COLUMN character TEXT;
         name: "v11-files-1",
         sql: super::v11::MIGRATION_SQL_4,
     },
+    // 1.1: an index of the Card v2 asks, so 需要你拍板 finds every open ask.
+    Migration {
+        name: "asks-1",
+        sql: super::v11::MIGRATION_SQL_ASKS,
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

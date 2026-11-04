@@ -124,6 +124,12 @@ pub(super) fn apply_desk_note(
     Ok(())
 }
 
+/// 1.1 step `asks-1`: the card messages that ask someone, newest first (需要你拍板 reads
+/// every open ask, not only the newest messages of a waiting topic).
+pub(super) const MIGRATION_SQL_ASKS: &str = r#"
+CREATE INDEX messages_asks ON messages(created_at) WHERE json_extract(raw, '$.cardV2.ask') IS NOT NULL;
+"#;
+
 /// One answer to a v2 card (`card.answered`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardAnswerRow {
@@ -480,6 +486,21 @@ impl Store {
                 }
             }
             Ok(out)
+        })
+    }
+
+    /// Card v2 messages with an `ask` of every group, newest first, at most `limit`, not
+    /// deleted. Whether an ask is open for a member is the caller's check.
+    pub fn ask_messages(&self, limit: usize) -> StoreResult<Vec<Message>> {
+        self.with_reader(|c| {
+            let mut st = c.prepare_cached(&format!(
+                "SELECT {} FROM messages INDEXED BY messages_asks
+                 WHERE json_extract(raw, '$.cardV2.ask') IS NOT NULL AND deleted_at IS NULL
+                 ORDER BY created_at DESC LIMIT ?1",
+                rows::MESSAGE_COLS
+            ))?;
+            st.query_map([limit as u64], rows::message_from_row)?
+                .collect()
         })
     }
 
