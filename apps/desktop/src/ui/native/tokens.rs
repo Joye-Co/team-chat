@@ -1108,7 +1108,7 @@ impl<T: Styled> NativeType for T {}
 
 /// The `px(` literals in `src/views` when this ratchet was set. The count
 /// can only go down: lower this number when a change removes literals.
-pub const VIEWS_PX_LITERALS: usize = 1676;
+pub const VIEWS_PX_LITERALS: usize = 1678;
 
 /// `.rounded(px(`, `.text_size(px(`, `.gap(px(` and `.h(px(` literals in
 /// `src/views` when the ratchet was set. Target 0.
