@@ -1,9 +1,14 @@
-//! The rows of the rail: the state slot, 话题 rows and section headers.
+//! The rows of the sidebar (NATIVE.md §9.1), built from the kit's
+//! `SidebarRow` and `SidebarSection`: 32 pt 话题 rows with an 18 pt leading
+//! slot (the amber needs-you symbol, the working member's 16 pt avatar, or
+//! nothing) and a trailing count or time; section headers with the
+//! disclosure chevron on hover. No hover fill, the arrow cursor, a context
+//! menu on every object.
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    px,
 };
 
 use gpui_component::menu::ContextMenuExt as _;
@@ -11,207 +16,154 @@ use gpui_component::menu::ContextMenuExt as _;
 use super::{RailView, model::RowState, modes::TopicItem};
 use crate::{
     data::Member,
-    theme::{self, Type as _, space},
-    ui::{self, Sym, MemberAvatar, Ring, RowSurface},
+    ui::{
+        MemberAvatar, Ring,
+        native::{SidebarRow, SidebarSection},
+        sf_symbols::Sf,
+    },
 };
 
 /// A row's click handler.
 pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
-/// The state dot, filled or hollow: one size for every state (§7.3).
-const DOT: gpui::Pixels = theme::RAIL_STATE_DOT;
-/// The widest a row's meta gets.
-const META_MAX: gpui::Pixels = px(96.);
-/// Indent of a 话题 under a member (mode C).
-pub(super) const NESTED_PAD: gpui::Pixels = px(28.);
+/// The 16 pt member avatar of a sidebar row (§9.1).
+pub(super) const ROW_AVATAR: gpui::Pixels = px(16.);
+/// The indent of a 话题 under its member (mode C).
+pub(super) const NESTED_PAD: gpui::Pixels = px(18.);
+/// The room the disclosure chevron of a section header takes at its
+/// trailing edge (10 pt inset, 8 pt padding, the 11 pt chevron and air).
+const CHEVRON_HIT: gpui::Pixels = px(34.);
 
-/// How a 话题 row shows its slot.
+/// How a 话题 row shows its leading slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SlotStyle {
-    /// The doing member's tile (modes A and B).
+    /// The doing member's avatar (modes A and B).
     Tile,
-    /// A breathing blue dot (mode C, where the member is the parent row).
+    /// Under its member (mode C): only the needs-you symbol.
     Dot,
 }
 
 impl RailView {
-    /// The 16 pt slot at the start of a 话题 row; `tile` is the doing
-    /// member.
-    pub(super) fn slot(
-        &self,
-        state: &RowState,
-        tile: Option<&Member>,
-        style: SlotStyle,
-        selected: bool,
-        cx: &App,
-    ) -> AnyElement {
-        let k = theme::colors(cx);
-        let surface = if selected { k.rail_sel } else { k.rail };
-        let center = |el: AnyElement| {
-            div()
-                .flex_none()
-                .w(theme::RAIL_SLOT)
-                .h(theme::RAIL_SLOT)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(el)
-                .into_any_element()
-        };
-        match state {
-            // NATIVE.md §6: needs you is `exclamationmark.circle.fill` in amber.
-            RowState::NeedsYou => {
-                center(ui::sym(Sym::NeedsYou, ui::SymSize::INLINE, k.you).into_any_element())
-            }
-            RowState::Working(_) if style == SlotStyle::Tile => center(
-                MemberAvatar::new(tile, theme::RAIL_SLOT)
-                    .ring(Some(Ring::Live))
-                    .on(surface)
-                    .into_any_element(),
-            ),
-            RowState::Working(_) => {
-                center(div().size(DOT).rounded_full().bg(k.live).into_any_element())
-            }
-            // Done is quiet: an `ink-3` check, not a green one (§7.3).
-            RowState::Done => {
-                center(ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, k.ink_3).into_any_element())
-            }
-            // Waiting on someone: `clock` in `secondary` (§6).
-            RowState::Waiting => {
-                center(ui::sym(Sym::Waiting, ui::SymSize::INLINE, k.ink_3).into_any_element())
-            }
-            RowState::Idle => center(div().into_any_element()),
+    /// A sidebar row with the window's inactive look when the shell asks
+    /// for it.
+    pub(super) fn row(&self, id: impl Into<ElementId>, title: impl Into<SharedString>) -> SidebarRow {
+        let row = SidebarRow::new(id, title);
+        if self.show_inactive {
+            row.inactive(true)
+        } else {
+            row
         }
     }
 
-    /// A 话题 row: slot, title (quiet rows in `ink-2`), meta. The indent is
-    /// the left padding (10, or 28 under a member).
+    /// The leading slot of a 话题 row: the amber needs-you symbol, the
+    /// working member's avatar, or nothing.
+    fn slot(
+        &self,
+        row: SidebarRow,
+        state: &RowState,
+        tile: Option<&Member>,
+        style: SlotStyle,
+        cx: &App,
+    ) -> SidebarRow {
+        let k = crate::views::shell::chrome::colors(cx);
+        match state {
+            RowState::NeedsYou => row.state_symbol(Sf::Alert, k.amber),
+            RowState::Working(_) if style == SlotStyle::Tile => row.leading(
+                MemberAvatar::new(tile, ROW_AVATAR)
+                    .ring(Some(Ring::Live))
+                    .on(k.sidebar),
+            ),
+            _ => row,
+        }
+    }
+
+    /// A 话题 row: slot, title (Semibold while unread), and the unread count
+    /// or a time (`09:12`, `3/5`).
     pub(super) fn topic_row(&self, item: &TopicItem, cx: &App) -> AnyElement {
         let TopicItem {
             key,
             topic,
             state,
             meta,
-            meta_you,
             selected,
             style,
             indent,
             tile,
             ..
         } = item;
-        let (meta_you, selected, style, indent) = (*meta_you, *selected, *style, *indent);
-        let meta = meta.clone();
-        let k = theme::colors(cx);
         let nav = self.services.nav.clone();
         let (g, t) = (topic.group_id.clone(), topic.id.clone());
         let title = crate::views::sidebar::topic_display_title(&topic.title).0;
-        let quiet = state.quiet() && style == SlotStyle::Tile;
-        ui::list_row(
-            SharedString::from(format!("rail-{key}-{}", topic.id)),
-            RowSurface::Rail,
-            selected,
-            cx,
-        )
-        .h(theme::RAIL_ROW)
-        .pl(indent)
-        .pr(space::S10)
-        .gap(space::S8)
-        .child(self.slot(state, tile.as_ref(), style, selected, cx))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .one_line()
-                .t_small()
-                .text_color(if quiet && !selected { k.ink_2 } else { k.ink })
-                .when(selected, |el| el.medium())
-                .child(title),
-        )
-        .children(meta.map(|m| {
-            // A long name (`等<long name>`) never takes the title's room.
-            div()
-                .flex_none()
-                .max_w(META_MAX)
-                .one_line()
-                .map(|el| if m.mono { el.t_mono() } else { el.t_meta() })
-                .text_color(if meta_you { k.you_ink } else { k.ink_3 })
-                .child(m.text)
-        }))
-        .on_click(move |_, _, cx| {
+        let unread = topic.unread > 0 && !*selected;
+        let mut row = self
+            .row(
+                SharedString::from(format!("rail-{key}-{}", topic.id)),
+                title,
+            )
+            .selected(*selected)
+            .unread(unread);
+        row = self.slot(row, state, tile.as_ref(), *style, cx);
+        row = if unread {
+            row.count(topic.unread as u32)
+        } else {
+            match meta.as_ref().filter(|m| m.mono) {
+                Some(m) => row.trailing(m.text.clone()),
+                None => row,
+            }
+        };
+        let row = row.on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());
             nav.update(cx, |nav, cx| nav.open_topic(g, t, cx))
-        })
-        .context_menu({
-            let (services, topic) = (self.services.clone(), topic.clone());
-            move |menu, window, cx| super::menus::topic(menu, &services, &topic, window, cx)
-        })
-        .into_any_element()
+        });
+        div()
+            .id(SharedString::from(format!("rail-row-{key}-{}", topic.id)))
+            .pl(*indent)
+            .child(row)
+            .context_menu({
+                let (services, topic) = (self.services.clone(), topic.clone());
+                move |menu, window, cx| super::menus::topic(menu, &services, &topic, window, cx)
+            })
+            .into_any_element()
     }
 
-    /// A section header (`⌄ 开发`, `⌄ • 需要你 4`): 26 pt, 12/500 `ink-3`.
-    /// The chevron folds the section; the rest of the row runs `open` when
-    /// given (a 群 opens its page), else it folds too.
-    #[allow(clippy::too_many_arguments)]
+    /// A section header (`开发`, `私聊`, `需要你`): Section style with the
+    /// disclosure chevron on hover. A click on the chevron folds the
+    /// section; a click on the rest runs `open` when given (a 群 opens its
+    /// page), else it folds too.
     pub(super) fn section_header(
         &self,
         id: impl Into<ElementId>,
         label: String,
-        count: Option<usize>,
-        you_dot: bool,
         folded: bool,
-        selected: bool,
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
-        cx: &App,
     ) -> AnyElement {
-        let k = theme::colors(cx);
         let id: ElementId = id.into();
         let fold = std::rc::Rc::new(fold);
         let chevron_fold = fold.clone();
-        let chevron = div()
-            .id(ElementId::Name(format!("{id}-fold").into()))
-            .flex_none()
-            .size(px(14.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(ui::icon(
-                if folded {
-                    Sym::ChevronRight
-                } else {
-                    Sym::ChevronDown
-                },
-                px(12.),
-                k.ink_3,
-            ))
-            .on_click(move |e, window, cx| {
-                cx.stop_propagation();
-                chevron_fold(e, window, cx)
-            });
-        ui::list_row(id, RowSurface::Rail, selected, cx)
-            .h(theme::RAIL_GROUP_ROW)
-            .pl(space::S8)
-            .pr(space::S10)
-            .gap(space::S6)
-            .rounded(px(7.))
-            .t_meta_medium()
-            .text_color(if selected { k.ink } else { k.ink_3 })
-            .child(chevron)
-            .when(you_dot, |el| {
-                el.child(div().flex_none().size(px(6.)).rounded_full().bg(k.you))
-            })
-            .child(div().flex_shrink(1.).min_w_0().one_line().child(label))
-            .children(count.map(|n| {
-                div()
-                    .ml(space::S2)
-                    .t_mono()
-                    .text_color(k.ink_3)
-                    .child(n.to_string())
-            }))
-            .on_click(move |e, window, cx| match &open {
+        let header = SidebarSection::new(id.clone(), label)
+            .collapsed(folded)
+            .on_toggle(move |e, window, cx| match &open {
                 Some(open) => open(e, window, cx),
                 None => fold(e, window, cx),
-            })
+            });
+        div()
+            .relative()
+            .child(header)
+            // The chevron folds the section, whatever the header opens.
+            .child(
+                div()
+                    .id(ElementId::Name(format!("{id}-fold").into()))
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(CHEVRON_HIT)
+                    .on_click(move |e, window, cx| {
+                        cx.stop_propagation();
+                        chevron_fold(e, window, cx)
+                    }),
+            )
             .into_any_element()
     }
 }

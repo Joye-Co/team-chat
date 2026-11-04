@@ -604,6 +604,8 @@ impl NativeKit {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
+                    // v12/shell: the first caption clears the window's top edge.
+                    .pt(px(12.))
                     .child(self.toolbar(false, window, cx))
                     .child(self.toolbar(true, window, cx))
                     .child(

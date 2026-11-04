@@ -7,21 +7,20 @@
 
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Pixels,
-    SharedString, StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
+    SharedString, div, px,
 };
 use gpui_component::menu::ContextMenuExt as _;
 
 use super::{
-    MEMBER_AVATAR, RailView,
+    RailView,
     model::{self, Bucket, MemberRow, Meta, RowState, SideChats},
-    rows::{NESTED_PAD, SlotStyle},
+    rows::{NESTED_PAD, ROW_AVATAR, SlotStyle},
 };
 use crate::{
     app::RailMode,
     copy::rail as c,
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic},
-    theme::{self, Type as _, space},
-    ui::{self, Sym, MemberAvatar, Ring, RowSurface},
+    ui::{MemberAvatar, Ring},
 };
 
 type Open<'a> = Option<&'a (String, String)>;
@@ -124,11 +123,9 @@ fn sections(list: Vec<Vec<Item>>) -> Vec<Entry> {
     let mut out = Vec::new();
     for (si, section) in list.into_iter().enumerate() {
         for (i, item) in section.into_iter().enumerate() {
-            let gap = match (si, i) {
-                (0, 0) => px(0.),
-                (_, 0) => space::S6,
-                _ => px(1.),
-            };
+            // Section headers carry their own space above (§9.1).
+            let _ = (si, i);
+            let gap = px(0.);
             out.push(Entry { gap, item });
         }
     }
@@ -179,7 +176,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
                     meta,
                     meta_you: false,
                     style: SlotStyle::Tile,
-                    indent: space::S10,
+                    indent: px(0.),
                     rise: None,
                 }));
             }
@@ -243,7 +240,7 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
                     meta,
                     meta_you: false,
                     style: SlotStyle::Tile,
-                    indent: space::S10,
+                    indent: px(0.),
                     rise: None,
                 }));
             }
@@ -351,14 +348,8 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
 impl RailView {
     /// Draws one list row from memory.
     pub(super) fn item(&self, item: &Item, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
         match item {
-            Item::GroupHeader {
-                id,
-                name,
-                folded,
-                selected,
-            } => {
+            Item::GroupHeader { id, name, folded, .. } => {
                 let fold_id = id.clone();
                 let this = cx.entity().downgrade();
                 let nav = self.services.nav.clone();
@@ -367,10 +358,7 @@ impl RailView {
                 let header = self.section_header(
                     SharedString::from(format!("rail-group-{id}")),
                     name.clone(),
-                    None,
-                    false,
                     *folded,
-                    *selected,
                     move |_, _, cx| {
                         let id = fold_id.clone();
                         let _ = this.update(cx, |this, cx| {
@@ -384,7 +372,6 @@ impl RailView {
                         let g = open_id.clone();
                         nav.update(cx, |nav, cx| nav.open_group(g, cx))
                     })),
-                    cx,
                 );
                 // A right click on the header opens the 群's menu (§7.3).
                 div()
@@ -400,10 +387,7 @@ impl RailView {
                 self.section_header(
                     "rail-dms",
                     c::RAIL_DMS.into(),
-                    None,
-                    false,
                     *folded,
-                    false,
                     move |_, _, cx| {
                         let _ = this.update(cx, |this, cx| {
                             if !this.folded_groups.remove("rail-dms") {
@@ -413,7 +397,6 @@ impl RailView {
                         });
                     },
                     None,
-                    cx,
                 )
             }
             Item::Dm {
@@ -423,52 +406,31 @@ impl RailView {
                 selected,
             } => {
                 let nav = self.services.nav.clone();
-                let selected = *selected;
                 let open_id = id.clone();
-                ui::list_row(
-                    SharedString::from(format!("rail-dm-{id}")),
-                    RowSurface::Rail,
-                    selected,
-                    cx,
-                )
-                .h(theme::RAIL_ROW)
-                .px(space::S10)
-                .gap(space::S8)
-                .child(MemberAvatar::new(peer.as_ref(), theme::RAIL_SLOT))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .one_line()
-                        .t_small()
-                        .text_color(if selected { k.ink } else { k.ink_2 })
-                        .when(selected, |el| el.medium())
-                        .child(name.clone()),
-                )
-                .on_click(move |_, _, cx| {
-                    let id = open_id.clone();
-                    nav.update(cx, |nav, cx| nav.open_group(id, cx))
-                })
-                .context_menu({
-                    let (services, id) = (self.services.clone(), id.clone());
-                    move |menu, _, _| super::menus::group(menu, &services, &id)
-                })
-                .into_any_element()
+                let row = self
+                    .row(SharedString::from(format!("rail-dm-{id}")), name.clone())
+                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
+                    .selected(*selected)
+                    .on_click(move |_, _, cx| {
+                        let id = open_id.clone();
+                        nav.update(cx, |nav, cx| nav.open_group(id, cx))
+                    });
+                div()
+                    .id(SharedString::from(format!("rail-dm-row-{id}")))
+                    .child(row)
+                    .context_menu({
+                        let (services, id) = (self.services.clone(), id.clone());
+                        move |menu, _, _| super::menus::group(menu, &services, &id)
+                    })
+                    .into_any_element()
             }
-            Item::BucketHeader {
-                bucket,
-                count,
-                folded,
-            } => {
+            Item::BucketHeader { bucket, folded, .. } => {
                 let bucket = *bucket;
                 let this = cx.entity().downgrade();
                 self.section_header(
                     SharedString::from(format!("rail-bucket-{bucket:?}")),
                     bucket.label().into(),
-                    Some(*count),
-                    bucket == Bucket::NeedsYou,
                     *folded,
-                    false,
                     move |_, _, cx| {
                         let _ = this.update(cx, |this, cx| {
                             if !this.folded_buckets.remove(&bucket) {
@@ -478,45 +440,28 @@ impl RailView {
                         });
                     },
                     None,
-                    cx,
                 )
             }
-            Item::Topic(t) => {
-                let row = self.topic_row(t, cx);
-                match t.rise {
-                    Some(ix) => ui::motion::rise(
-                        SharedString::from(format!("rail-{}-{}", t.key, t.topic.id)),
-                        ix,
-                        div().child(row),
-                        cx,
-                    ),
-                    None => row,
-                }
-            }
+            Item::Topic(t) => self.topic_row(t, cx),
             Item::MemberHead { row, expanded } => self.member_head(row, *expanded, cx),
             Item::Grouped {
-                id,
-                word,
-                members,
-                dim,
-            } => self.grouped_row(id, word, members, *dim, cx),
-            Item::PeopleLabel => div()
-                .flex_none()
-                .h(theme::RAIL_ROW)
-                .px(space::S10)
-                .flex()
-                .items_center()
-                .t_meta_medium()
-                .text_color(k.ink_3)
-                .child(c::RAIL_PEOPLE)
-                .into_any_element(),
+                id, word, members, ..
+            } => self.grouped_row(id, word, members, cx),
+            Item::PeopleLabel => self.section_header(
+                "rail-people",
+                c::RAIL_PEOPLE.into(),
+                false,
+                |_, _, _| {},
+                None,
+            ),
             Item::Plain(m) => self.plain_member(m, cx),
         }
     }
 
-    /// The head row of a member in C.
+    /// The head row of a member in C: avatar, name, and how many 话题 wait
+    /// on me (`等你`) or the plan step. A click opens or closes its 话题.
     fn member_head(&self, r: &MemberRow, expanded: bool, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
+        let k = crate::views::shell::chrome::colors(cx);
         let id = r.member.id.clone();
         let this = cx.entity().downgrade();
         let ring = if r.working {
@@ -526,81 +471,28 @@ impl RailView {
         } else {
             None
         };
-        let trailing: Option<AnyElement> = if r.waiting_on_me > 0 {
-            Some(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .t_meta()
-                    .text_color(k.you_ink)
-                    .child(div().size(px(6.)).rounded_full().bg(k.you))
-                    .child(c::RAIL_WAITS_ON_YOU)
-                    .when(r.waiting_on_me > 1, |el| {
-                        el.child(div().mono().child(r.waiting_on_me.to_string()))
-                    })
-                    .into_any_element(),
-            )
+        let trailing = if r.waiting_on_me > 0 {
+            Some(c::RAIL_WAITS_ON_YOU.to_string())
         } else {
-            r.plan.clone().map(|plan| {
-                div()
-                    .flex_none()
-                    .t_mono()
-                    .text_color(k.ink_3)
-                    .child(plan)
-                    .into_any_element()
-            })
+            r.plan.clone()
         };
         let can_open = r.busy();
-        ui::list_row(
-            SharedString::from(format!("rail-member-{}", r.member.id)),
-            RowSurface::Rail,
-            false,
-            cx,
-        )
-        .h(theme::RAIL_ROW)
-        .pl(space::S6)
-        .pr(space::S10)
-        .gap(space::S8)
-        .child(div().flex_none().w(px(12.)).flex().when(can_open, |el| {
-            el.child(ui::icon(
-                if expanded {
-                    Sym::ChevronDown
-                } else {
-                    Sym::ChevronRight
-                },
-                px(12.),
-                k.ink_3,
-            ))
-        }))
-        .child(
-            MemberAvatar::new(Some(&r.member), MEMBER_AVATAR)
-                .ring(ring)
-                .on(k.rail),
-        )
-        .child(
-            div()
-                .flex_shrink(1.)
-                .min_w_0()
-                .max_w(px(140.))
-                .one_line()
-                .t_small()
-                .medium()
-                .text_color(k.ink)
-                .child(r.member.name.clone()),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .one_line()
-                .t_meta()
-                .text_color(k.ink_3)
-                .children(r.member.role.clone()),
-        )
-        .children(trailing)
-        .on_click(move |_, _, cx| {
+        let _ = expanded;
+        let mut row = self
+            .row(
+                SharedString::from(format!("rail-member-{}", r.member.id)),
+                r.member.name.clone(),
+            )
+            .leading(
+                MemberAvatar::new(Some(&r.member), ROW_AVATAR)
+                    .ring(ring)
+                    .on(k.sidebar),
+            )
+            .unread(r.waiting_on_me > 0);
+        if let Some(t) = trailing {
+            row = row.trailing(t);
+        }
+        row.on_click(move |_, _, cx| {
             if !can_open {
                 return;
             }
@@ -617,101 +509,39 @@ impl RailView {
     }
 
     /// An online person with nothing on: avatar, name, 岗位.
-    fn plain_member(&self, m: &Member, cx: &App) -> AnyElement {
-        let k = theme::colors(cx);
+    fn plain_member(&self, m: &Member, _cx: &App) -> AnyElement {
         let nav = self.services.nav.clone();
         let id = m.id.clone();
-        ui::list_row(
-            SharedString::from(format!("rail-person-{}", m.id)),
-            RowSurface::Rail,
-            false,
-            cx,
-        )
-        .h(theme::RAIL_ROW)
-        .pl(px(26.))
-        .pr(space::S10)
-        .gap(space::S8)
-        .child(MemberAvatar::new(Some(m), MEMBER_AVATAR))
-        .child(
-            div()
-                .flex_shrink(1.)
-                .min_w_0()
-                .max_w(px(140.))
-                .one_line()
-                .t_small()
-                .medium()
-                .text_color(k.ink)
-                .child(m.name.clone()),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .one_line()
-                .t_meta()
-                .text_color(k.ink_3)
-                .children(m.role.clone()),
-        )
-        .on_click(move |_, _, cx| {
+        let mut row = self
+            .row(SharedString::from(format!("rail-person-{}", m.id)), m.name.clone())
+            .leading(MemberAvatar::new(Some(m), ROW_AVATAR));
+        if let Some(role) = m.role.clone() {
+            row = row.trailing(role);
+        }
+        row.on_click(move |_, _, cx| {
             let id = id.clone();
             nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
         })
         .into_any_element()
     }
 
-    /// `空闲 · Ledger、Scout、Pocket` and `不在 · Alex Chen、陈晨`: small
-    /// avatars, the word, the names.
+    /// `空闲 · Ledger、Scout、Pocket` and `不在 · Alex Chen、陈晨`: the first
+    /// avatar, the word, the names.
     fn grouped_row(
         &self,
         id: &'static str,
         word: &'static str,
         members: &[Member],
-        dim: bool,
-        cx: &App,
+        _cx: &App,
     ) -> AnyElement {
-        let k = theme::colors(cx);
         let nav = self.services.nav.clone();
         let names = members
             .iter()
             .map(|m| m.name.as_str())
             .collect::<Vec<_>>()
             .join(c::RAIL_NAMES_SEP);
-        let size = if dim { MEMBER_AVATAR } else { theme::RAIL_SLOT };
-        ui::list_row(id, RowSurface::Rail, false, cx)
-            .h(theme::RAIL_ROW)
-            .pl(px(26.))
-            .pr(space::S10)
-            .gap(space::S8)
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .gap(px(3.))
-                    .when(dim, |el| el.opacity(0.5))
-                    .children(
-                        members
-                            .iter()
-                            .take(3)
-                            .map(|m| MemberAvatar::new(Some(m), size)),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .one_line()
-                    .t_small()
-                    .text_color(k.ink_3)
-                    .child(
-                        gpui::StyledText::new(format!("{word} · {names}")).with_highlights([(
-                            0..word.len(),
-                            gpui::HighlightStyle {
-                                color: Some(k.ink_2),
-                                ..Default::default()
-                            },
-                        )]),
-                    ),
-            )
+        self.row(id, format!("{word} · {names}"))
+            .leading(MemberAvatar::new(members.first(), ROW_AVATAR))
             .on_click(move |_, _, cx| nav.update(cx, |nav, cx| nav.open_members(None, cx)))
             .into_any_element()
     }

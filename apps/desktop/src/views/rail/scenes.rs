@@ -132,3 +132,35 @@ fn right_click_when_drawn(
     });
 }
 // --- end v12/behavior ---
+
+// --- v12/shell ---
+/// The main window as an inactive window (NATIVE.md §4, §10): the sidebar
+/// selection turns gray and the toolbar title and symbols `secondary`.
+pub const SHELL_SCENES: &[Scene] = &[Scene {
+    name: "window-inactive",
+    about: "The main window when another window is key: gray selection, secondary toolbar symbols",
+    start: Start::SignedIn,
+    setup: crate::selftest::scenes::open_first_topic,
+    open: open_inactive,
+}];
+
+fn open_inactive(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<gpui::AnyWindowHandle, String> {
+    let mut options = crate::app::main_window_options(false, cx);
+    options.window_bounds = Some(gpui::WindowBounds::Windowed(
+        crate::selftest::scenes::capture_bounds(content, cx),
+    ));
+    options.window_min_size = None;
+    let (handle, root) = gpui_kit::open_window(options, cx, move |window, cx| {
+        gpui::AppContext::new(cx, |cx| {
+            crate::app::RootView::new(services, None, window, cx)
+        })
+    })
+    .map_err(|e| e.to_string())?;
+    root.update(cx, |root, cx| root.show_inactive(cx));
+    Ok(handle)
+}
+// --- end v12/shell ---
