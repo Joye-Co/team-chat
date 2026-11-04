@@ -106,6 +106,10 @@ pub struct WebEmbed {
     radius: Pixels,
     pass_scroll: bool,
     autoplay: bool,
+    /// The page's side and top padding in the host base stylesheet (`--tc-pad`).
+    pad: Pixels,
+    /// Its snapshots stand for the 产出 version in thumbnails ([`page_preview`]).
+    remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
 }
@@ -122,9 +126,25 @@ impl WebEmbed {
             radius: radius::LG,
             pass_scroll: false,
             autoplay: false,
+            pad: crate::ui::native::tokens::space::S24,
+            remember: true,
             on_event: None,
             on_host: None,
         }
+    }
+
+    /// A page that is not the 产出's own (a self-test probe under the 产出's id):
+    /// its snapshots never stand for the version in thumbnails.
+    pub fn forget_preview(mut self) -> Self {
+        self.remember = false;
+        self
+    }
+
+    /// The page's padding in the base stylesheet (`--tc-pad`, 24 by default; 16 in
+    /// a 400 pane, §2.5). A page that sets its own padding keeps it.
+    pub fn pad(mut self, pad: Pixels) -> Self {
+        self.pad = pad;
+        self
     }
 
     /// Routes page events to the 产出 page host with this embed (bridge requests, loads).
@@ -194,6 +214,8 @@ pub struct WebEmbedState {
     pass_scroll: bool,
     autoplay: bool,
     radius: Pixels,
+    pad: Pixels,
+    remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
     window: Option<AnyWindowHandle>,
@@ -210,6 +232,9 @@ pub struct WebEmbedState {
     focused: bool,
     /// The frame color the inline page's cut edge fades into, as last given to the page.
     fade: Option<String>,
+    /// Where an inline page ends on a whole block (its own height when it fits): the
+    /// frame shrinks to it, so no blank band sits under the cover.
+    end: Option<Pixels>,
     /// The host base stylesheet given to the page, by its token values.
     base: Option<String>,
     #[cfg(target_os = "macos")]
@@ -237,6 +262,8 @@ impl WebEmbedState {
             pass_scroll: false,
             autoplay: false,
             radius: px(0.),
+            pad: crate::ui::native::tokens::space::S24,
+            remember: true,
             on_event: None,
             on_host: None,
             window: None,
@@ -248,6 +275,7 @@ impl WebEmbedState {
             check_pending: false,
             focused: false,
             fade: None,
+            end: None,
             base: None,
             #[cfg(target_os = "macos")]
             native: None,
@@ -405,6 +433,8 @@ impl WebEmbedState {
         self.pass_scroll = embed.pass_scroll;
         self.autoplay = embed.autoplay;
         self.radius = embed.radius;
+        self.pad = embed.pad;
+        self.remember = embed.remember;
         self.on_event = embed.on_event.clone();
         self.on_host = embed.on_host.clone();
         self.spec.viewer = embed.spec.viewer.clone();
@@ -452,10 +482,12 @@ impl WebEmbedState {
                 self.phase = Phase::Ready;
                 // A new document: it has no fade and no base stylesheet yet.
                 self.fade = None;
+                self.end = None;
                 self.base = None;
                 self.apply_base(cx);
                 // Let the page draw, then keep a picture for overlays.
                 self.snapshot_later(cx, 250);
+                self.measure_end_later(cx, 300);
             }
             ArtifactEvent::LoadFailed { reason, .. } => {
                 tracing::warn!(artifact_id = %self.spec.artifact_id, %reason, "embedded 产出 failed to load");
@@ -474,7 +506,10 @@ impl WebEmbedState {
                     self.snapshot_later(cx, 0);
                 }
             }
-            ArtifactEvent::Emit { .. } | ArtifactEvent::Ask { .. } => self.snapshot_later(cx, 120),
+            ArtifactEvent::Emit { .. } | ArtifactEvent::Ask { .. } => {
+                self.snapshot_later(cx, 120);
+                self.measure_end_later(cx, 150);
+            }
             ArtifactEvent::ExternalLink { .. }
             | ArtifactEvent::VersionSelected { .. }
             | ArtifactEvent::Ref { .. }
@@ -496,10 +531,11 @@ impl WebEmbedState {
     }
 
     /// An inline page (wheel scrolling passes to the list) starts at its top and is cut at
-    /// the frame's height: while more of the page lies below, its bottom edge fades into
-    /// the frame's surface instead of cutting through a row (MEDIA §1 inline HTML). The
-    /// fade is a click-through layer the page cannot see in its layout; it follows the
-    /// page's scroll position and size, and the theme.
+    /// the frame's height: while more of the page lies below, it ends on the last whole
+    /// block above the frame edge (a solid cover in the frame's surface hides the rest),
+    /// never under a fade or mid-glyph (§2.21, A4). The cover is a click-through layer the
+    /// page cannot see in its layout; it follows the page's scroll position, size and
+    /// content, and the theme.
     fn apply_fade(&mut self, cx: &App) {
         if !self.pass_scroll || self.phase != Phase::Ready {
             return;
@@ -531,7 +567,7 @@ impl WebEmbedState {
         if self.phase != Phase::Ready {
             return;
         }
-        let css = base_css(cx);
+        let css = base_css(self.pad, cx);
         if self.base.as_deref() == Some(css.as_str()) {
             return;
         }
@@ -540,6 +576,50 @@ impl WebEmbedState {
             n.evaluate_script(&base_script(&css));
             self.base = Some(css);
         }
+    }
+
+    /// Reads, after `delay_ms`, where an inline page ends on a whole block
+    /// (`window.__tcEnd`, kept by the cover script) and shrinks the frame to it.
+    fn measure_end_later(&self, cx: &mut Context<Self>, delay_ms: u64) {
+        if !self.pass_scroll {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(delay_ms))
+                .await;
+            let (tx, rx) = futures::channel::oneshot::channel();
+            let started = this
+                .update(cx, |s, _| match &s.native {
+                    Some(n) => {
+                        n.evaluate_text("String(window.__tcEnd||'')", move |v| {
+                            let _ = tx.send(v);
+                        });
+                        true
+                    }
+                    None => false,
+                })
+                .unwrap_or(false);
+            if !started {
+                return;
+            }
+            let end = rx
+                .await
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|v| *v >= MIN_INLINE_END);
+            if let Some(end) = end {
+                let _ = this.update(cx, |s, cx| {
+                    s.end = Some(px(end.ceil()));
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+        #[cfg(not(target_os = "macos"))]
+        let _ = (cx, delay_ms);
     }
 
     /// Takes a new snapshot after `delay_ms` (only while the page is on screen).
@@ -569,7 +649,9 @@ impl WebEmbedState {
             if let Ok(Some(png)) = rx.await {
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
-                    remember_preview(&s.artifact_id().to_string(), s.version(), image.clone());
+                    if s.remember {
+                        remember_preview(s.artifact_id(), s.version(), image.clone());
+                    }
                     s.snapshot = Some(image);
                     cx.notify();
                 });
@@ -694,36 +776,67 @@ fn hex(c: gpui::Hsla) -> String {
     }
 }
 
+/// `top` composited over the opaque `under`.
+fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
+    let (t, u) = (gpui::Rgba::from(top), gpui::Rgba::from(under));
+    let mix = |a: f32, b: f32| a * t.a + b * (1. - t.a);
+    gpui::Rgba {
+        r: mix(t.r, u.r),
+        g: mix(t.g, u.g),
+        b: mix(t.b, u.b),
+        a: 1.,
+    }
+    .into()
+}
+
 /// The host base stylesheet in this theme's token values (see
 /// [`WebEmbedState::apply_base`]).
-fn base_css(cx: &App) -> String {
+fn base_css(pad: Pixels, cx: &App) -> String {
     let k = crate::ui::native::native_colors(cx);
     let scheme = if theme::is_dark(cx) { "dark" } else { "light" };
     format!(
-        ":root{{--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
+        ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
 --tc-fill:{fill};--tc-primary:{fg};color-scheme:{scheme}}}\
 @layer tc-base{{\
 html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;\
 color:var(--tc-fg);background:transparent;-webkit-font-smoothing:antialiased}}\
-body{{margin:0;padding:24px}}\
+body{{margin:0;padding:var(--tc-pad)}}\
 h1{{font-size:24px;line-height:32px;font-weight:600;margin:0 0 8px}}\
 h2{{font-size:18px;line-height:28px;font-weight:600;margin:24px 0 8px}}\
 h3{{font-size:16px;line-height:24px;font-weight:600;margin:16px 0 8px}}\
 p{{margin:0 0 12px}}small{{color:var(--tc-muted)}}\
 a{{color:inherit;text-underline-offset:2px}}\
 table{{border-collapse:collapse;width:100%;margin:8px 0 16px;font-variant-numeric:tabular-nums}}\
-th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:left}}\
+th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:start}}\
+[data-tc-num]{{text-align:right!important}}\
 th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
 hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
 code,pre{{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px}}\
 pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}}}",
+        pad = f32::from(pad).round(),
         bg = hex(k.content),
         fg = hex(k.label),
         muted = hex(k.secondary),
-        border = hex(k.separator),
+        // Opaque on the page background: a line the page draws twice (a row
+        // and its cells) keeps the token's value (§2.22, D2).
+        border = hex(over(k.separator, k.content)),
         fill = hex(k.fill),
     )
 }
+
+/// Marks every table column whose body cells all hold a number (`1,200`,
+/// `¥3.2`, `+12%`, `−0.3 秒`) with `data-tc-num`, header included, so the
+/// base stylesheet right-aligns it (§2.21: numbers right-aligned in columns).
+/// It runs again when the page changes its tables (live data).
+const NUMERIC_COLUMNS: &str = "var tcNum=function(){var re=/^[\\s+\\-\\u2212\\u00a5$\\u20ac]*\\d[\\d.,]*\\s*(%|\\S{0,2})$/;\
+document.querySelectorAll('table').forEach(function(t){var rows=[].slice.call(t.rows);\
+var head=function(r){return r.cells.length>0&&[].every.call(r.cells,function(c){return c.tagName==='TH';});};\
+var body=rows.filter(function(r){return !head(r);}),heads=rows.filter(head);\
+var n=0;body.forEach(function(r){n=Math.max(n,r.cells.length)});\
+for(var i=0;i<n;i++){var any=false,all=true;body.forEach(function(r){var c=r.cells[i];if(!c)return;var v=c.textContent.trim();if(!v||v==='\\u2014'||v==='\\u2013'||v==='-')return;any=true;if(!re.test(v))all=false;});\
+if(any&&all){rows.forEach(function(r){if(r.cells[i])r.cells[i].setAttribute('data-tc-num','');});}}});};\
+tcNum();if(!window.__tcNumObs&&window.MutationObserver&&document.body){var p=0;window.__tcNumObs=new MutationObserver(function(){if(p)return;p=1;setTimeout(function(){p=0;tcNum();},50);});\
+window.__tcNumObs.observe(document.body,{childList:true,subtree:true,characterData:true});}";
 
 /// The script that puts the base stylesheet first in a page's `<head>` (or replaces it).
 fn base_script(css: &str) -> String {
@@ -732,26 +845,43 @@ fn base_script(css: &str) -> String {
         "(function(){{var s=document.getElementById('__tc_base');\
 if(!s){{s=document.createElement('style');s.id='__tc_base';\
 var h=document.head||document.documentElement;h.insertBefore(s,h.firstChild);}}\
-s.textContent={css};}})()"
+s.textContent={css};{num}}})()",
+        num = NUMERIC_COLUMNS
     )
 }
 
-/// The script that puts the fade into a page (or recolors it): `rgb` is `r,g,b`.
+/// The script that ends an inline page on a block boundary (or recolors the
+/// cover): `rgb` is `r,g,b`, the frame's surface. While more of the page lies
+/// below the frame, a solid cover in the surface color hides everything from
+/// the top of the first block the frame edge would cut (a line of text, a
+/// table row, a small card, a chart, an image) down to the edge, so the page
+/// ends on whole blocks and never under a fade or mid-glyph (§2.21, A4); the
+/// frame's `展开` row follows. It keeps the id `__tc_fade` the self-tests read.
 fn fade_script(rgb: &str) -> String {
     format!(
         "(function(){{var d=document.getElementById('__tc_fade');\
 if(!d){{d=document.createElement('div');d.id='__tc_fade';d.setAttribute('aria-hidden','true');\
-var s=d.style;s.position='fixed';s.left='0';s.right='0';s.bottom='0';s.height='{h}px';\
+var s=d.style;s.position='fixed';s.left='0';s.right='0';s.bottom='0';s.height='0px';\
 s.pointerEvents='none';s.zIndex='2147483647';s.margin='0';s.padding='0';\
 document.documentElement.appendChild(d);\
-var u=function(){{var e=document.scrollingElement||document.documentElement;\
-d.style.opacity=(e.scrollHeight-(window.scrollY+window.innerHeight)>1)?'1':'0';}};\
+var atomic=function(el,r){{if(!el.firstElementChild)return true;var t=el.tagName.toUpperCase();\
+if(/^(SVG|IMG|CANVAS|VIDEO|AUDIO|IFRAME|TR|LI|BUTTON|PRE|P|H1|H2|H3|H4|H5|H6|DT|DD|FIGURE|INPUT|SELECT|TEXTAREA|CODE)$/.test(t))return true;\
+if(r.height<=160){{var c=getComputedStyle(el);if(parseFloat(c.borderTopWidth)>0||parseFloat(c.borderBottomWidth)>0||\
+(c.backgroundColor&&c.backgroundColor!=='rgba(0, 0, 0, 0)'&&c.backgroundColor!=='transparent'))return true;}}return false;}};\
+var u=function(){{var e=document.scrollingElement||document.documentElement,h=window.innerHeight;\
+var more=e.scrollHeight-(window.scrollY+h)>1;if(!more){{d.style.opacity='0';d.style.height='0px';var b=document.body,bs=b?getComputedStyle(b):null;window.__tcEnd=b?Math.ceil(b.getBoundingClientRect().bottom+parseFloat(bs.marginBottom||0)):h;return;}}\
+var cut=h,all=document.body?document.body.getElementsByTagName('*'):[];\
+for(var pass=0;pass<6;pass++){{var top=cut;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;\
+var r=el.getBoundingClientRect();if(r.height<=0||r.width<=0||r.top>=cut||r.bottom<=cut)continue;\
+if(atomic(el,r)&&r.top<top)top=r.top;}}if(top>=cut)break;cut=top;}}\
+if(cut<h*0.35)cut=h;window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
 window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
 try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
-if(document.body)o.observe(document.body);}}catch(_){{}}d.__tcUpdate=u;}}\
-d.style.background='linear-gradient(to bottom,rgba({rgb},0),rgba({rgb},1))';\
-d.__tcUpdate();}})()",
-        h = f32::from(theme::EMBED_FADE),
+if(document.body)o.observe(document.body);}}catch(_){{}}\
+try{{var m=new MutationObserver(function(){{u();}});m.observe(document.body,{{childList:true,subtree:true,characterData:true}});}}catch(_){{}}\
+d.__tcUpdate=u;}}\
+d.style.background='rgb({rgb})';\
+d.__tcUpdate();}})()"
     )
 }
 
@@ -784,12 +914,20 @@ fn rect(b: Bounds<Pixels>) -> artifact_view::Rect {
     )
 }
 
+/// The shortest an inline page's frame gets when it ends early.
+const MIN_INLINE_END: f32 = 120.;
+
 impl RenderOnce for WebEmbed {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = cached_state(&self, window, cx);
         state.update(cx, |s, _| s.sync(&self));
         let k = theme::colors(cx);
         let s = state.read(cx);
+        // An inline page ends on its last whole block (or its own end).
+        let height = match s.end {
+            Some(end) if self.pass_scroll => end.min(self.height),
+            _ => self.height,
+        };
         let backdrop = match (&s.phase, s.covered(), &s.snapshot) {
             (_, true, Some(image)) | (Phase::Loading, _, Some(image)) => {
                 img(image.clone()).size_full().into_any_element()
@@ -804,7 +942,7 @@ impl RenderOnce for WebEmbed {
             .relative()
             .w_full()
             .when(self.fill, |d| d.flex_1().h_full().min_h(px(0.)))
-            .when(!self.fill, |d| d.h(self.height).flex_none())
+            .when(!self.fill, |d| d.h(height).flex_none())
             .rounded(self.radius)
             .overflow_hidden()
             // A page that fills a content area sits on the app background; inline it

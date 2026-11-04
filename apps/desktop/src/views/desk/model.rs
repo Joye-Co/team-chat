@@ -74,10 +74,8 @@ pub struct RunCard {
 impl RunCard {
     /// The step number shown as `3/5`: done steps plus the one in progress.
     pub fn step(&self) -> (usize, usize) {
-        let plan = &self.run.plan;
-        let done = plan.iter().filter(|p| p.state == PlanState::Done).count();
-        let current = plan.iter().any(|p| p.state == PlanState::Current);
-        ((done + usize::from(current)).min(plan.len()), plan.len())
+        // One count everywhere (R2): the step the run is on.
+        crate::views::topic_page::plan_progress(&self.run.plan).map_or((0, 0), |(n, m, _)| (n, m))
     }
 
     /// The step in progress (or waited on), else the run's summary.

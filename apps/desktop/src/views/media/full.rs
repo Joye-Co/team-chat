@@ -13,7 +13,9 @@ use gpui::{
     StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
 
-use gpui_component::{Selectable as _, button::Button};
+use gpui_component::{Disableable as _, Selectable as _, button::Button};
+
+use crate::ui::native::FocusRow as _;
 
 use super::{
     inline::{code_line, fit, group_digits},
@@ -112,16 +114,26 @@ fn head(
     let n = ui::native::native_colors(cx);
     let save = spec.media.entry_path();
     let open = save.clone();
+    // The kind's own tools sit in a second slot, left of the fixed set and a
+    // separator; the fixed set is the same in every kind and state: copy
+    // (disabled at 50 % when nothing copies), download, open, close (F52).
+    let has_toggles = !h.toggles.is_empty();
     let mut tools = div()
         .flex_none()
         .flex()
         .items_center()
         .gap(space::S4)
-        .children(h.toggles);
-    if let Some(copy) = h.copy {
-        tools = tools
-            .child(action(spec, "copy", Sym::Copy, cm::COPY).on_click(move |_, _, cx| copy(cx)));
-    }
+        .children(h.toggles)
+        .when(has_toggles, |d| d.child(tool_separator(cx)));
+    tools = match h.copy {
+        Some(copy) => tools
+            .child(action(spec, "copy", Sym::Copy, cm::COPY).on_click(move |_, _, cx| copy(cx))),
+        None => tools.child(
+            action(spec, "copy", Sym::Copy, cm::COPY)
+                .disabled(true)
+                .opacity(0.5),
+        ),
+    };
     tools = tools
         .child(
             action(spec, "save", Sym::Download, cm::SAVE)
@@ -149,13 +161,12 @@ fn head(
         .border_color(n.separator)
         .child(ui::icon(icon, px(16.), n.secondary))
         .child(
-            div()
+            // A file name: cut in the middle, the extension kept (§2.21, F3).
+            ui::native::file_name(title)
                 .flex_shrink(1.)
                 .min_w(px(0.))
                 .t_card_title()
-                .text_color(k.text_1)
-                .one_line()
-                .child(title.into()),
+                .text_color(k.text_1),
         )
         .when_some(h.meta, |d, m| {
             d.child(
@@ -207,10 +218,9 @@ pub fn loading(title: &str, close: CloseFn, cx: &App) -> AnyElement {
                 .flex()
                 .flex_col()
                 .gap(space::S12)
-                .child(ui::native::skeleton(relative(1.), px(200.)))
+                .child(bar(0.9))
                 .child(bar(0.7))
-                .child(bar(0.4))
-                .child(bar(0.55)),
+                .child(bar(0.4)),
         )
         .into_any_element()
 }
@@ -227,6 +237,8 @@ pub fn failed(
     let (key, again) = (key.clone(), title.to_string());
     frame(cx)
         .child(bare_head(title, close, cx))
+        // The same height as while loading (E5): the Alert takes the
+        // skeleton's place.
         .child(
             div().p(space::S24).child(
                 ui::native::Alert::new(Sym::Alert, cm::STATE_FAILED)
@@ -251,10 +263,18 @@ pub fn failed(
         .into_any_element()
 }
 
-/// The header of a version that is not read yet: title and close only.
+/// The header of a version that is not read yet (loading, failed): the same
+/// anatomy as the ready header (icon, title, the fixed actions), with copy,
+/// download and open disabled at 50 % until there is something to act on (§2.9).
 fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     let n = ui::native::native_colors(cx);
+    let off = |id: &'static str, sym: Sym, name: &'static str| {
+        ui::native::icon_button_bare(id, sym, ui::native::IconSize::Regular)
+            .named(name)
+            .disabled(true)
+            .opacity(0.5)
+    };
     div()
         .flex_none()
         .h(ui::native::metrics::TOOLBAR_ROW)
@@ -265,24 +285,48 @@ fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
         .gap(space::S8)
         .border_b_1()
         .border_color(n.separator)
+        .child(ui::icon(Sym::Document, px(16.), n.secondary))
         .child(
-            div()
+            ui::native::file_name(title.to_string())
                 .flex_1()
                 .min_w(px(0.))
                 .t_card_title()
-                .text_color(k.text_1)
-                .one_line()
-                .child(title.to_string()),
+                .text_color(k.text_1),
         )
         .child(
-            ui::native::icon_button_bare(
-                "media-viewer-close",
-                Sym::Close,
-                ui::native::IconSize::Regular,
-            )
-            .named(cm::CLOSE)
-            .on_click(move |_, window, cx| close(window, cx)),
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(space::S4)
+                .child(off("media-viewer-copy", Sym::Copy, cm::COPY))
+                .child(off("media-viewer-save", Sym::Download, cm::SAVE))
+                .child(off(
+                    "media-viewer-sys",
+                    Sym::OpenExternal,
+                    cm::OPEN_WITH_SYSTEM,
+                ))
+                .child(
+                    ui::native::icon_button_bare(
+                        "media-viewer-close",
+                        Sym::Close,
+                        ui::native::IconSize::Regular,
+                    )
+                    .named(cm::CLOSE)
+                    .on_click(move |_, window, cx| close(window, cx)),
+                ),
         )
+}
+
+/// The h16 line between a viewer's own tools and its fixed actions (§2.2).
+fn tool_separator(cx: &App) -> gpui::Div {
+    let n = ui::native::native_colors(cx);
+    div()
+        .flex_none()
+        .mx(space::S4)
+        .w(ui::native::metrics::HAIRLINE)
+        .h(space::S16)
+        .bg(n.separator)
 }
 
 fn frame(cx: &App) -> gpui::Div {
@@ -379,8 +423,11 @@ fn html(
                 // Pages from teammates get no bridge capabilities (as in the 产出 window).
                 .capabilities(artifact_view::Capabilities::NONE),
             )
-            .height(px(10_000.))
-            .rounded(radius::LG)
+            // The page sits on the sheet's background edge to edge, with the
+            // pane padding (§2.22: no darker panel without a line).
+            .fill()
+            .rounded(gpui::Pixels::ZERO)
+            .pad(space::S16)
             .on_event(move |e, _, cx| {
                 if let ArtifactEvent::Emit { name, .. } = e {
                     let name = name.clone();
@@ -423,6 +470,7 @@ fn html(
                 .id(ElementId::Name(
                     format!("{}-v{}", spec.id, v.version).into(),
                 ))
+                .focus_row(v.version == shown, cx)
                 .px(space::S8)
                 .py(space::S6)
                 .rounded(radius::MD)
@@ -499,7 +547,7 @@ fn html(
                 .flex_1()
                 .min_h(px(0.))
                 .flex()
-                .child(div().flex_1().min_w(px(0.)).p(space::S12).child(page))
+                .child(div().flex_1().min_w(px(0.)).flex().flex_col().child(page))
                 .child(
                     div()
                         .w(px(150.))
@@ -581,6 +629,7 @@ fn markdown_view(
         toc = toc.child(
             div()
                 .id(ElementId::Name(format!("{}-toc-{i}", spec.id).into()))
+                .focus_row(false, cx)
                 .px(space::S8)
                 .py(space::S4)
                 .rounded(radius::SM)
@@ -739,6 +788,7 @@ fn lightbox(
         strip = strip.child(
             div()
                 .id(ElementId::Name(format!("{}-thumb-{i}", spec.id).into()))
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .w(px(36.))
                 .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::MARK)
@@ -971,6 +1021,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
             chapters = chapters.child(
                 div()
                     .id(ElementId::Name(format!("{}-ch-{i}", spec.id).into()))
+                    .focus_row(false, cx)
                     .h(crate::ui::native::tokens::height::DEFAULT)
                     .px(space::S8)
                     .rounded(radius::MD)
@@ -1006,6 +1057,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
         strip = strip.child(
             div()
                 .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex_1()
                 .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::SM)
@@ -1302,6 +1354,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         lines = lines.child(
             div()
                 .id(ElementId::Name(format!("{}-cue-{i}", spec.id).into()))
+                .focus_row(false, cx)
                 .min_h(px(32.))
                 .px(space::S8)
                 .py(space::S6)
@@ -1544,6 +1597,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         thumbs = thumbs.child(
             div()
                 .id(ElementId::Name(format!("{}-pt-{i}", spec.id).into()))
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex()
                 .flex_col()
                 .items_center()
@@ -1829,6 +1883,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
             cols,
             div()
                 .id(ElementId::Name(format!("{}-h-{i}", spec.id).into()))
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex_1()
                 .min_w(px(0.))
                 .h_full()

@@ -21,6 +21,7 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
@@ -261,6 +262,17 @@ impl GroupPage {
             Some(n) => format!("{first} · {n}"),
             None => first,
         };
+        // The one state mapping of a 话题 (§2.12, R2 `topic_state`): 在做 n/m
+        // only with a run, 排队 without one, 正在合并 while a PR merges.
+        let state =
+            crate::views::topic_page::topic_state(p.as_ref(), self.services.me().as_deref(), t);
+        let label = if state.short.is_empty() {
+            state.text.clone()
+        } else {
+            state.short.clone()
+        };
+        let unified = crate::ui::native::StatusBadge::new(state.badge, label).into_any_element();
+        let merging = state.badge == crate::ui::native::BadgeState::Merging;
         let (glyph, tint, second, badge): (Sym, gpui::Hsla, String, Option<AnyElement>) = match st {
             Standing::OnMe => {
                 // The same words as the 话题 header: `等你审 PR #61`.
@@ -297,19 +309,7 @@ impl GroupPage {
                 let mut parts = vec![owner_name];
                 parts.extend(step.map(|i| r.plan[i].text.clone()));
                 parts.push(kit::elapsed(p.clock_now(), since));
-                let text = match kit::plan_progress(&r.plan) {
-                    Some((n, m)) => fill(
-                        c::GROUP_PAGE_STATUS_WORKING,
-                        &[("n", &n.to_string()), ("m", &m.to_string())],
-                    ),
-                    None => c::GROUP_PAGE_STATUS_STARTED.to_string(),
-                };
-                (
-                    Sym::Spinner,
-                    k.blue,
-                    parts.join(" · "),
-                    Some(page::status_badge(Status::Working, text, cx)),
-                )
+                (Sym::Spinner, k.blue, parts.join(" · "), Some(unified))
             }
             Standing::OnOthers => {
                 // The badge keeps a short state word; who it waits on goes
@@ -339,14 +339,24 @@ impl GroupPage {
                     Some(page::status_badge(Status::Queued, text, cx)),
                 )
             }
-            Standing::Other => (
-                Sym::Topic,
-                k.label,
+            Standing::Other if !merging => (
+                Sym::Waiting,
+                k.secondary,
                 with_note(fill(
                     c::GROUP_PAGE_ASKED_BY,
                     &[("name", &member_name(&self.services, &t.created_by))],
                 )),
-                None,
+                Some(unified),
+            ),
+            // 正在合并: the merge glyph with the badge.
+            Standing::Other => (
+                Sym::Merge,
+                k.blue,
+                with_note(fill(
+                    c::GROUP_PAGE_ASKED_BY,
+                    &[("name", &member_name(&self.services, &t.created_by))],
+                )),
+                Some(unified),
             ),
         };
         let nav = self.services.nav.clone();
@@ -465,12 +475,18 @@ impl GroupPage {
     fn inspector(
         &self,
         g: &str,
-        loading: bool,
+        load: PageLoad,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
         let p = self.services.provider.clone();
+        // Skeletons only while the page loads (§2.14); a failed load shows
+        // one compact line per section, never pulsing bones (§2.15).
+        let loading = load == PageLoad::Loading;
+        let failed = load == PageLoad::Failed;
+        let offline =
+            |sym: Sym, cx: &App| page::compact_empty(sym, c::GROUP_PAGE_OFFLINE, None, cx);
         let header = div()
             .flex_none()
             .h(metrics::TOOLBAR_ROW)
@@ -498,10 +514,12 @@ impl GroupPage {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .pt(tsp::S4)
             .pb(tsp::S24)
             .flex()
-            .flex_col();
+            .flex_col()
+            // Pull the first GroupLabel up so its ink starts at y 68 (B2):
+            // the section's own 16 top sits under the header band.
+            .child(div().flex_none().mt(-tsp::S12));
 
         // 成员: the name keeps its room; the 岗位 truncates first, and both
         // show in full in the tooltip.
@@ -514,6 +532,8 @@ impl GroupPage {
                 4,
                 cx,
             ));
+        } else if failed {
+            sec = sec.row(offline(Sym::Members, cx));
         } else if members.is_empty() {
             sec = sec.row(page::compact_empty(
                 Sym::Members,
@@ -522,7 +542,7 @@ impl GroupPage {
                 cx,
             ));
         }
-        for m in members.into_iter().filter(|_| !loading) {
+        for m in members.into_iter().filter(|_| !loading && !failed) {
             let nav = self.services.nav.clone();
             let id = m.id.clone();
             let full = match &m.role {
@@ -532,6 +552,7 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-member-{}", m.id)))
+                    .focus_row(false, cx)
                     .h(tsp::S32)
                     .flex()
                     .items_center()
@@ -564,14 +585,14 @@ impl GroupPage {
         col = col.child(sec);
 
         // 群里的决定.
-        let decisions = if loading {
+        let decisions = if loading || failed {
             Vec::new()
         } else {
             p.group_decisions(g)
         };
         let now = p.clock_now();
         let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS);
-        if p.can_record_decision(g) && !loading {
+        if p.can_record_decision(g) && !loading && !failed {
             let services = self.services.clone();
             let group = g.to_string();
             sec = sec.action(
@@ -595,6 +616,8 @@ impl GroupPage {
                 2,
                 cx,
             ));
+        } else if failed {
+            sec = sec.row(offline(Sym::List, cx));
         } else if decisions.is_empty() {
             // A neutral icon: a check would read as a done item.
             let record = p.can_record_decision(g).then(|| {
@@ -627,13 +650,7 @@ impl GroupPage {
                     .flex()
                     .flex_col()
                     .gap(tsp::S2)
-                    .child(
-                        div()
-                            .n_body()
-                            .text_color(k.label)
-                            .line_clamp(2)
-                            .child(d.text.clone()),
-                    )
+                    .child(kit::decision_text(&d.text, k.label))
                     .child(
                         div()
                             .n_subheadline()
@@ -643,13 +660,19 @@ impl GroupPage {
                                 "{} · {date}",
                                 who.map(|m| m.name).unwrap_or_default()
                             )),
-                    ),
+                    )
+                    .tooltip({
+                        let text = d.text.clone();
+                        move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                        }
+                    }),
             );
         }
         col = col.child(sec);
 
         // 最近的产出.
-        let outputs: Vec<_> = if loading {
+        let outputs: Vec<_> = if loading || failed {
             Vec::new()
         } else {
             p.group_artifacts(g).into_iter().take(3).collect()
@@ -662,6 +685,8 @@ impl GroupPage {
                 2,
                 cx,
             ));
+        } else if failed {
+            sec = sec.row(offline(Sym::Document, cx));
         } else if outputs.is_empty() {
             sec = sec.row(page::compact_empty(
                 Sym::Document,
@@ -682,6 +707,7 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-output-{}", a.id)))
+                    .focus_row(false, cx)
                     .py(tsp::S6)
                     .flex()
                     .items_start()
@@ -727,7 +753,7 @@ impl GroupPage {
         col = col.child(sec);
 
         // 在哪干活: the team computer a member of this 群 works on now.
-        let run = if loading {
+        let run = if loading || failed {
             None
         } else {
             p.topics(g)
@@ -745,6 +771,9 @@ impl GroupPage {
                     1,
                     cx,
                 ));
+            }
+            None if failed => {
+                sec = sec.row(offline(Sym::Computer, cx));
             }
             None => {
                 sec = sec.row(page::compact_empty(
@@ -765,11 +794,7 @@ impl GroupPage {
                 let nav = self.services.nav.clone();
                 let (gid, tid, rid) = (run.group_id.clone(), run.topic_id.clone(), run.id.clone());
                 let name = run.machine_name.clone().unwrap_or_default();
-                let glyph = if name.to_lowercase().contains("mini") {
-                    Sym::MacMini
-                } else {
-                    Sym::Computer
-                };
+                let glyph = kit::machine_sym(&name, run.machine_id.as_deref());
                 let tip = format!("{name} · {step}");
                 sec = sec
                     .action(
@@ -792,6 +817,7 @@ impl GroupPage {
                     .row(
                         div()
                             .id("group-machine")
+                            .focus_row(false, cx)
                             .py(tsp::S6)
                             .flex()
                             .items_center()
@@ -1021,7 +1047,7 @@ impl Render for GroupPage {
             .child(content);
         let inspector = self
             .aside_open
-            .then(|| self.inspector(&g, load != PageLoad::Ready, window, cx));
+            .then(|| self.inspector(&g, load, window, cx));
         div()
             .size_full()
             .flex()

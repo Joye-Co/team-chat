@@ -84,7 +84,7 @@ crate::copy! {
     MEMBERS_COST_OF = "{cost} / 上限 {limit}",
     MEMBERS_WAITS_REVIEW_WORD = "等你审",
     MEMBERS_WHERE = "在哪干活",
-    MEMBERS_EDIT_MORE = "修改…",
+    MEMBERS_EDIT_MORE = "修改",
     // --- end pages track ---
     // --- v13/ux-pages: the member detail recipe (COMPLETENESS.md §2.18) ---
     MEMBERS_HAND_OVER_SHORT = "交代",
@@ -124,7 +124,7 @@ crate::copy! {
     MEMBERS_PLAN_LIMIT = "每周限额",
     MEMBERS_PLAN_LIMIT_UNIT = "美元",
     MEMBERS_PLAN_NOBODY = "不汇报",
-    MEMBERS_PLAN_EXPLANATION = "{name} 向谁汇报，每周最多花多少。超过限额时只做提醒，不会停下工作。",
+    MEMBERS_PLAN_EXPLANATION = "{name} 向谁汇报、每周最多花多少；超过只提醒，不停工。",
     MEMBERS_PLAN_LIMIT_PLACEHOLDER = "不限",
     MEMBERS_PLAN_LIMIT_INVALID = "请填 0 到 1000000 之间的金额，最多两位小数",
     MEMBERS_PLAN_REFUSED = "没能保存汇报和限额",

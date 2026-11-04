@@ -6,6 +6,7 @@
 //! Rows have no hover fill and the arrow cursor (§10); a row that is
 //! selected uses the native list selection of `ui::native::CompactRow`.
 
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,
@@ -132,6 +133,9 @@ pub fn mail_row(
     let has_right = title_trailing.is_some() || second_trailing.is_some();
     div()
         .id(id.into())
+        // A Tab stop with the focus ring; the list moves its selection with
+        // ↑ / ↓ itself (the 成员 list).
+        .focus_row_with(ink.fill.is_some(), crate::ui::native::Arrows::Owner, cx)
         .relative()
         .flex_none()
         .h(height)
@@ -139,9 +143,6 @@ pub fn mail_row(
         .px(ROW_PAD)
         .rounded(metrics::LIST_ROW_RADIUS)
         .when_some(ink.fill, |d, f| d.bg(f))
-        .when(ink.fill.is_none(), |d| {
-            d.hover(|s| s.bg(k.fill.opacity(0.5)))
-        })
         .flex()
         .items_center()
         .gap(ROW_GAP)
@@ -299,37 +300,9 @@ pub fn toolbar_separator(cx: &App) -> gpui::Div {
     div().flex_none().w(px(1.)).h(tsp::S16).bg(k.separator)
 }
 
-/// The region of a page whose first load failed (§2.15, §2.13): it takes
-/// the place of the content (no skeletons pulse under it), in a frame that
-/// hugs it, and says why, with `重试`, which reconnects now.
+/// The region of a page whose first load failed (§2.15, owner decision
+/// v15): the page Alert (icon, neutral title, the cause and `重试`, which
+/// reconnects now) in place of the content; no skeletons pulse under it.
 pub fn failed_region(id: &str, services: &Services, cx: &App) -> AnyElement {
-    use crate::{
-        copy::common as cc,
-        ui::native::{PushSize, PushStyle, page, push_button},
-    };
-    let k = native_colors(cx);
-    let services = services.clone();
-    let retry = push_button(
-        SharedString::from(format!("{id}-retry")),
-        cc::PAGE_RETRY,
-        PushStyle::Outline,
-        PushSize::Small,
-        cx,
-    )
-    .on_click(move |_, _, _| services.provider.reconnect_now());
-    div()
-        .id(SharedString::from(format!("{id}-failed")))
-        .flex_none()
-        .flex()
-        .rounded(page::m::FRAME_RADIUS)
-        .border_1()
-        .border_color(k.separator)
-        .child(page::page_empty(
-            Sym::Warning,
-            cc::PAGE_LOAD_FAILED,
-            cc::PAGE_LOAD_FAILED_LINE,
-            vec![retry.into_any_element()],
-            cx,
-        ))
-        .into_any_element()
+    crate::ui::native::page::load_failed(id, services, cx)
 }

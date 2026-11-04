@@ -53,7 +53,7 @@ crate::copy! {
     ARTIFACTS_FOOTER_MATCH = "找到 {n} 个，共 {total} 个产出",
     ARTIFACTS_VERSION = "v{v}",
     ARTIFACTS_TILE_META = "v{v} · {topic}",
-    ARTIFACTS_EMPTY_BODY = "成员做好的网页、文档和图片会放在这里，每个都带着版本和来龙去脉。",
+    ARTIFACTS_EMPTY_BODY = "成员做的网页、文档和图片都在这里，每个都有版本。",
     ARTIFACTS_NO_MATCH_TITLE = "没有找到“{q}”",
     ARTIFACTS_NO_MATCH_BODY = "换个词试试，或者清空搜索看全部产出。",
     ARTIFACTS_CLEAR_SEARCH = "清空搜索",
@@ -83,4 +83,10 @@ crate::copy! {
     ARTIFACT_STATUS_DONE = "完成",
     ARTIFACT_STATUS_ACTIVE = "在做",
     // --- end v14/t3-pages ---
+    // --- v15/r3-pages: the quiet-page check (artifact-quiet-page) ---
+    ARTIFACT_QUIET_TITLE = "渠道预算",
+    ARTIFACT_QUIET_CHECKING = "正在检查",
+    ARTIFACT_QUIET_PASSED = "没有替你发出回应",
+    ARTIFACT_QUIET_FAILED = "替你发出了回应",
+    // --- end v15/r3-pages ---
 }

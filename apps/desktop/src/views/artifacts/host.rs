@@ -976,9 +976,9 @@ fn selector_key(selector: &str) -> String {
     format!("sha256:{hex}")
 }
 
-/// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
-/// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
-/// 最多引用 5 处 (from [`refs::ask_about_outcome`]); a chip in 单独问 shows in its composer.
+// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
+// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
+// 最多引用 5 处 (from `refs::ask_about_outcome`); a chip in 单独问 shows in its composer.
 // --- the footer band ---------------------------------------------------------------------
 
 /// The band of a version's pages now, in words.
@@ -1378,7 +1378,9 @@ pub fn page_rows(
             .into_any_element()
     };
     rows.push(match view {
-        BandView::Waiting(t) | BandView::Working(t) => badge_row(Status::Working, t, Vec::new()),
+        // Waiting on someone else is the clock, muted (§2.12); working spins.
+        BandView::Waiting(t) => badge_row(Status::Waiting, t, Vec::new()),
+        BandView::Working(t) => badge_row(Status::Working, t, Vec::new()),
         BandView::NoAnswer(t) => {
             let (a, b) = (artifact_id.to_string(), artifact_id.to_string());
             badge_row(
@@ -1412,28 +1414,52 @@ pub fn page_rows(
     rows
 }
 
-/// The app's navigation, for [`shown_in_pane`] (set by the 产出 pane).
-struct PaneNav(gpui::Entity<crate::app::Navigation>);
+/// The navigation of every main window with a 产出 pane, for
+/// [`shown_in_pane`]. Each new pane adds its window's navigation (a later
+/// main window, or a later self-test scene, has its own), and closed
+/// windows drop out.
+#[derive(Default)]
+struct PaneNavs(Vec<gpui::WeakEntity<crate::app::Navigation>>);
 
-impl Global for PaneNav {}
+impl Global for PaneNavs {}
 
-/// Lets [`shown_in_pane`] see the right pane (the 产出 pane calls it once).
+/// Lets [`shown_in_pane`] see the right pane of `nav`'s window (each 产出
+/// pane calls it when it is made).
 pub fn track_pane(nav: gpui::Entity<crate::app::Navigation>, cx: &mut App) {
-    if !cx.has_global::<PaneNav>() {
-        cx.set_global(PaneNav(nav));
+    let navs = cx.default_global::<PaneNavs>();
+    navs.0.retain(|n| n.upgrade().is_some());
+    let weak = nav.downgrade();
+    if !navs.0.iter().any(|n| n == &weak) {
+        navs.0.push(weak);
     }
 }
 
-/// True while the 产出 pane shows `artifact_id` (COMPLETENESS.md §2.17: the
-/// in-thread embed of that 产出 then collapses to [`reference_row`]).
+/// True while a 产出 pane shows `artifact_id` (COMPLETENESS.md §2.17: the
+/// in-thread embed of that 产出 then collapses to [`reference_row`]). The
+/// thread reads it on every render, and it re-renders when the navigation
+/// changes, so opening or closing the pane collapses or restores the embed.
 pub fn shown_in_pane(artifact_id: &str, cx: &App) -> bool {
-    let Some(PaneNav(nav)) = cx.try_global::<PaneNav>() else {
+    let Some(PaneNavs(navs)) = cx.try_global::<PaneNavs>() else {
         return false;
     };
-    matches!(
-        nav.read(cx).visible_pane(),
-        crate::app::RightPane::Artifact { id, .. } if id == artifact_id
-    )
+    navs.iter().filter_map(|n| n.upgrade()).any(|nav| {
+        matches!(
+            nav.read(cx).visible_pane(),
+            crate::app::RightPane::Artifact { id, .. } if id == artifact_id
+        )
+    })
+}
+
+/// The reference row's action: moves keyboard focus into the page the 产出
+/// pane shows (the thread keeps no live copy of it, so the one live page of
+/// `artifact_id` is the pane's).
+fn focus_pane(artifact_id: &str, cx: &App) {
+    for page in crate::ui::web_embed::live(cx) {
+        let s = page.read(cx);
+        if s.artifact_id() == artifact_id && s.shown() {
+            s.focus();
+        }
+    }
 }
 
 /// The one-line reference an in-thread embed collapses to while the 产出 pane
@@ -1442,18 +1468,28 @@ pub fn shown_in_pane(artifact_id: &str, cx: &App) -> bool {
 /// as the in-thread width. No page shows twice on one screen (§2.21).
 pub fn reference_row(
     id: impl Into<gpui::ElementId>,
+    artifact_id: &str,
     title: impl Into<SharedString>,
     version: u32,
     cx: &App,
 ) -> gpui::AnyElement {
     use crate::ui::{
-        native::{NativeType as _, native_colors, page},
+        native::{FocusRow as _, NativeType as _, native_colors, page},
         sf_symbols::Sym,
     };
-    use gpui::{InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _, div};
+    use gpui::{
+        InteractiveElement as _, IntoElement as _, ParentElement as _,
+        StatefulInteractiveElement as _, Styled as _, div,
+    };
     let k = native_colors(cx);
+    let target = artifact_id.to_string();
     div()
         .id(id.into())
+        // A button (E3): a Tab stop with the focus ring, Return and Space act,
+        // hover muted 50 % (the kit's row recipe).
+        .focus_row(false, cx)
+        .cursor_pointer()
+        .on_click(move |_, _, cx| focus_pane(&target, cx))
         .w_full()
         .h(crate::ui::native::tokens::height::FOOTER_ROW)
         .px(tsp::S12)

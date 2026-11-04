@@ -29,6 +29,7 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
+use crate::ui::native::FocusRow as _;
 use crate::{
     app::{Changes, NewTopic, Services},
     copy::{desk as c, fill},
@@ -292,13 +293,16 @@ impl DeskPage {
         } else {
             rows
         };
-        let footer = long.then(|| {
+        // Every list ends with a footer row (§2.18, B5): the count, or past
+        // [`SECTION_ROWS`] `看全部 N 件` that opens the rest (and `收起`).
+        let footer = if long {
             let text = if open {
                 c::DESK_SHOW_LESS.to_string()
             } else {
                 fill(c::DESK_SHOW_ALL, &[("n", &total.to_string())])
             };
             page::list_footer(SharedString::from(format!("{id}-more")), text, None, cx)
+                .focus_row(false, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if !this.expanded.remove(id) {
@@ -306,8 +310,15 @@ impl DeskPage {
                     }
                     cx.notify();
                 }))
-        });
-        page::frame(cx).children(shown).children(footer)
+        } else {
+            page::list_footer(
+                SharedString::from(format!("{id}-count")),
+                fill(c::DESK_COUNT, &[("n", &total.to_string())]),
+                None,
+                cx,
+            )
+        };
+        page::frame(cx).children(shown).child(footer)
     }
 
     /// The KPI row (§2.4): 等你, 在做, 今天完成, 排队.
@@ -318,6 +329,9 @@ impl DeskPage {
             .iter()
             .filter(|a| !list::is_answered(a, self))
             .map(|a| a.item.at)
+            // A missing time (0) is not the earliest one (§2.15 dates): 未知
+            // shows only when no ask has a time.
+            .filter(|t| *t > 0)
             .min();
         let mut workers: Vec<&str> = snap.runs.iter().map(|r| r.run.bot_id.as_str()).collect();
         workers.sort_unstable();
@@ -462,6 +476,7 @@ impl Render for DeskPage {
             }
             PageLoad::Loading => {
                 content = content
+                    .child(list::note_skeleton(cx))
                     .child(page::skeleton_cards(4, cx))
                     .child(section(
                         page::section_header(c::DESK_NEEDS_YOU, None, None, None, cx),

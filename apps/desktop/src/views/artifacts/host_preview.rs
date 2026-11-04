@@ -16,35 +16,18 @@
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
-use gpui::{
-    AnyWindowHandle, App, AppContext as _, AsyncApp, Context, Entity, IntoElement, ParentElement,
-    Render, SharedString, Styled, Window, WindowBounds, div,
-};
+use gpui::{AnyWindowHandle, App, AsyncApp, Entity};
 
 use super::host;
 use crate::{
-    app::{Services, main_window_options},
-    data::{Member, page_host::PageEventKind, page_host::PageSignal},
+    app::Services,
+    data::{page_host::PageEventKind, page_host::PageSignal},
     fake::v2 as d,
-    selftest::scenes::capture_bounds,
-    theme::{self, Type as _, space},
-    ui::{
-        MemberAvatar,
-        parts::{hairline, toolbar_band},
-        web_embed::{Phase, WebEmbedState, live},
-    },
-    views::media::{
-        MediaKind,
-        inline::{self, InlineSpec},
-        state::Target,
-        store::{self, MediaKey},
-    },
+    ui::web_embed::{Phase, WebEmbedState, live},
+    views::media::store::{self, MediaKey},
 };
 
 const PAGE: &str = include_str!("host_dashboard.html");
-const ROW: &str = "host-scene";
-/// The message of the sample (sample data, like a member's message).
-const SAID: &str = "做好了，页面里可以按渠道看每周的数。觉得哪个数不对，直接在页面里问我。";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -102,84 +85,6 @@ fn write_version(version: u32) -> std::path::PathBuf {
     dir
 }
 
-pub struct HostPreview {
-    services: Services,
-    ledger: Option<Member>,
-    title: SharedString,
-}
-
-impl Render for HostPreview {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let spec = InlineSpec {
-            key: MediaKey::new(d::ART_REPORT, 3),
-            kind: MediaKind::Html,
-            title: self.title.to_string(),
-            bytes: PAGE.len() as u64,
-            target: Target {
-                provider: Some(self.services.provider.clone()),
-                group_id: d::GROWTH.into(),
-                topic_id: d::T_REPORT.into(),
-            },
-            id: SharedString::from(ROW),
-        };
-        let page = inline::render(&spec, window, cx).unwrap_or_else(|| div().into_any_element());
-        let message = div()
-            .flex()
-            .gap(space::S12)
-            .child(MemberAvatar::new(self.ledger.as_ref(), theme::AVATAR_SIZE))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S2)
-                    .child(
-                        div()
-                            .t_ui()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(k.text_1)
-                            .child(SharedString::from(
-                                self.ledger
-                                    .as_ref()
-                                    .map(|m| m.name.clone())
-                                    .unwrap_or_default(),
-                            )),
-                    )
-                    .child(div().t_body().text_color(k.text_1).child(SAID))
-                    .child(div().pt(space::S8).child(page)),
-            );
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(k.content)
-            .text_color(k.text_1)
-            .child(
-                toolbar_band("host-scene-bar")
-                    .pl(theme::TRAFFIC_LIGHTS_INSET + space::S12)
-                    .pr(space::S16)
-                    .child(
-                        div()
-                            .t_title()
-                            .text_color(k.text_1)
-                            .child(self.title.clone()),
-                    ),
-            )
-            .child(hairline(cx))
-            .child(
-                div()
-                    .w_full()
-                    .max_w(theme::MEASURE)
-                    .mx_auto()
-                    .px(theme::CONTENT_GUTTER)
-                    .py(space::S24)
-                    .child(message),
-            )
-    }
-}
-
 /// Opens the scene window and starts its check.
 pub fn open(
     services: Services,
@@ -206,19 +111,13 @@ pub fn open(
             cx,
         );
     }
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    let ledger = services.provider.member(d::LEDGER);
-    let handle = gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|_| HostPreview {
-            services,
-            ledger,
-            title: title.into(),
-        })
-    })
-    .map(|(handle, _)| handle)
-    .map_err(|e| e.to_string())?;
+    let _ = title;
+    // The real main window on the 话题 of this 产出 (sidebar, thread, composer):
+    // the thread's own inline frame shows the page (E2, B3).
+    services.nav.update(cx, |nav, cx| {
+        nav.open_topic(d::GROWTH.into(), d::T_REPORT.into(), cx)
+    });
+    let handle = crate::selftest::scenes::open_main(services, content, cx)?;
     cx.spawn(async move |cx: &mut AsyncApp| finish(run(mode, cx).await))
         .detach();
     Ok(handle)
