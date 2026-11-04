@@ -813,7 +813,8 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "aside",
                         "acceptance",
                         "interact",
-                        "output"
+                        "output",
+                        "resume"
                     ]
                     .map(String::from)[..]
                 )
@@ -1642,7 +1643,7 @@ async fn a_follow_up_run_resumes_the_session() {
 
 /// A tool that daemonized (its parent exited, so it is no longer below the CLI) still stops on
 /// pause, continues on resume and is gone after cancel: the daemon finds it by the run's
-/// `CHAT_RUN_ID` in its environment.
+/// `CHAT_RUN_FOLDER` in its environment.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pause_and_cancel_cover_orphaned_tools() {
     let tmp = tempfile::tempdir().unwrap();
