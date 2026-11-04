@@ -469,7 +469,8 @@ skip the confirm step before an irreversible action.
 **Anatomy.** Card: radius 12, 1 pt `line`, `bg`, `lift`, width `min(680, box)` (首页) or the
 message column. Body padding 14 16 16:
 1. Header (18 pt): 20 tile + name `ui` 500 + 岗位 tag + `群 / 话题` breadcrumb (`meta` `ink-3`, topic in
-   `ink-2`, a link) + mono time at the right. In the card's own topic the breadcrumb is dropped and
+   `ink-2`, a link) + mono time at the right: when the card message was created (a new rev or
+   an edit changes the card, not this time). In the card's own topic the breadcrumb is dropped and
    the intent state takes its place (`✓ 做完了`); the 28 pt gutter avatar stays beside the card.
 2. Title: `card-title` 16/24, 10 pt below the header; one sentence that says what is wanted.
 3. Blocks (below), 10 to 12 pt apart.
@@ -493,7 +494,7 @@ section on 首页, `需要你拍板` only for the asked viewer), `done` (`✓ �
 | Plan (计划) | The rail plan list (§7.8), with mono durations and a `看 Forge 的电脑` / `实时查看` action; a waiting step says `· 等 Joye 拍板` + `看问题` |
 | Metric (数据) | Up to 4 numbers in a row of cells split by 1 pt `line`: label `meta` `ink-3`, value `num`, change `meta` mono (`+12% 比 9 月`; up or down said with a sign, never by color alone; lower-is-better metrics say so) + a tiny bar or sparkline |
 | Chart | One line or bar chart, `ink` for the main series, `ink-3` / `line-2` for others, labels on the lines, axis `meta` mono; a legend only for more than 3 series |
-| Table | Numbers right-aligned mono, a last row `合计`, 32 pt rows, 1 pt `line` between; a link to the full 产出 |
+| Table | Header `meta` `ink-3` over a 1 pt `line`; 32 pt rows (`TABLE_ROW`), 1 pt `line` between. A column whose cells are all numbers (after the first) is a number column: right-aligned at the row end, mono cells, as wide as its widest header or cell and at least `TABLE_NUM_COL` (52 pt); text columns share the rest. A percent cell has a 48 pt bar (`TABLE_PCT_BAR`) before it. A total is an ordinary last row (Card v2 has no `summaryRow`): when its first cell is `合计` it is drawn 600 with a 1 pt `line-2` rule above. A link to the full 产出 |
 | Diff (对比) | File header (`src/sync/reconnect.ts` mono + `+5 −2`), one hunk in `code` on `raised` with `ok` / `bad` 10 % line fills (code text stays `ink`), `还有 11 个文件`, `在 GitHub 打开` |
 | Evidence (证据) | Up to 3 thumbnails (real screenshots, radius 6) then `+n`; a recording tile with mono duration; test result chips (`✓ 测试 148 项通过 · 0 失败`). No evidence: a neutral line `这次没有附证据` + secondary `让 Watch 补上` (never red) |
 | Refs (链接) | One row style for PR, 产出, 话题, 成员: 16 glyph or tile · name `ui` 500 · one line `meta` `ink-3` · right state. Stale state says how old (`PR 状态 10 分钟前`); a deleted 产出 keeps a row `产出已删除 · 原来是「…」` |
@@ -586,6 +587,12 @@ with `…`. The band says the state once; the body never says it again.
 | 时间段 (`slots`) | `选一个时间段` | Day columns of 52 pt slot cells (radius 9) with a mono time and `都能来` (`ok` check) or `缺 Alex` / `缺 2 人`; chosen: `sunken` + 1 pt `ink` border |
 | 投票 (`poll`) | `已投 7/13` + `今天 18:00 截止` | 44 pt option rows (radius 9) with the result as an `ink` 10 % fill behind the label, `12 票 · 40%` mono, voter tiles when public; my vote: 1 pt `ink` border + the `你投的` tag; `还没投：…` under; a voted viewer sees the grey band |
 
+**Decision layout** (2.1, Cards artboard 01): two short options sit side by side as one row
+of option buttons of equal width, gap 8. Short means a single select without `其他`, and each
+option's label plus detail at most 16 characters. Three or more options, a multi-select, `其他`
+or a longer option are stacked. A decision in a column of a side-by-side `row` stays stacked
+(Interact artboard 01); once the row folds to a stack, the short pair goes side by side again.
+
 **Other 2.1 blocks**: `buttons` (1–3 secondary or text buttons inside the body, never primary),
 table row select and sort, chart point select, metric press, input `slider`, `diagram` (§7.16) and
 `embed` (a live 产出 page in a frame, §7.17, with the foot `页面里的操作会发给 Ledger`).
@@ -604,23 +611,52 @@ event without a change. A shared card stays one object: everyone sees the newest
 - **Optimistic state**: the gesture shows at once (the bar highlighted and the others faded, the
   row selected, the option ticked). Local state (selection, sort, tab, collapse, drafts, the chart
   point) is kept per block id across revs.
-- **Pending band** (only the person who acted sees it; it is the blue band of §7.13):
+- **Pending band** (only the person who acted sees it; it says the stage of their newest event
+  once, in the band, in its own tone):
 
   | Time since the server took it | Band | At the block |
   | --- | --- | --- |
   | 0–400 ms | unchanged | the optimistic state only |
-  | 400 ms → soft | `等 Ledger 回应` | 14 pt spinner beside the block title |
-  | soft → hard | `Ledger 还在处理` (+ `实时查看` for runner members) | spinner |
-  | ≥ hard | `Ledger 没有回应` | `重试` secondary + `不等了` text action |
+  | 400 ms → soft | blue, spinner: `等 Ledger 回应` | — |
+  | soft → hard | blue, spinner: `Ledger 还在处理` (+ `实时查看` for runner members) | — |
+  | ≥ hard | grey, still mark: `Ledger 没有回应` | `重试` secondary + `不等了` text action |
 
   Soft and hard depend on the member (connected SDK member 8 s / 45 s; a run 20 s / 120 s; a run
-  that must start 45 s / 180 s). Offline: `Ledger 不在线，这一步没有发出` for 4 s, then the state
-  reverts; an answer says `Ledger 不在线，回来后会看到`. Busy: `Ledger 现在接不了，稍后再试`.
+  that must start 45 s / 180 s). Offline: a red band `失败` + `Ledger 不在线，这一步没有发出` for
+  4 s, then the state reverts; an answer gets the grey band `Ledger 不在线，回来后会看到`. Busy:
+  the red band `失败` + `Ledger 现在接不了，稍后再试`. A block says the stage itself (spinner and
+  words, under the block) only for an older event that the band no longer shows.
 - **Sent and answered**: `你点了「B 站」→ Ledger`; for an answer the §7.10 record line
   `你选了 B · 已发给 Ledger` + `撤回`.
-- **Attribution**: blocks that a rev added or replaced get a quiet line `meta` `ink-3`: `按你的选择`
-  for the viewer's own action, `按 Joye 的选择 · 10:12` for someone else's. New blocks flash
-  `live` 10 % once and fade (§12) with the tag `Ledger 刚加的`. The line goes with the next rev.
+- **Update band** (Interact artboard 02 step 3): a rev (2 or later) that a person's event
+  caused replaces the band of a done or `info` card with `Ledger 更新了这张卡` (`RotateCw` 16 in
+  `ink-2`, the word in `ink`, fill `live` 6 % over `sunken`, `UPDATED_FILL`) and the detail
+  `{time} · {why}`. The time is `刚刚` for the first minute, then the mono clock time. The why is
+  `按你点的「B 站」` for the viewer whose event caused the rev (the bar's x, the option's label or
+  the selected row's first cell, read from that viewer's own sent event), `按你的选择` when that
+  event is no longer at hand, and `按 Joye 的选择` for everyone else. Other viewers cannot be told
+  which bar was picked: the rev's `cause` names the person and the block, not the value. A card
+  with an open question or work in progress keeps its own band; my waiting event's band wins over
+  the update band. The band stays until a rev without a cause. Who caused the rev is said only
+  here, never per block.
+- **Changed and inserted blocks**: a top-level block that the rev changed or inserted spans the
+  card's width (padding 12 16) and fades in over 200 ms (`CHANGE_IN`) with a `live` 14 % tint
+  (`CHANGE_FILL`) that fades over 1.6 s (`CHANGE_FLASH`, §12). A changed block ends on `bg`; an
+  inserted one keeps a steady `live` 7 % tint (`INSERTED_FILL`) and `Ledger 刚加的` (`meta`
+  `live-ink`) at its top right, sharing the row of a `问你` / `等 Joye` mark or a group's title, until
+  the next rev. Changed or inserted top-level blocks that follow each other join into one tinted
+  run: no gap between them and a 1 pt `line` hairline at the top of each later one. A nested block
+  gets a small rounded tint instead (radius 8).
+- **Picked bar** (Interact artboard 02): a single-series bar chart the viewer can pick from is
+  drawn as rows, one per x: 30 pt rows (`BAR_ROW`, radius 7), the x in a 60 pt column
+  (`BAR_NAME`), a 10 pt track on `sunken` (radius 3) and the mono value `ink-2` at the right; hover
+  fills the row `hover`. Before a pick every bar is `ink-3` with `ink` names; after one, the picked
+  bar is `ink` with its name 600 and the others are `line-2` with `ink-3` names. A second click on
+  the picked row clears it (`chart.clear` when declared). The rows keep the chart label (`meta` 500
+  `ink`) above, the pick chip `● B 站 · 9` (`meta` 500 `ink`) under them, and the chart's text
+  summary (`meta` `ink-3`) last. The chip is left out when the pick is the one that caused the
+  rev: the update band already names it. The viewer's own pick that caused the rev stays marked
+  in the new rev until they clear it.
 - **Conflict**: the card re-renders on the newest rev, keeps the person's values where the block
   and option ids still exist, and a toast says `卡片刚更新了，请再看一眼`. A draft being typed when a
   rev arrives stays, with the inline line `内容变了` + `用新的`.
@@ -630,11 +666,17 @@ event without a change. A shared card stays one object: everyone sees the newest
 - **产出 pages that talk both ways** (frame of §7.17): buttons and filters in a member-made page
   go to that member; the member pushes new data into the open page (`Ledger 推来的 · 刚刚`, no new
   version) or adds a version (title bar `已更新到 v4` for 3 s, or the chip `有 v4` when an older
-  version is picked); the page can ask the member and wait for the answer in the page. The frame
-  foot lists what the page may do (`页面能做的：读这份数据 · 把你的操作发给 Ledger · 问 Ledger`); for a
-  runner member it adds `回答会记在 Ledger 的工作记录里`. While a page event waits, the foot shows the
-  same pending words. A page never approves: an irreversible step becomes an approval card in the
-  话题.
+  version is picked); the page can ask the member and wait for the answer in the page (the
+  sample page shows its question and the waiting answer right under its tabs, in the chart's
+  place, so the inline frame shows them without scrolling). The frame foot says who gets the
+  page's actions and the labels of its declared events: `页面里的操作会发给 Ledger · 按渠道看 ·
+  数据有问题` (a page that may not send says `页面能做的：读这份数据`); for a runner member that may
+  ask it adds `回答会记进工作记录` (whole notice on hover). Line rules: the head
+  `页面里的操作会发给 {name}` stays on one line; when even the head cannot fit, it wraps only before
+  the name, never inside it. The labels follow in the same run of text, joined with ` · ` (one
+  space each side of the dot), take only the room left and are cut with `…`; the whole line shows
+  in a tooltip. While a page event waits, the foot shows the same pending words and leaves the
+  labels out. A page never approves: an irreversible step becomes an approval card in the 话题.
 
 ### 7.15 引用提问 ([Refs](design/mockups-v3/Refs.dc.html))
 
@@ -646,7 +688,7 @@ step; a diff line or hunk; a box on an evidence screenshot; a diagram node; an e
 | Affordance | Look and behavior |
 | --- | --- |
 | Hover | The smallest part under the pointer gets `hover` + a 1 pt `line-2` ring at the part's radius |
-| `问这里` | After 300 ms of rest, a gpui-component ghost xsmall button with `↳` at the part's top-right (table: the end of the row; chart: in the tooltip; diagram: beside the node). Not shown on answer controls |
+| `问这里` | After 300 ms of rest, a gpui-component ghost xsmall button with `↳` at the part's top-right (table row: right after the row's name, 「B 站 [问这里]」, without changing the row height; when the name leaves no room in the first column, at the row end, centered on the row; in a card table it floats over the row end so the number columns stay at the right edge. Chart: in the tooltip; diagram: beside the node). Not shown on answer controls |
 | ⌥-click | Adds the part at once, also on controls (it does not pick the option); while ⌥ is held, parts show the outline |
 | Context menu | `就这里提问`, `单独问这里`, `复制`; on the card header `就这张卡提问` |
 | Keyboard | Tab into a block, arrows move a 2 pt `ink-3` part ring, ⌥↵ adds the part, ⇧⌥↵ the whole block |
@@ -674,13 +716,26 @@ card may mark node states (done, current, waiting on you) with the same tokens. 
 
 - **Inline**: content width, never above 1×. A block title (`时序图 · 重连的顺序`) above, the caption
   `meta` `ink-2` under. A hover toolbar of ghost xsmall buttons: `看原文` / `源码`, `复制原文`, `放大`.
+  Height at most 360 pt (`MAX_INLINE_HEIGHT`, REFS §B4): a taller diagram shrinks while its scale
+  stays ≥ 0.6, else it shows its top 360 pt at 1× with a 72 pt fade into `raised` and a secondary sm `展开`.
 - **Viewer** (gpui-component dialog at 90 % of the window, or the 产出 pane): fit on open, zoom
   25–400 % (`放大`, `缩小`, `适合窗口`, ⌘= ⌘- ⌘0, ⌘ + wheel), drag to pan, source beside it with
   `复制原文`, `复制图片`; zoom changes the layout size, never a transform. Esc returns to the diagram.
-- **States** (each keeps the source; red only for an error): drawing `正在画图` in a 160 pt `sunken`
-  box with a moving line (static with reduce motion); error `图没有画出来` + the line that failed +
-  the source collapsed to 8 lines + `让 Forge 改一下`; `这种图还画不了`; `图太大了，只显示原文`;
-  `图里有不支持的写法`.
+- **States**: drawing `正在画图` in a 160 pt `sunken` box with a moving line (static with reduce
+  motion). An error state is a frame (radius 12, `raised`) with a 36 pt header (icon 14, the
+  diagram type word in `meta` `ink-3`, the reason 600, then what it is about in `ink-2`, a copy
+  button for the source) and the source with line numbers below, collapsed to 8 lines + `展开`:
+
+  | Reason | When | After the reason | Look |
+  | --- | --- | --- | --- |
+  | `图没有画出来` | the source cannot be read, the renderer failed or timed out | `第 3 行看不懂`: the line of the source as sent (the library's message stays in the log) | The only red one: `bad` 35 % border, `bad` 7 % header, `circle-x`, `bad-ink` text; no type word |
+  | `这种图还画不了` | a type outside the 7 | — | `line` border, `raised` header, `ink-3` icon |
+  | `图里有不支持的写法` | the source has a refused construct (`click`, `javascript:`, `<script>`, `<iframe>`, `<foreignObject>`, `%%{` init lines, front matter) | — | as above |
+  | `图太大了，只显示原文` | more than 150 nodes, more than 300 edges, a side over 4096 pt, or a source over 16 KiB | `160 个节点` when the node count is what is over | Its own quiet state: `line` border, `sunken` header, `clock` icon, `ink-2` text |
+
+  The renderer draws in a hidden window and sends each whole SVG back in one message of up to
+  4 MiB, past the 16 KiB limit of a 产出 page's events, so a large but allowed diagram is never
+  dropped.
 - Nodes are parts (§7.15): hover ring, `问这里`, ⌥-click; the chip goes to the diagram's 话题 and
   the viewer stays open.
 
@@ -692,7 +747,7 @@ previews (posters, frames, waveforms, page thumbnails) are made by the sender's 
 
 | Type | Inline | Full |
 | --- | --- | --- |
-| HTML 网页 | Live page in a frame, 300 pt high (the wheel scrolls the page to its end, then the 话题), `展开 · 整页` / `收起`, version chip, `沙盒 · 不联网`, `打开`; the foot lists what the page sends (`页面能发给 Ledger：选渠道`). At most 2 live pages; others show their snapshot | Page + 版本 list + 页面发出的事件 |
+| HTML 网页 | Live page in a frame, 300 pt high. The wheel scrolls the 话题, not the page. The page starts at its top and is cut at the frame's height; while more of it lies below, its bottom edge fades into the frame's surface over 48 pt (`EMBED_FADE`), so the cut never runs through a row; the fade follows the page's scroll and size and the theme. Header: version chip, `沙盒 · 不联网`, `在窗口打开`; the foot has `展开` (opens the full view) and the §7.14 line `页面里的操作会发给 Ledger · …`. At most 2 live pages; others show their snapshot | Page + 版本 list + 页面发出的事件 |
 | Markdown | Native excerpt: the first 8 lines with headings and lists, then foot chips `表格 1 · 图 1 · 后续 2/4` and `展开全文 · 约 4 分钟`. A new version leaves the old excerpt and adds a line + `看改了什么` | Native reader with a TOC that follows the scroll; code blocks, tables, diagrams, checklists (a toggle writes a new version) |
 | 图片 | Grid of up to 4, `+n` on the 4th; one image keeps its ratio, max 360 pt high; meta `9 张 · 1242 × 1656 · 14.2 MB` | Lightbox on `screen`: the image centered, ← →, filmstrip, `复制`, `存到本机`, `发到话题` |
 | 视频 | Poster (never autoplays), play disc, mono duration chip, chapter ticks on the bottom edge, the `视频截图` strip of 6 frames (click seeks; hover `把这一帧发到话题`) | Player (play, time, scrubber with chapter marks, speed, mute, full screen), the chapter list, the frame strip, `复制这一帧` / `把这一帧发到话题` (sent: `这一帧（0:24）已发到话题 · 刚刚` + `撤回`) |
@@ -930,7 +985,7 @@ ms; only live signals loop.
 | Takeover banner | Rise in 200 ms; ring changes color by crossfade 160 ms | Instant |
 | New message from others | 120 ms opacity, no rise; none for a batch of more than 3 | same |
 | Busy indicators | Wait 400 ms before showing; once shown, at least 500 ms | same |
-| A card rev from the member (§7.14) | Inserted blocks fade in with a height reveal (layout offset) and a `live` 10 % flash that fades; removed blocks fade out; changed values cross-fade | Only the band and the attribution line change |
+| A card rev from the member (§7.14) | Changed and inserted blocks fade in (opacity, 200 ms) under a `live` 14 % tint that fades over 1.6 s, to `bg` for a changed block and to the steady `live` 7 % for an inserted one; removed top-level blocks fade out over 240 ms | No fade or flash: inserted blocks show the 7 % tint at once; the update band says the rest |
 | Status band | Word and fill cross-fade 160 ms; the `完成` check draws once | Instant |
 | 引用提问 part added | `sel` flash 600 ms on the part | No flash |
 | Diagram drawing, preview generating | A moving line in the placeholder (loop while waiting) | Static |
@@ -964,7 +1019,7 @@ Checked with `--worst-case` at 1100 × 680.
 | Title-bar title | Truncates first; the state tag keeps its text up to 200 pt, then `…` |
 | Card titles | Two lines, then `…` |
 | Card fields | Values wrap to 3 lines, then `…` + `展开` |
-| Choice options | 2 options stay in one row only if both fit; otherwise the column layout |
+| Choice options | 2 short options (single select, no `其他`, label + detail ≤ 16 characters) sit side by side; anything else, and a decision in a side-by-side row column, is stacked (§7.13) |
 | 6 options, 8 form fields | The maximum in a card; more belongs in a 产出 page |
 | Metric values | `99,999+` cap; units stay; a missing value shows `—` + why (`埋点 11-05 才上线`) |
 | Tables | Max 8 rows in a card, then `还有 n 行` + the 产出 link; wide tables scroll horizontally inside the well |
@@ -981,7 +1036,7 @@ Checked with `--worst-case` at 1100 × 680.
 | Composed cards | More than 8 top-level blocks fold behind `展开另外 n 块` (low emphasis first); a row folds to a stack under 560 pt |
 | Choice forms | Options, items and rows past the limits (6 options, 8 rank items, 8 × 5 matrix, 12 slots) belong in a 产出 page |
 | 引用提问 chips | Labels cut in the middle at 320 pt; 5 chips; a sent message with more than one shows `引用了 n 处` |
-| Diagrams | Inline height capped (§18); more than 4 per message stay as source |
+| Diagrams | Inline height at most 360 pt (§7.16); more than 4 per message stay as source; past 150 nodes, 300 edges or 16 KiB of source, `图太大了，只显示原文` |
 | Media | Long file names cut in the middle; durations and sizes never truncate |
 
 ## 16. Examples and keeping in sync
@@ -997,6 +1052,19 @@ Sync rules:
 - Sizes are Rust enums or constants in `ui/` (`TextStyle`, `ControlSize`, `Radius`, `Space`), so an
   off-scale value does not compile. Views never write a color, size or duration literal.
 - Each visual pull request adds before and after captures at 2x in both themes.
+
+**Where 1.1.0 differs from the artboards on purpose** (the app is right; the artboard is not
+redrawn):
+- Inline diagram height is at most 360 pt, shrinking while the scale stays ≥ 0.6, else the top
+  360 + `展开` (REFS §B4); the Refs artboard says 480 with scrolling in the block.
+- Diagrams draw 7 types (流程图, 时序图, 状态图, 类图, 关系图, 甘特图, 时间线); the Refs artboard text
+  lists flowchart, sequence and state only.
+- An inline HTML 产出 page fades into the frame at its cut edge (§7.17); the Media artboard shows a
+  plain cut.
+- A table total `合计` is an ordinary last row the member sends (Card v2 has no `summaryRow`); the
+  app only draws it 600 with a `line-2` rule.
+- The update band for other viewers says `按 Joye 的选择` and cannot name the bar: the rev's `cause`
+  carries the person and the block, not the event value.
 
 ## 17. Checklist
 
@@ -1034,7 +1102,9 @@ Cards
 - [ ] Card v2.1: every container and choice form matches CardsCompose; the status band on every
       card except `info`; a row folds under 560 pt; the unknown-block box.
 - [ ] Interaction loop: optimistic state, pending band at 400 ms / soft / hard with 重试 and 不等了,
-      the attribution line, the conflict toast and read-only controls for other viewers (Interact).
+      the update band (`按你点的「…」` / `按 {name} 的选择`), `Ledger 刚加的` and one tinted run of
+      changed blocks, the picked bar rows, the conflict toast and read-only controls for other
+      viewers (Interact).
 - [ ] 引用提问: 问这里 after 300 ms, ⌥-click, context menu, keyboard; 5 chips; sent chips go back to
       the part (Refs). Diagrams in the app's colors in both themes; every error state keeps the source.
 - [ ] 产出 media: inline and full forms per Media; upload and preview states with words, not color.
@@ -1061,8 +1131,6 @@ States and quality
   these differences.
 - Dark values come from the artboards; check them on a real display before release.
 - Scheduled runs (排队 from schedules), typed asks from CLIs and secret inputs in forms are 1.2.
-- Inline diagram height: the Refs artboard says max 480 with scrolling in the block; REFS and the
-  1.1.0 build use 360, shrinking while the scale stays ≥ 0.6, else the top 360 + `展开`. Decide one.
 - Video time, audio segment and PDF page references, and image bytes for runner members, are 1.2.
 - The settings window and login were not redrawn as v3 artboards; they follow v2.2 layout with v3
   tokens until they are.
