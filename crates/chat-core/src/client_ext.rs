@@ -130,6 +130,32 @@ impl Client {
         })
     }
 
+    /// 1.1: sets a group's purpose line (`PATCH /v1/groups/:id` with `purpose`; `""` clears
+    /// it). Same rights and storing as [`Client::rename_group`]. Answers with the stored
+    /// purpose.
+    pub fn set_group_purpose(
+        &self,
+        group_id: &str,
+        purpose: &str,
+    ) -> JoinHandle<Result<Option<String>, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let (gid, purpose) = (group_id.to_string(), purpose.to_string());
+        self.spawn(async move {
+            let summary = http.set_group_purpose(&gid, &purpose).await?;
+            let me = shared.store.me()?.map(|m| m.id).unwrap_or_default();
+            if summary.group.member_ids.contains(&me) {
+                shared
+                    .store
+                    .apply_directory(None, Some(std::slice::from_ref(&summary)), None)?;
+                shared.emit(ClientUpdate::GroupChanged {
+                    group_id: gid.clone(),
+                });
+            }
+            Ok(summary.group.purpose)
+        })
+    }
+
     /// Changes a member (owner: every field; self: name and role) and stores it.
     pub fn update_member(
         &self,
