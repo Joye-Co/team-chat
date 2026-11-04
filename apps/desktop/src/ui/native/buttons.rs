@@ -117,7 +117,11 @@ fn look(style: PushStyle, k: &NativeColors) -> Look {
         // shadcn: `bg-destructive text-white`, at 60 % in dark so the white
         // text keeps its contrast on the lighter dark-mode red.
         PushStyle::Destructive => {
-            let fill = if k.is_dark() { k.red.opacity(0.6) } else { k.red };
+            let fill = if k.is_dark() {
+                k.red.opacity(0.6)
+            } else {
+                k.red
+            };
             Look {
                 fill,
                 text: gpui::white(),
@@ -248,8 +252,9 @@ impl IconSize {
 fn glyph_el(glyph: Glyph, ink: Hsla, window: &Window) -> AnyElement {
     match glyph {
         Glyph::Sf(sf) => symbol(sf, icon::MD, Weight::Regular, ink, window),
-        Glyph::Sym(s) => crate::ui::icons::sym(s, SymSize::for_slot(icon::MD), ink)
-            .into_any_element(),
+        Glyph::Sym(s) => {
+            crate::ui::icons::sym(s, SymSize::for_slot(icon::MD), ink).into_any_element()
+        }
     }
 }
 
@@ -550,9 +555,8 @@ pub fn tile_button(id: impl Into<ElementId>, side: Pixels, selected: bool, cx: &
         .size(side)
         .p_0()
         .rounded(metrics::BUTTON_REGULAR_RADIUS);
-    styled(b, PushStyle::Ghost, cx).when(selected, |b| {
-        b.bg(k.fill).border_1().border_color(k.label)
-    })
+    styled(b, PushStyle::Ghost, cx)
+        .when(selected, |b| b.bg(k.fill).border_1().border_color(k.label))
 }
 
 /// A tool on the dark media screen (lightbox, video): `ink` icon, white
@@ -823,7 +827,9 @@ mod naming {
                     let tooltip = chain.find(".tooltip(");
                     // The hover toolbar builds its buttons in a closure and
                     // names them where they are used.
-                    if named.is_none() && !chain.contains("let tool") && !chain.contains("{id}-{key}")
+                    if named.is_none()
+                        && !chain.contains("let tool")
+                        && !chain.contains("{id}-{key}")
                     {
                         unnamed.push(format!("{}:{ix}", path.display()));
                     } else if let (Some(n), Some(t)) = (named, tooltip)

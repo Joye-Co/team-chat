@@ -951,7 +951,12 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
         let show_body = live || !numbered;
         col = col
             .when(i > 0 && live, |el| {
-                el.child(div().my(space::S14).h(crate::ui::native::tokens::layout::BORDER).bg(k.line))
+                el.child(
+                    div()
+                        .my(space::S14)
+                        .h(crate::ui::native::tokens::layout::BORDER)
+                        .bg(k.line),
+                )
             })
             .when(i > 0 && !live, |el| el.child(div().h(space::S6)))
             .children(head)

@@ -269,7 +269,8 @@ impl RenderOnce for CountBadge {
         if self.count == 0 {
             return div().into_any_element();
         }
-        crate::ui::native::badge::CountPill::text(Self::text(self.count, self.kind)).into_any_element()
+        crate::ui::native::badge::CountPill::text(Self::text(self.count, self.kind))
+            .into_any_element()
     }
 }
 

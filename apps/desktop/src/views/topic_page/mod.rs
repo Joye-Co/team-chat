@@ -267,10 +267,7 @@ pub fn pane_buttons(services: &Services, group_id: &str, topic_id: &str) -> Vec<
             RightPane::Changes,
         ));
     }
-    out.push(TitleButton::of(
-        TitleButtonKind::Rail,
-        RightPane::TopicRail,
-    ));
+    out.push(TitleButton::of(TitleButtonKind::Rail, RightPane::TopicRail));
     out
 }
 

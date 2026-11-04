@@ -35,24 +35,24 @@ pub mod tokens;
 pub mod toolbar;
 
 #[allow(unused_imports)]
-pub use buttons::{
-    Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
-    borderless_variant, disabled_push, ghost_button, icon_button, icon_button_bare, icon_button_styled,
-    chip_button, popup_button, pull_down, push_button, row_button, screen_button, select_button,
-    icon_button_sym, square_button, square_pair, tile_button, toolbar_item, toolbar_item_sym,
-    toolbar_tab,
-};
+pub use badge::{Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge};
 #[allow(unused_imports)]
 pub use blocks::{
     Card, Column, LIST_TITLE_INSET, ListRow, SectionTitle, card_surface, description_row,
     group_label, list_frame, media_box, separator, table,
 };
 #[allow(unused_imports)]
-pub use badge::{Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge};
+pub use buttons::{
+    Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
+    borderless_variant, chip_button, disabled_push, ghost_button, icon_button, icon_button_bare,
+    icon_button_styled, icon_button_sym, popup_button, pull_down, push_button, row_button,
+    screen_button, select_button, square_button, square_pair, tile_button, toolbar_item,
+    toolbar_item_sym, toolbar_tab,
+};
 #[allow(unused_imports)]
 pub use feedback::{
-    Alert, AlertTone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps,
-    skeleton, skeleton_rows, toast_surface,
+    Alert, AlertTone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps, skeleton,
+    skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
 pub use fields::{FieldSize, NativeTextField, SearchField};
@@ -60,7 +60,7 @@ pub use fields::{FieldSize, NativeTextField, SearchField};
 pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_state};
 #[allow(unused_imports)]
 pub use inspector::{
-    InspectorSection, CompactRow, determinate_bar, inspector_column, label_value, label_value_with,
+    CompactRow, InspectorSection, determinate_bar, inspector_column, label_value, label_value_with,
     steps_bar,
 };
 #[allow(unused_imports)]

@@ -21,7 +21,6 @@ use super::{
     AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text, open_file,
     preview_size, size_text,
 };
-use crate::ui::NamedButton as _;
 use crate::{
     copy::{files as f, fill},
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
@@ -343,8 +342,9 @@ fn row_frame(
 /// A borderless symbol button inside a file row (§5.2, §6): 24 × 24,
 /// radius 6, a 13 pt Regular symbol (inline size, not the 16 pt toolbar
 /// size), `fillHover` on hover.
-fn row_button(id: ElementId, glyph: Sym) -> gpui_component::button::Button {
-    crate::ui::native::icon_button_bare(id, glyph, crate::ui::native::IconSize::Small)
+fn row_button(id: ElementId, glyph: Sym, name: &'static str) -> gpui_component::button::Button {
+    use crate::ui::NamedButton as _;
+    crate::ui::native::icon_button_bare(id, glyph, crate::ui::native::IconSize::Small).named(name)
 }
 
 fn upload_row(
@@ -438,8 +438,7 @@ pub fn file_row_in(
     let action = |part: &str, label: &'static str, what: OpenAction, glyph: Sym| {
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
-        row_button(id(part), glyph)
-            .named(label)
+        row_button(id(part), glyph, label)
             .disabled(running)
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -454,8 +453,7 @@ pub fn file_row_in(
         let provider = provider.clone();
         let file = file.clone();
         vec![
-            row_button(id("cancel"), Sym::Close)
-                .named(f::CANCEL_DOWNLOAD)
+            row_button(id("cancel"), Sym::Close, f::CANCEL_DOWNLOAD)
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     provider.cancel_download(&file);

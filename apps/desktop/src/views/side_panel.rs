@@ -598,12 +598,16 @@ impl SidePanel {
             .gap(space::S4)
             .when(sub, |el| {
                 el.child(
-                    ui::native::icon_button_bare("panel-back", Sym::ChevronLeft, ui::native::IconSize::Regular)
-                        .named(p::BACK)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.set_tab(0, cx)
-                        })),
+                    ui::native::icon_button_bare(
+                        "panel-back",
+                        Sym::ChevronLeft,
+                        ui::native::IconSize::Regular,
+                    )
+                    .named(p::BACK)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.set_tab(0, cx)
+                    })),
                 )
             })
             .child(
@@ -619,14 +623,18 @@ impl SidePanel {
                 el.child(b)
             })
             .child(
-                ui::native::icon_button_bare("panel-close", Sym::Close, ui::native::IconSize::Regular)
-                    .named(p::CLOSE)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.services
-                            .nav
-                            .update(cx, |nav, cx| nav.set_side_panel_open(false, cx));
-                    })),
+                ui::native::icon_button_bare(
+                    "panel-close",
+                    Sym::Close,
+                    ui::native::IconSize::Regular,
+                )
+                .named(p::CLOSE)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.set_side_panel_open(false, cx));
+                })),
             );
         let context = topic.map(|t| self.context_line(t)).unwrap_or_default();
         ui::header_band(cx).child(title_row).child(
@@ -763,8 +771,14 @@ impl SidePanel {
             .when(has_run, |el| {
                 el.child(
                     div().mt(space::S4).ml(-space::S6).flex().child(
-                        ui::native::push_button("panel-view-process", p::VIEW_PROCESS, ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx)
-                            .on_click(cx.listener(|this, _, _, cx| this.set_tab(1, cx))),
+                        ui::native::push_button(
+                            "panel-view-process",
+                            p::VIEW_PROCESS,
+                            ui::native::PushStyle::Ghost,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.set_tab(1, cx))),
                     ),
                 )
             })

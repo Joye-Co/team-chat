@@ -171,7 +171,7 @@ fn pane_title(pane: &RightPane) -> &'static str {
 /// The header band of a right pane (§2.2): h52, px 16, the pane name 16
 /// medium, a 32 ghost close button at the far right.
 fn pane_header(title: &'static str, nav: Entity<crate::app::Navigation>, cx: &App) -> AnyElement {
-    use crate::ui::native::{NativeType as _, icon_button_sym, IconSize};
+    use crate::ui::native::{IconSize, NativeType as _, icon_button_sym};
     let k = super::chrome::colors(cx);
     div()
         .flex_none()

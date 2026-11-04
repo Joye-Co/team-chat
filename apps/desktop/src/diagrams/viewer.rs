@@ -243,13 +243,15 @@ impl DiagramViewer {
                     .items_center()
                     .h(px(28.))
                     .child(
-                        ui::native::icon_button_bare("dv-out", Sym::Minus, ui::native::IconSize::Small)
-                            .named(c::ZOOM_OUT)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.set_zoom(zoom_out(this.zoom), cx)
-                                }),
-                            ),
+                        ui::native::icon_button_bare(
+                            "dv-out",
+                            Sym::Minus,
+                            ui::native::IconSize::Small,
+                        )
+                        .named(c::ZOOM_OUT)
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.set_zoom(zoom_out(this.zoom), cx)),
+                        ),
                     )
                     .child(
                         div()
@@ -264,11 +266,15 @@ impl DiagramViewer {
                             )),
                     )
                     .child(
-                        ui::native::icon_button_bare("dv-in", Sym::Plus, ui::native::IconSize::Small)
-                            .named(c::ZOOM_IN)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx)),
-                            ),
+                        ui::native::icon_button_bare(
+                            "dv-in",
+                            Sym::Plus,
+                            ui::native::IconSize::Small,
+                        )
+                        .named(c::ZOOM_IN)
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx)),
+                        ),
                     ),
             )
             .child(

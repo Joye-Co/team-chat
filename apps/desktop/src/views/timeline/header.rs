@@ -72,7 +72,10 @@ impl TimelineView {
                         let services = self.services.clone();
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
                         ui::native::icon_button_bare(
-                            "topic-follow", if following { Sym::BellBadge } else { Sym::Bell }, ui::native::IconSize::Regular)
+                            "topic-follow",
+                            if following { Sym::BellBadge } else { Sym::Bell },
+                            ui::native::IconSize::Regular,
+                        )
                         .named(if following { t::UNFOLLOW } else { t::FOLLOW })
                         .on_click(move |_, _, _| {
                             services.provider.set_topic_following(&g, &tid, !following)
@@ -80,11 +83,14 @@ impl TimelineView {
                     })
                     .child(
                         ui::native::icon_button_bare(
-                            "toggle-panel", if panel_open {
+                            "toggle-panel",
+                            if panel_open {
                                 Sym::Inspector
                             } else {
                                 Sym::Inspector
-                            }, ui::native::IconSize::Regular)
+                            },
+                            ui::native::IconSize::Regular,
+                        )
                         .named(t::TOGGLE_PANEL)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.services
@@ -95,17 +101,21 @@ impl TimelineView {
                     .child({
                         let services = self.services.clone();
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
-                        ui::native::icon_button_bare("topic-status", Sym::More, ui::native::IconSize::Regular)
-                            .named(r::STATUS_MENU)
-                            .dropdown_menu(move |menu, window, cx| {
-                                // Read the topic again: the menu shows the newest state.
-                                match services.provider.topic(&g, &tid) {
-                                    Some(topic) => {
-                                        topic_menu::build(menu, &services, &g, &topic, window, cx)
-                                    }
-                                    None => menu,
+                        ui::native::icon_button_bare(
+                            "topic-status",
+                            Sym::More,
+                            ui::native::IconSize::Regular,
+                        )
+                        .named(r::STATUS_MENU)
+                        .dropdown_menu(move |menu, window, cx| {
+                            // Read the topic again: the menu shows the newest state.
+                            match services.provider.topic(&g, &tid) {
+                                Some(topic) => {
+                                    topic_menu::build(menu, &services, &g, &topic, window, cx)
                                 }
-                            })
+                                None => menu,
+                            }
+                        })
                     }),
             );
 

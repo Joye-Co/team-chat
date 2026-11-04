@@ -824,12 +824,20 @@ impl CardsGallery {
                                     .w(px(52.))
                                     .rounded(px(13.))
                                     .bg(crate::ui::native::native_colors(cx).fill)
-                                    .child(div().text_size(crate::ui::native::tokens::text::UI.0).child("👀"))
+                                    .child(
+                                        div()
+                                            .text_size(crate::ui::native::tokens::text::UI.0)
+                                            .child("👀"),
+                                    )
                                     .child(ui::MemberAvatar::new(jojo.as_ref(), px(16.))),
                             ),
                     ),
             )
-            .child(div().h(crate::ui::native::tokens::layout::BORDER).bg(k.line))
+            .child(
+                div()
+                    .h(crate::ui::native::tokens::layout::BORDER)
+                    .bg(k.line),
+            )
             .child(meta(div()).text_color(k.ink_3).child(fill(
                 c::GALLERY_ACK_NOTE,
                 &[(

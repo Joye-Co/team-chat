@@ -3,8 +3,7 @@
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -52,7 +51,6 @@ pub fn mention_surface(cx: &App) -> gpui::Div {
 pub fn float_surface(cx: &App) -> gpui::Div {
     overlay_surface(cx).p(space::S2).flex().items_center()
 }
-
 
 /// A menu row (§7.12): 32 pt, radius 6, padding 0 8, gap 8, a 16 pt icon in
 /// `text-2` and `ui` 14 text. `active` is the keyboard-active row.
@@ -155,7 +153,11 @@ impl RenderOnce for Toast {
             .flex()
             .items_center()
             .gap(space::S12)
-            .child(icon(self.glyph, crate::ui::native::tokens::icon::MD, glyph_color))
+            .child(icon(
+                self.glyph,
+                crate::ui::native::tokens::icon::MD,
+                glyph_color,
+            ))
             .child(
                 div()
                     .flex_1()

@@ -357,19 +357,27 @@ fn header(
                     }),
             )
             .child(
-                ui::native::icon_button_bare(ElementId::Name(format!("dcopy-{id}").into()), Sym::Copy, ui::native::IconSize::Small)
-                    .named(c::COPY_SOURCE)
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
-                    }),
+                ui::native::icon_button_bare(
+                    ElementId::Name(format!("dcopy-{id}").into()),
+                    Sym::Copy,
+                    ui::native::IconSize::Small,
+                )
+                .named(c::COPY_SOURCE)
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
+                }),
             )
             .when_some(viewer, |el, (spec, n, focus)| {
                 el.child(
-                    ui::native::icon_button_bare(ElementId::Name(format!("dzoom-{id}").into()), Sym::Expand, ui::native::IconSize::Small)
-                        .named(c::ZOOM_IN)
-                        .on_click(move |_, window, cx| {
-                            open_viewer(&spec, &n, focus.clone(), window, cx)
-                        }),
+                    ui::native::icon_button_bare(
+                        ElementId::Name(format!("dzoom-{id}").into()),
+                        Sym::Expand,
+                        ui::native::IconSize::Small,
+                    )
+                    .named(c::ZOOM_IN)
+                    .on_click(move |_, window, cx| {
+                        open_viewer(&spec, &n, focus.clone(), window, cx)
+                    }),
                 )
             })
         })
@@ -705,11 +713,15 @@ fn error_frame(
                 })
                 .child(div().flex_1())
                 .child(
-                    ui::native::icon_button_bare(ElementId::Name(format!("dcopy-{id}").into()), Sym::Copy, ui::native::IconSize::Small)
-                        .named(c::COPY_SOURCE)
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
-                        }),
+                    ui::native::icon_button_bare(
+                        ElementId::Name(format!("dcopy-{id}").into()),
+                        Sym::Copy,
+                        ui::native::IconSize::Small,
+                    )
+                    .named(c::COPY_SOURCE)
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
+                    }),
                 ),
         )
         .child(

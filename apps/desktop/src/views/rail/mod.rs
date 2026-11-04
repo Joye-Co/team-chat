@@ -365,8 +365,10 @@ impl RailView {
             return None;
         };
         let avatar = crate::ui::MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::MD);
-        let footer = SidebarFooter::new("rail-footer", avatar, me.name.clone())
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::OpenSettings), cx));
+        let footer =
+            SidebarFooter::new("rail-footer", avatar, me.name.clone()).on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
+            });
         let footer = match self.services.provider.connection() {
             ConnectionState::Online | ConnectionState::Connecting => {
                 let host = server_url

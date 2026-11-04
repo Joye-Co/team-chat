@@ -50,10 +50,10 @@ pub use chip::{BadgeKind, ChipStyle, CountBadge, JobTag, Kbd, RoleTag, StatusChi
 pub use composer::{ComposerShell, composer_tool, send_button};
 #[allow(unused_imports)]
 pub use controls::{NamedButton, field_help, field_label, placeholder_input};
+pub use icons::{AppAssets, Sym, button_glyph, icon};
 /// The one Button's variant and size (`ui::native::buttons`).
 #[allow(unused_imports)]
 pub use native::{PushSize, PushStyle};
-pub use icons::{AppAssets, Sym, button_glyph, icon};
 // --- v12/symbols: the SF Symbols API (NATIVE.md §6) ---
 #[allow(unused_imports)]
 pub use icons::{Lucide, SymSize, sym};

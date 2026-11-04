@@ -13,9 +13,9 @@
 //!   draws the title and the symbols in `secondary`.
 
 use gpui::{
-    AnyElement, App, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText,
-    TextLayout, Window, div, px,
+    AnyElement, App, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
+    Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText, TextLayout, Window,
+    div, px,
 };
 
 use crate::{
@@ -26,7 +26,7 @@ use crate::{
         self, Sym,
         native::{
             BadgeState, NativeColors, NativeType as _, StatusBadge, ToolbarGroup, ToolbarItemKind,
-            metrics, toolbar_item, tokens::space,
+            metrics, tokens::space, toolbar_item,
         },
         sf_symbols::Sf,
     },
@@ -468,7 +468,10 @@ mod tests {
             state: Some(("等李雪".into(), StateTone::Quiet)),
             ..live()
         };
-        assert_eq!(subtitle(&quiet, &k).unwrap().state.unwrap().1, BadgeState::Quiet);
+        assert_eq!(
+            subtitle(&quiet, &k).unwrap().state.unwrap().1,
+            BadgeState::Quiet
+        );
         // A page with a date only.
         let desk = TitleBarSpec {
             subtitle: Some("11 月 3 日 周二".into()),

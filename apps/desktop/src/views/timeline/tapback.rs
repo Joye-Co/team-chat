@@ -6,10 +6,7 @@ use gpui::{
     AnyElement, App, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _, div,
     prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    button::Button,
-    hover_card::HoverCard,
-};
+use gpui_component::{button::Button, hover_card::HoverCard};
 
 use crate::ui::{
     Sym,

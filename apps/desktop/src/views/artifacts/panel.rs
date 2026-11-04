@@ -163,10 +163,14 @@ impl Render for TopicOutputs {
                 cx,
             )))
             .child(
-                ui::native::icon_button_bare("artifact-new", Sym::Plus, ui::native::IconSize::Small)
-                    .named(ca::NEW)
-                    .disabled(busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.pick_and_upload(None, cx))),
+                ui::native::icon_button_bare(
+                    "artifact-new",
+                    Sym::Plus,
+                    ui::native::IconSize::Small,
+                )
+                .named(ca::NEW)
+                .disabled(busy)
+                .on_click(cx.listener(|this, _, _, cx| this.pick_and_upload(None, cx))),
             );
 
         // 48 pt rows (§7.11): a 32 pt `accent-soft` tile, the title 14/500,
@@ -253,7 +257,8 @@ impl Render for TopicOutputs {
                             .child(
                                 ui::native::icon_button_bare(
                                     ElementId::Name(SharedString::from(format!(
-                                        "panel-artifact-version-{}", a.id
+                                        "panel-artifact-version-{}",
+                                        a.id
                                     ))),
                                     Sym::Plus,
                                     ui::native::IconSize::Small,

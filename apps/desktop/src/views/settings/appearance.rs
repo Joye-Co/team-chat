@@ -187,7 +187,12 @@ impl Render for AppearancePage {
                     .text_color(k.label)
                     .child(s::APPEARANCE),
             )
-            .child(div().flex().gap(crate::ui::native::tokens::space::S16).children(tiles));
+            .child(
+                div()
+                    .flex()
+                    .gap(crate::ui::native::tokens::space::S16)
+                    .children(tiles),
+            );
         widgets::pane().child(
             GroupedForm::new().row(theme_row).row(
                 FormRow::new(s::MESSAGE_TEXT_SIZE).control(

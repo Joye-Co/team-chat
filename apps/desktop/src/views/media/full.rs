@@ -13,7 +13,7 @@ use gpui::{
     StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
 
-use gpui_component::{Selectable as _};
+use gpui_component::Selectable as _;
 
 use super::{
     inline::{code_line, fit, group_digits},
@@ -152,7 +152,7 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                         ui::PushSize::Regular,
                         cx,
                     )
-                        .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
+                    .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
                 ),
         )
         .into_any_element()
@@ -898,7 +898,12 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 .gap(space::S12)
                 .child(div().w_full().h(px(360.)).flex_none().child(player))
                 .when(!v.chapters.is_empty(), |el| el.child(chapters))
-                .child(div().h(crate::ui::native::tokens::layout::BORDER).bg(k.sep).mx(space::S4))
+                .child(
+                    div()
+                        .h(crate::ui::native::tokens::layout::BORDER)
+                        .bg(k.sep)
+                        .mx(space::S4),
+                )
                 .child(
                     div()
                         .flex()
@@ -1084,7 +1089,11 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         }
     }
     let tones = [k.text_1, k.text_3, k.border_strong];
-    let mut segs = div().h(px(6.)).w_full().flex().gap(crate::ui::native::tokens::space::S2);
+    let mut segs = div()
+        .h(px(6.))
+        .w_full()
+        .flex()
+        .gap(crate::ui::native::tokens::space::S2);
     let mut legend = div().flex().gap(space::S12);
     if !speakers.is_empty() && a.duration > 0. {
         for (i, c) in a.transcript.iter().enumerate() {
@@ -1135,7 +1144,10 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         .on_change(move |i, _, cx| set.update(cx, |s, cx| s.set_speed(i, cx)))
     };
     let current = a.transcript.iter().rposition(|c| c.t <= position + 0.25);
-    let mut lines = div().flex().flex_col().gap(crate::ui::native::tokens::space::S2);
+    let mut lines = div()
+        .flex()
+        .flex_col()
+        .gap(crate::ui::native::tokens::space::S2);
     for (i, c) in a.transcript.iter().enumerate().take(400) {
         let seek = state.clone();
         let p = a.path.clone();
@@ -1323,7 +1335,12 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                     })
                 }),
         )
-        .child(div().w(px(1.)).h(crate::ui::native::tokens::icon::MD).bg(k.sep))
+        .child(
+            div()
+                .w(px(1.))
+                .h(crate::ui::native::tokens::icon::MD)
+                .bg(k.sep),
+        )
         .child(tool(id(spec, "prev"), Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
         .child(
             mono(
@@ -1684,8 +1701,9 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                         .flex()
                         .one_line();
                     row = row.child(if num {
-                        cell.justify_end()
-                            .child(mono(v, k.text_1).text_size(crate::ui::native::tokens::text::MONO.0))
+                        cell.justify_end().child(
+                            mono(v, k.text_1).text_size(crate::ui::native::tokens::text::MONO.0),
+                        )
                     } else {
                         cell.t_small().text_color(k.text_1).child(v)
                     });

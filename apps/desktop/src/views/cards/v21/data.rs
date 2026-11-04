@@ -586,7 +586,11 @@ fn bar_rows(
     let emit = Emitter::of(ctx);
     let clear = super::interact::sends(ctx.card, b, "chart.clear");
     let skey = main.key().to_string();
-    let mut list = div().flex().flex_col().gap(crate::ui::native::tokens::space::S2).min_w(px(0.));
+    let mut list = div()
+        .flex()
+        .flex_col()
+        .gap(crate::ui::native::tokens::space::S2)
+        .min_w(px(0.));
     for (i, xv) in xs.iter().enumerate() {
         let on = picked == Some(i);
         let (name_ink, weight, bar) = match picked {

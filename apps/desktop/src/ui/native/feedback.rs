@@ -111,7 +111,11 @@ impl RenderOnce for Alert {
                     .h(px(20.))
                     .flex()
                     .items_center()
-                    .child(sym_icon(self.icon, icon::MD, self.icon_color.unwrap_or(ink))),
+                    .child(sym_icon(
+                        self.icon,
+                        icon::MD,
+                        self.icon_color.unwrap_or(ink),
+                    )),
             )
             .child(
                 div()
@@ -120,12 +124,7 @@ impl RenderOnce for Alert {
                     .flex()
                     .flex_col()
                     .gap(space::S2)
-                    .child(
-                        div()
-                            .n_headline()
-                            .text_color(title_ink)
-                            .child(self.title),
-                    )
+                    .child(div().n_headline().text_color(title_ink).child(self.title))
                     .when_some(self.description, |d, t| {
                         d.child(div().n_body().text_color(k.secondary).child(t))
                     }),
@@ -439,15 +438,11 @@ pub fn progress_steps(done: usize, total: usize, cx: &App) -> gpui::Div {
         .flex()
         .gap(space::S2)
         .children((0..total).map(|ix| {
-            div()
-                .flex_1()
-                .h_full()
-                .rounded_full()
-                .bg(if ix < done {
-                    k.accent
-                } else {
-                    k.accent.opacity(0.2)
-                })
+            div().flex_1().h_full().rounded_full().bg(if ix < done {
+                k.accent
+            } else {
+                k.accent.opacity(0.2)
+            })
         }))
 }
 

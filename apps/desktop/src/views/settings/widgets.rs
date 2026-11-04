@@ -5,11 +5,7 @@ use gpui::{
     AnyElement, App, Div, ElementId, IntoElement, ParentElement, Pixels, SharedString, Styled,
     Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Sizable as _,
-    button::Button,
-    clipboard::Clipboard,
-};
+use gpui_component::{Sizable as _, button::Button, clipboard::Clipboard};
 
 use crate::{
     copy::{fill, settings as s},
@@ -573,7 +569,9 @@ pub fn choice(
     div().flex().child(
         Segmented::new(
             id,
-            options.iter().map(|l| Segment::Label(SharedString::from(*l))),
+            options
+                .iter()
+                .map(|l| Segment::Label(SharedString::from(*l))),
         )
         .selected(selected)
         .disabled(disabled)

@@ -689,7 +689,8 @@ pub(crate) fn frame(_waits: bool, cx: &App) -> gpui::Div {
 
 /// 12/18 text, the artboard's meta line.
 pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
-    el.text_size(crate::ui::native::tokens::text::META.0).line_height(px(18.))
+    el.text_size(crate::ui::native::tokens::text::META.0)
+        .line_height(px(18.))
 }
 
 fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
@@ -1673,15 +1674,10 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 );
                 let form = ctx.form.clone();
                 items.push(
-                    button(
-                        ctx.id("draft-edit"),
-                        c::DRAFT_EDIT,
-                        PushStyle::Outline,
-                        cx,
-                    )
-                    .disabled(!live)
-                    .on_click(move |_, _, cx| form.update(cx, |f, cx| f.set_editing(true, cx)))
-                    .into_any_element(),
+                    button(ctx.id("draft-edit"), c::DRAFT_EDIT, PushStyle::Outline, cx)
+                        .disabled(!live)
+                        .on_click(move |_, _, cx| form.update(cx, |f, cx| f.set_editing(true, cx)))
+                        .into_any_element(),
                 );
                 for x in answers.iter().filter(|x| x.id != submit.id) {
                     let (a, action) = (a.clone(), (*x).clone());

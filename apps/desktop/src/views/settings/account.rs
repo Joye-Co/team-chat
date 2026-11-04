@@ -24,7 +24,7 @@ use crate::{
     ui::{
         self, Sym, SymSize,
         native::{
-            AlertLayout, GroupedForm, CompactRow, NativeCheckbox, NativeTextField, NativeType as _,
+            AlertLayout, CompactRow, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _,
             PushSize, PushStyle, SheetLayout, SheetWidth, alert_button, disabled_push, emphasized,
             metrics, native_colors, push_button, square_button,
         },

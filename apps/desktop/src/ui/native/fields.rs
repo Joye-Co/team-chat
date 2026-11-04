@@ -7,8 +7,8 @@
 
 use gpui::{
     AnyElement, App, BoxShadow, ElementId, Entity, Focusable as _, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
-    prelude::FluentBuilder as _, point, px,
+    IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,

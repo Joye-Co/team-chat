@@ -7,10 +7,7 @@ use gpui::{
     ParentElement, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
     prelude::FluentBuilder as _, px, relative,
 };
-use gpui_component::{
-    Disableable as _,
-    button::Button,
-};
+use gpui_component::{Disableable as _, button::Button};
 
 use super::{is_expanded, part_id, toggle_expanded};
 use crate::{
@@ -262,7 +259,7 @@ fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
         label,
         ui::native::PushSize::Small,
     )
-        .on_click(move |_, window, cx| toggle_expanded(toggle_key.clone(), window, cx))
+    .on_click(move |_, window, cx| toggle_expanded(toggle_key.clone(), window, cx))
 }
 
 fn render_table(

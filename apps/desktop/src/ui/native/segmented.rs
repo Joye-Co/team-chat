@@ -13,9 +13,7 @@ use gpui_component::{
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
 };
 
-use super::tokens::{
-    NativeType as _, height, icon, metrics, native_colors, radius, shadow, space,
-};
+use super::tokens::{NativeType as _, height, icon, metrics, native_colors, radius, shadow, space};
 use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
 /// One segment: a label or a symbol (symbols carry a name for VoiceOver).
@@ -118,7 +116,11 @@ impl RenderOnce for Segmented {
                     ButtonCustomVariant::new(cx)
                         .color(rest)
                         .foreground(ink)
-                        .hover(if selected || disabled { rest } else { k.content.opacity(0.5) })
+                        .hover(if selected || disabled {
+                            rest
+                        } else {
+                            k.content.opacity(0.5)
+                        })
                         .active(rest),
                 )
                 .with_size(gpui_component::Size::Medium)

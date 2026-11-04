@@ -172,15 +172,19 @@ pub fn composer_chip(
             d.child(div().flex_none().text_color(k.ink_3).child(c::UPDATED))
         })
         .child(
-            ui::native::icon_button_bare(ElementId::Name(format!("{id:?}-x").into()), Sym::Close, ui::native::IconSize::Regular)
-                .with_size(px(18.))
-                .rounded(px(9.))
-                .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
-                .named(c::REMOVE)
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    on_remove(window, cx)
-                }),
+            ui::native::icon_button_bare(
+                ElementId::Name(format!("{id:?}-x").into()),
+                Sym::Close,
+                ui::native::IconSize::Regular,
+            )
+            .with_size(px(18.))
+            .rounded(px(9.))
+            .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
+            .named(c::REMOVE)
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                on_remove(window, cx)
+            }),
         )
         .into_any_element()
 }

@@ -21,7 +21,7 @@ use super::{
     },
     fields::{FieldSize, NativeTextField, SearchField},
     form::{FormRow, GroupedForm, InlineValueField},
-    inspector::{InspectorSection, CompactRow, determinate_bar, inspector_column, label_value},
+    inspector::{CompactRow, InspectorSection, determinate_bar, inspector_column, label_value},
     menu::{MenuRow, menu_separator, menu_surface, popover_surface},
     segmented::{Segment, Segmented},
     sheet::{
@@ -915,14 +915,64 @@ impl NativeKit {
                 .flex_wrap()
                 .items_center()
                 .gap(space::S8)
-                .child(push_button("k3-p", t::APPROVE, PushStyle::Default, PushSize::Regular, cx))
-                .child(push_button("k3-o", t::CANCEL, PushStyle::Outline, PushSize::Regular, cx))
-                .child(push_button("k3-s", t::SEE_CHANGES, PushStyle::Secondary, PushSize::Regular, cx))
-                .child(push_button("k3-g", t::EDIT, PushStyle::Ghost, PushSize::Regular, cx))
-                .child(push_button("k3-d", t::REMOVE, PushStyle::Destructive, PushSize::Small, cx))
-                .child(push_button("k3-l", t::CONTINUE, PushStyle::Default, PushSize::Large, cx))
-                .child(icon_button("k3-i", Sf::More, t::OPEN, IconSize::Regular, window, cx))
-                .child(icon_button("k3-i2", Sf::Plus, t::ADD, IconSize::Small, window, cx)),
+                .child(push_button(
+                    "k3-p",
+                    t::APPROVE,
+                    PushStyle::Default,
+                    PushSize::Regular,
+                    cx,
+                ))
+                .child(push_button(
+                    "k3-o",
+                    t::CANCEL,
+                    PushStyle::Outline,
+                    PushSize::Regular,
+                    cx,
+                ))
+                .child(push_button(
+                    "k3-s",
+                    t::SEE_CHANGES,
+                    PushStyle::Secondary,
+                    PushSize::Regular,
+                    cx,
+                ))
+                .child(push_button(
+                    "k3-g",
+                    t::EDIT,
+                    PushStyle::Ghost,
+                    PushSize::Regular,
+                    cx,
+                ))
+                .child(push_button(
+                    "k3-d",
+                    t::REMOVE,
+                    PushStyle::Destructive,
+                    PushSize::Small,
+                    cx,
+                ))
+                .child(push_button(
+                    "k3-l",
+                    t::CONTINUE,
+                    PushStyle::Default,
+                    PushSize::Large,
+                    cx,
+                ))
+                .child(icon_button(
+                    "k3-i",
+                    Sf::More,
+                    t::OPEN,
+                    IconSize::Regular,
+                    window,
+                    cx,
+                ))
+                .child(icon_button(
+                    "k3-i2",
+                    Sf::Plus,
+                    t::ADD,
+                    IconSize::Small,
+                    window,
+                    cx,
+                )),
         );
         let card = section(t::SEC_CARD, &k).child(
             Card::new()
@@ -931,7 +981,13 @@ impl NativeKit {
                 .description(t::CARD_DESCRIPTION)
                 .action(Badge::new(t::VERSION_3))
                 .child(div().n_body().text_color(k.label).child(t::CARD_BODY))
-                .footer(push_button("k3-card", t::CARD_MORE, PushStyle::Outline, PushSize::Small, cx)),
+                .footer(push_button(
+                    "k3-card",
+                    t::CARD_MORE,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )),
         );
         let rows = vec![
             ListRow::new("k3-r1", t::TOPIC_A)
@@ -940,7 +996,13 @@ impl NativeKit {
                 .status(StatusBadge::new(BadgeState::NeedsYou, t::ST_NEEDS_YOU))
                 .time(t::TIME_A)
                 .time_width(px(40.))
-                .actions(push_button("k3-r1-a", t::OPEN, PushStyle::Outline, PushSize::Small, cx))
+                .actions(push_button(
+                    "k3-r1-a",
+                    t::OPEN,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                ))
                 .into_any_element(),
             ListRow::new("k3-r2", t::TOPIC_B)
                 .media(media_box(Sym::Topic, cx))
@@ -948,7 +1010,13 @@ impl NativeKit {
                 .status(StatusBadge::new(BadgeState::Working, t::ST_WORKING))
                 .time(t::TIME_B)
                 .time_width(px(40.))
-                .actions(push_button("k3-r2-a", t::OPEN, PushStyle::Outline, PushSize::Small, cx))
+                .actions(push_button(
+                    "k3-r2-a",
+                    t::OPEN,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                ))
                 .selected(true)
                 .into_any_element(),
         ];
@@ -966,8 +1034,18 @@ impl NativeKit {
         ];
         let cell = |s: &'static str| div().child(s).into_any_element();
         let data = vec![
-            vec![cell(t::TOPIC_A), Badge::new(t::KIND_PAGE).dense().into_any_element(), cell(t::VERSION_3), cell(t::TIME_A)],
-            vec![cell(t::TOPIC_B), Badge::new(t::KIND_DOC).dense().into_any_element(), cell(t::VERSION_1), cell(t::TIME_B)],
+            vec![
+                cell(t::TOPIC_A),
+                Badge::new(t::KIND_PAGE).dense().into_any_element(),
+                cell(t::VERSION_3),
+                cell(t::TIME_A),
+            ],
+            vec![
+                cell(t::TOPIC_B),
+                Badge::new(t::KIND_DOC).dense().into_any_element(),
+                cell(t::VERSION_1),
+                cell(t::TIME_B),
+            ],
         ];
         let tables = section(t::SEC_TABLE, &k).child(
             div()
@@ -975,29 +1053,49 @@ impl NativeKit {
                 .flex()
                 .flex_col()
                 .gap(space::S16)
-                .child(table(&cols, data, false, t::TABLE_EMPTY, Some(div().child(t::TABLE_COUNT).into_any_element()), cx))
+                .child(table(
+                    &cols,
+                    data,
+                    false,
+                    t::TABLE_EMPTY,
+                    Some(div().child(t::TABLE_COUNT).into_any_element()),
+                    cx,
+                ))
                 .child(table(&cols, Vec::new(), true, t::TABLE_EMPTY, None, cx))
                 .child(
                     EmptyLine::new(t::EMPTY_LINE)
                         .icon(Sym::Checklist)
-                        .action(push_button("k3-e3", t::ASSIGN, PushStyle::Ghost, PushSize::Small, cx)),
+                        .action(push_button(
+                            "k3-e3",
+                            t::ASSIGN,
+                            PushStyle::Ghost,
+                            PushSize::Small,
+                            cx,
+                        )),
                 ),
         );
         let empty = section(t::SEC_EMPTY, &k).child(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(space::S16)
-                .child(
-                    div().h(px(260.)).child(
-                        Empty::new(Sym::Done, t::EMPTY_TITLE)
-                            .description(t::EMPTY_DESCRIPTION)
-                            .action(push_button("k3-e1", t::EMPTY_START, PushStyle::Default, PushSize::Small, cx))
-                            .action(push_button("k3-e2", t::EMPTY_OUTPUTS, PushStyle::Outline, PushSize::Small, cx))
-                            .dashed(),
-                    ),
-                )
+            div().w_full().flex().flex_col().gap(space::S16).child(
+                div().h(px(260.)).child(
+                    Empty::new(Sym::Done, t::EMPTY_TITLE)
+                        .description(t::EMPTY_DESCRIPTION)
+                        .action(push_button(
+                            "k3-e1",
+                            t::EMPTY_START,
+                            PushStyle::Default,
+                            PushSize::Small,
+                            cx,
+                        ))
+                        .action(push_button(
+                            "k3-e2",
+                            t::EMPTY_OUTPUTS,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        ))
+                        .dashed(),
+                ),
+            ),
         );
         let loading = section(t::SEC_LOADING, &k).child(
             div()
@@ -1018,20 +1116,36 @@ impl NativeKit {
                     Alert::new(Sym::Offline, t::ALERT_OFFLINE)
                         .tone(AlertTone::Warning)
                         .description(t::ALERT_OFFLINE_DETAIL)
-                        .action(push_button("k3-a1", t::ALERT_RECONNECT, PushStyle::Outline, PushSize::Small, cx)),
+                        .action(push_button(
+                            "k3-a1",
+                            t::ALERT_RECONNECT,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        )),
                 )
                 .child(
                     Alert::new(Sym::Failed, t::ALERT_FAILED)
                         .tone(AlertTone::Destructive)
                         .description(t::ALERT_FAILED_DETAIL)
-                        .action(push_button("k3-a2", t::ALERT_RETRY, PushStyle::Outline, PushSize::Small, cx)),
+                        .action(push_button(
+                            "k3-a2",
+                            t::ALERT_RETRY,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        )),
                 )
                 .child(
                     toast_surface(cx)
                         .flex()
                         .items_center()
                         .gap(space::S12)
-                        .child(crate::ui::icons::icon(Sym::Done, super::tokens::icon::MD, k.green))
+                        .child(crate::ui::icons::icon(
+                            Sym::Done,
+                            super::tokens::icon::MD,
+                            k.green,
+                        ))
                         .child(div().flex_1().n_headline().child(t::TOAST_TEXT)),
                 ),
         );

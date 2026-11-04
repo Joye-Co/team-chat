@@ -31,7 +31,7 @@ use crate::{
     },
     ui::{
         native::{
-            FormRow, GroupedForm, CompactRow, NativeType as _, PushSize, PushStyle, Segment,
+            CompactRow, FormRow, GroupedForm, NativeType as _, PushSize, PushStyle, Segment,
             Segmented, ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button,
             determinate_bar, disabled_push, emphasized, metrics, native_colors, push_button,
             toolbar_item,
@@ -363,7 +363,10 @@ impl MembersPage {
         let p = &self.services.provider;
         let m = &e.member;
         let is_selected = selected == Some(m.id.as_str());
-        let ink = RowInk::new(CompactRow::selection_ink(is_selected, focused, active, cx), cx);
+        let ink = RowInk::new(
+            CompactRow::selection_ink(is_selected, focused, active, cx),
+            cx,
+        );
         let on_accent = ink.fill == Some(k.accent);
         let mut parts: Vec<String> = m.role.clone().into_iter().collect();
         if me == Some(m.id.as_str()) {

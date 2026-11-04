@@ -20,10 +20,7 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{
         self, Sym,
-        native::{
-            NativeType as _, PushSize, PushStyle, metrics, native_colors,
-            push_button,
-        },
+        native::{NativeType as _, PushSize, PushStyle, metrics, native_colors, push_button},
     },
     views::shell::clock,
 };

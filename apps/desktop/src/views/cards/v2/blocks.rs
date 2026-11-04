@@ -42,7 +42,8 @@ pub(crate) fn block_parts(ctx: &Ctx, b: &CardV2Block, cx: &App) -> Option<BlockP
 
 /// 13/20.
 pub(crate) fn small(el: Div) -> Div {
-    el.text_size(crate::ui::native::tokens::text::UI.0).line_height(px(20.))
+    el.text_size(crate::ui::native::tokens::text::UI.0)
+        .line_height(px(20.))
 }
 
 /// The blocks of the card body, with their spacing.
@@ -238,7 +239,10 @@ pub(crate) fn block(
                 cx,
             )
         }
-        CardV2Block::Divider { .. } => div().h(crate::ui::native::tokens::layout::BORDER).bg(k.line).into_any_element(),
+        CardV2Block::Divider { .. } => div()
+            .h(crate::ui::native::tokens::layout::BORDER)
+            .bg(k.line)
+            .into_any_element(),
         CardV2Block::Link { label, target, .. } => link(ctx, label, target, ix, cx),
         CardV2Block::Decision {
             id,
@@ -1561,14 +1565,18 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 })
         };
         let grid = if images.len() >= 3 {
-            div().flex().gap(crate::ui::native::tokens::space::S4).child(tile(0, px(74.))).child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(crate::ui::native::tokens::space::S4)
-                    .child(tile(1, px(35.)))
-                    .child(tile(2, px(35.))),
-            )
+            div()
+                .flex()
+                .gap(crate::ui::native::tokens::space::S4)
+                .child(tile(0, px(74.)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(crate::ui::native::tokens::space::S4)
+                        .child(tile(1, px(35.)))
+                        .child(tile(2, px(35.))),
+                )
         } else {
             div()
                 .flex()

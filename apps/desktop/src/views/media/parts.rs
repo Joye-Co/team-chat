@@ -7,10 +7,7 @@ use gpui::{
     App, ClipboardEntry, ClipboardItem, Div, ElementId, Hsla, ImageFormat, IntoElement,
     ParentElement, SharedString, Styled, div, px,
 };
-use gpui_component::{
-    button::Button,
-    notification::Notification,
-};
+use gpui_component::{button::Button, notification::Notification};
 
 use super::{Screen, state::Target};
 use crate::{

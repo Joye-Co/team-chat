@@ -238,8 +238,12 @@ fn forced_states(cx: &App) -> gpui::Div {
     }
     let mut icons = vec![label("icon")];
     for (state, sname) in FORCED {
-        let b = ui::native::icon_button_bare(SharedString::from(format!("st-icon-{sname}")), Sym::Bell, ui::native::IconSize::Regular)
-            .named("关注");
+        let b = ui::native::icon_button_bare(
+            SharedString::from(format!("st-icon-{sname}")),
+            Sym::Bell,
+            ui::native::IconSize::Regular,
+        )
+        .named("关注");
         let b = match state {
             Forced::Rest => b.into_any_element(),
             Forced::Hover => b.bg(k.hover).into_any_element(),
@@ -385,8 +389,22 @@ impl Render for Gallery {
                 ui::native::icon_button_bare("ib-5", Sym::Plus, ui::native::IconSize::Small)
                     .named("新建群")
                     .into_any_element(),
-                ui::native::push_button("tb-1", "重试", ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx).into_any_element(),
-                ui::native::push_button("tb-2", "查看过程", ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx).into_any_element(),
+                ui::native::push_button(
+                    "tb-1",
+                    "重试",
+                    ui::native::PushStyle::Ghost,
+                    ui::native::PushSize::Small,
+                    cx,
+                )
+                .into_any_element(),
+                ui::native::push_button(
+                    "tb-2",
+                    "查看过程",
+                    ui::native::PushStyle::Ghost,
+                    ui::native::PushSize::Small,
+                    cx,
+                )
+                .into_any_element(),
                 ui::native::push_button(
                     "b-icon",
                     "添加成员",
@@ -406,9 +424,9 @@ impl Render for Gallery {
             .flex_col()
             .gap(space::S12)
             .child(
-                div().w(px(224.)).child(
-                    ui::native::SearchField::new("f-search", &self.search).sidebar(),
-                ),
+                div()
+                    .w(px(224.))
+                    .child(ui::native::SearchField::new("f-search", &self.search).sidebar()),
             )
             .child(div().w(px(320.)).child(ui::native::SearchField::new(
                 "f-search-b",
@@ -429,19 +447,37 @@ impl Render for Gallery {
                     .flex()
                     .flex_col()
                     .child(ui::field_label("邀请码", cx))
-                    .child(ui::native::NativeTextField::new("f-err", &self.form_error).full_width().error(true))
+                    .child(
+                        ui::native::NativeTextField::new("f-err", &self.form_error)
+                            .full_width()
+                            .error(true),
+                    )
                     .child(ui::field_help("邀请码不对，请检查后再试。", true, cx)),
             )
-            .child(div().w(px(390.)).child(
-                ui::native::NativeTextField::new("f-off", &self.form_disabled)
-                    .full_width()
-                    .disabled(true),
-            ))
+            .child(
+                div().w(px(390.)).child(
+                    ui::native::NativeTextField::new("f-off", &self.form_disabled)
+                        .full_width()
+                        .disabled(true),
+                ),
+            )
             .child(row_of(vec![
-                ui::native::popup_button("sel-1", "成员", ui::native::PushSize::Regular, window, cx)
-                    .into_any_element(),
-                ui::native::popup_button("sel-2", "管理员", ui::native::PushSize::Small, window, cx)
-                    .into_any_element(),
+                ui::native::popup_button(
+                    "sel-1",
+                    "成员",
+                    ui::native::PushSize::Regular,
+                    window,
+                    cx,
+                )
+                .into_any_element(),
+                ui::native::popup_button(
+                    "sel-2",
+                    "管理员",
+                    ui::native::PushSize::Small,
+                    window,
+                    cx,
+                )
+                .into_any_element(),
             ]));
 
         // Chips, badges, tags (§7.8, §7.9)
@@ -583,7 +619,14 @@ impl Render for Gallery {
             .child(
                 SectionHeader::new("群")
                     .collapsible("sh-groups", false)
-                    .trailing(ui::native::icon_button_bare("sh-add", Sym::Plus, ui::native::IconSize::Small).named("新建群")),
+                    .trailing(
+                        ui::native::icon_button_bare(
+                            "sh-add",
+                            Sym::Plus,
+                            ui::native::IconSize::Small,
+                        )
+                        .named("新建群"),
+                    ),
             )
             .children(
                 [
@@ -912,10 +955,30 @@ impl Render for Gallery {
             )
             .child(
                 row_of(vec![
-                    ui::native::push_button("cb-1", "发布", ui::native::PushStyle::Default, ui::native::PushSize::Regular, cx).into_any_element(),
-                    ui::native::push_button("cb-2", "修改", ui::native::PushStyle::Outline, ui::native::PushSize::Regular, cx).into_any_element(),
-                    ui::native::push_button("cb-3", "放弃", PushStyle::Ghost, PushSize::Regular, cx)
-                        .into_any_element(),
+                    ui::native::push_button(
+                        "cb-1",
+                        "发布",
+                        ui::native::PushStyle::Default,
+                        ui::native::PushSize::Regular,
+                        cx,
+                    )
+                    .into_any_element(),
+                    ui::native::push_button(
+                        "cb-2",
+                        "修改",
+                        ui::native::PushStyle::Outline,
+                        ui::native::PushSize::Regular,
+                        cx,
+                    )
+                    .into_any_element(),
+                    ui::native::push_button(
+                        "cb-3",
+                        "放弃",
+                        PushStyle::Ghost,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .into_any_element(),
                 ])
                 .pt(space::S14),
             );
@@ -940,7 +1003,13 @@ impl Render for Gallery {
             .child(
                 ui::Toast::new(Sym::Done, "已复制链接")
                     .tone(ui::Tone::Success)
-                    .action(ui::native::push_button("t-undo", "撤销", ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx)),
+                    .action(ui::native::push_button(
+                        "t-undo",
+                        "撤销",
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -969,7 +1038,13 @@ impl Render for Gallery {
                     .child(
                         ui::EmptyState::new(Sym::Search, "没有找到「部署」")
                             .description("换个词，或在所有群里搜索")
-                            .action(ui::native::push_button("e-1", "在所有群里搜索", ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx)),
+                            .action(ui::native::push_button(
+                                "e-1",
+                                "在所有群里搜索",
+                                ui::native::PushStyle::Ghost,
+                                ui::native::PushSize::Small,
+                                cx,
+                            )),
                     ),
             );
 

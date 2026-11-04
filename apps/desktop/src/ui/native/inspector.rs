@@ -282,7 +282,9 @@ impl RenderOnce for CompactRow {
             .gap(px(8.))
             .n_body()
             .text_color(sel.map(|s| s.1).unwrap_or(k.label))
-            .when_some(sel, |d, (fill, _)| d.bg(fill).font_weight(crate::theme::MEDIUM_WEIGHT))
+            .when_some(sel, |d, (fill, _)| {
+                d.bg(fill).font_weight(crate::theme::MEDIUM_WEIGHT)
+            })
             .children(self.children)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))

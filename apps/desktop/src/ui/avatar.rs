@@ -264,7 +264,10 @@ impl RenderOnce for MemberAvatar {
 pub fn snap(size: Pixels) -> Pixels {
     let mut best = avatar_size::SIZES[0];
     for s in avatar_size::SIZES {
-        let (d, b) = ((f32::from(s) - f32::from(size)).abs(), (f32::from(best) - f32::from(size)).abs());
+        let (d, b) = (
+            (f32::from(s) - f32::from(size)).abs(),
+            (f32::from(best) - f32::from(size)).abs(),
+        );
         if d < b || (d == b && s > best) {
             best = s;
         }

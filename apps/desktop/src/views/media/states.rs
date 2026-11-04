@@ -20,7 +20,7 @@ use super::{
 use crate::{
     copy::{fill, media as cm},
     theme::{self, Type as _, radius, space},
-    ui::{self, PushStyle, PushSize, Sym},
+    ui::{self, PushSize, PushStyle, Sym},
 };
 
 /// What the row shows on its left.

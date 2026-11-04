@@ -142,7 +142,8 @@ impl RenderOnce for Card {
         } else {
             (space::S24, space::S24)
         };
-        let has_header = self.title.is_some() || self.description.is_some() || self.action.is_some();
+        let has_header =
+            self.title.is_some() || self.description.is_some() || self.action.is_some();
         let header = has_header.then(|| {
             div()
                 .px(pad)
@@ -476,7 +477,13 @@ impl RenderOnce for ListRow {
                     )
                     .children(self.description.map(|d| {
                         div()
-                            .map(|e| if self.meta { e.n_footnote() } else { e.n_body() })
+                            .map(|e| {
+                                if self.meta {
+                                    e.n_footnote()
+                                } else {
+                                    e.n_body()
+                                }
+                            })
                             .text_color(k.secondary)
                             .overflow_hidden()
                             .whitespace_nowrap()
@@ -615,11 +622,20 @@ pub fn table(
     } else {
         height::TABLE_ROW
     };
-    let mut head = TableRow::new().h(height::TABLE_HEAD).border_b_1().border_color(k.separator);
+    let mut head = TableRow::new()
+        .h(height::TABLE_HEAD)
+        .border_b_1()
+        .border_color(k.separator);
     for (ix, c) in columns.iter().enumerate() {
         let mut h = TableHead::new()
             .px(pad(ix))
-            .map(|h| if compact { h.n_section().text_color(k.secondary) } else { h.n_headline().text_color(k.label) })
+            .map(|h| {
+                if compact {
+                    h.n_section().text_color(k.secondary)
+                } else {
+                    h.n_headline().text_color(k.label)
+                }
+            })
             .child(c.header.clone());
         h = match c.width {
             Some(w) => h.w(w).flex_none(),
@@ -649,9 +665,9 @@ pub fn table(
         );
     }
     for (rix, cells) in rows.into_iter().enumerate() {
-        let mut row = TableRow::new()
-            .h(row_h)
-            .when(rix + 1 < count, |r| r.border_b_1().border_color(k.separator));
+        let mut row = TableRow::new().h(row_h).when(rix + 1 < count, |r| {
+            r.border_b_1().border_color(k.separator)
+        });
         for (ix, cell) in cells.into_iter().enumerate() {
             let c = &columns[ix.min(n.saturating_sub(1))];
             let mut td = TableCell::new()
@@ -682,7 +698,11 @@ pub fn table(
         .overflow_hidden()
         .flex()
         .flex_col()
-        .child(Table::new().child(TableHeader::new().child(head)).child(body))
+        .child(
+            Table::new()
+                .child(TableHeader::new().child(head))
+                .child(body),
+        )
         .children(footer.map(|f| {
             div()
                 .h(height::TABLE_ROW)

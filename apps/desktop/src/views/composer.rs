@@ -1528,9 +1528,14 @@ impl Render for ComposerView {
                     .t_small()
                     .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
                     .child(
-                        ui::native::push_button("cancel-edit", crate::copy::common::CANCEL, ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx).on_click(
-                            cx.listener(|this, _, window, cx| this.cancel_edit(window, cx)),
-                        ),
+                        ui::native::push_button(
+                            "cancel-edit",
+                            crate::copy::common::CANCEL,
+                            ui::native::PushStyle::Ghost,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.cancel_edit(window, cx))),
                     ),
             );
         }

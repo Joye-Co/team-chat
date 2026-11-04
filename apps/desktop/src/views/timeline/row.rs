@@ -384,11 +384,17 @@ impl TimelineView {
                         .child(t::FAILED),
                 )
                 .child(
-                    ui::native::push_button(ElementId::Name(format!("retry-{key}").into()), t::RETRY, ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx)
-                        .on_click(cx.listener({
-                            let message = message.clone();
-                            move |this, _, _, _| this.retry(&message)
-                        })),
+                    ui::native::push_button(
+                        ElementId::Name(format!("retry-{key}").into()),
+                        t::RETRY,
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(cx.listener({
+                        let message = message.clone();
+                        move |this, _, _, _| this.retry(&message)
+                    })),
                 )
                 .into_any_element()
         });
@@ -584,8 +590,12 @@ impl TimelineView {
         let can_edit = self.can_edit(message);
         let can_delete = self.can_delete(message);
         let tool = |id: &str, glyph: Sym| {
-            ui::native::icon_button_bare(ElementId::Name(format!("{id}-{key}").into()), glyph, ui::native::IconSize::Regular)
-                .rounded(theme::radius::SM)
+            ui::native::icon_button_bare(
+                ElementId::Name(format!("{id}-{key}").into()),
+                glyph,
+                ui::native::IconSize::Regular,
+            )
+            .rounded(theme::radius::SM)
         };
         ui::capsule(cx)
             .id(ElementId::Name(format!("hover-bar-{key}").into()))
@@ -958,7 +968,7 @@ impl TimelineView {
                             ui::native::PushSize::Small,
                             cx,
                         )
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx))),
+                        .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx))),
                     ),
             )
             .into_any_element()

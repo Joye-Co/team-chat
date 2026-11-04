@@ -339,7 +339,11 @@ pub struct SidebarFooter {
 }
 
 impl SidebarFooter {
-    pub fn new(id: impl Into<ElementId>, avatar: impl IntoElement, name: impl Into<SharedString>) -> Self {
+    pub fn new(
+        id: impl Into<ElementId>,
+        avatar: impl IntoElement,
+        name: impl Into<SharedString>,
+    ) -> Self {
         Self {
             id: id.into(),
             avatar: avatar.into_any_element(),

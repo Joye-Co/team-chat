@@ -498,7 +498,11 @@ pub fn play_badge(size: f32) -> gpui::Div {
 
 /// Chapter ticks along the bottom edge of a poster or scrubber: one segment per chapter.
 pub fn chapter_ticks(chapters: &[store::Cue], duration: f64, color: gpui::Hsla) -> gpui::Div {
-    let mut row = div().w_full().h(px(3.)).flex().gap(crate::ui::native::tokens::space::S4);
+    let mut row = div()
+        .w_full()
+        .h(px(3.))
+        .flex()
+        .gap(crate::ui::native::tokens::space::S4);
     if duration <= 0. || chapters.is_empty() {
         return row;
     }
@@ -685,7 +689,11 @@ pub fn waveform(
     on: gpui::Hsla,
     off: gpui::Hsla,
 ) -> gpui::Div {
-    let mut row = div().h(px(height)).flex().items_center().gap(crate::ui::native::tokens::space::S2);
+    let mut row = div()
+        .h(px(height))
+        .flex()
+        .items_center()
+        .gap(crate::ui::native::tokens::space::S2);
     if peaks.is_empty() {
         return row;
     }

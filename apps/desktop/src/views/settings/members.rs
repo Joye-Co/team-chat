@@ -249,18 +249,12 @@ impl MembersPage {
                 .icon(widgets::app_icon(cx))
                 .message(fill(s::DEACTIVATE_BODY, &[("name", &name)]))
                 .buttons([
-                    alert_button(
-                        "deactivate-ok",
-                        s::DEACTIVATE,
-                        PushStyle::Outline,
-                        true,
-                        cx,
-                    )
-                    .on_click(move |_, window, cx| {
-                        let id = id.clone();
-                        page.update(cx, |p, cx| p.set_deactivated(id, true, cx));
-                        window.close_dialog(cx);
-                    }),
+                    alert_button("deactivate-ok", s::DEACTIVATE, PushStyle::Outline, true, cx)
+                        .on_click(move |_, window, cx| {
+                            let id = id.clone();
+                            page.update(cx, |p, cx| p.set_deactivated(id, true, cx));
+                            window.close_dialog(cx);
+                        }),
                     alert_button(
                         "deactivate-cancel",
                         common::CANCEL,
@@ -784,8 +778,8 @@ pub fn character_picker(
                 cx,
             )
             .disabled(disabled)
-                .child(characters::image(c, CharacterStatus::Idle, px(32.)))
-                .on_click(move |_, window, cx| pick(c, window, cx))
+            .child(characters::image(c, CharacterStatus::Idle, px(32.)))
+            .on_click(move |_, window, cx| pick(c, window, cx))
         }))
 }
 
