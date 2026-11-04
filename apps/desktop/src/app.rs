@@ -557,8 +557,6 @@ impl Services {
             nav,
             characters,
         };
-        // Pages area (1.1.0 fixes): the ink disc of my own avatar.
-        crate::ui::avatar::track_viewer(&services, cx);
         // --- inc-host track: the 产出 page host (data, asks, new versions) ---
         crate::views::artifacts::host::start(&services, cx);
         // --- end inc-host track ---

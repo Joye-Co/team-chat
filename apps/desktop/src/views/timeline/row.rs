@@ -1184,8 +1184,8 @@ mod start_fade_tests {
 
     #[test]
     fn a_half_cut_title_is_hidden_and_the_meta_line_stays() {
-        // Title top is at 84; half of a one-line title (15 pt) is cut.
-        let f = StartFade::at(px(99.), px(30.));
+        // Title top is at 24 + 40 + 12 = 76; half of a one-line title (15 pt) is cut.
+        let f = StartFade::at(px(91.), px(30.));
         assert_eq!(f.avatar, 0.);
         assert_eq!(f.title, 0.);
         assert_eq!(f.meta, 1.);
@@ -1193,10 +1193,10 @@ mod start_fade_tests {
 
     #[test]
     fn a_half_cut_meta_line_is_hidden() {
-        // Meta top is at 84 + 60 + 8 = 152 under a two-line title.
-        let f = StartFade::at(px(162.), px(60.));
+        // Meta top is at 76 + 60 + 8 = 144 under a two-line title.
+        let f = StartFade::at(px(154.), px(60.));
         assert_eq!(f.meta, 0.);
-        let f = StartFade::at(px(130.), px(60.));
+        let f = StartFade::at(px(122.), px(60.));
         assert!(f.meta > 0.9);
     }
 }

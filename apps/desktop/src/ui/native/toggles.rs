@@ -124,7 +124,7 @@ impl RenderOnce for NativeSwitch {
                     })
                     .size(knob)
                     .rounded_full()
-                    .bg(k.knob)
+                    .bg(if self.on { k.knob_on } else { k.knob })
                     .shadow(k.knob_shadow()),
             )
     }

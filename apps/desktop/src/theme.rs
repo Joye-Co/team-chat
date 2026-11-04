@@ -23,36 +23,12 @@ use gpui_component::{ActiveTheme, Theme, ThemeMode, scroll::ScrollbarMode};
 use gpui_kit::base::Easing;
 
 use crate::data::TopicStatus;
+use crate::ui::native::tokens as tk;
 
 // ---------------------------------------------------------------------------
-// Layout (DESIGN.md §4.4)
+// Layout: the widths and rows live in ui/native/tokens.rs (§2.1).
 
-/// Sidebar column width (200 to 320, resizable).
-pub const SIDEBAR_WIDTH: Pixels = px(248.);
-pub const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
-pub const SIDEBAR_MAX_WIDTH: Pixels = px(320.);
-/// Topic list column width (280 to 400).
-pub const TOPIC_LIST_WIDTH: Pixels = px(320.);
-pub const TOPIC_LIST_MIN_WIDTH: Pixels = px(280.);
-pub const TOPIC_LIST_MAX_WIDTH: Pixels = px(400.);
-/// Side panel width (260 to 380), closed by default.
-pub const SIDE_PANEL_WIDTH: Pixels = px(300.);
-/// The topic view never gets narrower than this.
-pub const TOPIC_VIEW_MIN_WIDTH: Pixels = px(480.);
-/// The title row of every header band: 52 pt, centered with the traffic lights.
-pub const TOOLBAR_HEIGHT: Pixels = px(52.);
-/// The second row of a header band (tabs, topic meta, panel context).
-pub const HEADER_SECOND_ROW: Pixels = px(40.);
-/// Header band of the topic list, topic view and side panel: 52 + 40. The
-/// three 0.5 pt bottom rules sit on one y.
-pub const HEADER_BAND: Pixels = px(92.);
-/// From this window width every column has its default width with the side
-/// panel open: 248 + 320 + 480 + 300.
-pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1348.);
-pub const WINDOW_MIN_WIDTH: Pixels = px(1100.);
-/// Below this window width an open side panel floats over the topic view:
-/// 200 + 280 + 480 + 300.
-pub const SIDE_PANEL_INLINE_MIN_WINDOW: Pixels = px(1260.);
+pub use crate::ui::native::tokens::layout::*;
 
 /// The column widths of the main window (§4.4 "Narrow window").
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,265 +72,26 @@ pub fn columns(window_width: Pixels, panel_open: bool) -> Columns {
     }
 }
 // ---------------------------------------------------------------------------
-// Layout v3 (the v2 redesign: rail | page | pane)
+// Layout v3 (rail | page | pane): the widths live in ui/native/tokens.rs.
 
-/// The left rail: title row, search, destinations, 话题 and the team strip.
-pub const RAIL_WIDTH: Pixels = px(260.);
-/// The title bar of every page: breadcrumb, title, state and pane buttons.
-pub const TITLE_BAR: Pixels = px(52.);
-/// The topic rail beside a 话题 page (the default pane).
-pub const TOPIC_RAIL_WIDTH: Pixels = px(320.);
-/// The 单独问 side chat pane (⌘;).
-pub const SIDE_CHAT_WIDTH: Pixels = px(380.);
-/// The 实时查看 pane: half the window, between these bounds (720 at 1440).
-pub const LIVE_PANE_SHARE: f32 = 0.5;
-pub const LIVE_PANE_MIN_WIDTH: Pixels = px(460.);
-pub const LIVE_PANE_MAX_WIDTH: Pixels = px(760.);
-/// The 产出 pane beside a 话题 page.
-pub const ARTIFACT_PANE_WIDTH: Pixels = px(440.);
-/// The 来龙去脉 rail of the 产出 page.
-pub const ARTIFACT_RAIL_WIDTH: Pixels = px(320.);
-/// The right column of the 首页 (正在做, 排队) and the 群 page (群里的决定).
-pub const DESK_SIDE_WIDTH: Pixels = px(300.);
-/// The list of the 成员 page.
-pub const MEMBERS_LIST_WIDTH: Pixels = px(480.);
-/// A page never gets narrower than this; a pane floats over it instead.
-pub const PAGE_MIN_WIDTH: Pixels = px(480.);
-/// The reading column of pages (首页 cards, the topic timeline).
-pub const PAGE_MEASURE: Pixels = px(720.);
-/// Title bar icon buttons (单独问, 产出, 电脑, 改动, rail toggle).
-pub const TITLE_BUTTON: Pixels = px(28.);
-/// Rail rows (destinations and 话题): 28 pt; group headers 24 pt.
-pub const RAIL_ROW: Pixels = px(28.);
-pub const RAIL_GROUP_ROW: Pixels = px(24.);
-/// The slot at the start of a rail row (state dot, tile, check).
-pub const RAIL_SLOT: Pixels = px(16.);
-/// The state set of a rail row, one visual size (§7.3): a 6 pt dot (filled
-/// `you` for 需要你, hollow `ink-3` for 等别人), a 12 pt `ink-3` check for
-/// 做完了, the doing member's tile with its status dot for 在做.
-pub const RAIL_STATE_DOT: Pixels = px(6.);
-pub const RAIL_STATE_STROKE: Pixels = px(1.25);
-pub const RAIL_STATE_CHECK: Pixels = px(12.);
-/// The 岗位 tag after a member's name: 18 pt, radius 5.
-pub const TAG_HEIGHT: Pixels = px(18.);
-pub const TAG_RADIUS: Pixels = px(5.);
-/// The status dot on an avatar's corner (working, waits on me): 6 pt on a
-/// 16 pt avatar, 7 up to 24, 8 up to 32, 10 above (§7.9).
+/// The presence dot on an avatar's corner (§1.8): 8 on every avatar, 6 on
+/// a 16 avatar so it stays inside the disc.
 pub fn avatar_status_dot(avatar: Pixels) -> Pixels {
     if avatar <= px(16.) {
         px(6.)
-    } else if avatar <= px(24.) {
-        px(7.)
-    } else if avatar <= px(32.) {
-        px(8.)
     } else {
-        px(10.)
+        crate::ui::native::tokens::avatar::PRESENCE
     }
 }
-/// The ring in the surface color that cuts the status dot out of the avatar.
-pub const AVATAR_STATUS_CUT: Pixels = px(1.5);
-/// A right-pane rail section (topic rail, 正在做, 群资料, 来龙去脉, 工作环境):
-/// no border, fill or shadow; sections sit on the rail surface and a 1 pt
-/// `line` divides them (§7.8). Its vertical and side padding.
-pub const RAIL_SECTION_PAD_Y: Pixels = px(14.);
-pub const RAIL_SECTION_PAD_X: Pixels = px(4.);
-/// How far the hover fill of a row in a boxless list (refs, links) reaches
-/// past the text on each side (`ui::inset_row`).
-pub const LIST_ROW_BLEED: Pixels = px(8.);
 
 /// The width of the 实时查看 pane in a window `window_w` wide.
 pub fn live_pane_width(window_w: Pixels) -> Pixels {
     (window_w * LIVE_PANE_SHARE).clamp(LIVE_PANE_MIN_WIDTH, LIVE_PANE_MAX_WIDTH)
 }
 
-pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
-pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
-pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-/// Traffic light origin (v12/shell, NATIVE.md §2): the 14 pt lights sit in
-/// the floating sidebar, the red one centred 25, 26 pt from the window
-/// corner, on the centre line of the 52 pt toolbar row.
-pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
-/// Leading inset of a toolbar band that holds the traffic lights.
-pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
-/// Timeline and topic row avatar size.
-pub const AVATAR_SIZE: Pixels = px(36.);
-/// Sidebar 群 and 私聊 row height.
-pub const ROW_HEIGHT: Pixels = px(32.);
-/// One measure for message text, cards, files and images (Slack).
-pub const MEASURE: Pixels = px(620.);
-/// Equal side gutters of the timeline and composer content box.
-pub const CONTENT_GUTTER: Pixels = px(24.);
-/// Hairline width. 0.5 pt is exact on Retina; on 1x it becomes 1 px.
-pub const HAIRLINE: Pixels = px(0.5);
-/// Border width of controls, cards, fields and the composer.
-pub const BORDER: Pixels = px(1.);
-/// Height of the fade at the cut edge of an inline 产出 page (MEDIA §1 inline HTML).
-pub const EMBED_FADE: Pixels = px(48.);
-
-/// Spacing scale (§4.1): 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 44. 10 and 14
-/// are for row and card insets only.
-pub mod space {
-    use gpui::{Pixels, px};
-    pub const S2: Pixels = px(2.);
-    /// Off the scale: the side padding of a mention pill only (mockup `.mn`).
-    pub const S3: Pixels = px(3.);
-    pub const S4: Pixels = px(4.);
-    pub const S6: Pixels = px(6.);
-    pub const S8: Pixels = px(8.);
-    pub const S10: Pixels = px(10.);
-    pub const S12: Pixels = px(12.);
-    pub const S14: Pixels = px(14.);
-    pub const S16: Pixels = px(16.);
-    pub const S20: Pixels = px(20.);
-    pub const S24: Pixels = px(24.);
-    pub const S32: Pixels = px(32.);
-    pub const S44: Pixels = px(44.);
-    /// Not on the v2.1 scale; kept until the views that use it are rebuilt.
-    pub const S28: Pixels = px(28.);
-}
-
-/// Radii (§6). Concentric rule: outer = inner + padding.
-pub mod radius {
-    use gpui::{Pixels, px};
-    /// Inline marks in text: mentions, inline code, search marks.
-    pub const MARK: Pixels = px(4.);
-    /// Chips, labels, kbd, role tag, `sm` buttons, popup and menu rows,
-    /// hover-toolbar buttons.
-    pub const SM: Pixels = px(6.);
-    /// Buttons, 32 to 36 pt fields, selects, rows, option rows, file tiles.
-    pub const MD: Pixels = px(8.);
-    /// 40 pt fields, `lg` buttons, invite boxes, the @mention popup.
-    pub const FIELD: Pixels = px(10.);
-    /// Cards, the composer, popovers, dialogs, the switcher, settings tables.
-    pub const LG: Pixels = px(12.);
-    /// Card actions (`size::BUTTON_CARD`): every kind shares it.
-    pub const BUTTON_CARD: Pixels = px(7.);
-
-    // Older names, mapped onto the v2.1 steps.
-    pub const XS: Pixels = MARK;
-    pub const CHIP: Pixels = SM;
-    pub const TILE: Pixels = SM;
-    pub const ROW: Pixels = MD;
-    pub const COMPOSER: Pixels = LG;
-    pub const XL: Pixels = LG;
-
-    /// Bot tiles: 0.25 x size (9 at 36, 8 at 32, 6 at 24, 12 at 48).
-    pub fn bot(size: Pixels) -> Pixels {
-        size * 0.25
-    }
-}
-
-/// Icon sizes (§4.3).
-pub mod icon {
-    use gpui::{Pixels, px};
-    /// Headers, toolbars, the composer, icon buttons.
-    pub const HEADER: Pixels = px(18.);
-    /// Buttons, fields, rows, menus.
-    pub const ROW: Pixels = px(16.);
-    /// Chips and labels.
-    pub const CHIP: Pixels = px(14.);
-    /// The role tag and section chevrons.
-    pub const TAG: Pixels = px(12.);
-    /// Empty states.
-    pub const EMPTY: Pixels = px(20.);
-
-    // Older names, mapped onto the v2.1 sizes.
-    pub const TOOLBAR: Pixels = HEADER;
-    pub const TODO: Pixels = ROW;
-    pub const MENU: Pixels = ROW;
-    pub const BUTTON: Pixels = ROW;
-    pub const SMALL: Pixels = CHIP;
-}
-
-/// Control and row heights (§4.2, §7). Views take sizes from here, never a
-/// literal.
-pub mod size {
-    use gpui::{Pixels, px};
-    /// Button `sm`: inline in a message or card row (重试).
-    pub const BUTTON_SM: Pixels = px(20.); // v12/kit: small push button
-    /// Card actions (Card v2 footers, 首页 asks, the pinned card): one height
-    /// for primary, quiet and text actions (§7.5).
-    pub const BUTTON_CARD: Pixels = px(24.); // v12/kit: regular push button
-    /// Side padding of a card action.
-    pub const BUTTON_CARD_PAD: Pixels = px(12.);
-    /// Button `md`: the default (card actions, dialogs).
-    pub const BUTTON_MD: Pixels = px(24.); // v12/kit: regular push button
-    /// Button `md` page primary (settings `添加成员 ▾`).
-    pub const BUTTON_PAGE: Pixels = px(24.); // v12/kit: regular push button
-    /// Button `lg`: login, empty-state primary, full-width submit.
-    pub const BUTTON_LG: Pixels = px(28.); // v12/kit: large capsule
-    /// Text button inside a message (重试 after a failed send).
-    pub const TEXT_BUTTON: Pixels = px(20.); // v12/kit
-    pub const ICON_BUTTON: Pixels = px(28.); // v12/kit
-    pub const ICON_BUTTON_SM: Pixels = px(24.); // v12/kit
-    /// Search and filter fields.
-    pub const SEARCH_FIELD: Pixels = px(24.); // v12/kit: search field
-    /// Form fields (login, settings, dialogs).
-    pub const FORM_FIELD: Pixels = px(24.); // v12/kit: standalone field
-    /// Select in a table row: 36 x 120.
-    pub const SELECT: Pixels = px(24.); // v12/kit: pop-up button
-    pub const SELECT_WIDTH: Pixels = px(120.);
-    /// Invite code box: 42 x 48.
-    pub const INVITE_BOX: (Pixels, Pixels) = (px(42.), px(48.));
-    /// Composer: 12 top padding + 22 text (one line, it grows with the
-    /// text) + 40 toolbar.
-    pub const COMPOSER_MIN: Pixels = px(74.);
-    pub const COMPOSER_TEXT_MIN: Pixels = px(22.);
-    pub const COMPOSER_TOOLBAR: Pixels = px(40.);
-    /// The composer's format bar (§7.2).
-    pub const FORMAT_BAR: Pixels = px(36.);
-    /// The composer grows with its text up to this share of the topic view.
-    pub const COMPOSER_MAX_SHARE: f32 = 0.4;
-    pub const CHIP: Pixels = px(22.);
-    pub const CHIP_COMPACT: Pixels = px(20.);
-    pub const CHIP_MAX: Pixels = px(184.);
-    pub const CHIP_COMPACT_MAX: Pixels = px(72.);
-    pub const BADGE: Pixels = px(20.);
-    pub const KBD: Pixels = px(20.);
-    pub const ROLE_TAG: Pixels = px(20.);
-    pub const REACTION: Pixels = px(26.);
-    pub const SECTION_HEADER: Pixels = px(28.);
-    pub const SIDEBAR_ROW: Pixels = px(32.);
-    pub const SIDEBAR_FOOTER: Pixels = px(56.);
-    pub const TOPIC_ROW: Pixels = px(68.);
-    pub const MENU_ROW: Pixels = px(24.); // v12/kit: menu row
-    pub const POPUP_ROW: Pixels = px(40.);
-    pub const SWITCHER_ROW: Pixels = px(44.);
-    pub const SWITCHER_HIT_ROW: Pixels = px(60.);
-    pub const SWITCHER_QUERY: Pixels = px(56.);
-    pub const SETTINGS_ROW: Pixels = px(60.);
-    /// A settings list row (§8.10): the label at the left, its control at
-    /// the right, inside one rounded group.
-    pub const SETTINGS_LIST_ROW: Pixels = px(52.);
-    /// The text field of a settings list row: fixed, so fields do not
-    /// stretch across the window.
-    pub const SETTINGS_FIELD_WIDTH: Pixels = px(280.);
-    /// The longest value at the right of a settings list row (服务器).
-    pub const SETTINGS_VALUE_MAX: Pixels = px(320.);
-    /// The settings content column: 600 pt of content plus 32 pt each side.
-    pub const SETTINGS_COLUMN: Pixels = px(664.);
-    /// The picture in the 头像 row.
-    pub const SETTINGS_AVATAR: Pixels = px(40.);
-    pub const OPTION_ROW: Pixels = px(40.);
-    pub const PANEL_ROW: Pixels = px(40.);
-    /// Plan and step rows of the side panel's progress (§8.1).
-    pub const PLAN_ROW: Pixels = px(28.);
-    pub const BANNER: Pixels = px(52.);
-    pub const TOAST: Pixels = px(44.);
-    /// Avatars (§4.3).
-    pub const AVATAR_MESSAGE: Pixels = px(36.);
-    pub const AVATAR_FOOTER: Pixels = px(32.);
-    pub const AVATAR_ROW: Pixels = px(24.);
-    pub const AVATAR_START: Pixels = px(48.);
-    /// Widths of overlays (§7.12).
-    pub const SWITCHER_WIDTH: Pixels = px(640.);
-    pub const DIALOG_WIDTH: Pixels = px(440.);
-    pub const DIALOG_WIDE: Pixels = px(560.);
-    pub const ALERT_WIDTH: Pixels = px(320.);
-    pub const MENTION_POPUP_WIDTH: Pixels = px(320.);
-    /// Command-style panels sit this far below the window top.
-    pub const PALETTE_TOP: Pixels = px(96.);
-}
+/// Spacing, radii, icon sizes and control heights: aliases onto the scales
+/// of ui/native/tokens.rs (docs/design/COMPLETENESS.md §1).
+pub use crate::ui::native::tokens::{icon, radius, size, space};
 
 // ---------------------------------------------------------------------------
 // Theme set (§3)
@@ -461,198 +198,226 @@ fn c(hex: u32) -> Hsla {
     rgba(hex).into()
 }
 
-// --- v12/fx-shell: every menu (NATIVE.md §7.3) ---
+// --- v13/tokens: every menu (COMPLETENESS.md §2.11) ---
 /// The style of every gpui-component menu, dropdown and context menu
-/// (NATIVE.md §7.3): an opaque `sheet` fill, radius 12, the glass edge and
-/// `float`, 5 pt inner padding, 24 pt rows with 13 pt text, the `accent`
-/// highlight inset 5 pt with radius 6, 1 px separators inset to the text.
+/// (§2.11): an opaque `card` surface, radius 8, p 4, the border line and
+/// shadow md; items h32, px 8, radius 6, 14 text; highlight = `accent`
+/// (muted) with foreground text (D10); separators 1 px, my 4.
 pub fn apply_menu_style(cx: &mut App) {
-    use crate::ui::native::{metrics, tokens::text};
-    let k = crate::ui::native::native_colors(cx);
-    let mut shadow = k.glass();
-    if k.is_dark() {
-        // A dark outer hairline keeps the menu off a dark page (AppKit draws one).
-        shadow.push(BoxShadow {
-            color: c(0x00000099),
-            offset: point(px(0.), px(0.)),
-            blur_radius: px(0.),
-            spread_radius: metrics::HAIRLINE,
-            inset: false,
-        });
-    }
+    use crate::ui::native::{
+        metrics,
+        tokens::{Palette, shadow, text},
+    };
+    let p = Palette::for_mode(is_dark(cx));
+    let mut s = shadow::md();
+    s.push(shadow::line(p.border));
     gpui_component::menu::MenuStyle {
-        fill: k.sheet,
+        fill: p.card,
         radius: metrics::MENU_RADIUS,
-        shadow,
+        shadow: s,
         padding: metrics::MENU_PAD,
         row_height: metrics::MENU_ROW,
         row_radius: metrics::MENU_ROW_RADIUS,
         row_padding: metrics::MENU_ROW_PAD,
-        text_size: text::BODY.0,
-        line_height: text::BODY.1,
-        highlight: k.accent,
-        highlight_text: k.on_accent,
-        separator: k.separator,
-        separator_height: px(1.),
-        separator_margin: px(5.),
+        text_size: text::UI.0,
+        line_height: text::UI.1,
+        highlight: p.accent,
+        highlight_text: p.foreground,
+        separator: p.border,
+        separator_height: BORDER,
+        separator_margin: space::S4,
     }
     .set(cx);
 }
-// --- end v12/fx-shell ---
+// --- end v13/tokens ---
 
-/// Every gpui-component slot the app can show (DESIGN.md §2.8).
+/// Writes every gpui-component `ThemeColor` slot the app can show in one
+/// pass from the palette (COMPLETENESS.md §1.2, §1.3, D1): rem 16, so
+/// gpui-component draws its own shadcn sizes.
 fn apply(t: &mut Theme, dark: bool) {
+    use crate::ui::native::tokens::{Palette, radius as r, text};
+    let p = Palette::for_mode(dark);
     let k = if dark { dark_colors() } else { light_colors() };
-    let p = |l: u32, d: u32| if dark { c(d) } else { c(l) };
     let clear = c(0x00000000);
+    let soft = Palette::soft;
+    // The system accent the person picked, else `primary`.
+    let primary = app_accent(dark);
+    let on_primary = accent_ink(dark);
+    let primary_hover = primary.opacity(0.9);
+    let primary_active = primary.opacity(0.8);
+    let white = c(0xFFFFFFFF);
 
-    t.background = k.content;
-    t.foreground = k.text_1;
-    t.muted = k.field;
+    // Base.
+    t.background = p.background;
+    t.foreground = p.foreground;
+    t.muted = p.muted;
     t.muted_foreground = k.text_2;
     t.border = k.border;
-    t.input = k.border;
-    t.ring = k.focus;
-    t.selection = p(0x3B6EF533, 0x6B93F75C);
-    t.caret = k.ink;
-    t.overlay = k.scrim;
-    t.accent = k.hover;
-    t.accent_foreground = k.text_1;
+    t.input = k.control_border;
+    t.ring = p.ring;
+    t.selection = soft(p.info, 0.25);
+    t.caret = p.foreground;
+    t.overlay = p.scrim;
+    t.accent = p.accent;
+    t.accent_foreground = p.foreground;
+    t.accordion = p.background;
+    t.window_border = k.border;
+    t.drag_border = p.ring;
+    t.drop_target = p.muted;
 
-    t.primary = k.accent;
-    t.primary_hover = k.accent_hover;
-    t.primary_active = k.accent_pressed;
-    t.primary_foreground = k.on_accent;
-    t.button_primary = k.accent;
-    t.button_primary_hover = k.accent_hover;
-    t.button_primary_active = k.accent_pressed;
-    t.button_primary_foreground = k.on_accent;
+    // Buttons: default = primary; secondary = muted fill; outline and ghost
+    // draw on `background` and hover in `accent` (§1.8).
+    t.primary = primary;
+    t.primary_hover = primary_hover;
+    t.primary_active = primary_active;
+    t.primary_foreground = on_primary;
+    t.button_primary = primary;
+    t.button_primary_hover = primary_hover;
+    t.button_primary_active = primary_active;
+    t.button_primary_foreground = on_primary;
+    t.secondary = p.muted;
+    t.secondary_hover = p.accent;
+    t.secondary_active = p.pressed;
+    t.secondary_foreground = p.foreground;
+    t.button = p.background;
+    t.button_hover = p.accent;
+    t.button_active = p.pressed;
+    t.button_foreground = p.foreground;
+    t.button_secondary = p.muted;
+    t.button_secondary_hover = p.accent;
+    t.button_secondary_active = p.pressed;
+    t.button_secondary_foreground = p.foreground;
 
-    let (sec, sec_h, sec_a) = (k.bg, k.hover, k.pressed);
-    t.secondary = sec;
-    t.secondary_hover = sec_h;
-    t.secondary_active = sec_a;
-    // Ghost buttons draw in `secondary_foreground`: `text-2` at rest, and
-    // `accent_foreground` (`text-1`) on hover (§7.1).
-    t.secondary_foreground = k.text_2;
-    t.button = sec;
-    t.button_hover = sec_h;
-    t.button_active = sec_a;
-    t.button_foreground = k.text_1;
-    t.button_secondary = sec;
-    t.button_secondary_hover = sec_h;
-    t.button_secondary_active = sec_a;
-    t.button_secondary_foreground = k.text_1;
+    // State colors (§1.3): fills and their white text.
+    t.danger = p.destructive;
+    t.danger_hover = p.destructive.opacity(0.9);
+    t.danger_active = p.destructive.opacity(0.8);
+    t.danger_foreground = white;
+    t.button_danger = p.destructive;
+    t.button_danger_hover = p.destructive.opacity(0.9);
+    t.button_danger_active = p.destructive.opacity(0.8);
+    t.button_danger_foreground = white;
+    t.success = p.success;
+    t.success_hover = p.success;
+    t.success_active = p.success;
+    t.success_foreground = white;
+    t.button_success = p.success;
+    t.button_success_hover = p.success.opacity(0.9);
+    t.button_success_active = p.success.opacity(0.8);
+    t.button_success_foreground = white;
+    t.warning = p.warning;
+    t.warning_hover = p.warning;
+    t.warning_active = p.warning;
+    t.warning_foreground = white;
+    t.button_warning = p.warning;
+    t.button_warning_hover = p.warning.opacity(0.9);
+    t.button_warning_active = p.warning.opacity(0.8);
+    t.button_warning_foreground = white;
+    t.info = p.info;
+    t.info_hover = p.info;
+    t.info_active = p.info;
+    t.info_foreground = white;
+    t.button_info = p.info;
+    t.button_info_hover = p.info.opacity(0.9);
+    t.button_info_active = p.info.opacity(0.8);
+    t.button_info_foreground = white;
 
-    t.danger = k.danger;
-    t.danger_hover = p(0xD93F44FF, 0xF66A6EFF);
-    t.danger_active = p(0xC2272DFF, 0xD9474CFF);
-    t.danger_foreground = c(0xFFFFFFFF);
-    t.button_danger = t.danger;
-    t.button_danger_hover = t.danger_hover;
-    t.button_danger_active = t.danger_active;
-    t.button_danger_foreground = c(0xFFFFFFFF);
-    t.success = k.success;
-    t.success_hover = k.success;
-    t.success_active = k.success;
-    t.success_foreground = c(0xFFFFFFFF);
-    t.warning = k.you_glyph;
-    t.warning_hover = k.you_glyph;
-    t.warning_active = k.you_glyph;
-    t.warning_foreground = c(0xFFFFFFFF);
-    t.info = k.live;
-    t.info_hover = k.live;
-    t.info_active = k.live_ink;
-    t.info_foreground = c(0xFFFFFFFF);
-
-    t.colors.list = k.content;
-    t.list_hover = k.hover;
-    t.list_active = k.sel;
+    // Lists and tables (§2.6, §2.7): hover muted at 50 %, selected muted.
+    t.colors.list = p.background;
+    t.list_hover = soft(p.muted, 0.5);
+    t.list_active = p.muted;
     t.list_active_border = clear;
-    t.list_even = k.content;
-    t.list_head = k.content;
-
-    t.table = k.content;
-    t.table_hover = k.hover;
-    t.table_active = k.sel;
+    t.list_even = p.background;
+    t.list_head = p.background;
+    t.table = p.background;
+    t.table_hover = soft(p.muted, 0.5);
+    t.table_active = p.muted;
     t.table_active_border = clear;
-    t.table_even = k.content;
-    t.table_row_border = k.sep;
-    t.table_head = k.content;
-    t.table_head_foreground = k.text_3;
-    t.table_foot = k.content;
-    t.table_foot_foreground = k.text_3;
+    t.table_even = p.background;
+    t.table_row_border = k.border;
+    t.table_head = p.muted;
+    t.table_head_foreground = p.foreground;
+    t.table_foot = p.background;
+    t.table_foot_foreground = k.text_2;
 
-    t.popover = k.overlay;
-    t.popover_foreground = k.text_1;
-    t.group_box = k.content;
-    t.group_box_foreground = k.text_1;
+    // Surfaces.
+    t.popover = p.card;
+    t.popover_foreground = p.foreground;
+    t.group_box = p.sidebar;
+    t.group_box_foreground = p.foreground;
     t.description_list_label = clear;
     t.description_list_label_foreground = k.text_2;
 
-    t.sidebar = k.sidebar;
-    t.sidebar_foreground = k.text_2;
-    t.sidebar_accent = k.sel;
-    t.sidebar_accent_foreground = k.text_1;
-    t.sidebar_primary = k.accent;
-    t.sidebar_primary_foreground = k.on_accent;
-    t.sidebar_border = k.sep;
+    t.sidebar = p.sidebar;
+    t.sidebar_foreground = p.foreground;
+    t.sidebar_accent = p.muted;
+    t.sidebar_accent_foreground = system_accent().unwrap_or(p.foreground);
+    t.sidebar_primary = primary;
+    t.sidebar_primary_foreground = on_primary;
+    t.sidebar_border = k.border;
 
     t.title_bar = clear;
     t.title_bar_border = clear;
-    t.status_bar = k.content;
-    t.status_bar_border = k.sep;
+    t.status_bar = p.background;
+    t.status_bar_border = k.border;
 
+    // Tabs (segmented): list muted, trigger background.
     t.tab_bar = clear;
-    t.tab_bar_segmented = k.field;
+    t.tab_bar_segmented = p.muted;
     t.tab = clear;
-    t.tab_active = clear;
-    t.tab_foreground = k.text_2;
-    t.tab_active_foreground = k.text_1;
+    t.tab_active = p.background;
+    t.tab_foreground = p.foreground.opacity(0.6);
+    t.tab_active_foreground = p.foreground;
 
-    t.switch = k.border_strong;
-    t.switch_thumb = c(0xFFFFFFFF);
-    t.slider_bar = k.ink;
-    t.slider_thumb = c(0xFFFFFFFF);
-    t.progress_bar = k.live;
-    t.skeleton = k.field;
+    // Switch (§1.8): OFF track input, ON track primary.
+    t.switch = p.input;
+    t.switch_thumb = if dark { p.foreground } else { p.background };
+    t.slider_bar = primary;
+    t.slider_thumb = p.background;
+    // Progress (D12): value primary on primary at 20 %.
+    t.progress_bar = primary;
+    t.skeleton = p.muted;
 
     t.scrollbar = clear;
-    t.scrollbar_thumb = p(0x11111340, 0xFFFFFF40);
-    t.scrollbar_thumb_hover = p(0x11111366, 0xFFFFFF66);
+    t.scrollbar_thumb = soft(p.foreground, 0.25);
+    t.scrollbar_thumb_hover = soft(p.foreground, 0.4);
 
-    t.link = k.accent_text;
-    t.link_hover = p(0x1C45B8FF, 0xAFC6FCFF);
-    t.link_active = p(0x163A9EFF, 0xC4D5FDFF);
+    t.link = p.info;
+    t.link_hover = p.info.opacity(0.85);
+    t.link_active = p.info.opacity(0.7);
 
-    t.blue = k.live;
-    t.blue_light = k.info_bg;
-    t.yellow = k.you_text;
-    t.yellow_light = k.you_bg;
-    t.red = k.danger_text;
-    t.red_light = k.danger_bg;
-    t.green = k.success_text;
-    t.green_light = p(0x1F9D551F, 0x3CC27A29);
-    t.magenta = t.blue;
-    t.magenta_light = t.blue_light;
-    t.cyan = t.blue;
-    t.cyan_light = t.blue_light;
+    // Named colors: the four state colors; their light variants are the
+    // soft fills of an alert.
+    t.blue = p.info;
+    t.blue_light = soft(p.info, 0.1);
+    t.yellow = p.warning;
+    t.yellow_light = soft(p.warning, 0.1);
+    t.red = p.destructive;
+    t.red_light = soft(p.destructive, 0.1);
+    t.green = p.success;
+    t.green_light = soft(p.success, 0.1);
+    t.magenta = p.info;
+    t.magenta_light = soft(p.info, 0.1);
+    t.cyan = p.info;
+    t.cyan_light = soft(p.info, 0.1);
 
-    t.chart_1 = k.ink;
-    t.chart_2 = k.success;
-    t.chart_3 = k.you_glyph;
-    t.chart_4 = k.text_2;
-    t.chart_5 = k.text_3;
-    t.window_border = k.border;
-    t.drag_border = k.live;
-    t.drop_target = k.info_bg;
+    // Charts: primary first (D12), then neutral steps.
+    t.chart_1 = primary;
+    t.chart_2 = p.muted_foreground;
+    t.chart_3 = p.ring;
+    t.chart_4 = p.input;
+    t.chart_5 = p.border_strong;
+    t.chart_bullish = p.success;
+    t.chart_bearish = p.destructive;
+    t.chart_grid = k.border;
 
+    // Type and shape (D1, D5): rem 16, controls radius 8, large 10.
     t.font_family = FONT_FAMILY.into();
-    t.font_size = type_scale::UI.0;
+    t.font_size = px(16.);
     t.mono_font_family = MONO_FONT_FAMILY.into();
-    t.mono_font_size = type_scale::CODE.0;
-    t.radius = radius::MD;
-    t.radius_lg = radius::LG;
+    t.mono_font_size = text::MONO.0;
+    t.radius = r::CONTROL;
+    t.radius_lg = r::CONTAINER;
     t.shadow = true;
     t.focus_ring = true;
     t.scrollbar_mode = ScrollbarMode::Scrolling;
@@ -664,76 +429,10 @@ fn apply(t: &mut Theme, dark: bool) {
     m.easing_enter = motion::out();
     m.easing_exit = motion::out();
     m.easing_move = motion::moving();
-
-    // --- v12/kit: gpui-component at native values (NATIVE.md §3–§5, §7.3) ---
-    let n = crate::ui::native::NativeColors::for_mode(dark);
-    // Body 13 pt for every control; controls 6 pt radius, menus and
-    // popovers 12.
-    t.font_size = crate::ui::native::tokens::text::BODY.0;
-    t.radius = crate::ui::native::metrics::BUTTON_REGULAR_RADIUS;
-    t.radius_lg = crate::ui::native::metrics::MENU_RADIUS;
-    // No hover backgrounds on rows (§1 rule 9); selection stays gray.
-    t.list_hover = clear;
-    t.table_hover = clear;
-    t.list_active = n.selection;
-    t.table_active = n.selection;
-    // Push buttons: `fill`, no hover change, `fillHover` pressed (§5.2).
-    t.button = n.fill;
-    t.button_hover = n.fill;
-    t.button_active = n.fill_hover;
-    t.button_foreground = n.label;
-    t.button_secondary = n.fill;
-    t.button_secondary_hover = n.fill;
-    t.button_secondary_active = n.fill_hover;
-    t.button_secondary_foreground = n.label;
-    t.secondary = n.fill;
-    t.secondary_hover = n.fill;
-    t.secondary_active = n.fill_hover;
-    t.button_primary = n.accent;
-    t.button_primary_hover = n.accent;
-    t.button_primary_foreground = n.on_accent;
-    t.primary = n.accent;
-    t.primary_hover = n.accent;
-    t.primary_foreground = n.on_accent;
-    // Ghost buttons and menu rows hover in `fillHover` (`accent` drives both
-    // in gpui-component, and also inline code in markdown, so it stays a
-    // gray rather than the ink of §7.3).
-    t.accent = n.fill_hover;
-    t.accent_foreground = n.label;
-    // Fields: `separator` edge, the accent focus ring.
-    t.input = n.separator;
-    t.ring = n.focus;
-    t.border = n.separator;
-    // Switches and checkboxes: `accent` on, `quaternary` off.
-    t.switch = n.quaternary;
-    t.switch_thumb = n.knob;
-    // Menus and popovers: `sheet` (menus at 92 %).
-    t.popover = n.sheet;
-    t.popover_foreground = n.label;
-    t.overlay = n.dim;
-    t.progress_bar = n.label;
-    t.tab_bar_segmented = n.fill;
-    t.sidebar = n.sidebar;
-    t.sidebar_accent = n.selection;
-    t.sidebar_accent_foreground = n.accent_text;
-    t.background = n.content;
-    t.window_border = n.separator;
-    // --- end v12/kit ---
-    // --- v12/shell: the app accent and the soft focus halo (NATIVE.md §4) ---
-    let accent = app_accent(dark);
-    let on_accent = accent_ink(dark);
-    t.button_primary = accent;
-    t.button_primary_hover = accent;
-    t.button_primary_active = accent.opacity(0.82);
-    t.button_primary_foreground = on_accent;
-    t.primary = accent;
-    t.primary_hover = accent;
-    t.primary_active = accent.opacity(0.82);
-    t.primary_foreground = on_accent;
-    t.sidebar_accent_foreground = system_accent().unwrap_or(n.label);
-    t.ring = focus_ring_color(accent, n.content);
-    // --- end v12/shell ---
 }
+
+/// The root text size (D1): 14 on a rem of 16.
+pub const ROOT_TEXT: Pixels = crate::ui::native::tokens::text::UI.0;
 
 // ---------------------------------------------------------------------------
 // Typography (§3)
@@ -748,49 +447,9 @@ pub const FONT_FAMILY: &str = ".SystemUIFont";
 pub const MEDIUM_WEIGHT: FontWeight = FontWeight(501.);
 pub const MONO_FONT_FAMILY: &str = "Menlo";
 
-/// The closed type scale (§3): size and line height of each style. There is
-/// no 11 pt text and no text a reader reads under 12.
-pub mod type_scale {
-    use gpui::{Pixels, px};
-    /// 22 / 30: topic start title, page titles, login title, empty-state title.
-    pub const DISPLAY: (Pixels, Pixels) = (px(22.), px(30.));
-    /// 18 / 26: the topic view title, the one primary title of the window.
-    pub const HEADING: (Pixels, Pixels) = (px(18.), px(26.));
-    /// 17 / 24: v3 page titles in the title bar.
-    pub const PAGE_TITLE: (Pixels, Pixels) = (px(17.), px(24.));
-    /// 16 / 24: topic list header, side panel header, dialog title.
-    pub const TITLE: (Pixels, Pixels) = (px(17.), px(22.)); // v12/kit: Title 2
-    /// 15 / 22: card titles.
-    pub const CARD_TITLE: (Pixels, Pixels) = (px(15.), px(22.));
-    /// 14 / 22: message text, composer text, card text, option rows.
-    pub const BODY: (Pixels, Pixels) = (px(14.), px(21.)); // v12/kit: Message
-    /// 14 / 20: rows, tabs, buttons, menus, fields.
-    pub const UI: (Pixels, Pixels) = (px(13.), px(18.)); // v12/kit: Body
-    /// 13 / 20: previews, live line, inline buttons, footnotes, snippets.
-    pub const SMALL: (Pixels, Pixels) = (px(12.), px(16.)); // v12/kit: Callout
-    /// 12 / 16: times, chips, badges, kbd, role tag, file meta, help.
-    pub const META: (Pixels, Pixels) = (px(11.), px(14.)); // v12/kit: Subheadline
-    /// 13 / 20 Menlo.
-    pub const CODE: (Pixels, Pixels) = (px(13.), px(20.));
-    /// 20 / 28: invite code boxes only.
-    pub const CODE_ENTRY: (Pixels, Pixels) = (px(20.), px(28.));
-    /// 15 / 20: the `lg` button label (buttons only).
-    pub const BUTTON_LG: (Pixels, Pixels) = (px(13.), px(18.)); // v12/kit: Body
-    /// 32 / 40: a message of one to three emoji.
-    pub const EMOJI: (Pixels, Pixels) = (px(32.), px(40.));
-    /// 16 / 16: emoji in reaction pills.
-    pub const REACTION_EMOJI: (Pixels, Pixels) = (px(16.), px(16.));
-
-    // Older names, mapped onto the closed scale.
-    pub const TOPIC_TITLE: (Pixels, Pixels) = HEADING;
-    pub const MESSAGE: (Pixels, Pixels) = BODY;
-    pub const QUOTE: (Pixels, Pixels) = SMALL;
-    pub const CALLOUT: (Pixels, Pixels) = SMALL;
-    pub const ACK: (Pixels, Pixels) = SMALL;
-    pub const CAPTION: (Pixels, Pixels) = META;
-    pub const INVITE: (Pixels, Pixels) = CODE_ENTRY;
-    pub const OTP: (Pixels, Pixels) = CODE_ENTRY;
-}
+/// The type scale (§1.4 of docs/design/COMPLETENESS.md) under the older
+/// role names; the values live in ui/native/tokens.rs.
+pub use crate::ui::native::tokens::type_scale;
 
 /// OpenType tabular figures: every count, time, date, size and version.
 pub fn tabular() -> FontFeatures {
@@ -804,22 +463,22 @@ pub trait Type: Styled + Sized {
     fn type_role(self, role: (Pixels, Pixels)) -> Self {
         self.text_size(role.0).line_height(role.1)
     }
-    /// 22 / 30, 600.
+    /// 24 / 32, 600: the hero title (login, member profile).
     fn t_display(self) -> Self {
         self.type_role(type_scale::DISPLAY)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 18 / 26, 600: the topic view title.
+    /// 18 / 28, 600: dialog, sheet, alert and topic-start titles.
     fn t_heading(self) -> Self {
         self.type_role(type_scale::HEADING)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 16 / 24, 600: column, pane and dialog titles.
+    /// 18 / 28, 600: sheet and dialog titles.
     fn t_title(self) -> Self {
         self.type_role(type_scale::TITLE)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 15 / 22, 600: card titles.
+    /// 16 / 24, 600: card and section titles.
     fn t_card_title(self) -> Self {
         self.type_role(type_scale::CARD_TITLE)
             .font_weight(FontWeight::SEMIBOLD)
@@ -832,7 +491,7 @@ pub trait Type: Styled + Sized {
     fn t_ui(self) -> Self {
         self.type_role(type_scale::UI)
     }
-    /// 13 / 20: previews, secondary lines, inline buttons, footnotes.
+    /// 12 / 16: meta lines, captions, footnotes.
     fn t_small(self) -> Self {
         self.type_role(type_scale::SMALL)
     }
@@ -844,31 +503,36 @@ pub trait Type: Styled + Sized {
     fn t_meta_medium(self) -> Self {
         self.type_role(type_scale::META).font_weight(MEDIUM_WEIGHT)
     }
-    /// 12 / 16, 600: badges and sidebar section headers.
+    /// 12 / 16, 500: badges and group labels.
     fn t_section(self) -> Self {
-        self.type_role(type_scale::META)
-            .font_weight(FontWeight::SEMIBOLD)
+        self.type_role(type_scale::META).font_weight(MEDIUM_WEIGHT)
     }
     /// 13 / 20 Menlo.
     fn t_code(self) -> Self {
         self.type_role(type_scale::CODE)
             .font_family(MONO_FONT_FAMILY)
     }
-    /// 20 / 28, 500, tabular figures: invite code boxes.
+    /// 18 / 28, 500, tabular figures: invite code boxes.
     fn t_code_entry(self) -> Self {
         self.type_role(type_scale::CODE_ENTRY)
             .font_weight(MEDIUM_WEIGHT)
             .font_features(tabular())
     }
-    /// 17 / 24, 600: the title bar of 首页, 产出, 成员 and 群 pages (v3).
+    /// 16 / 24, 500: the toolbar title of every page (D9).
     fn t_page_title(self) -> Self {
         self.type_role(type_scale::PAGE_TITLE)
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(MEDIUM_WEIGHT)
     }
-    /// 15 / 22, 600: the title bar of a 话题 page (v3).
+    /// 16 / 24, 500: the toolbar title of a 话题 page (D9).
     fn t_bar_title(self) -> Self {
-        self.type_role(type_scale::CARD_TITLE)
+        self.type_role(type_scale::PAGE_TITLE)
+            .font_weight(MEDIUM_WEIGHT)
+    }
+    /// 30 / 36, 600, tabular: a KPI number (§2.4).
+    fn t_kpi(self) -> Self {
+        self.type_role(type_scale::KPI)
             .font_weight(FontWeight::SEMIBOLD)
+            .font_features(tabular())
     }
     /// 12 / 16 figures: counts, times, sizes, versions and costs (`.mono`
     /// in the artboards). The system font with tabular figures, so columns
@@ -1075,7 +739,6 @@ pub struct Colors {
     pub ph: [Hsla; 3],
     /// Named member tints (`--c-jojo` .. `--c-scout`), see [`MEMBER_TINTS`].
     tints: [Hsla; 8],
-    v3_shadows: V3Shadows,
 
     // Surfaces (§2.1)
     pub sidebar: Hsla,
@@ -1144,7 +807,8 @@ pub struct Colors {
     pub avatar_bg: Hsla,
     pub avatar_fg: Hsla,
     bots: [Hsla; 6],
-    shadows: ShadowColors,
+    /// The one palette every field above comes from.
+    pub palette: crate::ui::native::tokens::Palette,
     dark: bool,
 
     // Older names, mapped onto the v2.1 tokens so views written before v2.1
@@ -1176,26 +840,6 @@ pub struct Colors {
     pub search_highlight: Hsla,
 }
 
-/// The v3 shadow colors (`--lift`, `--btn-hi`, `--sec-hi`, `--tile-edge`,
-/// `--pop`). `None` where the token is `none` in that mode.
-#[derive(Clone, Copy, Debug)]
-struct V3Shadows {
-    lift: Option<Hsla>,
-    /// Inset highlight of a primary button, and its y offset (1 light, -1 dark).
-    btn_hi: (Hsla, f32),
-    sec_hi: Option<Hsla>,
-    tile_edge: Hsla,
-    pop: [Hsla; 2],
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ShadowColors {
-    /// Level 1 float: ring, drop.
-    float: [Hsla; 2],
-    /// Level 2 overlay: ring, drop, contact (light only).
-    overlay: [Hsla; 3],
-}
-
 impl Colors {
     pub fn is_dark(&self) -> bool {
         self.dark
@@ -1221,47 +865,31 @@ impl Colors {
         self.tints[member_tint_index(key)]
     }
 
-    /// `--lift`: the 1 pt drop under cards and rail cards (none in dark).
+    /// Shadow sm under cards (§1.7).
     pub fn lift(&self) -> Vec<BoxShadow> {
-        self.v3_shadows
-            .lift
-            .map(|c| vec![shadow(c, 0., 1., 2., 0., false)])
-            .unwrap_or_default()
+        tk::shadow::sm()
     }
 
-    /// `--btn-hi`: the inner highlight of a primary button.
+    /// Shadow xs under a primary button (§1.7).
     pub fn btn_hi(&self) -> Vec<BoxShadow> {
-        let (c, y) = self.v3_shadows.btn_hi;
-        vec![shadow(c, 0., y, 0., 0., true)]
+        tk::shadow::xs()
     }
 
-    /// `--sec-hi`: the hairline drop under a secondary button (none in dark).
+    /// Shadow xs under an outline or secondary button (§1.7).
     pub fn sec_hi(&self) -> Vec<BoxShadow> {
-        self.v3_shadows
-            .sec_hi
-            .map(|c| vec![shadow(c, 0., 1., 1., 0., false)])
-            .unwrap_or_default()
+        tk::shadow::xs()
     }
 
-    /// `--tile-edge`: the 1 pt inner edge of every bot tile.
+    /// The 1 px border line inside every agent avatar tile (§1.8, §2.22).
     pub fn tile_edge(&self) -> Vec<BoxShadow> {
-        vec![shadow(self.v3_shadows.tile_edge, 0., 0., 0., 1., true)]
+        vec![shadow(self.border, 0., 0., 0., 1., true)]
     }
 
-    /// `--pop`: popovers and the 交代或搜索 dialog.
+    /// Popovers and the palette: shadow md and the border line (§1.7).
     pub fn pop(&self) -> Vec<BoxShadow> {
-        let [a, b] = self.v3_shadows.pop;
-        if self.dark {
-            vec![
-                shadow(a, 0., 18., 48., 0., false),
-                shadow(b, 0., 0., 0., 1., false),
-            ]
-        } else {
-            vec![
-                shadow(a, 0., 18., 48., 0., false),
-                shadow(b, 0., 2., 8., 0., false),
-            ]
-        }
+        let mut s = tk::shadow::md();
+        s.push(tk::shadow::line(self.border));
+        s
     }
 
     /// The (mark, text) colors of a state: amber you, blue live, red
@@ -1282,52 +910,28 @@ impl Colors {
         (self.avatar_bg, self.avatar_fg)
     }
 
-    /// The edge of a level-2 overlay (§5): the ring color of its shadow.
-    /// Dialogs draw it as their 1 pt border, because gpui-component's
-    /// dialog paints its own drop shadow.
+    /// The edge of an overlay: the border token (§1.7). Dialogs draw it as
+    /// their 1 px border.
     pub fn overlay_edge(&self) -> Hsla {
-        self.shadows.overlay[0]
+        self.border
     }
 
-    /// The shadow list of an elevation level (§5).
+    /// The shadow list of an elevation level (§1.7): content (none, xs,
+    /// sm), float (md) and modal (lg). Every level keeps the 1 px border
+    /// line in both modes.
     pub fn shadow(&self, level: Elevation) -> Vec<BoxShadow> {
-        let ring = |color, width: Pixels| BoxShadow {
-            color,
-            offset: point(px(0.), px(0.)),
-            blur_radius: px(0.),
-            spread_radius: width,
-            inset: false,
+        let with_line = |mut s: Vec<BoxShadow>| {
+            s.push(tk::shadow::line(self.border));
+            s
         };
-        let drop = |color, y: f32, blur: f32, spread: f32| BoxShadow {
-            color,
-            offset: point(px(0.), px(y)),
-            blur_radius: px(blur),
-            spread_radius: px(spread),
-            inset: false,
-        };
-        let s = &self.shadows;
         match level {
             Elevation::Flat => vec![],
-            Elevation::Card => vec![ring(self.border, BORDER)],
-            Elevation::Image => vec![ring(self.sep, BORDER)],
-            Elevation::Control => vec![ring(self.border, BORDER)],
-            Elevation::Float | Elevation::Capsule => {
-                vec![ring(s.float[0], HAIRLINE), drop(s.float[1], 2., 8., 0.)]
-            }
-            Elevation::Overlay | Elevation::Popover | Elevation::Sheet => {
-                if self.dark {
-                    vec![
-                        ring(s.overlay[0], BORDER),
-                        drop(s.overlay[1], 16., 40., -8.),
-                    ]
-                } else {
-                    vec![
-                        ring(s.overlay[0], HAIRLINE),
-                        drop(s.overlay[1], 8., 28., -6.),
-                        drop(s.overlay[2], 2., 6., 0.),
-                    ]
-                }
-            }
+            Elevation::Card => with_line(tk::shadow::sm()),
+            Elevation::Image => with_line(vec![]),
+            Elevation::Control => with_line(tk::shadow::xs()),
+            Elevation::Float | Elevation::Capsule => with_line(tk::shadow::md()),
+            Elevation::Overlay | Elevation::Popover => with_line(tk::shadow::md()),
+            Elevation::Sheet => with_line(tk::shadow::lg()),
         }
     }
 
@@ -1453,332 +1057,142 @@ pub fn palette_index(id: &str) -> usize {
     bot_tint_index(id)
 }
 
-/// The v3 colors (HELMET2.html, the accepted v2 artboards). The v2.1 field
-/// names are kept and point at the v3 tokens, so views written before v3
-/// build and take the new look: ink primary buttons, grey selection, rail
-/// and sunken surfaces, amber only for "you", blue only for "live".
-// --- v12/kit: the v3 colors under the native surfaces (NATIVE.md §4) ---
+/// The app colors of one mode: every field is a value of the one
+/// [`Palette`](crate::ui::native::tokens::Palette) (COMPLETENESS.md §1.2,
+/// §1.3). The older names stay so views build; they point at the palette
+/// tokens: one muted text color, one border, a muted selection, `primary`
+/// buttons, and state colors only for state.
 fn build(dark: bool) -> Colors {
-    native_surfaces(build_v3(dark), dark)
-}
-
-/// Maps the shared surfaces, selection, separators, fills, scrim and the
-/// four state colors onto the macOS semantic values of NATIVE.md §4, so
-/// every screen built on these tokens gets the native look. Text colors and
-/// member tints stay as they are (the monochrome palette).
-fn native_surfaces(mut k: Colors, dark: bool) -> Colors {
-    let n = crate::ui::native::NativeColors::for_mode(dark);
-    // Surfaces.
-    k.bg = n.content;
-    k.content = n.content;
-    k.panel = n.content;
-    k.window_bg = n.content;
-    k.background = n.content;
-    k.group = n.content;
-    k.rail = n.sidebar;
-    k.sidebar = n.sidebar;
-    // Raised blocks stay a step above the page in dark mode.
-    if dark {
-        k.raised = rgba(0x262628FF).into();
-        // `ink-3` keeps 4.5:1 on the lighter native sidebar.
-        k.ink_3 = rgba(0x9C9CA4FF).into();
-        k.text_3 = k.ink_3;
-        k.offline = k.ink_3;
-    }
-    // Ink: the strongest text. The accent (graphite or the system
-    // accent) is a fill, never body text.
-    k.ink = n.ink;
-    k.text_1 = n.ink;
-    k.foreground = n.ink;
-    k.code_text = n.ink;
-    k.sel_glyph = n.ink;
-    k.overlay = n.sheet;
-    k.elevated = n.sheet;
-    k.scrim = n.dim;
-    // Selection: gray, never a hover (§1 rule 9).
-    for f in [
-        &mut k.sel,
-        &mut k.rail_sel,
-        &mut k.selected,
-        &mut k.sidebar_selected,
-        &mut k.fill_selected,
-        &mut k.fill_active,
-    ] {
-        *f = n.selection;
-    }
-    for f in [
-        &mut k.hover,
-        &mut k.rail_hover,
-        &mut k.sidebar_hover,
-        &mut k.row_hover,
-        &mut k.fill_hover,
-        &mut k.opt_hover,
-        &mut k.btn_quiet_hover,
-    ] {
-        *f = n.fill_hover;
-    }
-    k.pressed = n.quaternary;
-    k.fill_pressed = n.quaternary;
-    k.btn_quiet_pressed = n.quaternary;
-    // Quiet fills.
-    for f in [
-        &mut k.sunken,
-        &mut k.field,
-        &mut k.fill_field,
-        &mut k.code_bg,
-        &mut k.code_background,
-        &mut k.count_bg,
-        &mut k.opt_bg,
-        &mut k.tile,
-        &mut k.desk,
-        &mut k.btn_quiet,
-    ] {
-        *f = n.fill;
-    }
-    // Lines.
-    k.line = n.separator;
-    k.sep = n.separator;
-    k.border = n.separator;
-    k.control_border = n.separator;
-    // Accent (ink) and focus.
-    k.accent = n.accent;
-    k.btn = n.accent;
-    k.on_accent = n.on_accent;
-    k.btn_ink = n.on_accent;
-    // A solid count carries `onAccent` (white) text: graphite, like the accent.
-    k.count_solid = n.accent;
-    k.focus = n.focus;
-    k.focus_border = n.accent;
-    k.control_border_focus = n.accent;
-    // The four state colors (system orange, blue, red, green).
-    k.you = n.amber;
-    k.you_glyph = n.amber;
-    k.you_bar = n.amber;
-    k.warning = n.amber;
-    k.glyph_wait = n.amber;
-    k.live = n.blue;
-    k.glyph_progress = n.blue;
-    k.unread_dot = n.blue;
-    k.ok = n.green;
-    k.success = n.green;
-    k.online = n.green;
-    k.glyph_done = n.green;
-    k.bad = n.red;
-    k.danger = n.red;
-    k.badge = n.red;
-    k.new_divider = n.red;
-    k
-}
-// --- end v12/kit ---
-
-fn build_v3(dark: bool) -> Colors {
-    let p = |l: u32, d: u32| if dark { c(d) } else { c(l) };
-    // --- v3 tokens ---
-    let bg = p(0xFFFFFFFF, 0x111113FF);
-    let rail = p(0xF7F7F8FF, 0x161618FF);
-    let sunken = p(0xF3F3F4FF, 0x1C1C1FFF);
-    let raised = p(0xFAFAFAFF, 0x151517FF);
-    let ink = p(0x111113FF, 0xF1F1F3FF);
-    let ink_2 = p(0x52525BFF, 0xA9A9B2FF);
-    let ink_3 = p(0x6E6E76FF, 0x8C8C95FF);
-    let line = p(0xEBEBEDFF, 0x252529FF);
-    let line_2 = p(0xDCDCE0FF, 0x34343AFF);
-    let hover = p(0xF0F0F2FF, 0x1D1D20FF);
-    let sel = p(0xE9E9ECFF, 0x26262AFF);
-    let rail_sel = p(0xEDEDF0FF, 0x222226FF);
-    let rail_hover = p(0xF2F2F4FF, 0x1C1C1FFF);
-    let btn = p(0x111113FF, 0xF1F1F3FF);
-    let btn_ink = p(0xFFFFFFFF, 0x111113FF);
-    let you = p(0xE8590CFF, 0xF27A2EFF);
-    let you_ink = p(0xB54708FF, 0xF7A26AFF);
-    let you_bg = p(0xFFF4ECFF, 0x2B1C12FF);
-    let live = p(0x3B6EF5FF, 0x6B93F7FF);
-    let live_ink = p(0x2453D1FF, 0x93B1FAFF);
-    let ok = p(0x1F9D55FF, 0x3CC27AFF);
-    let ok_ink = p(0x177245FF, 0x6AD69CFF);
-    let bad = p(0xE5484DFF, 0xF2555AFF);
-    let bad_ink = p(0xC42B30FF, 0xFF8A8EFF);
-    let person = p(0xE6E6E9FF, 0x2C2C31FF);
-    let tints = if dark {
-        [
-            0xCFC39EFF, 0xB4C6C9FF, 0xCAB9C6FF, 0xD0BDB0FF, 0xB8C1D2FF, 0xCDB9BEFF, 0xC0BED0FF,
-            0xB7C9BCFF,
-        ]
-    } else {
-        [
-            0xF3E6BFFF, 0xD8ECEFFF, 0xEFDDEBFF, 0xF6E1D3FF, 0xDCE5F7FF, 0xF4DDE3FF, 0xE4E2F4FF,
-            0xDCEFE2FF,
-        ]
-    }
-    .map(c);
-    // Translucent tints of the state colors for fills (selection of text,
-    // mentions, focus halos, soft chips).
-    let live_a = |a: u32| p(0x3B6EF500 | a, 0x6B93F700 | a);
-    let you_a = |a: u32| p(0xE8590C00 | a, 0xF27A2E00 | a);
-    let bad_a = |a: u32| p(0xE5484D00 | a, 0xF2555A00 | a);
-    let overlay = p(0xFFFFFFFF, 0x1C1C1FFF);
-    let pressed = p(0xE4E4E8FF, 0x2A2A2FFF);
-    let bots = if dark {
-        [
-            0x6B7DA6FF, 0x62907BFF, 0xA08562FF, 0x8472A8FF, 0x6293A1FF, 0xA0717FFF,
-        ]
-    } else {
-        [
-            0xDCE6FBFF, 0xDDF1E6FF, 0xFBE9D3FF, 0xEFE3FAFF, 0xDDEFF4FF, 0xF7DDE4FF,
-        ]
-    }
-    .map(c);
-    let accent = btn;
-    let accent_text = live_ink;
-    let focus_border = live;
+    let p = tk::Palette::for_mode(dark);
+    let soft = tk::Palette::soft;
+    let x = |l: u32, d: u32| if dark { c(d) } else { c(l) };
+    let fg = p.foreground;
+    let mfg = p.muted_foreground;
+    // Text on a selected row, a link: `foreground` / `info`.
+    let accent = p.primary;
     Colors {
-        bg,
-        rail,
-        sunken,
-        ink,
-        ink_2,
-        ink_3,
-        line,
-        line_2,
-        sel,
-        rail_sel,
-        rail_hover,
-        btn,
-        btn_ink,
-        btn_quiet: p(0xF1F1F3FF, 0x222226FF),
-        btn_quiet_hover: p(0xE8E8EBFF, 0x2A2A2FFF),
-        btn_quiet_pressed: p(0xE1E1E5FF, 0x313137FF),
-        you,
-        you_ink,
-        live,
-        live_ink,
-        ok,
-        ok_ink,
-        bad,
-        bad_ink,
-        person,
-        screen: p(0x16161AFF, 0x0B0B0DFF),
-        screen_ink: c(0xC9C9D1FF),
-        screen_dim: p(0x7A7A84FF, 0x6E6E78FF),
-        tile_ink: p(0x2D3272FF, 0x232858FF),
-        ph: [
-            p(0xD9D3C7FF, 0x4A463FFF),
-            p(0xC9D5D3FF, 0x3D4645FF),
-            p(0xE2D2C4FF, 0x4E463FFF),
-        ],
-        tints,
-        v3_shadows: V3Shadows {
-            lift: (!dark).then(|| c(0x1111130D)),
-            btn_hi: if dark {
-                (c(0x00000024), -1.)
-            } else {
-                (c(0xFFFFFF29), 1.)
-            },
-            sec_hi: (!dark).then(|| c(0x1111130D)),
-            tile_edge: p(0x11111312, 0x00000033),
-            pop: if dark {
-                [c(0x0000008C), c(0xFFFFFF0F)]
-            } else {
-                [c(0x11111329), c(0x1111130F)]
-            },
-        },
+        bg: p.background,
+        rail: p.sidebar,
+        sunken: p.muted,
+        ink: fg,
+        ink_2: mfg,
+        ink_3: mfg,
+        line: p.border,
+        line_2: p.input,
+        sel: p.muted,
+        rail_sel: p.muted,
+        rail_hover: p.accent,
+        btn: accent,
+        btn_ink: p.primary_foreground,
+        btn_quiet: p.muted,
+        btn_quiet_hover: p.accent,
+        btn_quiet_pressed: p.pressed,
+        you: p.warning,
+        you_ink: p.warning,
+        live: p.info,
+        live_ink: p.info,
+        ok: p.success,
+        ok_ink: p.success,
+        bad: p.destructive,
+        bad_ink: p.destructive,
+        person: p.muted,
+        // The live terminal frame stays dark in both modes.
+        screen: x(0x171717FF, 0x0A0A0AFF),
+        screen_ink: c(0xD4D4D4FF),
+        screen_dim: x(0x737373FF, 0x737373FF),
+        tile_ink: fg,
+        ph: [p.muted, p.pressed, p.muted],
+        // One avatar style for every member (§1.8): no tints.
+        tints: [p.muted; 8],
 
-        // --- v2.1 names on v3 tokens ---
-        sidebar: rail,
-        content: bg,
-        raised,
-        overlay,
-        scrim: p(0x1111132E, 0x0000008C),
-        code_bg: sunken,
-        text_1: ink,
-        text_2: ink_2,
-        text_3: ink_3,
-        placeholder: p(0xA1A1A9FF, 0x6C6C75FF),
-        sep: line,
-        border: line,
-        border_strong: line_2,
-        hover,
-        selected: sel,
-        sidebar_hover: hover,
-        sidebar_selected: sel,
-        sel_glyph: ink,
-        pressed,
-        field: sunken,
-        count_bg: sunken,
-        count_text: ink_2,
-        count_solid: ink_3,
-        tile_ring: p(0xFFFFFFFF, 0xFFFFFF1A),
-        opt_bg: sunken,
-        opt_hover: hover,
-        disabled_bg: p(0x11111314, 0xFFFFFF0F),
-        disabled_text: p(0x8A8A92FF, 0x8A8A92FF),
-        tile: sunken,
-        desk: sunken,
+        sidebar: p.sidebar,
+        content: p.background,
+        raised: p.card,
+        overlay: p.card,
+        scrim: p.scrim,
+        code_bg: p.muted,
+        text_1: fg,
+        text_2: mfg,
+        text_3: mfg,
+        placeholder: mfg,
+        sep: p.border,
+        border: p.border,
+        border_strong: p.border_strong,
+        hover: p.accent,
+        selected: p.muted,
+        sidebar_hover: p.accent,
+        sidebar_selected: p.muted,
+        sel_glyph: fg,
+        pressed: p.pressed,
+        field: p.muted,
+        count_bg: p.muted,
+        count_text: fg,
+        count_solid: accent,
+        tile_ring: p.background,
+        opt_bg: p.muted,
+        opt_hover: p.accent,
+        disabled_bg: soft(p.primary, 0.5),
+        disabled_text: soft(p.primary_foreground, 0.5),
+        tile: p.muted,
+        desk: p.muted,
         accent,
-        accent_hover: p(0x2A2A2EFF, 0xDCDCE0FF),
-        accent_pressed: p(0x000000FF, 0xC9C9CFFF),
-        accent_text,
-        accent_soft: live_a(0x1A),
-        on_accent: btn_ink,
-        focus: live_a(0x8C),
-        focus_border,
-        focus_soft: live_a(0x33),
-        choice_bg: live_a(0x0F),
-        mention_bg: live_a(0x1A),
-        me_bg: you_a(0x24),
-        me_text: you_ink,
-        hl_bg: you_a(0x2E),
-        unread_dot: live,
-        you_bg,
-        you_text: you_ink,
-        you_glyph: you,
-        you_bar: you,
-        info_bg: live_a(0x1A),
-        info_text: live_ink,
-        danger: bad,
-        danger_bg: bad_a(0x1F),
-        danger_text: bad_ink,
-        success: ok,
-        success_text: ok_ink,
-        badge: bad,
-        online: ok,
-        avatar_bg: person,
-        avatar_fg: ink_2,
-        bots,
-        shadows: ShadowColors {
-            float: [p(0x1111131F, 0xFFFFFF1F), p(0x11111314, 0x00000059)],
-            overlay: [
-                p(0x11111324, 0xFFFFFF14),
-                p(0x11111329, 0x0000008C),
-                p(0x1111130F, 0x00000000),
-            ],
-        },
+        accent_hover: accent.opacity(0.9),
+        accent_pressed: accent.opacity(0.8),
+        accent_text: p.info,
+        accent_soft: p.muted,
+        on_accent: p.primary_foreground,
+        focus: p.focus(),
+        focus_border: p.ring,
+        focus_soft: p.focus(),
+        choice_bg: p.muted,
+        mention_bg: p.muted,
+        me_bg: soft(p.warning, 0.15),
+        me_text: fg,
+        hl_bg: p.muted,
+        unread_dot: p.info,
+        you_bg: p.muted,
+        you_text: fg,
+        you_glyph: p.warning,
+        you_bar: p.warning,
+        info_bg: p.muted,
+        info_text: p.info,
+        danger: p.destructive,
+        danger_bg: soft(p.destructive, 0.2),
+        danger_text: p.destructive,
+        success: p.success,
+        success_text: p.success,
+        badge: p.destructive,
+        online: p.success,
+        avatar_bg: p.muted,
+        avatar_fg: fg,
+        bots: [p.muted; 6],
+        palette: p,
         dark,
-        panel: bg,
-        window_bg: bg,
-        group: bg,
-        elevated: overlay,
-        fill_hover: hover,
-        fill_selected: sel,
-        fill_pressed: pressed,
-        fill_field: sunken,
-        fill_active: sel,
-        control_border: line,
-        control_border_focus: focus_border,
-        quote_bar: line_2,
-        code_text: ink,
-        warning: you,
-        new_divider: bad,
-        glyph_progress: live,
-        glyph_wait: you,
-        glyph_done: ok,
-        background: bg,
-        foreground: ink,
-        muted_foreground: ink_2,
-        row_hover: hover,
-        offline: ink_3,
-        code_background: sunken,
-        search_highlight: you_a(0x2E),
+        panel: p.background,
+        window_bg: p.background,
+        group: p.sidebar,
+        elevated: p.card,
+        fill_hover: p.accent,
+        fill_selected: p.muted,
+        fill_pressed: p.pressed,
+        fill_field: p.muted,
+        fill_active: p.muted,
+        control_border: p.input,
+        control_border_focus: p.ring,
+        quote_bar: p.input,
+        code_text: fg,
+        warning: p.warning,
+        new_divider: p.destructive,
+        glyph_progress: p.info,
+        glyph_wait: p.warning,
+        glyph_done: p.success,
+        background: p.background,
+        foreground: fg,
+        muted_foreground: mfg,
+        row_hover: soft(p.muted, 0.5),
+        offline: mfg,
+        code_background: p.muted,
+        search_highlight: p.muted,
     }
 }
 
@@ -1795,15 +1209,20 @@ pub fn set_increase_contrast(on: bool) -> bool {
 /// Scrim and overlay are opaque already, so Reduce transparency needs no
 /// change.
 fn high_contrast(mut k: Colors) -> Colors {
+    // One muted text color still (§1.2), one step stronger.
+    let strong = k.palette.muted_foreground_strong;
     k.border = k.border_strong;
     k.sep = k.border_strong;
     k.placeholder = k.text_3;
-    k.text_3 = k.text_2;
+    k.text_2 = strong;
+    k.text_3 = strong;
+    k.muted_foreground = strong;
     // v3 names of the same tokens.
-    k.line = k.line_2;
-    k.control_border = k.line_2;
-    k.ink_3 = k.ink_2;
-    k.offline = k.ink_2;
+    k.line = k.border_strong;
+    k.control_border = k.border_strong;
+    k.ink_2 = strong;
+    k.ink_3 = strong;
+    k.offline = strong;
     k
 }
 
@@ -1931,110 +1350,14 @@ pub fn screen_dots() -> [Hsla; 3] {
     [c(0xFF5F57FF), c(0xFEBC2EFF), c(0x28C840FF)]
 }
 
-/// Desk terminal thumbnail: 10/12 mono lines, 5 apart (a miniature, not
-/// reading text), and the time each line takes to scroll by.
-pub mod desk_screen {
-    use gpui::{Pixels, px};
-    use std::time::Duration;
-    pub const HEIGHT: Pixels = px(120.);
-    pub const LINE: (Pixels, Pixels) = (px(10.), px(12.));
-    pub const LINE_GAP: Pixels = px(5.);
-    pub const TOP: Pixels = px(32.);
-    pub const SCROLL_PER_LINE: Duration = Duration::from_millis(900);
-}
+/// The desk terminal thumbnail sizes (ui/native/tokens.rs).
+#[allow(unused_imports)]
+pub use crate::ui::native::tokens::desk_screen;
 
 // --- cards v2 track: Card v2 metrics and tints (DESIGN.md §7.10) ---
 
-/// Sizes of Card v2 (Cards.dc.html). Colors stay in [`Colors`]; the state
-/// tints of a card are `color-mix` of a state color into `bg`
-/// ([`card_v2::mix`]).
-pub mod card_v2 {
-    use gpui::{Hsla, Pixels, px};
-
-    /// The status strip at the top of a card.
-    pub const STRIP: Pixels = px(34.);
-    /// The card title: 16/24 600.
-    pub const TITLE: (Pixels, Pixels) = (px(17.), px(22.)); // v12/kit: Title 2
-    /// Widest card on the 首页 and in the gallery.
-    pub const MAX_WIDTH: Pixels = px(680.);
-    /// Header tile and the key letter tile of an option.
-    pub const TILE: Pixels = px(20.);
-    /// The least width of the group part of the header path (`群 / 话题`):
-    /// one 12 pt character and an ellipsis.
-    pub const PATH_GROUP_MIN: Pixels = px(24.);
-    /// Option rows and buttons, form fields.
-    pub const OPTION: Pixels = px(36.);
-    pub const OPTION_RADIUS: Pixels = px(9.);
-    /// Width of the label column of a form.
-    pub const FORM_LABEL: Pixels = px(84.);
-    /// Width of the key column of fields.
-    pub const FIELD_KEY: Pixels = px(68.);
-    /// Chips of a chips input.
-    pub const CHIP: Pixels = px(30.);
-    pub const CHIP_RADIUS: Pixels = px(7.);
-    /// Proof chips (`✓ 24 项通过`).
-    pub const PROOF: Pixels = px(26.);
-    /// Footer buttons (`size::BUTTON_CARD`).
-    pub const BUTTON: Pixels = super::size::BUTTON_CARD;
-    /// The footer sits in the card, under the blocks: no band, no rule, no
-    /// fill (one container level, §7.10). Its bottom padding.
-    pub const FOOTER_BOTTOM: Pixels = px(14.);
-    /// Plan rows.
-    pub const PLAN_ROW: Pixels = px(28.);
-    /// Reference rows and their glyph tile.
-    pub const REF_ROW: Pixels = px(60.);
-    pub const REF_TILE: Pixels = px(28.);
-    /// Table rows (Cards.dc.html 06, Interact.dc.html 02: 32 pt).
-    pub const TABLE_ROW: Pixels = px(32.);
-    /// The least width of a number column; numbers sit right-aligned at the row end.
-    pub const TABLE_NUM_COL: Pixels = px(52.);
-    /// The bar in front of a percent cell, and its gap.
-    pub const TABLE_PCT_BAR: Pixels = px(48.);
-    /// Diff lines and the line-number columns.
-    pub const DIFF_LINE: Pixels = px(20.);
-    pub const DIFF_NUMBER: Pixels = px(30.);
-    /// Chart plot height.
-    pub const CHART: Pixels = px(100.);
-    /// Evidence thumbnails.
-    pub const THUMB: Pixels = px(84.);
-    /// The live bar under a working strip.
-    pub const LIVE_BAR: Pixels = px(2.);
-
-    /// Strip fill and edge strengths of a state color mixed into `bg`.
-    pub const YOU_FILL: f32 = 0.10;
-    pub const YOU_EDGE: f32 = 0.24;
-    pub const YOU_BORDER: f32 = 0.30;
-    pub const OK_FILL: f32 = 0.09;
-    pub const OK_EDGE: f32 = 0.22;
-    pub const LIVE_FILL: f32 = 0.08;
-    /// v11/r3-cards: the band of a rev a member's event caused (live over `sunken`).
-    pub const UPDATED_FILL: f32 = 0.06;
-    pub const LIVE_EDGE: f32 = 0.22;
-    pub const QUIET_FILL: f32 = 0.09;
-    pub const QUIET_EDGE: f32 = 0.16;
-    /// Diff line fills.
-    pub const DIFF_FILL: f32 = 0.10;
-    /// The opacity of a muted card body (expired, superseded).
-    pub const MUTED: f32 = 0.55;
-
-    /// `color-mix(in srgb, a t, b)`.
-    pub fn mix(a: Hsla, b: Hsla, t: f32) -> Hsla {
-        let (a, b) = (a.to_rgb(), b.to_rgb());
-        let l = |x: f32, y: f32| x * t + y * (1. - t);
-        gpui::Rgba {
-            r: l(a.r, b.r),
-            g: l(a.g, b.g),
-            b: l(a.b, b.b),
-            a: l(a.a, b.a),
-        }
-        .into()
-    }
-
-    /// `a` at alpha `t` (`color-mix(in srgb, a t, transparent)`).
-    pub fn alpha(a: Hsla, t: f32) -> Hsla {
-        Hsla { a: a.a * t, ..a }
-    }
-}
+/// Card v2 sizes and tints (ui/native/tokens.rs).
+pub use crate::ui::native::tokens::card_v2;
 
 // --- end cards v2 track ---
 
@@ -2102,10 +1425,10 @@ pub fn focus_ring_color(accent: Hsla, under: Hsla) -> Hsla {
     .into()
 }
 
-/// The focus halo drawn by our own controls: 3 pt of the accent at 35 %.
+/// The focus ring drawn by our own controls (§1.8): 3 px of `ring` at 50 %.
 pub fn focus_halo(dark: bool) -> Vec<BoxShadow> {
     vec![BoxShadow {
-        color: app_accent(dark).opacity(FOCUS_HALO),
+        color: tk::Palette::for_mode(dark).focus(),
         offset: point(px(0.), px(0.)),
         blur_radius: px(0.),
         spread_radius: crate::ui::native::metrics::FOCUS_RING,
@@ -2215,10 +1538,10 @@ mod tests {
     #[test]
     fn the_accent_is_graphite_until_a_system_accent_is_set() {
         set_system_accent(None);
-        let graphite: Hsla = rgba(crate::ui::native::tokens::GRAPHITE).into();
         for dark in [false, true] {
-            assert_eq!(app_accent(dark), graphite);
-            assert_eq!(accent_ink(dark), rgba(0xFFFFFFFF).into());
+            let p = tk::Palette::for_mode(dark);
+            assert_eq!(app_accent(dark), p.primary);
+            assert_eq!(accent_ink(dark), p.primary_foreground);
         }
         let blue: Hsla = rgba(0x007AFFFF).into();
         assert!(set_system_accent(Some(blue)));
@@ -2267,21 +1590,25 @@ mod tests {
             let h = high_contrast(k);
             assert_eq!(h.border, k.border_strong);
             assert_eq!(h.sep, k.border_strong);
-            assert_eq!(h.text_3, k.text_2);
+            // Still one muted text color, one step stronger.
+            assert_eq!(h.text_3, h.text_2);
+            assert_eq!(h.text_2, k.palette.muted_foreground_strong);
+            assert!(contrast(h.text_2, h.bg) > contrast(k.text_2, k.bg));
             assert_eq!(h.placeholder, k.text_3);
             assert_eq!(h.text_1, k.text_1);
-            assert_eq!(h.line, k.line_2);
-            assert_eq!(h.ink_3, k.ink_2);
+            assert_eq!(h.line, k.border_strong);
+            assert_eq!(h.ink_3, h.ink_2);
         }
     }
 
     #[test]
-    fn disabled_fill_sits_above_every_surface_in_dark() {
-        // Translucent white: it lightens content and overlay alike, so the
-        // disabled primary never reads as a hole in a dialog (§2.3).
-        let k = build(true);
-        assert!(k.disabled_bg.a < 0.2);
-        assert!(k.disabled_bg.l > 0.9);
+    fn a_disabled_primary_is_primary_at_half() {
+        // D11: a disabled primary is the primary at 50 %, never the
+        // secondary fill that Cancel could wear.
+        for k in [build(false), build(true)] {
+            assert_eq!(k.disabled_bg, k.btn.opacity(0.5));
+            assert_ne!(k.disabled_bg, k.btn_quiet);
+        }
     }
 
     fn rel_luminance(h: Hsla, over: Hsla) -> f32 {
@@ -2369,7 +1696,7 @@ mod tests {
         for k in [build(false), build(true)] {
             assert_eq!(k.accent, k.btn);
             assert_ne!(k.btn, k.ink);
-            assert_eq!(k.btn, rgba(crate::ui::native::tokens::GRAPHITE).into());
+            assert_eq!(k.btn, k.palette.primary);
             assert_eq!(k.selected, k.sel);
             assert!(k.sel.s < 0.1, "selection has no hue");
             assert!(contrast(k.btn_ink, k.btn) >= 4.5);
@@ -2382,7 +1709,8 @@ mod tests {
             assert_eq!(k.state(StateTone::You).0, k.you);
             assert_eq!(k.state(StateTone::Live).0, k.live);
             assert_eq!(k.state(StateTone::Problem).0, k.bad);
-            assert!(contrast(k.you_ink, k.bg) >= 4.5);
+            // Warning marks an icon (§1.3): the 3:1 non-text minimum.
+            assert!(contrast(k.you_ink, k.bg) >= 3.);
             assert!(contrast(k.live_ink, k.bg) >= 4.5);
             assert!(contrast(k.bad_ink, k.bg) >= 4.5);
             assert!(contrast(k.ink_3, k.rail) >= 4.5);
@@ -2390,82 +1718,26 @@ mod tests {
     }
 
     #[test]
-    fn shadows_follow_the_mode() {
-        assert_eq!(build(false).lift().len(), 1);
-        assert!(build(true).lift().is_empty());
-        assert!(build(true).sec_hi().is_empty());
+    fn both_modes_draw_the_same_lines() {
+        // §1.7: one shadow set and a border line on every level, in light
+        // and dark alike.
         for k in [build(false), build(true)] {
-            assert!(k.btn_hi()[0].inset);
+            assert_eq!(k.lift(), tk::shadow::sm());
             assert!(k.tile_edge()[0].inset);
+            for level in [
+                Elevation::Card,
+                Elevation::Float,
+                Elevation::Overlay,
+                Elevation::Sheet,
+            ] {
+                assert!(k.shadow(level).iter().any(|s| s.color == k.border));
+            }
+            assert_eq!(k.text_2, k.text_3);
+            assert_eq!(k.sep, k.border);
         }
     }
 }
 
-// --- inc-cards21: Card v2.1 sizes and timings (CardsCompose.dc.html, INTERACT §4.4, §6.4) ---
-pub mod card_v21 {
-    use std::time::Duration;
-
-    use gpui::{Pixels, px};
-
-    /// Rank rows, slot cells, poll rows.
-    pub const RANK_ROW: Pixels = px(40.);
-    pub const SLOT_CELL: Pixels = px(52.);
-    pub const POLL_ROW: Pixels = px(44.);
-    /// Rating stars and scale cells.
-    pub const STAR: Pixels = px(22.);
-    pub const SCALE_CELL: Pixels = px(32.);
-    /// Image choice and compare previews.
-    pub const IMAGE: Pixels = px(150.);
-    pub const PREVIEW: Pixels = px(120.);
-    /// Matrix option columns.
-    pub const MATRIX_COL: Pixels = px(72.);
-    /// v11/r3-cards: a pickable bar chart as rows (Interact.dc.html 02): row height, the
-    /// name column, the track height and radius, the value column, the row radius.
-    pub const BAR_ROW: Pixels = px(30.);
-    pub const BAR_NAME: Pixels = px(60.);
-    pub const BAR_TRACK: Pixels = px(10.);
-    pub const BAR_TRACK_RADIUS: Pixels = px(3.);
-    pub const BAR_VALUE: Pixels = px(22.);
-    pub const BAR_ROW_RADIUS: Pixels = px(7.);
-    /// Inline page height range (CARD21 §8).
-    pub const EMBED_MIN: f32 = 160.;
-    pub const EMBED_MAX: f32 = 480.;
-    pub const EMBED_DEFAULT: f32 = 320.;
-    /// The amber tint of the decision surface of a non-blocking ask, and the live tint of
-    /// a block a new rev changed.
-    pub const SURFACE_FILL: f32 = 0.07;
-    pub const CHANGE_FILL: f32 = 0.14;
-    /// v11/r3-cards: the tint a block the rev inserted keeps after its flash (Interact 02).
-    pub const INSERTED_FILL: f32 = 0.07;
-
-    /// Pending (INTERACT §4.4): nothing shows before this.
-    pub const PENDING_QUIET: Duration = Duration::from_millis(400);
-    /// Soft and hard waits by `expect.mode` (INTERACT §6.4).
-    pub const SOFT_LIVE: Duration = Duration::from_secs(8);
-    pub const HARD_LIVE: Duration = Duration::from_secs(45);
-    pub const SOFT_RUN: Duration = Duration::from_secs(20);
-    pub const HARD_RUN: Duration = Duration::from_secs(120);
-    pub const SOFT_STARTING: Duration = Duration::from_secs(45);
-    pub const HARD_STARTING: Duration = Duration::from_secs(180);
-    /// `expect.mode: offline` for a live event: the note shows this long.
-    pub const OFFLINE_NOTE: Duration = Duration::from_secs(4);
-    /// An `interaction.resolved` note shows this long under the block.
-    pub const RESOLVED_NOTE: Duration = Duration::from_secs(5);
-    /// Live debounce (INTERACT §3.2): text inputs and draft edits.
-    pub const DEBOUNCE_TEXT: Duration = Duration::from_millis(600);
-    pub const DEBOUNCE_DRAFT: Duration = Duration::from_millis(1000);
-    /// A changed block fades in and its tint fades out.
-    pub const CHANGE_IN: Duration = Duration::from_millis(200);
-    pub const CHANGE_FLASH: Duration = Duration::from_millis(1600);
-    /// 问这里 shows after the pointer rests this long (REFS §A3).
-    pub const HOVER_ASK: Duration = Duration::from_millis(300);
-    /// A part that was just added flashes `--sel`.
-    pub const PART_FLASH: Duration = Duration::from_millis(600);
-    // v11/pb-cards
-    /// The column tint under a chosen and a hovered chart point (drawn under the series).
-    pub const CHART_PICK_FILL: f32 = 0.06;
-    pub const CHART_HOVER_FILL: f32 = 0.035;
-    /// A block a new rev removed fades out over this.
-    pub const REMOVE_OUT: Duration = Duration::from_millis(240);
-}
+// --- inc-cards21: Card v2.1 sizes and timings live in ui/native/tokens.rs ---
+pub use crate::ui::native::tokens::card_v21;
 // --- end inc-cards21 ---

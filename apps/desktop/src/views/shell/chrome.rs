@@ -88,8 +88,10 @@ fn with_highlight<R>(cx: &mut App, f: impl FnOnce(&mut App) -> R) -> R {
     let k = colors(cx);
     let theme = Theme::global_mut(cx);
     let saved = (theme.tokens.accent, theme.colors.accent_foreground);
-    theme.tokens.accent = k.accent.into();
-    theme.colors.accent_foreground = k.on_accent;
+    // D10: the menu highlight is the `accent` (muted) fill with foreground
+    // text, never an inverted row.
+    theme.tokens.accent = k.fill_hover.into();
+    theme.colors.accent_foreground = k.label;
     let out = f(cx);
     let theme = Theme::global_mut(cx);
     theme.tokens.accent = saved.0;
