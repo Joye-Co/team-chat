@@ -95,7 +95,7 @@ pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
             border: None,
         },
         PushStyle::Outline => Look {
-            fill: k.content,
+            fill: k.control,
             text: k.label,
             hover: k.fill_hover,
             pressed: k.pressed,
@@ -172,8 +172,12 @@ pub fn push_button(
     size: PushSize,
     cx: &App,
 ) -> Button {
+    // An empty label is no label: an empty label slot plus the gap would
+    // push a caller's own content row off its left edge (a select built on
+    // a push button, review 2 R1-10).
+    let label: SharedString = label.into();
     let b = Button::new(id)
-        .label(label)
+        .when(!label.is_empty(), |b| b.label(label))
         .with_size(gpui_component::Size::Medium)
         .h(size.height())
         .px(size.pad())
@@ -381,21 +385,27 @@ fn chevron_button(
         .pr(space::S8)
         .rounded(size.radius())
         .n_body();
+    // The row grows to fill the button (flex 1: the button's own label row
+    // centers its children), so the title starts at x + 12 and the chevron
+    // ends 8 before the right edge in every select of a column (§1.8, F4;
+    // review 2 R1-10).
     styled(b, PushStyle::Outline, cx).child(
         div()
+            .flex_1()
             .w_full()
             .min_w(px(0.))
             .flex()
             .items_center()
+            .justify_between()
             .gap(space::S8)
             .child(TruncText::new(title).flex_1())
-            .child(symbol(
+            .child(div().flex_none().child(symbol(
                 chevron,
                 metrics::POPUP_CHEVRON_SLOT,
                 Weight::Regular,
                 k.secondary,
                 window,
-            )),
+            ))),
     )
 }
 
@@ -411,7 +421,7 @@ pub fn square_pair(add: Button, remove: Button, cx: &App) -> gpui::Div {
         .rounded(metrics::BUTTON_REGULAR_RADIUS)
         .border_1()
         .border_color(k.quaternary)
-        .bg(k.content)
+        .bg(k.control)
         .overflow_hidden()
         .child(add)
         .child(div().w(px(1.)).h(icon::MD).bg(k.separator))
@@ -489,15 +499,23 @@ pub fn select_button(
         .pr(space::S8)
         .rounded(size.radius())
         .n_body();
+    // The same row as [`popup_button`]: title at x + 12, chevron pinned 8
+    // before the right edge.
     styled(b, PushStyle::Outline, cx).child(
         div()
+            .flex_1()
             .w_full()
             .min_w(px(0.))
             .flex()
             .items_center()
+            .justify_between()
             .gap(space::S8)
             .child(TruncText::new(title).flex_1())
-            .child(crate::ui::icons::icon(Sym::PopUp, icon::MD, k.secondary)),
+            .child(div().flex_none().child(crate::ui::icons::icon(
+                Sym::PopUp,
+                icon::MD,
+                k.secondary,
+            ))),
     )
 }
 
@@ -509,7 +527,7 @@ pub fn chip_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button
     let (fill, edge) = if selected {
         (k.fill, k.label)
     } else {
-        (k.content, k.quaternary)
+        (k.control, k.quaternary)
     };
     Button::new(id)
         .custom(
@@ -770,7 +788,7 @@ mod tests {
             // D11: Cancel (outline) has a border and the background fill; a
             // primary has the primary fill and no border.
             let outline = look(PushStyle::Outline, &k);
-            assert_eq!(outline.fill, k.content);
+            assert_eq!(outline.fill, k.control);
             assert_eq!(outline.border, Some(k.quaternary));
             let primary = look(PushStyle::Default, &k);
             assert_eq!(primary.fill, k.primary);

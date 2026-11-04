@@ -107,13 +107,13 @@ impl Palette {
             0x262626FF, // muted
             0x262626FF, // accent
             0xA1A1A1FF, // muted_foreground
-            0xFFFFFF1A, // border: white 10 %
-            0xFFFFFF26, // input: white 15 %
+            0xFFFFFF29, // border: white 16 % (>= 1.5:1 on background and card, §2.22)
+            0xFFFFFF33, // input: white 20 %
             0x737373FF, // ring
             0xE5E5E5FF, // primary
             0x171717FF, // primary_foreground
             0x404040FF, // pressed
-            0xFFFFFF33, // border_strong: white 20 %
+            0xFFFFFF40, // border_strong: white 25 %
             0x00000066, // scrim
             0xF87171FF, // destructive
             0xFBBF24FF, // warning
@@ -200,6 +200,11 @@ pub struct NativeColors {
     pub tertiary: Hsla,
     /// `input`: switch OFF track, outline control border.
     pub quaternary: Hsla,
+    /// The fill of an outline control (outline button, select, input,
+    /// checkbox): `background` in light; in dark `input` at 30 % over
+    /// `card` (shadcn `dark:bg-input/30`), so a control on a GroupBox or a
+    /// sheet reads as a raised control, not a hole (§2.22, R1-17).
+    pub control: Hsla,
     /// `border`.
     pub separator: Hsla,
     /// `muted`: control fill (secondary button, segmented track).
@@ -269,6 +274,11 @@ impl NativeColors {
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,
             quaternary: p.input,
+            control: if p.dark {
+                p.card.blend(p.input.opacity(0.3))
+            } else {
+                p.background
+            },
             separator: p.border,
             fill: p.muted,
             fill_hover: p.accent,
@@ -1187,6 +1197,27 @@ mod tests {
                 assert!(contrast(s, p.background) >= 3.);
             }
         }
+    }
+
+    #[test]
+    fn dark_lines_hold_one_and_a_half_to_one() {
+        // §2.22 (R1-16): every dark line measures >= 1.5:1 on the window
+        // background and on the card fill; the input line is not weaker.
+        let d = Palette::dark();
+        for surface in [d.background, d.card, d.sidebar] {
+            assert!(contrast(d.border, surface) >= 1.5);
+            assert!(contrast(d.input, surface) >= contrast(d.border, surface));
+        }
+    }
+
+    #[test]
+    fn dark_controls_rise_from_their_surface() {
+        // R1-17: an outline control on a GroupBox (#171717) is lighter than
+        // the box, not the #0a0a0a window background.
+        let d = NativeColors::dark();
+        let p = Palette::dark();
+        assert!(d.control.l > p.card.l && d.control.a == 1.);
+        assert_eq!(NativeColors::light().control, Palette::light().background);
     }
 
     #[test]

@@ -12,6 +12,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
+use super::focus::FocusRow as _;
 use super::tokens::{NativeType as _, emphasized, metrics, native_colors};
 use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
@@ -201,7 +202,8 @@ pub fn label_value_with(
 /// A list row (Mail, Finder): 28 pt by default, radius 6 inset 8 pt.
 /// Selection: `accent` fill with `onAccent` content when the list has focus
 /// in the key window, `selection` gray when it does not or the window is
-/// inactive. No hover.
+/// inactive. A row with `on_click` is a [`FocusRow`](super::FocusRow): hover
+/// muted 50 %, a tab stop with the focus ring, ↑ / ↓ move the focus.
 #[derive(IntoElement)]
 pub struct CompactRow {
     id: ElementId,
@@ -297,6 +299,7 @@ impl RenderOnce for CompactRow {
             .when_some(sel, |d, (fill, _)| {
                 d.bg(fill).font_weight(crate::theme::MEDIUM_WEIGHT)
             })
+            .when(self.on_click.is_some(), |d| d.focus_row(self.selected, cx))
             .children(self.children)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
