@@ -207,6 +207,8 @@ pub struct MediaThread {
     group_id: String,
     topic_id: String,
     extras: Vec<Extra>,
+    /// Card v2 messages at the end of the thread: (message id = card id, author).
+    cards: Vec<(String, String)>,
     /// Folder and entry of each sample on disk.
     folders: Vec<(Sample, PathBuf, String)>,
 }
@@ -220,6 +222,25 @@ impl MediaThread {
             group_id,
             topic_id,
             extras,
+            cards: Vec::new(),
+            folders: Vec::new(),
+        })
+    }
+
+    /// The 话题 `topic_id` of `group_id` with the stored Card v2 messages `cards`
+    /// (id, author) at its end: the real thread draws them as it draws any card.
+    pub fn with_cards(
+        inner: Arc<dyn ChatProvider>,
+        group_id: &str,
+        topic_id: &str,
+        cards: Vec<(String, String)>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            group_id: group_id.into(),
+            topic_id: topic_id.into(),
+            extras: Vec::new(),
+            cards,
             folders: Vec::new(),
         })
     }
@@ -247,6 +268,7 @@ impl MediaThread {
             group_id,
             topic_id,
             extras,
+            cards: Vec::new(),
             folders,
         })
     }
@@ -265,6 +287,29 @@ impl MediaThread {
 
     fn extra_messages(&self) -> Vec<Message> {
         let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let cards = self
+            .cards
+            .iter()
+            .enumerate()
+            .map(|(i, (id, author))| Message {
+                id: id.clone(),
+                client_msg_id: format!("c-{id}"),
+                group_id: self.group_id.clone(),
+                topic_id: self.topic_id.clone(),
+                author_id: author.clone(),
+                body: String::new(),
+                mentions: Vec::new(),
+                created_seq: 950_000 + i as u64,
+                created_at: now - 300_000 + i as i64 * 60_000,
+                edited_at: None,
+                deleted_at: None,
+                streaming: false,
+                send_state: SendState::Sent,
+                quote_of: None,
+                attachments: Vec::new(),
+                artifact_refs: Vec::new(),
+                reactions: Vec::new(),
+            });
         self.extras
             .iter()
             .enumerate()
@@ -297,6 +342,7 @@ impl MediaThread {
                     reactions: Vec::new(),
                 }
             })
+            .chain(cards)
             .collect()
     }
 
@@ -373,6 +419,180 @@ fn list(dir: &std::path::Path) -> Vec<ArtifactVersionFile> {
 }
 
 impl ChatProvider for MediaThread {
+    // The real thread of the base provider: cards, pages, runs and their data.
+    fn card_v2(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Message> {
+        self.inner.card_v2(group_id, message_id)
+    }
+    fn card_v2_answers(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::CardV2Answer> {
+        self.inner.card_v2_answers(group_id, message_id)
+    }
+    fn card_v2_pending(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Pending> {
+        self.inner.card_v2_pending(group_id, message_id)
+    }
+    fn card_v2_events(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        self.inner.card_v2_events(group_id, message_id)
+    }
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: cards_v2::CardV2AnswerRequest,
+    ) {
+        self.inner
+            .answer_card_v2(group_id, topic_id, message_id, answer)
+    }
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        self.inner
+            .withdraw_card_v2_answer(group_id, topic_id, message_id)
+    }
+    fn send_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        self.inner
+            .send_card_event(group_id, topic_id, message_id, request)
+    }
+    fn drop_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        self.inner
+            .drop_card_event(group_id, topic_id, message_id, client_event_id)
+    }
+    fn retry_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) -> bool {
+        self.inner
+            .retry_card_event(group_id, topic_id, message_id, client_event_id)
+    }
+    fn card(&self, group_id: &str, message_id: &str) -> Option<Arc<card::Card>> {
+        self.inner.card(group_id, message_id)
+    }
+    fn card_press_state(&self, group_id: &str, message_id: &str) -> Option<CardPressState> {
+        self.inner.card_press_state(group_id, message_id)
+    }
+    fn card_presses(&self, group_id: &str, message_id: &str) -> Vec<CardPress> {
+        self.inner.card_presses(group_id, message_id)
+    }
+    fn press_card_action(&self, group_id: &str, topic_id: &str, message_id: &str, action_id: &str) {
+        self.inner
+            .press_card_action(group_id, topic_id, message_id, action_id)
+    }
+    fn page_bridge(&self, artifact_id: &str, version: u32) -> Option<page_host::PageBridge> {
+        self.inner.page_bridge(artifact_id, version)
+    }
+    fn page_signals(&self) -> Option<UnboundedReceiver<page_host::PageSignal>> {
+        self.inner.page_signals()
+    }
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        self.inner.fetch_page_data(artifact_id, version)
+    }
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        kind: page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, page_host::PageSendError> {
+        self.inner
+            .send_page_event(artifact_id, version, name, kind, payload)
+    }
+    fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
+        self.inner.artifact_page_events(artifact_id, version)
+    }
+    fn artifact_story(&self, artifact_id: &str) -> Option<v2::ArtifactStory> {
+        self.inner.artifact_story(artifact_id)
+    }
+    fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<PathBuf> {
+        self.inner.artifact_poster(artifact_id, version)
+    }
+    fn artifact_preview(&self, artifact_id: &str, version: u32) -> Option<v2::ArtifactPreview> {
+        self.inner.artifact_preview(artifact_id, version)
+    }
+    fn artifact_thumb(&self, artifact_id: &str) -> Option<pages::ArtifactThumb> {
+        self.inner.artifact_thumb(artifact_id)
+    }
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<pages::ArtifactResponse> {
+        self.inner.artifact_responses(artifact_id)
+    }
+    fn artifact_responses_load(&self, artifact_id: &str) -> pages::ResponsesLoad {
+        self.inner.artifact_responses_load(artifact_id)
+    }
+    fn reload_artifact_responses(&self, artifact_id: &str) {
+        self.inner.reload_artifact_responses(artifact_id)
+    }
+    fn clock_now(&self) -> Millis {
+        self.inner.clock_now()
+    }
+    fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
+        self.inner.runs(group_id, topic_id)
+    }
+    fn active_runs(&self) -> Vec<BotRunSummary> {
+        self.inner.active_runs()
+    }
+    fn run_step_times(&self, run_id: &str) -> Vec<Millis> {
+        self.inner.run_step_times(run_id)
+    }
+    fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
+        self.inner.topic_glance(group_id, topic_id)
+    }
+    fn message_proof(&self, group_id: &str, message_id: &str) -> Vec<v2::Proof> {
+        self.inner.message_proof(group_id, message_id)
+    }
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.inner.message_block_refs(message)
+    }
+    fn refs_supported(&self) -> bool {
+        self.inner.refs_supported()
+    }
+    fn artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        self.inner.artifact_media(artifact_id, version)
+    }
+    fn request_artifact(&self, group_id: &str, topic_id: &str, artifact_id: &str) {
+        self.inner.request_artifact(group_id, topic_id, artifact_id)
+    }
+    fn group_artifacts(&self, group_id: &str) -> Vec<ArtifactSummary> {
+        self.inner.group_artifacts(group_id)
+    }
+    fn all_artifacts(&self) -> Vec<(GroupId, ArtifactSummary)> {
+        self.inner.all_artifacts()
+    }
+    fn topic_decisions(&self, group_id: &str, topic_id: &str) -> Vec<v2::Decision> {
+        self.inner.topic_decisions(group_id, topic_id)
+    }
+    fn topic_changes(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicChanges> {
+        self.inner.topic_changes(group_id, topic_id)
+    }
+    fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
+        self.inner.topic_cost(group_id, topic_id)
+    }
+    fn run_usage(&self, run_id: &str) -> Option<v2::RunUsage> {
+        self.inner.run_usage(run_id)
+    }
+    fn acceptance_criteria(&self, run_id: &str) -> Vec<v2::AcceptanceItem> {
+        self.inner.acceptance_criteria(run_id)
+    }
+
     fn session(&self) -> SessionState {
         self.inner.session()
     }
@@ -417,7 +637,7 @@ impl ChatProvider for MediaThread {
         self.inner.typing(group_id, topic_id)
     }
     fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
-        if self.mine(group_id, topic_id) {
+        if self.mine(group_id, topic_id) && !self.folders.is_empty() {
             self.folders
                 .iter()
                 .map(|(s, dir, entry)| self.detail(*s, dir, entry).summary)
@@ -425,6 +645,29 @@ impl ChatProvider for MediaThread {
         } else {
             self.inner.artifacts(group_id, topic_id)
         }
+    }
+    /// A sample's own folder (the 产出 pane shows the same page as the thread).
+    fn open_artifact_version(
+        &self,
+        artifact_id: &str,
+        version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
+        let Some((s, dir, entry)) = self
+            .folders
+            .iter()
+            .find(|(s, _, _)| s.key().artifact_id == artifact_id)
+        else {
+            return self.inner.open_artifact_version(artifact_id, version);
+        };
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(Ok(ArtifactFolder {
+            artifact_id: artifact_id.to_string(),
+            version: version.unwrap_or(s.key().version),
+            dir: dir.clone(),
+            entry: entry.clone(),
+            is_page: matches!(s, Sample::Html | Sample::EmbedInPane),
+        }));
+        rx
     }
     fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
         self.folders
@@ -1146,10 +1389,10 @@ export function resumeFrom(s: SyncState) {
 "#;
 
 const REPORT_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><style>
-:root{color-scheme:light dark;--t1:#111113;--t2:#52525B;--t3:#6E6E76;--line:#EBEBED;--ok:#177245;--bg:#fff}
-@media (prefers-color-scheme: dark){:root{--t1:#F1F1F3;--t2:#A9A9B2;--t3:#8C8C95;--line:#252529;--ok:#6AD69C;--bg:#111113}}
+:root{color-scheme:light dark;--t1:var(--tc-fg,#0A0A0A);--t2:var(--tc-muted,#737373);--t3:var(--tc-muted,#737373);--line:var(--tc-border,#E5E5E5);--ok:var(--tc-fg,#0A0A0A);--bg:var(--tc-bg,#fff)}
+@media (prefers-color-scheme: dark){:root{--t1:var(--tc-fg,#FAFAFA);--t2:var(--tc-muted,#A1A1A1);--t3:var(--tc-muted,#A1A1A1);--line:var(--tc-border,#2E2E2E);--ok:var(--tc-fg,#FAFAFA);--bg:var(--tc-bg,#0A0A0A)}}
 html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
-.w{padding:16px 18px}h1{font-size:16px;margin:0;font-weight:600}.s{color:var(--t3);font-size:12px;margin:2px 0 14px}
+.w{padding:0}h1{font-size:16px;margin:0;font-weight:600}.s{color:var(--t3);font-size:12px;margin:2px 0 14px}
 .k{display:flex;gap:10px}.k div{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .k i{display:block;font-style:normal;color:var(--t2);font-size:12px}.k b{display:block;font:600 17px ui-monospace,Menlo,monospace}.k em{font-style:normal;color:var(--ok);font:12px ui-monospace,Menlo,monospace}
 h2{font-size:12px;font-weight:600;margin:16px 0 6px;color:var(--t2)}svg{width:100%;height:110px}

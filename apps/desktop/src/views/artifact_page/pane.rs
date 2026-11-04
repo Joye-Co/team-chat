@@ -64,42 +64,36 @@ impl Render for ArtifactPane {
         {
             return pane;
         }
-        // The page fills the pane edge to edge under its toolbar row.
-        let height = window.viewport_size().height - crate::ui::native::metrics::TOOLBAR_ROW;
+        // The page fills the pane under its header, on the pane's
+        // background (§2.1), with the pane's 16 padding (§2.5).
         let body = match self.folders.get(&self.services, &id, shown, cx) {
             Some(Ok(folder)) if folder.is_page => embed(
                 &self.services,
                 "artifact-pane",
                 &detail,
                 &folder,
-                height,
+                crate::ui::native::metrics::TOOLBAR_ROW,
                 px(0.),
                 cx,
             )
+            .fill()
+            .pad(space::S16)
             .into_any_element(),
             Some(_) => {
+                // Not a web page: a designed Empty with 打开 (§2.13), not a
+                // thumbnail floating in the middle of the pane.
                 let provider = self.services.provider.clone();
                 let open = id.clone();
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(space::S12)
-                    .child(kit::artifact_thumb(
-                        &self.services,
-                        &detail.summary,
-                        px(192.),
-                        px(144.),
-                        cx,
-                    ))
-                    .child(
+                crate::ui::native::page::page_empty(
+                    super::kind_sym(detail.summary.kind),
+                    detail.summary.title.clone(),
+                    c::ARTIFACT_PAGE_SNAPSHOT,
+                    vec![
                         crate::ui::native::push_button(
                             "artifact-pane-open",
                             c::ARTIFACT_OPEN,
                             crate::ui::native::PushStyle::Default,
-                            crate::ui::native::PushSize::Regular,
+                            crate::ui::native::PushSize::Small,
                             cx,
                         )
                         .on_click(move |_, _, cx| {
@@ -109,31 +103,34 @@ impl Render for ArtifactPane {
                                 Some(shown),
                                 cx,
                             )
-                        }),
-                    )
-                    .into_any_element()
+                        })
+                        .into_any_element(),
+                    ],
+                    cx,
+                )
+                .into_any_element()
             }
             None => div().size_full().into_any_element(),
         };
         let provider = self.services.provider.clone();
         let nav = self.services.nav.clone();
         let open = id.clone();
+        let _ = window;
         div()
             .size_full()
             .flex()
             .flex_col()
-            // The pane's toolbar row (NATIVE.md §5.1): the 产出's name over
-            // `类型 · v3`, one glass group.
+            .bg(crate::ui::native::native_colors(cx).content)
+            // The pane header (§2.2): the pane's name "产出" over the 产出's
+            // title and version (the page under it shows its own title),
+            // then 在新窗口打开, 在产出里打开 and close at the far right.
             .child({
-                use crate::ui::{native as nk, sf_symbols::Sf};
-                let active = nk::emphasized(window);
-                let open_window = nk::toolbar_item(
+                use crate::ui::{native as nk, sf_symbols::Sym as S};
+                let open_window = nk::icon_button_sym(
                     "artifact-pane-window",
-                    Sf::Open,
+                    S::OpenExternal,
                     c::ARTIFACT_OPEN_WINDOW,
-                    nk::ToolbarItemKind::Plain,
-                    active,
-                    window,
+                    nk::IconSize::Regular,
                     cx,
                 )
                 .on_click(move |_, _, cx| {
@@ -144,25 +141,61 @@ impl Render for ArtifactPane {
                         cx,
                     )
                 });
-                let page = nk::toolbar_item(
+                let page = nk::icon_button_sym(
                     "artifact-pane-page",
-                    Sf::Outputs,
+                    S::Outputs,
                     c::ARTIFACTS_TITLE,
-                    nk::ToolbarItemKind::Plain,
-                    active,
-                    window,
+                    nk::IconSize::Regular,
+                    cx,
+                )
+                .on_click({
+                    let nav = nav.clone();
+                    move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |n, cx| n.open_artifact(id, version, cx))
+                    }
+                });
+                let close = nk::icon_button_sym(
+                    "artifact-pane-close",
+                    S::Close,
+                    crate::copy::common::CLOSE,
+                    nk::IconSize::Regular,
                     cx,
                 )
                 .on_click(move |_, _, cx| {
-                    let id = id.clone();
-                    nav.update(cx, |n, cx| n.open_artifact(id, version, cx))
+                    nav.update(cx, |n, cx| {
+                        let back = if n.page() == crate::app::Page::Topic {
+                            RightPane::TopicRail
+                        } else {
+                            RightPane::None
+                        };
+                        n.set_right_pane(back, cx)
+                    })
                 });
-                nk::ToolbarRow::new(detail.summary.title.clone())
-                    .subtitle(format!("{} · v{shown}", kind_label(detail.summary.kind)))
-                    .leading_inset(crate::ui::native::metrics::TOOLBAR_LEADING)
-                    .group(nk::ToolbarGroup::new([open_window, page]))
+                kit::pane_header(
+                    c::ARTIFACTS_TITLE,
+                    format!(
+                        "{} · {} · v{shown}",
+                        detail.summary.title,
+                        kind_label(detail.summary.kind)
+                    ),
+                    vec![
+                        open_window.into_any_element(),
+                        page.into_any_element(),
+                        close.into_any_element(),
+                    ],
+                    cx,
+                )
             })
-            .child(div().flex_1().min_h_0().overflow_hidden().child(body))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .child(body),
+            )
             .into_any_element()
     }
 }
