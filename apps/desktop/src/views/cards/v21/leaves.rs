@@ -304,7 +304,18 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
     let max = max_select.unwrap_or(options.len() as u32) as usize;
     let full = multiple && picked.len() >= max;
     let recommended = default.as_deref().unwrap_or(&[]);
+    // Cards.dc.html 01: two short options sit side by side as one row of buttons; three or
+    // more are stacked. A narrow column of a row keeps them stacked (Interact.dc.html 01).
+    let side_by_side = !multiple
+        && allow_other.is_none()
+        && options.len() == 2
+        && options.iter().all(|o| {
+            o.label.chars().count() + o.detail.as_deref().map_or(0, |d| d.chars().count())
+                <= SHORT_OPTION
+        })
+        && !in_row_column(node, id);
     let mut col = div().flex().flex_col().gap(space::S8).min_w(px(0.));
+    let mut pair = div().flex().gap(space::S8).min_w(px(0.));
     let mut all: Vec<(String, String, Option<String>, bool)> = options
         .iter()
         .map(|o| {
@@ -343,6 +354,10 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
                     form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
                     node_ptr.after(&block, cx);
                 });
+        }
+        if side_by_side {
+            pair = pair.child(div().flex_1().min_w(px(0.)).child(row));
+            continue;
         }
         col = col.child(row);
         if on && oid == form21::OTHER {
@@ -390,6 +405,9 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
             );
         }
     }
+    if side_by_side {
+        col = col.child(pair);
+    }
     if multiple && live {
         let min = min_select.unwrap_or(1);
         col = col.child(hint(
@@ -409,6 +427,29 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
         ));
     }
     framed(node, b, col.into_any_element(), cx)
+}
+
+/// The longest option (label and detail, in characters) that still counts as short: the
+/// 2.0 quick choice's limit.
+const SHORT_OPTION: usize = 16;
+
+/// True when `id` sits in a column of a `row` that is drawn side by side (not folded).
+fn in_row_column(node: &Node, id: &str) -> bool {
+    if node.narrow {
+        return false;
+    }
+    let mut cur = id;
+    // Depth is at most 2; the bound also stops a cycle the server would refuse.
+    for _ in 0..8 {
+        let Some(p) = node.tree.parent(cur) else {
+            break;
+        };
+        if matches!(node.tree.get(p), Some(CardV2Block::Row { .. })) {
+            return true;
+        }
+        cur = p;
+    }
+    false
 }
 
 /// What a pick handler needs after the form changed (a clone of the node's context).
