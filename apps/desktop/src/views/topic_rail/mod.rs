@@ -32,6 +32,8 @@ struct Data {
     group_id: String,
     topic_id: String,
     topic: Option<Topic>,
+    /// The one state of the 话题 (`topic_page::topic_state`).
+    state: Option<crate::views::topic_page::StateLine>,
     /// The run the rail shows (`rail_run`): the owner's newest, else the newest.
     run: Option<BotRunSummary>,
     step_times: Vec<Millis>,
@@ -72,7 +74,11 @@ impl Data {
             .into_iter()
             .filter_map(|id| p.member(id).map(|m| (id.to_string(), m)))
             .collect();
+        let state = topic
+            .as_ref()
+            .map(|x| crate::views::topic_page::topic_state(p.as_ref(), services.me().as_deref(), x));
         Self {
+            state,
             group_id: g.to_string(),
             topic_id: t.to_string(),
             step_times: run
@@ -165,6 +171,68 @@ impl TopicRail {
                 d
             }
         }
+    }
+}
+
+impl TopicRail {
+    /// The pinned footer of the inspector (§2.5): 标记完成 (primary) over
+    /// 交给… (outline, a menu of the 群's members), full width, gap 8.
+    fn footer(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::native::{PushSize, PushStyle, push_button};
+        use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+        let k = ui::native::native_colors(cx);
+        let (g, t) = (topic.group_id.clone(), topic.id.clone());
+        let done = {
+            let (s, g, t) = (self.services.clone(), g.clone(), t.clone());
+            push_button(
+                "rail-mark-done",
+                c::MARK_DONE,
+                PushStyle::Default,
+                PushSize::Regular,
+                cx,
+            )
+            .w_full()
+            .on_click(move |_, _, _| {
+                s.provider
+                    .set_topic_status(&g, &t, crate::data::TopicStatus::Done, Vec::new())
+            })
+        };
+        let members = crate::views::topic_menu::group_members(&self.services, &g);
+        let owner = topic.owner_id.clone();
+        let services = self.services.clone();
+        let hand = push_button(
+            "rail-hand-to",
+            c::HAND_TO,
+            PushStyle::Outline,
+            PushSize::Regular,
+            cx,
+        )
+        .w_full()
+        .dropdown_menu(move |mut menu, _, _| {
+            for m in &members {
+                let (s, g, t, id) = (services.clone(), g.clone(), t.clone(), m.id.clone());
+                menu = menu.item(
+                    PopupMenuItem::new(m.name.clone())
+                        .checked(owner.as_deref() == Some(m.id.as_str()))
+                        .on_click(move |_, _, _| {
+                            s.provider.set_topic_owner(&g, &t, Some(id.clone()))
+                        }),
+                );
+            }
+            menu
+        });
+        div()
+            .flex_none()
+            .w_full()
+            .p(space::S16)
+            .border_t_1()
+            .border_color(k.separator)
+            .flex()
+            .flex_col()
+            .gap(space::S8)
+            .child(done)
+            .child(hand)
+            .into_any_element()
     }
 }
 
@@ -419,25 +487,13 @@ impl Render for TopicRail {
         // 状态, 负责 (with 提出), 计划, 改动, 产出, 用到的决定, 在哪干活,
         // 用时和成本. A section with no data keeps its place with one quiet
         // line; it never disappears.
-        use native::{CHANGES, COST, DECISIONS, OUTPUTS, OWNER, PLAN, WHERE};
+        use native::{CHANGES, COST, DECISIONS, OUTPUTS, PLAN, WHERE};
         let mut sections: Vec<AnyElement> = vec![self.native_status(&d, cx)];
-        match topic.and_then(|t| t.owner_id.clone()) {
-            Some(owner) => {
-                let by = topic
-                    .filter(|x| x.created_by != owner)
-                    .map(|x| (x.created_by.clone(), x.created_at));
-                // The 负责 card says only what its own member does (DU-1):
-                // another member's run in the same 话题 is not the owner's.
-                let own = run.filter(|r| r.bot_id == owner);
-                sections.push(self.native_owner(&d, &owner, own, by, cx));
-            }
-            None => sections.push(self.native_empty(
-                OWNER,
-                c::TOPIC_RAIL_OWNER,
-                c::RAIL_EMPTY_OWNER,
-                cx,
-            )),
-        }
+        let owner = topic.and_then(|t| t.owner_id.clone());
+        let by = topic
+            .filter(|x| owner.as_deref() != Some(x.created_by.as_str()))
+            .map(|x| (x.created_by.clone(), x.created_at));
+        sections.push(self.native_owner(&d, owner.as_deref(), by, cx));
         sections.push(match run.filter(|r| !r.plan.is_empty()) {
             Some(r) => self.native_plan(&d, r, cx),
             None => self.native_empty(PLAN, c::TOPIC_RAIL_PLAN, c::RAIL_EMPTY_PLAN, cx),
@@ -469,19 +525,32 @@ impl Render for TopicRail {
         sections.push(cost.unwrap_or_else(|| {
             self.native_empty(COST, c::TOPIC_RAIL_COST, c::RAIL_EMPTY_COST, cx)
         }));
+        let footer = topic
+            .filter(|t| t.status != crate::data::TopicStatus::Done)
+            .map(|t| self.footer(t, cx));
+        // §2.5: the body scrolls by itself and ends 24 above the pinned
+        // footer; the footer (标记完成 / 交给…) is full width, p 16, border-t.
         div()
-            .id("topic-rail")
             .size_full()
-            .overflow_y_scroll()
-            .bg(k.sidebar)
-            // The shell starts the inspector below the 52 pt toolbar row
-            // (shell/panes.rs, PANE_TOP). Pull up by the section's own 12 pt
-            // top padding so the first header row starts at 52, as on 首页.
-            .mt(-gpui::px(12.))
-            .pb(space::S16)
+            .bg(k.content)
             .flex()
             .flex_col()
-            .children(sections)
+            .child(
+                div()
+                    .id("topic-rail")
+                    .flex_1()
+                    .min_h_0()
+                    // §2.2, B2: the first GroupLabel's ink sits at y 68, 16
+                    // under the header band; pull up by the section's own
+                    // top padding less 4.
+                    .mt(-space::S12)
+                    .overflow_y_scroll()
+                    .pb(space::S24)
+                    .flex()
+                    .flex_col()
+                    .children(sections),
+            )
+            .children(footer)
             .into_any_element()
     }
 }

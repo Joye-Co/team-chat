@@ -44,7 +44,7 @@ use crate::{
     data::{GroupId, MemberId, Topic},
     ui::{
         Sym,
-        native::{SearchField, metrics},
+        native::{SearchField, metrics, tokens::space},
         sf_symbols::Sf,
     },
     views::{nav::QuickSwitch, shell::layout},
@@ -375,16 +375,14 @@ impl RailView {
             SidebarFooter::new("rail-footer", avatar, me.name.clone()).on_click(|_, window, cx| {
                 window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
             });
+        let _ = server_url;
+        // §2.1: the second line is the role, never a server address.
+        let role = me.role.clone().filter(|r| !r.trim().is_empty());
         let footer = match self.services.provider.connection() {
-            ConnectionState::Online | ConnectionState::Connecting => {
-                let host = server_url
-                    .split("://")
-                    .nth(1)
-                    .unwrap_or(&server_url)
-                    .trim_end_matches('/')
-                    .to_string();
-                footer.detail(me.role.clone().unwrap_or(host), cx)
-            }
+            ConnectionState::Online | ConnectionState::Connecting => match role {
+                Some(role) => footer.detail(role, cx),
+                None => footer,
+            },
             _ => footer.second(StatusBadge::new(
                 BadgeState::Offline,
                 crate::copy::connection::OFFLINE,
@@ -445,6 +443,12 @@ impl Render for RailView {
             .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx)
             .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx));
         let filter = self.filter_button(mode, cx);
+        let first_sync = self.cache.as_ref().is_none_or(|c| c.entries.is_empty())
+            && matches!(
+                self.services.provider.connection(),
+                crate::data::ConnectionState::Connecting
+            );
+        let sidebar_fill = crate::views::shell::chrome::colors(cx).sidebar;
         div()
             .id("rail")
             .size_full()
@@ -455,38 +459,34 @@ impl Render for RailView {
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.move_selection(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &OpenSelected, _, cx| this.move_selection(0, cx)))
-            // The traffic-light row: the lights at its start (drawn by the
-            // system), the filter and 新话题 at its end. Dragging it moves
-            // the window, as a title bar does.
+            // §2.1: the traffic-light band holds the lights only (drawn by
+            // the system). Dragging it moves the window, as a title bar does.
             .child(
                 div()
                     .id("rail-lights-row")
                     .flex_none()
                     .h(LIGHTS_ROW)
-                    .pr(px(10.))
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(2.))
                     .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
                         if event.click_count >= 2 {
                             window.titlebar_double_click();
                         } else {
                             window.start_window_move();
                         }
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(2.))
-                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation()
-                            })
-                            .child(filter)
-                            .child(new_topic),
-                    ),
+                    }),
             )
-            .child(self.search_field())
+            // The search field, then the filter pull-down and 新话题 on its
+            // center line.
+            .child(
+                div()
+                    .flex_none()
+                    .pr(metrics::SIDEBAR_ROW_INSET)
+                    .flex()
+                    .items_center()
+                    .gap(space::S4)
+                    .child(div().flex_1().min_w_0().child(self.search_field()))
+                    .child(filter)
+                    .child(new_topic),
+            )
             .child(
                 div()
                     .flex_none()
@@ -499,12 +499,40 @@ impl Render for RailView {
                 div()
                     .flex_1()
                     .min_h(px(0.))
+                    .relative()
                     // A click in the list makes it take the arrow keys (§10).
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
                     )
-                    .child(rows),
+                    .child(if first_sync {
+                        // §2.14: the first sync shows the sidebar's own
+                        // shapes, never an empty panel.
+                        crate::ui::native::skeleton_rows(
+                            crate::ui::native::SkeletonKind::SidebarItem,
+                            6,
+                        )
+                        .px(metrics::SIDEBAR_ROW_INSET)
+                        .pt(space::S8)
+                        .into_any_element()
+                    } else {
+                        rows.into_any_element()
+                    })
+                    // §2.1, A4: the list scrolls under a 24 edge, so the row
+                    // under 设置 fades out instead of being cut mid-glyph.
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .h(space::S24)
+                            .bg(gpui::linear_gradient(
+                                0.,
+                                gpui::linear_color_stop(sidebar_fill, 0.),
+                                gpui::linear_color_stop(sidebar_fill.opacity(0.), 1.),
+                            )),
+                    ),
             )
             // An update that runs while its sheet is hidden.
             .children(

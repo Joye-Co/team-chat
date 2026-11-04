@@ -68,9 +68,6 @@ const LOAD_AHEAD: usize = 30;
 pub const EST_ROW_HEIGHT: Pixels = px(56.);
 /// While a message streams, the timeline refreshes at most this often.
 const STREAM_REFRESH: Duration = Duration::from_millis(100);
-/// The eased top fade (§4.4): `content` alpha at each 8 pt step.
-const FADE: [f32; 5] = [1., 0.9, 0.6, 0.25, 0.];
-const FADE_STEP: Pixels = px(8.);
 
 /// Events for other views.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -763,43 +760,33 @@ impl Render for TimelineView {
                     })),
                 )
         });
+        // §2.14: older messages loading show 2 message skeleton rows in the
+        // flow above the first message, never a line of text over a row.
         let loading = (self.provider_loading && self.has_older).then(|| {
             div()
+                .flex_none()
+                .pl(v2::LEADING)
+                .pr(v2::SIDE)
+                .pt(space::S24)
+                .pb(space::S8)
+                .child(ui::native::skeleton_rows(ui::native::SkeletonKind::Message, 2))
+        });
+        // §2.2: content scrolls under the header band with no fade. When
+        // there is more below (the jump pill shows), the list's bottom edge
+        // fades over 24 so its last row is never a hard mid-glyph cut.
+        let bottom_edge = (!following && !self.messages.is_empty()).then(|| {
+            div()
                 .absolute()
-                .top(space::S24)
                 .left_0()
                 .right_0()
-                .flex()
-                .justify_center()
-                .t_meta()
-                .text_color(colors.text_3)
-                .child(t::LOADING_OLDER)
+                .bottom_0()
+                .h(space::S24)
+                .bg(gpui::linear_gradient(
+                    0.,
+                    gpui::linear_color_stop(colors.content, 0.),
+                    gpui::linear_color_stop(colors.content.opacity(0.), 1.),
+                ))
         });
-        // The top fade so a row scrolled under the header never shows as a
-        // hard sliver (§4.4). A linear fade leaves a half-cut title at 30 to
-        // 40 % ink, which still reads as a cut line; this one is eased over
-        // 32 pt (content at 1, 0.9, 0.6, 0.25, 0 every 8 pt), so the top
-        // half of the band hides what it covers. GPUI gradients take two
-        // stops, so each 8 pt step is its own layer.
-        let fade = div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .h(FADE_STEP * (FADE.len() - 1) as f32)
-            .children(FADE.windows(2).enumerate().map(|(i, pair)| {
-                div()
-                    .absolute()
-                    .top(FADE_STEP * i as f32)
-                    .left_0()
-                    .right_0()
-                    .h(FADE_STEP)
-                    .bg(gpui::linear_gradient(
-                        180.,
-                        gpui::linear_color_stop(colors.content.opacity(pair[0]), 0.),
-                        gpui::linear_color_stop(colors.content.opacity(pair[1]), 1.),
-                    ))
-            }));
 
         div()
             .id("timeline")
@@ -812,14 +799,14 @@ impl Render for TimelineView {
                     .then(|| self.render_header(&topic, window, cx)),
             )
             .children(search_bar)
+            .children(loading)
             .child(
                 div()
                     .relative()
                     .flex_1()
                     .min_h(px(0.))
                     .child(timeline)
-                    .child(fade)
-                    .children(loading)
+                    .children(bottom_edge)
                     .children(jump_unread),
             )
             .children(jump)

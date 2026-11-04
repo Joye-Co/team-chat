@@ -44,8 +44,8 @@ pub fn scroll_edge(cx: &App) -> gpui::Div {
         ))
 }
 
-/// The inspector column (§2): edge to edge, the `sidebar` fill and a 1 px
-/// `separator` on its leading edge.
+/// The right pane column (§2.1, T1-10): edge to edge, the `background`
+/// fill and a 1 px `separator` on its leading edge.
 pub fn inspector_frame(width: Pixels, cx: &App) -> gpui::Div {
     let k = colors(cx);
     div()
@@ -54,7 +54,7 @@ pub fn inspector_frame(width: Pixels, cx: &App) -> gpui::Div {
         .flex_none()
         .relative()
         .overflow_hidden()
-        .bg(k.sidebar)
+        .bg(k.content)
         .border_l_1()
         .border_color(k.separator)
 }

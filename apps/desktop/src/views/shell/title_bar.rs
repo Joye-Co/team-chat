@@ -21,7 +21,6 @@ use gpui::{
 use crate::{
     app::{RightPane, Services},
     copy::topic_rail as c,
-    theme::StateTone,
     ui::{
         self, Sym,
         native::{
@@ -120,12 +119,10 @@ pub struct TitleBarSpec {
     /// A quiet line (首页: the date; 群: the purpose): the subtitle, or its
     /// end after the state.
     pub subtitle: Option<String>,
-    /// The state words and their tone.
-    pub state: Option<(String, StateTone)>,
+    /// The state words and their §2.12 state (`topic_page::topic_state`).
+    pub state: Option<(String, BadgeState)>,
     /// A quieter tail after the state (`跑一万条消息的压测`).
     pub state_detail: Option<String>,
-    /// The state is a paused run: a `pause` symbol in place of the state's.
-    pub state_paused: bool,
     /// The member's name that leads the state words.
     pub state_name: Option<String>,
     pub buttons: Vec<TitleButton>,
@@ -173,15 +170,7 @@ pub fn subtitle(spec: &TitleBarSpec, _k: &NativeColors) -> Option<Subtitle> {
         .state
         .as_ref()
         .filter(|(w, _)| !w.is_empty())
-        .map(|(words, tone)| {
-            // A paused run is quiet: no state icon.
-            let state = if spec.state_paused {
-                BadgeState::Quiet
-            } else {
-                BadgeState::from_tone(*tone)
-            };
-            (words.clone(), state)
-        });
+        .map(|(words, state)| (words.clone(), *state));
     if let Some(detail) = spec.state_detail.as_deref().filter(|d| !d.is_empty()) {
         push(detail, &mut text);
     }
@@ -349,7 +338,10 @@ pub fn render(
         services.provider.session(),
         crate::data::SessionState::SignedIn { .. }
     );
-    let over = signed_in
+    // §2.2, §2.15: a 话题 keeps its state badge offline; the Alert docked
+    // above its composer says the connection is down, the subtitle does not
+    // repeat it. Pages without a state show the connection in the subtitle.
+    let over = (signed_in && spec.state.is_none())
         .then(|| connection_subtitle(services.provider.connection(), &k))
         .flatten();
     let (heading, _, _) = heading_with(spec, over, active, window, cx);
@@ -437,7 +429,7 @@ mod tests {
             breadcrumb: Some("开发".into()),
             title: "话题列表虚拟滚动和消息分页的重写".into(),
             style: TitleStyle::Topic,
-            state: Some(("Forge 在做 3/5".into(), StateTone::Live)),
+            state: Some(("Forge 在做 3/5".into(), BadgeState::Working)),
             state_detail: Some("跑一万条消息的压测".into()),
             state_name: Some("Forge".into()),
             ..TitleBarSpec::default()
@@ -456,21 +448,21 @@ mod tests {
         );
         // Needs you: the warning state.
         let you = TitleBarSpec {
-            state: Some(("等你审 PR #61".into(), StateTone::You)),
+            state: Some(("等你审 PR #61".into(), BadgeState::NeedsYou)),
             state_detail: None,
             ..live()
         };
         let s = subtitle(&you, &k).unwrap();
         assert_eq!(s.text, "开发");
         assert_eq!(s.state.unwrap().1, BadgeState::NeedsYou);
-        // Quiet words have no state icon.
+        // Waiting on someone else: the queued clock.
         let quiet = TitleBarSpec {
-            state: Some(("等李雪".into(), StateTone::Quiet)),
+            state: Some(("等李雪回答".into(), BadgeState::Queued)),
             ..live()
         };
         assert_eq!(
             subtitle(&quiet, &k).unwrap().state.unwrap().1,
-            BadgeState::Quiet
+            BadgeState::Queued
         );
         // A page with a date only.
         let desk = TitleBarSpec {
@@ -498,17 +490,6 @@ mod tests {
         .expect("a subtitle");
         assert_eq!(s.text, "连接已断开 · 8 秒后重连");
         assert_eq!(s.symbol, Some((Sym::Offline, k.secondary)));
-    }
-
-    #[test]
-    fn a_paused_run_has_a_quiet_badge() {
-        let k = NativeColors::light();
-        let paused = TitleBarSpec {
-            state_paused: true,
-            ..live()
-        };
-        let s = subtitle(&paused, &k).unwrap();
-        assert_eq!(s.state.unwrap().1, BadgeState::Quiet);
     }
 
     #[test]
