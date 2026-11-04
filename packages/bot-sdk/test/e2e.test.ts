@@ -769,6 +769,50 @@ describe("1.1 cards, side chats and page events", () => {
     expect(botMessages(t.message.topicId)).toHaveLength(0);
   });
 
+  test("a side chat opened before the bot's first start reaches onAside, and again after a restart", async () => {
+    const late = await post("/v1/bots", { name: "Late" }, { authorization: `Bearer ${ownerToken}` });
+    const lateId: string = late.member.id;
+    const lateState = join(server.dir, "late.state.json");
+    const t = await human.startTopic(generalId, { title: "晚到的单独问", body: "源话题第一条" });
+    const dm = await new HttpClient({ url: server.url, token: ownerToken }).dm(lateId);
+    const ask = await human.send(
+      { groupId: dm.group.id },
+      { body: "先问一句", context: { groupId: generalId, topicId: t.message.topicId, uptoSeq: t.message.createdSeq } },
+    );
+    const asideTopic = ask.message.topicId;
+    const run = async (body: string) => {
+      const seen: AsideContext[] = [];
+      const other: string[] = [];
+      const b = new Bot({ url: server.url, token: late.token, stateFile: lateState, logLevel: "warn" });
+      b.onAside((ctx) => {
+        seen.push(ctx);
+      });
+      b.onMessage((ctx) => {
+        other.push(ctx.message.body);
+      });
+      await b.start();
+      try {
+        await human.send({ groupId: dm.group.id, topicId: asideTopic }, body);
+        await waitFor(`aside "${body}"`, () => seen.find((c) => c.message.body === body), 20_000);
+        const c = seen.find((x) => x.message.body === body) as AsideContext;
+        expect(c.aside.topicId).toBe(t.message.topicId);
+        expect(c.aside.groupId).toBe(generalId);
+        expect(other).not.toContain(body);
+      } finally {
+        await b.stop();
+      }
+    };
+    // First start: no state, so the bot skips the DM's history, where the side chat was opened.
+    await run("还有呢？");
+    expect(JSON.parse(readFileSync(lateState, "utf8")).asides[asideTopic]?.topicId).toBe(t.message.topicId);
+    // State of an older SDK (no side chats remembered, no scan): the scan finds it again.
+    const saved = JSON.parse(readFileSync(lateState, "utf8"));
+    delete saved.asides;
+    delete saved.asideScan;
+    writeFileSync(lateState, JSON.stringify(saved));
+    await run("重启以后呢？");
+  }, 60_000);
+
   test.skipIf(!hasFiles)("a page event from my 产出 reaches onArtifactEvent", async () => {
     const got: { name: string; payload: unknown; actorId: string; topicId?: string }[] = [];
     bot.onArtifactEvent((ctx) => {

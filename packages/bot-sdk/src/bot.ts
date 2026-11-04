@@ -450,6 +450,8 @@ interface GroupState {
   /** Seqs whose handlers are still running. */
   running: Set<number>;
   member: boolean;
+  /** Set while a DM group is read for side chat topics before its cursor; events wait. */
+  scanning?: boolean;
   readTimer: ReturnType<typeof setTimeout> | null;
   lastReadSent: number;
 }
@@ -1602,7 +1604,67 @@ export class Bot {
       }
     }
     g.member = true;
+    if (s.group.kind === "dm" && this.state.asideScan?.[gid] === undefined && !g.scanning) {
+      if (g.applied > 0) {
+        void this.scanAsides(gid, g);
+        return;
+      }
+      // Read from its start: every side chat topic arrives as an event.
+      (this.state.asideScan ??= {})[gid] = 0;
+      this.scheduleSave();
+    }
     if (s.lastSeq > g.applied) void this.catchUp(gid);
+  }
+
+  /**
+   * Reads a DM group from its start up to the cursor for side chat topics (topic.created and
+   * topic.updated with `contextOf`) and remembers them, without running handlers. Live events
+   * and catch-up wait until it is done.
+   */
+  private async scanAsides(gid: string, g: GroupState): Promise<void> {
+    g.scanning = true;
+    const upto = g.applied;
+    let after = 0;
+    try {
+      while (after < upto) {
+        if (this.stopped || !g.member) {
+          g.scanning = false;
+          return;
+        }
+        const page = (await this.request({ t: "fetch", groupId: gid, afterSeq: after, limit: FETCH_LIMIT })) as { events: RawEvent[]; hasMore: boolean };
+        for (const raw of page.events) {
+          if (raw.seq > upto) break;
+          const parsed = EventSchema.safeParse({ ...raw, groupId: gid });
+          if (!parsed.success) continue;
+          const e = parsed.data;
+          if (e.type === "topic.created" && e.data.topic.contextOf) {
+            this.noteAside(gid, e.data.topic.id, e.data.topic.contextOf);
+            this.follow(gid, e.data.topic.id);
+          } else if (e.type === "topic.updated" && e.data.contextOf) this.noteAside(gid, e.data.topicId, e.data.contextOf);
+        }
+        const last = page.events.at(-1)?.seq ?? after;
+        if (!page.hasMore || last <= after) break;
+        after = last;
+      }
+      (this.state.asideScan ??= {})[gid] = upto;
+      this.scheduleSave();
+      g.scanning = false;
+    } catch (err) {
+      if (err instanceof ChatError && (err.code === "forbidden" || err.code === "not_found")) {
+        g.member = false;
+        g.scanning = false;
+        return;
+      }
+      if (err instanceof ChatError && err.code === "closed") {
+        // The next welcome starts the scan again.
+        g.scanning = false;
+        return;
+      }
+      this.log.warn("side chat scan failed; retrying", { groupId: gid, err: String(err) });
+      setTimeout(() => void this.scanAsides(gid, g), 2000);
+      return;
+    }
+    void this.catchUp(gid);
   }
 
   private onEventFrame(raw: RawEvent, catchUp: boolean): void {
@@ -1614,6 +1676,10 @@ export class Bot {
       this.groups.set(raw.groupId, g);
     }
     if (raw.seq <= g.applied) return;
+    if (g.scanning) {
+      g.buffer.set(raw.seq, raw);
+      return;
+    }
     if (raw.seq > g.applied + 1) {
       g.buffer.set(raw.seq, raw);
       void this.catchUp(raw.groupId);
@@ -1630,7 +1696,7 @@ export class Bot {
   /** Fetches pages until the group has no gap. One loop per group at a time. */
   private async catchUp(gid: string): Promise<void> {
     const g = this.groups.get(gid);
-    if (!g || g.fetching) return;
+    if (!g || g.fetching || g.scanning) return;
     g.fetching = true;
     try {
       for (;;) {
