@@ -1034,9 +1034,10 @@ pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElem
     let mut group = div().w_full().flex().flex_col();
     for i in 0..rows {
         if i > 0 {
+            // Inset to the title x, after the 28 media box.
             group = group.child(
                 div()
-                    .ml(metrics::FORM_ROW_INSET)
+                    .ml(metrics::FORM_ROW_INSET + tokens::height::SM + tokens::space::S12)
                     .h(tokens::layout::HAIRLINE)
                     .bg(k.separator),
             );

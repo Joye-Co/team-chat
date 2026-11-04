@@ -2,8 +2,8 @@
 //! version with 检查更新; 开发者视图; 发送诊断… opens a sheet.
 
 use gpui::{
-    AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _, WindowExt as _,
@@ -19,10 +19,12 @@ use crate::{
     app::{Changes, Services},
     copy::{common, dev, fill, overlays as o, settings as s, update as u},
     data::{Change, ConnectionState, SessionState},
+    theme::Type as _,
     ui::native::{
-        FormRow, GroupedForm, NativeSwitch, NativeType as _, PushSize, PushStyle, SheetLayout,
-        SheetWidth, determinate_bar, disabled_push, metrics, native_colors, popup_button,
-        push_button, spinner,
+        FormRow, GroupedForm, IconSize, NativeSwitch, NativeType as _, PushSize, PushStyle,
+        SectionTitle, SheetLayout, SheetWidth, disabled_push, icon_button, metrics, native_colors,
+        progress, push_button, spinner,
+        tokens::{height, space},
     },
     updater::{self, Phase, banner::banner_text, version},
 };
@@ -195,7 +197,7 @@ impl GeneralPage {
                                     "diagnostics-cancel",
                                     common::CANCEL,
                                     PushStyle::Outline,
-                                    PushSize::Large,
+                                    PushSize::Regular,
                                     cx,
                                 )
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
@@ -204,7 +206,7 @@ impl GeneralPage {
                                         "diagnostics-send",
                                         s::DIAGNOSTICS_SUBMIT,
                                         PushStyle::Default,
-                                        PushSize::Large,
+                                        PushSize::Regular,
                                         cx,
                                     ),
                                     busy || no_server,
@@ -219,82 +221,273 @@ impl GeneralPage {
         );
     }
 
-    /// The version row (NATIVE.md §8): the update state as its detail and
-    /// one control: 检查更新, 更新到 …, the download's progress bar, or
-    /// 重启安装 once the update is ready.
-    fn update_row(&self, cx: &mut Context<Self>) -> FormRow {
+    /// The version row (2.19, F49): 当前版本 over the update state, and one
+    /// control: 检查更新, 更新到 …, 取消下载, 重启安装 or 知道了. A download
+    /// adds its Progress as a dependent row; a manual install adds its steps.
+    fn update_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
         let k = native_colors(cx);
         let phase = self.updater.as_ref().map(|u| u.read(cx).phase().clone());
+        let product = env!("PRODUCT_NAME");
         let detail = match &phase {
             None | Some(Phase::Idle) => s::UPDATE_STATE_IDLE.to_string(),
             Some(Phase::Checking) => u::CHECKING.to_string(),
             Some(Phase::UpToDate) => u::UP_TO_DATE.to_string(),
-            // The steps go in the group's footer: a detail is one line.
+            Some(Phase::Available(i)) => fill(
+                u::FROM_TO,
+                &[("current", version::CURRENT), ("version", &i.version)],
+            ),
+            Some(Phase::Downloading { info, done, total }) => {
+                let total = if *total == 0 { info.size } else { *total };
+                fill(
+                    u::DOWNLOAD_PROGRESS,
+                    &[
+                        ("percent", &version::percent(*done, total).to_string()),
+                        ("done", &megabytes(*done)),
+                        ("total", &megabytes(total)),
+                    ],
+                )
+            }
             Some(Phase::Manual(_)) => u::BANNER_MANUAL.to_string(),
             Some(other) => banner_text(other).unwrap_or_default(),
         };
-        let row = FormRow::new(fill(u::VERSION, &[("version", version::CURRENT)])).detail(detail);
-        let Some(updater) = self.updater.clone() else {
-            return row;
+        let title = fill(u::VERSION_TITLE, &[("version", version::CURRENT)]);
+        let share = phase
+            .as_ref()
+            .and_then(crate::updater::banner::download_share);
+        let version_row = |control: Option<gpui::AnyElement>| {
+            div()
+                .w_full()
+                .min_h(height::FORM_ROW_TWO)
+                .px(metrics::FORM_ROW_INSET)
+                .py(space::S12)
+                .flex()
+                .items_center()
+                .gap(space::S12)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(gpui::Pixels::ZERO)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
+                        .child(div().n_body().text_color(k.label).child(title.clone()))
+                        .child(
+                            div()
+                                .n_subheadline()
+                                .n_figures()
+                                .text_color(k.secondary)
+                                .child(detail.clone()),
+                        )
+                        // A download shows its Progress under the detail.
+                        .children(share.map(|v| div().pt(space::S4).child(progress(v, cx)))),
+                )
+                .children(control.map(|c| div().flex_none().child(c)))
+                .into_any_element()
         };
-        match phase {
-            Some(Phase::Available(i)) | Some(Phase::Failed { info: Some(i), .. }) => row.control(
-                push_button(
-                    "about-update",
-                    fill(u::UPDATE_TO, &[("version", &i.version)]),
-                    PushStyle::Default,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.start_update(cx))),
-            ),
-            Some(ref p @ Phase::Downloading { .. }) => {
-                row.control(div().w(px(120.)).child(determinate_bar(
-                    crate::updater::banner::download_share(p).unwrap_or(0.),
-                    None,
-                    cx,
-                )))
+        let Some(updater) = self.updater.clone() else {
+            return vec![version_row(None)];
+        };
+        let sm = |id: &'static str, label: SharedString, style: PushStyle, cx: &App| {
+            push_button(id, label, style, PushSize::Small, cx)
+        };
+        let mut rows = Vec::new();
+        let control: gpui::AnyElement = match phase.clone() {
+            Some(Phase::Available(i)) => sm(
+                "about-update",
+                fill(u::UPDATE_TO, &[("version", &i.version)]).into(),
+                PushStyle::Default,
+                cx,
+            )
+            .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.start_update(cx)))
+            .into_any_element(),
+            Some(Phase::Failed { info: Some(_), .. }) => {
+                sm("about-retry", u::RETRY.into(), PushStyle::Outline, cx)
+                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.start_update(cx)))
+                    .into_any_element()
             }
-            Some(Phase::Ready { .. }) => row.control(
-                push_button(
-                    "about-restart",
-                    o::UPDATE_RESTART,
-                    PushStyle::Default,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.install_now(cx))),
-            ),
-            Some(Phase::WaitingForSends(_) | Phase::Installing(_) | Phase::Checking) => {
-                row.control(spinner().with_size(metrics::SPINNER).color(k.secondary))
+            Some(Phase::Downloading { .. }) => sm(
+                "about-cancel-download",
+                u::CANCEL_DOWNLOAD.into(),
+                PushStyle::Outline,
+                cx,
+            )
+            .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.cancel_download(cx)))
+            .into_any_element(),
+            Some(Phase::Ready { .. }) => sm(
+                "about-restart",
+                o::UPDATE_RESTART.into(),
+                PushStyle::Default,
+                cx,
+            )
+            .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.install_now(cx)))
+            .into_any_element(),
+            Some(Phase::WaitingForSends(_) | Phase::Installing(_)) => spinner()
+                .with_size(metrics::SPINNER)
+                .color(k.secondary)
+                .into_any_element(),
+            Some(Phase::Manual(_)) => {
+                sm("about-dismiss", u::DISMISS.into(), PushStyle::Outline, cx)
+                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx)))
+                    .into_any_element()
             }
-            Some(Phase::Manual(_)) => row.control(
-                push_button(
-                    "about-dismiss",
-                    u::DISMISS,
-                    PushStyle::Outline,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
-            ),
-            Some(Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. }) | None => row
-                .control(
-                    push_button(
-                        "about-check",
-                        u::CHECK,
-                        PushStyle::Outline,
+            Some(Phase::Checking) => disabled_push(
+                sm("about-check", u::CHECK.into(), PushStyle::Outline, cx),
+                true,
+                cx,
+            )
+            .loading(true)
+            .into_any_element(),
+            Some(Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. }) | None => {
+                sm("about-check", u::CHECK.into(), PushStyle::Outline, cx)
+                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.check_now(cx)))
+                    .into_any_element()
+            }
+        };
+        rows.push(version_row(Some(control)));
+        if let Some(Phase::Manual(_)) = &phase {
+            let line = |t: String| {
+                div()
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .whitespace_nowrap()
+                    .child(t)
+            };
+            rows.push(
+                dependent()
+                    .flex_col()
+                    .items_start()
+                    .gap(space::S4)
+                    .child(line(u::MANUAL_STEPS.to_string()))
+                    .child(line(fill(u::MANUAL_STEP_1, &[("product", product)])))
+                    .child(line(fill(u::MANUAL_STEP_2, &[("product", product)])))
+                    .child(line(fill(u::MANUAL_STEP_3, &[("product", product)])))
+                    .into_any_element(),
+            );
+        }
+        // 查看更新内容: a navigation row when the update has notes.
+        if let Some(info) = phase.as_ref().and_then(|p| p.info()).cloned()
+            && !info.notes.trim().is_empty()
+        {
+            rows.push(nav_row(
+                "about-notes",
+                u::NOTES,
+                None,
+                window,
+                cx,
+                move |window, cx| open_notes(info.clone(), window, cx),
+            ));
+        }
+        rows
+    }
+}
+
+/// Megabytes with one decimal under 10 MB (2.21: tabular, separators).
+fn megabytes(bytes: u64) -> String {
+    let mb = bytes as f64 / (1024. * 1024.);
+    if mb < 10. {
+        format!("{mb:.1}")
+    } else {
+        widgets::grouped(mb.round() as u64)
+    }
+}
+
+/// A dependent row of a group (2.8): full width under its parent row.
+fn dependent() -> gpui::Div {
+    div()
+        .w_full()
+        .px(metrics::FORM_ROW_INSET)
+        .py(space::S12)
+        .flex()
+        .items_center()
+}
+
+/// A navigation row (2.8): the label, an optional 14 muted value and a
+/// chevron-right 16 muted; the whole row opens what it names.
+pub fn nav_row(
+    id: &'static str,
+    label: &'static str,
+    value: Option<String>,
+    window: &Window,
+    cx: &App,
+    open: impl Fn(&mut Window, &mut App) + 'static,
+) -> gpui::AnyElement {
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    let k = native_colors(cx);
+    div()
+        .id(id)
+        .w_full()
+        .h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .cursor_pointer()
+        .hover(|d| d.bg(k.fill.opacity(0.5)))
+        .on_click(move |_, window, cx| open(window, cx))
+        .child(div().flex_1().n_body().text_color(k.label).child(label))
+        .children(value.map(|v| {
+            div()
+                .flex_none()
+                .n_body()
+                .n_figures()
+                .text_color(k.secondary)
+                .child(v)
+        }))
+        .child(crate::ui::sf_symbols::symbol(
+            crate::ui::sf_symbols::Sf::ChevronRight,
+            crate::ui::native::tokens::icon::MD,
+            crate::ui::sf_symbols::Weight::Regular,
+            k.secondary,
+            window,
+        ))
+        .into_any_element()
+}
+
+/// 查看更新内容: the notes of an update in a sheet.
+fn open_notes(info: chat_core::proto::UpdateInfo, window: &mut Window, cx: &mut App) {
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    widgets::open_sheet(
+        window,
+        cx,
+        SheetWidth::Form,
+        crate::ui::native::tokens::layout::WINDOW_MIN_HEIGHT * 0.66,
+        move |dialog, _, cx| {
+            let k = native_colors(cx);
+            let notes = info.notes.trim().to_string();
+            dialog.on_ok(|_, _, _| true).child(
+                SheetLayout::new(fill(u::NOTES_TITLE, &[("version", &info.version)]))
+                    .explanation(u::NOTES_DESCRIPTION)
+                    .body(
+                        div()
+                            .id("update-notes")
+                            .w_full()
+                            .max_h(metrics::SHEET_WIDE / 2.)
+                            .overflow_y_scroll()
+                            .p(metrics::FORM_ROW_INSET)
+                            .rounded(metrics::GROUP_RADIUS)
+                            .border_1()
+                            .border_color(k.separator)
+                            .bg(k.group)
+                            .n_body()
+                            .text_color(k.label)
+                            .child(notes),
+                    )
+                    .buttons([push_button(
+                        "update-notes-ok",
+                        u::NOTES_OK,
+                        PushStyle::Default,
                         PushSize::Regular,
                         cx,
                     )
-                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.check_now(cx))),
-                ),
-        }
-    }
+                    .on_click(|_, window, cx| window.close_dialog(cx))]),
+            )
+        },
+    );
 }
 
 impl Render for GeneralPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = native_colors(cx);
         let p = prefs::get();
         let developer = self.services.nav.read(cx).developer_view;
         let server = self.server();
@@ -314,10 +507,10 @@ impl Render for GeneralPage {
                     window.refresh();
                 })
         };
-        let launch = popup_button(
+        let launch = widgets::popup_fixed(
             "general-launch",
             launch_title,
-            PushSize::Regular,
+            crate::ui::native::tokens::size::SELECT_WIDTH,
             window,
             cx,
         )
@@ -335,39 +528,49 @@ impl Render for GeneralPage {
                     )
                 })
         });
-        let options = GroupedForm::new()
-            .row(FormRow::new(s::ON_LAUNCH).control(launch))
-            .row(FormRow::new(s::LAUNCH_AT_LOGIN).control(switch(
-                "general-login",
-                p.launch_at_login,
-                s::LAUNCH_AT_LOGIN,
-                |p, v| p.launch_at_login = v,
-            )))
-            .row(FormRow::new(s::MENU_BAR).control(switch(
-                "general-menu-bar",
-                p.menu_bar,
-                s::MENU_BAR,
-                |p, v| p.menu_bar = v,
-            )))
-            .row(FormRow::new(s::SOUND).control(switch(
+        let startup = widgets::section(
+            SectionTitle::new(s::SECTION_STARTUP),
+            GroupedForm::new()
+                .row(FormRow::new(s::ON_LAUNCH).control(launch))
+                .row(FormRow::new(s::LAUNCH_AT_LOGIN).control(switch(
+                    "general-login",
+                    p.launch_at_login,
+                    s::LAUNCH_AT_LOGIN,
+                    |p, v| p.launch_at_login = v,
+                )))
+                .row(FormRow::new(s::MENU_BAR).control(switch(
+                    "general-menu-bar",
+                    p.menu_bar,
+                    s::MENU_BAR,
+                    |p, v| p.menu_bar = v,
+                ))),
+        );
+        let alerts = widgets::section(
+            SectionTitle::new(s::SECTION_ALERTS),
+            GroupedForm::new().row(FormRow::new(s::SOUND).control(switch(
                 "general-sound",
                 p.sound,
                 s::SOUND,
                 |p, v| p.sound = v,
-            )));
-        let nav = self.services.nav.clone();
-        let mut about = GroupedForm::new().row(self.update_row(cx));
-        if let Some(up) = &self.updater
-            && matches!(up.read(cx).phase(), Phase::Manual(_))
-        {
-            about = about.footer(fill(u::MANUAL, &[("product", env!("PRODUCT_NAME"))]));
-        }
+            ))),
+        );
+        let mut about = GroupedForm::new().rows(self.update_rows(window, cx));
         if !server.is_empty() {
-            about = about.row(FormRow::new(s::SERVER).value(server.clone(), cx));
+            about = about.row(FormRow::new(s::SERVER).control(value_with_copy(
+                "general-server",
+                server.clone(),
+                s::COPY_SERVER,
+                false,
+                window,
+                cx,
+            )));
         }
+        let version = widgets::section(SectionTitle::new(s::SECTION_VERSION), about);
+        let nav = self.services.nav.clone();
         let mut dev_group = GroupedForm::new().row(
             FormRow::new(s::DEVELOPER_VIEW)
                 .detail(s::DEVELOPER_VIEW_HINT)
+                .min_height(height::FORM_ROW_TWO)
                 .control(
                     NativeSwitch::new("developer-view", developer)
                         .name(s::DEVELOPER_VIEW)
@@ -398,47 +601,145 @@ impl Render for GeneralPage {
                 SessionState::SignedIn { me, .. } => me.id,
                 _ => String::new(),
             };
-            dev_group = dev_group
-                .row(FormRow::new(fill(
-                    dev::CONNECTION,
-                    &[("state", &connection)],
-                )))
-                .row(FormRow::new(fill(dev::SERVER, &[("url", &server)])))
-                .row(FormRow::new(fill(dev::MEMBER_ID, &[("id", &me)])));
+            for (id, label, value) in [
+                ("dev-connection", dev::LABEL_CONNECTION, connection),
+                ("dev-server", dev::LABEL_SERVER, server.clone()),
+                ("dev-member", dev::LABEL_MEMBER_ID, me),
+            ] {
+                dev_group = dev_group.row(dev_row(id, label, value, window, cx));
+            }
         }
         let page = cx.entity();
+        let diagnostics = disabled_push(
+            push_button(
+                "diagnostics-open",
+                s::DIAGNOSTICS_OPEN,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            ),
+            server.is_empty(),
+            cx,
+        )
+        .on_click(move |_, window, cx| Self::open_diagnostics(page.clone(), window, cx));
+        let retry_page = cx.entity();
+        let developer_section = widgets::section(
+            SectionTitle::new(s::SECTION_DEVELOPER)
+                .description(s::SECTION_DEVELOPER_HINT)
+                .action(diagnostics),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::S12)
+                .child(dev_group)
+                // The answer of the last 发送诊断 (the sheet shows it while
+                // it is open).
+                .children(match &self.status {
+                    Status::Done(t) => Some(widgets::quiet(t.clone(), cx).into_any_element()),
+                    Status::Failed(t) => Some(widgets::failed_alert(
+                        "diagnostics-failed",
+                        s::DIAGNOSTICS_FAILED,
+                        Some(t.clone()),
+                        Some(widgets::retry_button("diagnostics-retry", cx).on_click(
+                            move |_, window, cx| {
+                                Self::open_diagnostics(retry_page.clone(), window, cx)
+                            },
+                        )),
+                        cx,
+                    )),
+                    _ => None,
+                }),
+        );
+        let _ = k;
         widgets::pane()
-            .child(options)
-            .child(about)
-            .child(dev_group)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(crate::ui::native::tokens::space::S6)
-                    .child(
-                        div().flex().child(
-                            disabled_push(
-                                push_button(
-                                    "diagnostics-open",
-                                    s::DIAGNOSTICS_OPEN,
-                                    PushStyle::Outline,
-                                    PushSize::Regular,
-                                    cx,
-                                ),
-                                server.is_empty(),
-                                cx,
-                            )
-                            .on_click(move |_, window, cx| {
-                                Self::open_diagnostics(page.clone(), window, cx)
-                            }),
-                        ),
-                    )
-                    .children(
-                        (!matches!(self.status, Status::Idle))
-                            .then(|| widgets::native_status(&self.status, cx))
-                            .flatten(),
-                    ),
-            )
+            .child(startup)
+            .child(alerts)
+            .child(version)
+            .child(developer_section)
     }
+}
+
+/// A trailing value with its copy button (2.19): 14 muted (13 mono for a
+/// developer value), truncating with a tooltip, then a ghost 28 copy.
+fn value_with_copy(
+    id: &'static str,
+    value: String,
+    name: &'static str,
+    mono: bool,
+    window: &Window,
+    cx: &App,
+) -> gpui::Div {
+    use gpui::{ClipboardItem, InteractiveElement as _, StatefulInteractiveElement as _};
+    let k = native_colors(cx);
+    let tip: SharedString = value.clone().into();
+    let copy = value.clone();
+    div()
+        .min_w(gpui::Pixels::ZERO)
+        .max_w(crate::ui::native::tokens::size::SETTINGS_VALUE_MAX)
+        .flex()
+        .items_center()
+        .gap(space::S4)
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-value")))
+                .min_w(gpui::Pixels::ZERO)
+                .map(|d| if mono { d.t_code() } else { d.n_body() })
+                .text_color(if mono { k.label } else { k.secondary })
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                })
+                .child(value),
+        )
+        .child(
+            icon_button(
+                SharedString::from(format!("{id}-copy")),
+                crate::ui::Sym::Copy,
+                name,
+                IconSize::Small,
+                window,
+                cx,
+            )
+            .on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+            }),
+        )
+}
+
+/// A developer row (2.19 DescriptionList): the label 14 muted in the 112
+/// column, the value 13 mono, the copy button at the trailing edge.
+fn dev_row(
+    id: &'static str,
+    label: &'static str,
+    value: String,
+    window: &Window,
+    cx: &App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .w_full()
+        .h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .flex()
+        .items_center()
+        .gap(metrics::LABEL_GAP)
+        .child(
+            div()
+                .flex_none()
+                .w(metrics::LABEL_COLUMN)
+                .n_body()
+                .text_color(k.secondary)
+                .child(label),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
+                .flex()
+                .justify_start()
+                .child(value_with_copy(id, value, s::COPY_VALUE, true, window, cx)),
+        )
 }

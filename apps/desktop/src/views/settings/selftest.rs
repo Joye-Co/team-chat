@@ -689,7 +689,11 @@ fn after_fit(
 }
 
 /// A pane scrolled to its end after its first layout.
-fn open_end(services: Services, page: Page, cx: &mut App) -> Result<AnyWindowHandle, String> {
+pub(crate) fn open_end(
+    services: Services,
+    page: Page,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, page, cx)?;
     handle
         .update(cx, |_, window, _| {
@@ -727,6 +731,8 @@ pub fn open_notifications_end(
                 cx,
             )
         });
+        // The pane is taller than the window: show its end (按群).
+        view.read(cx).scroll_to_end();
     });
     Ok(handle)
 }

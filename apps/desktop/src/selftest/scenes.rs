@@ -289,7 +289,7 @@ pub const SCENES: &[Scene] = &[
                 .nav
                 .update(cx, |nav, cx| nav.set_developer_view(true, cx))
         },
-        open: settings_scenes::open_about,
+        open: crate::updater::preview::open_up_to_date_end,
     },
     Scene {
         name: "update",
