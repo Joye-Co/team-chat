@@ -12,7 +12,7 @@ use crate::{
     copy::{cards_v2 as c, fill},
     data::cards_v2::{CardActionKind, CardIntent, CardV2Block, CardV2Message},
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, PushStyle, Ring, Sym, native::NativeType as _},
+    ui::{self, PushStyle, Sym, native::NativeType as _},
 };
 
 /// The state overview: the strip, then the title on one line.
@@ -32,7 +32,7 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
                 .text_color(n.label)
                 .one_line()
                 .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
-                .child(ctx.card.title.clone()),
+                .child(super::one_line_text(&ctx.card.title)),
         )
         .into_any_element()
 }
@@ -86,6 +86,8 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
         .w(px(380.))
         .rounded(px(16.))
         .bg(k.bg)
+        .border_1()
+        .border_color(k.line)
         .shadow(k.pop())
         .p(space::S14)
         .flex()
@@ -238,12 +240,22 @@ pub fn plan_row(
             .gap(space::S10)
             .h(crate::ui::native::tokens::height::LG)
             .px(space::S12)
-            .rounded(ui::native::cards::card::RADIUS)
-            .bg(ui::native::native_colors(cx).fill)
+            .rounded(crate::ui::native::tokens::radius::CONTROL)
+            .border_1()
+            .border_color(ui::native::native_colors(cx).separator)
+            .bg(ui::native::native_colors(cx).content)
             .n_body()
-            .child(
-                ui::MemberAvatar::new(member.as_ref(), m::TILE).ring(working.then_some(Ring::Live)),
-            )
+            // Work in progress is the working loader (§2.12), not a ring on the avatar.
+            .child(ui::MemberAvatar::new(member.as_ref(), m::TILE))
+            .when(working, |el| {
+                el.child(
+                    gpui_component::Sizable::with_size(
+                        ui::motion::spinner(),
+                        crate::ui::native::tokens::icon::SM,
+                    )
+                    .color(ui::native::native_colors(cx).blue),
+                )
+            })
             .child(
                 div()
                     .min_w(px(0.))

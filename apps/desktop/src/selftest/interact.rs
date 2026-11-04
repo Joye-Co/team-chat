@@ -45,6 +45,11 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-hover-message", hover(400., 250., 600)),
     ("state-focus-tab", keys(&["tab"])),
     // --- end t5 ---
+    // --- t5-cards ---
+    ("state-card-option-hover", hover(1011., 290., 400)),
+    ("state-card-button-hover", hover(667., 320., 400)),
+    ("state-card-tooltip", hover(900., 530., 1200)),
+    // --- end t5-cards ---
 ];
 
 /// The steps of scene `name`, if it has any.

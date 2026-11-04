@@ -13,7 +13,7 @@ use crate::{
     app::Services,
     copy::cards21 as c,
     fake::v2::{ME, XIAOWANG},
-    theme::{self, Type as _, space},
+    theme::{self, Type as _, card_v2 as m, space},
     views::cards::v2::{
         CardEnv, CardMode,
         form::{Preset, Val},
@@ -81,17 +81,12 @@ impl Gallery21 {
 }
 
 /// A captioned example.
-fn item(
-    caption: &str,
-    note: &str,
-    el: Option<AnyElement>,
-    width: Option<f32>,
-    cx: &App,
-) -> AnyElement {
+fn item(caption: &str, note: &str, el: Option<AnyElement>, fixed: bool, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
+    // Every example is one card width (§2.4, F66).
     div()
         .min_w(px(0.))
-        .when_some(width, |el, w| el.w(px(w)).flex_none())
+        .when(fixed, |el| el.w(m::MAX_WIDTH).flex_none())
         .child(
             meta(div())
                 .mb(space::S8)
@@ -113,9 +108,8 @@ fn item(
 
 fn column(items: Vec<AnyElement>) -> AnyElement {
     div()
-        .flex_1()
-        .min_w(px(0.))
-        .max_w(px(600.))
+        .flex_none()
+        .w(m::MAX_WIDTH)
         .flex()
         .flex_col()
         .gap(space::S24)
@@ -175,14 +169,14 @@ impl Gallery21 {
                             preset(vec![("perm", Val::Choice(vec!["same".into()])),]),
                             "a"
                         ),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_METRICS_APPROVE,
                         c::G_METRICS_APPROVE_NOTE,
                         card!(HEALTH, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -191,28 +185,28 @@ impl Gallery21 {
                         c::G_COMPARE,
                         c::G_COMPARE_NOTE,
                         card!(COMPARE, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_GROUP,
                         c::G_GROUP_NOTE,
                         card!(GROUPS, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_READONLY,
                         c::G_READONLY_NOTE,
                         card!(QUESTIONNAIRE, XIAOWANG, None, "ro"),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_VOID,
                         c::G_VOID_NOTE,
                         card!(VOID, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -232,7 +226,7 @@ impl Gallery21 {
                             ]),
                             "a"
                         ),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
@@ -253,7 +247,7 @@ impl Gallery21 {
                             ),]),
                             "a"
                         ),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -270,14 +264,14 @@ impl Gallery21 {
                             ),]),
                             "a"
                         ),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_RATING,
                         c::G_RATING_NOTE,
                         card!(RATING, me, preset(vec![("clear", Val::Num(4.)),]), "a"),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -294,14 +288,14 @@ impl Gallery21 {
                             preset(vec![("cover", Val::Choice(vec!["B".into()])),]),
                             "a"
                         ),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_CONFIRM,
                         c::G_CONFIRM_NOTE,
                         card!(CONFIRM, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -310,7 +304,7 @@ impl Gallery21 {
                         c::G_FAILED,
                         c::G_FAILED_NOTE,
                         card!(FAILED, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
@@ -334,7 +328,7 @@ impl Gallery21 {
                             }),
                             "a"
                         ),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -350,14 +344,14 @@ impl Gallery21 {
                         preset(vec![("when", Val::Choice(vec!["t4".into()])),]),
                         "a"
                     ),
-                    None,
+                    false,
                     cx,
                 )];
                 let right = vec![item(
                     c::G_POLL,
                     c::G_POLL_NOTE,
                     card!(POLL, me, None, "a"),
-                    None,
+                    false,
                     cx,
                 )];
                 (column(left), column(right))
@@ -368,14 +362,14 @@ impl Gallery21 {
                         c::G_BUTTONS,
                         c::G_BUTTONS_NOTE,
                         card!(BUTTONS, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_DIAGRAM,
                         c::G_DIAGRAM_NOTE,
                         card!(DIAGRAM, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -384,14 +378,14 @@ impl Gallery21 {
                         c::G_EMBED,
                         c::G_EMBED_NOTE,
                         card!(EMBED, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                     item(
                         c::G_UNKNOWN,
                         c::G_UNKNOWN_NOTE,
                         card!(UNKNOWN, me, None, "a"),
-                        None,
+                        false,
                         cx,
                     ),
                 ];
@@ -401,8 +395,8 @@ impl Gallery21 {
                 item(
                     c::I_REPORT,
                     c::I_REPORT_NOTE,
-                    self.card(REPORT, me, None, "wide", CardMode::Topic, window, cx),
-                    Some(720.),
+                    self.card(REPORT, me, None, "wide", CardMode::Desk, window, cx),
+                    true,
                     cx,
                 ),
                 item(
@@ -413,41 +407,42 @@ impl Gallery21 {
                         me,
                         preset(vec![("check", Val::Choice(vec!["wrong".into()]))]),
                         "narrow",
-                        CardMode::Topic,
+                        CardMode::Desk,
                         window,
                         cx,
                     ),
-                    Some(480.),
+                    true,
                     cx,
                 ),
             ),
             Page::Pending => {
-                let cards = div()
+                let left = div()
                     .flex()
+                    .flex_col()
                     .gap(space::S24)
                     .child(item(
                         c::I_PENDING_FAST,
                         "",
-                        self.card(PEND_WAIT, me, None, "a", CardMode::Topic, window, cx),
-                        Some(380.),
-                        cx,
-                    ))
-                    .child(item(
-                        c::I_PENDING_SOFT,
-                        "",
-                        self.card(PEND_SLOW, me, None, "a", CardMode::Topic, window, cx),
-                        Some(380.),
+                        self.card(PEND_WAIT, me, None, "a", CardMode::Desk, window, cx),
+                        true,
                         cx,
                     ))
                     .child(item(
                         c::I_PENDING_HARD,
                         "",
-                        self.card(PEND_HARD, me, None, "a", CardMode::Topic, window, cx),
-                        Some(380.),
+                        self.card(PEND_HARD, me, None, "a", CardMode::Desk, window, cx),
+                        true,
                         cx,
                     ))
                     .into_any_element();
-                (cards, div().into_any_element())
+                let right = item(
+                    c::I_PENDING_SOFT,
+                    "",
+                    self.card(PEND_SLOW, me, None, "a", CardMode::Desk, window, cx),
+                    true,
+                    cx,
+                );
+                (left, right)
             }
             Page::Drill => {
                 let prev = || {
@@ -460,23 +455,15 @@ impl Gallery21 {
                     item(
                         c::I_DRILL_SELF,
                         c::I_DRILL_NOTE,
-                        self.card(DRILL, me, prev(), "self", CardMode::Topic, window, cx),
-                        Some(560.),
+                        self.card(DRILL, me, prev(), "self", CardMode::Desk, window, cx),
+                        true,
                         cx,
                     ),
                     item(
                         c::I_DRILL_OTHER,
                         c::I_DRILL_OTHER_NOTE,
-                        self.card(
-                            DRILL,
-                            XIAOWANG,
-                            prev(),
-                            "other",
-                            CardMode::Topic,
-                            window,
-                            cx,
-                        ),
-                        Some(560.),
+                        self.card(DRILL, XIAOWANG, prev(), "other", CardMode::Desk, window, cx),
+                        true,
                         cx,
                     ),
                 )
@@ -494,18 +481,18 @@ impl Gallery21 {
                             ..Default::default()
                         }),
                         "a",
-                        CardMode::Topic,
+                        CardMode::Desk,
                         window,
                         cx,
                     ),
-                    Some(640.),
+                    true,
                     cx,
                 ),
                 div().into_any_element(),
             ),
             Page::Notes => {
                 let cell = |caption: &'static str, el: Option<AnyElement>, cx: &mut App| {
-                    item(caption, "", el, Some(420.), cx)
+                    item(caption, "", el, true, cx)
                 };
                 let left = div()
                     .flex()
@@ -513,7 +500,7 @@ impl Gallery21 {
                     .gap(space::S24)
                     .child(cell(
                         c::I_NOTES_OFFLINE,
-                        self.card(NOTE_OFFLINE, me, None, "a", CardMode::Topic, window, cx),
+                        self.card(NOTE_OFFLINE, me, None, "a", CardMode::Desk, window, cx),
                         cx,
                     ))
                     .child(cell(
@@ -527,7 +514,7 @@ impl Gallery21 {
                                 ..Default::default()
                             }),
                             "a",
-                            CardMode::Topic,
+                            CardMode::Desk,
                             window,
                             cx,
                         ),
@@ -540,12 +527,12 @@ impl Gallery21 {
                     .gap(space::S24)
                     .child(cell(
                         c::I_NOTES_BUSY,
-                        self.card(NOTE_BUSY, me, None, "a", CardMode::Topic, window, cx),
+                        self.card(NOTE_BUSY, me, None, "a", CardMode::Desk, window, cx),
                         cx,
                     ))
                     .child(cell(
                         c::I_NOTES_REPLY,
-                        self.card(NOTE_REPLY, me, None, "a", CardMode::Topic, window, cx),
+                        self.card(NOTE_REPLY, me, None, "a", CardMode::Desk, window, cx),
                         cx,
                     ))
                     .into_any_element();
@@ -555,8 +542,8 @@ impl Gallery21 {
                 item(
                     c::I_READONLY,
                     c::I_READONLY_NOTE,
-                    self.card(REPORT, XIAOWANG, None, "ro", CardMode::Topic, window, cx),
-                    Some(720.),
+                    self.card(REPORT, XIAOWANG, None, "ro", CardMode::Desk, window, cx),
+                    true,
                     cx,
                 ),
                 div().into_any_element(),
@@ -588,15 +575,14 @@ impl Render for Gallery21 {
                 .gap(space::S6)
                 .child(
                     div()
-                        .text_size(px(17.))
-                        .line_height(px(24.))
+                        .text_size(crate::ui::native::tokens::text::HEADING.0)
+                        .line_height(crate::ui::native::tokens::text::HEADING.1)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(k.ink)
                         .child(c::G_TITLE),
                 )
                 .child(
                     div()
-                        .max_w(px(760.))
                         .text_size(crate::ui::native::tokens::text::UI.0)
                         .line_height(px(22.))
                         .text_color(k.ink_2)
@@ -612,8 +598,7 @@ impl Render for Gallery21 {
             .px(px(40.))
             .child(
                 div()
-                    .w_full()
-                    .max_w(px(1232.))
+                    .w(m::MAX_WIDTH * 2. + space::S16)
                     .mx_auto()
                     .flex()
                     .flex_col()
@@ -631,7 +616,7 @@ impl Render for Gallery21 {
                                     .mt(space::S20)
                                     .flex()
                                     .items_start()
-                                    .gap(space::S32)
+                                    .gap(space::S16)
                                     .child(left)
                                     .child(right),
                             ),

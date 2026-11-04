@@ -16,7 +16,7 @@ use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, ObjectFit, ParentElement, Render,
     SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Subscription, Window,
-    div, img, prelude::FluentBuilder as _, px, relative,
+    div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _,
@@ -198,50 +198,31 @@ fn after_pick(node: &Node, block: &str, cx: &mut App) {
     }
 }
 
-/// An option row (NATIVE.md §5.4): a radio button, or a checkbox when
-/// several may be chosen, the label with `推荐` in `secondary` right after
-/// it, and the detail at the trailing edge. One 24 pt row, no box, no
-/// letter; the row takes the click.
+/// An option row: the shared choice row of §2.17 (h40, border, the letter
+/// box or a checkbox); the row takes the click.
 #[allow(clippy::too_many_arguments)]
 fn option_row(
     id: SharedString,
+    index: usize,
     label: &str,
     detail: Option<&str>,
     recommended: bool,
     picked: bool,
     multiple: bool,
-    dimmed: bool,
+    enabled: bool,
     cx: &App,
 ) -> gpui::Stateful<Div> {
-    use crate::ui::native::{self as nk, NativeType as _};
-    let n = nk::native_colors(cx);
-    let control = if multiple {
-        nk::NativeCheckbox::new(SharedString::from(format!("{id}-c")), picked).into_any_element()
-    } else {
-        nk::NativeRadio::new(SharedString::from(format!("{id}-c")), picked).into_any_element()
-    };
-    div()
-        .id(id)
-        .w_full()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .min_h(px(24.))
-        .when(dimmed, |el| el.opacity(0.45))
-        .n_body()
-        .text_color(n.label)
-        .child(control)
-        .child(b20::option_title(label, recommended, cx).flex_1())
-        .when_some(detail, |el, d| {
-            el.child(
-                div()
-                    .flex_none()
-                    .max_w(relative(0.45))
-                    .one_line()
-                    .text_color(n.secondary)
-                    .child(d.to_string()),
-            )
-        })
+    b20::choice_row(
+        id,
+        index,
+        label,
+        detail,
+        recommended,
+        picked,
+        multiple,
+        enabled,
+        cx,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -269,19 +250,8 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
     let max = max_select.unwrap_or(options.len() as u32) as usize;
     let full = multiple && picked.len() >= max;
     let recommended = default.as_deref().unwrap_or(&[]);
-    // Two or three short options are one row of Regular push buttons (NATIVE.md §5.2):
-    // the recommended one in the Default style, the chosen one with a checkmark. More,
-    // several at once, 其他 or a narrow column of a row: radio rows (Interact.dc.html 01).
-    let side_by_side = !multiple
-        && allow_other.is_none()
-        && (2..=3).contains(&options.len())
-        && options.iter().all(|o| {
-            o.label.chars().count() + o.detail.as_deref().map_or(0, |d| d.chars().count())
-                <= SHORT_OPTION
-        })
-        && !in_row_column(node, id);
+    // Every choice is a RadioGroup of h40 rows (§2.17), short or long.
     let mut col = div().flex().flex_col().gap(space::S8).min_w(px(0.));
-    let mut pair = div().flex().flex_wrap().gap(space::S8).min_w(px(0.));
     let mut all: Vec<(String, String, Option<String>, bool)> = options
         .iter()
         .map(|o| {
@@ -296,37 +266,18 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
     if let Some(o) = allow_other {
         all.push((form21::OTHER.into(), o.label.clone(), None, false));
     }
-    for (oid, label, detail, rec) in all.iter() {
+    for (i, (oid, label, detail, rec)) in all.iter().enumerate() {
         let on = live && picked.contains(oid);
         let dimmed = live && full && !on;
-        if side_by_side {
-            let mut button = b20::option_button(
-                eid(node, format!("opt-{id}-{oid}")),
-                label,
-                *rec,
-                on,
-                live,
-                cx,
-            );
-            if live {
-                let (form, block, option) = (ctx.form.clone(), id.clone(), oid.clone());
-                let node_ptr = PickTarget::of(node);
-                button = button.on_click(move |_, _, cx| {
-                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                    node_ptr.after(&block, cx);
-                });
-            }
-            pair = pair.child(button);
-            continue;
-        }
         let mut row = option_row(
             eid(node, format!("opt-{id}-{oid}")),
+            i,
             label,
             detail.as_deref(),
             *rec,
             on,
             multiple,
-            dimmed,
+            live && !dimmed,
             cx,
         );
         if live && !dimmed {
@@ -383,9 +334,6 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
             );
         }
     }
-    if side_by_side {
-        col = col.child(pair);
-    }
     if multiple && live {
         let min = min_select.unwrap_or(1);
         col = col.child(hint(
@@ -406,10 +354,6 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
     }
     framed(node, b, col.into_any_element(), cx)
 }
-
-/// The longest option (label and detail, in characters) that still counts as short: the
-/// 2.0 quick choice's limit.
-const SHORT_OPTION: usize = 16;
 
 /// True when `id` sits in a column of a `row` that is drawn side by side (not folded).
 fn in_row_column(node: &Node, id: &str) -> bool {
@@ -562,6 +506,8 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .flex_col()
         .p(space::S4)
         .rounded(crate::ui::native::tokens::radius::CONTROL)
+        .border_1()
+        .border_color(crate::ui::native::native_colors(cx).separator)
         .bg(crate::ui::native::native_colors(cx).fill)
         .min_w(px(0.));
     if live {
@@ -869,17 +815,24 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .id(eid(node, format!("scale-{id}-{n}")))
             .flex_1()
             .min_w(px(0.))
-            .h(px(24.))
-            // A segment-like cell (NATIVE.md §5.5): `fill`, the chosen one in `accent`;
-            // no outlines, no hover.
+            .h(crate::ui::native::tokens::height::SM)
+            // An sm h28 cell with a 1 px border (§1.8): the chosen one in `primary`,
+            // hover muted at 50%.
             .rounded(crate::ui::native::tokens::radius::ITEM)
-            .bg(if on { nk.accent } else { nk.fill })
+            .border_1()
+            .border_color(if on { nk.primary } else { nk.separator })
+            .bg(if on { nk.primary } else { nk.content })
+            .when(live && !on, |el| {
+                let hover = theme::card_v2::alpha(nk.fill, 0.5);
+                el.hover(move |s| s.bg(hover))
+            })
+            .when(!live, |el| el.opacity(0.5))
             .flex()
             .items_center()
             .justify_center()
             .n_body()
             .n_figures()
-            .text_color(if on { nk.on_accent } else { nk.label })
+            .text_color(if on { nk.on_primary } else { nk.label })
             .when(live, |el| {
                 el.on_click(move |_, _, cx| {
                     form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
@@ -1023,15 +976,14 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         return div().into_any_element();
     };
     let ctx = node.ctx;
-    let k = theme::colors(cx);
     let live = live(node, b);
     let multiple = multiple.unwrap_or(false);
     let picked = ctx.form.read(cx).choice(id).to_vec();
     let target = PickTarget::of(node);
     let grid = div()
         .flex()
-        .gap(space::S10)
-        .children(options.iter().enumerate().map(|(i, o)| {
+        .gap(space::S12)
+        .children(options.iter().map(|o| {
             let on = picked.contains(&o.id);
             let path =
                 ctx.env
@@ -1061,9 +1013,9 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         .h(t::IMAGE)
                         .rounded(crate::ui::native::tokens::radius::CONTROL)
                         .overflow_hidden()
-                        .bg(k.ph[i % k.ph.len()])
-                        .when_some(path, |el, p| {
-                            el.child(img(p).size_full().object_fit(ObjectFit::Cover))
+                        .map(|el| match path {
+                            Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                            None => b20::missing_image(el, cx),
                         })
                         .when(on, |el| {
                             el.child(
@@ -1274,11 +1226,13 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .min_w(px(0.))
             .h(t::SLOT_CELL)
             .px(space::S10)
-            // A quiet well; the chosen slot gets `selection` and a checkmark badge,
-            // never an outline (NATIVE.md rule 4).
+            // A bordered cell (§1.7); the chosen slot: a foreground border on the
+            // muted fill and a checkmark badge (§2.17 selected row).
             .relative()
             .rounded(crate::ui::native::tokens::radius::CONTROL)
-            .bg(if on { nk.selection } else { nk.fill })
+            .border_1()
+            .border_color(if on { nk.label } else { nk.separator })
+            .bg(if on { nk.selection } else { nk.content })
             .when(on, |el| {
                 el.child(
                     div()
@@ -1603,6 +1557,8 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
         });
         cells.push(
             crate::ui::native::cards::card_well(cx)
+                .border_1()
+                .border_color(k.line)
                 .flex_1()
                 .min_w(px(0.))
                 .overflow_hidden()
@@ -1795,9 +1751,11 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
             .items_center()
             .gap(space::S12)
             .child(
+                // FormRow label (§2.8): one line in the 112 column, cut at the end.
                 b20::small(div())
                     .flex_none()
                     .w(m::FORM_LABEL)
+                    .one_line()
                     .text_color(k.ink)
                     .child(label.clone()),
             )
@@ -1810,10 +1768,11 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
             .child(
                 b20::small(div())
                     .flex_none()
-                    .min_w(px(64.))
+                    .min_w(m::TABLE_NUM_COL)
                     .flex()
                     .justify_end()
-                    .mono()
+                    .whitespace_nowrap()
+                    .n_figures()
                     .text_color(k.ink)
                     .child(shown),
             )
@@ -2320,6 +2279,8 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .p(space::S12)
         .rounded(theme::radius::MD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .flex()
         .gap(space::S10)
         .child(

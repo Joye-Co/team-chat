@@ -118,4 +118,48 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::refs::scenes::open_too_many,
     },
     // --- end t5-media ---
+    // --- t5-cards ---
+    Scene {
+        name: "state-card-option-hover",
+        about: "Card v2 13: the pointer on choice row B of the long choice (hover: muted at 50%)",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::cards::v2::scenes::open_gallery(
+                s,
+                c,
+                crate::views::cards::v2::gallery::Section::Load,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "state-card-button-hover",
+        about: "Card v2 13: the pointer on 重试 of the card that cannot be read (outline sm hover)",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::cards::v2::scenes::open_gallery(
+                s,
+                c,
+                crate::views::cards::v2::gallery::Section::Load,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "state-card-tooltip",
+        about: "Card v2 13: the pointer on the cut label of option G: the full text in a tooltip (§2.21)",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::cards::v2::scenes::open_gallery(
+                s,
+                c,
+                crate::views::cards::v2::gallery::Section::Load,
+                cx,
+            )
+        },
+    },
+    // --- end t5-cards ---
 ];
