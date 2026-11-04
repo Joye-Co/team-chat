@@ -256,6 +256,7 @@ impl MembersPage {
         // Nothing to add to while the team has not loaded (§2.15: the
         // toolbar stays in place, its controls disabled).
         .disabled(!owner || load != PageLoad::Ready)
+        .when(load != PageLoad::Ready, |b| b.opacity(0.5))
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let invite = services.clone();
             let bot = services.clone();
@@ -304,7 +305,12 @@ impl MembersPage {
         });
         let mut row = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
             .leading_inset(rows::toolbar_leading(&self.services, cx))
-            .group(filter)
+            .group(
+                div()
+                    .flex_none()
+                    .when(load != PageLoad::Ready, |d| d.opacity(0.5))
+                    .child(filter),
+            )
             .group(rows::toolbar_capsule(add, cx));
         // The subtitle slot stays in every state, so the title never moves.
         row = row.subtitle(match load {
@@ -400,25 +406,7 @@ impl MembersPage {
                 .flex_1()
                 .min_h_0()
                 .px(rows::LEADING)
-                .children((0..6).map(|i| {
-                    div()
-                        .flex()
-                        .flex_col()
-                        .child(page::skeleton_rows(
-                            &format!("members-sk-{i}"),
-                            page::SkeletonKind::MemberRow,
-                            1,
-                            cx,
-                        ))
-                        .when(i < 5, |d| {
-                            d.child(
-                                div()
-                                    .h(crate::ui::native::metrics::HAIRLINE)
-                                    .ml(AVATAR + rows::ROW_GAP)
-                                    .bg(k.separator),
-                            )
-                        })
-                }));
+                .child(member_skeleton(cx));
         } else if !any {
             let this = cx.entity().downgrade();
             list = list.child(page::page_empty(
@@ -1712,6 +1700,65 @@ impl MembersPage {
             ))
             .child(pair_skeleton("member-sk-b", cx))
     }
+}
+
+/// The member list while the first sync runs (§2.14): a group label, then six
+/// rows at the real pitch (56): avatar circle 32, the name over the line, the
+/// row lines inset to the name and none after the last row.
+fn member_skeleton(cx: &App) -> gpui::Div {
+    use crate::ui::native::{Bone, tokens::text};
+    let k = native_colors(cx);
+    let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
+    div()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .h(tsp::S32)
+                .flex()
+                .items_center()
+                .child(Bone::new().h(text::META.0).w(tsp::S48).rounded(tsp::S6)),
+        )
+        .children(widths.iter().enumerate().map(|(i, w)| {
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .h(rows::MEMBER_ROW)
+                        .flex()
+                        .items_center()
+                        .gap(rows::ROW_GAP)
+                        .child(Bone::new().size(AVATAR).rounded_full())
+                        .child(
+                            div()
+                                .flex_1()
+                                .flex()
+                                .flex_col()
+                                .gap(tsp::S6)
+                                .child(
+                                    Bone::new()
+                                        .h(text::UI.0)
+                                        .w(gpui::relative(w * 0.7))
+                                        .rounded(tsp::S6),
+                                )
+                                .child(
+                                    Bone::new()
+                                        .h(text::META.0)
+                                        .w(gpui::relative(w * 0.4))
+                                        .rounded(tsp::S6),
+                                ),
+                        ),
+                )
+                .when(i + 1 < widths.len(), |d| {
+                    d.child(
+                        div()
+                            .h(crate::ui::native::metrics::HAIRLINE)
+                            .ml(AVATAR + rows::ROW_GAP)
+                            .bg(k.separator),
+                    )
+                })
+        }))
 }
 
 /// A detail card while the first sync runs (§2.14): the card's title and
