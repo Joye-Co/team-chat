@@ -1,6 +1,6 @@
 //! 首页 (NATIVE.md §9.4): a Mail-like list under the toolbar row (title
-//! 首页, subtitle `3 件事等你拍板`), grouped by 需要你拍板, 正在做 and 做完了,
-//! with Jojo's one-line priority above it; the inspector at the right shows
+//! 首页, subtitle `3 件事等你拍板`): Jojo's priority as its first row, then
+//! the sections 需要你拍板, 正在做 and 做完了; the inspector at the right shows
 //! 正在做 (plan bars) and 排队 as inspector rows.
 //!
 //! The page keeps a snapshot of what it shows and rebuilds it when the
@@ -31,7 +31,6 @@ use crate::{
     copy::{desk as c, fill},
     data::Millis,
     ui::{
-        self,
         native::{
             NativeType as _, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized, native_colors,
             toolbar_item,
@@ -284,42 +283,16 @@ impl Render for DeskPage {
             }))]));
         }
 
-        let note = snap.note.as_ref().map(|n| {
-            let member = snap.member(&n.member_id);
-            let from = fill(c::DESK_NOTE_FROM, &[("name", &snap.name(&n.member_id))]);
-            let text = gpui::StyledText::new(format!("{from}{}", n.text)).with_highlights([(
-                0..from.len(),
-                gpui::HighlightStyle {
-                    color: Some(k.label),
-                    ..Default::default()
-                },
-            )]);
-            div()
-                .flex_none()
-                .px(rows::TEXT_START)
-                .pb(px(4.))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .n_body()
-                .text_color(k.secondary)
-                .child(ui::MemberAvatar::new(member.as_ref(), px(16.)))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(text),
-                )
-        });
+        // Jojo's priority is the first row of the list (§9.4), not a
+        // banner under the toolbar.
+        let note = list::note_row(&snap, cx);
 
         let mut body = div()
             .id("desk-list")
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
+            .pt(px(4.))
             .pb(px(20.))
             .flex()
             .flex_col()

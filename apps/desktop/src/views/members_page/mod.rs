@@ -30,7 +30,6 @@ use crate::{
         v2::MemberStats,
     },
     ui::{
-        MemberAvatar,
         native::{
             FormRow, GroupedForm, ListRow, NativeType as _, PushSize, PushStyle, Segment,
             Segmented, ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button,
@@ -170,7 +169,7 @@ fn money(cents: u64) -> String {
 /// The list pane (§9.5): its own toolbar row with the segmented filter.
 const LIST_WIDTH: gpui::Pixels = px(320.);
 /// The measure of the member detail.
-const DETAIL_MEASURE: gpui::Pixels = px(600.);
+const DETAIL_MEASURE: gpui::Pixels = px(880.);
 /// The width of the 成本 bar.
 const COST_BAR: gpui::Pixels = px(120.);
 
@@ -303,7 +302,7 @@ impl MembersPage {
                     .flex_none()
                     .h(px(28.))
                     .mt(px(6.))
-                    .px(rows::TEXT_START)
+                    .px(rows::LEADING)
                     .flex()
                     .items_end()
                     .pb(px(4.))
@@ -407,7 +406,7 @@ impl MembersPage {
         let mark = match e.bucket {
             Bucket::Working => Some(rows::sym(
                 Sym::Live,
-                SymSize::INLINE,
+                SymSize::INLINE_SMALL,
                 if on_accent { ink.title } else { k.blue },
             )),
             _ => None,
@@ -423,11 +422,11 @@ impl MembersPage {
         mail_row(
             SharedString::from(format!("member-{}", m.id)),
             rows::MEMBER_ROW,
-            MemberAvatar::new(Some(m), AVATAR).into_any_element(),
+            rows::avatar(Some(m), AVATAR, cx),
             m.name.clone(),
-            None,
-            second,
             mark,
+            second,
+            None,
             !last && !is_selected,
             ink,
             cx,
@@ -587,7 +586,7 @@ impl MembersPage {
             .flex()
             .items_center()
             .gap(px(16.))
-            .child(MemberAvatar::new(Some(m), px(64.)))
+            .child(rows::avatar(Some(m), px(64.), cx))
             .child(
                 div()
                     .flex_1()
@@ -1028,7 +1027,7 @@ impl MembersPage {
                                 "{} · {place}",
                                 who.as_ref().map(|w| w.name.clone()).unwrap_or_default()
                             ))
-                            .leading(MemberAvatar::new(who.as_ref(), px(20.)))
+                            .leading(rows::avatar(who.as_ref(), px(20.), cx))
                             .value(when, cx),
                     )
                     .on_click(move |_, _, cx| {
@@ -1096,13 +1095,15 @@ impl Render for MembersPage {
                             .flex_1()
                             .min_h(px(0.))
                             .overflow_y_scroll()
-                            .px(px(32.))
+                            // The shared leading inset (§2): the detail
+                            // starts on the same edge as the list's rows.
+                            .px(rows::LEADING)
+                            .pt(px(4.))
                             .pb(px(32.))
                             .child(
                                 div()
                                     .w_full()
                                     .max_w(DETAIL_MEASURE)
-                                    .mx_auto()
                                     .flex()
                                     .flex_col()
                                     .gap(metrics::GROUP_GAP)

@@ -57,4 +57,7 @@ crate::copy! {
     DESK_ASK_FROM = "{name} · {topic}",
     DESK_PROOF_PR = "PR #{n}",
     // --- end pages track ---
+    // --- v12/fx-pages ---
+    DESK_OPEN_DM = "打开私聊",
+    // --- end v12/fx-pages ---
 }

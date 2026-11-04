@@ -214,8 +214,8 @@ fn kind_word(file: &FileAttachment) -> &'static str {
 }
 
 /// The progress of a file row (NATIVE.md §5.7): a 4 pt determinate bar,
-/// radius 2, `quaternary` track and `label` fill, inset 12 pt from the
-/// row's sides and 6 pt from its bottom so it never crosses the corners.
+/// radius 2, `quaternary` track and `label` fill, under the text column
+/// (as Messages draws a transfer), 6 pt from the row's bottom.
 fn track(percent: f32, cx: &App) -> gpui::Div {
     let n = native_colors(cx);
     div()
@@ -331,9 +331,22 @@ fn row_frame(
         el.child(if compact {
             track(p, cx).left(px(46.)).right(space::S8).bottom(px(1.))
         } else {
-            track(p, cx).bottom(px(4.))
+            // Under the name and meta: the symbol slot, then the gap.
+            track(p, cx).left(space::S12 + px(28.) + space::S10).right(px(44.)).bottom(px(5.))
         })
     })
+}
+
+/// A borderless symbol button inside a file row (§5.2, §6): 24 × 24,
+/// radius 6, a 13 pt Regular symbol (inline size, not the 16 pt toolbar
+/// size), `fillHover` on hover.
+fn row_button(id: ElementId, glyph: Sym) -> gpui_component::button::Button {
+    use gpui_component::{Sizable as _, button::ButtonVariants as _};
+    gpui_component::button::Button::new(id)
+        .ghost()
+        .icon(ui::icons::button_sym(glyph, SymSize::INLINE, px(24.)))
+        .with_size(px(24.))
+        .rounded(n_metrics::BUTTON_REGULAR_RADIUS)
 }
 
 fn upload_row(
@@ -427,7 +440,7 @@ pub fn file_row_in(
     let action = |part: &str, label: &'static str, what: OpenAction, glyph: Sym| {
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
-        ui::icon_button(id(part), glyph)
+        row_button(id(part), glyph)
             .named(label)
             .disabled(running)
             .on_click(move |_, _, cx| {
@@ -448,7 +461,7 @@ pub fn file_row_in(
         let provider = provider.clone();
         let file = file.clone();
         vec![
-            ui::icon_button(id("cancel"), Sym::Close)
+            row_button(id("cancel"), Sym::Close)
                 .named(f::CANCEL_DOWNLOAD)
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
