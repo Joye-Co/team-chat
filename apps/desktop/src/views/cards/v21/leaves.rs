@@ -6,6 +6,7 @@
 //! Controls are live only for the viewer the ask names (or who may send the block's
 //! events); everyone else sees the same options read-only (CARD21 §5).
 
+use crate::ui::native::FocusRow as _;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -320,14 +321,22 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
                                     .child(b20::line_input(&field, !live, window, cx)),
                             ),
                     )
+                    // Over the limit: neutral text with a red icon (owner
+                    // decision v15, field errors).
                     .child(
                         meta(div())
                             .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(space::S4)
                             .mono()
                             .text_color(if n > form21::OTHER_MAX {
-                                k.bad_ink
+                                k.ink
                             } else {
                                 k.ink_3
+                            })
+                            .when(n > form21::OTHER_MAX, |el| {
+                                el.child(ui::icon(Sym::Failed, px(12.), k.bad))
                             })
                             .child(format!("{n}/{}", form21::OTHER_MAX)),
                     ),
@@ -599,7 +608,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .min_w(px(0.))
                     .one_line()
                     .when(is_focus, |el| el.font_weight(theme::MEDIUM_WEIGHT))
-                    .child(item.label.clone()),
+                    .child(crate::ui::truncate::TruncText::new(item.label.clone())),
             )
             .when_some(item.meta.clone(), |el, mt| {
                 el.child(meta(div()).flex_none().text_color(k.ink_3).child(mt))
@@ -761,10 +770,11 @@ pub fn rating(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .when(live, |el| {
-                    el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
-                        target.after(&block, cx);
-                    })
+                    el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                        .on_click(move |_, _, cx| {
+                            form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
+                            target.after(&block, cx);
+                        })
                 })
                 .child(ui::icon(
                     if on { Sym::StarFill } else { Sym::Star },
@@ -822,9 +832,15 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .border_1()
             .border_color(if on { nk.primary } else { nk.separator })
             .bg(if on { nk.primary } else { nk.content })
+            // A tab stop with ← → (E3); the hover below keeps its border step.
+            // `selected: true` leaves the hover to this cell (one hover style).
+            .when(live, |el| {
+                el.focus_row_with(true, crate::ui::native::Arrows::Grid, cx)
+            })
             .when(live && !on, |el| {
                 let hover = theme::card_v2::alpha(nk.fill, 0.5);
-                el.hover(move |s| s.bg(hover))
+                let edge = theme::card_v2::alpha(nk.label, 0.5);
+                el.hover(move |s| s.bg(hover).border_color(edge))
             })
             .when(!live, |el| el.opacity(0.5))
             .flex()
@@ -1001,10 +1017,11 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex_col()
                 .gap(space::S6)
                 .when(live, |el| {
-                    el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                        target.after(&block, cx);
-                    })
+                    el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                        .on_click(move |_, _, cx| {
+                            form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                            target.after(&block, cx);
+                        })
                 })
                 .child(
                     div()
@@ -1090,7 +1107,7 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .min_w(px(0.))
                     .one_line()
                     .text_color(k.ink)
-                    .child(r.label.clone()),
+                    .child(crate::ui::truncate::TruncText::new(r.label.clone())),
             );
         for col in columns {
             let on = set.get(&r.id) == Some(&col.id);
@@ -1112,12 +1129,13 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .items_center()
                     .justify_center()
                     .when(live, |el| {
-                        el.on_click(move |_, _, cx| {
-                            let mut rows = cur.clone();
-                            rows.insert(row_id.clone(), col_id.clone());
-                            form.update(cx, |f, cx| f.set_value21(&block, Val::Rows(rows), cx));
-                            target.after(&block, cx);
-                        })
+                        el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                            .on_click(move |_, _, cx| {
+                                let mut rows = cur.clone();
+                                rows.insert(row_id.clone(), col_id.clone());
+                                form.update(cx, |f, cx| f.set_value21(&block, Val::Rows(rows), cx));
+                                target.after(&block, cx);
+                            })
                     })
                     .child(
                         crate::ui::native::NativeRadio::new(
@@ -1249,10 +1267,11 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .flex_col()
             .justify_center()
             .when(live, |el| {
-                el.on_click(move |_, _, cx| {
-                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                    target.after(&block, cx);
-                })
+                el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                    .on_click(move |_, _, cx| {
+                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                        target.after(&block, cx);
+                    })
             })
             .child(
                 b20::small(div())
@@ -1267,8 +1286,9 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .flex()
                     .items_center()
                     .gap(space::S4)
-                    .text_color(k.ok_ink)
-                    .child(ui::icon(Sym::Check, px(12.), k.ok_ink))
+                    // Foreground text; the color stays on the 12 icon (§1.3).
+                    .text_color(k.ink)
+                    .child(ui::icon(Sym::Check, px(12.), k.ok))
                     .child(c::SLOT_ALL_FREE),
             })
     };
@@ -1411,10 +1431,11 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex_col()
                 .gap(space::S4)
                 .when(can, |el| {
-                    el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
-                        target.after(&block, cx);
-                    })
+                    el.focus_row_with(on, crate::ui::native::Arrows::Vertical, cx)
+                        .on_click(move |_, _, cx| {
+                            form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
+                            target.after(&block, cx);
+                        })
                 })
                 .child(
                     div()
@@ -1577,7 +1598,8 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                         .child(
                             b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD),
                         )
-                        .children(lines(&o.pros, "+", k.ok_ink))
+                        // "+" and "−" are muted marks, not state color (D3).
+                        .children(lines(&o.pros, "+", k.ink_3))
                         .children(lines(&o.cons, "−", k.ink_3))
                         .children(kids)
                         .child(div().mt(space::S4).child(pick)),
@@ -1760,7 +1782,7 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
                     .w(m::FORM_LABEL)
                     .one_line()
                     .text_color(k.ink)
-                    .child(label.clone()),
+                    .child(crate::ui::truncate::TruncText::new(label.clone())),
             )
             .child(
                 div()
@@ -2343,14 +2365,11 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         return None;
     }
     let k = theme::colors(cx);
-    let bar = |items: Vec<AnyElement>| {
-        crate::views::cards::v2::card_footer(cx)
-            .children(items)
-            .into_any_element()
+    let bar = |items: Vec<AnyElement>, note: Option<AnyElement>| {
+        crate::views::cards::v2::footer_stack(items, note, cx)
     };
     let note = |t: String| {
         meta(div())
-            .ml_auto()
             .min_w(px(0.))
             .one_line()
             .text_color(k.ink_3)
@@ -2358,37 +2377,42 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
             .into_any_element()
     };
     if only_input_unknown(ctx) && matches!(ctx.state, CardState::Pending) {
-        return Some(Some(bar(vec![
-            button(
-                ctx.id("update"),
-                fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
-                PushStyle::Outline,
-                cx,
-            )
-            .on_click(|_, _, cx| {
-                if let Some(u) = crate::updater::global(cx) {
-                    u.update(cx, |u, cx| u.check_now(cx));
-                }
-            })
-            .into_any_element(),
-            note(c::UNKNOWN_FOOT.into()),
-        ])));
+        return Some(Some(bar(
+            vec![
+                button(
+                    ctx.id("update"),
+                    fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
+                    PushStyle::Outline,
+                    cx,
+                )
+                .on_click(|_, _, cx| {
+                    if let Some(u) = crate::updater::global(cx) {
+                        u.update(cx, |u, cx| u.check_now(cx));
+                    }
+                })
+                .into_any_element(),
+            ],
+            Some(note(c::UNKNOWN_FOOT.into()).into_any_element()),
+        )));
     }
     // My answer did not get there: 重试 with the same answer, and it goes again by itself.
     if let CardState::SendFailed { .. } = ctx.state {
         let resend = resend_answer(ctx);
-        return Some(Some(bar(vec![
-            button(
-                ctx.id("retry21"),
-                c::PENDING_RETRY.to_string(),
-                PushStyle::Outline,
-                cx,
-            )
-            .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
-            .on_click(move |_, _, _| resend())
-            .into_any_element(),
-            note(c::SEND_AUTO.into()),
-        ])));
+        crate::selftest::drawn::mark("card-band-retry", ctx.msg.message_id.clone());
+        return Some(Some(bar(
+            vec![
+                button(
+                    ctx.id("retry21"),
+                    c::PENDING_RETRY.to_string(),
+                    PushStyle::Outline,
+                    cx,
+                )
+                .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
+                .on_click(move |_, _, _| resend())
+                .into_any_element(),
+            ],
+            Some(note(c::SEND_AUTO.into()).into_any_element()),
+        )));
     }
     // A poll: the rules, no submit (a press votes).
     if let Some(CardV2Block::Poll {
@@ -2409,10 +2433,11 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 })
                 .into_any_element(),
         ];
+        // No buttons here: the rules read as one line.
         if changeable.unwrap_or(false) {
-            items.push(note(c::POLL_CHANGEABLE.into()));
+            items.push(note(c::POLL_CHANGEABLE.into()).into_any_element());
         }
-        return Some(Some(bar(items)));
+        return Some(Some(bar(items, None)));
     }
     // Only immediate blocks (a confirm, a single pick): the press is the answer.
     let surface = ctx.card.surface_ids();
@@ -2464,10 +2489,13 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 .into_any_element()
             });
         }
-        if let Some(p) = ctx.card.ask.as_ref().and_then(|a| a.promise.clone()) {
-            items.push(note(p));
-        }
-        return Some((!items.is_empty()).then(|| bar(items)));
+        let desc = ctx
+            .card
+            .ask
+            .as_ref()
+            .and_then(|a| a.promise.clone())
+            .map(|p| note(p).into_any_element());
+        return Some((!items.is_empty()).then(|| bar(items, desc)));
     }
     let _ = mix;
     None

@@ -593,17 +593,13 @@ impl CardsGallery {
                     ],
                 )
             }
+            // Two cards a column, so neither column ends in a void (F66).
             Section::Data => (
-                vec![item(
-                    c::GALLERY_METRICS,
-                    "",
-                    self.card(METRICS, d, me, None, "a", window, cx),
-                )],
                 vec![
                     item(
-                        c::GALLERY_TABLE,
+                        c::GALLERY_METRICS,
                         "",
-                        self.card(TABLE, d, me, None, "a", window, cx),
+                        self.card(METRICS, d, me, None, "a", window, cx),
                     ),
                     item(
                         c::GALLERY_MISSING,
@@ -611,6 +607,11 @@ impl CardsGallery {
                         self.card(METRICS_OLD, d, me, None, "a", window, cx),
                     ),
                 ],
+                vec![item(
+                    c::GALLERY_TABLE,
+                    "",
+                    self.card(TABLE, d, me, None, "a", window, cx),
+                )],
             ),
             Section::Diff => (
                 vec![item(
@@ -763,6 +764,9 @@ impl CardsGallery {
                 .h(px(168.))
                 .rounded(theme::radius::LG)
                 .bg(mix(k.sunken, k.bg, 0.6))
+                // A fill step alone is not an edge (§1.7, D5).
+                .border_1()
+                .border_color(k.line)
                 .pt(space::S24)
                 .pr(space::S24)
                 .flex()

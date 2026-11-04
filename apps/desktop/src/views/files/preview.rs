@@ -314,6 +314,12 @@ pub fn open(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     let provider: Arc<dyn ChatProvider> = FilesPreview::new(services.provider.clone());
+    // With `--worst-case` the added files get worst-case names too.
+    let provider: Arc<dyn ChatProvider> = if crate::selftest::worst_case() {
+        crate::selftest::worst_case::WorstCase::new(provider)
+    } else {
+        provider
+    };
     let services = Services::new(provider, cx);
     open_first_topic(&services, cx);
     services

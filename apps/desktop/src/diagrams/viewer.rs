@@ -1,4 +1,5 @@
-//! The expand viewer (REFS §B4): a dialog at 90 % of the window. Fit on open, zoom
+//! The expand viewer (REFS §B4): a 560 sheet under the toolbar row (F52, §2.9). Fit on
+//! open with a 12 px text floor (a larger diagram scrolls), zoom
 //! 25 %–400 % by layout size (never a transform), ⌘= ⌘- ⌘0 and ⌘ + wheel, pan by scroll,
 //! drag and arrow keys, 看原文 beside the image, 复制原文, 复制图片, Esc closes and the
 //! focus goes back to the diagram.
@@ -33,7 +34,8 @@ pub const STEPS: &[f32] = &[
 pub const ARROW_STEP: f32 = 40.;
 /// Space around the diagram inside the canvas (page padding + card padding).
 const MARGIN: f32 = 56.;
-const SOURCE_PANE: f32 = 320.;
+/// The height of the 看原文 pane under the diagram.
+const SOURCE_PANE: f32 = 200.;
 
 /// What the viewer shows.
 #[derive(Clone)]
@@ -46,11 +48,23 @@ pub struct ViewerSpec {
     pub return_focus: Option<FocusHandle>,
 }
 
-/// The zoom that fits the diagram in the viewport, at most 100 %.
+/// The smallest zoom a fit picks: diagram text is 13 px at 100 %, and a fit
+/// never draws it under 12 px (a larger diagram scrolls instead).
+pub const FIT_FLOOR: f32 = 12. / 13.;
+
+/// The zoom that fits the diagram in the viewport, at most 100 % and at
+/// least [`FIT_FLOOR`].
 pub fn fit_zoom(w: f32, h: f32, viewport_w: f32, viewport_h: f32) -> f32 {
     let zw = (viewport_w - 2. * MARGIN).max(1.) / w.max(1.);
     let zh = (viewport_h - 2. * MARGIN).max(1.) / h.max(1.);
-    zw.min(zh).clamp(MIN_ZOOM, 1.0)
+    zw.min(zh).clamp(FIT_FLOOR, 1.0)
+}
+
+/// The sheet height: the window under the toolbar row, 48 short, at most 760.
+fn sheet_height(window: &Window) -> Pixels {
+    (window.viewport_size().height - ui::native::metrics::TOOLBAR_ROW - space::S48)
+        .min(px(760.))
+        .max(px(320.))
 }
 
 /// The next step above `z`.
@@ -102,8 +116,6 @@ pub fn preview_hover_next(index: usize) {
 
 /// Opens the viewer over `window`.
 pub fn open(spec: ViewerSpec, window: &mut Window, cx: &mut App) -> Entity<DiagramViewer> {
-    let size = window.viewport_size();
-    let (w, h) = (f32::from(size.width), f32::from(size.height));
     let view = cx.new(|cx| DiagramViewer::new(spec.clone(), cx));
     let handle = view.clone();
     let focus = view.read(cx).focus.clone();
@@ -114,17 +126,11 @@ pub fn open(spec: ViewerSpec, window: &mut Window, cx: &mut App) -> Entity<Diagr
             focus.focus(window, cx);
         }
         let back = back.clone();
-        dialog
-            .w(px((w * 0.9).max(480.)))
-            .margin_top(px(h * 0.05))
-            .close_button(false)
-            .p_0()
-            .child(
-                div()
-                    .h(px((h * 0.9).max(360.)))
-                    .w_full()
-                    .child(view.clone()),
-            )
+        let h = sheet_height(window);
+        ui::native::native_sheet(dialog, ui::native::SheetWidth::List, cx)
+            .px(px(0.))
+            .h(h)
+            .child(div().h(h).w_full().child(view.clone()))
             .on_close(move |_, window, cx| {
                 if let Some(f) = &back {
                     f.focus(window, cx);
@@ -211,7 +217,6 @@ impl DiagramViewer {
     fn toolbar(&self, ready: Option<&Ready>, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let kind = self.spec.normalized.kind;
-        let raw = self.spec.raw.clone();
         let image = ready.map(|r| r.image.clone());
         let n = ui::native::native_colors(cx);
         div()
@@ -294,13 +299,6 @@ impl DiagramViewer {
                         this.show_source = !this.show_source;
                         cx.notify();
                     })),
-            )
-            .child(
-                ui::native::icon_button_bare("dv-copy", Sym::Copy, ui::native::IconSize::Small)
-                    .named(c::COPY_SOURCE)
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
-                    }),
             )
             .child(
                 ui::native::icon_button_bare("dv-img", Sym::Image, ui::native::IconSize::Small)
@@ -476,16 +474,18 @@ impl Render for DiagramViewer {
             .on_key_down(on_key)
             .child(toolbar)
             .child(
+                // In the 560 sheet 看原文 opens under the diagram.
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
+                    .flex_col()
                     .child(
                         div()
                             .relative()
                             .flex_1()
-                            .min_w_0()
-                            .h_full()
+                            .min_h_0()
+                            .w_full()
                             .child(measure)
                             .child(
                                 div()
@@ -537,40 +537,82 @@ impl Render for DiagramViewer {
                             ),
                     )
                     .when(self.show_source, |el| {
+                        let raw = self.spec.raw.clone();
                         el.child(
                             div()
-                                .id("diagram-viewer-source")
-                                .w(px(SOURCE_PANE))
                                 .flex_none()
-                                .h_full()
-                                .border_l_1()
+                                .h(px(SOURCE_PANE))
+                                .w_full()
+                                .border_t_1()
                                 .border_color(k.line)
-                                .overflow_y_scroll()
-                                .p(space::S12)
                                 .flex()
                                 .flex_col()
-                                .children(self.spec.raw.lines().enumerate().map(|(i, line)| {
+                                .child(
                                     div()
+                                        .flex_none()
+                                        .px(space::S16)
+                                        .pt(space::S8)
                                         .flex()
-                                        .gap(space::S12)
-                                        .t_code()
-                                        .text_size(px(12.))
-                                        .line_height(px(20.))
-                                        .child(
-                                            div()
-                                                .w(px(20.))
-                                                .flex_none()
-                                                .text_color(k.ink_3)
-                                                .child(format!("{}", i + 1)),
-                                        )
+                                        .items_center()
                                         .child(
                                             div()
                                                 .flex_1()
-                                                .min_w_0()
-                                                .text_color(k.ink)
-                                                .child(line.to_string()),
+                                                .t_meta()
+                                                .text_color(k.ink_3)
+                                                .child(c::VIEW_SOURCE),
                                         )
-                                })),
+                                        .child(
+                                            ui::native::icon_button_bare(
+                                                "dv-copy",
+                                                Sym::Copy,
+                                                ui::native::IconSize::Small,
+                                            )
+                                            .named(c::COPY_SOURCE)
+                                            .on_click(
+                                                move |_, _, cx| {
+                                                    cx.write_to_clipboard(
+                                                        ClipboardItem::new_string(raw.clone()),
+                                                    )
+                                                },
+                                            ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("diagram-viewer-source")
+                                        .flex_1()
+                                        .min_h_0()
+                                        .w_full()
+                                        .overflow_y_scroll()
+                                        .px(space::S16)
+                                        .pb(space::S12)
+                                        .flex()
+                                        .flex_col()
+                                        .children(self.spec.raw.lines().enumerate().map(
+                                            |(i, line)| {
+                                                div()
+                                                    .flex()
+                                                    .gap(space::S12)
+                                                    .t_code()
+                                                    .text_size(px(12.))
+                                                    .line_height(px(20.))
+                                                    .child(
+                                                        div()
+                                                            .w(px(20.))
+                                                            .flex_none()
+                                                            .text_color(k.ink_3)
+                                                            .child(format!("{}", i + 1)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex_1()
+                                                            .min_w_0()
+                                                            .text_color(k.ink)
+                                                            .child(line.to_string()),
+                                                    )
+                                            },
+                                        )),
+                                ),
                         )
                     }),
             )
@@ -584,9 +626,11 @@ mod tests {
     #[test]
     fn fit_never_upscales_and_stays_in_range() {
         assert_eq!(fit_zoom(400., 300., 1200., 800.), 1.0);
-        let z = fit_zoom(2224., 400., 1224., 800.);
-        assert!((z - 0.5).abs() < 1e-3, "{z}");
-        assert_eq!(fit_zoom(100_000., 100., 1200., 800.), MIN_ZOOM);
+        let z = fit_zoom(1180., 400., 1224., 800.);
+        assert!((z - 1112. / 1180.).abs() < 1e-3, "{z}");
+        assert_eq!(fit_zoom(2224., 400., 1224., 800.), FIT_FLOOR);
+        // A huge diagram keeps 12 px text and scrolls.
+        assert_eq!(fit_zoom(100_000., 100., 1200., 800.), FIT_FLOOR);
     }
 
     #[test]

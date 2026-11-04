@@ -1296,7 +1296,12 @@ pub fn open_login(
             } else if let Some(server) = code.strip_prefix('~') {
                 l.preview_server(server, window, cx)
             } else if let Some(code) = code.strip_prefix('@') {
-                l.preview_server(UNREACHABLE_SERVER, window, cx);
+                let server = if worst {
+                    WORST_UNREACHABLE_SERVER
+                } else {
+                    UNREACHABLE_SERVER
+                };
+                l.preview_server(server, window, cx);
                 l.preview_submit(code, window, cx)
             } else {
                 l.preview(code, server_open, window, cx)
@@ -1311,6 +1316,9 @@ pub fn open_login(
 /// A server the fake provider cannot reach (`.invalid`, RFC 2606).
 const UNREACHABLE_SERVER: &str = "https://team.northwind.invalid";
 
+/// A long server that the fake provider cannot reach.
+const WORST_UNREACHABLE_SERVER: &str = "https://team-chat.internal.northwind-industries-holdings.invalid/workspaces/product-design-and-frontend/region-ap-southeast-2";
+
 /// A 120-character custom server URL.
 const WORST_SERVER: &str = "https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2";
 
@@ -1321,6 +1329,10 @@ fn worst_login_code(code: &'static str) -> &'static str {
         "K7QM2X" => "tc_live_9fK2mQ7xL0pR4sT8vW1yZ3bD6gH5jN2cE7aU0iO9",
         // A checked code becomes a 12-character legacy code.
         "^K7QM2X9A" => "^ABCDEFGHJKLM",
+        // A wrong legacy code (a locked line) instead of a short one.
+        "!0000-0000" => "!000000000000",
+        // A long code against a long host that cannot be reached.
+        "@K7QM2X9A" => "@K7QM2X9ABC3D",
         "~https://team.joye.co" => {
             "~https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2"
         }

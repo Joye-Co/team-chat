@@ -265,7 +265,7 @@ fn report_rev1() -> Value {
                   "summary": "10 月日活从 2,210 涨到 2,340，每周都比 9 月高。", "events": ["chart.select"] },
                 { "id": "check_col", "type": "stack", "children": ["check", "note"] },
                 { "id": "check", "type": "decision", "label": "这个数据对不对？", "required": true, "fallbackText": "对 / 有问题",
-                  "help": "有问题就写一句，Ledger 会先查再发。",
+                  "help": "有问题就写一句，Ledger 查过再发。",
                   "options": [ { "id": "ok", "label": "对，可以发周会" }, { "id": "wrong", "label": "有问题" } ],
                   "deliver": "onSubmit", "events": ["choice.change"] },
                 { "id": "note", "type": "input", "kind": "textarea", "label": "哪里不对？", "required": false, "maxLength": 300 }

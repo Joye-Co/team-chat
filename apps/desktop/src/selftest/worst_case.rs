@@ -173,6 +173,59 @@ fn worst_artifact(mut a: ArtifactSummary, i: usize) -> ArtifactSummary {
     a
 }
 
+/// A stable index for a message id, so each card gets its own worst cases.
+fn hash_index(id: &str) -> usize {
+    id.bytes()
+        .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize))
+}
+
+/// A v1 card with worst-case text: a long title and status, long field
+/// values and labels, table cells with e-mails and file names, list items
+/// that wrap, and a long link label. Block kinds and actions stay.
+fn worst_card(card: &card::Card, i: usize) -> card::Card {
+    use card::CardBlock as B;
+    let mut c = card.clone();
+    c.title = pick(TITLES, i).to_string();
+    if let Some(s) = c.status.as_mut() {
+        s.label = pick(PLAN_TEXTS, i).to_string();
+    }
+    for b in c.blocks.iter_mut() {
+        match b {
+            B::Text { text } => *text = pick(BODIES, i + 4).to_string(),
+            B::Fields { fields } => {
+                for (j, f) in fields.iter_mut().enumerate() {
+                    if j % 2 == 0 {
+                        f.value = pick(ATTACHMENT_NAMES, i + j).to_string();
+                    } else {
+                        f.label = pick(ROLES, j).unwrap_or("实习").to_string();
+                        f.value = clean_name(pick(NAMES, i + j));
+                    }
+                }
+            }
+            B::Table { rows, .. } => {
+                for (j, row) in rows.iter_mut().enumerate() {
+                    if let Some(first) = row.first_mut() {
+                        *first = pick(ATTACHMENT_NAMES, j).to_string();
+                    }
+                    if j % 3 == 1
+                        && let Some(cell) = row.get_mut(1)
+                    {
+                        *cell = "1,284,567,890".into();
+                    }
+                }
+            }
+            B::List { items } => {
+                for (j, it) in items.iter_mut().enumerate().filter(|(j, _)| j % 2 == 0) {
+                    it.text = pick(PLAN_TEXTS, i + j).to_string();
+                }
+            }
+            B::Link { label, .. } => *label = pick(FILE_TITLES, i).to_string(),
+            _ => {}
+        }
+    }
+    c
+}
+
 /// A long self-hosted server URL.
 const WORST_SERVER_URL: &str = "https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2";
 
@@ -364,12 +417,16 @@ impl ChatProvider for WorstCase {
             .enumerate()
             .map(|(i, g)| {
                 let mut g = group(g, i);
-                if let Some(peer) = g
+                match g
                     .dm_peer
                     .as_ref()
-                    .and_then(|p| members.iter().find(|m| &m.id == p))
+                    .map(|p| members.iter().find(|m| &m.id == p))
                 {
-                    g.name = peer.name.clone();
+                    Some(Some(peer)) => g.name = peer.name.clone(),
+                    // A peer not synced yet (the page loading and failed
+                    // scenes) still gets a worst-case name.
+                    Some(None) => g.name = clean_name(pick(NAMES, i + 7)),
+                    None => {}
                 }
                 g
             })
@@ -841,7 +898,8 @@ impl ChatProvider for WorstCase {
         self.inner.send_diagnostics(description)
     }
     fn card(&self, group_id: &str, message_id: &str) -> Option<Arc<card::Card>> {
-        self.inner.card(group_id, message_id)
+        let card = self.inner.card(group_id, message_id)?;
+        Some(Arc::new(worst_card(&card, hash_index(message_id))))
     }
     fn card_presses(&self, group_id: &str, message_id: &str) -> Vec<CardPress> {
         self.inner.card_presses(group_id, message_id)
@@ -954,10 +1012,17 @@ impl ChatProvider for WorstCase {
             card.title = title.to_string();
         }
         card.fallback = pick(TITLES, i + 3).to_string();
-        // desk track: long bodies in the text blocks too.
+        // desk track: long bodies in the text blocks too, on one card in
+        // four; the others get a mixed right-to-left line, so a gallery of
+        // named states still shows each state in the window.
+        let body = if i.is_multiple_of(4) {
+            pick(BODIES, 4)
+        } else {
+            pick(BODIES, 7)
+        };
         for b in card.blocks.iter_mut() {
             if let cards_v2::CardV2Block::Text { text, .. } = b {
-                *text = pick(BODIES, 4).to_string();
+                *text = body.to_string();
             }
         }
         msg.card = Arc::new(card);

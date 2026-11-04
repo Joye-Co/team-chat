@@ -216,4 +216,54 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     // --- end r1-kit ---
+    // --- v15/r5-cards: keyboard focus on list rows, card options and the picker (E3); the sidebar scenes are r1-kit's ---
+    Scene {
+        name: "state-focus-page-list",
+        about: "group-v2 after Tab reaches the 话题 list: the focus ring on a list row",
+        start: Start::V2,
+        setup: |s, cx| (like("group-v2").setup)(s, cx),
+        open: |s, c, cx| (like("group-v2").open)(s, c, cx),
+    },
+    Scene {
+        name: "state-focus-card-option",
+        about: "cards-v2-choice after Tab reaches an option row: the focus ring on the option, apart from the picked one",
+        start: Start::V2,
+        setup: |s, cx| (like("cards-v2-choice").setup)(s, cx),
+        open: |s, c, cx| (like("cards-v2-choice").open)(s, c, cx),
+    },
+    Scene {
+        name: "state-focus-picker",
+        about: "new-group after Tab reaches the member picker: the focus ring on a picker row",
+        start: Start::SignedIn,
+        setup: |s, cx| (like("new-group").setup)(s, cx),
+        open: |s, c, cx| (like("new-group").open)(s, c, cx),
+    },
+    // --- end v15/r5-cards ---
 ];
+
+/// The scene a hover or focus scene starts from: the same setup and window,
+/// so the capture differs from that scene only by the pointer or the keys.
+fn like(name: &str) -> &'static Scene {
+    super::scenes::all()
+        .into_iter()
+        .find(|s| s.name == name)
+        .unwrap_or_else(|| panic!("no scene {name}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A derived scene starts from the same data as the scene it copies.
+    #[test]
+    fn derived_scenes_start_like_their_base() {
+        for (name, base) in [
+            ("state-focus-page-list", "group-v2"),
+            ("state-focus-card-option", "cards-v2-choice"),
+            ("state-focus-picker", "new-group"),
+        ] {
+            let scene = SCENES.iter().find(|s| s.name == name).expect(name);
+            assert_eq!(scene.start, like(base).start, "{name}");
+        }
+    }
+}

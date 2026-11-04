@@ -212,11 +212,8 @@ pub fn render_card(
             CardTone::Warning => (Sym::NeedsYou, n.amber),
             CardTone::Danger => (Sym::Problem, n.red),
         };
-        let ink = if tone == CardTone::Neutral {
-            n.label
-        } else {
-            color
-        };
+        // The word stays in the foreground; the color is on the symbol only.
+        let ink = n.label;
         ui::native::cards::state_words(
             ui::native::cards::state_symbol(sym, color),
             s.label.clone(),
@@ -226,13 +223,25 @@ pub fn render_card(
         )
         .mb(space::S8)
     });
-    let header = div().flex().flex_col().children(state).child(
-        div()
-            .min_w(px(0.))
-            .n_title3()
-            .text_color(n.label)
-            .child(card.title.clone()),
-    );
+    // A title is one line of text: line breaks and runs of spaces collapse,
+    // it wraps to at most 2 lines, and an empty title takes no room.
+    let title = card.title.split_whitespace().collect::<Vec<_>>().join(" ");
+    let header = div()
+        .flex()
+        .flex_col()
+        .children(state)
+        .when(!title.is_empty(), |el| {
+            el.child(
+                div()
+                    .min_w(px(0.))
+                    // A compact card's title: 14 semibold (§2.4).
+                    .n_headline()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(n.label)
+                    .line_clamp(2)
+                    .child(title),
+            )
+        });
 
     let shown: Vec<(usize, &CardBlock)> = card
         .blocks

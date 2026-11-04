@@ -309,6 +309,8 @@ pub struct CardForm {
     pub editing: Option<u32>,
     /// The answer record is expanded (展开).
     pub expanded: bool,
+    /// The ref list shows every row (看全部).
+    pub refs_all: bool,
     /// inc-cards21: rank orders, numbers and matrix rows.
     other: HashMap<String, Val>,
     _subscriptions: Vec<Subscription>,
@@ -347,6 +349,7 @@ impl CardForm {
             initial,
             editing,
             expanded,
+            refs_all: false,
             other: HashMap::new(),
             _subscriptions: Vec::new(),
         };
@@ -566,6 +569,11 @@ impl CardForm {
 
     pub fn toggle_expanded(&mut self, cx: &mut Context<Self>) {
         self.expanded = !self.expanded;
+        cx.notify();
+    }
+
+    pub fn toggle_refs_all(&mut self, cx: &mut Context<Self>) {
+        self.refs_all = !self.refs_all;
         cx.notify();
     }
 

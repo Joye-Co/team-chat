@@ -922,7 +922,10 @@ fn draft_changed(ctx: &Ctx, id: &str, cx: &mut App) -> AnyElement {
 /// The line at a block while its event waits: a spinner and the stage when `words` (the
 /// band does not say it), and 重试 and 不等了 once no answer came. `None`: nothing to add.
 fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<AnyElement> {
-    if !words && p.stage != Stage::Silent {
+    // No answer came, or the author was offline: the line offers 重试
+    // (§2.15: a failure always has an action).
+    let retry = matches!(p.stage, Stage::Silent | Stage::OfflineLive);
+    if !words && !retry {
         return None;
     }
     let k = theme::colors(cx);
@@ -935,12 +938,12 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
         .text_color(k.ink_2)
         .when(
             words && matches!(p.stage, Stage::Wait | Stage::Slow),
-            |el| el.child(crate::ui::motion::spinner().color(k.live)),
+            |el| el.child(ui::icon(ui::Sym::Waiting, px(12.), k.ink_3)),
         )
         .when(words, |el| {
             el.child(div().min_w(px(0.)).one_line().child(text))
         });
-    if p.stage == Stage::Silent {
+    if retry {
         crate::selftest::drawn::mark("card-retry", ctx.msg.message_id.clone());
         let (provider, g, tp, m, cid) = (
             ctx.env.provider.clone(),
@@ -967,10 +970,12 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
                         p2.send_card_event(&g2, &t2, &m2, retry_req.clone());
                     }),
             )
-            .child(
-                b20::quiet_button(ctx.id(format!("stop-{cid}")), c::PENDING_STOP, cx)
-                    .on_click(move |_, _, _| provider.drop_card_event(&g, &tp, &m, &cid)),
-            );
+            .when(p.stage == Stage::Silent, |el| {
+                el.child(
+                    b20::quiet_button(ctx.id(format!("stop-{cid}")), c::PENDING_STOP, cx)
+                        .on_click(move |_, _, _| provider.drop_card_event(&g, &tp, &m, &cid)),
+                )
+            });
     }
     Some(row.into_any_element())
 }

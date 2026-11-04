@@ -1,6 +1,7 @@
 //! Reference chips: the composer's chip row (REFS §A4) and the read-only references above a
 //! sent message's body (§A6, Refs.dc.html §01 and §03).
 
+use crate::ui::native::FocusRow as _;
 use std::{rc::Rc, sync::Arc};
 
 use chat_core::proto::BlockRef;
@@ -74,6 +75,8 @@ pub fn fit(lead: &str, part: &str, max: f32) -> (String, String) {
             out.push(c);
             w += cw;
         }
+        // No separator right before the "…" (`数 ·…`).
+        let mut out = out.trim_end_matches([' ', '·']).to_string();
         out.push('…');
         return (out, part.to_string());
     }
@@ -107,9 +110,11 @@ pub fn fit(lead: &str, part: &str, max: f32) -> (String, String) {
 }
 
 /// The chip's text: quiet lead, strong part, cut to 320 pt minus the glyph and ×.
+/// [`width`] counts at 12 pt and the chip draws at 14, so the room is scaled; the
+/// lead then fits by itself and its "…" sits right before the part (no gap).
 fn chip_text(r: &DraftRef) -> (String, String) {
     let (lead, part) = label::split(&r.input.label, r.lead_chars);
-    fit(lead, part, 320.0 - 48.0)
+    fit(lead, part, (320.0 - 48.0) * 12.0 / 14.0)
 }
 
 /// One composer chip: `--sunken`, 12 pt, glyph, label on one line, `已更新` when the source
@@ -147,6 +152,9 @@ pub fn composer_chip(
         .line_height(px(18.))
         .text_color(k.ink_3)
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
+        // The chip body is a tab stop (Enter goes back to the part); × is its
+        // own button (E3).
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
         .on_click(move |_, window, cx| on_open(window, cx))
         .child(
             div()
@@ -163,6 +171,8 @@ pub fn composer_chip(
                 .when(!lead.trim().is_empty(), |d| {
                     // The lead gives way to the part; its own ellipsis marks the cut, so
                     // no second "…" leaves a gap before the part.
+                    // `fit` already cut the lead to its room and ended it with "…";
+                    // the box keeps the text's own width, so the part follows it.
                     d.child(
                         div()
                             .min_w_0()
@@ -170,13 +180,7 @@ pub fn composer_chip(
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .child(
-                                lead.trim_end()
-                                    .trim_end_matches('…')
-                                    .trim_end_matches('·')
-                                    .trim_end()
-                                    .to_string(),
-                            ),
+                            .child(lead.trim_end().trim_end_matches('·').trim_end().to_string()),
                     )
                 })
                 // The part stays whole (`fit` already cut it); the lead gives way.
@@ -292,8 +296,12 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         .h(px(22.))
         .t_meta()
         .text_color(k.ink_3)
+        // A sent ref is a tab stop (Enter opens the part) with the row focus
+        // ring (E3); its hover stays a text step.
         .when(!deleted, |d| {
-            d.hover(|s| s.text_color(k.ink_2))
+            // `selected: true` leaves the hover to the text step here.
+            d.focus_row(true, cx)
+                .hover(|s| s.text_color(k.ink_2))
                 .on_click(move |_, _, cx| open_source(&draft, cx))
         })
         .child(

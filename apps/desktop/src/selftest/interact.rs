@@ -10,7 +10,8 @@
 
 use gpui::{Pixels, Point, point, px};
 
-/// What the runner does in a scene before it captures.
+/// What the runner does in a scene before it captures. `TC_KEYS=tab,down`
+/// replaces the keys of a key scene while you look for the right count.
 #[derive(Clone, Copy, Debug)]
 pub struct Steps {
     /// Where the pointer rests while the window draws (`None`: outside).
@@ -31,10 +32,18 @@ const fn hover(x: f32, y: f32, settle_ms: u64) -> Steps {
     }
 }
 
+const fn keys(keys: &'static [&'static str]) -> Steps {
+    Steps {
+        pointer: None,
+        keys,
+        settle_ms: 200,
+    }
+}
+
 /// One line per scene.
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
-    ("state-hover-message", hover(400., 250., 600)),
+    ("state-hover-message", hover(600., 315., 600)),
     ("state-hover-code", hover(690., 424., 400)),
     // --- end t5 ---
     // --- t5-cards ---
@@ -53,6 +62,19 @@ const STEPS: &[(&str, Steps)] = &[
         },
     ),
     // --- end r1-kit ---
+    // --- v15/r5-cards ---
+    // Tab past the sidebar rows and the toolbar to the first 话题 row, then ↓.
+    (
+        "state-focus-page-list",
+        keys(&[
+            "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab",
+            "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab",
+            "tab", "tab", "down",
+        ]),
+    ),
+    ("state-focus-card-option", keys(&["tab", "down"])),
+    ("state-focus-picker", keys(&["tab", "tab", "down"])),
+    // --- end v15/r5-cards ---
 ];
 
 /// The steps of scene `name`, if it has any.

@@ -32,7 +32,9 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
                 .text_color(n.label)
                 .one_line()
                 .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
-                .child(super::one_line_text(&ctx.card.title)),
+                .child(crate::ui::truncate::TruncText::new(super::one_line_text(
+                    &ctx.card.title,
+                ))),
         )
         .into_any_element()
 }
@@ -139,7 +141,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                                 .line_height(px(20.))
                                 .text_color(k.ink_2)
                                 .one_line()
-                                .child(body),
+                                .child(crate::ui::truncate::TruncText::new(body)),
                         ),
                 ),
         )
@@ -201,8 +203,9 @@ pub fn plan_row(
                 fill(c::PLAN_LIVE_LINE, &[("name", &name)]),
                 p.current.clone().unwrap_or_default()
             ),
-            p.step
-                .map(|s| format!("{s}/{}", p.total))
+            // One count rule (§2.12): steps done of all, as the card's badge.
+            (p.total > 0)
+                .then(|| format!("{}/{}", p.done, p.total))
                 .unwrap_or_default(),
             c::PLAN_LIVE_VIEW,
             Sym::ChevronRight,

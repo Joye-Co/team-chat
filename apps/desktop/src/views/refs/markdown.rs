@@ -118,35 +118,12 @@ impl TableRefs {
             })
     }
 
-    /// True when 问这里 of a row sits right after its name (Refs.dc.html: 「B 站 [问这里]」):
-    /// the first column holds the name, the gap and the button. `inner` is the first
-    /// column's width inside its padding; `None` takes the width the column had at its last
-    /// paint ([`TableRefs::measure`]). Else the button goes to the row's end.
-    pub fn beside(&self, name: &str, inner: Option<f32>, window: &Window) -> bool {
-        let Some(inner) =
-            inner.or_else(|| FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied()))
-        else {
-            return false;
-        };
-        let style = window.text_style();
-        let run = gpui::TextRun {
-            len: name.len(),
-            font: style.font(),
-            color: style.color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let w = window
-            .text_system()
-            .shape_line(
-                gpui::SharedString::from(name.to_string()),
-                theme::type_scale::SMALL.0,
-                &[run],
-                None,
-            )
-            .width;
-        f32::from(w) + NAME_GAP + ASK_PILL <= inner
+    /// True when 问这里 of a row sits right after its name. It never does now: the
+    /// row's action has one place, the row end (§2.6, E3), so it does not land over
+    /// the data column next to the name. Kept as the one switch the table renderers
+    /// ask.
+    pub fn beside(&self, _name: &str, _inner: Option<f32>, _window: &Window) -> bool {
+        false
     }
 
     /// 问这里 after the row's name, for the hovered cell of `row` (see [`TableRefs::beside`]).

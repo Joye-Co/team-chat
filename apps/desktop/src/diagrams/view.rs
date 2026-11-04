@@ -162,6 +162,11 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
     if let State::Failed(kind_err, hint) = &state {
         return error_frame(&spec, *kind_err, *hint, kind, &ui, window, cx);
     }
+    if let State::Ready(r) = &state
+        && r.meta.nodes.len() > MAX_INLINE_NODES
+    {
+        return dense_alert(&spec, r, &ui, cx);
+    }
 
     let header = header(&spec, kind, &ui, normalized.as_ref().ok(), true, cx);
     let avail = (width - 2. * PAD).max(80.);
@@ -414,6 +419,42 @@ fn pending(_id: &SharedString, _avail: f32, _cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// Too many nodes to read inline (F64): in place of the picture, the same
+/// Alert as a diagram that did not draw (§2.15), with 打开查看器: one style
+/// for one failure.
+fn dense_alert(spec: &InlineSpec, ready: &Ready, ui: &gpui::Entity<Ui>, cx: &App) -> AnyElement {
+    let n = ui::native::native_colors(cx);
+    let id = spec.id.clone();
+    let viewer = normalize::normalize(&spec.source)
+        .ok()
+        .map(|nz| (spec.clone(), nz, ui.read(cx).focus.clone()));
+    let alert = ui::native::Alert::new(Sym::Diagram, c::TOO_DENSE)
+        .icon_color(n.secondary)
+        .description(crate::copy::fill(
+            c::ERROR_NODES,
+            &[("n", &ready.meta.nodes.len().to_string())],
+        ));
+    let alert = match viewer {
+        Some((spec, nz, focus)) => alert.action(
+            ui::native::push_button(
+                ElementId::Name(format!("dview-{id}").into()),
+                c::OPEN_VIEWER,
+                ui::native::PushStyle::Outline,
+                ui::native::PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, window, cx| open_viewer(&spec, &nz, focus.clone(), window, cx)),
+        ),
+        None => alert,
+    };
+    div()
+        .id(ElementId::Name(format!("diagram-{id}").into()))
+        .w(ui::native::tokens::card_v2::MAX_WIDTH)
+        .max_w_full()
+        .child(alert)
+        .into_any_element()
+}
+
 fn image_with_hits(
     spec: &InlineSpec,
     ready: &Ready,
@@ -424,52 +465,6 @@ fn image_with_hits(
 ) -> AnyElement {
     let n = ui::native::native_colors(cx);
     let id = spec.id.clone();
-    // Too many nodes to read inline: a summary and the viewer (F64).
-    if ready.meta.nodes.len() > MAX_INLINE_NODES {
-        let viewer = normalize::normalize(&spec.source)
-            .ok()
-            .map(|nz| (spec.clone(), nz, ui.read(cx).focus.clone()));
-        return div()
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(space::S12)
-            .child(ui::icon(Sym::Diagram, px(16.), n.secondary))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .gap(space::S2)
-                    .child(div().t_small().text_color(n.label).child(c::TOO_DENSE))
-                    .child(
-                        div()
-                            .t_meta()
-                            .tnum()
-                            .text_color(n.secondary)
-                            .child(crate::copy::fill(
-                                c::ERROR_NODES,
-                                &[("n", &ready.meta.nodes.len().to_string())],
-                            )),
-                    ),
-            )
-            .when_some(viewer, |d, (spec, nz, focus)| {
-                d.child(
-                    ui::native::push_button(
-                        ElementId::Name(format!("dview-{id}").into()),
-                        c::OPEN_VIEWER,
-                        ui::native::PushStyle::Outline,
-                        ui::native::PushSize::Small,
-                        cx,
-                    )
-                    .on_click(move |_, window, cx| {
-                        open_viewer(&spec, &nz, focus.clone(), window, cx)
-                    }),
-                )
-            })
-            .into_any_element();
-    }
     let (expanded, hovered, focused) = {
         let u = ui.read(cx);
         (u.expanded, u.hovered, u.focused)
@@ -610,8 +605,13 @@ fn image_with_hits(
                 }),
         )
         // The top of a tall diagram: 展开 in a footer row under a line (§2.4), not on a
-        // fade over the picture.
-        .when(fit.clipped, |el| {
+        // fade over the picture. A diagram wider than the card at 12 px text also
+        // offers the viewer there (F64: an outline sm 打开查看器).
+        .when(fit.clipped || scrolls, |el| {
+            let viewer = scrolls
+                .then(|| normalize::normalize(&spec.source).ok())
+                .flatten()
+                .map(|nz| (spec.clone(), nz, ui.read(cx).focus.clone()));
             el.child(
                 div()
                     .mt(space::S12)
@@ -623,21 +623,38 @@ fn image_with_hits(
                     .border_color(n.separator)
                     .flex()
                     .items_center()
-                    .child(
-                        ui::native::push_button(
-                            ElementId::Name(format!("dexpand-{id}").into()),
-                            c::EXPAND,
-                            ui::native::PushStyle::Ghost,
-                            ui::native::PushSize::Small,
-                            cx,
+                    .gap(space::S8)
+                    .when(fit.clipped, |row| {
+                        row.child(
+                            ui::native::push_button(
+                                ElementId::Name(format!("dexpand-{id}").into()),
+                                c::EXPAND,
+                                ui::native::PushStyle::Ghost,
+                                ui::native::PushSize::Small,
+                                cx,
+                            )
+                            .on_click(move |_, _, cx| {
+                                toggle.update(cx, |s, cx| {
+                                    s.expanded = true;
+                                    cx.notify();
+                                })
+                            }),
                         )
-                        .on_click(move |_, _, cx| {
-                            toggle.update(cx, |s, cx| {
-                                s.expanded = true;
-                                cx.notify();
-                            })
-                        }),
-                    ),
+                    })
+                    .when_some(viewer, |row, (spec, nz, focus)| {
+                        row.child(
+                            ui::native::push_button(
+                                ElementId::Name(format!("dwide-{id}").into()),
+                                c::OPEN_VIEWER,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
+                                cx,
+                            )
+                            .on_click(move |_, window, cx| {
+                                open_viewer(&spec, &nz, focus.clone(), window, cx)
+                            }),
+                        )
+                    }),
             )
         })
         .into_any_element()

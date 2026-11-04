@@ -912,7 +912,10 @@ impl ChatProvider for FakeProvider {
 
     fn login(&self, request: LoginRequest) {
         let ok = match &request.credential {
-            Credential::InviteCode(code) => code != "WRONG-CODE-0000" && code != "0000-0000",
+            Credential::InviteCode(code) => !matches!(
+                code.as_str(),
+                "WRONG-CODE-0000" | "0000-0000" | "0000-0000-0000"
+            ),
             Credential::Token(token) => token.len() > 3,
         };
         // A `.invalid` host (RFC 2606) never answers: the login-unreachable scene.
@@ -1566,6 +1569,92 @@ impl ChatProvider for FakeProvider {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = tx.send(Ok(hits));
         rx
+    }
+
+    /// What waits on me, as the default lists it, with the question itself
+    /// as the ask's title: the asker's newest message in the 话题 (the pinned
+    /// banner then names the question, not the 话题 title).
+    fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {
+        self.todo()
+            .into_iter()
+            .filter(|t| t.reason == TodoReason::WaitingOnMe)
+            .map(|t| {
+                let from = t
+                    .topic
+                    .owner_id
+                    .clone()
+                    .unwrap_or_else(|| t.topic.created_by.clone());
+                let question = self
+                    .messages(&t.group_id, &t.topic.id, 50)
+                    .messages
+                    .into_iter()
+                    .rev()
+                    .find(|m| m.author_id == from && m.deleted_at.is_none())
+                    .and_then(|m| {
+                        // The line that asks (it ends in a question mark),
+                        // else the first line; without a leading @mention.
+                        let line = m
+                            .body
+                            .lines()
+                            .find(|l| l.trim_end().ends_with(['？', '?']))
+                            .or_else(|| m.body.lines().next())?
+                            .trim();
+                        let line = match line.strip_prefix('@') {
+                            Some(rest) => rest.split_once(' ').map_or(rest, |(_, r)| r).trim(),
+                            None => line,
+                        };
+                        Some(line.to_string())
+                    })
+                    .filter(|b| !b.trim().is_empty());
+                let review = t.topic.status == TopicStatus::WaitingReview;
+                crate::data::v2::AskItem {
+                    group_id: t.group_id,
+                    topic_id: t.topic.id.clone(),
+                    message_id: None,
+                    from,
+                    kind: if review {
+                        crate::data::v2::AskKind::Review
+                    } else {
+                        crate::data::v2::AskKind::Topic
+                    },
+                    // A review keeps the 话题 title (the change under review).
+                    title: question
+                        .filter(|_| !review)
+                        .unwrap_or_else(|| t.topic.title.clone()),
+                    at: t.topic.last_activity_at,
+                }
+            })
+            .collect()
+    }
+
+    /// This week of a member from the same data as 首页's 今天完成 and
+    /// 最近的产出: 话题 it owns that are done, and 产出 it made, in the last
+    /// 7 days (fixtures agree, A5).
+    fn member_stats(&self, member_id: &str) -> Option<crate::data::v2::MemberStats> {
+        let week_ago = crate::selftest::clock::local_now().timestamp_millis() - 7 * 24 * 3_600_000;
+        let mut stats = crate::data::v2::MemberStats::default();
+        for g in self.groups() {
+            for t in self.topics(&g.id) {
+                for r in self.runs(&g.id, &t.id) {
+                    if r.bot_id == member_id && r.status.is_active() {
+                        stats.active.push((g.id.clone(), t.id.clone()));
+                    }
+                }
+                let owner = t.owner_id.as_deref() == Some(member_id);
+                if owner && t.last_activity_at >= week_ago {
+                    stats.topics_this_week += 1;
+                    if t.status == TopicStatus::Done {
+                        stats.done_this_week += 1;
+                    }
+                }
+                stats.artifacts_this_week += self
+                    .artifacts(&g.id, &t.id)
+                    .iter()
+                    .filter(|a| a.created_by == member_id && a.updated_at >= week_ago)
+                    .count() as u32;
+            }
+        }
+        Some(stats)
     }
 
     fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {

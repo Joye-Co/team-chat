@@ -238,8 +238,10 @@ pub fn member_extras(p: &V2Samples, member_id: &str) -> MemberExtras {
             LEDGER => line("空闲 · 09:40 交了 10 月数据月报"),
             POCKET => line("空闲 · 明早 08:00 发晨报"),
             SCOUT => line("空闲 · 09:12 巡检 staging，24 项都通过"),
-            XIAOWANG => line("在线 · 在试断线重连的修复"),
-            LIXUE => line("在线 · 跟进夹夹 3.0 宣传"),
+            // People have no run: their line says what they did last, so it
+            // agrees with 现在没在做事 in their detail (A5).
+            XIAOWANG => line("在线 · 10:12 看过断线重连的修复"),
+            LIXUE => line("在线 · 09:30 发了夹夹 3.0 的文案"),
             ALEX => line("离开 · 08:50 后没回来"),
             CHENCHEN => line("离线 · 周三回来"),
             _ => None,
@@ -410,6 +412,11 @@ pub fn sample_image(file_id: &str) -> Option<std::path::PathBuf> {
     let svg = match file_id {
         "f-proto-a" => proto_by_event(),
         "f-proto-b" => proto_by_time(),
+        // The cover choices and the draft's pictures (D1-12): real pictures,
+        // not empty boxes.
+        "f-cover-a" | "f-promo-1" => cover_collage(),
+        "f-cover-b" | "f-promo-2" => cover_big_title(),
+        "f-cover-c" | "f-promo-3" => phone("#DCE3E8", &chat_screen()),
         _ => return None,
     };
     let dir = std::env::temp_dir()
@@ -463,6 +470,63 @@ fn proto_by_time() -> String {
         ));
     }
     phone("#DCE4E2", &cells)
+}
+
+/// 合照拼图: four photos of people in a 2 × 2 grid.
+fn cover_collage() -> String {
+    let mut cells = String::new();
+    let tints = ["#C9B9A6", "#B7C4CF", "#D4C2B0", "#B9C7C4"];
+    for (i, tint) in tints.iter().enumerate() {
+        let (x, y) = (12 + (i % 2) * 274, 12 + (i / 2) * 114);
+        cells.push_str(&format!(
+            r##"<rect x="{x}" y="{y}" width="262" height="102" rx="8" fill="{tint}"/>
+<circle cx="{}" cy="{}" r="16" fill="#2B2724" opacity=".22"/>
+<circle cx="{}" cy="{}" r="16" fill="#2B2724" opacity=".22"/>
+<circle cx="{}" cy="{}" r="16" fill="#2B2724" opacity=".22"/>
+<rect x="{}" y="{}" width="170" height="30" rx="15" fill="#2B2724" opacity=".16"/>"##,
+            x + 81,
+            y + 44,
+            x + 131,
+            y + 40,
+            x + 181,
+            y + 44,
+            x + 46,
+            y + 66,
+        ));
+    }
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+<rect width="560" height="240" fill="#EFEAE4"/>
+{cells}
+</svg>"##
+    )
+}
+
+/// 大字标题: a photo with two heavy title lines over it.
+fn cover_big_title() -> String {
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+<rect width="560" height="240" fill="#B7C4CF"/>
+<circle cx="440" cy="150" r="70" fill="#2B2724" opacity=".12"/>
+<rect x="40" y="56" width="300" height="34" rx="6" fill="#1F1B18"/>
+<rect x="40" y="102" width="220" height="34" rx="6" fill="#1F1B18"/>
+<rect x="40" y="160" width="160" height="12" rx="6" fill="#1F1B18" opacity=".5"/>
+</svg>"##
+        .to_string()
+}
+
+/// 手机截图: a group chat with photo messages.
+fn chat_screen() -> String {
+    let mut rows = String::new();
+    for (i, w) in [120, 84, 140].iter().enumerate() {
+        let y = 92 + i * 52;
+        rows.push_str(&format!(
+            r##"<circle cx="210" cy="{}" r="10" fill="#2B2724" opacity=".2"/>
+<rect x="228" y="{}" width="{w}" height="30" rx="8" fill="#2B2724" opacity=".1"/>"##,
+            y + 12,
+            y,
+        ));
+    }
+    rows
 }
 
 fn phone(bg: &str, screen: &str) -> String {

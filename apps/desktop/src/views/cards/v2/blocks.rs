@@ -17,6 +17,7 @@ use gpui_component::{
 use serde_json::Value;
 
 use super::{Ctx, choice_text, form::Field, meta, option_label, state::CardState};
+use crate::ui::native::FocusRow as _;
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
@@ -828,7 +829,10 @@ pub(crate) fn choice_row(
             .child(letter.to_string())
             .into_any_element()
     };
+    // Hover: muted at 50 % and the border at foreground 50 %, so it reads
+    // on the card fill and stays apart from the picked row (E2, E3).
     let hover = m::alpha(n.fill, 0.5);
+    let hover_edge = m::alpha(n.label, 0.5);
     div()
         .id(id)
         .w_full()
@@ -838,7 +842,16 @@ pub(crate) fn choice_row(
         .border_1()
         .border_color(if picked { n.label } else { n.separator })
         .when(picked, |el| el.bg(n.selection))
-        .when(enabled && !picked, |el| el.hover(move |s| s.bg(hover)))
+        // A tab stop with Enter / Space and ↑ ↓, and the focus ring apart
+        // from the picked fill (E3, R1 FocusRow); the hover below keeps its
+        // border step.
+        // `selected: true` leaves the hover to this row (one hover style).
+        .when(enabled, |el| {
+            el.focus_row_with(true, ui::native::Arrows::Vertical, cx)
+        })
+        .when(enabled && !picked, |el| {
+            el.hover(move |s| s.bg(hover).border_color(hover_edge))
+        })
         .when(!enabled, |el| el.opacity(0.5))
         .flex()
         .items_center()
@@ -852,9 +865,7 @@ pub(crate) fn choice_row(
                 div()
                     .flex_none()
                     .max_w(gpui::relative(0.45))
-                    .one_line()
-                    .text_color(n.secondary)
-                    .child(d.to_string()),
+                    .child(ui::truncate::TruncText::new(d.to_string()).text_color(n.secondary)),
             )
         })
 }
@@ -1011,7 +1022,7 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         } else {
             ui::motion::check_mark(
                 ctx.id("record-check"),
-                ui::icon(Sym::Check, px(16.), k.ok),
+                ui::icon(Sym::Check, px(16.), k.ink_3),
                 px(16.),
                 fresh,
                 cx,
@@ -1569,11 +1580,19 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                                     .text_color(k.ink)
                                     .child(label.unwrap_or("").to_string()),
                             )
+                            // Over the limit: neutral text with a red icon
+                            // (owner decision v15, field errors).
                             .child(
                                 meta(div())
                                     .ml_auto()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S4)
                                     .mono()
-                                    .text_color(if over { k.bad_ink } else { k.ink_3 })
+                                    .text_color(if over { k.ink } else { k.ink_3 })
+                                    .when(over, |el| {
+                                        el.child(ui::icon(Sym::Failed, px(12.), k.bad))
+                                    })
                                     .child(counter),
                             ),
                     )
@@ -1674,6 +1693,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .line_height(px(22.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(k.ink)
+                .line_clamp(2)
                 .child(t)
         } else {
             div()
@@ -1687,7 +1707,13 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                         )
                     })
                 })
-                .child(small(div()).text_color(k.ink_2).child(t))
+                // The well previews the text; 改一下 shows all of it.
+                .child(
+                    small(div())
+                        .text_color(k.ink_2)
+                        .line_clamp(DRAFT_LINES)
+                        .child(t),
+                )
         });
     }
     div()
@@ -1703,6 +1729,9 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         .child(texts)
         .into_any_element()
 }
+
+/// Lines of draft text the well previews.
+const DRAFT_LINES: usize = 6;
 
 /// A group: a label and its blocks; a group of drafts and images is the
 /// draft well.
@@ -1784,6 +1813,7 @@ fn plan(
         .or_else(|| ctx.me.as_ref().map(|me| ctx.name(me)))
         .unwrap_or_default();
     let mut current_seen = false;
+    let header_bar = super::strip_parts(ctx, cx).is_some_and(|p| p.bar.is_some());
     div()
         .flex()
         .flex_col()
@@ -1841,9 +1871,11 @@ fn plan(
                     }),
                 _ => None,
             };
+            // One Progress per card: when the header draws the work bar, the
+            // current step keeps only its label (§2.4 working card).
             let bar = progress
                 .as_ref()
-                .filter(|_| current)
+                .filter(|_| current && !header_bar)
                 .map(|(v, l)| progress_bar(*v, None, segments(l.as_deref()), cx));
             let row = small(div())
                 .flex()
@@ -1864,21 +1896,23 @@ fn plan(
                         .min_w(px(0.))
                         .flex()
                         .overflow_hidden()
+                        // A long step ends in "…" with the full text in a
+                        // tooltip; 问这里 stays after it (§2.21, F3).
                         .child(
-                            div()
-                                .flex_none()
+                            ui::truncate::TruncText::new(it.text.clone())
+                                .id(SharedString::from(format!("plan-step-text-{i}")))
+                                .flex_shrink(1.)
+                                .min_w(px(0.))
                                 .text_color(text_color)
-                                .font_weight(weight)
-                                .child(it.text.clone()),
+                                .font_weight(weight),
                         )
                         .when(it.state == RunPlanState::Waiting, |el| {
-                            el.child(
-                                div()
-                                    .min_w(px(0.))
-                                    .one_line()
-                                    .text_color(k.ink_2)
-                                    .child(fill(c::PLAN_WAITS_ON, &[("name", &waiting_on)])),
-                            )
+                            el.child(div().min_w(px(0.)).one_line().text_color(k.ink_2).child(
+                                crate::ui::truncate::TruncText::new(fill(
+                                    c::PLAN_WAITS_ON,
+                                    &[("name", &waiting_on)],
+                                )),
+                            ))
                         })
                         .children(ask.map(|a| div().flex_none().ml(space::S8).child(a))),
                 )
@@ -2124,7 +2158,7 @@ fn diff(
                     .items_center()
                     .text_color(k.ink_3)
                     .one_line()
-                    .child(raw.to_string())
+                    .child(crate::ui::truncate::TruncText::new(raw.to_string()))
                     .into_any_element(),
             );
             continue;
@@ -2227,7 +2261,10 @@ fn diff(
                         .min_w(px(0.))
                         .one_line()
                         .text_color(k.ink)
-                        .child(path.unwrap_or("").to_string()),
+                        .child(
+                            crate::ui::truncate::TruncText::new(path.unwrap_or("").to_string())
+                                .middle(),
+                        ),
                 )
                 // Counts in muted text; the +/− glyph carries the meaning (§1.3).
                 .child(div().text_color(k.ink_3).child(format!("+{adds}")))
@@ -2308,7 +2345,9 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         }
         let bp = part(b);
         let glyph = match state {
-            Some(EvidenceState::Pass) => Some((Sym::Check, k.ok)),
+            // A passed check is a muted mark; only a failure keeps color on
+            // its icon (§2.12: no free colored mark).
+            Some(EvidenceState::Pass) => Some((Sym::Check, k.ink_3)),
             Some(EvidenceState::Fail) => Some((Sym::Close, k.bad)),
             _ => None,
         };
@@ -2394,7 +2433,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .border_b_1()
                                     .border_color(k.line)
                                     .one_line()
-                                    .child(label.clone()),
+                                    .child(crate::ui::truncate::TruncText::new(label.clone())),
                             )
                             .children(detail.iter().flat_map(|d| d.lines()).take(2).map(|l| {
                                 div()
@@ -2402,7 +2441,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .line_height(crate::ui::native::tokens::text::META.1)
                                     .text_color(k.ink_3)
                                     .one_line()
-                                    .child(l.to_string())
+                                    .child(crate::ui::truncate::TruncText::new(l.to_string()))
                             })),
                     });
                 // The thumbnail clips, so the part wraps it: 问这里 sits inside its corner.
@@ -2734,7 +2773,12 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         .filter(|r| !r.plan.is_empty() && topic.as_ref().is_some_and(|t| t.status != TopicStatus::Done))
                         .map(|r| {
                             let done = r.plan.iter().filter(|x| x.state == crate::data::PlanState::Done).count();
-                            format!("{}/{}", (done + 1).min(r.plan.len()), r.plan.len())
+                            // One count rule everywhere: steps done of all, with
+                            // its word (§2.12: 在做 3/5).
+                            fill(
+                                c::STRIP_WORKING_COUNT,
+                                &[("n", &done.to_string()), ("total", &r.plan.len().to_string())],
+                            )
                         });
                     (
                         ref_tile(Sym::List, false, cx),
@@ -2781,10 +2825,20 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .min_h(px(44.))
                 .py(space::S8)
                 .when(!gone, |el| {
-                    el
+                    el.focus_row(false, cx)
                         .on_click(move |_, window, cx| a.open(&t, window, cx))
                 })
-                .child(lead)
+                // One 24 media column for every kind, so every name starts
+                // at one x (F4).
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(24.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(lead),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -2815,23 +2869,62 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         Some(state) => ui::native::StatusBadge::new(state, r)
                             .max_w(m::MAX_WIDTH / 4.)
                             .into_any_element(),
+                        // Every badge has an icon (§2.12): a newer version
+                        // reads with the refresh mark.
                         None => ui::native::Badge::new(r)
+                            .icon(Sym::Refresh, ui::native::native_colors(cx).secondary)
                             .max_w(m::MAX_WIDTH / 4.)
                             .into_any_element(),
                     })
                 }),
         )
     });
+    // A long list shows its first rows and ends with a footer row that
+    // opens the rest (§2.6).
+    let total = blocks.len();
+    let all = ctx.form.read(cx).refs_all;
+    let capped = total > REFS_CAP + 1 && !all;
+    let shown = if capped { REFS_CAP } else { total };
+    let footer = (total > REFS_CAP + 1).then(|| {
+        let form = ctx.form.clone();
+        let label = if all {
+            c::REFS_FEWER.to_string()
+        } else {
+            fill(c::REFS_ALL, &[("count", &total.to_string())])
+        };
+        quiet_button(ctx.id("refs-all"), &label, cx)
+            .on_click(move |_, _, cx| form.update(cx, |f, cx| f.toggle_refs_all(cx)))
+            .into_any_element()
+    });
     // No box of its own inside the card: rows divided by a hairline, their
     // hover reaching past the text (one container level, §7.10).
-    ui::divided(
-        rows.map(|r| ui::inset_row(r).into_any_element()),
+    let list = ui::divided(
+        rows.take(shown)
+            .map(|r| ui::inset_row(r).into_any_element()),
         theme::LIST_ROW_BLEED,
         cx,
     )
-    .mx(-theme::LIST_ROW_BLEED)
-    .into_any_element()
+    .mx(-theme::LIST_ROW_BLEED);
+    match footer {
+        Some(f) => div()
+            .flex()
+            .flex_col()
+            .child(list)
+            .child(
+                div()
+                    .flex()
+                    .pt(space::S8)
+                    .border_t_1()
+                    .border_color(k.line)
+                    .child(f),
+            )
+            .into_any_element(),
+        None => list.into_any_element(),
+    }
 }
+
+/// Rows a ref list shows before its 看全部 footer row.
+const REFS_CAP: usize = 5;
 
 #[cfg(test)]
 mod tests {
