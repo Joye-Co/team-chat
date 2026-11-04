@@ -1,6 +1,7 @@
 //! The 群, 成员 and 产出 pages on the chat-core cache (pages track):
 //! 群里的决定 derived from answered asks marked `record`, 页面里的回应 from the
-//! local page event log (page events are transient, never stored in the group log),
+//! server's page log of the 产出 (`GET /v1/artifacts/:id/events`, GAPS SF-2) plus the page
+//! events this window saw since (page events are never stored in the group log),
 //! page events declared by bot-made versions and forwarded as `artifact.event`, and
 //! 重试 for a stuck run.
 
@@ -78,13 +79,48 @@ pub(super) struct PageEvent {
     pub at: i64,
 }
 
-/// The local page event log, per 产出 id, oldest first (R5: page events are transient).
+/// The page event log, per 产出 id, oldest first: the server's page log once fetched, and
+/// the events this window saw after it.
 #[derive(Default)]
 pub(super) struct PageEventLog {
     inner: Mutex<HashMap<String, Vec<PageEvent>>>,
+    /// When the server's page log of a 产出 was last asked for.
+    fetched: Mutex<HashMap<String, std::time::Instant>>,
 }
 
+/// How often the server's page log of an open 产出 is read again.
+const PAGE_LOG_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl PageEventLog {
+    /// True when the server's page log of `artifact_id` should be read now (marks it).
+    pub(super) fn due(&self, artifact_id: &str) -> bool {
+        let mut map = self.fetched.lock().unwrap_or_else(|e| e.into_inner());
+        let now = std::time::Instant::now();
+        match map.get(artifact_id) {
+            Some(at) if now.duration_since(*at) < PAGE_LOG_REFRESH => false,
+            _ => {
+                map.insert(artifact_id.to_string(), now);
+                true
+            }
+        }
+    }
+
+    /// Takes the server's page log (newest first, as the server sends it): the stored events,
+    /// then the events this window saw after the newest stored one.
+    pub(super) fn merge_server(&self, artifact_id: &str, newest_first: Vec<PageEvent>) {
+        let mut stored = newest_first;
+        stored.reverse();
+        let newest = stored.last().map(|e| e.at).unwrap_or(i64::MIN);
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let local = map.remove(artifact_id).unwrap_or_default();
+        stored.extend(local.into_iter().filter(|e| e.at > newest));
+        if stored.len() > PAGE_EVENTS_KEPT {
+            let extra = stored.len() - PAGE_EVENTS_KEPT;
+            stored.drain(..extra);
+        }
+        map.insert(artifact_id.to_string(), stored);
+    }
+
     pub(super) fn record(&self, artifact_id: &str, event: PageEvent) {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let list = map.entry(artifact_id.to_string()).or_default();
@@ -333,10 +369,57 @@ impl CoreProvider {
         }
     }
 
+    /// Reads the server's page log of a 产出 in the background (at most every minute) and
+    /// redraws the 产出 page when it arrives.
+    fn refresh_page_log(&self, artifact_id: &str) {
+        let Some(a) = self.account() else { return };
+        if !self.shared.page_events.due(artifact_id) {
+            return;
+        }
+        let http = a.client.http();
+        let this = self.clone();
+        let id = artifact_id.to_string();
+        let change = a
+            .client
+            .artifact(artifact_id)
+            .ok()
+            .flatten()
+            .map(|r| Change::Artifacts {
+                group_id: r.artifact.group_id,
+                topic_id: r.artifact.topic_id,
+            });
+        chat_core::background().spawn(async move {
+            match http
+                .artifact_events(&id, None, PAGE_EVENTS_KEPT as u32)
+                .await
+            {
+                Ok(r) => {
+                    let events = r
+                        .events
+                        .into_iter()
+                        .map(|e| PageEvent {
+                            actor_id: e.actor_id,
+                            version: e.version,
+                            name: e.name,
+                            payload: e.payload,
+                            at: e.at.min(i64::MAX as u64) as i64,
+                        })
+                        .collect();
+                    this.shared.page_events.merge_server(&id, events);
+                    if let Some(c) = change {
+                        this.emit(vec![c]);
+                    }
+                }
+                Err(e) => tracing::info!(error = %e, "产出 page log not read"),
+            }
+        });
+    }
+
     pub(super) fn artifact_responses_inner(&self, artifact_id: &str) -> Vec<ArtifactResponse> {
         let Some(a) = self.account() else {
             return Vec::new();
         };
+        self.refresh_page_log(artifact_id);
         let row = a.client.artifact(artifact_id).ok().flatten();
         let label = |version: u32, name: &str| -> String {
             row.as_ref()
@@ -440,5 +523,30 @@ impl CoreProvider {
             }
         });
         rx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_page_log_takes_the_servers_events_and_keeps_newer_local_ones() {
+        let ev = |name: &str, at: i64| PageEvent {
+            actor_id: "m".into(),
+            version: 1,
+            name: name.into(),
+            payload: None,
+            at,
+        };
+        let log = PageEventLog::default();
+        log.record("A", ev("seen", 5));
+        log.record("A", ev("mine-later", 30));
+        // The server sends newest first; an event this window saw before is in it.
+        log.merge_server("A", vec![ev("pick", 20), ev("seen", 5)]);
+        let names: Vec<String> = log.events("A").into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["seen", "pick", "mine-later"]);
+        assert!(log.due("A"));
+        assert!(!log.due("A"));
     }
 }
