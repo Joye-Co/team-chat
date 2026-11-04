@@ -202,6 +202,7 @@ async fn collect(ws: &mut Ws, run: &str, ack: bool, stop: impl Fn(&Up) -> bool) 
 fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Down {
     Down::RunAssign(RunAssign {
         kind: None,
+        resume_session_id: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
@@ -1555,6 +1556,81 @@ async fn chat_run_without_a_link_is_not_connected() {
             .contains("the result is unknown"),
         "{err}"
     );
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// A follow-up run in the same topic continues the CLI session of the run before it: run 1
+/// reports its session, run 2 gets `run.assign.resumeSessionId` and starts the CLI with
+/// `--resume` of that session (the session file copied into its own project folder). The daemon
+/// reports feature "resume".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_follow_up_run_resumes_the_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(20), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match next(&mut ws).await {
+        Up::Hello { machine, .. } => {
+            assert!(
+                machine
+                    .features
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|f| f == "resume")
+            );
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("f1", "fake", "first question", None)).await;
+    let fr = collect(&mut ws, "f1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let s1 = done(&fr).session_id.expect("run 1 session");
+
+    // The CLI has exited; an answer in the topic starts run 2 with the session.
+    let mut a = assign("f2", "fake", "the answer", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some(s1.clone());
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "f2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+    assert_eq!(done(&fr).session_id.as_deref(), Some(s1.as_str()));
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/f2/work/argv.json")).unwrap(),
+    )
+    .unwrap();
+    let i = argv.iter().position(|a| a == "--resume").expect("--resume");
+    assert_eq!(argv[i + 1], s1);
+    assert!(!argv.iter().any(|a| a == "--session-id"));
+
+    // A session the CLI no longer has starts a new one.
+    let mut a = assign("f3", "fake", "again", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some("gone-session".into());
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "f3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+    assert_ne!(done(&fr).session_id.as_deref(), Some("gone-session"));
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/f3/work/argv.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(argv.iter().any(|a| a == "--session-id"));
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

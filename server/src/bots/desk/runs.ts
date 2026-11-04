@@ -148,10 +148,29 @@ export abstract class DeskRuns extends DeskCore {
     }
   }
 
-  /** The best machine for the run; an aside run needs a daemon that runs it read-only. */
+  /** The best machine for the run; an aside run needs a daemon that runs it read-only. The
+   * machine of the topic's last session comes first, so the run can continue that session. */
   protected pick(r: RunRow, runner: BotRunner, machines: MachineView[], excluded: string[] = []): MachineView | null {
     const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
+    const prev = this.lastSession(r, runner);
+    if (prev) {
+      const same = pickMachine(usable.filter((x) => x.id === prev.machine_id), runner, Date.now(), excluded);
+      if (same) return same;
+    }
     return pickMachine(usable, runner, Date.now(), excluded);
+  }
+
+  /** The topic's last ended run of the same kind and runtime with a CLI session, if any. */
+  protected lastSession(r: RunRow, runner: BotRunner): RunRow | undefined {
+    const prev = this.sql
+      .exec<RunRow>(
+        "SELECT * FROM runs WHERE topic_id = ? AND id != ? AND ended_at IS NOT NULL AND kind IS ? ORDER BY created_at DESC LIMIT 1",
+        r.topic_id,
+        r.id,
+        r.kind,
+      )
+      .toArray()[0] as RunRow | undefined;
+    return prev?.session_id && prev.machine_id && prev.runtime === runner.runtime && !prev.external ? prev : undefined;
   }
 
   protected async topicPrompt(m: TopicMessage, claim: ClaimResult, followUps: { authorId: string; body: string }[], acceptance = false): Promise<string> {
@@ -217,7 +236,7 @@ export abstract class DeskRuns extends DeskCore {
     });
   }
 
-  protected assignFrame(r: RunRow, runner: BotRunner, prompt: string): RunAssignFrame {
+  protected assignFrame(r: RunRow, runner: BotRunner, prompt: string, machine?: MachineView): RunAssignFrame {
     const frame: RunAssignFrame = {
       t: "run.assign",
       runId: r.id,
@@ -233,13 +252,17 @@ export abstract class DeskRuns extends DeskCore {
     if (runner.model) frame.model = runner.model;
     if (r.kind === RUN_KIND_ASIDE) frame.kind = RUN_KIND_ASIDE;
     if (runner.repo) frame.repo = { ...runner.repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
+    // Continue the topic's last session when this run goes to the machine that has it.
+    const prev = machine && hasFeature(machine, "resume") ? this.lastSession(r, runner) : undefined;
+    if (prev?.session_id && prev.machine_id === machine?.id) frame.resumeSessionId = prev.session_id;
     return frame;
   }
 
   protected async assign(r: RunRow, runner: BotRunner, machine: MachineView, prompt: string): Promise<void> {
-    const frame = this.assignFrame(r, runner, prompt);
-    this.sql.exec("UPDATE runs SET machine_id = ? WHERE id = ?", machine.id, r.id);
+    const frame = this.assignFrame(r, runner, prompt, machine);
+    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
     r.machine_id = machine.id;
+    r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ? WHERE id = ?").bind(machine.id, r.id).run();
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
     await linkStub(this.env, machine.id).assign(machine.id, this.botId as string, frame);

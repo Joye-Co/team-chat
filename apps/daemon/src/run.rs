@@ -275,6 +275,10 @@ pub async fn supervise(ctx: RunCtx) {
                 env,
                 aside,
                 note: chat_run.as_ref().map(|_| crate::chat_run::note()),
+                resume_session_id: assign
+                    .resume_session_id
+                    .clone()
+                    .filter(|s| runtime::valid_session_id(s)),
             };
             let work = spec.cwd.clone();
             let res = run_runtime(&cfg, &assign, spec, control_rx, &event).await;

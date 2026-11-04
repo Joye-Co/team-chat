@@ -266,8 +266,14 @@ const STEER_WAIT: Duration = Duration::from_secs(10);
 enum Pending {
     Initialize,
     ThreadStart,
+    /// `thread/resume` with the params a `thread/start` takes when the thread is gone.
+    ThreadResume {
+        params: Value,
+    },
     TurnStart,
-    Steer { text: String },
+    Steer {
+        text: String,
+    },
     Interrupt,
 }
 
@@ -364,6 +370,12 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             let msg = rpc_error_text(e);
                             match kind {
                                 Pending::Steer { text } => queued.push_back(text),
+                                // The thread is gone (another CODEX_HOME, removed): a new one.
+                                Pending::ThreadResume { params } => {
+                                    let id = ids.next_id();
+                                    pending.insert(id, Pending::ThreadStart);
+                                    let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
+                                }
                                 Pending::Interrupt => {}
                                 _ => {
                                     p.kill_group(Duration::from_secs(3)).await;
@@ -380,7 +392,6 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             Pending::Initialize => {
                                 let _ = p.write_json(&json!({ "method": "initialized" })).await;
                                 let id = ids.next_id();
-                                pending.insert(id, Pending::ThreadStart);
                                 let (approval, sandbox) = thread_policy(&spec);
                                 let mut params = json!({
                                     "cwd": spec.cwd.to_string_lossy(),
@@ -393,9 +404,20 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 if let Some(n) = spec.note.as_ref().filter(|_| chat_run_works(&spec)) {
                                     params["developerInstructions"] = json!(n);
                                 }
-                                let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
+                                match spec.resume_session_id.clone() {
+                                    Some(tid) => {
+                                        let mut resume = params.clone();
+                                        resume["threadId"] = json!(tid);
+                                        pending.insert(id, Pending::ThreadResume { params });
+                                        let _ = p.write_json(&json!({ "id": id, "method": "thread/resume", "params": resume })).await;
+                                    }
+                                    None => {
+                                        pending.insert(id, Pending::ThreadStart);
+                                        let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
+                                    }
+                                }
                             }
-                            Pending::ThreadStart => {
+                            Pending::ThreadStart | Pending::ThreadResume { .. } => {
                                 let tid = r["thread"]["id"].as_str().unwrap_or_default().to_string();
                                 session_file = r["thread"]["path"].as_str().map(PathBuf::from);
                                 let _ = emit.send(RunEvent::Session {

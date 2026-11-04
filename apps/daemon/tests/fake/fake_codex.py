@@ -5,7 +5,9 @@ appended to the reply; a command approval is asked when the prompt says "approve
 prompt says "late", the turn waits for a steer and then completes before it answers the steer
 with an error (a steer that arrives as the turn ends). When the prompt says "chatrun", the turn
 runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DIR`,
-`CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json."""
+`CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json. `thread/resume` knows only
+the thread "th-old" (any other id is an error, like a thread Codex no longer has); each thread
+call goes to threads.json."""
 import json, os, subprocess, sys, threading, time
 
 assert sys.argv[1:2] == ["app-server"]
@@ -65,7 +67,17 @@ for line in sys.stdin:
         out({"id": mid, "result": {"userAgent": "fake", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}})
     elif meth == "initialized":
         pass
+    elif meth == "thread/resume":
+        calls = json.load(open("threads.json")) if os.path.exists("threads.json") else []
+        open("threads.json", "w").write(json.dumps(calls + [[meth, m["params"].get("threadId")]]))
+        if m["params"]["threadId"] == "th-old":
+            thread = "th-old"
+            out({"id": mid, "result": {"thread": {"id": thread, "path": os.path.realpath(path)}, "model": "fake-codex"}})
+        else:
+            out({"id": mid, "error": {"code": -32600, "message": "no rollout found for thread id"}})
     elif meth == "thread/start":
+        calls = json.load(open("threads.json")) if os.path.exists("threads.json") else []
+        open("threads.json", "w").write(json.dumps(calls + [[meth, None]]))
         assert m["params"]["cwd"] == os.getcwd() or os.path.realpath(m["params"]["cwd"]) == os.path.realpath(os.getcwd())
         out({"id": mid, "result": {"thread": {"id": thread, "path": os.path.realpath(path)}, "model": "fake-codex"}})
     elif meth == "turn/start":

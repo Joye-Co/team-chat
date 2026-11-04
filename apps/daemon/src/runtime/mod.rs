@@ -43,6 +43,16 @@ pub struct RunSpec {
     pub aside: bool,
     /// Run instructions for the CLI's system prompt (how to use `chat-run`), when the run has it.
     pub note: Option<String>,
+    /// `run.assign.resumeSessionId`: the CLI session to continue (Claude Code `--resume`, Codex
+    /// `thread/resume`). A session the CLI no longer has starts a new one.
+    pub resume_session_id: Option<String>,
+}
+
+/// A session id the daemon passes on: 1-128 of `[A-Za-z0-9_-]` (it becomes a file name).
+pub fn valid_session_id(s: &str) -> bool {
+    (1..=128).contains(&s.len())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 impl RunSpec {

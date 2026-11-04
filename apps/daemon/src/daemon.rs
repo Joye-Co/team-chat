@@ -32,6 +32,7 @@ pub const FEATURES: &[&str] = &[
     feature::ACCEPTANCE,
     feature::INTERACT,
     feature::OUTPUT,
+    feature::RESUME,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).

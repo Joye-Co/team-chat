@@ -7,7 +7,7 @@ import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, mergePrs, prRefs } from "../proof";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
-import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage } from "./core";
+import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns } from "./runs";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
@@ -34,6 +34,7 @@ export abstract class DeskEvents extends DeskRuns {
       // here first) still gives the run its usage and time.
       if (r.ended_at !== null) {
         const late = frames.find((f): f is Extract<SeqFrame, { t: "run.done" }> => f.t === "run.done");
+        if (late) this.storeSession(r, late.sessionId);
         if (late && r.usage === null && r.duration_ms === null && this.storeUsage(r, late)) await this.setStatus(r, r.status);
         return { lastSeq: top };
       }
@@ -95,6 +96,9 @@ export abstract class DeskEvents extends DeskRuns {
         }
         case "status":
           // A stall report among real progress: the progress wins.
+          break;
+        case "session":
+          this.storeSession(r, ev.sessionId);
           break;
         case "approval.resolved":
           if (r.approval_id === ev.approvalId) {
@@ -297,8 +301,17 @@ export abstract class DeskEvents extends DeskRuns {
     return true;
   }
 
+  /** Keeps the CLI session of the run for the topic's next run (resume). */
+  protected storeSession(r: RunRow, sessionId: unknown): void {
+    const sid = sessionIdOf(sessionId);
+    if (!sid || sid === r.session_id) return;
+    r.session_id = sid;
+    this.sql.exec("UPDATE runs SET session_id = ? WHERE id = ?", sid, r.id);
+  }
+
   protected async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
     this.storeUsage(r, f);
+    this.storeSession(r, f.sessionId);
     if (f.status === "succeeded") {
       const result = (f.resultText ?? "").trim() || (f.summary ?? "").trim() || TEXT.done;
       this.dropResultFromProgress(r, result);

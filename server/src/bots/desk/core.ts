@@ -82,7 +82,17 @@ export type RunRow = {
   // desk-6-queue (1.1, GAPS SF-3)
   /** Set while the run waits for a free machine (排队); null otherwise. */
   queued_at: number | null;
+  // desk-6 (1.1 resume)
+  /** The CLI session the run used (`run.done.sessionId` or the `session` event), or null. */
+  session_id: string | null;
+  /** The runtime the run was assigned to, or null. */
+  runtime: string | null;
 };
+
+/** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
+export function sessionIdOf(v: unknown): string | null {
+  return typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v) ? v : null;
+}
 
 export const ACTIVE = "ended_at IS NULL";
 /** Runs waiting for a free machine (排队): created, no machine yet, queued. */
@@ -284,6 +294,15 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           // Old rows read as NULL (not queued).
           name: "desk-6-queue",
           up: `ALTER TABLE runs ADD COLUMN queued_at INTEGER;`,
+        },
+        {
+          // 1.1 resume: the CLI session a run used and the runtime it ran on, so the topic's next
+          // run on the same machine continues the session. Old rows read as NULL: no resume.
+          name: "desk-6-resume",
+          up: `
+            ALTER TABLE runs ADD COLUMN session_id TEXT;
+            ALTER TABLE runs ADD COLUMN runtime TEXT;
+          `,
         },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];

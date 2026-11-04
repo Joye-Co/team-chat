@@ -38,6 +38,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         ],
         aside: false,
         note: None,
+        resume_session_id: None,
     }
 }
 
@@ -709,4 +710,60 @@ fn claude_aside_settings_keep_only_auth_and_model() {
     );
     std::fs::write(dir.path().join("settings.json"), r#"{"hooks":{}}"#).unwrap();
     assert!(runtime::claude::aside_settings(dir.path()).is_none());
+}
+
+/// `run.assign.resumeSessionId` for Codex: `thread/resume` with the thread; a thread Codex no
+/// longer has falls back to a new thread.
+#[tokio::test]
+async fn codex_resumes_the_thread_or_starts_a_new_one() {
+    for (tid, want, calls) in [
+        (
+            "th-old",
+            "th-old",
+            serde_json::json!([["thread/resume", "th-old"]]),
+        ),
+        (
+            "th-gone",
+            "th-1",
+            serde_json::json!([["thread/resume", "th-gone"], ["thread/start", null]]),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = spec(dir.path(), "codex", &fake("fake_codex.py"), &[], "hello");
+        s.resume_session_id = Some(tid.into());
+        let (o, evs) = drive(s, |_| None).await;
+        assert_eq!(o.status, Status::Succeeded, "{:?}", o.error);
+        assert_eq!(o.session_id.as_deref(), Some(want));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == want))
+        );
+        let seen: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("work/threads.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(seen, calls);
+    }
+}
+
+/// `run.assign.resumeSessionId` for Claude Code: the earlier run's session file is copied into
+/// the project folder of this run's working directory and the CLI gets `--resume`; a session
+/// that is gone, or an id that is not a plain id, starts a new session.
+#[test]
+fn claude_resume_copies_the_session_into_this_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("claude");
+    let old = cfg.join("projects/-old-run-work");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("s1.jsonl"), "{}\n").unwrap();
+    let cwd = dir.path().join("work");
+    std::fs::create_dir_all(&cwd).unwrap();
+    assert!(runtime::claude::prepare_resume(&cfg, &cwd, "s1"));
+    let copied = cfg
+        .join("projects")
+        .join(runtime::claude::project_dir_name(&cwd))
+        .join("s1.jsonl");
+    assert_eq!(std::fs::read_to_string(copied).unwrap(), "{}\n");
+    assert!(!runtime::claude::prepare_resume(&cfg, &cwd, "s2"));
+    assert!(!runtime::claude::prepare_resume(&cfg, &cwd, "../s1"));
 }

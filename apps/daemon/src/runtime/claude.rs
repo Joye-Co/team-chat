@@ -330,6 +330,25 @@ pub fn find_session_file(config_dir: &Path, cwd: &Path, session_id: &str) -> Opt
     })
 }
 
+/// Readies `--resume <session_id>`: Claude Code looks for the session in the project folder of
+/// its working directory, and a follow-up run has a new one, so the earlier run's session file
+/// (found under any project of `config_dir`) is copied there. False when the file is gone: the
+/// run then starts a new session.
+pub fn prepare_resume(config_dir: &Path, cwd: &Path, session_id: &str) -> bool {
+    if !super::valid_session_id(session_id) {
+        return false;
+    }
+    let Some(found) = find_session_file(config_dir, cwd, session_id) else {
+        return false;
+    };
+    let dir = config_dir.join("projects").join(project_dir_name(cwd));
+    let target = dir.join(format!("{session_id}.jsonl"));
+    if found == target {
+        return true;
+    }
+    std::fs::create_dir_all(&dir).is_ok() && std::fs::copy(&found, &target).is_ok()
+}
+
 /// The only tools a side chat run has: built-in tools that read files.
 pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
 
@@ -464,7 +483,11 @@ impl Runtime for ClaudeRuntime {
 }
 
 async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
-    let session_id = uuid_v4();
+    let config_dir = config_dir(&spec);
+    let resume = spec
+        .resume_session_id
+        .clone()
+        .filter(|s| prepare_resume(&config_dir, &spec.cwd, s));
     let mut args: Vec<String> = [
         "-p",
         "--input-format",
@@ -473,12 +496,23 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         "stream-json",
         "--verbose",
         "--include-partial-messages",
-        "--session-id",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
-    args.push(session_id.clone());
+    let session_id = match resume {
+        Some(sid) => {
+            args.push("--resume".into());
+            args.push(sid.clone());
+            sid
+        }
+        None => {
+            let sid = uuid_v4();
+            args.push("--session-id".into());
+            args.push(sid.clone());
+            sid
+        }
+    };
     args.extend(permission_args(&spec));
     let aside_settings = if spec.aside {
         write_aside_settings(&spec)
@@ -498,7 +532,6 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         args.push(m);
     }
     let program = spec.cfg.command();
-    let config_dir = config_dir(&spec);
     // The settings file holds auth values: it goes when the run ends, however it ends.
     let _settings = aside_settings.map(RemoveOnDrop);
 

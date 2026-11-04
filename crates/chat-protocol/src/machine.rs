@@ -25,6 +25,8 @@ pub mod feature {
     pub const INTERACT: &str = "interact";
     /// 1.1 `chat-run`: RunEvent `output` and `run.output.result`.
     pub const OUTPUT: &str = "output";
+    /// `run.assign.resumeSessionId`: continue the CLI session of the topic's last run.
+    pub const RESUME: &str = "resume";
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,6 +135,9 @@ pub struct RunAssign {
     /// 1.1: "aside" = a read-only side chat run (feature "aside").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// 1.1 (feature "resume"): the CLI session of the topic's last run on this machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_session_id: Option<String>,
 }
 
 /// A Card v2 answer given to a run (`run.input.answer`).

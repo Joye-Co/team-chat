@@ -90,7 +90,8 @@ KnownRun = { runId, ackedSeq: number }
   leaseMs: number,                 // e.g. 600000
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
   sessionUpload?: { url: string, headers?: Record<string, string> },
-  kind?: "aside" }                 // 1.1, feature "aside": a read-only side chat run
+  kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
+  resumeSessionId?: string }       // 1.1, feature "resume": continue this CLI session (<= 128)
 { t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
 { t: "run.approval", runId, approvalId, decision: "approve" | "deny" }
@@ -240,8 +241,21 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
 | `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
+| `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
 
 How the 1.1 daemon does each one:
+
+- **resume**: BotDesk keeps each run's session id (`run.done.sessionId`, else the `session`
+  run event) and its runtime. A new run in a topic whose last ended run (same kind, same bot)
+  has a session goes to that run's machine when the machine can take it, and then carries
+  `resumeSessionId` when the machine reports `resume` and the runtime is the same; on another
+  machine the run starts a new session as before. The daemon passes only ids of 1-128
+  `[A-Za-z0-9_-]`. Claude Code: the session file
+  `$CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl` is copied into the project folder of the new
+  working directory and the CLI starts with `--resume <id>` instead of `--session-id`; with no
+  such file the run starts a new session. Codex: `thread/resume { threadId, ...the thread/start
+  params }`; an error answer falls back to `thread/start`. The prompt is the same as without
+  resume, and `run.done.sessionId` names the session the run used.
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
   every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. CLIs start tool

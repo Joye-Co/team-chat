@@ -21,6 +21,9 @@ import errno, json, os, re, subprocess, sys, time
 
 args = sys.argv[1:]
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else "fake-session"
+if "--resume" in args:
+    # Like Claude Code: the session must be in the project folder of the working directory.
+    sid = args[args.index("--resume") + 1]
 assert "--input-format" in args and "stream-json" in args
 # A read-only working folder (a side chat run): the records go to the run folder above it,
 # with the error of the write that failed in aside-write.json.
