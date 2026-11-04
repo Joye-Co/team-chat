@@ -1,33 +1,36 @@
-//! Screenshot self-test scenes for the media views (Media.dc.html): each scene shows one
-//! kind as a 话题 card with its inline preview (left) and the full view in the 产出 pane
-//! (right), from sample 产出 written to a temp folder and read by the real pipeline
-//! ([`store::analyze`]: AVFoundation frames, audio peaks, PDFKit pages). `media-states`
-//! shows the upload and preview states.
+//! Screenshot self-test scenes for the media views (Media.dc.html). Every scene opens the
+//! real main window on the sample team: the first 话题 gets messages that point at sample
+//! 产出 written to a temp folder and read by the real pipeline ([`store::analyze`]:
+//! AVFoundation frames, audio peaks, PDFKit pages). A `media-<kind>` scene then opens
+//! the 产出 viewer sheet over the thread, as a click on the preview does;
+//! `media-inline-*` show the inline previews alone; `media-viewer-loading` and
+//! `media-viewer-failed` the sheet before and after a read that did not work.
+//! `media-states` shows the upload and preview rows.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, ElementId, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Window, WindowBounds, div, px,
+    AnyWindowHandle, App, AppContext as _, Context, IntoElement, ParentElement, Pixels, Render,
+    Styled, Window, WindowBounds, div, px,
 };
 
 use super::{
     MediaKind,
-    full::{self, FullSpec, VersionRow},
-    inline::{self, InlineSpec},
-    state::{MediaState, Target},
+    inline::InlineSpec,
+    state::Target,
     states::{self, Lead, Status},
     store::{self, Data, MediaKey},
+    viewer::{self, Opening},
 };
 use crate::{
     app::{Services, main_window_options},
     copy::media as cm,
-    data::Member,
-    fake,
-    selftest::scenes::capture_bounds,
-    theme::{self, Type as _, radius, space},
+    data::*,
+    selftest::scenes::{capture_bounds, open_main},
+    theme::{self, Type as _, space},
     ui::{
-        self, MemberAvatar, Sym,
+        Sym,
         web_embed::{Phase, live},
     },
 };
@@ -43,6 +46,16 @@ pub enum Sample {
     Code,
     Table,
     States,
+    /// Inline previews of a page, a document and a PDF.
+    InlineDocs,
+    /// Inline previews of code and a table.
+    InlineData,
+    /// Inline previews of images, a video and audio.
+    InlineAv,
+    /// The viewer sheet while the version is read.
+    ViewerLoading,
+    /// The viewer sheet after the version could not be read.
+    ViewerFailed,
 }
 
 impl Sample {
@@ -57,6 +70,11 @@ impl Sample {
             "media-code" => Sample::Code,
             "media-table" => Sample::Table,
             "media-states" => Sample::States,
+            "media-inline-docs" => Sample::InlineDocs,
+            "media-inline-data" => Sample::InlineData,
+            "media-inline-av" => Sample::InlineAv,
+            "media-viewer-loading" => Sample::ViewerLoading,
+            "media-viewer-failed" => Sample::ViewerFailed,
             _ => return None,
         })
     }
@@ -69,8 +87,11 @@ impl Sample {
             Sample::Video => "sample-video",
             Sample::Audio => "sample-audio",
             Sample::Pdf => "sample-pdf",
-            Sample::Code | Sample::States => "sample-code",
+            Sample::Code | Sample::States | Sample::InlineData => "sample-code",
             Sample::Table => "sample-table",
+            Sample::InlineDocs | Sample::InlineAv => "sample-none",
+            Sample::ViewerLoading => "sample-pending",
+            Sample::ViewerFailed => "sample-broken",
         };
         MediaKey::new(id, if self == Sample::Html { 3 } else { 1 })
     }
@@ -78,172 +99,77 @@ impl Sample {
     /// The samples a scene needs on disk and read.
     fn needs(self) -> Vec<Sample> {
         match self {
-            Sample::Code => vec![Sample::Code, Sample::Table],
+            Sample::Code | Sample::InlineData => vec![Sample::Code, Sample::Table],
             Sample::States => vec![Sample::Video],
+            Sample::InlineDocs => vec![Sample::Html, Sample::Markdown, Sample::Pdf],
+            Sample::InlineAv => vec![Sample::Images, Sample::Video, Sample::Audio],
+            Sample::ViewerLoading | Sample::ViewerFailed => vec![Sample::Code],
             s => vec![s],
+        }
+    }
+
+    /// The sample whose viewer sheet the scene opens.
+    fn viewer(self) -> Option<Sample> {
+        match self {
+            Sample::InlineDocs | Sample::InlineData | Sample::InlineAv | Sample::States => None,
+            s => Some(s),
         }
     }
 }
 
-struct Topic {
-    group: &'static str,
-    title: &'static str,
-    state: &'static str,
+struct Post {
     author: &'static str,
-    role: &'static str,
-    time: &'static str,
     text: &'static str,
 }
 
-fn topic(s: Sample) -> Topic {
+fn post(s: Sample) -> Post {
     match s {
-        Sample::Html => Topic {
-            group: "夹夹增长",
-            title: "10 月数据月报",
-            state: "做完了 · 09:40",
+        Sample::Html => Post {
             author: "m-alex",
-            role: "数据",
-            time: "09:40",
             text: "月报更新到 v3，加了渠道拆分。",
         },
-        Sample::Markdown | Sample::Code => Topic {
-            group: "开发",
-            title: "断线重连后消息重复",
-            state: "需要你审 PR #61",
+        Sample::Markdown => Post {
             author: "m-coder",
-            role: "开发",
-            time: "10:02",
             text: "复盘写好了，后续还有两项没做。",
         },
-        Sample::Images => Topic {
-            group: "夹夹增长",
-            title: "夹夹 3.0 宣传",
-            state: "需要你拍板",
+        Sample::Code => Post {
+            author: "m-coder",
+            text: "改动在这个文件里，重连从最后确认的 seq 继续。",
+        },
+        Sample::Images => Post {
             author: "m-alex",
-            role: "社媒发布",
-            time: "10:05",
             text: "配图改好了，一共 9 张，第 1 张当封面。和草稿一起周四 20:00 发。",
         },
-        Sample::Video | Sample::States => Topic {
-            group: "开发",
-            title: "断线重连后消息重复",
-            state: "需要你审 PR #61",
+        Sample::Video | Sample::States => Post {
             author: "m-coder",
-            role: "开发",
-            time: "09:55",
             text: "录屏在这里：断网、重连、合盖休眠都没再重复。",
         },
-        Sample::Audio => Topic {
-            group: "全员",
-            title: "本周周报",
-            state: "正在做 · 1/3",
+        Sample::Audio => Post {
             author: "m-alex",
-            role: "数据",
-            time: "10:30",
             text: "周会录音和文字稿整理好了。",
         },
-        Sample::Pdf => Topic {
-            group: "运维",
-            title: "staging 每日巡检",
-            state: "完成 · 09:12",
+        Sample::Pdf => Post {
             author: "m-coder",
-            role: "测试验收",
-            time: "09:12",
             text: "今天的巡检报告，24 项都通过。",
         },
-        Sample::Table => Topic {
-            group: "夹夹增长",
-            title: "10 月数据月报",
-            state: "做完了 · 09:40",
+        _ => Post {
             author: "m-alex",
-            role: "数据",
-            time: "09:41",
             text: "原始数据也放上来了，月报里的数都从这里算。",
         },
     }
 }
 
-pub struct MediaPreview {
-    sample: Sample,
-    members: Vec<Member>,
-}
-
-impl MediaPreview {
-    fn new(services: &Services, sample: Sample, cx: &mut Context<Self>) -> Self {
-        store::clear(cx);
-        for s in sample.needs() {
-            if let Some((dir, entry)) = write_sample(s) {
-                let key = s.key();
-                store::request_folder(&key, title(s), dir, entry, cx);
-            }
-        }
-        let members = ["m-alex", "m-coder", fake::ME, "m-lixue"]
-            .iter()
-            .filter_map(|id| services.provider.member(id))
-            .collect();
-        Self { sample, members }
-    }
-
-    fn member(&self, id: &str) -> Option<&Member> {
-        self.members
-            .iter()
-            .find(|m| m.id == id)
-            .or(self.members.first())
-    }
-
-    fn topic_card(&self, t: &Topic, preview: gpui::AnyElement, cx: &App) -> gpui::Div {
-        let k = theme::colors(cx);
-        let member = self.member(t.author);
-        div()
-            .w(px(600.))
-            .flex_none()
-            .bg(k.content)
-            .flex()
-            .flex_col()
-            // The topic's toolbar title and subtitle (NATIVE.md §2), no
-            // breadcrumb.
-            .child(
-                crate::ui::native::ToolbarRow::new(t.title)
-                    .subtitle(format!("{} · {}", t.group, t.state)),
-            )
-            .child(
-                div()
-                    .p(space::S16)
-                    .flex()
-                    .gap(space::S12)
-                    .child(MemberAvatar::new(member, px(28.)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .flex()
-                            .flex_col()
-                            .gap(space::S4)
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::S8)
-                                    .child(div().t_small().semibold().text_color(k.text_1).child(
-                                        SharedString::from(
-                                            member.map(|m| m.name.clone()).unwrap_or_default(),
-                                        ),
-                                    ))
-                                    .child(ui::RoleTag::new(t.role))
-                                    .child(
-                                        div().t_meta().tnum().text_color(k.text_3).child(t.time),
-                                    ),
-                            )
-                            .child(div().t_body().text_color(k.text_1).child(t.text))
-                            .child(div().pt(space::S8).child(preview)),
-                    ),
-            )
-    }
-}
-
+/// The 产出 title of a sample (a long one with `--worst-case`).
 fn title(s: Sample) -> &'static str {
+    let worst = crate::selftest::worst_case();
     match s {
+        Sample::Html if worst => {
+            "2025 年第三季度全渠道增长复盘、预算调整建议与下季度投放计划（终版，含附录和原始数据口径说明）"
+        }
         Sample::Html => "10 月数据月报",
+        Sample::Markdown if worst => {
+            "WebSocket 断线重连后消息重复的完整复盘：时间线、根因、修复方案、回归测试和后续待办"
+        }
         Sample::Markdown => "重连重复问题复盘",
         Sample::Images => "夹夹 3.0 配图",
         Sample::Video | Sample::States => "重连测试录屏",
@@ -251,149 +177,352 @@ fn title(s: Sample) -> &'static str {
         Sample::Pdf => "巡检报告-11-03",
         Sample::Code => "reconnect.ts",
         Sample::Table => "10 月各渠道新增",
+        _ => "",
     }
 }
 
-fn spec_for(s: Sample, cx: &App) -> InlineSpec {
-    let key = s.key();
-    let kind = store::ready(&key, cx).map_or(MediaKind::File, |m| m.kind);
-    InlineSpec {
-        key,
-        kind,
-        title: title(s).into(),
-        bytes: 0,
-        target: Target::none(),
-        id: SharedString::from(format!("scene-{s:?}")),
-    }
+/// The main window's first 话题 with the scene's sample messages at its end.
+pub struct MediaThread {
+    inner: Arc<dyn ChatProvider>,
+    group_id: String,
+    topic_id: String,
+    samples: Vec<Sample>,
+    /// Folder and entry of each sample on disk.
+    folders: Vec<(Sample, PathBuf, String)>,
 }
 
-impl Render for MediaPreview {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let t = topic(self.sample);
-        let left: gpui::AnyElement = match self.sample {
-            Sample::States => states_column(cx).into_any_element(),
-            Sample::Code => {
-                let a = inline::render(&spec_for(Sample::Code, cx), window, cx)
-                    .unwrap_or_else(|| div().into_any_element());
-                let b = inline::render(&spec_for(Sample::Table, cx), window, cx)
-                    .unwrap_or_else(|| div().into_any_element());
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S24)
-                    .child(self.topic_card(&t, a, cx))
-                    .child(self.topic_card(&topic(Sample::Table), b, cx))
-                    .into_any_element()
-            }
-            s => {
-                let p = inline::render(&spec_for(s, cx), window, cx)
-                    .unwrap_or_else(|| div().into_any_element());
-                self.topic_card(&t, p, cx).into_any_element()
-            }
-        };
-        let pane_sample = match self.sample {
-            Sample::States => None,
-            s => Some(s),
-        };
-        let right: gpui::AnyElement =
-            match pane_sample.and_then(|s| store::ready(&s.key(), cx).map(|m| (s, m))) {
-                Some((s, media)) => {
-                    let state = MediaState::for_view(
-                        ElementId::Name(format!("scene-pane-{s:?}").into()),
-                        window,
-                        cx,
-                    );
-                    preset(s, &media, &state, cx);
-                    let spec = FullSpec {
-                        media,
-                        target: Target::none(),
-                        versions: if s == Sample::Html {
-                            vec![
-                                VersionRow {
-                                    version: 3,
-                                    when: "今天 09:40".into(),
-                                    note: "加了渠道拆分".into(),
-                                },
-                                VersionRow {
-                                    version: 2,
-                                    when: "昨天 18:20".into(),
-                                    note: "修正日活口径".into(),
-                                },
-                                VersionRow {
-                                    version: 1,
-                                    when: "10-31".into(),
-                                    note: "第一版".into(),
-                                },
-                            ]
-                        } else {
-                            Vec::new()
-                        },
-                        close: Some(std::rc::Rc::new(|_: &mut Window, _: &mut App| {})),
-                        id: SharedString::from(format!("scene-full-{s:?}")),
-                        autoplay: false,
-                        title_row: None,
-                    };
-                    let body = full::render(&spec, &state, window, cx);
-                    let images = s == Sample::Images;
-                    div()
-                        .w(px(600.))
-                        .h(px(780.))
-                        .flex_none()
-                        .rounded(radius::LG)
-                        .shadow(crate::ui::native::native_colors(cx).float())
-                        .overflow_hidden()
-                        .when_images(images, cx)
-                        .child(body)
-                        .into_any_element()
+impl MediaThread {
+    fn new(inner: Arc<dyn ChatProvider>, samples: Vec<Sample>) -> Arc<Self> {
+        let group = inner.groups().first().cloned();
+        let topic = group.as_ref().and_then(|g| {
+            inner
+                .topics(&g.id)
+                .into_iter()
+                .find(|t| t.id != crate::fake::LONG_TOPIC)
+        });
+        let folders = samples
+            .iter()
+            .filter_map(|s| write_sample(*s).map(|(dir, entry)| (*s, dir, entry)))
+            .collect();
+        Arc::new(Self {
+            inner,
+            group_id: group.map(|g| g.id).unwrap_or_default(),
+            topic_id: topic.map(|t| t.id).unwrap_or_default(),
+            samples,
+            folders,
+        })
+    }
+
+    fn mine(&self, g: &str, t: &str) -> bool {
+        g == self.group_id && t == self.topic_id
+    }
+
+    fn extra_messages(&self) -> Vec<Message> {
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        self.samples
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let p = post(*s);
+                let at = now - 600_000 + i as i64 * 60_000;
+                let key = s.key();
+                Message {
+                    id: format!("media-{i}"),
+                    client_msg_id: format!("c-media-{i}"),
+                    group_id: self.group_id.clone(),
+                    topic_id: self.topic_id.clone(),
+                    author_id: p.author.into(),
+                    body: p.text.into(),
+                    mentions: Vec::new(),
+                    created_seq: 900_000 + i as u64,
+                    created_at: at,
+                    edited_at: None,
+                    deleted_at: None,
+                    streaming: false,
+                    send_state: SendState::Sent,
+                    quote_of: None,
+                    attachments: Vec::new(),
+                    artifact_refs: vec![ArtifactRef {
+                        artifact_id: key.artifact_id.clone(),
+                        version: key.version,
+                    }],
+                    reactions: Vec::new(),
                 }
-                None if self.sample == Sample::States => uploads_column(cx).into_any_element(),
-                None => div().w(px(600.)).into_any_element(),
-            };
+            })
+            .collect()
+    }
+
+    fn detail(&self, s: Sample, dir: &std::path::Path, entry: &str) -> ArtifactDetail {
+        let key = s.key();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let author = post(s).author.to_string();
+        let files = list(dir);
+        ArtifactDetail {
+            summary: ArtifactSummary {
+                id: key.artifact_id.clone(),
+                topic_id: self.topic_id.clone(),
+                kind: ArtifactKind::Page,
+                title: title(s).into(),
+                version: key.version,
+                size_bytes: Some(files.iter().map(|f| f.size).sum()),
+                created_by: author.clone(),
+                updated_at: now - 120_000,
+            },
+            group_id: self.group_id.clone(),
+            versions: (1..=key.version)
+                .rev()
+                .map(|v| ArtifactVersionInfo {
+                    version: v,
+                    note: None,
+                    created_by: author.clone(),
+                    created_at: now - 1_000_000 + v as i64,
+                    entry: entry.to_string(),
+                    files: files.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The files of a sample folder, as a version lists them.
+fn list(dir: &std::path::Path) -> Vec<ArtifactVersionFile> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if let Ok(rel) = p.strip_prefix(dir) {
+                out.push(ArtifactVersionFile {
+                    path: rel.to_string_lossy().replace('\\', "/"),
+                    size: e.metadata().map(|m| m.len()).unwrap_or(0),
+                    mime: String::new(),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
+impl ChatProvider for MediaThread {
+    fn session(&self) -> SessionState {
+        self.inner.session()
+    }
+    fn login(&self, request: LoginRequest) {
+        self.inner.login(request)
+    }
+    fn logout(&self) {
+        self.inner.logout()
+    }
+    fn connection(&self) -> ConnectionState {
+        self.inner.connection()
+    }
+    fn members(&self) -> Vec<Member> {
+        self.inner.members()
+    }
+    fn member(&self, id: &str) -> Option<Member> {
+        self.inner.member(id)
+    }
+    fn groups(&self) -> Vec<GroupSummary> {
+        self.inner.groups()
+    }
+    fn topics(&self, group_id: &str) -> Vec<Topic> {
+        self.inner.topics(group_id)
+    }
+    fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
+        self.inner.topic(group_id, topic_id)
+    }
+    fn todo(&self) -> Vec<TodoItem> {
+        self.inner.todo()
+    }
+    fn messages(&self, group_id: &str, topic_id: &str, limit: usize) -> MessageWindow {
+        let mut w = self.inner.messages(group_id, topic_id, limit);
+        if self.mine(group_id, topic_id) {
+            w.messages.extend(self.extra_messages());
+        }
+        w
+    }
+    fn load_older(&self, group_id: &str, topic_id: &str) {
+        self.inner.load_older(group_id, topic_id)
+    }
+    fn typing(&self, group_id: &str, topic_id: &str) -> Vec<MemberId> {
+        self.inner.typing(group_id, topic_id)
+    }
+    fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
+        if self.mine(group_id, topic_id) {
+            self.folders
+                .iter()
+                .map(|(s, dir, entry)| self.detail(*s, dir, entry).summary)
+                .collect()
+        } else {
+            self.inner.artifacts(group_id, topic_id)
+        }
+    }
+    fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
+        self.folders
+            .iter()
+            .find(|(s, _, _)| s.key().artifact_id == artifact_id)
+            .map(|(s, dir, entry)| self.detail(*s, dir, entry))
+            .or_else(|| self.inner.artifact(artifact_id))
+    }
+    fn send(&self, request: SendRequest) -> ClientMsgId {
+        self.inner.send(request)
+    }
+    fn start_topic(&self, request: StartTopicRequest) -> ClientMsgId {
+        self.inner.start_topic(request)
+    }
+    fn edit(&self, group_id: &str, message_id: &str, body: String) {
+        self.inner.edit(group_id, message_id, body)
+    }
+    fn delete(&self, group_id: &str, message_id: &str) {
+        self.inner.delete(group_id, message_id)
+    }
+    fn set_topic_status(&self, g: &str, t: &str, status: TopicStatus, waiting_on: Vec<MemberId>) {
+        self.inner.set_topic_status(g, t, status, waiting_on)
+    }
+    fn mark_read(&self, group_id: &str, topic_id: &str, seq: u64) {
+        self.inner.mark_read(group_id, topic_id, seq)
+    }
+    fn set_typing(&self, group_id: &str, topic_id: &str) {
+        self.inner.set_typing(group_id, topic_id)
+    }
+    fn draft(&self, key: &DraftKey) -> Draft {
+        self.inner.draft(key)
+    }
+    fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
+        self.inner.subscribe()
+    }
+}
+
+// --- openers --------------------------------------------------------------------------
+
+/// The scene opener: the main window on the sample thread, then the viewer sheet of
+/// the scene's sample (`media-<kind>`, `media-viewer-*`).
+pub fn open(
+    services: Services,
+    content: gpui::Size<Pixels>,
+    sample: Sample,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    if sample == Sample::States {
+        return open_states(services, content, cx);
+    }
+    store::clear(cx);
+    let shown = match sample {
+        Sample::InlineDocs | Sample::InlineData | Sample::InlineAv => sample.needs(),
+        Sample::ViewerLoading | Sample::ViewerFailed => vec![Sample::Code],
+        Sample::Code => vec![Sample::Code, Sample::Table],
+        s => vec![s],
+    };
+    let thread = MediaThread::new(services.provider.clone(), shown);
+    for (s, dir, entry) in &thread.folders {
+        store::request_folder(&s.key(), title(*s), dir.clone(), entry.clone(), cx);
+    }
+    let provider: Arc<dyn ChatProvider> = thread.clone();
+    let services = Services::new(provider.clone(), cx);
+    crate::selftest::scenes::open_first_topic(&services, cx);
+    let handle = open_main(services, content, cx)?;
+    if let Some(v) = sample.viewer() {
+        let target = match v {
+            // No provider: nothing reads the version, so the sheet stays loading.
+            Sample::ViewerLoading => Target::none(),
+            _ => Target {
+                provider: Some(provider.clone()),
+                group_id: thread.group_id.clone(),
+                topic_id: thread.topic_id.clone(),
+            },
+        };
+        let opening = match v {
+            Sample::Images => Opening::at(2),
+            Sample::Video => Opening::frame(3),
+            _ => Opening::default(),
+        };
+        let name = match v {
+            Sample::ViewerLoading | Sample::ViewerFailed => title(Sample::Code),
+            s => title(s),
+        };
+        handle
+            .update(cx, |_, window, cx| {
+                viewer::open_in(window, v.key(), name.to_string(), target, opening, cx);
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(handle)
+}
+
+/// The upload and preview rows (`media-states`) in a thread-width column.
+fn open_states(
+    services: Services,
+    content: gpui::Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    store::clear(cx);
+    if let Some((dir, entry)) = write_sample(Sample::Video) {
+        store::request_folder(&Sample::Video.key(), title(Sample::Video), dir, entry, cx);
+    }
+    let mut options = main_window_options(false, cx);
+    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
+    options.window_min_size = None;
+    let _ = services;
+    gpui_kit::open_window(options, cx, move |_, cx| cx.new(|_| StatesPreview))
+        .map(|(handle, _)| handle)
+        .map_err(|e| e.to_string())
+}
+
+/// True once every sample of the scene is read and its pages (if any) drew.
+pub fn ready(sample: Sample, cx: &App) -> bool {
+    let read = sample
+        .needs()
+        .iter()
+        .all(|s| store::ready(&s.key(), cx).is_some());
+    if !read {
+        return false;
+    }
+    if sample == Sample::ViewerFailed
+        && !matches!(store::get(&sample.key(), cx), Some(store::Load::Failed(_)))
+    {
+        return false;
+    }
+    // Every page drew; a page under the sheet hides behind its snapshot, so at least one
+    // shows.
+    let pages = live(cx);
+    let pages_ok = pages.iter().all(|p| *p.read(cx).phase() == Phase::Ready)
+        && (pages.is_empty() || pages.iter().any(|p| p.read(cx).shown()));
+    // Pages: an HTML 产出 inline or in the sheet, and the video player in the sheet.
+    let wants_pages = matches!(sample.viewer(), Some(Sample::Html | Sample::Video))
+        || sample.needs().contains(&Sample::Html);
+    pages_ok && (!wants_pages || !pages.is_empty())
+}
+
+/// The `media-states` harness: the rows in one thread-width column (640).
+struct StatesPreview;
+
+impl Render for StatesPreview {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = theme::colors(cx);
         div()
             .size_full()
             .bg(k.content)
             .text_color(k.text_1)
             .flex()
             .justify_center()
-            .items_start()
-            .gap(crate::ui::native::tokens::space::S32)
-            .pt(px(40.))
-            .child(left)
-            .child(right)
+            .pt(space::S48)
+            .child(
+                div()
+                    .w(crate::ui::native::tokens::card_v2::MAX_WIDTH)
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S24)
+                    .child(states_column(cx))
+                    .child(uploads_column(cx)),
+            )
     }
-}
-
-trait WhenImages {
-    fn when_images(self, on: bool, cx: &App) -> Self;
-}
-
-impl WhenImages for gpui::Div {
-    /// The image viewer is one Quick Look panel: no grey desk around it.
-    fn when_images(self, on: bool, _cx: &App) -> Self {
-        if on { self.h(px(600.)) } else { self }
-    }
-}
-
-/// Puts each pane in the state the design shows.
-fn preset(s: Sample, media: &store::Media, state: &gpui::Entity<MediaState>, cx: &mut App) {
-    let init = state.read(cx).events.is_empty()
-        && state.read(cx).index == 0
-        && state.read(cx).frame.is_none();
-    if !init {
-        return;
-    }
-    state.update(cx, |st, _| match (&media.data, s) {
-        (Data::Images(_), _) => st.index = 2,
-        (Data::Video(v), _) => {
-            st.frame = Some(3);
-            st.position = v.frames.get(3).map_or(0., |f| f.t);
-        }
-        (Data::Audio(a), _) => st.position = a.duration * 0.31,
-        (Data::Pdf(_), _) => st.index = 1,
-        (Data::Html, _) => st.events.push("选渠道 · Joye 10:12".into()),
-        _ => {}
-    });
 }
 
 fn states_column(cx: &App) -> gpui::Div {
@@ -503,45 +632,6 @@ fn uploads_column(cx: &App) -> gpui::Div {
         .child(states::failed_row(&spec, cx))
 }
 
-// --- openers --------------------------------------------------------------------------
-
-pub fn open(
-    services: Services,
-    content: gpui::Size<Pixels>,
-    sample: Sample,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|cx| MediaPreview::new(&services, sample, cx))
-    })
-    .map(|(handle, _)| handle)
-    .map_err(|e| e.to_string())
-}
-
-/// True once every sample of the scene is read and its pages (if any) drew.
-pub fn ready(sample: Sample, cx: &App) -> bool {
-    let read = sample
-        .needs()
-        .iter()
-        .all(|s| store::ready(&s.key(), cx).is_some());
-    if !read {
-        return false;
-    }
-    let pages = live(cx);
-    match sample {
-        Sample::Html | Sample::Video => {
-            !pages.is_empty()
-                && pages
-                    .iter()
-                    .all(|p| *p.read(cx).phase() == Phase::Ready && p.read(cx).shown())
-        }
-        _ => true,
-    }
-}
-
 /// Checks what the pipeline produced (frames, peaks, pages, rows).
 pub fn verify(sample: Sample, cx: &App) -> Result<(), String> {
     for s in sample.needs() {
@@ -625,6 +715,12 @@ fn write_sample(s: Sample) -> Option<(PathBuf, String)> {
             w("10 月各渠道新增.csv", channels_csv().as_bytes())?;
             "10 月各渠道新增.csv"
         }
+        // Scenes, not samples: nothing on disk.
+        Sample::InlineDocs
+        | Sample::InlineData
+        | Sample::InlineAv
+        | Sample::ViewerLoading
+        | Sample::ViewerFailed => return None,
     };
     Some((dir, entry.to_string()))
 }

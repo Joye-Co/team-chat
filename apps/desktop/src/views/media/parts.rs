@@ -17,8 +17,8 @@ use crate::{
     ui::{self, NamedButton as _, Sym},
 };
 
-/// The frame of an inline preview (NATIVE.md §9.2): the card container,
-/// radius 12, `fill`, no border, no shadow.
+/// The frame of an inline preview (COMPLETENESS.md §2.4): the card container, radius 14,
+/// a 1 px border, shadow sm, 640 wide in a thread.
 pub fn card(cx: &App) -> Div {
     crate::ui::native::cards::card_frame(cx).flex().flex_col()
 }
@@ -29,7 +29,7 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     div()
         .flex_none()
         .h(crate::ui::native::tokens::height::LG)
-        .px(space::S14)
+        .px(space::S16)
         .flex()
         .items_center()
         .gap(space::S8)
@@ -109,7 +109,7 @@ pub fn footer(cx: &App) -> Div {
     div()
         .flex_none()
         .min_h(px(32.))
-        .px(space::S14)
+        .px(space::S16)
         .flex()
         .items_center()
         .gap(space::S8)

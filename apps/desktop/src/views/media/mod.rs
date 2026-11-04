@@ -30,7 +30,7 @@ pub mod store;
 pub mod text;
 pub mod viewer;
 
-use gpui::{App, Hsla, Pixels, px, rgb};
+use gpui::{App, Hsla, Pixels, rgb};
 
 use crate::{copy::media as cm, ui::Sym};
 
@@ -238,7 +238,7 @@ pub fn screen(cx: &App) -> Screen {
 }
 
 /// Width of an inline preview in the timeline (Media.dc.html: the message column).
-pub const INLINE_W: Pixels = px(560.);
+pub const INLINE_W: Pixels = crate::ui::native::tokens::card_v2::MAX_WIDTH;
 
 #[cfg(test)]
 mod tests {

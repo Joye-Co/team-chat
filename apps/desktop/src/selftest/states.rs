@@ -26,4 +26,80 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     // --- end t5 ---
+    // --- t5-media ---
+    Scene {
+        name: "media-inline-docs",
+        about: "The inline previews of a page, a Markdown document and a PDF in the real thread (640 wide)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::media::preview::open(
+                s,
+                c,
+                crate::views::media::preview::Sample::from_name("media-inline-docs")
+                    .expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-inline-data",
+        about: "The inline previews of a code file and a table in the real thread (640 wide)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::media::preview::open(
+                s,
+                c,
+                crate::views::media::preview::Sample::from_name("media-inline-data")
+                    .expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-inline-av",
+        about: "The inline previews of an image set, a video and audio in the real thread (640 wide)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::media::preview::open(
+                s,
+                c,
+                crate::views::media::preview::Sample::from_name("media-inline-av").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-viewer-loading",
+        about: "The 产出 viewer sheet while the version is read: header, then skeletons",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::media::preview::open(
+                s,
+                c,
+                crate::views::media::preview::Sample::from_name("media-viewer-loading")
+                    .expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-viewer-failed",
+        about: "The 产出 viewer sheet after the version could not be read: header, then an Alert with 重试",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::media::preview::open(
+                s,
+                c,
+                crate::views::media::preview::Sample::from_name("media-viewer-failed")
+                    .expect("sample"),
+                cx,
+            )
+        },
+    },
+    // --- end t5-media ---
 ];

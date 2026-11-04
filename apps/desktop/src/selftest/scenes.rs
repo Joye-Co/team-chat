@@ -1085,6 +1085,38 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-states" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-states").expect("sample"), cx)
         }),
+        // --- t5-media ---
+        "media-inline-docs" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-docs").expect("sample"),
+                cx,
+            )
+        }),
+        "media-inline-data" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-data").expect("sample"),
+                cx,
+            )
+        }),
+        "media-inline-av" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-av").expect("sample"),
+                cx,
+            )
+        }),
+        "media-viewer-loading" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-viewer-loading").expect("sample"),
+                cx,
+            )
+        }),
+        "media-viewer-failed" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-viewer-failed").expect("sample"),
+                cx,
+            )
+        }),
+        // --- end t5-media ---
         _ => None,
     }
 }

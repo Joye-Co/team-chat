@@ -228,6 +228,11 @@ pub fn request_folder(key: &MediaKey, title: &str, dir: PathBuf, entry: String, 
     .detach();
 }
 
+/// Forgets one version, so the next view reads it again (重试 after a failure).
+pub fn forget(key: &MediaKey, cx: &mut App) {
+    cx.default_global::<Store>().map.remove(key);
+}
+
 /// Forgets every loaded version (self-tests start clean).
 pub fn clear(cx: &mut App) {
     cx.default_global::<Store>().map.clear();
