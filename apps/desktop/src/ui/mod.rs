@@ -28,6 +28,9 @@ pub mod emoji;
 pub mod gallery;
 pub mod icons;
 pub mod motion;
+// --- v12/kit: the native component kit (docs/design/NATIVE.md) ---
+pub mod native;
+// --- end v12/kit ---
 pub mod overlay;
 pub mod parts;
 pub mod rows;

@@ -1,0 +1,162 @@
+//! The toolbar row (NATIVE.md §2, §5.1): the window title and subtitle at
+//! the leading edge, glass capsule groups of 36 pt items at the trailing
+//! edge. The row is transparent over the content; no hairline under it.
+
+use gpui::{
+    AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window,
+    div, prelude::FluentBuilder as _, px,
+};
+use gpui_component::button::Button;
+
+use super::tokens::{NativeType as _, emphasized, metrics, native_colors};
+use crate::ui::sf_symbols::{Sf, Weight, symbol};
+
+/// Related toolbar items in one glass capsule (§5.1): 36 pt tall, items 36
+/// wide, no dividers. A lone prominent item draws without a capsule.
+#[derive(IntoElement)]
+pub struct ToolbarGroup {
+    items: Vec<Button>,
+    bare: bool,
+}
+
+impl ToolbarGroup {
+    pub fn new(items: impl IntoIterator<Item = Button>) -> Self {
+        Self {
+            items: items.into_iter().collect(),
+            bare: false,
+        }
+    }
+
+    /// No capsule behind the items (the prominent action has its own fill).
+    pub fn bare(mut self) -> Self {
+        self.bare = true;
+        self
+    }
+}
+
+impl RenderOnce for ToolbarGroup {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = native_colors(cx);
+        div()
+            .flex_none()
+            .h(metrics::TOOLBAR_GROUP)
+            .flex()
+            .items_center()
+            .rounded(metrics::TOOLBAR_GROUP / 2.)
+            .when(!self.bare, |d| d.bg(k.capsule).shadow(k.glass()))
+            .children(self.items)
+    }
+}
+
+/// The 52 pt toolbar row: title (Title 3) over subtitle (Subheadline,
+/// `secondary`) starting 20 pt from the leading edge, at most three groups
+/// 8 pt apart ending 12 pt from the trailing edge (§2).
+#[derive(IntoElement)]
+pub struct ToolbarRow {
+    title: SharedString,
+    subtitle: Option<SharedString>,
+    state: Option<(Sf, Hsla)>,
+    groups: Vec<AnyElement>,
+    leading_inset: gpui::Pixels,
+    inactive: Option<bool>,
+}
+
+impl ToolbarRow {
+    pub fn new(title: impl Into<SharedString>) -> Self {
+        Self {
+            title: title.into(),
+            subtitle: None,
+            state: None,
+            groups: Vec::new(),
+            leading_inset: metrics::TOOLBAR_LEADING,
+            inactive: None,
+        }
+    }
+
+    pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
+        self.subtitle = Some(subtitle.into());
+        self
+    }
+
+    /// A state symbol before the subtitle (needs you:
+    /// `exclamationmark.circle.fill` in `amber`).
+    pub fn state(mut self, sf: Sf, color: Hsla) -> Self {
+        self.state = Some((sf, color));
+        self
+    }
+
+    pub fn group(mut self, group: impl IntoElement) -> Self {
+        self.groups.push(group.into_any_element());
+        self
+    }
+
+    /// Where the title starts: 20 pt after the sidebar by default.
+    pub fn leading_inset(mut self, inset: gpui::Pixels) -> Self {
+        self.leading_inset = inset;
+        self
+    }
+
+    /// Forces the inactive-window look (gallery); otherwise the window says.
+    pub fn inactive(mut self, inactive: bool) -> Self {
+        self.inactive = Some(inactive);
+        self
+    }
+}
+
+impl RenderOnce for ToolbarRow {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = native_colors(cx);
+        let active = self
+            .inactive
+            .map(|i| !i)
+            .unwrap_or_else(|| emphasized(window));
+        let title_ink = if active { k.label } else { k.secondary };
+        div()
+            .flex_none()
+            .w_full()
+            .h(metrics::TOOLBAR_ROW)
+            .pl(self.leading_inset)
+            .pr(metrics::TOOLBAR_TRAILING)
+            .flex()
+            .items_center()
+            .gap(metrics::TOOLBAR_GROUP_GAP)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .n_title3()
+                            .text_color(title_ink)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(self.title),
+                    )
+                    .when_some(self.subtitle, |d, sub| {
+                        d.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .when_some(self.state, |d, (sf, color)| {
+                                    d.child(symbol(sf, px(11.), Weight::Regular, color, window))
+                                })
+                                .child(
+                                    div()
+                                        .min_w(px(0.))
+                                        .n_subheadline()
+                                        .text_color(k.secondary)
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .child(sub),
+                                ),
+                        )
+                    }),
+            )
+            .children(self.groups)
+    }
+}

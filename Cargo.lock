@@ -1354,6 +1354,7 @@ dependencies = [
  "chrono",
  "dispatch2",
  "futures",
+ "gpui-base",
  "gpui-component",
  "gpui-kit",
  "gpui-pre",
