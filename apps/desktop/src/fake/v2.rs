@@ -70,6 +70,8 @@ pub const T_WEEKLY: &str = "t-v2-weekly";
 
 pub const RUN_RECONNECT: &str = "run-v2-reconnect";
 pub const RUN_VIRTUAL: &str = "run-v2-virtual";
+/// Scout's check of the virtual list, beside Forge's run (`with_second_run`).
+pub const RUN_VIRTUAL_CHECK: &str = "run-v2-virtual-check";
 pub const RUN_V4: &str = "run-v2-v4";
 pub const RUN_WEEKLY: &str = "run-v2-weekly";
 
@@ -968,6 +970,31 @@ impl V2Samples {
             paused_by: None,
             approval: None,
         }
+    }
+
+    /// The sample team with a second member at work in 开发 / 虚拟列表: Scout checks the
+    /// list while Forge builds it (two plan cards in one 话题, `topic-two-runs`).
+    pub fn with_second_run() -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            d.runs.push(run(RunSpec {
+                id: RUN_VIRTUAL_CHECK,
+                bot: SCOUT,
+                group: DEV,
+                topic: T_VIRTUAL,
+                status: RunStatus::Running,
+                by: ME,
+                started: at(9, 40),
+                ended: None,
+                machine: "云端",
+                plan: plan(&[
+                    ("读压测脚本", PlanState::Done),
+                    ("在三台电脑上跑一遍", PlanState::Current),
+                    ("写验收记录", PlanState::Pending),
+                ]),
+            }))
+        });
+        s
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut Data) -> R) -> R {

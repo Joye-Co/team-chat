@@ -43,4 +43,32 @@ pub const SCENES: &[Scene] = &[
         },
         open: open_main,
     },
+    Scene {
+        name: "topic-two-runs",
+        about: "话题 page with two members at work (Forge builds the virtual list, Scout checks it): one plan card each",
+        start: Start::V2TwoRuns,
+        setup: |s, cx| v2_open_topic(s, d::DEV, d::T_VIRTUAL, cx),
+        open: open_main,
+    },
 ];
+
+/// The checks of the 话题 page scenes.
+pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
+    use crate::selftest::drawn::{check, ids};
+    match name {
+        "topic-two-runs" => Some(|_, _| {
+            let cards = ids("plan-card");
+            vec![
+                check(
+                    cards.contains(d::RUN_VIRTUAL),
+                    format!("Forge's plan card is drawn ({cards:?})"),
+                ),
+                check(
+                    cards.contains(d::RUN_VIRTUAL_CHECK),
+                    format!("Scout's plan card is drawn ({cards:?})"),
+                ),
+            ]
+        }),
+        _ => None,
+    }
+}

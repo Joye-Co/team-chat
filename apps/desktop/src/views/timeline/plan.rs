@@ -110,6 +110,7 @@ impl TimelineView {
         times: &[Millis],
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        crate::selftest::drawn::mark("plan-card", run.id.clone());
         let k = theme::colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
         let name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();

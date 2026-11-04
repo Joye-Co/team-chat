@@ -46,6 +46,9 @@ pub enum Start {
     /// (`fake::v2::refs_samples::with_card_parts`).
     V2RefParts,
     // --- end inc-refs ---
+    /// The v2 sample team with a second member at work in 开发 / 虚拟列表
+    /// (`fake::v2::V2Samples::with_second_run`).
+    V2TwoRuns,
 }
 
 pub struct Scene {
@@ -962,6 +965,15 @@ fn media_verify(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(
 }
 
 // --- end v11/media ---
+
+/// The checks of a scene, after its capture: each line says what held (`Ok`) or what did
+/// not (`Err`, the shot fails). The report lists them under `checks`.
+pub type Checks = fn(&Services, &mut App) -> Vec<Result<String, String>>;
+
+/// The checks of scene `name`, if it has any.
+pub fn checks(name: &str) -> Option<Checks> {
+    crate::views::topic_page::scenes::checks(name)
+}
 
 pub fn find(name: &str) -> Option<&'static Scene> {
     all().into_iter().find(|s| s.name == name)
