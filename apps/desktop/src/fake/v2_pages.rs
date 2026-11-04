@@ -412,6 +412,11 @@ pub fn sample_image(file_id: &str) -> Option<std::path::PathBuf> {
     let svg = match file_id {
         "f-proto-a" => proto_by_event(),
         "f-proto-b" => proto_by_time(),
+        // The cover choices and the draft's pictures (D1-12): real pictures,
+        // not empty boxes.
+        "f-cover-a" | "f-promo-1" => cover_collage(),
+        "f-cover-b" | "f-promo-2" => cover_big_title(),
+        "f-cover-c" | "f-promo-3" => phone("#DCE3E8", &chat_screen()),
         _ => return None,
     };
     let dir = std::env::temp_dir()
@@ -465,6 +470,63 @@ fn proto_by_time() -> String {
         ));
     }
     phone("#DCE4E2", &cells)
+}
+
+/// 合照拼图: four photos of people in a 2 × 2 grid.
+fn cover_collage() -> String {
+    let mut cells = String::new();
+    let tints = ["#C9B9A6", "#B7C4CF", "#D4C2B0", "#B9C7C4"];
+    for (i, tint) in tints.iter().enumerate() {
+        let (x, y) = (12 + (i % 2) * 274, 12 + (i / 2) * 114);
+        cells.push_str(&format!(
+            r##"<rect x="{x}" y="{y}" width="262" height="102" rx="8" fill="{tint}"/>
+<circle cx="{}" cy="{}" r="16" fill="#2B2724" opacity=".22"/>
+<circle cx="{}" cy="{}" r="16" fill="#2B2724" opacity=".22"/>
+<circle cx="{}" cy="{}" r="16" fill="#2B2724" opacity=".22"/>
+<rect x="{}" y="{}" width="170" height="30" rx="15" fill="#2B2724" opacity=".16"/>"##,
+            x + 81,
+            y + 44,
+            x + 131,
+            y + 40,
+            x + 181,
+            y + 44,
+            x + 46,
+            y + 66,
+        ));
+    }
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+<rect width="560" height="240" fill="#EFEAE4"/>
+{cells}
+</svg>"##
+    )
+}
+
+/// 大字标题: a photo with two heavy title lines over it.
+fn cover_big_title() -> String {
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+<rect width="560" height="240" fill="#B7C4CF"/>
+<circle cx="440" cy="150" r="70" fill="#2B2724" opacity=".12"/>
+<rect x="40" y="56" width="300" height="34" rx="6" fill="#1F1B18"/>
+<rect x="40" y="102" width="220" height="34" rx="6" fill="#1F1B18"/>
+<rect x="40" y="160" width="160" height="12" rx="6" fill="#1F1B18" opacity=".5"/>
+</svg>"##
+        .to_string()
+}
+
+/// 手机截图: a group chat with photo messages.
+fn chat_screen() -> String {
+    let mut rows = String::new();
+    for (i, w) in [120, 84, 140].iter().enumerate() {
+        let y = 92 + i * 52;
+        rows.push_str(&format!(
+            r##"<circle cx="210" cy="{}" r="10" fill="#2B2724" opacity=".2"/>
+<rect x="228" y="{}" width="{w}" height="30" rx="8" fill="#2B2724" opacity=".1"/>"##,
+            y + 12,
+            y,
+        ));
+    }
+    rows
 }
 
 fn phone(bg: &str, screen: &str) -> String {
