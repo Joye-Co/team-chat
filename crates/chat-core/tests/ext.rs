@@ -415,6 +415,7 @@ async fn upload_streams_with_hash_and_download_is_verified_and_cached() {
         height: None,
         sha256: fsha,
         media: None,
+        source: None,
     };
     let (progress, seen) = recorder();
     let p = client
@@ -480,6 +481,7 @@ async fn upload_streams_with_hash_and_download_is_verified_and_cached() {
         height: None,
         sha256: fsha2.clone(),
         media: None,
+        source: None,
     };
     let e = client
         .download_file(bad.clone(), no_progress())
@@ -555,6 +557,7 @@ async fn file_cache_drops_least_recently_used_past_its_limit() {
                 height: None,
                 sha256,
                 media: None,
+                source: None,
             }
         })
         .collect();

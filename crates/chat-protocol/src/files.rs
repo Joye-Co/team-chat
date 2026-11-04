@@ -92,6 +92,7 @@ impl FileMeta {
             height: self.height,
             sha256: self.sha256.clone(),
             media: None,
+            source: None,
         }
     }
 }

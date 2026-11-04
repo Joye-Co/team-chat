@@ -70,4 +70,10 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   const c21 = (blocks: unknown[]) => ({ v: 2, catalog: "tc.card/2.1", rev: 1, intent: "ask", title: "选", fallback: "选", ask: { from: [JOYE] }, blocks });
   bad("entities/card-v2-compare-no-fallback.json", "CardV2", c21([{ id: "c", type: "compare", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }]), "a compare needs fallbackText", "card.limits");
   bad("entities/card-v2-questionnaire-no-fallback.json", "CardV2", c21([{ id: "q", type: "questionnaire", children: ["i", "j"] }, { id: "i", type: "input", kind: "text", label: "一" }, { id: "j", type: "input", kind: "text", label: "二" }]), "a questionnaire needs fallbackText", "card.limits");
+
+  // PC-14: 把这一帧发到话题, an attachment taken from a frame of a 产出 version.
+  const frameRef = { fileId: "01JC0FIL0000000000000FRAME", name: "frame.png", size: 51_200, mime: "image/png", width: 1280, height: 720, sha256: HASH, source: { artifactId: "01JC0ART00000000000000OCT3", version: 2, t: 12.5 } };
+  ok("entities/file-ref-frame-source.json", "FileRef", frameRef, "a frame of a 产出 version sent to the 话题");
+  bad("entities/file-ref-frame-source-negative.json", "FileRef", { ...frameRef, source: { ...frameRef.source, t: -1 } }, "t is not negative");
+  bad("entities/file-ref-frame-source-version-zero.json", "FileRef", { ...frameRef, source: { ...frameRef.source, version: 0 } }, "version is positive");
 }

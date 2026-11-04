@@ -495,6 +495,12 @@ function resolveAttachments(room: RoomContext, raw: unknown): FileRef[] {
     // 1.1: the sender's media metadata, checked against the limits and the group's files.
     const media = (item as { media?: unknown }).media;
     if (media !== undefined) ref.media = checkMedia(room, media);
+    // 1.1: 把这一帧发到话题: the frame's 产出 version is one of this group.
+    const source = (item as { source?: { artifactId: string; version: number; t: number } }).source;
+    if (source !== undefined) {
+      if (!versionRow(room, source.artifactId, source.version)) throw new ApiError("invalid", "attachment source is not a 产出 version of this group");
+      ref.source = { artifactId: source.artifactId, version: source.version, t: source.t };
+    }
     out.push(ref);
   }
   return out;

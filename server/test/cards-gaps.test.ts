@@ -340,3 +340,23 @@ describe("backfill of rooms from before the cards2 tables (PC-15)", () => {
     for (const c of [ca, cb, cbot]) c.close();
   });
 });
+
+describe("frame source of an attachment (PC-14)", () => {
+  it("keeps the 产出 version and time of a frame and refuses a 产出 of another group", async () => {
+    const w = await world();
+    const ca = await w.connect(w.alice);
+    const root = (await ca.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "录屏" })).message;
+    const video = await upload(w.alice, w.gid, "demo.mp4", "video/mp4", "mp4");
+    const art = await api("/v1/artifacts", { token: w.alice.token, body: { groupId: w.gid, topicId: root.topicId, title: "演示", kind: "file", entry: "demo.mp4", files: [{ path: "demo.mp4", fileId: video }] } });
+    expect(art.status, JSON.stringify(art.body)).toBe(200);
+    const frame = await upload(w.alice, w.gid, "frame.png", "image/png", "frame");
+    const att = (source: unknown) => [{ fileId: frame, name: "frame.png", size: 5, mime: "image/png", sha256: "0".repeat(64), source }];
+    const source = { artifactId: art.body.artifact.id, version: 1, t: 12.5 };
+    const ok = await ca.request({ t: "send", groupId: w.gid, topicId: root.topicId, clientMsgId: clientMsgId(), body: "看这一帧", attachments: att(source) });
+    expect(ok, JSON.stringify(ok)).toMatchObject({ ok: true });
+    expect(ok.result.message.attachments[0].source).toEqual(source);
+    const bad = await ca.request({ t: "send", groupId: w.gid, topicId: root.topicId, clientMsgId: clientMsgId(), body: "?", attachments: att({ ...source, version: 9 }) });
+    expect(bad).toMatchObject({ ok: false, error: { code: "invalid" } });
+    ca.close();
+  });
+});

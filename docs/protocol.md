@@ -342,6 +342,8 @@ Rules:
   the same group and not deleted. The server fills `authorId` and `excerpt` (the first 200 code
   points of the quoted body, or of the card title).
 - `attachments`: each `fileId` must be a `ready` file of the same group (`invalid` otherwise).
+  1.1: `source?: { artifactId, version, t /* seconds >= 0 */ }` says the file is a frame of
+  that 产出 version (把这一帧发到话题); the version must be one of the same group (`invalid`).
   The server stores its own record for name, size, mime, width, height and sha256 and ignores the
   client's values for those fields.
 - `artifactRefs`: each must name an existing 产出 of the same group and an existing version.

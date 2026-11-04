@@ -40,6 +40,8 @@ export const FileRef = z.object({
   sha256: Sha256,
   /** 1.1: what the file is, for inline previews (computed by the sender). */
   media: MediaInfo.optional(),
+  /** 1.1: the frame of a 产出 version this file was taken from (把这一帧发到话题), `t` in seconds. */
+  source: z.object({ artifactId: Id, version: z.int().positive(), t: z.number().nonnegative() }).optional(),
 });
 export type FileRef = z.infer<typeof FileRef>;
 
