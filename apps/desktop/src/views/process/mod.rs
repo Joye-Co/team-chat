@@ -29,7 +29,8 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            PushSize, PushStyle, StatusKind, disabled_push, label_value, native_colors, push_button,
+            NativeType as _, PushSize, PushStyle, StatusKind, disabled_push, label_value,
+            native_colors, push_button,
         },
     },
     views::shell::{clock, clock_range},
@@ -577,13 +578,51 @@ impl ProcessView {
                     .update(cx, |nav, cx| nav.set_developer_view(true, cx));
             }))
         });
-        let mut alert = ui::native::Alert::new(Sym::Failed, cause.unwrap_or(title))
-            .icon_color(native_colors(cx).red)
-            .description(p::FAILED_HINT)
-            .action(retry);
-        if let Some(log) = log {
-            alert = alert.action(log);
-        }
+        // The Alert anatomy (§2.15) with the actions under the text: the
+        // pane is narrow, so the title and its cause keep the full width.
+        let n = native_colors(cx);
+        let alert = div()
+            .px(space::S16)
+            .py(space::S12)
+            .rounded(ui::native::tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
+            .flex()
+            .items_start()
+            .gap(space::S12)
+            .child(
+                div()
+                    .flex_none()
+                    .h(ui::native::tokens::text::UI.1)
+                    .flex()
+                    .items_center()
+                    .child(ui::sym(Sym::Failed, ui::SymSize::INLINE, n.red)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(
+                        div()
+                            .n_headline()
+                            .text_color(n.label)
+                            .line_clamp(2)
+                            .child(cause.unwrap_or(title)),
+                    )
+                    .child(div().n_body().text_color(n.secondary).child(p::FAILED_HINT))
+                    .child(
+                        div()
+                            .pt(space::S8)
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .child(retry)
+                            .children(log),
+                    ),
+            );
         Some(div().pt(space::S12).child(alert).into_any_element())
     }
 
