@@ -98,7 +98,7 @@ impl MessageExtra for CardExtra {
                 div()
                     .mt(space::S6)
                     .w_full()
-                    .max_w(crate::ui::native::tokens::card_v2::MAX_WIDTH)
+                    .max_w(crate::ui::native::tokens::layout::IN_THREAD)
                     .child(card)
                     .into_any_element(),
             );
@@ -263,7 +263,7 @@ pub fn render_card(
 
     ui::native::cards::card_frame(cx)
         .mt(space::S6)
-        .max_w(crate::ui::native::tokens::card_v2::MAX_WIDTH)
+        .max_w(crate::ui::native::tokens::layout::IN_THREAD)
         .child(
             div()
                 .p(ui::native::cards::card::INSET)
