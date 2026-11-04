@@ -83,4 +83,10 @@ crate::copy! {
     ARTIFACT_STATUS_DONE = "完成",
     ARTIFACT_STATUS_ACTIVE = "在做",
     // --- end v14/t3-pages ---
+    // --- v15/r3-pages: the quiet-page check (artifact-quiet-page) ---
+    ARTIFACT_QUIET_TITLE = "渠道预算",
+    ARTIFACT_QUIET_CHECKING = "正在检查",
+    ARTIFACT_QUIET_PASSED = "没有替你发出回应",
+    ARTIFACT_QUIET_FAILED = "替你发出了回应",
+    // --- end v15/r3-pages ---
 }

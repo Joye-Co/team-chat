@@ -223,6 +223,41 @@ impl MediaThread {
         })
     }
 
+    /// The main window's first 话题 with `extras` at its end, where an extra may point
+    /// at one of `pages` (web page 产出 read from their folders on disk).
+    pub fn with_pages(
+        inner: Arc<dyn ChatProvider>,
+        extras: Vec<Extra>,
+        pages: Vec<PageArt>,
+    ) -> Arc<Self> {
+        let (group_id, topic_id) = first_topic(&inner);
+        let states = pages
+            .into_iter()
+            .map(|p| StateArt {
+                id: p.id,
+                author: p.author,
+                said: "",
+                title: p.title,
+                entry: "index.html".into(),
+                bytes: list(&p.dir).iter().map(|f| f.size).sum(),
+                media: None,
+                hang: false,
+                dir: Some(p.dir),
+                message: false,
+            })
+            .collect();
+        Arc::new(Self {
+            inner,
+            group_id,
+            topic_id,
+            extras,
+            cards: Vec::new(),
+            states,
+            hung: Default::default(),
+            folders: Vec::new(),
+        })
+    }
+
     /// The 话题 `topic_id` of `group_id` with the stored Card v2 messages `cards`
     /// (id, author) at its end: the real thread draws them as it draws any card.
     pub fn with_cards(
@@ -287,16 +322,23 @@ impl MediaThread {
 
     fn state_detail(&self, a: &StateArt) -> ArtifactDetail {
         let now = crate::selftest::clock::utc_now().timestamp_millis();
-        let files = vec![ArtifactVersionFile {
-            path: a.entry.clone(),
-            size: a.bytes,
-            mime: String::new(),
-        }];
+        let files = match &a.dir {
+            Some(dir) => list(dir),
+            None => vec![ArtifactVersionFile {
+                path: a.entry.clone(),
+                size: a.bytes,
+                mime: String::new(),
+            }],
+        };
         ArtifactDetail {
             summary: ArtifactSummary {
                 id: a.id.into(),
                 topic_id: self.topic_id.clone(),
-                kind: ArtifactKind::File,
+                kind: if a.dir.is_some() {
+                    ArtifactKind::Page
+                } else {
+                    ArtifactKind::File
+                },
                 title: a.title.clone(),
                 version: 1,
                 size_bytes: Some(a.bytes),
@@ -344,7 +386,7 @@ impl MediaThread {
                 artifact_refs: Vec::new(),
                 reactions: Vec::new(),
             });
-        let states = self.states.iter().map(|a| Extra {
+        let states = self.states.iter().filter(|a| a.message).map(|a| Extra {
             author: a.author.into(),
             body: a.said.into(),
             streaming: false,
@@ -434,6 +476,19 @@ struct StateArt {
     media: Option<(chat_core::proto::MediaKind, chat_core::proto::MediaPreview)>,
     /// The version never arrives (it stays loading); else it fails to open.
     hang: bool,
+    /// A web page on disk (the version opens and shows), else no folder.
+    dir: Option<PathBuf>,
+    /// Its own message at the end of the thread (else an [`Extra`] points at it).
+    message: bool,
+}
+
+/// A web page 产出 for a scene's thread: its record and its folder on disk; an
+/// [`Extra`] with `MediaKey::new(id, 1)` points at it.
+pub struct PageArt {
+    pub id: &'static str,
+    pub title: String,
+    pub author: &'static str,
+    pub dir: PathBuf,
 }
 
 /// The first 群 and its first ordinary 话题 (the one `open_first_topic` opens).
@@ -719,6 +774,17 @@ impl ChatProvider for MediaThread {
         version: Option<u32>,
     ) -> Reply<ArtifactFolder> {
         if let Some(a) = self.state(artifact_id) {
+            if let Some(dir) = &a.dir {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = tx.send(Ok(ArtifactFolder {
+                    artifact_id: artifact_id.to_string(),
+                    version: version.unwrap_or(1),
+                    dir: dir.clone(),
+                    entry: a.entry.clone(),
+                    is_page: true,
+                }));
+                return rx;
+            }
             if !a.hang {
                 return reply_err(FileError::Other);
             }
@@ -872,6 +938,8 @@ fn open_states(
         bytes,
         media,
         hang,
+        dir: None,
+        message: true,
     };
     let states = vec![
         art(

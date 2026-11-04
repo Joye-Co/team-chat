@@ -424,8 +424,11 @@ fn html(
                 // Pages from teammates get no bridge capabilities (as in the 产出 window).
                 .capabilities(artifact_view::Capabilities::NONE),
             )
-            .height(px(10_000.))
-            .rounded(radius::LG)
+            // The page sits on the sheet's background edge to edge, with the
+            // pane padding (§2.22: no darker panel without a line).
+            .fill()
+            .rounded(gpui::Pixels::ZERO)
+            .pad(space::S16)
             .on_event(move |e, _, cx| {
                 if let ArtifactEvent::Emit { name, .. } = e {
                     let name = name.clone();
@@ -544,7 +547,7 @@ fn html(
                 .flex_1()
                 .min_h(px(0.))
                 .flex()
-                .child(div().flex_1().min_w(px(0.)).p(space::S12).child(page))
+                .child(div().flex_1().min_w(px(0.)).flex().flex_col().child(page))
                 .child(
                     div()
                         .w(px(150.))

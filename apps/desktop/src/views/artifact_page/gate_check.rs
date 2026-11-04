@@ -18,24 +18,21 @@ use std::time::{Duration, Instant};
 use artifact_view::{ArtifactEvent, Capabilities, Content, VersionSpec};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, AsyncApp, Context, Entity, IntoElement, ParentElement,
-    Render, SharedString, Styled, Window, WindowBounds, div, px,
+    Render, Styled, Window, WindowBounds, div,
 };
 
 use crate::{
     app::{Services, main_window_options},
+    copy::artifact_page as c,
     data::ChatProvider,
     fake::v2::{self as d, sent_page_events},
     selftest::scenes::capture_bounds,
-    theme::{self, Type as _, space},
-    ui::{
-        parts::{hairline, toolbar_band},
-        web_embed::{Phase, WebEmbed, WebEmbedSpec, WebEmbedState, live},
-    },
+    theme::{self, space},
+    ui::web_embed::{Phase, WebEmbed, WebEmbedSpec, WebEmbedState, live},
 };
 
 /// The version the quiet page claims (the sample provider declares `choose` on it).
 const QUIET_VERSION: u32 = 3;
-const QUIET_HEIGHT: f32 = 320.;
 
 #[derive(Default)]
 struct Probe {
@@ -225,10 +222,8 @@ async fn check_choose(cx: &mut AsyncApp) -> Result<(), String> {
 const QUIET_HTML: &str = r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <style>
 :root{color-scheme:light dark}
-body{margin:0;padding:28px 32px;font:14px/1.6 -apple-system,"PingFang SC",sans-serif;color:#111113;background:#fff}
-h2{margin:0 0 6px;font-size:18px}p{margin:0 0 16px;color:#5B5B66}
-button{height:34px;padding:0 14px;border:1px solid #D9D9DE;border-radius:9px;background:#fff;font:inherit;color:inherit}
-@media (prefers-color-scheme:dark){body{color:#F1F1F3;background:#111113}p{color:#A1A1AA}button{background:#1B1B1F;border-color:#34343A}}
+h2{margin:0 0 8px;font-size:18px;line-height:28px}p{margin:0 0 16px;color:var(--tc-muted,#737373)}
+button{height:32px;padding:0 12px;border:1px solid var(--tc-border,#e5e5e5);border-radius:8px;background:var(--tc-bg,#fff);font:inherit;color:inherit}
 </style></head><body>
 <h2>渠道预算</h2><p>这个页面在打开时、定时和用脚本点按钮时都试着发回应。</p>
 <button type="button" id="go">选小红书</button>
@@ -254,13 +249,20 @@ pub fn open_quiet(
     options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
     let handle = gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|_| QuietPage {
+        cx.new(|cx| QuietPage {
             provider: services.provider.clone(),
-            title: services
-                .provider
-                .artifact(d::ART_REPORT)
-                .map(|a| SharedString::from(a.summary.title))
-                .unwrap_or_default(),
+            // Redraws until the check finished, so the capture shows its result.
+            _poll: cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(50))
+                        .await;
+                    let done = PROBE.with(|p| p.borrow().done);
+                    if this.update(cx, |_, cx| cx.notify()).is_err() || done {
+                        break;
+                    }
+                }
+            }),
         })
     })
     .map(|(handle, _)| handle)
@@ -272,12 +274,14 @@ pub fn open_quiet(
 
 struct QuietPage {
     provider: Arc<dyn ChatProvider>,
-    title: SharedString,
+    _poll: gpui::Task<()>,
 }
 
 impl Render for QuietPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ui::native::{BadgeState, StatusBadge, ToolbarRow, native_colors};
+        let k = native_colors(cx);
+        let _ = &self.provider;
         let spec = WebEmbedSpec::new(
             d::ART_REPORT,
             VersionSpec::new(
@@ -291,8 +295,8 @@ impl Render for QuietPage {
         });
         let page = WebEmbed::new("quiet-page", spec)
             .forget_preview()
-            .height(px(QUIET_HEIGHT))
-            .rounded(theme::radius::LG)
+            .fill()
+            .rounded(gpui::Pixels::ZERO)
             .on_event(move |event, _, cx| {
                 if let ArtifactEvent::Emit {
                     version,
@@ -315,33 +319,28 @@ impl Render for QuietPage {
                     );
                 }
             });
+        // The check's result is the window's state (E2): a StatusBadge in the
+        // toolbar, by the page's own title.
+        let (state, label) = PROBE.with(|p| {
+            let p = p.borrow();
+            match (p.done, &p.error) {
+                (false, _) => (BadgeState::Working, c::ARTIFACT_QUIET_CHECKING),
+                (true, None) => (BadgeState::Done, c::ARTIFACT_QUIET_PASSED),
+                (true, Some(_)) => (BadgeState::Failed, c::ARTIFACT_QUIET_FAILED),
+            }
+        });
+        let _ = window;
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(k.content)
-            .text_color(k.text_1)
             .child(
-                toolbar_band("quiet-bar")
-                    .pl(theme::TRAFFIC_LIGHTS_INSET + space::S12)
-                    .pr(space::S16)
-                    .child(
-                        div()
-                            .t_title()
-                            .text_color(k.text_1)
-                            .child(self.title.clone()),
-                    ),
+                ToolbarRow::new(c::ARTIFACT_QUIET_TITLE)
+                    .leading_inset(theme::TRAFFIC_LIGHTS_INSET + space::S12)
+                    .group(StatusBadge::new(state, label)),
             )
-            .child(hairline(cx))
-            .child(
-                div()
-                    .w_full()
-                    .max_w(theme::MEASURE)
-                    .mx_auto()
-                    .px(theme::CONTENT_GUTTER)
-                    .py(space::S24)
-                    .child(page),
-            )
+            .child(div().flex_1().min_h_0().flex().flex_col().child(page))
     }
 }
 
@@ -349,13 +348,14 @@ async fn check_quiet(cx: &mut AsyncApp) -> Result<(), String> {
     let page = wait_for(cx, Duration::from_secs(15), |cx| page(d::ART_REPORT, cx))
         .await
         .ok_or("the quiet page did not load")?;
-    // A real click in the window, below the page: input outside the page must not count.
+    // A real click in the window, in the toolbar above the page: input outside the page
+    // must not count.
     let posted = cx
         .update(|cx| {
             let s = page.read(cx);
             let b = s.bounds()?;
             let x = f32::from(b.origin.x + b.size.width / 2.) as f64;
-            let y = f32::from(b.origin.y + b.size.height) as f64 + 48.;
+            let y = f32::from(b.origin.y) as f64 - 26.;
             Some(s.post_click(x, y, false))
         })
         .unwrap_or(false);
