@@ -421,7 +421,10 @@ async fn shoot(
                 cx.background_executor().timer(options.settle).await;
                 settled = true;
             }
-            park_pointer(handle, interact::pointer(scene.name), cx);
+            // A key scene parks the pointer once, before its keys.
+            if frames == 0 || !interact::keys_only(scene.name) {
+                park_pointer(handle, interact::pointer(scene.name), cx);
+            }
             match next_frame(handle, cx).await {
                 Ok(()) => {
                     frames += 1;
@@ -458,7 +461,9 @@ async fn shoot(
             cx.background_executor()
                 .timer(Duration::from_millis(steps.settle_ms))
                 .await;
-            park_pointer(handle, interact::pointer(scene.name), cx);
+            if !interact::keys_only(scene.name) {
+                park_pointer(handle, interact::pointer(scene.name), cx);
+            }
             let _ = next_frame(handle, cx).await;
             let _ = next_frame(handle, cx).await;
         }
@@ -542,8 +547,16 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
             for key in steps.keys {
-                if let Ok(key) = gpui::Keystroke::parse(key) {
-                    window.dispatch_keystroke(key, cx);
+                if let Ok(stroke) = gpui::Keystroke::parse(key) {
+                    let handled = window.dispatch_keystroke(stroke, cx);
+                    // A fresh window keeps the focus on gpui-base's `Root`,
+                    // above the app view that handles `FocusNext`: move the
+                    // focus the way the action does.
+                    match (handled, *key) {
+                        (false, "tab") => window.focus_next(cx),
+                        (false, "shift-tab") => window.focus_prev(cx),
+                        _ => {}
+                    }
                 }
             }
         })
