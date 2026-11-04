@@ -116,6 +116,8 @@ crate::copy! {
     REF_ARTIFACT_GONE = "产出已删除",
     REF_ARTIFACT_GONE_DETAIL = "原来是「{title}」",
     REF_ARTIFACT_LINE = "v{version} · {name}",
+    REFS_ALL = "看全部 {count} 个",
+    REFS_FEWER = "收起",
     REF_ARTIFACT_NEWER = "有新版本 v{version}",
     REF_TOPIC_LINE = "{group} · {status}",
     REF_MEMBER_LINE = "{role}",

@@ -824,7 +824,8 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .bg(if on { nk.primary } else { nk.content })
             .when(live && !on, |el| {
                 let hover = theme::card_v2::alpha(nk.fill, 0.5);
-                el.hover(move |s| s.bg(hover))
+                let edge = theme::card_v2::alpha(nk.label, 0.5);
+                el.hover(move |s| s.bg(hover).border_color(edge))
             })
             .when(!live, |el| el.opacity(0.5))
             .flex()
@@ -1267,8 +1268,9 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .flex()
                     .items_center()
                     .gap(space::S4)
-                    .text_color(k.ok_ink)
-                    .child(ui::icon(Sym::Check, px(12.), k.ok_ink))
+                    // Foreground text; the color stays on the 12 icon (§1.3).
+                    .text_color(k.ink)
+                    .child(ui::icon(Sym::Check, px(12.), k.ok))
                     .child(c::SLOT_ALL_FREE),
             })
     };
@@ -1577,7 +1579,8 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                         .child(
                             b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD),
                         )
-                        .children(lines(&o.pros, "+", k.ok_ink))
+                        // "+" and "−" are muted marks, not state color (D3).
+                        .children(lines(&o.pros, "+", k.ink_3))
                         .children(lines(&o.cons, "−", k.ink_3))
                         .children(kids)
                         .child(div().mt(space::S4).child(pick)),
