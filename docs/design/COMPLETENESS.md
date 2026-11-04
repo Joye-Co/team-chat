@@ -76,7 +76,7 @@ Rules:
 
 | State | Light | Dark | Allowed on |
 |---|---|---|---|
-| destructive / failed | #dc2626 | #f87171 | Badge icon, destructive button fill, error text, invalid field border |
+| destructive / failed | #dc2626 | #f87171 | Badge icon, destructive button fill, error icon (field and sheet error text stays foreground, v15), invalid field border |
 | warning / needs you | #d97706 | #fbbf24 | Badge icon, Alert icon |
 | success / done / online | #16a34a | #4ade80 | Badge icon, presence dot |
 | info / in progress / unread / link | #2563eb | #60a5fa | Badge icon, unread dot (8 px), link text |
@@ -305,7 +305,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Footer: 24 below the body. Left slot: count ("已选 2 位") or the error (2.8: foreground text, red icon). Right: outline Cancel then primary, h32, gap 8; the right edge of the primary equals the content right edge (today 4-5 px overhang).
 - Primary is disabled (primary at 50%) until the required fields are valid.
 - Long content scrolls inside the body; header and footer stay.
-- **Member picker** (new-group, add-members, start-dm: one component): search field h32 full width; 12 below it a list box (radius 10, border) showing 7.5 rows so the cut row signals scroll, plus a scrollbar; rows h40: avatar 24 (presence dot green only), name 14 medium, role 14 muted, truncate. Multi-select: checkbox 16 at the left. Single-select: check icon 16 at the right on a muted row. Footer left "已选 N 位". Empty: "没有匹配的成员" Empty (compact, 2.13).
+- **Member picker** (new-group, add-members, start-dm: one component): search field h32 full width; 12 below it a list box (radius 10, border) showing 7.5 rows so the cut row signals scroll, plus a scrollbar; rows h40: avatar 24 (presence dot green only), name 14 medium, role 14 muted, truncate. Multi-select: checkbox 16 at the left. Single-select: check icon 16 at the right on a muted row. Footer left "已选 N 位". Empty: "没有匹配的成员" Empty (compact, 2.13). Keys (owner decision v15): ↓ from the search field moves into the list, ↑↓ move the highlight, Space toggles the highlighted member (multi-select), ↩ / ⌘↩ submit.
 - Avatar grid (add-bot): a column count that divides the set (for example 26 avatars + 1 random cell = 3 x 9), cells 40, gap 8.
 
 ### 2.10 Alert (Mac confirm)
@@ -319,7 +319,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 - **Menu**: float surface, radius 8, p 4, border, shadow md, opaque, min-w 128. Item h32, px 8, radius 6, 14 text, icon 16, gap 8, shortcut 12 muted at the right. GroupLabel 12 medium muted h28 px 8. Separator 1 px, mx -4, my 4. If any item in a menu is checkable, every item reserves the 16 + 8 check column; otherwise none does. Highlight = accent fill.
 - **Mention popup**: a menu anchored to the caret (left edge = caret x - 8, above the composer), w 320, max 8 rows, GroupLabel per group, selected = accent fill.
-- **Command palette** (search, switcher, ask): w 600, radius 10, float surface, shadow md. Input row h48, search icon 16, 16 text, border-b. List p 4: GroupLabel 12 medium muted h32; rows h32, radius 6: leading 16 icon or 16 avatar for the kind (topic, group, DM), title 14, meta 14 muted, StatusBadge at the right if any, time 12 muted tabular right-aligned at one x in every row, then a reserved 20 column for the ↩ hint (shown only on the selected row). Selected row = accent fill. Footer h40, border-t, 12 muted Kbd hints: "↑↓ 选择 · ↩ 打开 · esc 关闭". Max 8.5 visible rows, so a half row signals scroll; the panel height is header + rows + footer, never a row cut by the panel edge.
+- **Command palette** (search, switcher, ask): w 600, radius 10, float surface, shadow md. Input row h48, search icon 16, 16 text, border-b. List p 4: GroupLabel 12 medium muted h32; rows h32, radius 6: leading 16 icon or 16 avatar for the kind (topic, group, DM), title 14, meta 14 muted, StatusBadge at the right if any, time 12 muted tabular right-aligned at one x in every row, then a reserved 20 column for the ↩ hint (shown only on the selected row). Selected row = accent fill. Footer h40, border-t, 12 muted Kbd hints: "↑↓ 选择 · ↩ 打开 · esc 关闭"; when no row can be chosen (no match, failed, loading) only "esc 关闭". Max 8.5 visible rows, so a half row signals scroll; the panel height is header + rows + footer, never a row cut by the panel edge.
 - Palette states: empty query = recent list; no match = compact Empty ("没有找到“X”", one action); loading = 3 skeleton rows h32; error = Alert row with Retry.
 - Scope and target chips: max 200, truncate at the end with "…", full value in a tooltip.
 
