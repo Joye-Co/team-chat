@@ -36,7 +36,7 @@ impl Seeded {
             p,
             root,
             now,
-            seq: 14,
+            seq: 15,
         }
     }
 
@@ -136,7 +136,8 @@ fn the_machine_card_problems_and_tools_come_from_runs_machines_and_the_runner() 
     s.p.seed_remote_for_test(vec![machine], vec![runner]);
     s.apply(vec![
         run_event(json!({
-            "id": "01SEEDFAIL", "botId": FORGE, "groupId": GROUP, "topicId": TOPIC_WEEKLY,
+            // A 话题 of its own: the seeded weekly report has a newer run at work (RUN_WEEKLY).
+            "id": "01SEEDFAIL", "botId": FORGE, "groupId": GROUP, "topicId": "01SEEDFAILTOPIC",
             "status": "failed", "createdAt": now - 30 * MIN, "updatedAt": now - 25 * MIN,
             "summary": "CI 超时，检查没跑完", "machineId": "01SEEDMACHINE"
         })),
@@ -151,7 +152,14 @@ fn the_machine_card_problems_and_tools_come_from_runs_machines_and_the_runner() 
     assert_eq!(mc.name, "mac-mini-2");
     assert!(mc.online && mc.busy);
     assert_eq!(mc.disk_used_pct, Some(60));
-    assert_eq!(forge.active, [(GROUP.to_string(), TOPIC.to_string())]);
+    // The seeded weekly run (RUN_WEEKLY) is at work too.
+    assert_eq!(
+        forge.active,
+        [
+            (GROUP.to_string(), TOPIC_WEEKLY.to_string()),
+            (GROUP.to_string(), TOPIC.to_string())
+        ]
+    );
     assert_eq!(forge.problems.len(), 1);
     assert_eq!(forge.problems[0].text, "CI 超时，检查没跑完");
     assert_eq!(forge.problems[0].run_id.as_deref(), Some("01SEEDFAIL"));
@@ -176,7 +184,7 @@ fn the_machine_card_problems_and_tools_come_from_runs_machines_and_the_runner() 
     // A later good run in the same 话题 clears the problem; the machine is idle then.
     s.apply(vec![
         run_event(json!({
-            "id": "01SEEDFIX", "botId": FORGE, "groupId": GROUP, "topicId": TOPIC_WEEKLY,
+            "id": "01SEEDFIX", "botId": FORGE, "groupId": GROUP, "topicId": "01SEEDFAILTOPIC",
             "status": "done", "createdAt": now - 20 * MIN, "updatedAt": now - 15 * MIN,
             "machineId": "01SEEDMACHINE"
         })),
@@ -376,7 +384,8 @@ fn page_aggregates_with_500_topics_stay_within_the_frame_budget() {
     );
     // Every run of the week counts, also in 话题 beyond the newest 500 of the 群.
     let forge = p.member_stats(FORGE).expect("stats");
-    assert_eq!(forge.topics_this_week as u64, TOPICS + 1);
+    // Plus the seeded 话题 and the weekly report (RUN_WEEKLY).
+    assert_eq!(forge.topics_this_week as u64, TOPICS + 2);
 }
 
 #[test]

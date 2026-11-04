@@ -358,7 +358,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 18);
+    assert_eq!(valid("Event", "type").len(), 19);
     assert_eq!(valid("TransientEvent", "type").len(), 8);
 }
 
