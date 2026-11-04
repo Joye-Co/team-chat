@@ -9,8 +9,9 @@
 //! - Pending shows only to the emitter: nothing for 400 ms, then 等 {name} 回应, then
 //!   {name} 还在处理, then {name} 没有回应 with 重试 and 不等了 (§4.4, soft and hard from
 //!   `expect.mode`, §6.4).
-//! - `expect.mode: none` on a live event says {name} 现在接不了，稍后再试 for 4 s at the
-//!   block and in the band; the block stays usable (INTERACT §6.2).
+//! - `expect.mode: none` on a live event means the block was not interactive (INTERACT
+//!   §4.4): the block goes back to its state and is read-only for that rev, with no copy.
+//!   A rate-limited send says {name} 现在接不了，稍后再试 for 4 s.
 //! - A live event that comes back offline or busy puts the block back to its state before
 //!   the gesture (INTERACT §4.4) while the band says why for 4 s.
 //! - A rev that changes a block I typed in keeps my text and says 内容变了 · 用新的.
@@ -89,6 +90,15 @@ pub fn may_emit(ctx: &Ctx, b: &CardV2Block) -> bool {
         .as_ref()
         .and_then(|s| s.emitters.as_ref())
         .and_then(|e| e.get(id));
+    // The author said this block is not interactive (`expect.mode: none`, INTERACT §4.4).
+    if refused(
+        &provider.card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id),
+        id,
+        ctx.card.rev,
+    ) {
+        crate::selftest::drawn::mark("card-refused", ctx.msg.message_id.clone());
+        return false;
+    }
     if let Some(ids) = resolved {
         return ids.iter().any(|x| x == me);
     }
@@ -253,8 +263,11 @@ pub enum Stage {
     OfflineLive,
     /// The author is offline; my answer is stored and they will see it.
     OfflineAnswer,
-    /// Refused because of limits, or `expect.mode: none`: 现在接不了，稍后再试 (4 s).
+    /// Refused because of limits: 现在接不了，稍后再试 (4 s).
     Busy,
+    /// `expect.mode: none` for a live event: the block was not interactive. The state goes
+    /// back and the block is read-only; nothing is said (INTERACT §4.4).
+    Refused,
 }
 
 /// My newest event on a card that still waits for the author.
@@ -304,13 +317,13 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
                     }
                     (Stage::OfflineLive, Some(at + ms(t::OFFLINE_NOTE)))
                 }
-                // The author cannot take it now (a runner over its limit, INTERACT §6.2):
-                // {name} 现在接不了，稍后再试 for 4 s; the block stays usable.
+                // The block was not interactive (INTERACT §4.4): its state goes back once
+                // and it is read-only from now on (`refused`); no band, no retry.
                 ExpectMode::None => {
                     if age >= ms(t::OFFLINE_NOTE) {
                         return None;
                     }
-                    (Stage::Busy, Some(at + ms(t::OFFLINE_NOTE)))
+                    (Stage::Refused, Some(at + ms(t::OFFLINE_NOTE)))
                 }
                 ExpectMode::Unknown => return None,
                 mode => {
@@ -352,9 +365,27 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
     }
 }
 
-/// The newest of my events on the card that still waits, if any (the band).
+/// The newest of my events on the card that still waits, if any (the band). A refused
+/// event (`expect.mode: none`) shows nothing.
 pub fn pending(events: &[MyCardEvent], now: Millis) -> Option<Pending> {
-    events.iter().rev().find_map(|e| stage_of(e, now))
+    events
+        .iter()
+        .rev()
+        .find_map(|e| stage_of(e, now))
+        .filter(|p| p.stage != Stage::Refused)
+}
+
+/// True when the author answered a live event of mine on `block` at `rev` with
+/// `expect.mode: none`: the block is not interactive and draws read-only (INTERACT §4.4).
+pub fn refused(events: &[MyCardEvent], block: &str, rev: u32) -> bool {
+    events.iter().any(|e| {
+        !e.durable
+            && !e.dropped
+            && e.request.rev == rev
+            && e.request.block_id.as_deref() == Some(block)
+            && matches!(&e.phase, CardEventPhase::Acked { ack, .. }
+                if !ack.stored && ack.expect.mode == ExpectMode::None)
+    })
 }
 
 /// The newest of my events on block `block` that still waits, if any (the line at the
@@ -366,6 +397,7 @@ pub fn pending_at(events: &[MyCardEvent], block: &str, now: Millis) -> Option<Pe
         .rev()
         .filter(|e| e.request.block_id.as_deref() == Some(block))
         .find_map(|e| stage_of(e, now))
+        .filter(|p| p.stage != Stage::Refused)
 }
 
 /// The next time any waiting event of the card changes its stage.
@@ -405,6 +437,7 @@ pub fn stage_words(stage: Stage, name: &str) -> String {
         Stage::OfflineLive => c::OFFLINE_LIVE,
         Stage::OfflineAnswer => c::OFFLINE_ANSWER,
         Stage::Busy => c::BUSY,
+        Stage::Refused => "",
     };
     fill(t, &[("name", name)])
 }
@@ -520,7 +553,7 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
 /// (offline) or the author cannot take it now (busy, `expect.mode: none`).
 pub fn undone(e: &MyCardEvent, now: Millis) -> bool {
     !e.durable
-        && stage_of(e, now).is_some_and(|p| matches!(p.stage, Stage::OfflineLive | Stage::Busy))
+        && stage_of(e, now).is_some_and(|p| matches!(p.stage, Stage::OfflineLive | Stage::Busy | Stage::Refused))
 }
 
 /// Blocks with a live event of mine on its way, or one whose state is still to go back.
@@ -953,6 +986,7 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
             el.child(div().min_w(px(0.)).one_line().child(text))
         });
     if p.stage == Stage::Silent {
+        crate::selftest::drawn::mark("card-retry", ctx.msg.message_id.clone());
         let (provider, g, tp, m, cid) = (
             ctx.env.provider.clone(),
             ctx.msg.group_id.clone(),
@@ -1048,16 +1082,28 @@ mod tests {
         dropped.dropped = true;
         assert!(stage_of(&dropped, 10_000).is_none(), "不等了");
         let none = ev(ExpectMode::None, 0, false);
-        assert_eq!(
-            stage_of(&none, 100).unwrap().stage,
-            Stage::Busy,
-            "现在接不了"
-        );
-        assert!(stage_of(&none, 5_000).is_none(), "the note goes after 4 s");
+        assert_eq!(stage_of(&none, 100).unwrap().stage, Stage::Refused);
+        assert!(stage_of(&none, 5_000).is_none());
         assert!(
             stage_of(&ev(ExpectMode::None, 0, true), 100).is_none(),
             "an answer"
         );
+    }
+
+    #[test]
+    fn a_block_the_author_refused_is_read_only_with_no_retry() {
+        // INTERACT §4.4: `expect.mode: none` means the block was not interactive.
+        let none = ev(ExpectMode::None, 0, false);
+        let events = [none.clone()];
+        assert!(pending(&events, 100).is_none(), "no band copy");
+        assert!(pending_at(&events, "bars", 100).is_none(), "no 重试 at the block");
+        assert!(pending_at(&events, "bars", 60_000).is_none());
+        assert!(refused(&events, "bars", 1), "read-only for that rev");
+        assert!(!refused(&events, "bars", 2), "a new rev may make it interactive");
+        assert!(!refused(&events, "other", 1));
+        assert!(undone(&none, 100), "the optimistic state goes back");
+        assert!(!refused(&[ev(ExpectMode::Live, 0, false)], "bars", 1));
+        assert!(!refused(&[ev(ExpectMode::None, 0, true)], "bars", 1), "an answer");
     }
 
     #[test]

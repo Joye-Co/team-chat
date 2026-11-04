@@ -476,7 +476,7 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
     use interact::Stage as S;
     let words = interact::stage_words(stage, author);
     Some(match stage {
-        S::Quiet => return None,
+        S::Quiet | S::Refused => return None,
         S::Wait | S::Slow => (words, String::new(), PendTone::Live),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
         S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),

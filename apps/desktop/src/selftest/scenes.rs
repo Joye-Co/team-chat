@@ -973,6 +973,7 @@ pub type Checks = fn(&Services, &mut App) -> Vec<Result<String, String>>;
 /// The checks of scene `name`, if it has any.
 pub fn checks(name: &str) -> Option<Checks> {
     crate::views::topic_page::scenes::checks(name)
+        .or_else(|| crate::views::cards::v21::scenes::checks(name))
 }
 
 pub fn find(name: &str) -> Option<&'static Scene> {

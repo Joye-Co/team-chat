@@ -91,7 +91,36 @@ pub const SCENES: &[Scene] = &[
     // v11/pb-cards
     scene!(
         "interact_notes",
-        "INTERACT §4.4 and §6.2: my click offline (the bar goes back), the member busy, a rev that changed the block I typed in (内容变了 · 用新的) and a reply off screen ({name} 回了一条新消息)",
+        "INTERACT §4.4 and §6.2: my click offline (the bar goes back), a block the member said is not interactive (read-only, no 重试), a rev that changed the block I typed in (内容变了 · 用新的) and a reply off screen ({name} 回了一条新消息)",
         Page::Notes
     ),
 ];
+
+/// The checks of the Card v2.1 scenes.
+pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
+    use super::samples::NOTE_BUSY;
+    use crate::selftest::drawn::{check, ids};
+    match name {
+        "interact_notes" => Some(|_, _| {
+            let (retry, refused) = (ids("card-retry"), ids("card-refused"));
+            vec![
+                check(
+                    refused.contains(NOTE_BUSY),
+                    format!("expect.mode none: the block is read-only ({refused:?})"),
+                ),
+                check(
+                    !retry.contains(NOTE_BUSY),
+                    format!("expect.mode none: no 重试 ({retry:?})"),
+                ),
+            ]
+        }),
+        "interact_pending" => Some(|_, _| {
+            let retry = ids("card-retry");
+            vec![check(
+                !retry.is_empty(),
+                format!("没有回应 shows 重试 ({retry:?})"),
+            )]
+        }),
+        _ => None,
+    }
+}
