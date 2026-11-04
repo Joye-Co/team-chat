@@ -6,7 +6,8 @@ import { MachineDownFrame } from "@chat/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import { STALL_MS, TEXT } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
-import { ACK_EMOJI, doneCard, prRefs, testCounts } from "../src/bots/proof";
+import { ACK_EMOJI } from "@chat/protocol";
+import { doneCard, prRefs, testCounts } from "../src/bots/proof";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
@@ -290,6 +291,27 @@ describe("1.1 runs", () => {
     expect(stopped.body.status).toBe("cancelled");
     expect(stopped.body.pausedBy).toBeUndefined();
     expect((await pause(w.human)).status).toBe(409);
+    c.close();
+    d.close();
+  });
+
+  it("clear pausedBy when the daemon reports the CLI going on by itself", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const { c } = await Client.connect(w.human.token);
+    const { runId } = await startRun(w, c, d);
+    const paused = await api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} });
+    expect(paused.body).toMatchObject({ pausedBy: w.human.id });
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    // The daemon restarted the CLI: it goes on without a resume from the server.
+    const seq = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, seq);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && !e.data.run.pausedBy && e.data.run.updatedAt > paused.body.updatedAt);
+    const got = await api(`/v1/runs/${runId}`, { token: w.human.token });
+    expect(got.status).toBe(200);
+    expect(got.body.pausedBy).toBeUndefined();
+    // It can be taken over again.
+    expect((await api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} })).status).toBe(200);
     c.close();
     d.close();
   });

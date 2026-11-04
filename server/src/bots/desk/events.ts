@@ -133,6 +133,16 @@ export abstract class DeskEvents extends DeskRuns {
           if (items && this.storeAcceptance(r, items)) planChanged = true;
           break;
         }
+        case "paused":
+          // The CLI goes on without a resume from here (for example the daemon restarted it):
+          // the run is no longer taken over.
+          if (ev.paused === false && r.paused_by) {
+            this.sql.exec("UPDATE runs SET paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
+            r.paused_by = null;
+            r.paused_at = null;
+            planChanged = true;
+          }
+          break;
         default:
           break;
       }
