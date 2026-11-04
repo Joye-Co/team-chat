@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
+    App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
     WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
 };
 
@@ -597,6 +597,10 @@ pub struct RootView {
     first_frame: Option<FirstFrameHook>,
     /// v12/shell: draw as an inactive window (a self-test scene).
     show_inactive: bool,
+    /// The app's own focus, on its root: a fresh window focuses it, so the
+    /// first Tab goes through the app's `FocusNext` handler (it is not a
+    /// tab stop, so that Tab lands on the first control).
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -608,6 +612,10 @@ impl RootView {
         cx: &mut Context<Self>,
     ) -> Self {
         crate::views::nav::attach_window(window, cx);
+        // Focus the app root before the views below build: a view that takes
+        // the focus itself (the login field) still wins.
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         let subscriptions = vec![
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
@@ -649,6 +657,7 @@ impl RootView {
             services,
             first_frame,
             show_inactive: false,
+            focus,
             _subscriptions: subscriptions,
         }
     }
@@ -690,8 +699,18 @@ impl Render for RootView {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
+        // Nothing has the focus (a fresh window, or the focused view went
+        // away): the app root takes it, so Tab and the app's keys reach it.
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus, cx);
+        }
         let k = theme::colors(cx);
-        let root = div().id("root").size_full().bg(k.bg).text_color(k.ink);
+        let root = div()
+            .id("root")
+            .track_focus(&self.focus)
+            .size_full()
+            .bg(k.bg)
+            .text_color(k.ink);
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root = crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
             .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
@@ -904,6 +923,24 @@ pub fn open_settings_window(services: Services, cx: &mut App) {
     crate::views::settings::open(services, cx);
 }
 
+/// The keys of the views that need no services: Tab through the window's
+/// tab stops and the arrow keys of the lists. The screenshot self-test binds
+/// them too, so its key scenes press the app's real keys.
+pub fn bind_view_keys(cx: &mut App) {
+    cx.bind_keys([
+        // Tab moves keyboard focus through the window's tab stops (§11);
+        // inputs keep their own Tab binding.
+        KeyBinding::new("tab", FocusNext, None),
+        KeyBinding::new("shift-tab", FocusPrev, None),
+    ]);
+    crate::views::topic_list::bind_keys(cx);
+    // --- v12/behavior ---
+    crate::views::rail::bind_keys(cx);
+    crate::views::timeline::bind_keys(cx);
+    crate::views::members_page::bind_keys(cx);
+    // --- end v12/behavior ---
+}
+
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.bind_keys([
@@ -918,20 +955,11 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-shift-h", OpenDesk, None),
         KeyBinding::new("cmd-shift-m", OpenMembers, None),
         KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
-        // Tab moves keyboard focus through the window's tab stops (§11);
-        // inputs keep their own Tab binding.
-        KeyBinding::new("tab", FocusNext, None),
-        KeyBinding::new("shift-tab", FocusPrev, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
-    crate::views::topic_list::bind_keys(cx);
-    // --- v12/behavior ---
-    crate::views::rail::bind_keys(cx);
-    crate::views::timeline::bind_keys(cx);
-    crate::views::members_page::bind_keys(cx);
-    // --- end v12/behavior ---
+    bind_view_keys(cx);
     // --- v12/shell: the accent of System Settings (NATIVE.md §4) ---
     theme::watch_system_accent(cx);
     // --- end v12/shell ---

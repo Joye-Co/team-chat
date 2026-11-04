@@ -72,6 +72,16 @@ enum Pending {
 
 impl Global for NavGlobal {}
 
+/// The keys inside the switcher, the sheets and 问: ↑↓ and Return in their
+/// lists (the screenshot self-test binds them too).
+pub fn bind_sheet_keys(cx: &mut App) {
+    switcher::bind_keys(cx);
+    dialogs::bind_keys(cx);
+    crate::views::ask::bind_keys(cx);
+    // v12/overlays: ⌘Return in the 新话题 sheet.
+    new_topic::bind_keys(cx);
+}
+
 /// Key bindings, global actions, the save-on-change observer and the menu bar
 /// item. Call once after `gpui_kit::init`. `status_item` is false for self-tests.
 pub fn install(services: Services, status_item: bool, cx: &mut App) {
@@ -90,11 +100,7 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         KeyBinding::new("cmd-8", OpenGroup8, None),
         KeyBinding::new("cmd-9", OpenGroup9, None),
     ]);
-    switcher::bind_keys(cx);
-    dialogs::bind_keys(cx);
-    crate::views::ask::bind_keys(cx);
-    // v12/overlays: ⌘Return in the 新话题 sheet.
-    new_topic::bind_keys(cx);
+    bind_sheet_keys(cx);
     cx.set_global(NavGlobal {
         services: services.clone(),
         window: None,
