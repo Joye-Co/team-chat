@@ -334,3 +334,38 @@ fn app_icon_image() -> Arc<Image> {
 pub fn app_icon(size: Pixels) -> gpui::Img {
     img(app_icon_image()).size(size).flex_none()
 }
+
+/// `text` with the characters in `ranges` (char indices) in Semibold: how
+/// Spotlight shows what matched. No highlight fill.
+pub fn weighted(text: &str, ranges: &[std::ops::Range<usize>]) -> gpui::StyledText {
+    let starts: Vec<usize> = text
+        .char_indices()
+        .map(|(b, _)| b)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    let n = starts.len() - 1;
+    gpui::StyledText::new(text.to_string()).with_highlights(ranges.iter().filter_map(|r| {
+        let (a, b) = (r.start.min(n), r.end.min(n));
+        (a < b).then(|| {
+            (
+                starts[a]..starts[b],
+                gpui::HighlightStyle {
+                    font_weight: Some(gpui::FontWeight::SEMIBOLD),
+                    ..Default::default()
+                },
+            )
+        })
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weighted_maps_char_ranges_to_bytes() {
+        // Must not panic on multi-byte text or ranges past the end.
+        let _ = weighted("登录页支持", &[0..2, 4..9]);
+        let _ = weighted("", &[0..1]);
+    }
+}
