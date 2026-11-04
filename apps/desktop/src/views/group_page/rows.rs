@@ -300,8 +300,8 @@ pub fn toolbar_separator(cx: &App) -> gpui::Div {
 }
 
 /// The region of a page whose first load failed (§2.15, §2.13): it takes
-/// the place of the content (no skeletons pulse under it), fills the free
-/// height in a frame and says why, with `重试`, which reconnects now.
+/// the place of the content (no skeletons pulse under it), in a frame that
+/// hugs it, and says why, with `重试`, which reconnects now.
 pub fn failed_region(id: &str, services: &Services, cx: &App) -> AnyElement {
     use crate::{
         copy::common as cc,
@@ -319,8 +319,7 @@ pub fn failed_region(id: &str, services: &Services, cx: &App) -> AnyElement {
     .on_click(move |_, _, _| services.provider.reconnect_now());
     div()
         .id(SharedString::from(format!("{id}-failed")))
-        .flex_1()
-        .min_h(px(240.))
+        .flex_none()
         .flex()
         .rounded(page::m::FRAME_RADIUS)
         .border_1()

@@ -1234,8 +1234,8 @@ impl ArtifactPage {
                         .min_h_0()
                         .overflow_y_scroll()
                         .child(
-                            // The content fills the pane: a short table or grid
-                            // ends in its footer at the bottom (§2.21).
+                            // Frames hug their content; space below the last
+                            // frame is allowed (A1).
                             div()
                                 .min_h_full()
                                 .px(page::m::EDGE)
@@ -1254,7 +1254,6 @@ impl ArtifactPage {
                 // The failure takes the content's place (§2.15).
                 return shell(
                     div()
-                        .flex_1()
                         .flex()
                         .flex_col()
                         .child(crate::views::group_page::rows::failed_region(
@@ -1276,8 +1275,7 @@ impl ArtifactPage {
             page::PageLoad::Ready if total == 0 => {
                 return shell(
                     div()
-                        .flex_1()
-                        .min_h(px(240.))
+                        .flex_none()
                         .flex()
                         .rounded(page::m::FRAME_RADIUS)
                         .border_1()
@@ -1387,7 +1385,6 @@ impl ArtifactPage {
             .size_full();
             div()
                 .relative()
-                .flex_1()
                 .flex()
                 .flex_col()
                 .gap(page::m::GUTTER)
@@ -1461,8 +1458,7 @@ impl ArtifactPage {
                                 .children(tiles),
                         )
                 }))
-                // The count in a footer row at the bottom (§2.6).
-                .child(div().flex_1())
+                // The count in a footer row under the tiles (§2.6).
                 .child(page::frame(cx).child(footer.border_t_0()))
                 .into_any_element()
         } else {
@@ -1627,12 +1623,10 @@ impl ArtifactPage {
                     )
                     .child(clear)
             });
-            // The frame takes the rest of the pane and ends in its footer.
+            // The frame hugs the table and ends in its footer row.
             page::frame(cx)
-                .flex_1()
                 .child(page::table("artifacts", &cols, rows, cx))
                 .children(no_match)
-                .child(div().flex_1())
                 .child(footer)
                 .into_any_element()
         };

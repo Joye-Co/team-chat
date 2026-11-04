@@ -861,8 +861,8 @@ impl Render for GroupPage {
             .enumerate()
             .map(|(i, (st, t, run))| self.topic_row(t, *st, run.as_ref(), i + 1 == shown, cx))
             .collect();
-        // The content fills the pane: the last frame grows to the bottom and
-        // ends in its footer row, so a short list leaves no blank band.
+        // Frames hug their rows and footer row; space below the last frame
+        // is allowed (A1).
         let mut content = div()
             .min_h_full()
             .px(page::m::EDGE)
@@ -909,8 +909,7 @@ impl Render for GroupPage {
             PageLoad::Ready if n == 0 && done.is_empty() => {
                 content = content.child(
                     div()
-                        .flex_1()
-                        .min_h(px(240.))
+                        .flex_none()
                         .flex()
                         .rounded(page::m::FRAME_RADIUS)
                         .border_1()
@@ -981,11 +980,10 @@ impl Render for GroupPage {
                     active_body,
                     false,
                 ));
-                // 最近完成 always shows (a compact empty when nothing is
-                // done), and its frame takes the rest of the pane.
+                // 最近完成 always shows (an Empty when nothing is done); its
+                // frame hugs its rows and footer.
                 let done_body = if done.is_empty() {
-                    // The rest of the pane holds a designed Empty (§2.13).
-                    page::frame(cx).flex_1().child(page::page_empty(
+                    page::frame(cx).child(page::page_empty(
                         Sym::Done,
                         c::GROUP_PAGE_DONE_EMPTY,
                         c::GROUP_PAGE_DONE_EMPTY_BODY,
@@ -993,16 +991,12 @@ impl Render for GroupPage {
                         cx,
                     ))
                 } else {
-                    page::frame(cx)
-                        .flex_1()
-                        .children(done)
-                        .child(div().flex_1())
-                        .child(page::list_footer(
-                            "group-count-done",
-                            fill(c::GROUP_PAGE_COUNT, &[("n", &done_total.to_string())]),
-                            None,
-                            cx,
-                        ))
+                    page::frame(cx).children(done).child(page::list_footer(
+                        "group-count-done",
+                        fill(c::GROUP_PAGE_COUNT, &[("n", &done_total.to_string())]),
+                        None,
+                        cx,
+                    ))
                 };
                 content = content.child(section(
                     page::section_header(
@@ -1013,7 +1007,7 @@ impl Render for GroupPage {
                         cx,
                     ),
                     done_body,
-                    true,
+                    false,
                 ));
             }
         }

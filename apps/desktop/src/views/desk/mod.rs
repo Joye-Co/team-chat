@@ -26,7 +26,7 @@ use std::{collections::HashMap, rc::Rc, time::Duration};
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _,
 };
 
 use crate::{
@@ -283,16 +283,7 @@ impl DeskPage {
 
     /// A framed list of `rows`; past [`SECTION_ROWS`] it shows the first
     /// ones and a footer `看全部 N 件` that opens the rest (and `收起`).
-    /// The last section (`grow`) takes the rest of the pane and always ends in
-    /// its footer row (the count, or `看全部`), so the page never ends in a
-    /// blank band (§2.21).
-    fn list(
-        &self,
-        id: &'static str,
-        rows: Vec<AnyElement>,
-        grow: bool,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    fn list(&self, id: &'static str, rows: Vec<AnyElement>, cx: &mut Context<Self>) -> gpui::Div {
         let total = rows.len();
         let open = self.expanded.contains(id);
         let long = total > SECTION_ROWS;
@@ -316,20 +307,7 @@ impl DeskPage {
                     cx.notify();
                 }))
         });
-        let count = (grow && !long).then(|| {
-            page::list_footer(
-                SharedString::from(format!("{id}-count")),
-                fill(c::DESK_COUNT, &[("n", &total.to_string())]),
-                None,
-                cx,
-            )
-        });
-        page::frame(cx)
-            .when(grow, |f| f.flex_1())
-            .children(shown)
-            .when(grow, |f| f.child(div().flex_1()))
-            .children(footer)
-            .children(count)
+        page::frame(cx).children(shown).children(footer)
     }
 
     /// The KPI row (§2.4): 等你, 在做, 今天完成, 排队.
@@ -506,15 +484,6 @@ impl Render for DeskPage {
                 // session move to 刚处理, so the count matches the rows.
                 let (open, handled): (Vec<&AskCard>, Vec<&AskCard>) =
                     snap.asks.iter().partition(|a| !list::is_answered(a, self));
-                let last = if !snap.done.is_empty() {
-                    "desk-done"
-                } else if !snap.runs.is_empty() {
-                    "desk-runs"
-                } else if !handled.is_empty() {
-                    "desk-handled"
-                } else {
-                    "desk-asks"
-                };
                 for (id, title, asks) in [
                     ("desk-asks", c::DESK_NEEDS_YOU, open),
                     ("desk-handled", c::DESK_JUST_HANDLED, handled),
@@ -528,13 +497,10 @@ impl Render for DeskPage {
                         .enumerate()
                         .map(|(i, a)| list::ask_row(a, self.last_shown(id, i, n), self, &snap, cx))
                         .collect();
-                    content = content.child(
-                        section(
-                            page::section_header(title, Some(n), None, None, cx),
-                            self.list(id, rows, id == last, cx),
-                        )
-                        .when(id == last, |s| s.flex_1()),
-                    );
+                    content = content.child(section(
+                        page::section_header(title, Some(n), None, None, cx),
+                        self.list(id, rows, cx),
+                    ));
                 }
                 if !snap.runs.is_empty() {
                     let n = snap.runs.len();
@@ -553,13 +519,10 @@ impl Render for DeskPage {
                             )
                         })
                         .collect();
-                    content = content.child(
-                        section(
-                            page::section_header(c::DESK_WORKING, Some(n), None, None, cx),
-                            self.list("desk-runs", rows, last == "desk-runs", cx),
-                        )
-                        .when(last == "desk-runs", |s| s.flex_1()),
-                    );
+                    content = content.child(section(
+                        page::section_header(c::DESK_WORKING, Some(n), None, None, cx),
+                        self.list("desk-runs", rows, cx),
+                    ));
                 }
                 if !snap.done.is_empty() {
                     let n = snap.done.len();
@@ -578,13 +541,10 @@ impl Render for DeskPage {
                             )
                         })
                         .collect();
-                    content = content.child(
-                        section(
-                            page::section_header(c::DESK_DONE_TODAY, Some(n), None, None, cx),
-                            self.list("desk-done", rows, last == "desk-done", cx),
-                        )
-                        .when(last == "desk-done", |s| s.flex_1()),
-                    );
+                    content = content.child(section(
+                        page::section_header(c::DESK_DONE_TODAY, Some(n), None, None, cx),
+                        self.list("desk-done", rows, cx),
+                    ));
                 }
                 if quiet {
                     let new_topic = push_button(
@@ -604,11 +564,11 @@ impl Render for DeskPage {
                         cx,
                     )
                     .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx)));
-                    // The Empty fills the rest of the pane (§2.13: flex-1).
+                    // The Empty in a frame that hugs it (A1: space below the
+                    // last frame is allowed).
                     content = content.child(
                         div()
-                            .flex_1()
-                            .min_h(px(240.))
+                            .flex_none()
                             .flex()
                             .rounded(m::FRAME_RADIUS)
                             .border_1()
