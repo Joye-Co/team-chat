@@ -106,10 +106,10 @@ impl TimelineView {
         let mut out: Vec<AnyElement> = runs
             .iter()
             .map(|run| {
-                if in_pane.as_deref() == Some(run.id.as_str()) {
-                    return self.plan_line(run, cx);
-                }
                 let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
+                if in_pane.as_deref() == Some(run.id.as_str()) {
+                    return self.plan_line(run, paused_by.is_some(), cx);
+                }
                 let times = p.run_step_times(&run.id);
                 self.plan_card(run, paused_by.is_some(), &times, cx)
             })
@@ -118,78 +118,87 @@ impl TimelineView {
         out
     }
 
-    /// The one-line card of a run whose plan shows in 实时查看: `计划 3/5`,
-    /// the step it is on and `在右侧查看`.
-    fn plan_line(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
+    /// The working card's header alone, for a run whose plan shows in
+    /// 实时查看 (§2.4, T-06): avatar 24 + `Forge 正在做：<step>` + the same
+    /// StatusBadge (已暂停 while someone holds its computer) and
+    /// `在右侧打开`, on the text column with the gutter empty.
+    fn plan_line(&self, run: &BotRunSummary, held: bool, cx: &mut Context<Self>) -> AnyElement {
         let n = native_colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
-        let name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
-        let progress = crate::views::topic_page::plan_progress(&run.plan);
-        let stopping = self.services.provider.run_stopping(&run.id);
-        let tile = div()
-            .flex_none()
-            .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER));
-        let card = div()
-            .flex_1()
-            .min_w_0()
-            .max_w(super::v2::TEXT_MAX)
-            .h(HEADER)
-            .px(space::S16)
-            // §1.7, D5: a bordered surface, never a fill step alone.
-            .rounded(crate::ui::native::tokens::radius::CONTAINER)
-            .border_1()
-            .border_color(n.separator)
-            .bg(n.content)
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            // A2-24: while it stops, the badge says 停止中 and the title
-            // names the member only (never `Forge 在做` beside `停止中`).
-            .child(div().flex_none().n_headline().text_color(n.label).child(
-                if !run.plan.is_empty() {
-                    l::LIVE_PLAN.to_string()
-                } else if stopping {
-                    name.clone()
-                } else {
-                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
-                },
-            ))
-            .children(progress.as_ref().map(|(step, total, _)| {
+        let (doing, badge) = self.working_header(run, held);
+        let card = WorkingCard {
+            id: SharedString::from(format!("plan-line-{}", run.id)),
+            member: bot,
+            title: doing,
+            badge,
+            progress: None,
+            trailing: Some(
                 div()
                     .flex_none()
-                    .n_subheadline()
-                    .n_figures()
+                    .n_footnote()
                     .text_color(n.secondary)
-                    .child(format!("{step}/{total}"))
-            }))
-            .children(progress.and_then(|(_, _, now)| now).map(|now| {
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .one_line()
-                    .n_body()
-                    .text_color(n.label)
-                    .child(now)
-            }))
-            .when(run.plan.is_empty(), |el| el.child(div().flex_1()))
-            .when(stopping, |el| {
-                el.child(crate::views::process::run_badge(run, true, cx))
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .n_subheadline()
-                    .text_color(n.secondary)
-                    .child(t::PLAN_IN_PANE),
-            );
+                    .child(c::OPEN_RIGHT)
+                    .into_any_element(),
+            ),
+            body: None,
+            footer: None,
+        }
+        .render(cx);
         div()
             .mt(space::S16)
             .px(space::S8)
             .flex()
             .gap(space::S12)
-            .child(tile)
-            .child(card)
+            .child(div().flex_none().w(GUTTER))
+            .child(div().flex_1().min_w_0().child(card))
             .into_any_element()
+    }
+
+    /// The working card's title and StatusBadge: `Forge 正在做：<step>`
+    /// (no plan: `Forge 在做`) and 停止中, 已暂停, 等你 or `在做 2/5`.
+    fn working_header(
+        &self,
+        run: &BotRunSummary,
+        held: bool,
+    ) -> (String, (crate::ui::native::BadgeState, String)) {
+        use crate::ui::native::BadgeState;
+        let bot = self.members.iter().find(|m| m.id == run.bot_id);
+        let stopping = self.services.provider.run_stopping(&run.id);
+        let progress_of = crate::views::topic_page::plan_progress(&run.plan);
+        let waiting = run
+            .plan
+            .iter()
+            .find(|s| matches!(s.state, PlanState::Current | PlanState::Waiting))
+            .is_some_and(|s| s.state == PlanState::Waiting);
+        let badge = if stopping {
+            (BadgeState::Stopping, pr::STATUS_STOPPING.to_string())
+        } else if held {
+            (BadgeState::Paused, c::STATE_PAUSED_SHORT.to_string())
+        } else if waiting {
+            (BadgeState::NeedsYou, c::STATE_YOU_SHORT.to_string())
+        } else {
+            match &progress_of {
+                Some((step, total, _)) => (
+                    BadgeState::Working,
+                    format!("{} {step}/{total}", c::STATE_WORKING_SHORT),
+                ),
+                None => (BadgeState::Working, c::STATE_WORKING_SHORT.to_string()),
+            }
+        };
+        // R2-05, A2-10: the title names the member and the step it is on;
+        // with no plan, `Forge 在做` (never a bare `计划`).
+        let name = crate::copy::isolate(&bot.map(|m| m.name.clone()).unwrap_or_default());
+        let doing = progress_of
+            .and_then(|(_, _, now)| now)
+            .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
+            .unwrap_or_else(|| {
+                if stopping {
+                    name.clone()
+                } else {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
+                }
+            });
+        (doing, badge)
     }
 
     /// A run that failed, in place of its card at the foot of the 话题: an
@@ -384,7 +393,6 @@ impl TimelineView {
             .plan
             .iter()
             .position(|s| matches!(s.state, PlanState::Current | PlanState::Waiting));
-        let waiting = current.is_some_and(|i| run.plan[i].state == PlanState::Waiting);
 
         // The disclosure chevron (28 ghost), only with steps to show.
         let toggle = (!run.plan.is_empty()).then(|| {
@@ -410,35 +418,7 @@ impl TimelineView {
                 cx.notify();
             }))
         });
-        let (badge_state, badge_text) = if stopping {
-            (BadgeState::Stopping, pr::STATUS_STOPPING.to_string())
-        } else if held {
-            (BadgeState::Paused, c::STATE_PAUSED_SHORT.to_string())
-        } else if waiting {
-            (BadgeState::NeedsYou, c::STATE_YOU_SHORT.to_string())
-        } else {
-            match &progress_of {
-                Some((step, total, _)) => (
-                    BadgeState::Working,
-                    format!("{} {step}/{total}", c::STATE_WORKING_SHORT),
-                ),
-                None => (BadgeState::Working, c::STATE_WORKING_SHORT.to_string()),
-            }
-        };
-        // R2-05, A2-10: the title names the member and the step it is on;
-        // with no plan, `Forge 在做` (never a bare `计划`).
-        let name = crate::copy::isolate(&bot.as_ref().map(|m| m.name.clone()).unwrap_or_default());
-        let doing = progress_of
-            .as_ref()
-            .and_then(|(_, _, now)| now.clone())
-            .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
-            .unwrap_or_else(|| {
-                if stopping {
-                    name.clone()
-                } else {
-                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
-                }
-            });
+        let (doing, (badge_state, badge_text)) = self.working_header(run, held);
         let done_steps = run
             .plan
             .iter()
