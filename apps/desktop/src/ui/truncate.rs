@@ -35,10 +35,22 @@ pub fn row_tip(title: SharedString, detail: SharedString) -> Tooltip {
     })
 }
 
+/// `text` for one line: a text with a line break or a tab (a 话题 title typed
+/// on two lines) has every run of white space collapsed to one space, so it
+/// never draws a second line over the next row (§2.21). Other text is kept.
+pub fn single_line(text: SharedString) -> SharedString {
+    if text.contains(['\n', '\r', '\t', '\u{2028}', '\u{2029}']) {
+        text.split_whitespace().collect::<Vec<_>>().join(" ").into()
+    } else {
+        text
+    }
+}
+
 /// `text` as an element whose layout tells, after it is drawn, whether its one-line box
 /// cut it. Put the element in a `one_line()` box and pass the layout to [`tip_when_cut`].
+/// Line breaks in `text` become spaces ([`single_line`]).
 pub fn cut_line(text: impl Into<SharedString>) -> (StyledText, TextLayout) {
-    let styled = StyledText::new(text.into());
+    let styled = StyledText::new(single_line(text.into()));
     let layout = styled.layout().clone();
     (styled, layout)
 }
@@ -249,6 +261,17 @@ mod tests {
         });
         cx.run_until_parked();
         window.update(cx, |row, _, _| any_cut(&row.lines)).unwrap()
+    }
+
+    #[test]
+    fn a_line_break_becomes_one_space() {
+        assert_eq!(
+            single_line("第一行\n第二行".into()).as_ref(),
+            "第一行 第二行"
+        );
+        assert_eq!(single_line(" a \r\n\t b ".into()).as_ref(), "a b");
+        // Text with no break keeps its spaces.
+        assert_eq!(single_line("  Sam   Lee ".into()).as_ref(), "  Sam   Lee ");
     }
 
     #[gpui::test]
