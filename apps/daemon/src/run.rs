@@ -244,6 +244,10 @@ pub async fn supervise(ctx: RunCtx) {
                 message: None,
             });
             let aside = assign.kind.as_deref() == Some(KIND_ASIDE);
+            // A side chat run reads only: its checkout is read-only, not just its CLI's modes.
+            if aside {
+                workspace::set_read_only(&cwd, true);
+            }
             let mut env = build_env(&cfg, &rt, &assign);
             // Lives until the CLI is done; dropping it removes the socket.
             let chat_run = if aside {
@@ -272,8 +276,12 @@ pub async fn supervise(ctx: RunCtx) {
                 aside,
                 note: chat_run.as_ref().map(|_| crate::chat_run::note()),
             };
+            let work = spec.cwd.clone();
             let res = run_runtime(&cfg, &assign, spec, control_rx, &event).await;
             drop(chat_run);
+            if aside {
+                workspace::set_read_only(&work, false);
+            }
             res
         }
     };

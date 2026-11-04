@@ -432,3 +432,33 @@ fn crash_leftover_request_folders_are_removed_at_start() {
     assert!(live.join("a1-1.req").exists());
     assert!(repo_dir.exists());
 }
+
+/// A side chat run's checkout is read-only while it runs; a crash that leaves it so does not
+/// stop cleanup from removing the run.
+#[tokio::test]
+async fn read_only_checkout_and_its_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut text = base_config(dir.path());
+    text.push_str("keep_runs_hours = 0\n");
+    let cfg = Config::parse(&text).unwrap();
+    let (work, _) = daemon::workspace::prepare(&cfg, "ra1", None).await.unwrap();
+    std::fs::create_dir_all(work.join("src")).unwrap();
+    std::fs::write(work.join("src/a.rs"), "x").unwrap();
+    daemon::workspace::set_read_only(&work, true);
+    for p in [work.join("new.txt"), work.join("src/b.rs")] {
+        let e = std::fs::write(&p, "y").unwrap_err();
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "{}",
+            p.display()
+        );
+    }
+    assert!(std::fs::write(work.join("src/a.rs"), "y").is_err());
+    daemon::workspace::set_read_only(&work, false);
+    std::fs::write(work.join("src/a.rs"), "y").unwrap();
+    daemon::workspace::set_read_only(&work, true);
+    // Left read-only (a crash): cleanup still removes the run.
+    assert_eq!(daemon::workspace::cleanup(&cfg, &[]).await, 1);
+    assert!(!work.exists());
+}

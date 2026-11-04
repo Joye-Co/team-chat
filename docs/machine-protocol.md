@@ -265,7 +265,10 @@ How the 1.1 daemon does each one:
   close it. It is the CLI's next turn in the same session (Claude Code: one more stream-json user
   line; Codex: `turn/steer`, or the next `turn/start`). When the CLI has already ended, the input
   is not taken (see "Follow-up input"), and BotDesk starts a new run.
-- **aside**: `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
+- **aside**: the run's checkout (worktree or scratch folder) is made read-only (`a-w`, without
+  following symlinks) before the CLI starts, so a write fails with `EACCES` whatever the CLI's
+  own modes allow; the owner gets write access back when the run ends, and cleanup does that
+  first for a run that a crash left read-only. `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
   `codex`; others are rejected with `runtime_unavailable` (ACP agents and the PTY have no
   read-only mode the daemon can force). A `kind` this daemon does not know is rejected with
   `invalid`. Claude Code gets `--permission-mode plan --tools Read,Grep,Glob --disallowedTools

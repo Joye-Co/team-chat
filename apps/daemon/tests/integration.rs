@@ -1007,7 +1007,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let fr = collect(&mut ws, "s1", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "succeeded");
     let argv: Vec<String> = serde_json::from_str(
-        &std::fs::read_to_string(tmp.path().join("work/runs/s1/work/argv.json")).unwrap(),
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/argv.json")).unwrap(),
     )
     .unwrap();
     let mode = argv.iter().position(|a| a == "--permission-mode").unwrap();
@@ -1020,7 +1020,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let sources = argv.iter().position(|a| a == "--setting-sources").unwrap();
     assert_eq!(argv[sources + 1], "");
     let seen: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(tmp.path().join("work/runs/s1/work/settings-seen.json")).unwrap(),
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/settings-seen.json")).unwrap(),
     )
     .unwrap();
     assert_eq!(seen["probe"], "from-settings");
@@ -1028,6 +1028,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
         seen["settings"],
         serde_json::json!({ "env": { "ASIDE_PROBE": "from-settings" }, "apiKeyHelper": "/bin/echo key", "model": "m1" })
     );
+    // The checkout of a side chat run is read-only to its CLI (EACCES), and writable again after.
+    let write: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/aside-write.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(write["name"], "EACCES", "{write}");
+    let work = tmp.path().join("work/runs/s1/work");
+    assert!(std::fs::metadata(&work).unwrap().permissions().mode() & 0o200 != 0);
     // The settings file (auth values) is gone after the run and never on the command line.
     let settings = argv.iter().position(|a| a == "--settings").unwrap();
     assert!(!Path::new(&argv[settings + 1]).exists());
