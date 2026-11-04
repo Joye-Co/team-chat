@@ -359,8 +359,6 @@ fn page_aggregates_with_500_topics_stay_within_the_frame_budget() {
         frame();
     }
     let frame_ms = start.elapsed().as_secs_f64() * 1000. / FRAMES as f64;
-    let forge = p.member_stats(FORGE).expect("stats");
-    assert_eq!(forge.topics_this_week as u64, TOPICS + 1);
     let report = json!({
         "test": "page_aggregates_with_500_topics_stay_within_the_frame_budget",
         "topics": TOPICS, "frames": FRAMES, "firstFrameMs": first_ms,
@@ -376,6 +374,9 @@ fn page_aggregates_with_500_topics_stay_within_the_frame_budget() {
         frame_ms < BUDGET_MS,
         "a frame of page aggregates took {frame_ms:.2} ms (budget {BUDGET_MS} ms)"
     );
+    // Every run of the week counts, also in 话题 beyond the newest 500 of the 群.
+    let forge = p.member_stats(FORGE).expect("stats");
+    assert_eq!(forge.topics_this_week as u64, TOPICS + 1);
 }
 
 #[test]
