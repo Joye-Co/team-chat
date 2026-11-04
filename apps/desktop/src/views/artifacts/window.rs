@@ -556,6 +556,67 @@ mod tests {
         }
         assert!(!opens_in_window(&folder("report.pdf", false)));
     }
+
+    /// Trust boundary: the separate 产出 window's page events go through the same
+    /// user-activation gate as a page in the main window. An `emitEvent` or `ask` the page
+    /// sends without the viewer's input in that window is dropped; with it, it is sent.
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    fn window_page_events_need_the_viewer_s_input(cx: &mut gpui::TestAppContext) {
+        use crate::data::page_host::PageEventKind;
+        use artifact_view::ArtifactEvent as E;
+        use serde_json::json;
+        const ART: &str = crate::fake::v2::ART_REPORT;
+        cx.update(|cx| {
+            let provider: Arc<dyn ChatProvider> = crate::fake::v2::V2Samples::new();
+            super::super::host::reset_for_test(provider.clone(), cx);
+            let emit = |user_action: bool, cx: &mut App| {
+                on_event(
+                    Some(&provider),
+                    ART,
+                    E::Emit {
+                        version: 3,
+                        name: "filter".into(),
+                        payload: json!({ "channel": "B 站" }),
+                        user_action,
+                        reply_id: Some(json!(1)),
+                    },
+                    cx,
+                )
+            };
+            let ask = |user_action: bool, cx: &mut App| {
+                on_event(
+                    Some(&provider),
+                    ART,
+                    E::Ask {
+                        version: 3,
+                        reply_id: json!(2),
+                        name: "question".into(),
+                        payload: json!({ "q": "B 站" }),
+                        timeout_ms: 60_000,
+                        user_action,
+                    },
+                    cx,
+                )
+            };
+            emit(false, cx);
+            ask(false, cx);
+            assert!(
+                super::super::host::sent(cx).is_empty(),
+                "events without input in the window must be dropped"
+            );
+            emit(true, cx);
+            ask(true, cx);
+            let kinds: Vec<PageEventKind> = super::super::host::sent(cx)
+                .into_iter()
+                .map(|(a, v, _, k)| {
+                    assert_eq!((a.as_str(), v), (ART, 3));
+                    k
+                })
+                .collect();
+            assert_eq!(kinds, [PageEventKind::Emit, PageEventKind::Ask]);
+        });
+    }
 }
 
 // --- v11/media ---
