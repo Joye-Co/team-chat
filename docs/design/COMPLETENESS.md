@@ -81,6 +81,8 @@ Rules:
 | info / in progress / unread / link | #2563eb | #60a5fa | Badge icon, unread dot (8 px), link text |
 
 - A state color is never the only carrier of a state. It always sits next to text (badge, alert, labeled dot).
+- Destructive button fill (decided in v14): #dc2626 in both modes, white label 4.8:1. The dark token #f87171 is for icons and text only (white on #f87171 is 2.8:1). Token: `tokens::DESTRUCTIVE_FILL`.
+- Text selection is neutral: foreground at 15 %, never a state color.
 - No state color for provenance or decoration: the blue fill (226,240,255) for "Ledger 刚加的" blocks, the orange accent and orange progress bar in web-embed, and blue progress bars all go.
 
 ### 1.4 Type scale
@@ -326,6 +328,9 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | needs you | 等你 / 等你审 / 等你回答 | alert-circle | warning |
 | working | 在做 3/5 | loader (spinning) | info |
 | stopping | 停止中 | loader | muted |
+| merging | 正在合并 | loader (spinning) | info |
+| paused | 已暂停 | pause | muted |
+| waiting on someone else | 等李雪回答 / 等审 | clock | muted |
 | queued | 排队 | clock | muted |
 | done / merged / answered | 完成 / 已合并 / 已回答 | check-circle (filled) | success |
 | failed / stuck | 失败 / 卡住了 | x-circle | destructive |
@@ -351,7 +356,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.15 Error, offline, failed
 
-- Alert in place of the failed content: radius 10, border, px 16, py 12, icon 16, gap-x 12, title 14 medium, description 14 muted, action at the right (outline sm "重试"). Destructive variant: title, icon and border tint destructive.
+- Alert in place of the failed content: radius 10, border, px 16, py 12, icon 16, gap-x 12, title 14 medium, description 14 muted, action at the right (outline sm "重试"). Destructive variant: icon and border tint destructive; the title stays foreground (owner decision v14: state color only on icons and badges).
 - Run failure in a thread: an Alert in place of the run card: title states the cause ("打包失败：找不到证书"), description, actions "重试" (primary sm) and "查看日志" (outline sm). The inspector 状态 row shows StatusBadge "失败".
 - Failed message: below the body, x = text column: destructive icon 16 + "没有发出" 12 destructive + ghost sm "重试" (rotate-ccw icon) + ghost sm "⋯" (删除, 复制). Retry is the same button in every place (members detail, files, messages).
 - Offline: a warning Alert docked above the composer (title "连接已断开", description "8 秒后重连", outline sm "立即重连"); the composer shows "消息会在连上后发出" 12 muted; the sidebar footer second line shows "离线" with a muted dot badge.

@@ -10,8 +10,17 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
-use super::tokens::{NativeType as _, emphasized, metrics, native_colors};
-use crate::ui::sf_symbols::{Sf, Weight, symbol};
+use super::{
+    badge::{BadgeState, StatusBadge},
+    tokens::{NativeType as _, emphasized, metrics, native_colors},
+};
+use crate::{
+    theme::MEDIUM_WEIGHT,
+    ui::{
+        sf_symbols::{Sf, Weight, symbol},
+        truncate::TruncText,
+    },
+};
 
 type Click = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -92,15 +101,10 @@ impl RenderOnce for SidebarSection {
             .flex()
             .items_center()
             .child(
-                div()
+                TruncText::new(self.label)
                     .flex_1()
-                    .min_w(px(0.))
                     .n_section()
-                    .text_color(k.secondary)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(self.label),
+                    .text_color(k.secondary),
             )
             .child(
                 div()
@@ -122,7 +126,35 @@ impl RenderOnce for SidebarSection {
     }
 }
 
-/// What sits in the 18 pt leading slot of a sidebar row.
+/// The one media kind of a sidebar group (COMPLETENESS.md §2.1, T1-08):
+/// inside one group every item has a 16 media of this kind, or none has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SidebarMedia {
+    /// No media column: the title starts at the slot x.
+    #[default]
+    None,
+    /// A 16 symbol (群, pages).
+    Icon,
+    /// A 16 avatar (私聊, members).
+    Avatar,
+}
+
+/// The right column of a sidebar item (§2.1, §2.12, T1-08): one kind at
+/// x 238. State goes here as a StatusBadge, never as a colored mark in the
+/// media column.
+#[derive(Clone, Debug, Default)]
+pub enum RightColumn {
+    #[default]
+    None,
+    /// The unread count pill (hidden at 0).
+    Count(u32),
+    /// One StatusBadge (等你, 在做 3/5, 失败).
+    Status(BadgeState, SharedString),
+    /// A time, 12 muted tabular.
+    Time(SharedString),
+}
+
+/// What sits in the 16 leading slot of a sidebar row.
 pub enum RowLeading {
     None,
     /// A 15 pt symbol: `secondary`, `accent` when selected; or a state color
@@ -156,6 +188,11 @@ pub struct SidebarRow {
     /// A collapsed tail (`空闲 · 3`): the row at 70 % opacity.
     dim: bool,
     // --- end v13/ux-pages ---
+    /// The one right column (T1-08).
+    right: RightColumn,
+    /// The media kind of the group the row sits in; set by
+    /// [`SidebarGroup`].
+    media: Option<SidebarMedia>,
 }
 
 impl SidebarRow {
@@ -174,7 +211,22 @@ impl SidebarRow {
             trailing_el: None,
             disclosure: None,
             dim: false,
+            right: RightColumn::None,
+            media: None,
         }
+    }
+
+    /// The right column: a count pill, a StatusBadge or a time (T1-08).
+    pub fn right(mut self, right: RightColumn) -> Self {
+        self.right = right;
+        self
+    }
+
+    /// The media kind of the row's group: a row whose media is of another
+    /// kind keeps an empty slot of the group's kind, so titles share one x.
+    pub fn media_kind(mut self, media: SidebarMedia) -> Self {
+        self.media = Some(media);
+        self
     }
 
     // --- v13/ux-pages ---
@@ -203,7 +255,9 @@ impl SidebarRow {
         self
     }
 
-    /// A state symbol in its state color (needs you: `amber`).
+    /// Older API: a state symbol in its state color. State belongs in the
+    /// right column ([`SidebarRow::right`] with a StatusBadge, §2.12); a
+    /// [`SidebarGroup`] of icons draws this symbol in `secondary`.
     pub fn state_symbol(mut self, sf: Sf, color: Hsla) -> Self {
         self.leading = RowLeading::Symbol(sf, Some(color));
         self
@@ -231,8 +285,8 @@ impl SidebarRow {
         self
     }
 
-    /// A 6 pt state dot at the trailing edge (§6: blue live work, amber
-    /// needs you).
+    /// Older API: a 6 pt state dot at the trailing edge. A free colored dot
+    /// is not a status carrier (§2.12); use [`SidebarRow::right`].
     pub fn trailing_dot(mut self, color: Hsla) -> Self {
         self.dot = Some(color);
         self
@@ -264,7 +318,22 @@ impl RenderOnce for SidebarRow {
             .unwrap_or_else(|| emphasized(window));
         let (sel_symbol, sel_text) = k.selected_ink(active);
         let text = if self.selected { sel_text } else { k.label };
-        let leading: Option<AnyElement> = match self.leading {
+        // One media kind per group (§2.1): a row of a group drops media of
+        // another kind and keeps an empty slot; state colors leave the
+        // media column.
+        let in_group = self.media.is_some();
+        let leading = match (self.media, self.leading) {
+            (Some(SidebarMedia::None), _) => RowLeading::None,
+            (Some(SidebarMedia::Icon), RowLeading::Symbol(sf, _)) => RowLeading::Symbol(sf, None),
+            (Some(SidebarMedia::Icon), _)
+            | (Some(SidebarMedia::Avatar), RowLeading::Symbol(..)) => {
+                RowLeading::Element(div().into_any_element())
+            }
+            (_, l) => l,
+        };
+        let slot = !matches!(self.media, Some(SidebarMedia::None));
+        let _ = in_group;
+        let leading: Option<AnyElement> = match leading {
             RowLeading::None => None,
             RowLeading::Symbol(sf, state) => {
                 let color = state.unwrap_or(if self.selected {
@@ -299,7 +368,21 @@ impl RenderOnce for SidebarRow {
         };
         // A row with a disclosure keeps its count in the right column, where
         // the chevron replaces it on hover.
-        let (count, trailing_el) = match (self.disclosure, self.trailing_el, self.count) {
+        let (trailing_text, count, trailing_el) = match self.right {
+            RightColumn::None => (self.trailing, self.count, self.trailing_el),
+            RightColumn::Count(n) => (None, Some(n).filter(|&n| n > 0), None),
+            RightColumn::Status(state, label) => (
+                None,
+                None,
+                Some(
+                    StatusBadge::new(state, label)
+                        .max_w(px(120.))
+                        .into_any_element(),
+                ),
+            ),
+            RightColumn::Time(t) => (Some(t), None, None),
+        };
+        let (count, trailing_el) = match (self.disclosure, trailing_el, count) {
             (Some(_), None, Some(n)) => (None, Some(count_capsule(n, cx).into_any_element())),
             (_, el, n) => (n, el),
         };
@@ -356,28 +439,28 @@ impl RenderOnce for SidebarRow {
             .items_center()
             .gap(px(6.))
             .when(self.selected, |d| d.bg(k.selection))
+            .when(slot, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .size(metrics::SIDEBAR_SLOT)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .children(leading),
+                )
+            })
             .child(
-                div()
-                    .flex_none()
-                    .size(metrics::SIDEBAR_SLOT)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .children(leading),
-            )
-            .child(
-                div()
+                // D10: the selected item is the muted fill and 500; unread
+                // is 600. A cut title shows the whole title in a tooltip.
+                TruncText::new(self.title)
                     .flex_1()
-                    .min_w(px(0.))
                     .n_body()
+                    .when(self.selected, |d| d.font_weight(MEDIUM_WEIGHT))
                     .when(self.unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
-                    .text_color(text)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(self.title),
+                    .text_color(text),
             )
-            .when_some(self.trailing, |d, t| {
+            .when_some(trailing_text, |d, t| {
                 d.child(
                     div()
                         .flex_none()
@@ -437,13 +520,10 @@ impl SidebarFooter {
     pub fn detail(mut self, text: impl Into<SharedString>, cx: &App) -> Self {
         let k = native_colors(cx);
         self.second = Some(
-            div()
+            TruncText::new(text)
+                .flex_1()
                 .n_footnote()
                 .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(text.into())
                 .into_any_element(),
         );
         self
@@ -486,16 +566,13 @@ impl RenderOnce for SidebarFooter {
                             .min_w(px(0.))
                             .flex()
                             .flex_col()
-                            .child(
-                                div()
-                                    .n_headline()
-                                    .text_color(k.label)
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(self.name),
-                            )
-                            .children(self.second),
+                            .child(TruncText::new(self.name).n_headline().text_color(k.label))
+                            // A badge on the second line hugs its text
+                            // (T1-08): the row does not stretch it.
+                            .children(
+                                self.second
+                                    .map(|el| div().flex().items_center().min_w(px(0.)).child(el)),
+                            ),
                     )
                     .child(symbol(
                         Sf::Popup,
@@ -508,6 +585,77 @@ impl RenderOnce for SidebarFooter {
                         d.on_click(move |e, w, cx| f(e, w, cx))
                     }),
             )
+    }
+}
+
+/// A sidebar group (§2.1, T1-08): a GroupLabel, then items that share one
+/// media kind and one right-column x. An empty group draws nothing (no
+/// label with no rows).
+#[derive(IntoElement)]
+pub struct SidebarGroup {
+    header: Option<SidebarSection>,
+    media: SidebarMedia,
+    rows: Vec<SidebarRow>,
+    tail: Vec<AnyElement>,
+}
+
+impl SidebarGroup {
+    pub fn new(header: SidebarSection, media: SidebarMedia) -> Self {
+        Self {
+            header: Some(header),
+            media,
+            rows: Vec::new(),
+            tail: Vec::new(),
+        }
+    }
+
+    /// A group with no label: only for the one group of a list.
+    pub fn unlabeled(media: SidebarMedia) -> Self {
+        Self {
+            header: None,
+            media,
+            rows: Vec::new(),
+            tail: Vec::new(),
+        }
+    }
+
+    pub fn row(mut self, row: SidebarRow) -> Self {
+        self.rows.push(row);
+        self
+    }
+
+    pub fn rows(mut self, rows: impl IntoIterator<Item = SidebarRow>) -> Self {
+        self.rows.extend(rows);
+        self
+    }
+
+    /// An element after the rows (the "More" item, a skeleton).
+    pub fn tail(mut self, el: impl IntoElement) -> Self {
+        self.tail.push(el.into_any_element());
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty() && self.tail.is_empty()
+    }
+}
+
+impl RenderOnce for SidebarGroup {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        if self.is_empty() {
+            return div().into_any_element();
+        }
+        let media = self.media;
+        let collapsed = self.header.as_ref().is_some_and(|h| h.collapsed);
+        div()
+            .flex()
+            .flex_col()
+            .children(self.header)
+            .when(!collapsed, |d| {
+                d.children(self.rows.into_iter().map(|r| r.media_kind(media)))
+                    .children(self.tail)
+            })
+            .into_any_element()
     }
 }
 

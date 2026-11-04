@@ -514,9 +514,12 @@ mod tests {
     }
 
     #[test]
-    fn lines_draw_in_650_ms_and_later_series_follow() {
-        assert_eq!(draw_time(ChartKind::Line, 1).as_millis(), 650);
-        assert_eq!(draw_time(ChartKind::Line, 3).as_millis(), 750);
+    fn lines_draw_in_line_draw_and_later_series_follow() {
+        assert_eq!(draw_time(ChartKind::Line, 1), motion::LINE_DRAW);
+        assert_eq!(
+            draw_time(ChartKind::Line, 3),
+            motion::LINE_DRAW + motion::SERIES_STAGGER * 2
+        );
         assert_eq!(draw_time(ChartKind::Bar, 3), motion::BAR_GROW);
         // At the end every series is whole; early on the second lags.
         assert!((series_progress(ChartKind::Line, 2, 1, 1.) - 1.).abs() < 1e-4);

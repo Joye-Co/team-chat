@@ -26,7 +26,8 @@ pub enum AlertTone {
     Warning,
     /// An info icon (a summary, a notice).
     Info,
-    /// Title, icon and border tint destructive (a failure).
+    /// Icon and border tint destructive (a failure); the title stays
+    /// neutral (owner decision v14, overrides §2.15).
     Destructive,
 }
 
@@ -84,7 +85,7 @@ pub fn alert_colors(tone: AlertTone, k: &NativeColors) -> (Hsla, Hsla, Hsla) {
         AlertTone::Neutral => (k.label, k.label, k.separator),
         AlertTone::Warning => (k.amber, k.label, k.separator),
         AlertTone::Info => (k.blue, k.label, k.separator),
-        AlertTone::Destructive => (k.red, k.red, k.red.opacity(0.5)),
+        AlertTone::Destructive => (k.red, k.label, k.red.opacity(0.5)),
     }
 }
 
@@ -313,13 +314,80 @@ impl RenderOnce for EmptyLine {
 // ---------------------------------------------------------------------------
 // Skeleton (§2.14)
 
-/// A skeleton bar: `muted` fill, radius 8, pulsing (gpui-component
-/// `Skeleton`).
-pub fn skeleton(w: impl Into<gpui::Length>, h: Pixels) -> gpui_component::skeleton::Skeleton {
-    gpui_component::skeleton::Skeleton::new()
-        .w(w.into())
-        .h(h)
-        .rounded(radius::CONTROL)
+/// A skeleton bar (§2.14, T1-07): the `muted` fill at full strength,
+/// radius 8, a slow pulse between 100 % and 70 % (never down to a fill that
+/// vanishes on white). On the sidebar fill use [`Bone::on_fill`]: one step
+/// darker, so it still reads on #fafafa.
+#[derive(IntoElement)]
+pub struct Bone {
+    style: gpui::StyleRefinement,
+    on_fill: bool,
+}
+
+impl Bone {
+    pub fn new() -> Self {
+        Self {
+            style: gpui::StyleRefinement::default(),
+            on_fill: false,
+        }
+    }
+
+    /// The bar sits on the sidebar or another `muted`-ish fill.
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
+    }
+}
+
+impl Default for Bone {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Styled for Bone {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        &mut self.style
+    }
+}
+
+/// The skeleton fill on `background` and on a filled surface.
+pub fn bone_fill(on_fill: bool, k: &NativeColors) -> Hsla {
+    if on_fill {
+        super::tokens::card_v2::mix(k.fill, k.pressed, 0.5)
+    } else {
+        k.fill
+    }
+}
+
+/// The pulse of a skeleton: one slow breath, 100 % to 70 %.
+pub const BONE_PULSE: std::time::Duration = std::time::Duration::from_millis(1600);
+pub const BONE_LOW: f32 = 0.7;
+
+impl RenderOnce for Bone {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        use gpui::{Animation, AnimationExt as _, bounce, ease_in_out};
+        use gpui_component::StyledExt as _;
+        let k = native_colors(cx);
+        div()
+            .w_full()
+            .h(px(14.))
+            .rounded(radius::CONTROL)
+            .bg(bone_fill(self.on_fill, &k))
+            .refine_style(&self.style)
+            .with_animation(
+                "bone",
+                Animation::new(BONE_PULSE)
+                    .repeat()
+                    .with_easing(bounce(ease_in_out)),
+                |d, t| d.opacity(1. - (1. - BONE_LOW) * t),
+            )
+    }
+}
+
+/// A skeleton bar of `w` × `h` (radius 8).
+pub fn skeleton(w: impl Into<gpui::Length>, h: Pixels) -> Bone {
+    Bone::new().w(w.into()).h(h)
 }
 
 /// The skeleton of a region, with the final shapes (§2.14).
@@ -364,8 +432,12 @@ pub fn skeleton_rows(kind: SkeletonKind, rows: usize) -> gpui::Div {
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .child(skeleton(icon::MD, icon::MD).rounded(radius::CHECKBOX))
-                .child(skeleton(relative(0.5 + 0.4 * vary), px(14.)))
+                .child(
+                    skeleton(icon::MD, icon::MD)
+                        .rounded(radius::CHECKBOX)
+                        .on_fill(true),
+                )
+                .child(skeleton(relative(0.5 + 0.4 * vary), px(14.)).on_fill(true))
                 .into_any_element(),
             SkeletonKind::ListRow => div()
                 .w_full()
@@ -422,9 +494,9 @@ pub fn progress(value: f32, cx: &App) -> gpui::Div {
         .w_full()
         .h(metrics::BAR)
         .rounded_full()
-        .bg(k.accent.opacity(0.2))
+        .bg(k.primary.opacity(0.2))
         .overflow_hidden()
-        .child(div().h_full().w(relative(v)).rounded_full().bg(k.accent))
+        .child(div().h_full().w(relative(v)).rounded_full().bg(k.primary))
 }
 
 /// The steps variant of Progress (D12): one segment per step, 2 px gaps,
@@ -439,9 +511,9 @@ pub fn progress_steps(done: usize, total: usize, cx: &App) -> gpui::Div {
         .gap(space::S2)
         .children((0..total).map(|ix| {
             div().flex_1().h_full().rounded_full().bg(if ix < done {
-                k.accent
+                k.primary
             } else {
-                k.accent.opacity(0.2)
+                k.primary.opacity(0.2)
             })
         }))
 }
@@ -469,14 +541,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn alert_tones_tint_only_the_destructive_title() {
+    fn alert_titles_stay_neutral() {
         let k = NativeColors::light();
         let (_, title, edge) = alert_colors(AlertTone::Warning, &k);
         assert_eq!(title, k.label);
         assert_eq!(edge, k.separator);
+        // T1-11, owner decision: state color only on the icon (and border).
         let (icon, title, _) = alert_colors(AlertTone::Destructive, &k);
         assert_eq!(icon, k.red);
-        assert_eq!(title, k.red);
+        assert_eq!(title, k.label);
+    }
+
+    #[test]
+    fn skeletons_read_on_white_and_on_the_sidebar() {
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            // T1-07: the bar is the full muted fill; on the sidebar fill it
+            // is one half-step darker than muted.
+            assert_eq!(bone_fill(false, &k), k.fill);
+            assert_ne!(bone_fill(true, &k), k.sidebar);
+            assert_ne!(bone_fill(true, &k), k.fill);
+        }
+        assert!(BONE_LOW >= 0.7);
     }
 
     #[test]
