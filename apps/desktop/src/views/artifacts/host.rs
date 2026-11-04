@@ -1202,7 +1202,7 @@ pub fn page_footer(
                 .flex_1()
                 .min_w(px(0.))
                 .one_line()
-                .child(format!("· {labels}"))
+                .child(format!(" · {labels}"))
                 .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
         ),
         (Some(_), true) => div().flex().items_center().child(
