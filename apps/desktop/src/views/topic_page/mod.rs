@@ -16,8 +16,9 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    data::{BotRunSummary, PlanItem, PlanState, RunStatus, TopicStatus},
+    data::{BotRunSummary, ChatProvider, PlanItem, PlanState, RunStatus, Topic, TopicStatus},
     theme::{self, StateTone, space},
+    ui::native::BadgeState,
     views::{
         composer::ComposerView,
         shell::{PageView, TitleBarSpec, TitleButton, TitleButtonKind, TitleStyle, panes::watch},
@@ -54,11 +55,18 @@ impl TopicPage {
     }
 }
 
-/// The state line of a 话题 in the title bar.
+/// The one state of a 话题 (§2.12, A5): the title bar, the inspector's
+/// 状态, the sidebar row and the pinned banner all draw it from
+/// [`topic_state`], so one 话题 never shows two state words.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StateLine {
     pub text: String,
     pub tone: StateTone,
+    /// The StatusBadge state of `text`.
+    pub badge: BadgeState,
+    /// The short words for the sidebar's right column (`等你`, `3/5`,
+    /// `失败`): the same state, fewer words. Empty when the row shows none.
+    pub short: String,
     /// The quieter tail: the step a member is on, or who holds its computer.
     pub detail: Option<String>,
     /// The member's run is paused (someone took over its computer).
@@ -69,14 +77,32 @@ pub struct StateLine {
 }
 
 impl StateLine {
-    fn plain(text: String, tone: StateTone) -> Self {
+    fn plain(text: String, badge: BadgeState) -> Self {
         Self {
             text,
-            tone,
+            tone: tone_of(badge),
+            badge,
+            short: String::new(),
             detail: None,
             paused: false,
             name: None,
         }
+    }
+
+    fn short(mut self, short: impl Into<String>) -> Self {
+        self.short = short.into();
+        self
+    }
+}
+
+/// The subtitle tone of a badge state (older callers read the tone).
+fn tone_of(badge: BadgeState) -> StateTone {
+    match badge {
+        BadgeState::NeedsYou => StateTone::You,
+        BadgeState::Working => StateTone::Live,
+        BadgeState::Failed | BadgeState::Abnormal => StateTone::Problem,
+        BadgeState::Done => StateTone::Done,
+        _ => StateTone::Quiet,
     }
 }
 
@@ -101,6 +127,18 @@ pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize, Option<String>)
 /// a person (an answer or a review is said elsewhere), the latest first.
 pub fn working_run(runs: &[BotRunSummary]) -> Option<&BotRunSummary> {
     working_runs(runs).pop()
+}
+
+/// The run a 话题's state names (T2-01): the owner's run at work, so the
+/// title bar, the inspector's 负责 and 计划 and the composer hint name one
+/// member; else the newest member at work.
+pub fn lead_run<'a>(runs: &'a [BotRunSummary], owner: Option<&str>) -> Option<&'a BotRunSummary> {
+    let at_work = working_runs(runs);
+    at_work
+        .iter()
+        .find(|r| owner == Some(r.bot_id.as_str()))
+        .or(at_work.last())
+        .copied()
 }
 
 /// The runs members work on in this 话题 now, one per member (its latest),
@@ -141,6 +179,8 @@ pub fn run_state(
         return StateLine {
             text: fill(c::STATE_PAUSED, &[("name", name)]),
             tone: StateTone::Quiet,
+            badge: BadgeState::Paused,
+            short: c::STATE_PAUSED_SHORT.to_string(),
             detail: Some(detail),
             paused: true,
             name: Some(name.to_string()),
@@ -157,6 +197,8 @@ pub fn run_state(
                 ],
             ),
             tone: StateTone::Live,
+            badge: BadgeState::Working,
+            short: format!("{n}/{total}"),
             detail: step,
             paused: false,
             name: Some(name.to_string()),
@@ -164,6 +206,8 @@ pub fn run_state(
         None => StateLine {
             text: fill(c::STATE_WORKING_NO_PLAN, &[("name", name)]),
             tone: StateTone::Live,
+            badge: BadgeState::Working,
+            short: c::STATE_WORKING_SHORT.to_string(),
             detail: None,
             paused: false,
             name: Some(name.to_string()),
@@ -171,64 +215,94 @@ pub fn run_state(
     }
 }
 
-/// The state line of a 话题: amber only when it waits on me; while a
-/// member works on it, what it does (Live.dc.html); quiet otherwise.
+/// The state of a 话题 for the title bar, the inspector, the sidebar and
+/// the pinned banner (§2.12, A5): one kind and one set of words.
 pub fn state_sentence(services: &Services, group_id: &str, topic_id: &str) -> Option<StateLine> {
     let p = &services.provider;
     let topic = p.topic(group_id, topic_id)?;
-    let members = p.members();
-    let me = services.me();
-    let owner = topic
-        .owner_id
-        .as_deref()
-        .map(|id| crate::views::shell::member_name(services, id))
-        .unwrap_or_default();
-    // The change of the 话题 says it best: it merges, or it waits on my review.
-    if let Some(ch) = p.topic_changes(group_id, topic_id) {
+    Some(topic_state(p.as_ref(), services.me().as_deref(), &topic))
+}
+
+/// [`state_sentence`] from the provider and the signed-in member (the
+/// sidebar and the palette read it without `Services`). In order: a merge
+/// in progress, my review, an answer from me, a member stopping, at work
+/// or paused, a failed run, then the 话题's own status.
+pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> StateLine {
+    use crate::copy::{common as cm, fill, topic_rail as c};
+    let (g, t) = (topic.group_id.as_str(), topic.id.as_str());
+    let name = |id: &str| p.member(id).map(|m| m.name).unwrap_or_default();
+    let owner = topic.owner_id.as_deref().map(name).unwrap_or_default();
+    let mine = me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
+    if let Some(ch) = p.topic_changes(g, t) {
         if ch.state == crate::data::v2::ChangeState::Merging {
-            return Some(StateLine::plain(
-                crate::copy::fill(crate::copy::topic_rail::STATE_MERGING, &[("name", &owner)]),
-                StateTone::Live,
-            ));
+            return StateLine::plain(
+                fill(c::STATE_MERGING, &[("name", &owner)]),
+                BadgeState::Merging,
+            )
+            .short(c::STATE_MERGING_SHORT);
         }
-        if p.pinned_ask(group_id, topic_id)
+        if p.pinned_ask(g, t)
             .is_some_and(|a| a.kind == crate::data::v2::AskKind::Review)
         {
-            return Some(StateLine::plain(
-                crate::copy::fill(
-                    crate::copy::topic_rail::STATE_REVIEW,
-                    &[("n", &ch.number.to_string())],
-                ),
-                StateTone::You,
-            ));
+            return StateLine::plain(
+                fill(c::STATE_REVIEW, &[("n", &ch.number.to_string())]),
+                BadgeState::NeedsYou,
+            )
+            .short(c::STATE_YOU_SHORT);
         }
     }
-    let mine = me
-        .as_deref()
-        .is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
-    if !mine {
-        let runs = p.runs(group_id, topic_id);
-        if let Some(run) = working_run(&runs) {
-            let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
-            let name = crate::views::shell::member_name(services, &run.bot_id);
-            return Some(run_state(
-                run,
-                &name,
-                paused_by.as_deref(),
-                me.as_deref(),
-                |id| crate::views::shell::member_name(services, id),
-            ));
-        }
+    if mine {
+        let text = match topic.status {
+            TopicStatus::WaitingReview => cm::STATUS_WAITING_REVIEW_ME,
+            _ => cm::STATUS_WAITING_ANSWER_ME,
+        };
+        return StateLine::plain(text.to_string(), BadgeState::NeedsYou).short(c::STATE_YOU_SHORT);
     }
-    let text = crate::views::status_chip_text(&topic, me.as_deref(), &members)?;
-    // Blue is for a member at work; a 话题 in progress with no run is quiet.
-    let tone = match topic.status {
-        _ if mine => StateTone::You,
-        TopicStatus::Blocked => StateTone::Problem,
-        TopicStatus::Done => StateTone::Done,
-        _ => StateTone::Quiet,
+    let runs = p.runs(g, t);
+    if let Some(run) = lead_run(&runs, topic.owner_id.as_deref()) {
+        let who = name(&run.bot_id);
+        if p.run_stopping(&run.id) {
+            let mut line = StateLine::plain(
+                fill(c::STATE_STOPPING, &[("name", &who)]),
+                BadgeState::Stopping,
+            )
+            .short(crate::copy::process::STATUS_STOPPING);
+            line.name = Some(who);
+            return line;
+        }
+        let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
+        return run_state(run, &who, paused_by.as_deref(), me, name);
+    }
+    // The newest run failed and the 话题 is not done: say it, the same word
+    // as the run log and the inspector.
+    let latest_failed = runs
+        .iter()
+        .max_by_key(|r| r.updated_at)
+        .is_some_and(|r| r.status == RunStatus::Failed);
+    if latest_failed && topic.status != TopicStatus::Done {
+        return StateLine::plain(
+            crate::copy::process::STATUS_FAILED.to_string(),
+            BadgeState::Failed,
+        )
+        .short(crate::copy::process::STATUS_FAILED);
+    }
+    let members = p.members();
+    let text = crate::views::status_chip_text(topic, me, &members)
+        .unwrap_or_else(|| cm::STATUS_OPEN.to_string());
+    let badge = match topic.status {
+        TopicStatus::Blocked => BadgeState::Failed,
+        TopicStatus::Done => BadgeState::Done,
+        TopicStatus::InProgress => BadgeState::Working,
+        // Waiting on someone else, or not started: the clock, muted.
+        TopicStatus::WaitingAnswer | TopicStatus::WaitingReview | TopicStatus::Open => {
+            BadgeState::Queued
+        }
     };
-    Some(StateLine::plain(text, tone))
+    let short = match topic.status {
+        TopicStatus::Blocked => text.clone(),
+        _ => String::new(),
+    };
+    StateLine::plain(text, badge).short(short)
 }
 
 /// The pane buttons of a 话题 page: 单独问, 产出 (when it has one), 电脑
@@ -301,9 +375,8 @@ impl PageView for TopicPage {
             title,
             style: TitleStyle::Topic,
             subtitle: None,
-            state: state.as_ref().map(|s| (s.text.clone(), s.tone)),
+            state: state.as_ref().map(|s| (s.text.clone(), s.badge)),
             state_detail: state.as_ref().and_then(|s| s.detail.clone()),
-            state_paused: state.as_ref().is_some_and(|s| s.paused),
             state_name: state.as_ref().and_then(|s| s.name.clone()),
             buttons: toolbar_buttons(pane_buttons(&self.services, &g, &t)),
         }

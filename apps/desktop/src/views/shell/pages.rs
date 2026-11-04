@@ -111,7 +111,7 @@ impl Pages {
 pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App) -> AnyElement {
     use crate::{
         copy::{nav, rail},
-        ui::native::{NativeType as _, PushSize, PushStyle, ToolbarRow, push_button},
+        ui::native::{PushSize, PushStyle, ToolbarRow, push_button},
         views::nav::{NewGroup, StartDm},
     };
     let k = super::chrome::colors(cx);
@@ -127,54 +127,34 @@ pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App)
                 .leading_inset(leading)
                 .inactive(!active),
         )
+        // §2.13: the full Empty state (40 icon box, title 18, description,
+        // primary sm and outline sm), centered in the page.
         .child(
-            div()
-                .id("empty-state")
-                .flex_1()
-                .min_h(px(0.))
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                // Optically centered in the window, not under the toolbar.
-                .pb(crate::ui::native::metrics::TOOLBAR_ROW)
-                .gap(crate::ui::native::tokens::space::S16)
-                .child(
-                    div()
-                        .n_body()
-                        .text_color(k.secondary)
-                        .text_center()
-                        .child(nav::NO_GROUPS_HINT),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(crate::ui::native::metrics::SHEET_BUTTON_GAP)
-                        .child(
-                            push_button(
-                                "empty-start-dm",
-                                nav::MENU_START_DM,
-                                PushStyle::Outline,
-                                PushSize::Regular,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(StartDm), cx)
-                            }),
+            div().id("empty-state").flex_1().min_h(px(0.)).flex().child(
+                crate::ui::native::Empty::new(crate::ui::Sym::Members, rail::EMPTY_NO_GROUPS_TITLE)
+                    .description(nav::NO_GROUPS_HINT)
+                    .action(
+                        push_button(
+                            "empty-new-group",
+                            nav::MENU_NEW_GROUP,
+                            PushStyle::Default,
+                            PushSize::Small,
+                            cx,
                         )
-                        .child(
-                            push_button(
-                                "empty-new-group",
-                                nav::MENU_NEW_GROUP,
-                                PushStyle::Default,
-                                PushSize::Regular,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(NewGroup), cx)
-                            }),
-                        ),
-                ),
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(NewGroup), cx)),
+                    )
+                    .action(
+                        push_button(
+                            "empty-start-dm",
+                            nav::MENU_START_DM,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(StartDm), cx)),
+                    )
+                    .wide(),
+            ),
         )
         .into_any_element()
 }

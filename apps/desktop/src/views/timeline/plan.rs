@@ -10,30 +10,26 @@
 //! It replaces the v1 pending row (`live.rs`) on the 话题 page.
 
 use gpui::{
-    AnyElement, ClickEvent, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, ClickEvent, Context, ElementId, IntoElement, ParentElement, SharedString, Styled,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use super::{TimelineView, model, v2::GUTTER};
+use crate::ui::controls::NamedButton as _;
 use crate::{
     copy::{fill, live as l, process as pr, timeline as t, topic_rail as c},
     data::{BotRunSummary, Millis, PlanState},
     theme::{Type as _, space},
     ui::{
         self, Sym,
-        native::{
-            NativeType as _, PushSize, PushStyle, determinate_bar, disabled_push, native_colors,
-            push_button,
-        },
+        native::{NativeType as _, PushSize, PushStyle, disabled_push, native_colors, push_button},
     },
     views::topic_page::working_runs,
 };
 
 /// Rows of the plan card: 28 pt; its header 40 pt and footer 32 pt.
-const ROW: gpui::Pixels = px(28.);
+const ROW: gpui::Pixels = crate::ui::native::tokens::height::SM;
 const HEADER: gpui::Pixels = px(40.);
-const FOOTER: gpui::Pixels = px(32.);
 
 /// A span of time: whole minutes (rounded, at least 1), and hours and
 /// minutes from 60 minutes on (`已 9 小时 49 分钟`, never `已 589 分钟`).
@@ -132,16 +128,18 @@ impl TimelineView {
         let stopping = self.services.provider.run_stopping(&run.id);
         let tile = div()
             .flex_none()
-            .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER).ring(Some(ui::Ring::Live)));
+            .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER));
         let card = div()
             .flex_1()
             .min_w_0()
             .max_w(super::v2::TEXT_MAX)
             .h(HEADER)
-            .pl(space::S14)
-            .pr(space::S14)
-            .rounded(crate::theme::radius::LG)
-            .bg(n.fill)
+            .px(space::S16)
+            // §1.7, D5: a bordered surface, never a fill step alone.
+            .rounded(crate::ui::native::tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.content)
             .flex()
             .items_center()
             .gap(space::S8)
@@ -337,22 +335,30 @@ impl TimelineView {
                                         .line_clamp(2)
                                         .child(title),
                                 )
-                                .child(div().n_body().text_color(n.secondary).child(detail)),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(space::S8)
-                                .child(log)
-                                .child(retry),
+                                .child(div().n_body().text_color(n.secondary).child(detail))
+                                // The actions sit under the description, so
+                                // the text keeps the card's width and never
+                                // wraps a lone `次。` (break-ui).
+                                .child(
+                                    div()
+                                        .pt(space::S8)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S8)
+                                        .child(retry)
+                                        .child(log),
+                                ),
                         ),
                 )
                 .into_any_element(),
         )
     }
 
+    /// The working card (§2.4): the member's author line over a compact
+    /// bordered card. Header: `正在做：<step>` 14 medium and a StatusBadge
+    /// (`在做 3/5` spinning, 已暂停, 停止中) with the disclosure chevron;
+    /// content: Progress h4 and `3/5` 12 muted, then the steps; footer:
+    /// `已用 50 分钟 · 09:31 开始` 12 muted and ghost sm 查看, outline sm 停止….
     fn plan_card(
         &mut self,
         run: &BotRunSummary,
@@ -360,99 +366,106 @@ impl TimelineView {
         times: &[Millis],
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        use crate::ui::native::{BadgeState, StatusBadge, badge::state_mark, progress};
         crate::selftest::drawn::mark("plan-card", run.id.clone());
         let n = native_colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
-        let name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
         let open = !self.plan_collapsed.contains(&run.id);
-        let progress = crate::views::topic_page::plan_progress(&run.plan);
+        let progress_of = crate::views::topic_page::plan_progress(&run.plan);
         let now = crate::selftest::clock::now_ms();
+        let stopping = self.services.provider.run_stopping(&run.id);
         let current = run
             .plan
             .iter()
             .position(|s| matches!(s.state, PlanState::Current | PlanState::Waiting));
+        let waiting = current.is_some_and(|i| run.plan[i].state == PlanState::Waiting);
 
-        // The tile, with its live status dot while the member works (§7.9).
-        let tile = div().flex_none().child(
-            ui::MemberAvatar::new(bot.as_ref(), GUTTER).ring((!held).then_some(ui::Ring::Live)),
-        );
-
-        // A borderless disclosure chevron (NATIVE.md §9.3: no 展开 text).
+        // The disclosure chevron (28 ghost), only with steps to show.
         let toggle = (!run.plan.is_empty()).then(|| {
             let id = run.id.clone();
-            div()
-                .id(ElementId::Name(format!("plan-toggle-{}", run.id).into()))
-                .flex_none()
-                .ml_auto()
-                .size(px(24.))
-                .rounded(px(6.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| s.bg(n.fill_hover))
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(if open {
-                        c::PLAN_COLLAPSE
-                    } else {
-                        c::PLAN_EXPAND
-                    })
-                    .build(window, cx)
-                })
-                .child(ui::sym(
-                    if open {
-                        Sym::ChevronUp
-                    } else {
-                        Sym::ChevronDown
-                    },
-                    ui::SymSize::INLINE_SMALL,
-                    n.secondary,
-                ))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    if !this.plan_collapsed.remove(&id) {
-                        this.plan_collapsed.insert(id.clone());
-                    }
-                    cx.notify();
-                }))
+            crate::ui::native::icon_button_bare(
+                ElementId::Name(format!("plan-toggle-{}", run.id).into()),
+                if open {
+                    Sym::ChevronUp
+                } else {
+                    Sym::ChevronDown
+                },
+                crate::ui::native::IconSize::Small,
+            )
+            .named(if open {
+                c::PLAN_COLLAPSE
+            } else {
+                c::PLAN_EXPAND
+            })
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                if !this.plan_collapsed.remove(&id) {
+                    this.plan_collapsed.insert(id.clone());
+                }
+                cx.notify();
+            }))
         });
+        let (badge_state, badge_text) = if stopping {
+            (BadgeState::Stopping, pr::STATUS_STOPPING.to_string())
+        } else if held {
+            (BadgeState::Paused, c::STATE_PAUSED_SHORT.to_string())
+        } else if waiting {
+            (BadgeState::NeedsYou, c::STATE_YOU_SHORT.to_string())
+        } else {
+            match &progress_of {
+                Some((step, total, _)) => (
+                    BadgeState::Working,
+                    format!("{} {step}/{total}", c::STATE_WORKING_SHORT),
+                ),
+                None => (BadgeState::Working, c::STATE_WORKING_SHORT.to_string()),
+            }
+        };
+        let doing = progress_of
+            .as_ref()
+            .and_then(|(_, _, now)| now.clone())
+            .map(|step| fill(t::PLAN_DOING, &[("step", &step)]))
+            .unwrap_or_else(|| l::LIVE_PLAN.to_string());
         let header = div()
-            .h(HEADER)
-            .pl(space::S14)
-            .pr(space::S6)
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(div().flex_none().n_headline().text_color(n.label).child(
-                if run.plan.is_empty() {
-                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
-                } else {
-                    l::LIVE_PLAN.to_string()
-                },
-            ))
-            .children(progress.as_ref().map(|(step, total, _)| {
+            .child(
+                crate::ui::truncate::TruncText::new(doing)
+                    .id(SharedString::from(format!("plan-doing-{}", run.id)))
+                    .flex_1()
+                    .n_headline()
+                    .text_color(n.label),
+            )
+            .child(
                 div()
                     .flex_none()
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(n.secondary)
-                    .child(format!("{step}/{total}"))
-            }))
-            .when(self.services.provider.run_stopping(&run.id), |el| {
-                el.child(crate::views::process::run_badge(run, true, cx))
-            })
+                    .child(StatusBadge::new(badge_state, badge_text)),
+            )
             .children(toggle);
 
-        // The 4 pt determinate bar (§5.7): `blue` while the member works.
-        let bar = (!run.plan.is_empty()).then(|| {
+        // D12: the one Progress, and the count beside it.
+        let bar = progress_of.as_ref().map(|(step, total, _)| {
             let done = run
                 .plan
                 .iter()
                 .filter(|s| s.state == PlanState::Done)
                 .count();
-            div().px(space::S14).pb(space::S4).child(determinate_bar(
-                done as f32 / run.plan.len() as f32,
-                (!held).then_some(n.blue),
-                cx,
-            ))
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S12)
+                .child(
+                    div()
+                        .flex_1()
+                        .child(progress(done as f32 / (*total).max(1) as f32, cx)),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .n_footnote()
+                        .n_figures()
+                        .text_color(n.secondary)
+                        .child(format!("{step}/{total}")),
+                )
         });
 
         // Expanded: every step. Collapsed: only the step it is on.
@@ -464,197 +477,197 @@ impl TimelineView {
             .map(|(i, s)| {
                 let started = times.get(i).copied();
                 let next = times.get(i + 1).copied();
-                match s.state {
-                    PlanState::Current | PlanState::Waiting => {
-                        let mark: AnyElement = if held {
-                            ui::sym(Sym::Pause, ui::SymSize::INLINE_SMALL, n.secondary)
-                                .into_any_element()
-                        } else if s.state == PlanState::Waiting {
-                            ui::sym(Sym::NeedsYou, ui::SymSize::INLINE_SMALL, n.amber)
-                                .into_any_element()
-                        } else {
-                            ui::motion::breathe(
-                                SharedString::from(format!("plan-dot-{}-{i}", run.id)),
-                                div().size(px(6.)).rounded_full().bg(n.blue),
-                                cx,
-                            )
-                        };
-                        let doing = if held {
-                            Some(fill(l::LIVE_PLAN_HELD, &[("name", &name)]))
-                        } else {
-                            self.doing_now(&run.id)
-                        };
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(space::S2)
-                            .py(space::S4)
-                            .px(space::S8)
-                            .child(
-                                div()
-                                    .h(px(20.))
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::S10)
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .size(px(16.))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(mark),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .one_line()
-                                            .n_body()
-                                            .text_color(n.label)
-                                            .child(s.text.clone()),
-                                    )
-                                    .children(started.map(|at| {
-                                        div()
-                                            .flex_none()
-                                            .n_subheadline()
-                                            .text_color(n.secondary)
-                                            .child(span_text(FOR, now - at))
-                                    })),
-                            )
-                            .children(doing.map(|d| {
-                                div()
-                                    .pl(px(26.))
-                                    .min_w_0()
-                                    .one_line()
-                                    .n_subheadline()
-                                    .text_color(n.secondary)
-                                    .child(d)
-                            }))
+                let at_work = matches!(s.state, PlanState::Current | PlanState::Waiting);
+                // §2.12: the step at work spins; never a free colored dot.
+                let mark: AnyElement = match s.state {
+                    _ if at_work && held => {
+                        ui::sym(Sym::Pause, ui::SymSize::INLINE_SMALL, n.secondary)
                             .into_any_element()
                     }
-                    state => {
-                        let done = state == PlanState::Done;
-                        let mark: AnyElement = if done {
-                            ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, n.secondary)
-                                .into_any_element()
-                        } else {
-                            ui::sym(Sym::Todo, ui::SymSize::INLINE_SMALL, n.tertiary)
-                                .into_any_element()
-                        };
-                        let took = done
-                            .then(|| started.zip(next).map(|(a, b)| span_text(TOOK, b - a)))
-                            .flatten();
+                    PlanState::Waiting => state_mark(BadgeState::NeedsYou, &n)
+                        .unwrap_or_else(|| div().into_any_element()),
+                    PlanState::Current => state_mark(BadgeState::Working, &n)
+                        .unwrap_or_else(|| div().into_any_element()),
+                    PlanState::Done => ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, n.secondary)
+                        .into_any_element(),
+                    PlanState::Pending => {
+                        ui::sym(Sym::Todo, ui::SymSize::INLINE_SMALL, n.tertiary).into_any_element()
+                    }
+                };
+                let time = if at_work {
+                    started.map(|at| span_text(FOR, now - at))
+                } else if s.state == PlanState::Done {
+                    started.zip(next).map(|(a, b)| span_text(TOOK, b - a))
+                } else {
+                    None
+                };
+                div()
+                    .h(ROW)
+                    .px(space::S8)
+                    .rounded(crate::ui::native::tokens::radius::ITEM)
+                    .when(at_work, |el| el.bg(n.fill))
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(
                         div()
-                            .h(ROW)
-                            .px(space::S8)
+                            .flex_none()
+                            .size(px(16.))
                             .flex()
                             .items_center()
-                            .gap(space::S10)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .size(px(16.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(mark),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .one_line()
-                                    .n_body()
-                                    .text_color(n.secondary)
-                                    .child(s.text.clone()),
-                            )
-                            .children(took.map(|t| {
-                                div()
-                                    .flex_none()
-                                    .n_subheadline()
-                                    .text_color(n.secondary)
-                                    .child(t)
-                            }))
-                            .into_any_element()
-                    }
-                }
+                            .justify_center()
+                            .child(mark),
+                    )
+                    .child(
+                        crate::ui::truncate::TruncText::new(s.text.clone())
+                            .id(SharedString::from(format!("plan-step-{}-{i}", run.id)))
+                            .flex_1()
+                            .n_body()
+                            .text_color(if at_work { n.label } else { n.secondary }),
+                    )
+                    .children(time.map(|t| {
+                        div()
+                            .flex_none()
+                            .n_footnote()
+                            .n_figures()
+                            .text_color(n.secondary)
+                            .child(t)
+                    }))
+                    .into_any_element()
             })
             .collect();
+        let doing_now = (!held)
+            .then(|| self.doing_now(&run.id))
+            .flatten()
+            .or_else(|| {
+                held.then(|| {
+                    fill(
+                        l::LIVE_PLAN_HELD,
+                        &[(
+                            "name",
+                            &bot.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
+                        )],
+                    )
+                })
+            });
 
-        // 停止… for the member who asked (Standard Small; the alert makes
-        // the red choice), then 正在停止… disabled until the run ends.
+        // Footer: the time used and the start, then 查看 and 停止….
+        let view = {
+            let id = run.id.clone();
+            push_button(
+                ElementId::Name(format!("plan-view-{}", run.id).into()),
+                t::PLAN_VIEW,
+                PushStyle::Ghost,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                let id = id.clone();
+                this.services.nav.update(cx, |nav, cx| {
+                    nav.set_right_pane(crate::app::RightPane::Live(id), cx)
+                });
+            }))
+        };
         let stop = crate::views::process::asked_by(run, self.me.as_deref()).then(|| {
-            let stopping = self.services.provider.run_stopping(&run.id);
             let run = run.clone();
             disabled_push(
                 push_button(
                     ElementId::Name(format!("plan-stop-{}", run.id).into()),
-                    if stopping { pr::STOPPING } else { t::PLAN_STOP },
+                    t::PLAN_STOP,
                     PushStyle::Outline,
                     PushSize::Small,
                     cx,
-                ),
+                )
+                .loading(stopping),
                 stopping,
                 cx,
             )
-            .ml(space::S6)
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 crate::views::process::stop_run(&this.services, &run, cx);
                 cx.notify();
             }))
         });
-        let footer = run.started_at.map(|at| {
-            div()
-                .h(FOOTER)
-                .px(space::S14)
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .n_subheadline()
-                .n_figures()
-                .text_color(n.secondary)
-                .child(div().flex_none().child(span_text(USED, now - at)))
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .flex_none()
-                        .child(fill(c::PLAN_STARTED_AT, &[("time", &model::clock(at))])),
-                )
-                .children(stop)
-        });
+        let footer = div()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .one_line()
+                    .n_footnote()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .children(run.started_at.map(|at| {
+                        fill(
+                            t::PLAN_FOOTER,
+                            &[
+                                ("used", &span_text(USED, now - at)),
+                                ("time", &model::clock(at)),
+                            ],
+                        )
+                    })),
+            )
+            .child(view)
+            .children(stop);
 
+        // §2.4 compact card: radius 14, a 1 px border, the card fill,
+        // shadow-sm, p 16, gap 16, the one in-thread width.
         let card = div()
-            .flex_1()
-            .min_w_0()
+            .w_full()
             .max_w(super::v2::TEXT_MAX)
-            .rounded(px(12.))
-            .bg(n.fill)
-            .overflow_hidden()
+            .rounded(crate::ui::native::tokens::radius::CARD)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.sheet)
+            .shadow(crate::ui::native::tokens::shadow::sm())
+            .p(space::S16)
+            .flex()
+            .flex_col()
+            .gap(space::S16)
             .child(header)
             .children(bar)
             .when(!rows.is_empty(), |el| {
                 el.child(
                     div()
-                        .pt(space::S8)
-                        .px(space::S6)
-                        .pb(space::S6)
                         .flex()
                         .flex_col()
                         .gap(space::S2)
-                        .children(rows),
+                        .children(rows)
+                        .children(doing_now.map(|d| {
+                            div()
+                                .pl(space::S32)
+                                .min_w_0()
+                                .one_line()
+                                .n_footnote()
+                                .text_color(n.secondary)
+                                .child(d)
+                        })),
                 )
             })
-            .when(run.plan.is_empty(), |el| el.pb(space::S2))
-            .children(footer);
+            .child(footer);
 
         div()
             .mt(space::S16)
             .px(space::S8)
             .flex()
             .gap(space::S12)
-            .child(tile)
-            .child(card)
+            .child(
+                div()
+                    .flex_none()
+                    .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S6)
+                    .child(self.v2_meta(bot.as_ref(), run.started_at.unwrap_or(run.created_at), cx))
+                    .child(card),
+            )
             .into_any_element()
     }
 

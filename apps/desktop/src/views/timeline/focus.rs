@@ -52,8 +52,10 @@ impl FocusState {
     }
 }
 
-/// The room above a revealed hit: it never sits cut under the top edge.
-const PLACE_GAP: gpui::Pixels = crate::theme::space::S24;
+/// The room above a revealed hit: none. The hit's own row starts with its
+/// group gap, and a gap here would leave a sliver of the row above it
+/// under the search bar (§2.17, F15).
+const PLACE_GAP: gpui::Pixels = gpui::Pixels::ZERO;
 /// Frames to wait for the list to lay out the revealed row.
 const PLACE_TRIES: u8 = 8;
 
