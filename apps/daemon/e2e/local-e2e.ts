@@ -6,10 +6,11 @@
 // the run log and the uploaded raw session. Then 停止: a second run hangs in the fake CLI, a member
 // stops it through the client API (the chat-core `cancel_run` example), and the run must end as
 // cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
-// The first run also calls `chat-run card patch` (the fake CLI's word "chatrun"): the run log
-// must hold the `output` event with the token in its body redacted, and the socket must be gone
-// after the run. A server without `chat-run` support makes the command end with
-// "server too old" after 15 s; the report records which answer came.
+// The first run also uses `chat-run` (the fake CLI's word "chatcard"): it reads `chat-run card
+// schema`, posts a card built from it, posts it again (a retry: the idempotency key must give the
+// same message, and the topic must hold the card once), and patches the posted card at its rev
+// (exit 0, the next rev). The run log must hold the `output` events with the token in the patch
+// body redacted, and the socket must be gone after the run.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // Against a deployed env (no wrangler; the owner token comes from a file, and the run makes its
@@ -221,14 +222,16 @@ async function runDaemonCheck(
   ws.send(JSON.stringify({ t: "hello", protocol: 1, client: { name: "e2e", version: "0" } }));
   await until("welcome", () => events.find((e) => e.frame?.t === "welcome"));
   ws.send(
-    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow chatrun", mentions: [bot.member.id] }),
+    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow chatcard", mentions: [bot.member.id] }),
   );
   const ack = await until("send ack", () => events.find((e) => e.frame?.rid === "r1"));
   if (!ack.frame.ok) throw new Error("send failed");
   const topicId = ack.frame.result.message.topicId as string;
   step(`mentioned the bot in topic ${topicId}`);
 
-  const botMsgs = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id).map((e) => e.data.message);
+  const allBotMsgs = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id).map((e) => e.data.message);
+  const CHAT_RUN_TITLE = "chat-run card";
+  const botMsgs = () => allBotMsgs().filter((m) => m.cardV2?.title !== CHAT_RUN_TITLE);
   const statuses = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).map((e) => e.data.status);
   const ackReaction = await until("acknowledgement", () =>
     events.find((e) => e.type === "reaction.changed" && e.actorId === bot.member.id && e.data.messageId === ack.frame.result.message.id && e.data.on),
@@ -247,22 +250,27 @@ async function runDaemonCheck(
   step("no progress message; done card posted; topic done");
 
   const log = await call("GET", `/v1/runs/${runId}/events`, { token: alice.token });
-  // chat-run: the output event is in the run log, redacted; the socket is gone.
-  const output = log.entries.find((e: any) => e.t === "run.event" && e.event.type === "output");
-  if (output?.event.op !== "card.patch") throw new Error("no chat-run output event in the run log");
+  // chat-run: the output events are in the run log, the patch body redacted; the socket is gone.
+  const outputs = log.entries.filter((e: any) => e.t === "run.event" && e.event.type === "output");
+  const output = outputs.find((e: any) => e.event.op === "card.patch");
+  if (!output || outputs.filter((e: any) => e.event.op === "card.post").length !== 2) throw new Error("no chat-run output events in the run log");
   const outputBody = JSON.stringify(output.event.body);
   if (outputBody.includes("tm_fakefakefakefakefakefake01") || !outputBody.includes("<redacted>")) throw new Error("output body not redacted");
   const runDir = join(work, "runs", runId);
-  const chatRun = JSON.parse(readFileSync(join(runDir, "work", "chatrun-1.json"), "utf8"));
-  if (!chatRun.socket || existsSync(chatRun.socket)) throw new Error("chat-run socket missing in the run or left after it");
-  if (chatRun.mode !== "0o600") throw new Error(`chat-run socket mode ${chatRun.mode}`);
-  const chatRunAnswer = JSON.parse(chatRun.out || "null");
-  // An old server answers with a reason ("server too old"); a 1.1 server runs the patch through
-  // the group room, which refuses the fake message id "M" as not_found.
-  const typed = chatRunAnswer?.error?.reason || chatRunAnswer?.error?.code === "not_found";
-  if (chatRun.code !== 0 && !typed) throw new Error(`chat-run failed without a reason: ${chatRun.err}`);
-  report.chatRun = { exitCode: chatRun.code, answer: chatRunAnswer };
-  step(`chat-run output in the run log, redacted; chat-run exit ${chatRun.code}`);
+  const chatRun = JSON.parse(readFileSync(join(runDir, "work", "chatcard-1.json"), "utf8"));
+  const sockets = readdirSync(runDir).filter((f) => f.endsWith(".sock"));
+  if (sockets.length > 0) throw new Error("chat-run socket left after the run");
+  // The card came from `chat-run card schema`; the post, its retry and the patch all worked.
+  if (!chatRun.kinds?.includes("text")) throw new Error(`chat-run card schema gave no block types: ${JSON.stringify(chatRun.kinds)}`);
+  const posted = chatRun.post.out;
+  if (chatRun.post.code !== 0 || !posted?.messageId) throw new Error(`chat-run card post failed: ${JSON.stringify(chatRun.post)}`);
+  if (chatRun.again.code !== 0 || chatRun.again.out?.messageId !== posted.messageId) throw new Error(`the retry posted another card: ${JSON.stringify(chatRun.again)}`);
+  const copies = allBotMsgs().filter((m) => m.cardV2?.title === CHAT_RUN_TITLE);
+  if (copies.length !== 1) throw new Error(`the topic holds the chat-run card ${copies.length} times`);
+  const rev = posted.message.cardV2.rev as number;
+  if (chatRun.patch.code !== 0 || chatRun.patch.out?.rev !== rev + 1) throw new Error(`chat-run card patch failed: ${JSON.stringify(chatRun.patch)}`);
+  report.chatRun = { post: posted.messageId, retry: chatRun.again.out.messageId, patchedRev: chatRun.patch.out.rev, blockTypes: chatRun.kinds.length };
+  step(`chat-run: card from the schema posted once (retry deduped), patched to rev ${chatRun.patch.out.rev}; outputs in the run log, redacted`);
   const session = await until("raw session uploaded", async () => {
     const res = await fetch(`${BASE}/v1/runs/${runId}/session`, { headers: { authorization: `Bearer ${owner}` } });
     return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;

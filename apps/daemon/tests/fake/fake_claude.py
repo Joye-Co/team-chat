@@ -8,7 +8,10 @@ in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, w
 to children.txt and then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
 mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and runs
-`chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json.
+`chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json;
+"chatcard" reads `chat-run card schema`, posts a card built from it with `chat-run card post`,
+posts it again (a retry: the idempotency key gives the same message), patches the posted card
+with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json.
 The arguments are written to argv.json in the working directory.
 The session file goes to $CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as ->/<id>.jsonl.
 """
@@ -65,6 +68,27 @@ for line in sys.stdin:
         open("page/app.js", "w").write("console.log(1)")
         r = subprocess.run(["chat-run", "artifact", "create", "--title", "看板", "--dir", "page"], capture_output=True, text=True)
         open("chatrun-%d.json" % n, "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr}))
+    if "chatcard" in text:
+        def run(*a):
+            r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
+            try:
+                v = json.loads(r.stdout)
+            except ValueError:
+                v = None
+            return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
+        schema = run("card", "schema")["out"] or {}
+        kinds = [b["properties"]["type"]["const"] for b in schema.get("properties", {}).get("blocks", {}).get("items", {}).get("oneOf", [])]
+        card = {"v": 2, "rev": 1, "title": "chat-run card", "fallback": "chat-run card", "intent": "working", "blocks": [{"type": kinds[0], "id": "note", "text": "working"}]}
+        card = {k: v for k, v in card.items() if k in schema.get("properties", {})}
+        assert all(k in card for k in schema.get("required", [])), schema.get("required")
+        open("card.json", "w").write(json.dumps(card))
+        post = run("card", "post", "--file", "card.json")
+        again = run("card", "post", "--file", "card.json")
+        mid = (post["out"] or {}).get("messageId", "none")
+        rev = (((post["out"] or {}).get("message") or {}).get("cardV2") or {}).get("rev", 1)
+        open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "key tm_fakefakefakefakefakefake01"}}]))
+        patch = run("card", "patch", "--message", mid, "--base-rev", str(rev), "--ops", "ops.json")
+        open("chatcard-%d.json" % n, "w").write(json.dumps({"kinds": kinds, "post": post, "again": again, "patch": patch}))
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in text else 2
