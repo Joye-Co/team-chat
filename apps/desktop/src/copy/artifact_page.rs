@@ -63,4 +63,9 @@ crate::copy! {
     ARTIFACTS_DAY = "{m} 月 {d} 日",
     ARTIFACT_NO_NOTE = "无说明",
     // --- end v13/ux-pages ---
+    // --- v13/wire: 页面里的回应 from the server's page log ---
+    ARTIFACT_RESPONSES_EMPTY = "还没有人在页面里回应",
+    ARTIFACT_RESPONSES_FAILED = "没能读到页面里的回应",
+    ARTIFACT_RESPONSES_RETRY = "重试",
+    // --- end v13/wire ---
 }

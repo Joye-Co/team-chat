@@ -94,7 +94,7 @@ pub struct DoneItem {
 pub struct QueuedItem {
     pub member_id: MemberId,
     pub title: String,
-    /// When it starts, when known.
+    /// When it joined the queue (`BotRun.queuedAt`), when known.
     pub at: Option<Millis>,
 }
 
@@ -291,9 +291,8 @@ pub struct MemberStats {
     pub cost_cents_this_week: Option<u64>,
     /// The currency of [`MemberStats::cost_cents_this_week`] (never converted).
     pub cost_currency: Currency,
+    /// 汇报给 (`Member.reportsTo`).
     pub reports_to: Option<MemberId>,
-    /// 需要批准的事 (merge to main, release to production…).
-    pub needs_approval: Vec<String>,
     /// 能用的工具.
     pub tools: Vec<String>,
     pub machine: Option<MemberMachine>,

@@ -872,8 +872,60 @@ impl ArtifactPage {
                     .into_any_element(),
             );
         }
-        // 页面里的回应.
+        // 页面里的回应: the server's page log (`GET /v1/artifacts/:id/events`). A page that
+        // declares no events cannot get responses, so it shows no card.
         let responses = p.artifact_responses(&detail.summary.id);
+        let responses_load = p.artifact_responses_load(&detail.summary.id);
+        let has_events = detail.versions.iter().any(|v| {
+            !p.artifact_page_events(&detail.summary.id, v.version)
+                .is_empty()
+        });
+        if responses.is_empty() && has_events {
+            use crate::data::pages::ResponsesLoad;
+            let body: AnyElement = match responses_load {
+                ResponsesLoad::Loading => {
+                    page::skeleton_rows("artifact-responses-sk", page::SkeletonKind::Compact, 2, cx)
+                }
+                ResponsesLoad::Failed => {
+                    let services = self.services.clone();
+                    let id = detail.summary.id.clone();
+                    page::page_alert(
+                        "artifact-responses-failed",
+                        page::AlertKind::Error,
+                        c::ARTIFACT_RESPONSES_FAILED,
+                        None,
+                        Some(
+                            crate::ui::native::push_button(
+                                "artifact-responses-retry",
+                                c::ARTIFACT_RESPONSES_RETRY,
+                                crate::ui::native::PushStyle::Outline,
+                                crate::ui::native::PushSize::Small,
+                                cx,
+                            )
+                            .on_click(move |_, _, _| {
+                                services.provider.reload_artifact_responses(&id)
+                            })
+                            .into_any_element(),
+                        ),
+                        cx,
+                    )
+                    .into_any_element()
+                }
+                ResponsesLoad::Ready => page::compact_empty(
+                    crate::ui::sf_symbols::Sym::AskAside,
+                    c::ARTIFACT_RESPONSES_EMPTY,
+                    None,
+                    cx,
+                )
+                .into_any_element(),
+            };
+            cards.push(
+                kit::side_card(cx)
+                    .child(kit::card_label(c::ARTIFACT_RESPONSES, None, cx))
+                    .child(div().mt(space::S8).child(body))
+                    .into_any_element(),
+            );
+        }
         if !responses.is_empty() {
             let rows = responses.into_iter().enumerate().map(|(i, r)| {
                 let m = p.member(&r.member_id);

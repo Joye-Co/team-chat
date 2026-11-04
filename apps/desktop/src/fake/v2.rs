@@ -1327,12 +1327,12 @@ impl ChatProvider for V2Samples {
             QueuedItem {
                 member_id: POCKET.into(),
                 title: "发晨报".into(),
-                at: Some(days_ago_at(-1, 8, 0)),
+                at: Some(days_ago_at(0, 9, 12)),
             },
             QueuedItem {
                 member_id: SCOUT.into(),
                 title: "巡检 staging".into(),
-                at: Some(days_ago_at(-1, 9, 0)),
+                at: Some(days_ago_at(0, 9, 40)),
             },
         ]
     }
@@ -1429,6 +1429,14 @@ impl ChatProvider for V2Samples {
     }
     fn side_chat_default_member(&self) -> Option<MemberId> {
         Some(JOJO.into())
+    }
+    /// 需要你批准的事 of the samples: the team's rules (`GET /v1/settings/approvals`).
+    fn approval_defaults(&self) -> crate::data::AdminReply<crate::data::ApprovalDefaults> {
+        crate::data::reply_now(Ok(crate::data::ApprovalDefaults {
+            delete_data: false,
+            external_publish: false,
+            ..crate::data::ApprovalDefaults::default()
+        }))
     }
     fn side_chat(&self, _group_id: &str, topic_id: &str, member_id: &str) -> SideChatThread {
         SideChatThread {
@@ -1590,14 +1598,9 @@ impl ChatProvider for V2Samples {
             stats.done_this_week = 6;
             stats.artifacts_this_week = 4;
             stats.cost_cents_this_week = Some(13_200);
-            stats.cost_currency = crate::data::v2::Currency::Cny;
+            // `costUsd` and `weeklyBudgetCents` are US dollars.
+            stats.cost_currency = crate::data::v2::Currency::Usd;
             stats.reports_to = Some(TATA.into());
-            stats.needs_approval = vec![
-                "合并到 main".into(),
-                "发布到生产".into(),
-                "改生产环境配置".into(),
-                "单次花费超过 ¥50".into(),
-            ];
             stats.tools = vec!["GitHub".into(), "Cloudflare 只读".into(), "staging".into()];
             stats.machine = Some(MemberMachine {
                 name: "Mac mini".into(),

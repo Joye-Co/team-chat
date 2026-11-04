@@ -43,10 +43,13 @@ mod realtime;
 mod realtime_live;
 #[cfg(test)]
 mod search_live;
+// v13/wire: the pages' backend data against a live server.
 pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+#[cfg(test)]
+mod wire_live;
 // --- settings-backend track ---
 mod settings_backend;
 // --- end settings-backend track ---
@@ -1758,6 +1761,14 @@ impl ChatProvider for CoreProvider {
         self.set_member_character_inner(member_id, character)
     }
 
+    fn set_member_plan(
+        &self,
+        member_id: &str,
+        plan: crate::data::pages::MemberPlan,
+    ) -> AdminReply<Member> {
+        self.set_member_plan_inner(member_id, plan)
+    }
+
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
         self.machines_inner()
     }
@@ -2135,6 +2146,16 @@ impl ChatProvider for CoreProvider {
         self.artifact_responses_inner(artifact_id)
     }
 
+    fn artifact_responses_load(&self, artifact_id: &str) -> crate::data::pages::ResponsesLoad {
+        self.shared.page_events.load(artifact_id)
+    }
+
+    fn reload_artifact_responses(&self, artifact_id: &str) {
+        self.shared.page_events.forget_fetch(artifact_id);
+        self.refresh_page_log(artifact_id);
+        self.emit_artifact_change(artifact_id);
+    }
+
     fn retry_member_problem(&self, member_id: &str, run_id: &str) -> AdminReply<()> {
         self.retry_member_problem_inner(member_id, run_id)
     }
@@ -2235,6 +2256,11 @@ impl ChatProvider for CoreProvider {
             .group_purpose(group_id)
             .ok()
             .flatten()
+            .filter(|p| !p.trim().is_empty())
+    }
+
+    fn set_group_purpose(&self, group_id: &str, purpose: String) -> AdminReply<()> {
+        self.set_group_purpose_inner(group_id, purpose)
     }
 
     // --- end provider track ---

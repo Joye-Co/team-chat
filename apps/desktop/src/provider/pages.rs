@@ -16,7 +16,8 @@ use super::CoreProvider;
 use crate::{
     copy::{artifact_page as ca, fill, group_page as cg, members_page as cm},
     data::{
-        AdminError, AdminReply, Change, ChatProvider as _, SendRequest, pages::ArtifactResponse,
+        AdminError, AdminReply, Change, ChatProvider as _, SendRequest,
+        pages::{ArtifactResponse, ResponsesLoad},
         v2::Decision,
     },
 };
@@ -104,6 +105,8 @@ pub(super) struct PageEventLog {
     inner: Mutex<HashMap<String, Vec<PageEvent>>>,
     /// When the server's page log of a 产出 was last asked for.
     fetched: Mutex<HashMap<String, std::time::Instant>>,
+    /// Where the last read of each 产出's page log stands.
+    loads: Mutex<HashMap<String, ResponsesLoad>>,
 }
 
 /// How often the server's page log of an open 产出 is read again.
@@ -120,6 +123,36 @@ impl PageEventLog {
                 map.insert(artifact_id.to_string(), now);
                 true
             }
+        }
+    }
+
+    /// Where the read of the page log of `artifact_id` stands. Before the first answer it is
+    /// [`ResponsesLoad::Loading`]; a failed later read keeps the events it had.
+    pub(super) fn load(&self, artifact_id: &str) -> ResponsesLoad {
+        self.loads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(artifact_id)
+            .copied()
+            .unwrap_or(ResponsesLoad::Loading)
+    }
+
+    fn set_load(&self, artifact_id: &str, load: ResponsesLoad) {
+        self.loads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(artifact_id.to_string(), load);
+    }
+
+    /// Makes the next [`PageEventLog::due`] true (重试).
+    pub(super) fn forget_fetch(&self, artifact_id: &str) {
+        self.fetched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(artifact_id);
+        let mut loads = self.loads.lock().unwrap_or_else(|e| e.into_inner());
+        if loads.get(artifact_id) == Some(&ResponsesLoad::Failed) {
+            loads.insert(artifact_id.to_string(), ResponsesLoad::Loading);
         }
     }
 
@@ -396,9 +429,20 @@ impl CoreProvider {
         }
     }
 
+    /// Redraws the 产出 page of `artifact_id`.
+    pub(super) fn emit_artifact_change(&self, artifact_id: &str) {
+        let Some(a) = self.account() else { return };
+        if let Some(r) = a.client.artifact(artifact_id).ok().flatten() {
+            self.emit(vec![Change::Artifacts {
+                group_id: r.artifact.group_id,
+                topic_id: r.artifact.topic_id,
+            }]);
+        }
+    }
+
     /// Reads the server's page log of a 产出 in the background (at most every minute) and
     /// redraws the 产出 page when it arrives.
-    fn refresh_page_log(&self, artifact_id: &str) {
+    pub(super) fn refresh_page_log(&self, artifact_id: &str) {
         let Some(a) = self.account() else { return };
         if !self.shared.page_events.due(artifact_id) {
             return;
@@ -433,11 +477,15 @@ impl CoreProvider {
                         })
                         .collect();
                     this.shared.page_events.merge_server(&id, events);
-                    if let Some(c) = change {
-                        this.emit(vec![c]);
-                    }
+                    this.shared.page_events.set_load(&id, ResponsesLoad::Ready);
                 }
-                Err(e) => tracing::info!(error = %e, "产出 page log not read"),
+                Err(e) => {
+                    tracing::info!(error = %e, "产出 page log not read");
+                    this.shared.page_events.set_load(&id, ResponsesLoad::Failed);
+                }
+            }
+            if let Some(c) = change {
+                this.emit(vec![c]);
             }
         });
     }

@@ -89,7 +89,7 @@ impl CoreProvider {
                 QueuedItem {
                     member_id: r.bot_id,
                     title,
-                    at: None,
+                    at: r.queued_at.map(|at| at.min(i64::MAX as u64) as i64),
                 }
             })
             .collect()

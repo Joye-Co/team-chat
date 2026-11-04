@@ -7,9 +7,10 @@
 //! 需要你批准的事, 能用的工具, 用到的决定. Stats come from the runs cache
 //! and `BotRun.usage`; 添加 and 修改 reuse the settings forms.
 
+pub mod plan;
 pub mod scenes;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Render,
@@ -26,7 +27,8 @@ use crate::{
     app::{Place, RightPane, Services},
     copy::{fill, members_page as c},
     data::{
-        BotRunSummary, GroupKind, Member, PlanState,
+        AdminError, ApprovalDefaults, ApproverRole, BotRunSummary, GroupKind, Member, MemberLevel,
+        PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
         v2::{Currency, MemberStats},
     },
@@ -74,6 +76,14 @@ pub struct MembersPage {
     // --- end v12/behavior ---
     filter: Filter,
     retried: HashSet<String>,
+    /// 重试 on its way, by run id.
+    retrying: HashSet<String>,
+    /// 重试 the server refused, by run id.
+    retry_errors: HashMap<String, AdminError>,
+    /// 需要你批准的事: the team's rules (`GET /v1/settings/approvals`); `None` before the
+    /// first answer.
+    approvals: Option<Result<ApprovalDefaults, AdminError>>,
+    approvals_loading: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,7 +105,29 @@ impl MembersPage {
             focus: cx.focus_handle(),
             filter: Filter::All,
             retried: HashSet::new(),
+            retrying: HashSet::new(),
+            retry_errors: HashMap::new(),
+            approvals: None,
+            approvals_loading: false,
         }
+    }
+
+    /// Reads the team's approval rules (需要你批准的事); the answer redraws the page.
+    fn load_approvals(&mut self, cx: &mut Context<Self>) {
+        if self.approvals_loading {
+            return;
+        }
+        self.approvals_loading = true;
+        let reply = self.services.provider.approval_defaults();
+        cx.spawn(async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(AdminError::Other));
+            let _ = this.update(cx, |this, cx| {
+                this.approvals_loading = false;
+                this.approvals = Some(result);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn selected(&self, cx: &App) -> Option<String> {
@@ -167,6 +199,26 @@ fn count_word(n: usize) -> String {
 /// Cents in the currency the data has, never converted (`$0.85`, `¥6.20`).
 fn money(cents: u64, currency: Currency) -> String {
     crate::views::topic_rail::money_text(cents, currency)
+}
+
+/// 需要你批准的事: the actions the team's rules make an AI member ask before, in the
+/// order of 设置 › 成员 › 默认规则.
+pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
+    let mut out: Vec<String> = [
+        (r.merge_main, c::MEMBERS_APPROVE_MERGE),
+        (r.deploy_prod, c::MEMBERS_APPROVE_DEPLOY),
+        (r.prod_config, c::MEMBERS_APPROVE_CONFIG),
+        (r.delete_data, c::MEMBERS_APPROVE_DELETE),
+        (r.external_publish, c::MEMBERS_APPROVE_PUBLISH),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, t)| t.to_string())
+    .collect();
+    if let Some(n) = r.max_spend_cny {
+        out.push(fill(c::MEMBERS_APPROVE_SPEND, &[("n", &n.to_string())]));
+    }
+    out
 }
 
 /// The list pane (§9.5): its own toolbar row with the segmented filter.
@@ -758,15 +810,35 @@ impl MembersPage {
         let nq = e.extras.queued.len();
         for (i, q) in e.extras.queued.iter().enumerate() {
             rows_n += 1;
-            body = body.child(page::card_row(
+            let meta = q.note.clone().or_else(|| {
+                q.queued_at.map(|at| {
+                    fill(
+                        c::MEMBERS_QUEUED_SINCE,
+                        &[("time", &kit::day_and_time(p.clock_now(), at, true))],
+                    )
+                })
+            });
+            let row = page::card_row(
                 SharedString::from(format!("member-queued-{i}")),
                 Some(page::row_icon(Sym::Waiting, k.secondary)),
                 q.title.clone(),
-                q.note.clone().map(Into::into),
+                meta.map(Into::into),
                 Some(page::status_badge(Status::Queued, c::MEMBERS_QUEUED, cx)),
                 i + 1 == nq,
                 cx,
-            ));
+            );
+            body = body.child(match q.topic.clone() {
+                Some((g, t)) => {
+                    let nav = self.services.nav.clone();
+                    row.cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let (g, t) = (g.clone(), t.clone());
+                            nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                        })
+                        .into_any_element()
+                }
+                None => row.into_any_element(),
+            });
         }
         if rows_n == 0 {
             body = body.child(page::compact_empty(
@@ -812,12 +884,15 @@ impl MembersPage {
         // No run reported a cost: `–`, never a wrong ¥0.
         let currency = e.stats.cost_currency;
         let cost = e.stats.cost_cents_this_week;
+        // The limit is in US cents (`weeklyBudgetCents`); a cost in another currency is
+        // never measured against it.
         let budget = e.extras.budget_cents.filter(|b| *b > 0);
         let pct = cost
             .zip(budget)
+            .filter(|_| currency == Currency::Usd)
             .map(|(c, b)| (c as f32 / b as f32).clamp(0., 1.));
         let limit_note = match budget {
-            Some(b) => fill(c::MEMBERS_LIMIT, &[("v", &money(b, currency))]),
+            Some(b) => fill(c::MEMBERS_LIMIT, &[("v", &money(b, Currency::Usd))]),
             None => c::MEMBERS_NO_LIMIT.to_string(),
         };
         let cost_text = cost
@@ -1031,6 +1106,15 @@ impl MembersPage {
                 continue;
             }
             let member = e.member.id.clone();
+            let busy = pr
+                .run_id
+                .as_ref()
+                .is_some_and(|r| self.retrying.contains(r));
+            let refused = pr
+                .run_id
+                .as_ref()
+                .and_then(|r| self.retry_errors.get(r))
+                .copied();
             let retry = pr.run_id.clone().map(|run| {
                 push_button(
                     SharedString::from(format!("member-retry-{i}")),
@@ -1039,33 +1123,54 @@ impl MembersPage {
                     PushSize::Small,
                     cx,
                 )
+                .loading(busy)
+                .disabled(busy)
                 .on_click(cx.listener(move |this, _, _, cx| {
+                    // A new run with the same request (`POST /v1/runs/:id/retry`).
+                    if !this.retrying.insert(run.clone()) {
+                        return;
+                    }
+                    this.retry_errors.remove(&run);
+                    cx.notify();
                     let rx = this.services.provider.retry_member_problem(&member, &run);
                     let run = run.clone();
                     cx.spawn(async move |this, cx| {
-                        if let Ok(Ok(())) = rx.await {
-                            let _ = this.update(cx, |this, cx| {
-                                this.retried.insert(run);
-                                cx.notify();
-                            });
-                        }
+                        let result = rx.await.unwrap_or(Err(AdminError::Other));
+                        let _ = this.update(cx, |this, cx| {
+                            this.retrying.remove(&run);
+                            match result {
+                                Ok(()) => {
+                                    this.retried.insert(run);
+                                }
+                                Err(e) => {
+                                    this.retry_errors.insert(run, e);
+                                }
+                            }
+                            cx.notify();
+                        });
                     })
                     .detach();
                 }))
                 .into_any_element()
             });
+            let stuck = format!(
+                "{} · {}",
+                c::MEMBERS_STUCK,
+                kit::day_and_time(now, pr.at, true)
+            );
+            let description = match refused {
+                Some(e) => format!(
+                    "{stuck} · {}：{}",
+                    c::MEMBERS_RETRY_FAILED,
+                    crate::views::settings::widgets::error_text(e)
+                ),
+                None => stuck,
+            };
             body = body.child(page::page_alert(
                 SharedString::from(format!("member-problem-{i}")),
                 page::AlertKind::Error,
                 pr.text.clone(),
-                Some(
-                    format!(
-                        "{} · {}",
-                        c::MEMBERS_STUCK,
-                        kit::day_and_time(now, pr.at, true)
-                    )
-                    .into(),
-                ),
+                Some(description.into()),
                 retry,
                 cx,
             ));
@@ -1141,49 +1246,185 @@ impl MembersPage {
             .into_any_element()
     }
 
-    /// 需要你批准的事 (card): the list, the note as the description and
-    /// `修改…` in the footer.
-    fn approvals(&self, e: &Entry, cx: &App) -> AnyElement {
+    /// 需要你批准的事 (card): what the team's rules make an AI member ask before
+    /// (`GET /v1/settings/approvals`), who approves as the description, and `修改…`
+    /// (设置 › 成员) in the header. A person needs no approval.
+    fn approvals(&self, e: &Entry, cx: &mut Context<Self>) -> AnyElement {
         let k = native_colors(cx);
         let services = self.services.clone();
-        let n = e.stats.needs_approval.len();
-        let body: AnyElement = if n == 0 {
-            page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_EMPTY, None, cx).into_any_element()
-        } else {
-            div()
-                .flex()
-                .flex_col()
-                .children(e.stats.needs_approval.iter().enumerate().map(|(i, a)| {
-                    page::card_row(
-                        SharedString::from(format!("member-approval-{i}")),
-                        Some(page::row_icon(Sym::Lock, k.secondary)),
-                        a.clone(),
-                        None,
-                        None,
-                        i + 1 == n,
-                        cx,
-                    )
-                }))
+        let bot = e.member.is_bot();
+        let rules = self
+            .approvals
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .copied();
+        let items: Vec<String> = rules.map(approval_items).unwrap_or_default();
+        let body: AnyElement = match (&self.approvals, bot) {
+            (_, false) => page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_PERSON, None, cx)
+                .into_any_element(),
+            (None, true) => {
+                page::skeleton_rows("member-approvals-sk", page::SkeletonKind::Compact, 3, cx)
+            }
+            (Some(Err(err)), true) => {
+                let busy = self.approvals_loading;
+                page::page_alert(
+                    "member-approvals-failed",
+                    page::AlertKind::Error,
+                    c::MEMBERS_APPROVALS_FAILED,
+                    Some(crate::views::settings::widgets::error_text(*err).into()),
+                    Some(
+                        push_button(
+                            "member-approvals-retry",
+                            c::MEMBERS_RETRY,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .loading(busy)
+                        .disabled(busy)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.load_approvals(cx);
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                    ),
+                    cx,
+                )
                 .into_any_element()
+            }
+            (Some(Ok(_)), true) if items.is_empty() => {
+                page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_EMPTY, None, cx)
+                    .into_any_element()
+            }
+            (Some(Ok(_)), true) => {
+                let n = items.len();
+                div()
+                    .flex()
+                    .flex_col()
+                    .children(items.into_iter().enumerate().map(|(i, a)| {
+                        page::card_row(
+                            SharedString::from(format!("member-approval-{i}")),
+                            Some(page::row_icon(Sym::Lock, k.secondary)),
+                            a,
+                            None,
+                            None,
+                            i + 1 == n,
+                            cx,
+                        )
+                    }))
+                    .into_any_element()
+            }
         };
-        let edit = push_button(
-            "member-approvals-edit",
-            c::MEMBERS_EDIT_MORE,
-            PushStyle::Outline,
-            PushSize::Small,
-            cx,
-        )
-        .on_click(move |_, _, cx| crate::app::open_settings_window(services.clone(), cx));
+        let note = match rules.map(|r| r.approver) {
+            Some(ApproverRole::Owners) => Some(c::MEMBERS_APPROVAL_NOTE_OWNERS),
+            Some(ApproverRole::Requester) => Some(c::MEMBERS_APPROVAL_NOTE),
+            None => None,
+        }
+        .filter(|_| bot)
+        .map(|t| SharedString::from(fill(t, &[("name", &e.member.name)])));
+        let edit = bot.then(|| {
+            push_button(
+                "member-approvals-edit",
+                c::MEMBERS_EDIT_MORE,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, _, cx| crate::app::open_settings_window(services.clone(), cx))
+            .into_any_element()
+        });
         page::titled_card(
             "member-approvals",
             c::MEMBERS_NEEDS_APPROVAL,
-            Some(fill(c::MEMBERS_APPROVAL_NOTE, &[("name", &e.member.name)]).into()),
-            Some(edit.into_any_element()),
+            note,
+            edit,
             body,
             None,
             cx,
         )
         .into_any_element()
+    }
+
+    /// 汇报和限额 (card): who the member reports to (`reportsTo`) and, for an AI member,
+    /// the weekly limit (`weeklyBudgetCents`, US cents). Owners change both in a sheet.
+    fn plan(&self, e: &Entry, cx: &App) -> AnyElement {
+        let k = native_colors(cx);
+        let reports: SharedString = match &e.stats.reports_to {
+            Some(r) => member_name(&self.services, r).into(),
+            None => c::MEMBERS_PLAN_NOBODY.into(),
+        };
+        let mut body = div().flex().flex_col().child(page::desc_row(
+            c::MEMBERS_PLAN_REPORTS,
+            div()
+                .when(e.stats.reports_to.is_none(), |d| d.text_color(k.secondary))
+                .child(reports),
+            cx,
+        ));
+        if e.member.is_bot() {
+            let limit: SharedString = match e.extras.budget_cents.filter(|b| *b > 0) {
+                Some(b) => money(b, Currency::Usd).into(),
+                None => c::MEMBERS_NO_LIMIT.into(),
+            };
+            body = body.child(page::desc_row(
+                c::MEMBERS_PLAN_LIMIT,
+                div()
+                    .when(e.extras.budget_cents.is_none_or(|b| b == 0), |d| {
+                        d.text_color(k.secondary)
+                    })
+                    .child(limit),
+                cx,
+            ));
+        }
+        let owner = self.i_am_owner();
+        let action = if owner {
+            let services = self.services.clone();
+            let member = e.member.clone();
+            let current = crate::data::pages::MemberPlan {
+                reports_to: e.stats.reports_to.clone(),
+                weekly_budget_cents: e.extras.budget_cents,
+            };
+            push_button(
+                "member-plan-edit",
+                c::MEMBERS_EDIT_MORE,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, window, cx| {
+                plan::open_plan_sheet(
+                    services.clone(),
+                    member.clone(),
+                    current.clone(),
+                    window,
+                    cx,
+                )
+            })
+            .into_any_element()
+        } else {
+            div()
+                .n_callout()
+                .text_color(k.secondary)
+                .child(c::MEMBERS_PLAN_READONLY)
+                .into_any_element()
+        };
+        page::titled_card(
+            "member-plan",
+            c::MEMBERS_PLAN,
+            None,
+            Some(action),
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
+    }
+
+    /// True when I am an owner (owners set 汇报给 and 限额).
+    fn i_am_owner(&self) -> bool {
+        match self.services.provider.session() {
+            crate::data::SessionState::SignedIn { me, .. } => me.level == MemberLevel::Owner,
+            _ => false,
+        }
     }
 
     /// 能用的工具 (card).
@@ -1293,7 +1534,7 @@ impl MembersPage {
     /// The detail body: the header block, a line, then the cards in pairs
     /// that sit side by side when the pane is wide enough (§2.18) and
     /// stack when it is not.
-    fn detail_body(&self, e: &Entry, window: &mut Window, cx: &mut Context<Self>) -> gpui::Div {
+    fn detail_body(&mut self, e: &Entry, window: &mut Window, cx: &mut Context<Self>) -> gpui::Div {
         let k = native_colors(cx);
         let pair = |a: AnyElement, b: Option<AnyElement>| {
             div()
@@ -1307,9 +1548,13 @@ impl MembersPage {
         let week = e.member.is_bot().then(|| self.week_section(e, cx));
         let problems = self.problems(e, cx);
         let workplace = self.workplace(e, window, cx);
+        if self.approvals.is_none() && e.member.is_bot() {
+            self.load_approvals(cx);
+        }
         let approvals = self.approvals(e, cx);
         let tools = self.tools(e, cx);
         let deliveries = self.deliveries(e, cx);
+        let plan = self.plan(e, cx);
         let decisions = self.decisions(e, cx);
         div()
             .w_full()
@@ -1322,7 +1567,7 @@ impl MembersPage {
             .child(deliveries)
             .child(pair(problems, Some(workplace)))
             .child(pair(approvals, Some(tools)))
-            .child(decisions)
+            .child(pair(plan, Some(decisions)))
     }
 
     /// The detail while the first sync runs: the header block and two
@@ -1639,3 +1884,34 @@ mod behavior_tests {
     }
 }
 // --- end v12/behavior ---
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+
+    #[test]
+    fn approvals_list_what_the_rules_turn_on_in_the_settings_order() {
+        let all = approval_items(ApprovalDefaults::default());
+        assert_eq!(
+            all,
+            [
+                c::MEMBERS_APPROVE_MERGE.to_string(),
+                c::MEMBERS_APPROVE_DEPLOY.into(),
+                c::MEMBERS_APPROVE_CONFIG.into(),
+                c::MEMBERS_APPROVE_DELETE.into(),
+                c::MEMBERS_APPROVE_PUBLISH.into(),
+                fill(c::MEMBERS_APPROVE_SPEND, &[("n", "50")]),
+            ]
+        );
+        let none = ApprovalDefaults {
+            merge_main: false,
+            deploy_prod: false,
+            prod_config: false,
+            delete_data: false,
+            external_publish: false,
+            max_spend_cny: None,
+            approver: ApproverRole::Owners,
+        };
+        assert!(approval_items(none).is_empty());
+    }
+}

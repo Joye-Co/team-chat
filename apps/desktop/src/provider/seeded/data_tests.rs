@@ -494,3 +494,45 @@ fn group_decisions_of_one_account_are_not_shown_to_the_next() {
     );
     assert_eq!(s.p.group_decisions(GROUP), Vec::<Decision>::new());
 }
+
+#[test]
+fn reports_to_the_weekly_limit_and_the_queue_come_from_the_synced_rows() {
+    let mut s = Seeded::new("wire");
+    let now = s.now;
+    // 汇报给 and 限额 on the member row (`member.updated` or a PATCH answer).
+    let forge: proto::Member = from(json!({
+        "id": FORGE, "kind": "bot", "name": "Forge", "role": "工程师", "level": "member",
+        "reportsTo": ME, "weeklyBudgetCents": 30000
+    }));
+    let a = s.p.account().expect("signed in");
+    a.client
+        .store()
+        .apply_directory(Some(std::slice::from_ref(&forge)), None, None)
+        .expect("member");
+    // A run that waits for a free machine (`queuedAt`, no machine, `created`).
+    s.apply(vec![run_event(json!({
+        "id": "01SEEDQUEUED", "botId": FORGE, "groupId": GROUP, "topicId": TOPIC,
+        "status": "created", "createdAt": now - 2 * MIN, "updatedAt": now - 2 * MIN,
+        "queuedAt": now - 2 * MIN, "queuePosition": 1
+    }))]);
+    let stats = s.p.member_stats(FORGE).expect("stats");
+    assert_eq!(stats.reports_to.as_deref(), Some(ME));
+    assert_eq!(stats.queued, 1);
+    let extras = s.p.member_extras(FORGE);
+    assert_eq!(extras.budget_cents, Some(30_000));
+    assert_eq!(extras.queued.len(), 1);
+    assert_eq!(
+        extras.queued[0].topic,
+        Some((GROUP.to_string(), TOPIC.to_string()))
+    );
+    assert_eq!(extras.queued[0].queued_at, Some((now - 2 * MIN) as i64));
+    // 首页: in 排队 with its time, not in 正在做.
+    let queue = s.p.queue();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].member_id, FORGE);
+    assert_eq!(queue[0].at, Some((now - 2 * MIN) as i64));
+    assert!(!s.p.active_runs().iter().any(|r| r.id == "01SEEDQUEUED"));
+    // The other bot has no plan.
+    assert_eq!(s.p.member_extras(SCOUT).budget_cents, None);
+    assert_eq!(s.p.member_stats(SCOUT).expect("stats").reports_to, None);
+}
