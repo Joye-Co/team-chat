@@ -263,18 +263,20 @@ impl GroupPage {
         };
         let (glyph, tint, second, badge): (Sym, gpui::Hsla, String, Option<AnyElement>) = match st {
             Standing::OnMe => {
+                // The same words as the 话题 header: `等你审 PR #61`.
                 let (label, pr) = match t.status {
                     TopicStatus::WaitingReview => (
-                        c::GROUP_PAGE_STATUS_REVIEW,
-                        p.topic_changes(&t.group_id, &t.id).map(|ch| {
-                            fill(
-                                crate::copy::desk::DESK_PROOF_PR,
+                        match p.topic_changes(&t.group_id, &t.id) {
+                            Some(ch) => fill(
+                                crate::copy::topic_rail::STATE_REVIEW,
                                 &[("n", &ch.number.to_string())],
-                            )
-                        }),
+                            ),
+                            None => c::GROUP_PAGE_STATUS_REVIEW.to_string(),
+                        },
+                        None::<String>,
                     ),
-                    TopicStatus::WaitingAnswer => (c::GROUP_PAGE_STATUS_DECIDE, None),
-                    _ => (c::GROUP_PAGE_STATUS_ANSWER, None),
+                    TopicStatus::WaitingAnswer => (c::GROUP_PAGE_STATUS_DECIDE.to_string(), None),
+                    _ => (c::GROUP_PAGE_STATUS_ANSWER.to_string(), None),
                 };
                 let mut parts: Vec<String> = pr.into_iter().collect();
                 parts.push(with_note(owner_name));

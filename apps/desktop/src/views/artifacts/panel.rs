@@ -10,7 +10,7 @@ use gpui::{
     PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
     WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Disableable as _, notification::Notification};
+use gpui_component::Disableable as _;
 
 use super::window;
 use crate::ui::NamedButton as _;
@@ -24,7 +24,7 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{self, Sym},
     views::{
-        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify, notify_error, size_text},
+        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify_error, size_text},
         time_text,
     },
 };
@@ -125,16 +125,19 @@ impl TopicOutputs {
             });
             let result = rx.await.unwrap_or(Err(FileError::Other));
             cx.update(|cx| match result {
-                Ok(created) => notify(
-                    Notification::success(fill(
+                // The kit Toast (§2.16), bottom-right.
+                Ok(created) => crate::ui::overlay::Toast::new(
+                    crate::ui::Sym::Done,
+                    fill(
                         ca::CREATED,
                         &[
                             ("title", &created.title),
                             ("n", &created.version.to_string()),
                         ],
-                    )),
-                    cx,
-                ),
+                    ),
+                )
+                .tone(crate::ui::overlay::Tone::Success)
+                .push(cx),
                 Err(e) => notify_error(fill(ca::CREATE_FAILED, &[("reason", error_text(e))]), cx),
             })
         })

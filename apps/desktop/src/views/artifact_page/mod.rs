@@ -1644,17 +1644,22 @@ fn day_label(now: Millis, at: Millis) -> String {
         Local.timestamp_millis_opt(now).single(),
         Local.timestamp_millis_opt(at).single(),
     ) else {
-        return c::ARTIFACTS_DAY_TODAY.to_string();
+        return crate::copy::common::TIME_UNKNOWN.to_string();
     };
+    if at <= 0 {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    }
     if t.date_naive() == n.date_naive() {
         c::ARTIFACTS_DAY_TODAY.to_string()
     } else if t.date_naive().succ_opt() == Some(n.date_naive()) {
         c::ARTIFACTS_DAY_YESTERDAY.to_string()
-    } else {
+    } else if t.year() == n.year() {
         fill(
             c::ARTIFACTS_DAY,
             &[("m", &t.month().to_string()), ("d", &t.day().to_string())],
         )
+    } else {
+        crate::views::shell::day(at)
     }
 }
 

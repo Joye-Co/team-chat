@@ -10,7 +10,7 @@ crate::copy! {
     GROUP_PAGE_COMPOSER = "在{group}里开个话题，或 @ 成员交代…",
     GROUP_PAGE_WAITING_YOU = "{n} 个等你",
     GROUP_PAGE_NEEDS_REVIEW = "需要你审",
-    GROUP_PAGE_NEEDS_REVIEW_PR = "需要你审 PR #{n}",
+    GROUP_PAGE_NEEDS_REVIEW_PR = "等你审 PR #{n}",
     GROUP_PAGE_NEEDS_DECISION = "需要你拍板",
     GROUP_PAGE_NEEDS_ANSWER = "等你回复",
     GROUP_PAGE_WAITING_ON = "等{name} 确认",

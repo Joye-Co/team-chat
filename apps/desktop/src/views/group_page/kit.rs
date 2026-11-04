@@ -254,12 +254,8 @@ pub fn elapsed(now: Millis, since: Millis) -> String {
 
 /// A date as the week lists print it: `11-03`.
 pub fn month_day(at: Millis) -> String {
-    use chrono::{Local, TimeZone as _};
-    Local
-        .timestamp_millis_opt(at)
-        .single()
-        .map(|t| t.format("%m-%d").to_string())
-        .unwrap_or_default()
+    // The shell's zero-safe day (`未知` for no time; the year when it differs).
+    crate::views::shell::day(at)
 }
 
 /// `今天 09:55`, `昨天`, or `10-31` relative to `now`.
@@ -269,8 +265,11 @@ pub fn day_and_time(now: Millis, at: Millis, with_time_yesterday: bool) -> Strin
         Local.timestamp_millis_opt(now).single(),
         Local.timestamp_millis_opt(at).single(),
     ) else {
-        return String::new();
+        return common::TIME_UNKNOWN.to_string();
     };
+    if at <= 0 {
+        return common::TIME_UNKNOWN.to_string();
+    }
     if t.date_naive() == n.date_naive() {
         format!("{} {}", crate::copy::timeline::TODAY, t.format("%H:%M"))
     } else if t.date_naive().succ_opt() == Some(n.date_naive()) {
@@ -280,7 +279,7 @@ pub fn day_and_time(now: Millis, at: Millis, with_time_yesterday: bool) -> Strin
             common::YESTERDAY.to_string()
         }
     } else {
-        t.format("%m-%d").to_string()
+        crate::views::shell::day(at)
     }
 }
 
