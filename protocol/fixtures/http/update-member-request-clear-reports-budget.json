@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "null clears both",
+  "value": {
+    "reportsTo": null,
+    "weeklyBudgetCents": null
+  }
+}

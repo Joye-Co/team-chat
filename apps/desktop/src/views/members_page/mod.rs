@@ -21,6 +21,7 @@ use gpui_component::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
 
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{fill, members_page as c},
@@ -31,12 +32,13 @@ use crate::{
     },
     ui::{
         native::{
-            CompactRow, FormRow, GroupedForm, NativeType as _, PushSize, PushStyle, Segment,
-            Segmented, ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button,
-            determinate_bar, disabled_push, emphasized, metrics, native_colors, push_button,
-            toolbar_item,
+            CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
+            ToolbarItemKind, ToolbarRow, borderless_button, disabled_push, emphasized,
+            native_colors,
+            page::{self, PageLoad, Status},
+            push_button, toolbar_item,
         },
-        sf_symbols::{Sf, Sym, SymSize},
+        sf_symbols::{Sf, Sym},
     },
     views::{
         group_page::{
@@ -190,6 +192,7 @@ impl MembersPage {
         &self,
         entries: &[Entry],
         selected: Option<&str>,
+        load: PageLoad,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -255,11 +258,18 @@ impl MembersPage {
                 });
             }
         });
-        let toolbar = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
-            .subtitle(fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]))
+        let mut row = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
             .leading_inset(rows::toolbar_leading(&self.services, cx))
             .group(filter)
             .group(rows::toolbar_capsule(add, cx));
+        if load == PageLoad::Ready {
+            row = row.subtitle(fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]));
+        }
+        let toolbar = div()
+            .flex_none()
+            .border_b_1()
+            .border_color(k.separator)
+            .child(row);
 
         let shown = |b: Bucket| match self.filter {
             Filter::All => true,
@@ -273,7 +283,7 @@ impl MembersPage {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
-            .pb(px(12.))
+            .pb(tsp::S12)
             .flex()
             .flex_col();
         let mut any = false;
@@ -302,11 +312,11 @@ impl MembersPage {
                 div()
                     .flex_none()
                     .h(px(28.))
-                    .mt(px(6.))
+                    .mt(tsp::S6)
                     .px(rows::LEADING)
                     .flex()
                     .items_end()
-                    .pb(px(4.))
+                    .pb(tsp::S4)
                     .n_section()
                     .text_color(k.secondary)
                     .child(label),
@@ -324,16 +334,42 @@ impl MembersPage {
                 ));
             }
         }
-        if !any {
-            list = list.child(
-                div()
-                    .pt(px(40.))
-                    .flex()
-                    .justify_center()
-                    .n_body()
-                    .text_color(k.secondary)
-                    .child(c::MEMBERS_FILTER_EMPTY),
-            );
+        if load != PageLoad::Ready {
+            list = div()
+                .id("members-list")
+                .flex_1()
+                .min_h(px(0.))
+                .p(tsp::S8)
+                .child(page::skeleton_rows(
+                    "members-sk",
+                    page::SkeletonKind::Row,
+                    6,
+                    cx,
+                ));
+        } else if !any {
+            let this = cx.entity().downgrade();
+            list = list.child(page::page_empty(
+                Sym::Filter,
+                c::MEMBERS_FILTER_EMPTY,
+                c::MEMBERS_FILTER_EMPTY_BODY,
+                vec![
+                    push_button(
+                        "members-filter-all",
+                        c::MEMBERS_FILTER_ALL,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.filter = Filter::All;
+                            cx.notify();
+                        });
+                    })
+                    .into_any_element(),
+                ],
+                cx,
+            ));
         }
         div()
             .flex_none()
@@ -363,38 +399,44 @@ impl MembersPage {
         let p = &self.services.provider;
         let m = &e.member;
         let is_selected = selected == Some(m.id.as_str());
-        let ink = RowInk::new(
-            CompactRow::selection_ink(is_selected, focused, active, cx),
-            cx,
-        );
+        // D10: the selected row is the muted fill, focused or not; never an
+        // inverted row.
+        let _ = (focused, active);
+        let ink = RowInk::new(CompactRow::selection_ink(is_selected, false, false, cx), cx);
         let on_accent = ink.fill == Some(k.accent);
         let mut parts: Vec<String> = m.role.clone().into_iter().collect();
         if me == Some(m.id.as_str()) {
             parts.push(c::MEMBERS_YOU_WORD.to_string());
         }
-        let state: Option<(Sym, gpui::Hsla, String)>;
+        let _ = on_accent;
+        // The state is a StatusBadge on the title line (§2.12), never
+        // colored text.
+        let mut badge: Option<AnyElement> = None;
         match e.bucket {
             Bucket::Waiting => {
-                state = Some((
-                    Sym::NeedsYou,
-                    if on_accent { ink.title } else { k.amber },
-                    c::MEMBERS_WAITS_ON_YOU.to_string(),
+                badge = Some(page::status_badge(
+                    Status::NeedsYou,
+                    c::MEMBERS_WAITS_ON_YOU,
+                    cx,
                 ));
                 parts.extend(e.extras.line.clone().or(e.ask.clone()));
             }
             Bucket::Working => {
-                state = None;
                 let run = e.run.as_ref();
                 let topic = run
                     .and_then(|r| p.topic(&r.group_id, &r.topic_id))
                     .map(|t| t.title);
                 parts.extend(topic);
-                if let Some((n, mm)) = run.and_then(|r| kit::plan_progress(&r.plan)) {
-                    parts.push(format!("{n}/{mm}"));
-                }
+                let text = match run.and_then(|r| kit::plan_progress(&r.plan)) {
+                    Some((n, mm)) => fill(
+                        c::MEMBERS_WORKING_N,
+                        &[("n", &n.to_string()), ("m", &mm.to_string())],
+                    ),
+                    None => c::MEMBERS_WORKING.to_string(),
+                };
+                badge = Some(page::status_badge(Status::Working, text, cx));
             }
             Bucket::Idle => {
-                state = None;
                 parts.push(
                     e.extras
                         .line
@@ -403,7 +445,6 @@ impl MembersPage {
                 );
             }
             Bucket::People => {
-                state = None;
                 parts.push(e.extras.line.clone().unwrap_or_else(|| {
                     if m.online {
                         c::MEMBERS_ONLINE.to_string()
@@ -414,25 +455,8 @@ impl MembersPage {
             }
         }
         parts.retain(|p| !p.trim().is_empty());
-        // The state as a symbol at the trailing edge (§1 rule 4: no pills).
-        let mark = match e.bucket {
-            Bucket::Working => Some(rows::sym(
-                Sym::Live,
-                SymSize::INLINE_SMALL,
-                if on_accent { ink.title } else { k.blue },
-            )),
-            _ => None,
-        };
-        let second = if let Some(st) = state {
-            let rest = parts.join(" · ");
-            rows::state_line(
-                Some(st),
-                Some(rest).filter(|r| !r.is_empty()),
-                ink.secondary,
-            )
-        } else {
-            rows::line(parts.join(" · ")).into_any_element()
-        };
+        let mark = badge;
+        let second = rows::line(parts.join(" · ")).into_any_element();
         let nav = self.services.nav.clone();
         let id = m.id.clone();
         mail_row(
@@ -503,8 +527,9 @@ impl MembersPage {
             .into_any_element()
     }
 
-    /// The Contacts-like card head: avatar 64, the name (Large title), 岗位
-    /// and who they report to, then 交代… (default), 单独问 and 暂停.
+    /// The header block (§2.18): avatar 64, the name (24), one muted line
+    /// (岗位, who they report to, their 群), and the actions at the right:
+    /// 交代 (primary), 单独问 and 暂停 for an AI member, 私聊 for a person.
     fn identity(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
         let p = &self.services.provider;
@@ -534,7 +559,8 @@ impl MembersPage {
                 ],
             ));
         }
-        let buttons = m.is_bot().then(|| {
+        let mut actions: Vec<AnyElement> = Vec::new();
+        if m.is_bot() {
             let run = e.run.clone();
             let services = self.services.clone();
             let side = {
@@ -550,41 +576,13 @@ impl MembersPage {
                     })
                 }
             };
-            div()
-                .mt(px(14.))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .child(
-                    push_button(
-                        "member-hand-over",
-                        c::MEMBERS_HAND_OVER_MORE,
-                        PushStyle::Default,
-                        PushSize::Regular,
-                        cx,
-                    )
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(crate::views::nav::QuickSwitch), cx)
-                    }),
-                )
-                .child(disabled_push(
-                    push_button(
-                        "member-side-chat",
-                        c::MEMBERS_SIDE_CHAT,
-                        PushStyle::Outline,
-                        PushSize::Regular,
-                        cx,
-                    )
-                    .on_click(side),
-                    e.run.is_none(),
-                    cx,
-                ))
-                .child(disabled_push(
+            actions.push(
+                disabled_push(
                     push_button(
                         "member-pause",
                         c::MEMBERS_PAUSE,
                         PushStyle::Outline,
-                        PushSize::Regular,
+                        PushSize::Small,
                         cx,
                     )
                     .on_click(move |_, _, _| {
@@ -597,12 +595,55 @@ impl MembersPage {
                     }),
                     e.run.is_none(),
                     cx,
-                ))
-        });
+                )
+                .into_any_element(),
+            );
+            actions.push(
+                disabled_push(
+                    push_button(
+                        "member-side-chat",
+                        c::MEMBERS_SIDE_CHAT,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(side),
+                    e.run.is_none(),
+                    cx,
+                )
+                .into_any_element(),
+            );
+            actions.push(
+                push_button(
+                    "member-hand-over",
+                    c::MEMBERS_HAND_OVER_SHORT,
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(crate::views::nav::QuickSwitch), cx)
+                })
+                .into_any_element(),
+            );
+        } else if self.services.me().as_deref() != Some(m.id.as_str()) {
+            let id = m.id.clone();
+            actions.push(
+                push_button(
+                    "member-message",
+                    c::MEMBERS_MESSAGE,
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, _, cx| crate::views::nav::open_dm_with(id.clone(), cx))
+                .into_any_element(),
+            );
+        }
         div()
             .flex()
             .items_center()
-            .gap(px(16.))
+            .gap(tsp::S16)
             .child(rows::avatar(Some(m), px(64.), cx))
             .child(
                 div()
@@ -610,6 +651,7 @@ impl MembersPage {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
+                    .gap(tsp::S4)
                     .child(
                         rows::line(m.name.clone())
                             .n_large_title()
@@ -621,20 +663,27 @@ impl MembersPage {
                                 .n_body()
                                 .text_color(k.secondary),
                         )
-                    })
-                    .children(buttons),
+                    }),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(tsp::S8)
+                    .children(actions),
             )
             .into_any_element()
     }
 
-    /// 现在在做: the active run, its step, and what waits in the queue.
-    fn now_section(&self, e: &Entry, cx: &App) -> Option<AnyElement> {
-        if e.run.is_none() && e.extras.queued.is_empty() {
-            return None;
-        }
+    /// 现在在做 (card): the run's 话题 with its StatusBadge and Progress,
+    /// the step in progress, then what waits in the queue. A compact empty
+    /// when nothing runs.
+    fn now_section(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
         let p = &self.services.provider;
-        let mut form = GroupedForm::new().header(c::MEMBERS_NOW_DOING);
+        let mut body = div().flex().flex_col();
+        let mut rows_n = 0;
         if let Some(r) = &e.run {
             let topic = p.topic(&r.group_id, &r.topic_id);
             let group = p
@@ -653,420 +702,572 @@ impl MembersPage {
                 .and_then(|i| p.run_step_times(&r.id).get(i).copied())
                 .or(r.started_at)
                 .unwrap_or(r.created_at);
-            let progress = kit::plan_progress(&r.plan)
-                .map(|(n, m)| format!("{n}/{m}"))
-                .unwrap_or_default();
-            form = form.row(
-                FormRow::new(topic.map(|t| t.title).unwrap_or_default())
-                    .detail(fill(
-                        c::MEMBERS_TOPIC_META,
-                        &[("group", &group), ("name", &by)],
-                    ))
-                    .value(progress, cx),
+            let (badge, value) = match kit::plan_progress(&r.plan) {
+                Some((n, m)) => (
+                    fill(
+                        c::MEMBERS_WORKING_N,
+                        &[("n", &n.to_string()), ("m", &m.to_string())],
+                    ),
+                    if m == 0 { 0. } else { n as f32 / m as f32 },
+                ),
+                None => (c::MEMBERS_WORKING.to_string(), 0.),
+            };
+            let nav = self.services.nav.clone();
+            let (g, t) = (r.group_id.clone(), r.topic_id.clone());
+            body = body.child(
+                page::card_row(
+                    "member-now-topic",
+                    None,
+                    topic.map(|t| t.title).unwrap_or_default(),
+                    Some(fill(c::MEMBERS_TOPIC_META, &[("group", &group), ("name", &by)]).into()),
+                    Some(page::status_badge(Status::Working, badge, cx)),
+                    true,
+                    cx,
+                )
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let (g, t) = (g.clone(), t.clone());
+                    nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                }),
             );
+            body = body.child(div().pb(tsp::S8).child(page::progress(
+                "member-now-progress",
+                value,
+                cx,
+            )));
+            rows_n += 1;
             if let Some(i) = current {
-                form = form.row(
-                    FormRow::new(r.plan[i].text.clone())
-                        .leading(rows::sym(Sym::Live, SymSize::INLINE, k.blue))
-                        .value(kit::elapsed(p.clock_now(), since), cx),
-                );
+                body = body.child(page::card_row(
+                    "member-now-step",
+                    Some(page::row_icon(Sym::Spinner, k.blue)),
+                    r.plan[i].text.clone(),
+                    None,
+                    Some(
+                        div()
+                            .n_callout()
+                            .n_figures()
+                            .text_color(k.secondary)
+                            .child(kit::elapsed(p.clock_now(), since))
+                            .into_any_element(),
+                    ),
+                    e.extras.queued.is_empty(),
+                    cx,
+                ));
             }
         }
-        for q in &e.extras.queued {
-            let mut row = FormRow::new(q.title.clone()).leading(rows::sym(
-                Sym::Waiting,
-                SymSize::INLINE,
-                k.secondary,
+        let nq = e.extras.queued.len();
+        for (i, q) in e.extras.queued.iter().enumerate() {
+            rows_n += 1;
+            body = body.child(page::card_row(
+                SharedString::from(format!("member-queued-{i}")),
+                Some(page::row_icon(Sym::Waiting, k.secondary)),
+                q.title.clone(),
+                q.note.clone().map(Into::into),
+                Some(page::status_badge(Status::Queued, c::MEMBERS_QUEUED, cx)),
+                i + 1 == nq,
+                cx,
             ));
-            row = match &q.note {
-                Some(n) => row.detail(n.clone()).value(c::MEMBERS_QUEUED, cx),
-                None => row.value(c::MEMBERS_QUEUED, cx),
-            };
-            form = form.row(row);
         }
-        Some(form.into_any_element())
+        if rows_n == 0 {
+            body = body.child(page::compact_empty(
+                Sym::Circle,
+                c::MEMBERS_NOW_EMPTY,
+                None,
+                cx,
+            ));
+        }
+        page::titled_card(
+            "member-now",
+            c::MEMBERS_NOW_DOING,
+            None,
+            None,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
-    /// 这周: label/value rows; 成本 against 上限 with a 4 pt bar.
+    /// 这周 (card): three stats (完成的话题, 产出, 成本) and the 成本 Progress
+    /// against the limit.
     fn week_section(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
-        let done = match e.extras.avg_topic_ms {
-            Some(ms) => fill(
-                c::MEMBERS_DONE_VALUE,
-                &[
-                    ("n", &e.stats.done_this_week.to_string()),
-                    ("m", &(ms / 60_000).max(1).to_string()),
-                ],
-            ),
-            None => e.stats.done_this_week.to_string(),
-        };
+        let avg = e.extras.avg_topic_ms.map(|ms| {
+            SharedString::from(fill(
+                c::MEMBERS_AVG_MINUTES,
+                &[("m", &(ms / 60_000).max(1).to_string())],
+            ))
+        });
         let outputs = e
             .stats
             .artifacts_this_week
             .max(e.extras.prs_this_week + e.extras.pages_this_week);
-        let outputs = fill(
-            c::MEMBERS_OUTPUTS_VALUE,
+        let kinds = fill(
+            c::MEMBERS_OUTPUT_KINDS,
             &[
-                ("n", &outputs.to_string()),
-                (
-                    "kinds",
-                    &fill(
-                        c::MEMBERS_OUTPUT_KINDS,
-                        &[
-                            ("prs", &e.extras.prs_this_week.to_string()),
-                            ("pages", &e.extras.pages_this_week.to_string()),
-                        ],
-                    ),
-                ),
+                ("prs", &e.extras.prs_this_week.to_string()),
+                ("pages", &e.extras.pages_this_week.to_string()),
             ],
         );
+        // No run reported a cost: `–`, never a wrong ¥0.
         let currency = e.stats.cost_currency;
-        let cost = e.stats.cost_cents_this_week.unwrap_or(0);
+        let cost = e.stats.cost_cents_this_week;
         let budget = e.extras.budget_cents.filter(|b| *b > 0);
-        let cost_value = match budget {
-            Some(b) => fill(
-                c::MEMBERS_COST_OF,
-                &[
-                    ("cost", &money(cost, currency)),
-                    ("limit", &money(b, currency)),
-                ],
-            ),
-            None => money(cost, currency),
+        let pct = cost
+            .zip(budget)
+            .map(|(c, b)| (c as f32 / b as f32).clamp(0., 1.));
+        let limit_note = match budget {
+            Some(b) => fill(c::MEMBERS_LIMIT, &[("v", &money(b, currency))]),
+            None => c::MEMBERS_NO_LIMIT.to_string(),
         };
-        // No row when no run reported a cost: ¥0 or $0 would be a wrong number.
-        let cost_row = e.stats.cost_cents_this_week.map(|_| {
-            FormRow::new(c::MEMBERS_COST).control(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .children(budget.map(|b| {
-                        let pct = (cost as f32 / b as f32).clamp(0., 1.);
-                        // Over 80 % of the limit the bar shows the problem color.
-                        let color = (pct >= 0.8).then_some(k.amber);
-                        div().w(COST_BAR).child(determinate_bar(pct, color, cx))
-                    }))
-                    .child(
-                        div()
-                            .n_body()
-                            .n_figures()
-                            .text_color(k.secondary)
-                            .child(cost_value),
-                    ),
-            )
-        });
-        GroupedForm::new()
-            .header(c::MEMBERS_THIS_WEEK)
-            .row(FormRow::new(c::MEMBERS_DONE_TOPICS).value(done, cx))
-            .row(FormRow::new(c::MEMBERS_OUTPUTS).value(outputs, cx))
-            .rows(cost_row)
-            .into_any_element()
+        let cost_text = cost
+            .map(|c| money(c, currency))
+            .unwrap_or_else(|| c::MEMBERS_NO_COST.to_string());
+        let strip = div()
+            .flex()
+            .gap(tsp::S16)
+            .child(page::stat(
+                c::MEMBERS_DONE_TOPICS,
+                e.stats.done_this_week.to_string(),
+                avg,
+                cx,
+            ))
+            .child(div().flex_none().w(px(1.)).bg(k.separator))
+            .child(page::stat(
+                c::MEMBERS_OUTPUTS,
+                outputs.to_string(),
+                Some(kinds.into()),
+                cx,
+            ))
+            .child(div().flex_none().w(px(1.)).bg(k.separator))
+            .child(page::stat(
+                c::MEMBERS_COST,
+                cost_text,
+                Some(limit_note.into()),
+                cx,
+            ));
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(tsp::S16)
+            .child(strip)
+            .children(pct.map(|p| page::progress("member-cost", p, cx)));
+        page::titled_card(
+            "member-week",
+            c::MEMBERS_THIS_WEEK,
+            None,
+            None,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
-    /// 最近交付: rows without chevrons; the state is text, never a pill.
-    fn deliveries(&self, e: &Entry, cx: &App) -> Option<AnyElement> {
-        if e.extras.deliveries.is_empty() {
-            return None;
-        }
+    /// 最近交付 (card with a table): 名称, 在哪, 时间, 状态.
+    fn deliveries(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
         let p = &self.services.provider;
         let now = p.clock_now();
-        let rows_el: Vec<AnyElement> = e
-            .extras
-            .deliveries
-            .iter()
-            .enumerate()
-            .map(|(i, d)| {
-                let group = d
-                    .topic
-                    .as_ref()
-                    .and_then(|(g, _)| p.groups().into_iter().find(|x| &x.id == g))
-                    .map(|g| g.name);
-                let (glyph, title, meta) = match &d.kind {
-                    DeliveryKind::Pr { number, .. } => (
-                        if d.state == Some(DeliveryState::Merged) {
-                            Sym::Merge
-                        } else {
-                            Sym::PullRequest
-                        },
-                        fill(
-                            c::MEMBERS_PR,
-                            &[("n", &number.to_string()), ("title", &d.title)],
-                        ),
-                        {
-                            let mut line = kit::day_and_time(now, d.at, false);
-                            if let Some(g) = &group {
-                                line = format!("{line} · {g}");
-                            }
-                            line
-                        },
-                    ),
-                    DeliveryKind::Artifact {
-                        artifact_id,
-                        version,
-                    } => {
-                        let kind = p
-                            .artifact(artifact_id)
-                            .map(|a| crate::views::group_page::kind_label(a.summary.kind))
-                            .unwrap_or(crate::copy::group_page::GROUP_PAGE_KIND_PAGE);
-                        (
-                            Sym::Document,
+        let body: AnyElement = if e.extras.deliveries.is_empty() {
+            page::compact_empty(Sym::Document, c::MEMBERS_DELIVERIES_EMPTY, None, cx)
+                .into_any_element()
+        } else {
+            let cols = [
+                page::Col {
+                    header: c::MEMBERS_COL_NAME.into(),
+                    width: None,
+                    right: false,
+                },
+                page::Col {
+                    header: c::MEMBERS_COL_WHERE.into(),
+                    width: Some(px(120.)),
+                    right: false,
+                },
+                page::Col {
+                    header: c::MEMBERS_COL_TIME.into(),
+                    width: Some(px(96.)),
+                    right: true,
+                },
+                page::Col {
+                    header: c::MEMBERS_COL_STATE.into(),
+                    width: Some(px(104.)),
+                    right: true,
+                },
+            ];
+            let rows = e
+                .extras
+                .deliveries
+                .iter()
+                .map(|d| {
+                    let group = d
+                        .topic
+                        .as_ref()
+                        .and_then(|(g, _)| p.groups().into_iter().find(|x| &x.id == g))
+                        .map(|g| g.name);
+                    let (glyph, title, place) = match &d.kind {
+                        DeliveryKind::Pr { number, .. } => (
+                            if d.state == Some(DeliveryState::Merged) {
+                                Sym::Merge
+                            } else {
+                                Sym::PullRequest
+                            },
                             fill(
-                                c::MEMBERS_ARTIFACT,
-                                &[("title", &d.title), ("v", &version.to_string())],
+                                c::MEMBERS_PR,
+                                &[("n", &number.to_string()), ("title", &d.title)],
                             ),
-                            format!("{kind} · {}", kit::day_and_time(now, d.at, false)),
-                        )
-                    }
-                };
-                let state = d.state.map(|s| match s {
-                    DeliveryState::WaitsOnMe => (c::MEMBERS_WAITS_REVIEW_WORD, k.amber),
-                    DeliveryState::Open => (c::MEMBERS_UNMERGED, k.secondary),
-                    DeliveryState::Merged => (c::MEMBERS_MERGED, k.secondary),
-                });
-                let nav = self.services.nav.clone();
-                let kind = d.kind.clone();
-                let topic = d.topic.clone();
-                div()
-                    .id(SharedString::from(format!("member-delivery-{i}")))
-                    .child(
-                        FormRow::new(title)
-                            .detail(meta)
-                            .leading(rows::sym(glyph, SymSize::INLINE, k.secondary))
-                            .when_some(state, |r, (text, color)| {
-                                r.control(div().n_body().text_color(color).child(text))
-                            }),
+                            group.unwrap_or_default(),
+                        ),
+                        DeliveryKind::Artifact {
+                            artifact_id,
+                            version,
+                        } => {
+                            let kind = p
+                                .artifact(artifact_id)
+                                .map(|a| crate::views::group_page::kind_label(a.summary.kind))
+                                .unwrap_or(crate::copy::group_page::GROUP_PAGE_KIND_PAGE);
+                            (
+                                Sym::Document,
+                                fill(
+                                    c::MEMBERS_ARTIFACT,
+                                    &[("title", &d.title), ("v", &version.to_string())],
+                                ),
+                                group
+                                    .map(|g| format!("{g} · {kind}"))
+                                    .unwrap_or(kind.to_string()),
+                            )
+                        }
+                    };
+                    let state = match d.state {
+                        Some(DeliveryState::WaitsOnMe) => {
+                            page::status_badge(Status::NeedsYou, c::MEMBERS_WAITS_REVIEW_WORD, cx)
+                        }
+                        Some(DeliveryState::Open) => {
+                            page::status_badge(Status::Queued, c::MEMBERS_UNMERGED, cx)
+                        }
+                        Some(DeliveryState::Merged) => {
+                            page::status_badge(Status::Done, c::MEMBERS_MERGED, cx)
+                        }
+                        None => page::status_badge(Status::Done, c::MEMBERS_DELIVERED, cx),
+                    };
+                    let name = div()
+                        .min_w(px(0.))
+                        .flex()
+                        .items_center()
+                        .gap(tsp::S8)
+                        .child(div().flex_none().child(page::row_icon(glyph, k.secondary)))
+                        .child(page::cell_text(title, false, cx))
+                        .into_any_element();
+                    let nav = self.services.nav.clone();
+                    let kind = d.kind.clone();
+                    let topic = d.topic.clone();
+                    let click: Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)> =
+                        Box::new(move |_, _, cx| match (&kind, &topic) {
+                            (DeliveryKind::Artifact { artifact_id, .. }, _) => {
+                                let id = artifact_id.clone();
+                                nav.update(cx, |n, cx| n.open_artifact(id, None, cx))
+                            }
+                            (_, Some((g, t))) => {
+                                let (g, t) = (g.clone(), t.clone());
+                                nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                            }
+                            _ => {}
+                        });
+                    (
+                        vec![
+                            name,
+                            page::cell_text(place, true, cx),
+                            div()
+                                .n_figures()
+                                .text_color(k.secondary)
+                                .child(kit::day_and_time(now, d.at, true))
+                                .into_any_element(),
+                            state,
+                        ],
+                        Some(click),
                     )
-                    .on_click(move |_, _, cx| match (&kind, &topic) {
-                        (DeliveryKind::Artifact { artifact_id, .. }, _) => {
-                            let id = artifact_id.clone();
-                            nav.update(cx, |n, cx| n.open_artifact(id, None, cx))
-                        }
-                        (_, Some((g, t))) => {
-                            let (g, t) = (g.clone(), t.clone());
-                            nav.update(cx, |n, cx| n.open_topic(g, t, cx))
-                        }
-                        _ => {}
-                    })
-                    .into_any_element()
-            })
-            .collect();
-        Some(
-            GroupedForm::new()
-                .header(c::MEMBERS_RECENT_DELIVERED)
-                .rows(rows_el)
-                .into_any_element(),
+                })
+                .collect();
+            page::frame(cx)
+                .child(page::table("member-deliveries", &cols, rows, cx))
+                .into_any_element()
+        };
+        page::titled_card(
+            "member-deliveries",
+            c::MEMBERS_RECENT_DELIVERED,
+            None,
+            None,
+            body,
+            None,
+            cx,
         )
+        .into_any_element()
     }
 
-    /// 最近的问题: a red symbol, the problem and `重试` as a small button.
-    fn problems(&self, e: &Entry, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if e.stats.problems.is_empty() {
-            return None;
-        }
-        let k = native_colors(cx);
+    /// 最近的问题 (card): each problem as an Alert with `重试`.
+    fn problems(&self, e: &Entry, cx: &mut Context<Self>) -> AnyElement {
         let now = self.services.provider.clock_now();
         let name = e.member.name.clone();
-        let mut form = GroupedForm::new().header(c::MEMBERS_RECENT_PROBLEMS);
+        let mut body = div().flex().flex_col().gap(tsp::S8);
+        if e.stats.problems.is_empty() {
+            body = body.child(page::compact_empty(
+                Sym::Done,
+                c::MEMBERS_PROBLEMS_EMPTY,
+                None,
+                cx,
+            ));
+        }
         for (i, pr) in e.stats.problems.iter().enumerate() {
             let retried = pr.run_id.as_ref().is_some_and(|r| self.retried.contains(r));
             if retried {
-                form = form.row(
-                    FormRow::new(fill(c::MEMBERS_RETRIED, &[("name", &name)]))
-                        .detail(c::MEMBERS_RETRIED_NOTE)
-                        .leading(rows::sym(Sym::Done, SymSize::INLINE, k.green))
-                        .value(c::MEMBERS_JUST_NOW, cx),
-                );
+                body = body.child(page::page_alert(
+                    SharedString::from(format!("member-problem-{i}")),
+                    page::AlertKind::Info,
+                    fill(c::MEMBERS_RETRIED, &[("name", &name)]),
+                    Some(c::MEMBERS_RETRIED_NOTE.into()),
+                    None,
+                    cx,
+                ));
                 continue;
             }
             let member = e.member.id.clone();
-            let mut row = FormRow::new(pr.text.clone())
-                .detail(format!(
-                    "{} · {}",
-                    c::MEMBERS_STUCK,
-                    kit::day_and_time(now, pr.at, true)
-                ))
-                .leading(rows::sym(Sym::Problem, SymSize::INLINE, k.red));
-            if let Some(run) = pr.run_id.clone() {
-                row = row.control(
-                    push_button(
-                        SharedString::from(format!("member-retry-{i}")),
-                        c::MEMBERS_RETRY,
-                        PushStyle::Outline,
-                        PushSize::Small,
-                        cx,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let rx = this.services.provider.retry_member_problem(&member, &run);
-                        let run = run.clone();
-                        cx.spawn(async move |this, cx| {
-                            if let Ok(Ok(())) = rx.await {
-                                let _ = this.update(cx, |this, cx| {
-                                    this.retried.insert(run);
-                                    cx.notify();
-                                });
-                            }
-                        })
-                        .detach();
-                    })),
-                );
-            }
-            form = form.row(row);
-        }
-        Some(form.into_any_element())
-    }
-
-    /// 在哪干活: the team computer (or cloud runner) the member works on.
-    fn workplace(&self, e: &Entry, window: &Window, cx: &App) -> Option<AnyElement> {
-        let mc = e.stats.machine.as_ref()?;
-        let k = native_colors(cx);
-        let (state, dot) = if mc.busy {
-            (c::MEMBERS_IN_USE, Some(k.blue))
-        } else if mc.online {
-            (c::MEMBERS_MACHINE_IDLE, Some(k.green))
-        } else {
-            (c::MEMBERS_MACHINE_OFFLINE, None)
-        };
-        let mut detail = state.to_string();
-        if let Some(pct) = mc.disk_used_pct {
-            detail = format!("{detail} · {} {pct}%", c::MEMBERS_DISK);
-        }
-        let open = e.run.clone().map(|r| {
-            let nav = self.services.nav.clone();
-            borderless_button(
-                "member-see-computer",
-                Sf::Open,
-                fill(c::MEMBERS_SEE_COMPUTER, &[("name", &e.member.name)]),
-                window,
-                cx,
-            )
-            .on_click(move |_, _, cx| {
-                let r = r.clone();
-                nav.update(cx, |nav, cx| {
-                    nav.open_topic(r.group_id, r.topic_id, cx);
-                    nav.set_right_pane(RightPane::Live(r.id), cx);
-                })
-            })
-        });
-        let mut row = FormRow::new(mc.name.clone()).detail(detail).leading(
-            div()
-                .relative()
-                .child(rows::sym(
-                    machine_sym(&mc.name),
-                    SymSize::SIDEBAR,
-                    k.secondary,
-                ))
-                .children(dot.map(|d| {
-                    div()
-                        .absolute()
-                        .right(px(-2.))
-                        .bottom(px(-1.))
-                        .size(px(7.))
-                        .rounded_full()
-                        .bg(d)
-                })),
-        );
-        if let Some(b) = open {
-            row = row.control(b);
-        }
-        Some(
-            GroupedForm::new()
-                .header(c::MEMBERS_WHERE)
-                .row(row)
-                .into_any_element(),
-        )
-    }
-
-    fn approvals(&self, e: &Entry, cx: &App) -> Option<AnyElement> {
-        if e.stats.needs_approval.is_empty() {
-            return None;
-        }
-        let k = native_colors(cx);
-        let services = self.services.clone();
-        Some(
-            GroupedForm::new()
-                .header(c::MEMBERS_NEEDS_APPROVAL)
-                .rows(e.stats.needs_approval.iter().map(|a| {
-                    FormRow::new(a.clone()).leading(rows::sym(
-                        Sym::Lock,
-                        SymSize::INLINE,
-                        k.secondary,
-                    ))
+            let retry = pr.run_id.clone().map(|run| {
+                push_button(
+                    SharedString::from(format!("member-retry-{i}")),
+                    c::MEMBERS_RETRY,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let rx = this.services.provider.retry_member_problem(&member, &run);
+                    let run = run.clone();
+                    cx.spawn(async move |this, cx| {
+                        if let Ok(Ok(())) = rx.await {
+                            let _ = this.update(cx, |this, cx| {
+                                this.retried.insert(run);
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .detach();
                 }))
-                .footer(fill(c::MEMBERS_APPROVAL_NOTE, &[("name", &e.member.name)]))
-                .below(
-                    push_button(
-                        "member-approvals-edit",
-                        c::MEMBERS_EDIT_MORE,
-                        PushStyle::Outline,
-                        PushSize::Regular,
+                .into_any_element()
+            });
+            body = body.child(page::page_alert(
+                SharedString::from(format!("member-problem-{i}")),
+                page::AlertKind::Error,
+                pr.text.clone(),
+                Some(
+                    format!(
+                        "{} · {}",
+                        c::MEMBERS_STUCK,
+                        kit::day_and_time(now, pr.at, true)
+                    )
+                    .into(),
+                ),
+                retry,
+                cx,
+            ));
+        }
+        page::titled_card(
+            "member-problems",
+            c::MEMBERS_RECENT_PROBLEMS,
+            None,
+            None,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
+    }
+
+    /// 在哪干活 (card): the team computer (or cloud runner) with its
+    /// StatusBadge and a way to watch it.
+    fn workplace(&self, e: &Entry, window: &Window, cx: &App) -> AnyElement {
+        let body: AnyElement = match e.stats.machine.as_ref() {
+            None => page::compact_empty(Sym::Computer, c::MEMBERS_WHERE_EMPTY, None, cx)
+                .into_any_element(),
+            Some(mc) => {
+                let badge = if mc.busy {
+                    page::status_badge(Status::Working, c::MEMBERS_IN_USE, cx)
+                } else if mc.online {
+                    page::status_badge(Status::Online, c::MEMBERS_MACHINE_IDLE, cx)
+                } else {
+                    page::status_badge(Status::Offline, c::MEMBERS_MACHINE_OFFLINE, cx)
+                };
+                let detail = mc
+                    .disk_used_pct
+                    .map(|pct| SharedString::from(format!("{} {pct}%", c::MEMBERS_DISK)));
+                let open = e.run.clone().map(|r| {
+                    let nav = self.services.nav.clone();
+                    borderless_button(
+                        "member-see-computer",
+                        Sf::Open,
+                        fill(c::MEMBERS_SEE_COMPUTER, &[("name", &e.member.name)]),
+                        window,
                         cx,
                     )
                     .on_click(move |_, _, cx| {
-                        crate::app::open_settings_window(services.clone(), cx)
-                    }),
+                        let r = r.clone();
+                        nav.update(cx, |nav, cx| {
+                            nav.open_topic(r.group_id, r.topic_id, cx);
+                            nav.set_right_pane(RightPane::Live(r.id), cx);
+                        })
+                    })
+                    .into_any_element()
+                });
+                page::card_row(
+                    "member-machine",
+                    Some(page::icon_box(machine_sym(&mc.name), None, cx)),
+                    mc.name.clone(),
+                    detail,
+                    Some(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(tsp::S8)
+                            .child(badge)
+                            .children(open)
+                            .into_any_element(),
+                    ),
+                    true,
+                    cx,
                 )
-                .into_any_element(),
-        )
+                .into_any_element()
+            }
+        };
+        page::titled_card("member-where", c::MEMBERS_WHERE, None, None, body, None, cx)
+            .into_any_element()
     }
 
-    fn tools(&self, e: &Entry, cx: &App) -> Option<AnyElement> {
-        if e.extras.tools.is_empty() {
-            return None;
-        }
-        Some(
-            GroupedForm::new()
-                .header(c::MEMBERS_TOOLS)
-                .rows(e.extras.tools.iter().map(|t| {
-                    let mut row = FormRow::new(t.name.clone());
-                    if let Some(d) = &t.detail {
-                        row = row.detail(d.clone());
-                    }
-                    if let Some(a) = &t.access {
-                        row = row.value(a.clone(), cx);
-                    }
-                    row
+    /// 需要你批准的事 (card): the list, the note as the description and
+    /// `修改…` in the footer.
+    fn approvals(&self, e: &Entry, cx: &App) -> AnyElement {
+        let k = native_colors(cx);
+        let services = self.services.clone();
+        let n = e.stats.needs_approval.len();
+        let body: AnyElement = if n == 0 {
+            page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_EMPTY, None, cx).into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .children(e.stats.needs_approval.iter().enumerate().map(|(i, a)| {
+                    page::card_row(
+                        SharedString::from(format!("member-approval-{i}")),
+                        Some(page::row_icon(Sym::Lock, k.secondary)),
+                        a.clone(),
+                        None,
+                        None,
+                        i + 1 == n,
+                        cx,
+                    )
                 }))
-                .into_any_element(),
+                .into_any_element()
+        };
+        let edit = push_button(
+            "member-approvals-edit",
+            c::MEMBERS_EDIT_MORE,
+            PushStyle::Outline,
+            PushSize::Small,
+            cx,
         )
+        .on_click(move |_, _, cx| crate::app::open_settings_window(services.clone(), cx));
+        page::titled_card(
+            "member-approvals",
+            c::MEMBERS_NEEDS_APPROVAL,
+            Some(fill(c::MEMBERS_APPROVAL_NOTE, &[("name", &e.member.name)]).into()),
+            Some(edit.into_any_element()),
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
-    fn decisions(&self, e: &Entry, cx: &App) -> Option<AnyElement> {
-        if e.extras.decisions.is_empty() {
-            return None;
-        }
+    /// 能用的工具 (card).
+    fn tools(&self, e: &Entry, cx: &App) -> AnyElement {
+        let k = native_colors(cx);
+        let n = e.extras.tools.len();
+        let body: AnyElement = if n == 0 {
+            page::compact_empty(Sym::General, c::MEMBERS_TOOLS_EMPTY, None, cx).into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .children(e.extras.tools.iter().enumerate().map(|(i, t)| {
+                    page::card_row(
+                        SharedString::from(format!("member-tool-{i}")),
+                        None,
+                        t.name.clone(),
+                        t.detail.clone().map(Into::into),
+                        t.access.clone().map(|a| {
+                            div()
+                                .n_callout()
+                                .text_color(k.secondary)
+                                .child(a)
+                                .into_any_element()
+                        }),
+                        i + 1 == n,
+                        cx,
+                    )
+                }))
+                .into_any_element()
+        };
+        page::titled_card("member-tools", c::MEMBERS_TOOLS, None, None, body, None, cx)
+            .into_any_element()
+    }
+
+    /// 用到的决定 (card).
+    fn decisions(&self, e: &Entry, cx: &App) -> AnyElement {
+        let k = native_colors(cx);
         let p = &self.services.provider;
         let now = p.clock_now();
-        let rows_el: Vec<AnyElement> = e
-            .extras
-            .decisions
-            .iter()
-            .enumerate()
-            .map(|(i, d)| {
-                let who = p.member(&d.by);
-                let place = match &d.topic_id {
-                    Some(t) => p.topic(&d.group_id, t).map(|t| t.title).unwrap_or_default(),
-                    None => p
-                        .groups()
-                        .into_iter()
-                        .find(|g| g.id == d.group_id)
-                        .map(|g| fill(c::MEMBERS_GROUP_NAME, &[("name", &g.name)]))
-                        .unwrap_or_default(),
-                };
-                let when = crate::views::group_page::short_time(now, d.at);
-                let nav = self.services.nav.clone();
-                let (g, t) = (d.group_id.clone(), d.topic_id.clone());
-                div()
-                    .id(SharedString::from(format!("member-decision-{i}")))
-                    .child(
-                        FormRow::new(d.text.clone())
-                            .detail(format!(
+        let n = e.extras.decisions.len();
+        let body: AnyElement = if n == 0 {
+            page::compact_empty(Sym::Check, c::MEMBERS_DECISIONS_EMPTY, None, cx).into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .children(e.extras.decisions.iter().enumerate().map(|(i, d)| {
+                    let who = p.member(&d.by);
+                    let place = match &d.topic_id {
+                        Some(t) => p.topic(&d.group_id, t).map(|t| t.title).unwrap_or_default(),
+                        None => p
+                            .groups()
+                            .into_iter()
+                            .find(|g| g.id == d.group_id)
+                            .map(|g| fill(c::MEMBERS_GROUP_NAME, &[("name", &g.name)]))
+                            .unwrap_or_default(),
+                    };
+                    let when = crate::views::group_page::short_time(now, d.at);
+                    let nav = self.services.nav.clone();
+                    let (g, t) = (d.group_id.clone(), d.topic_id.clone());
+                    page::card_row(
+                        SharedString::from(format!("member-decision-{i}")),
+                        Some(rows::avatar(who.as_ref(), tsp::S24, cx)),
+                        d.text.clone(),
+                        Some(
+                            format!(
                                 "{} · {place}",
                                 who.as_ref().map(|w| w.name.clone()).unwrap_or_default()
-                            ))
-                            .leading(rows::avatar(who.as_ref(), px(20.), cx))
-                            .value(when, cx),
+                            )
+                            .into(),
+                        ),
+                        Some(
+                            div()
+                                .n_callout()
+                                .n_figures()
+                                .text_color(k.secondary)
+                                .child(when)
+                                .into_any_element(),
+                        ),
+                        i + 1 == n,
+                        cx,
                     )
+                    .cursor_pointer()
                     .on_click(move |_, _, cx| {
                         let g = g.clone();
                         match t.clone() {
@@ -1074,27 +1275,106 @@ impl MembersPage {
                             None => nav.update(cx, |n, cx| n.open_group(g, cx)),
                         }
                     })
-                    .into_any_element()
-            })
-            .collect();
-        Some(
-            GroupedForm::new()
-                .header(c::MEMBERS_DECISIONS)
-                .rows(rows_el)
-                .into_any_element(),
+                }))
+                .into_any_element()
+        };
+        page::titled_card(
+            "member-decisions",
+            c::MEMBERS_DECISIONS,
+            None,
+            None,
+            body,
+            None,
+            cx,
         )
+        .into_any_element()
+    }
+
+    /// The detail body: the header block, a line, then the cards in pairs
+    /// that sit side by side when the pane is wide enough (§2.18) and
+    /// stack when it is not.
+    fn detail_body(&self, e: &Entry, window: &mut Window, cx: &mut Context<Self>) -> gpui::Div {
+        let k = native_colors(cx);
+        let pair = |a: AnyElement, b: Option<AnyElement>| {
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(page::m::GRID_GAP)
+                .child(div().flex_1().min_w(CARD_MIN).flex().flex_col().child(a))
+                .children(b.map(|b| div().flex_1().min_w(CARD_MIN).flex().flex_col().child(b)))
+        };
+        let now = self.now_section(e, cx);
+        let week = e.member.is_bot().then(|| self.week_section(e, cx));
+        let problems = self.problems(e, cx);
+        let workplace = self.workplace(e, window, cx);
+        let approvals = self.approvals(e, cx);
+        let tools = self.tools(e, cx);
+        let deliveries = self.deliveries(e, cx);
+        let decisions = self.decisions(e, cx);
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(page::m::GUTTER)
+            .child(self.identity(e, cx))
+            .child(div().h(px(1.)).bg(k.separator))
+            .child(pair(now, week))
+            .child(deliveries)
+            .child(pair(problems, Some(workplace)))
+            .child(pair(approvals, Some(tools)))
+            .child(decisions)
+    }
+
+    /// The detail while the first sync runs: the header block and two
+    /// cards as skeletons.
+    fn detail_skeleton(&self, cx: &App) -> gpui::Div {
+        use gpui_component::skeleton::Skeleton;
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(page::m::GUTTER)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(tsp::S16)
+                    .child(Skeleton::new().size(px(64.)).rounded_full())
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(tsp::S8)
+                            .child(Skeleton::new().h(tsp::S24).w(px(160.)).rounded(tsp::S8))
+                            .child(Skeleton::new().h(px(14.)).w(px(280.)).rounded(tsp::S8)),
+                    ),
+            )
+            .child(page::skeleton_cards(2, cx))
+            .child(page::skeleton_rows(
+                "member-sk",
+                page::SkeletonKind::Row,
+                3,
+                cx,
+            ))
     }
 }
+
+/// The narrowest card of a detail pair before the pair stacks.
+const CARD_MIN: gpui::Pixels = px(320.);
 
 impl Render for MembersPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         let entries = self.entries();
+        // Only me in the cache: the first sync has not brought the team yet.
+        let load = PageLoad::of(&self.services, entries.len() > 1);
         let selected = self.selected(cx);
-        let list = self.list(&entries, selected.as_deref(), window, cx);
+        let list = self.list(&entries, selected.as_deref(), load, window, cx);
         let entry = selected
             .as_deref()
-            .and_then(|id| entries.iter().find(|e| e.member.id == id));
+            .and_then(|id| entries.iter().find(|e| e.member.id == id))
+            .filter(|_| load == PageLoad::Ready);
         crate::selftest::drawn::mark(
             "members-page",
             format!(
@@ -1103,58 +1383,67 @@ impl Render for MembersPage {
                 entry.map_or("", |e| e.member.name.as_str())
             ),
         );
-        let detail = match entry {
-            None => div()
+        let scroll = |body: gpui::Div| {
+            div()
+                .id("member-detail")
                 .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .px(page::m::EDGE)
+                .pt(page::m::GUTTER)
+                .pb(page::m::GUTTER)
+                .child(body)
+        };
+        let toolbar_band = |toolbar: AnyElement| {
+            div()
+                .flex_none()
+                .border_b_1()
+                .border_color(k.separator)
+                .child(toolbar)
+        };
+        let detail = match (load, entry) {
+            (PageLoad::Ready, None) => div()
+                .flex_1()
+                .min_w(px(0.))
                 .h_full()
                 .flex()
-                .items_center()
-                .justify_center()
-                .n_body()
-                .text_color(k.secondary)
-                .child(c::MEMBERS_PICK)
+                .flex_col()
+                .child(toolbar_band(ToolbarRow::new("").into_any_element()))
+                .child(page::page_empty(
+                    Sym::Members,
+                    c::MEMBERS_PICK,
+                    c::MEMBERS_PICK_BODY,
+                    Vec::new(),
+                    cx,
+                ))
                 .into_any_element(),
-            Some(e) => {
+            (PageLoad::Ready, Some(e)) => {
                 let toolbar = self.detail_toolbar(e, window, cx);
-                let mut sections: Vec<AnyElement> = vec![self.identity(e, cx)];
-                sections.extend(self.now_section(e, cx));
-                if e.member.is_bot() {
-                    sections.push(self.week_section(e, cx));
-                }
-                sections.extend(self.deliveries(e, cx));
-                sections.extend(self.problems(e, cx));
-                sections.extend(self.workplace(e, window, cx));
-                sections.extend(self.approvals(e, cx));
-                sections.extend(self.tools(e, cx));
-                sections.extend(self.decisions(e, cx));
+                let body = self.detail_body(e, window, cx);
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(toolbar)
-                    .child(
-                        div()
-                            .id("member-detail")
-                            .flex_1()
-                            .min_h(px(0.))
-                            .overflow_y_scroll()
-                            // The shared leading inset (§2): the detail
-                            // starts on the same edge as the list's rows.
-                            .px(rows::LEADING)
-                            .pt(px(4.))
-                            .pb(px(32.))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .max_w(DETAIL_MEASURE)
-                                    .flex()
-                                    .flex_col()
-                                    .gap(metrics::GROUP_GAP)
-                                    .children(sections),
-                            ),
-                    )
+                    .child(toolbar_band(toolbar))
+                    .child(scroll(body))
+                    .into_any_element()
+            }
+            (load, _) => {
+                let mut body = div().flex().flex_col().gap(page::m::GUTTER);
+                if load == PageLoad::Failed {
+                    body = body.child(page::load_failed("members", &self.services, cx));
+                }
+                body = body.child(self.detail_skeleton(cx));
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(toolbar_band(ToolbarRow::new("").into_any_element()))
+                    .child(scroll(body))
                     .into_any_element()
             }
         };

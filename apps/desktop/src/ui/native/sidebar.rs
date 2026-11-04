@@ -147,6 +147,15 @@ pub struct SidebarRow {
     count: Option<u32>,
     inactive: Option<bool>,
     on_click: Option<Click>,
+    // --- v13/ux-pages ---
+    /// The right column as one element (a count pill or a StatusBadge).
+    trailing_el: Option<AnyElement>,
+    /// A row that opens to child rows: `Some(open)`. Open shows the
+    /// chevron in the right column; closed shows it on hover.
+    disclosure: Option<bool>,
+    /// A collapsed tail (`空闲 · 3`): the row at 70 % opacity.
+    dim: bool,
+    // --- end v13/ux-pages ---
 }
 
 impl SidebarRow {
@@ -162,8 +171,32 @@ impl SidebarRow {
             count: None,
             inactive: None,
             on_click: None,
+            trailing_el: None,
+            disclosure: None,
+            dim: false,
         }
     }
+
+    // --- v13/ux-pages ---
+    /// The right column as one element: a count pill or a StatusBadge
+    /// (COMPLETENESS.md §2.1, §2.12).
+    pub fn trailing_element(mut self, el: impl IntoElement) -> Self {
+        self.trailing_el = Some(el.into_any_element());
+        self
+    }
+
+    /// The row opens to child rows; `open` says whether it is open now.
+    pub fn disclosure(mut self, open: bool) -> Self {
+        self.disclosure = Some(open);
+        self
+    }
+
+    /// A collapsed tail item, drawn at 70 % opacity.
+    pub fn dim(mut self, dim: bool) -> Self {
+        self.dim = dim;
+        self
+    }
+    // --- end v13/ux-pages ---
 
     pub fn symbol(mut self, sf: Sf) -> Self {
         self.leading = RowLeading::Symbol(sf, None);
@@ -249,8 +282,71 @@ impl RenderOnce for SidebarRow {
             }
             RowLeading::Element(el) => Some(el),
         };
+        // The right column: the chevron of an open row; else the element
+        // (or nothing), with the chevron fading in on hover.
+        let chevron = |open: bool| {
+            symbol(
+                if open {
+                    Sf::ChevronDown
+                } else {
+                    Sf::ChevronRight
+                },
+                px(11.),
+                Weight::Semibold,
+                k.secondary,
+                window,
+            )
+        };
+        // A row with a disclosure keeps its count in the right column, where
+        // the chevron replaces it on hover.
+        let (count, trailing_el) = match (self.disclosure, self.trailing_el, self.count) {
+            (Some(_), None, Some(n)) => (None, Some(count_capsule(n, cx).into_any_element())),
+            (_, el, n) => (n, el),
+        };
+        let right: Option<AnyElement> = match (self.disclosure, trailing_el) {
+            (Some(true), _) => Some(
+                div()
+                    .flex_none()
+                    .min_w(px(16.))
+                    .flex()
+                    .justify_end()
+                    .child(chevron(true))
+                    .into_any_element(),
+            ),
+            (Some(false), el) => Some(
+                div()
+                    .flex_none()
+                    .relative()
+                    .min_w(px(16.))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .children(el.map(|el| {
+                        div()
+                            .group_hover(SIDEBAR_ROW_GROUP, |s| s.opacity(0.))
+                            .child(el)
+                    }))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .right_0()
+                            .flex()
+                            .items_center()
+                            .opacity(0.)
+                            .group_hover(SIDEBAR_ROW_GROUP, |s| s.opacity(1.))
+                            .child(chevron(false)),
+                    )
+                    .into_any_element(),
+            ),
+            (None, el) => el,
+        };
         div()
             .id(self.id)
+            .group(SIDEBAR_ROW_GROUP)
+            .when(self.dim, |d| d.opacity(0.7))
             .flex_none()
             .h(metrics::SIDEBAR_ROW)
             .mx(metrics::SIDEBAR_ROW_INSET)
@@ -301,24 +397,8 @@ impl RenderOnce for SidebarRow {
                         .child(div().size(px(6.)).rounded_full().bg(color)),
                 )
             })
-            .when_some(self.count, |d, n| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .h(px(16.))
-                        .min_w(px(16.))
-                        .px(px(5.))
-                        .rounded_full()
-                        .bg(k.quaternary)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .n_subheadline()
-                        .n_figures()
-                        .text_color(k.secondary)
-                        .child(crate::ui::chip::CountBadge::cap(n)),
-                )
-            })
+            .when_some(count, |d, n| d.child(count_capsule(n, cx)))
+            .children(right)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
             })
@@ -430,3 +510,12 @@ impl RenderOnce for SidebarFooter {
             )
     }
 }
+
+/// The sidebar count: the count pill (20, `muted` fill, tabular figures).
+fn count_capsule(n: u32, _cx: &App) -> gpui::Div {
+    // COMPLETENESS.md §1.8: the one count pill.
+    div().flex_none().child(super::badge::CountPill::new(n))
+}
+
+/// The hover group of a sidebar row (its disclosure chevron).
+const SIDEBAR_ROW_GROUP: &str = "sidebar-row";

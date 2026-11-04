@@ -20,6 +20,7 @@ import { getMember, isGroupMember } from "../core/db";
 import { ApiError, unwrap } from "../core/errors";
 import { ulid } from "../core/ids";
 import { registerRoute } from "../core/registry";
+import { membersChanged } from "../core/routes";
 import { type WriterContext, addArtifactVersionAs, artifactGroupOf, completeFile, createArtifactAs, reserveFile } from "../files/routes";
 import { toMachine } from "./dispatch";
 import { deskStub, linkStub } from "./env";
@@ -104,6 +105,7 @@ export function registerBotRoutes(): void {
         ),
         auditStatement(env.DB, a, { action: "bot.runner.set", target: params.id, details: { ...req } }, now),
       ]);
+      await membersChanged(env, [params.id]);
       return loadRunner(env.DB, params.id);
     },
   });
@@ -129,6 +131,7 @@ export function registerBotRoutes(): void {
         auditStatement(env.DB, auth as AuthContext, { action: "bot.runner.delete", target: params.id }),
       ]);
       if (!res[0].meta.changes) throw new ApiError("not_found", "bot is not runner-backed");
+      await membersChanged(env, [params.id]);
       return { ok: true };
     },
   });

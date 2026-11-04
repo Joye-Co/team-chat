@@ -167,6 +167,23 @@ pub fn rise<E: IntoElement + Styled + 'static>(
     })
 }
 
+/// A message that arrives while its 话题 is open: it rises
+/// [`motion::RISE`] with opacity over [`motion::SLOW`] on the out curve.
+/// With Reduce motion only the fade stays (§12). First paint never rises.
+pub fn arrive<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    enter(
+        id,
+        motion::SLOW,
+        element,
+        |el, t| el.relative().top(motion::RISE * (1. - t)),
+        cx,
+    )
+}
+
 /// A pane or the side chat enters: opacity plus [`motion::PANE_TRAVEL`] from
 /// the right over [`motion::PANE_ENTER`], once per `id`.
 pub fn pane_enter<E: IntoElement + Styled + 'static>(

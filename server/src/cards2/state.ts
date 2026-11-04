@@ -26,10 +26,37 @@ import { privacyOf } from "./privacy";
 export type MemberInfo = { name: string; kind: "human" | "bot"; level: "owner" | "member"; deactivated: boolean };
 export type Directory = Map<string, MemberInfo>;
 
+/**
+ * GAPS PC-16: every Card v2 send, edit and patch reads the directory. It is kept for
+ * DIRECTORY_TTL_MS per isolate (rooms in one isolate share it) and read again when a member of
+ * the room is not in it. A change of a member (name, level, deactivation, runner) drops it in the
+ * rooms of the member's groups at once (`cards.directoryChanged`, members-changed hook), so a
+ * demoted owner is not named by `ask.from: ["owners"]` after the change returned.
+ */
+const DIRECTORY_TTL_MS = 60_000;
+let cachedDirectory: { at: number; dir: Directory } | null = null;
+const forgetHooks: (() => void)[] = [];
+
+/** Also run `fn` when the directory is dropped (a feature's own member cache). */
+export function onDirectoryForget(fn: () => void): void {
+  forgetHooks.push(fn);
+}
+
+/** Drops the cached directory of this isolate. */
+export function forgetDirectory(): void {
+  cachedDirectory = null;
+  for (const f of forgetHooks) f();
+}
+
 /** Every member of the server (small teams), for names, kinds and levels. */
 export async function directory(room: RoomContext): Promise<Directory> {
+  const now = Date.now();
+  const c = cachedDirectory;
+  if (c && now - c.at < DIRECTORY_TTL_MS && room.memberIds().every((id) => c.dir.has(id))) return c.dir;
   const rows = await listMembers(room.env.DB);
-  return new Map(rows.map((r) => [r.id, { name: r.name, kind: r.kind, level: r.level, deactivated: !!r.deactivated }]));
+  const dir: Directory = new Map(rows.map((r) => [r.id, { name: r.name, kind: r.kind, level: r.level, deactivated: !!r.deactivated }]));
+  cachedDirectory = { at: now, dir };
+  return dir;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@
 //! | --- | --- | --- |
 //! | [`tokens`] | §3, §4 | colors (light, dark), text styles, metrics, shadows |
 //! | [`toolbar`] | §2, §5.1 | toolbar row (title, subtitle), glass groups |
+//! | [`badge`] | COMPLETENESS §2.12 | the outline status badge |
 //! | [`buttons`] | §5.1–§5.3 | push, pop-up, pull-down, square pair, borderless, toolbar items |
 //! | [`sidebar`] | §2, §9.1 | floating panel, section headers, 32 pt rows |
 //! | [`form`] | §5.6, §8 | grouped forms, form rows, inline value field |
@@ -35,7 +36,9 @@ pub mod tokens;
 pub mod toolbar;
 
 #[allow(unused_imports)]
-pub use badge::{Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge};
+pub use badge::{
+    Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge, StatusKind, status_badge,
+};
 #[allow(unused_imports)]
 pub use blocks::{
     Card, Column, LIST_TITLE_INSET, ListRow, SectionTitle, card_surface, description_row,
@@ -93,3 +96,8 @@ pub mod cards;
 /// (§9.7), the bordered list of a sheet and the app icon.
 pub mod overlays;
 // --- end v12/overlays ---
+// --- v13/ux-pages ---
+/// Page parts (COMPLETENESS.md §2.3–§2.18): section headers, framed lists,
+/// KPI cards, StatusBadge, Alert, Empty and skeleton states.
+pub mod page;
+// --- end v13/ux-pages ---

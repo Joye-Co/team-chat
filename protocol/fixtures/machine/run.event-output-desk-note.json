@@ -1,0 +1,19 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "chat-run desk note: the bot's desk note in the run's group",
+  "value": {
+    "t": "run.event",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 13,
+    "at": 1762128000000,
+    "event": {
+      "type": "output",
+      "outputId": "o2",
+      "op": "desk.note",
+      "body": {
+        "text": "今天先把 1.1 发出去"
+      }
+    }
+  }
+}

@@ -388,18 +388,22 @@ pub fn sym_toolbar_item(
     name: impl Into<gpui::SharedString>,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use gpui_component::button::{Button, ButtonVariants as _};
-    let k = native_colors(cx);
-    let name = name.into();
-    Button::new(id)
-        .custom(super::borderless_variant(cx))
-        .with_size(metrics::TOOLBAR_ITEM)
-        .size(metrics::TOOLBAR_ITEM)
-        .p_0()
-        .rounded(metrics::TOOLBAR_ITEM / 2.)
-        .accessibility_label(name.clone())
-        .tooltip(name)
-        .child(sym.icon(SymSize::TOOLBAR).text_color(k.label))
+    // D4: the 32 ghost square of `toolbar_item`.
+    super::toolbar_item_sym(id, sym, name, false, true, cx)
+}
+
+/// A toolbar item that turns a view on and off (开发者视图): while on, the
+/// symbol sits in the 28 pt `selection` pill, like the inspector toggle
+/// (§5.1 Toggled). The name is the tooltip and what VoiceOver reads.
+pub fn sym_toolbar_toggle(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<gpui::SharedString>,
+    on: bool,
+    cx: &App,
+) -> gpui_component::button::Button {
+    // D4: a 32 ghost square; while on, the `muted` fill.
+    super::toolbar_item_sym(id, sym, name, on, true, cx)
 }
 
 /// A bar on `fill`, radius 12 (§9.2 decision bar): the state symbol, a

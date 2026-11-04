@@ -183,6 +183,14 @@ ALTER TABLE members ADD COLUMN character TEXT;
         name: "asks-1",
         sql: super::v11::MIGRATION_SQL_ASKS,
     },
+    // 1.1: 汇报给 and the weekly spending limit of a member. Old rows read as NULL: none.
+    Migration {
+        name: "members-2",
+        sql: r#"
+ALTER TABLE members ADD COLUMN reports_to TEXT;
+ALTER TABLE members ADD COLUMN weekly_budget_cents INTEGER;
+"#,
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

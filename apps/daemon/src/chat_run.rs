@@ -49,6 +49,8 @@ const MAX_SOCKET_PATH: usize = 100;
 const MAX_NOTE: usize = 120;
 /// `artifact.reply` decline message limit.
 const MAX_DECLINE: usize = 200;
+/// Desk note limit (protocol `MAX_DESK_NOTE_CHARS`; the server counts after trimming).
+const MAX_DESK_NOTE: usize = 140;
 
 const OPS: &[&str] = &[
     output_op::CARD_POST,
@@ -56,6 +58,7 @@ const OPS: &[&str] = &[
     output_op::INTERACTION_RESOLVE,
     output_op::ARTIFACT_DATA,
     output_op::ARTIFACT_REPLY,
+    output_op::DESK_NOTE,
 ];
 
 /// The note the CLI gets in its system prompt (Claude Code `--append-system-prompt`, Codex
@@ -68,7 +71,9 @@ answer in the group, use the `chat-run` command (on PATH): `chat-run card post -
 [--cause <eventId>]`, `chat-run card patch --message <messageId> --base-rev <rev> --ops ops.json \
 [--cause <eventId>]`, `chat-run resolve --event <eventId> --result ignored|failed [--note <text>]`, \
 `chat-run artifact data --artifact <id> --version <n> --file data.json [--cause <eventId>]`, \
-`chat-run artifact reply --event <eventId> --file reply.json` or `--decline <text>`. To deliver a \
+`chat-run artifact reply --event <eventId> --file reply.json` or `--decline <text>`. `chat-run desk \
+note --text <text>` sets your one-line priority for today on the group's home page (\"\" clears \
+it). To deliver a \
 page or a file as a 产出 (a deliverable people open in the group), write it in your working \
 folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--file <path>`; \
 `chat-run artifact version --artifact <id> --dir <folder>` adds a version); `chat-run file \
@@ -672,6 +677,7 @@ pub const USAGE: &str = "usage:
   chat-run resolve --event <eventId> --result ignored|failed [--note <text>]
   chat-run artifact data --artifact <artifactId> --version <n> --file data.json [--base-data-rev <n>] [--cause <eventId>]
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
+  chat-run desk note --text <text>
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
@@ -767,6 +773,7 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &args[2..],
             &["event", "file", "decline"],
         ),
+        ["desk", "note"] => (output_op::DESK_NOTE, &args[2..], &["text"]),
         ["file", "upload"] => (
             crate::chat_run_files::FILE_UPLOAD,
             &args[2..],
@@ -893,6 +900,14 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             if let Some(c) = f.opt("cause") {
                 put("cause", json!(c));
             }
+        }
+        output_op::DESK_NOTE => {
+            // `--text ""` clears the note.
+            let text = f.opt("text").ok_or("--text is required")?;
+            if text.trim().chars().count() > MAX_DESK_NOTE {
+                return Err(format!("--text is over {MAX_DESK_NOTE} characters"));
+            }
+            put("text", json!(text));
         }
         _ => {
             put("eventId", json!(f.req("event")?));
@@ -1095,6 +1110,22 @@ mod tests {
 
     fn args(s: &[&str]) -> Vec<String> {
         s.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn desk_note_command_builds_its_body_and_checks_the_length() {
+        let (op, body) =
+            request(&args(&["desk", "note", "--text", "今天先把 1.1 发出去"])).unwrap();
+        assert_eq!(op, "desk.note");
+        assert_eq!(body, json!({ "text": "今天先把 1.1 发出去" }));
+        assert_eq!(
+            request(&args(&["desk", "note", "--text", ""])).unwrap().1,
+            json!({ "text": "" })
+        );
+        assert!(request(&args(&["desk", "note"])).is_err());
+        let long = "长".repeat(141);
+        assert!(request(&args(&["desk", "note", "--text", &long])).is_err());
+        assert!(OPS.contains(&"desk.note"));
     }
 
     #[test]

@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "owner sets who the member reports to and its weekly limit",
+  "value": {
+    "reportsTo": "01JBX0OWNER0000000000000AA",
+    "weeklyBudgetCents": 5000
+  }
+}

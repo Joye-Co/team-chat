@@ -239,6 +239,18 @@ pub struct FocusRequest {
     /// The message's `created_seq` (0 when unknown).
     pub seq: u64,
     pub serial: u64,
+    /// The search that found it, when it was opened from search results:
+    /// the 话题 shows the search bar (query, `2 / 7`, previous and next).
+    pub search: Option<SearchContext>,
+}
+
+/// The hits of one search in one 话题, newest first, and the one shown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchContext {
+    pub query: String,
+    /// `(message id, created_seq)` of every hit in this 话题.
+    pub hits: Vec<(String, u64)>,
+    pub index: usize,
 }
 
 impl Navigation {
@@ -402,6 +414,33 @@ impl Navigation {
         seq: u64,
         cx: &mut Context<Self>,
     ) {
+        self.open_message_found(group_id, topic_id, message_id, seq, None, cx)
+    }
+
+    /// Opens a topic at a search hit: like [`Self::open_message`], with the
+    /// search that found it, so the 话题 shows its search bar.
+    pub fn open_search_hit(
+        &mut self,
+        group_id: GroupId,
+        topic_id: TopicId,
+        search: SearchContext,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((message_id, seq)) = search.hits.get(search.index).cloned() else {
+            return;
+        };
+        self.open_message_found(group_id, topic_id, message_id, seq, Some(search), cx)
+    }
+
+    fn open_message_found(
+        &mut self,
+        group_id: GroupId,
+        topic_id: TopicId,
+        message_id: String,
+        seq: u64,
+        search: Option<SearchContext>,
+        cx: &mut Context<Self>,
+    ) {
         let serial = self.focus.as_ref().map_or(0, |f| f.serial) + 1;
         self.place = Some(Place::Group(group_id.clone()));
         self.topic = Some((group_id.clone(), topic_id.clone()));
@@ -411,6 +450,7 @@ impl Navigation {
             message_id,
             seq,
             serial,
+            search,
         });
         cx.notify();
     }

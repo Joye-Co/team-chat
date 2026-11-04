@@ -524,9 +524,26 @@ impl Switcher {
             }
             Row::Hit(h) => {
                 let h = h.clone();
+                // Every hit of this search in the same 话题, newest first:
+                // the 话题's search bar steps through them.
+                let hits: Vec<(String, u64)> = self
+                    .hits
+                    .iter()
+                    .filter(|x| x.group_id == h.group_id && x.topic_id == h.topic_id)
+                    .map(|x| (x.message_id.clone(), x.seq))
+                    .collect();
+                let index = hits
+                    .iter()
+                    .position(|(id, _)| *id == h.message_id)
+                    .unwrap_or(0);
+                let search = crate::app::SearchContext {
+                    query: self.text(cx),
+                    hits,
+                    index,
+                };
                 window.close_dialog(cx);
                 services.nav.update(cx, |nav, cx| {
-                    nav.open_message(h.group_id, h.topic_id, h.message_id, h.seq, cx)
+                    nav.open_search_hit(h.group_id, h.topic_id, search, cx)
                 });
             }
         }

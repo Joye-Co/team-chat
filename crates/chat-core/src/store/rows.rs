@@ -311,8 +311,7 @@ pub(crate) fn enum_from<T: DeserializeOwned>(s: String) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(s)).map_err(json_err)
 }
 
-pub(crate) const MEMBER_COLS: &str =
-    "id, kind, name, role, level, avatar_url, deactivated, character";
+pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents";
 
 pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
     let deactivated: bool = r.get(6)?;
@@ -329,6 +328,10 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
         deactivated: Some(deactivated),
         // An id this build does not know reads as no character.
         character: character.as_deref().and_then(CharacterId::parse).map(Some),
+        reports_to: r.get(8)?,
+        weekly_budget_cents: r
+            .get::<_, Option<i64>>(9)?
+            .and_then(|c| u64::try_from(c).ok()),
     })
 }
 

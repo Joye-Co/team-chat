@@ -27,6 +27,8 @@ Member = {
   avatarUrl?: string | null
   deactivated?: boolean
   character?: CharacterId | null // the avatar's jojo-friends character; absent or null = none
+  reportsTo?: string           // 1.1: the member it reports to (汇报给); absent = nobody
+  weeklyBudgetCents?: number   // 1.1: weekly spending limit in US cents (限额), 0..100,000,000; absent = none
 }
 
 CharacterId = "jojo" | "h02" | "h03" | "h04" | "h05" | "h06"
@@ -534,7 +536,7 @@ Module: `members.ts` / `members.rs`.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
-| `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated?, character?: CharacterId \| null }` | `Member` |
+| `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated?, character?: CharacterId \| null, reportsTo?: string \| null, weeklyBudgetCents?: number \| null }` | `Member` |
 | `PATCH /v1/groups/:id/prefs` | group member, for self | `UpdateGroupPrefsRequest { muted?, notify? }` | `GroupSummary` |
 | `PATCH /v1/groups/:id` | group member, or an owner | `UpdateGroupRequest { name?, purpose? }` (at least one) | `GroupSummary` |
 
@@ -556,6 +558,12 @@ Rules:
   member's live status (idle, working, needs-input, success, error, offline); members without
   one keep their initial avatar. `welcome`, `directory`, `GET /v1/members` and `GET /v1/me`
   carry it.
+- 1.1 `reportsTo` and `weeklyBudgetCents` are owner only (`forbidden` for a member, also on
+  self); `null` clears them. `reportsTo` must name another existing member (`invalid`
+  otherwise). `weeklyBudgetCents` is whole US cents, 0..100,000,000 (`MAX_WEEKLY_BUDGET_CENTS`).
+  Clients show it next to the member's cost this week (the sum of `usage.costUsd` of its runs);
+  the server stores it and does not stop runs past it in 1.1. Both are audited with
+  `member.update` and pushed like the other fields.
 - Rename (`PATCH /v1/groups/:id`): any member of the group, or an owner who is not in it, may
   rename a group. A DM cannot be renamed (`forbidden`, message "a DM cannot be renamed"). The
   server trims the name and turns every run of whitespace (also full-width spaces and line
@@ -1048,7 +1056,8 @@ GET /v1/groups/:id/desk-notes -> DeskNotesResponse { notes: { memberId, text, at
 ```
 
 Rules: only a bot member of the group sets its own note (`forbidden` for people, `not_found`
-outside the group). The text is normalized like a group name. Readers keep the newest
+outside the group). A runner-backed bot sets it from its run with `chat-run desk note --text …`
+(the `desk.note` output op, machine-protocol.md), in the run's group. The text is normalized like a group name. Readers keep the newest
 `desk.noted` per bot and group; `""` removes it. 1.0.x clients skip the event.
 
 ## Run fields, pause and resume

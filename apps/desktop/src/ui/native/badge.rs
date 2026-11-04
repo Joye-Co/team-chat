@@ -433,3 +433,37 @@ mod tests {
         assert_eq!(edge, k.separator);
     }
 }
+
+/// The run and check states of the topic inspector and the run steps (the
+/// names they had before the one StatusBadge): each maps onto a §2.12
+/// [`BadgeState`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusKind {
+    NeedsYou,
+    Working,
+    Stopping,
+    Queued,
+    Done,
+    Failed,
+    Idle,
+    Pending,
+}
+
+impl StatusKind {
+    pub fn state(self) -> BadgeState {
+        match self {
+            StatusKind::NeedsYou => BadgeState::NeedsYou,
+            StatusKind::Working => BadgeState::Working,
+            StatusKind::Stopping => BadgeState::Stopping,
+            StatusKind::Queued | StatusKind::Pending => BadgeState::Queued,
+            StatusKind::Done => BadgeState::Done,
+            StatusKind::Failed => BadgeState::Failed,
+            StatusKind::Idle => BadgeState::Offline,
+        }
+    }
+}
+
+/// The StatusBadge of a [`StatusKind`].
+pub fn status_badge(kind: StatusKind, text: impl Into<SharedString>, _cx: &App) -> StatusBadge {
+    StatusBadge::new(kind.state(), text)
+}

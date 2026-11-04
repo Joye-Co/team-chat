@@ -113,6 +113,11 @@ impl RailView {
                 cx.notify();
             }),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
+            // An answer made on 首页 changes the 首页 count at once.
+            cx.observe_global::<crate::views::desk::model::DeskAnswers>(|this, cx| {
+                this.cache = None;
+                cx.notify();
+            }),
         ];
         Self {
             _subscriptions: subscriptions,
@@ -188,7 +193,8 @@ impl RailView {
             _ => self.list.reset(entries.len()),
         }
         self.cache = Some(Cache {
-            asks: p.asks_for_me().len(),
+            // One needs-you query for this count and the 首页 subtitle.
+            asks: crate::views::desk::model::waiting_on_me(&self.services, cx),
             groups: model::groups(p.as_ref()),
             entries: Rc::new(entries),
             inputs,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::characters::CharacterId;
 use crate::entities::MemberLevel;
-use crate::limits::{Validation, check_chars, check_name};
+use crate::limits::{Validation, ValidationError, check_chars, check_id, check_name};
 use crate::serde_util::{non_null, nullable};
 
 /// `PATCH /v1/members/:id`. Owner: every field. Self: `name` and `role` only.
@@ -44,7 +44,24 @@ pub struct UpdateMemberRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub character: Option<Option<CharacterId>>,
+    /// 1.1, owner only: another member's id. `Some(None)` = `null` clears it.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reports_to: Option<Option<String>>,
+    /// 1.1, owner only: the weekly spending limit in US cents. `Some(None)` = `null` clears it.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub weekly_budget_cents: Option<Option<u64>>,
 }
+
+/// Largest weekly spending limit (US cents): 1,000,000 USD.
+pub const MAX_WEEKLY_BUDGET_CENTS: u64 = 100_000_000;
 
 impl UpdateMemberRequest {
     pub fn validate(&self) -> Validation {
@@ -53,6 +70,17 @@ impl UpdateMemberRequest {
         }
         if let Some(Some(r)) = &self.role {
             check_chars("role", r, 0, 64)?;
+        }
+        if let Some(Some(id)) = &self.reports_to {
+            check_id("reportsTo", id)?;
+        }
+        if let Some(Some(c)) = self.weekly_budget_cents
+            && c > MAX_WEEKLY_BUDGET_CENTS
+        {
+            return Err(ValidationError {
+                field: "weeklyBudgetCents",
+                message: format!("at most {MAX_WEEKLY_BUDGET_CENTS}"),
+            });
         }
         Ok(())
     }

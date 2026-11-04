@@ -369,6 +369,16 @@ export function registerMemberDeactivated(hook: MemberDeactivatedHook): void {
   memberDeactivatedHooks.push(hook);
 }
 
+/**
+ * Runs after members changed (name, level, deactivation, a new member, a bot's runner), so a
+ * feature can drop what it cached about them. Awaited by the route; errors are logged.
+ */
+export type MembersChangedHook = (env: Env, memberIds: string[]) => Promise<void> | void;
+export const membersChangedHooks: MembersChangedHook[] = [];
+export function registerMembersChanged(hook: MembersChangedHook): void {
+  membersChangedHooks.push(hook);
+}
+
 // ---------------------------------------------------------------------------
 // Cron (scheduled handler) and archive import
 // ---------------------------------------------------------------------------

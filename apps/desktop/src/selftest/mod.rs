@@ -22,6 +22,9 @@
 pub mod capture;
 pub mod clock;
 pub mod drawn;
+// --- v13/ux-pages ---
+pub mod page_states;
+// --- end v13/ux-pages ---
 pub mod scenes;
 pub mod worst_case;
 
@@ -169,6 +172,23 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::V2 => fake::v2::V2Samples::new(),
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
         Start::V2TwoRuns => fake::v2::V2Samples::with_second_run(),
+        // --- v13/ux-pages ---
+        Start::V2Unsynced => page_states::Unsynced::new(
+            fake::v2::V2Samples::new(),
+            crate::data::ConnectionState::Connecting,
+        ),
+        Start::V2Unreachable => page_states::Unsynced::new(
+            fake::v2::V2Samples::new(),
+            crate::data::ConnectionState::Reconnecting {
+                attempt: 3,
+                retry_in_ms: 8_000,
+            },
+        ),
+        Start::V2Bare => page_states::Unsynced::new(
+            fake::v2::V2Samples::new(),
+            crate::data::ConnectionState::Online,
+        ),
+        // --- end v13/ux-pages ---
         // --- inc-refs
         Start::V2Refs => fake::v2::V2Samples::with_refs(),
         Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),

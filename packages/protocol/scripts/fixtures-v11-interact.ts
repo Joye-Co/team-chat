@@ -744,6 +744,13 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     at: T0,
     event: { type: "output", outputId: "o1", op: "card.patch", body: { messageId: M, baseRev: 1, cause: EV(1), ops: [{ op: "remove", id: "note" }] } },
   });
+  ok("machine/run.event-output-desk-note.json", "MachineUpFrame", {
+    t: "run.event",
+    runId: RUN,
+    seq: 13,
+    at: T0,
+    event: { type: "output", outputId: "o2", op: "desk.note", body: { text: "今天先把 1.1 发出去" } },
+  }, "chat-run desk note: the bot's desk note in the run's group");
   ok("machine/run.input-answer-2.1.json", "MachineDownFrame", {
     t: "run.input",
     runId: RUN,

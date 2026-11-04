@@ -50,6 +50,7 @@ fn migrations_are_named_and_run_once() {
             "characters-1",
             "core-1",
             "ext-1",
+            "members-2",
             "v11-1",
             "v11-2",
             "v11-3",
@@ -142,6 +143,31 @@ fn member_characters_are_stored_changed_and_cleared() {
     s.with_reader(|c| c.execute("UPDATE members SET character = 'zz9' WHERE id = 'B1'", []))
         .unwrap();
     assert_eq!(s.member("B1").unwrap().unwrap().character(), None);
+}
+
+#[test]
+fn member_reports_to_and_weekly_budget_are_stored_and_cleared() {
+    let (_d, s) = open();
+    let bot = Member {
+        kind: MemberKind::Bot,
+        reports_to: Some(ALICE.into()),
+        weekly_budget_cents: Some(5000),
+        ..member("B2", "Forge")
+    };
+    s.apply_directory(Some(std::slice::from_ref(&bot)), None, None)
+        .unwrap();
+    let got = s.member("B2").unwrap().unwrap();
+    assert_eq!(got.reports_to.as_deref(), Some(ALICE));
+    assert_eq!(got.weekly_budget_cents, Some(5000));
+    // The server omits both once they are cleared; the directory replaces the row.
+    let cleared = Member {
+        reports_to: None,
+        weekly_budget_cents: None,
+        ..bot
+    };
+    s.apply_directory(Some(&[cleared]), None, None).unwrap();
+    let got = s.member("B2").unwrap().unwrap();
+    assert_eq!((got.reports_to, got.weekly_budget_cents), (None, None));
 }
 
 #[test]

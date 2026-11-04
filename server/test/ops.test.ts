@@ -534,6 +534,110 @@ describe("产出 and files after restore", () => {
     ) as any;
     expect(v3.version.version).toBe(3);
   });
+
+  // GAPS SF-6: restore --from-group gives the copy its own file and 产出 rows and R2 objects, so
+  // its attachments and 产出 open for the target group's members.
+  it("copies files and 产出 into a --from-group copy under new ids, idempotently (copy-files)", async () => {
+    const owner = await createMember({ level: "owner" });
+    const b = await createMember();
+    const gid = await createGroup(owner, [b.id]);
+    const room = roomStub(env, gid);
+    const note = await uploadFile(owner, gid, "附件内容", "a.txt", "text/plain");
+    const root = unwrap(
+      await room.send(gid, actor(owner), {
+        t: "send",
+        rid: "r",
+        groupId: gid,
+        clientMsgId: clientMsgId(),
+        body: "带附件",
+        attachments: [{ fileId: note, name: "a.txt", size: 12, mime: "text/plain", sha256: "x" }],
+      } as any),
+    );
+    const topicId = root.topic!.id;
+    const page = await uploadFile(owner, gid, "<h1>v1</h1>", "index.html", "text/html");
+    const page2 = await uploadFile(owner, gid, "<h1>v2</h1>", "index.html", "text/html");
+    const created = await api("/v1/artifacts", {
+      token: owner.token,
+      body: { groupId: gid, topicId, title: "页面", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: page }] },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const artifactId = created.body.artifact.id as string;
+    const v2 = await api(`/v1/artifacts/${artifactId}/versions`, {
+      token: owner.token,
+      body: { entry: "index.html", files: [{ path: "index.html", fileId: page2 }] },
+    });
+    expect(v2.status, JSON.stringify(v2.body)).toBe(200);
+    await runArchive(env, { skipD1: true });
+
+    // The copy's id map (restore.ts copyIdMap does the same with stable ids).
+    const target = await emptyGroupLike([owner.id, b.id]);
+    const map = new Map<string, string>([[gid, target]]);
+    for (const id of [topicId, root.message.id, artifactId, note, page, page2]) map.set(id, ulid());
+    const remap = (v: unknown): unknown =>
+      typeof v === "string"
+        ? (map.get(v) ?? v)
+        : Array.isArray(v)
+          ? v.map(remap)
+          : v && typeof v === "object"
+            ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, remap(x)]))
+            : v;
+    for (const key of eventFiles(await archivedKeys(`${GROUP_PREFIX}${gid}/`), gid)) {
+      const text = await gunzip(await (await env.FILES.get(key))!.arrayBuffer());
+      const lines = text.split("\n").map((l) => (l.trim() === "" ? l : JSON.stringify(remap(JSON.parse(l)))));
+      const r = await importChunk(target, await gzip(lines.join("\n")));
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    }
+    const pair = (id: string): [string, string] => [id, map.get(id) as string];
+    const lost = ulid();
+    const body = {
+      fromGroup: gid,
+      files: [pair(note), pair(page), pair(page2), [lost, ulid()]],
+      artifacts: [pair(artifactId)],
+      topics: [pair(topicId)],
+    };
+    const path = `/v1/admin/import/groups/${target}/copy-files`;
+    expect((await api(path, { body })).status).toBe(401);
+    expect((await api(path, { headers: { "x-admin-secret": "wrong" }, body })).status).toBe(401);
+    expect((await api(`/v1/admin/import/groups/${gid}/copy-files`, { headers: ADMIN, body })).status).toBe(400);
+    expect((await api(`/v1/admin/import/groups/${ulid()}/copy-files`, { headers: ADMIN, body })).status).toBe(404);
+    expect((await api(path, { headers: ADMIN, body: { ...body, files: Array.from({ length: 51 }, () => [ulid(), ulid()]) } })).status).toBe(400);
+    const copied = await api(path, { headers: ADMIN, body });
+    expect(copied.status, JSON.stringify(copied.body)).toBe(200);
+    expect(copied.body).toEqual({ groupId: target, files: 3, artifacts: 1, bytes: 12 + 11 + 11, missing: 1 });
+    // A re-run keeps the rows and copies no bytes again.
+    const again = await api(path, { headers: ADMIN, body });
+    expect(again.body).toEqual({ groupId: target, files: 3, artifacts: 1, bytes: 0, missing: 1 });
+    const filesRoute = await api(`/v1/admin/import/groups/${target}/files`, { method: "POST", headers: ADMIN });
+    expect(filesRoute.status, JSON.stringify(filesRoute.body)).toBe(200);
+    expect(filesRoute.body.rows).toBe(3);
+
+    // D1 rows of the copy: the target group, the copy's topic, the same name and hash.
+    const row = await env.DB.prepare("SELECT group_id, topic_id, name, sha256, status FROM files WHERE id = ?").bind(map.get(note)).first<any>();
+    const src = await env.DB.prepare("SELECT topic_id, sha256 FROM files WHERE id = ?").bind(note).first<any>();
+    expect(row).toEqual({ group_id: target, topic_id: src.topic_id ? map.get(src.topic_id) : null, name: "a.txt", sha256: src.sha256, status: "ready" });
+    const art = await env.DB.prepare("SELECT group_id, topic_id FROM artifacts WHERE id = ?").bind(map.get(artifactId)).first<any>();
+    expect(art).toEqual({ group_id: target, topic_id: map.get(topicId) });
+
+    // A member of the copy downloads the attachment and opens both versions of the 产出.
+    const file = await api(`/v1/files/${map.get(note)}/content`, { token: b.token });
+    expect(file.status).toBe(200);
+    expect(file.body).toBe("附件内容");
+    const got = await api(`/v1/artifacts/${map.get(artifactId)}`, { token: b.token });
+    expect(got.status, JSON.stringify(got.body)).toBe(200);
+    expect(got.body.artifact).toMatchObject({ id: map.get(artifactId), groupId: target, topicId: map.get(topicId), currentVersion: 2 });
+    for (const [v, html] of [[1, "<h1>v1</h1>"], [2, "<h1>v2</h1>"]] as const) {
+      const f = await api(`/v1/artifacts/${map.get(artifactId)}/versions/${v}/files/index.html`, { token: b.token });
+      expect(f.status).toBe(200);
+      expect(f.body).toBe(html);
+    }
+    // The source keeps its own objects; a member of neither group gets nothing.
+    expect((await api(`/v1/files/${note}/content`, { token: b.token })).body).toBe("附件内容");
+    const stranger = await createMember();
+    expect([403, 404]).toContain((await api(`/v1/files/${map.get(note)}/content`, { token: stranger.token })).status);
+    expect([403, 404]).toContain((await api(`/v1/artifacts/${map.get(artifactId)}`, { token: stranger.token })).status);
+    const audited = await env.DB.prepare("SELECT details FROM audit WHERE action = 'admin.import.copyFiles' AND target = ?").bind(target).all<any>();
+    expect(audited.results).toHaveLength(2);
+  });
 });
 
 describe("archive runs", () => {

@@ -1582,14 +1582,15 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let a = a.clone();
                     button(
                         ctx.id("submit"),
-                        submit.label.clone(),
+                        shown_label(ctx.card, &submit),
                         PushStyle::Default,
                         cx,
                     )
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
                     .into_any_element()
                 } else {
-                    disabled_button(ctx.id("submit"), submit.label.clone(), cx).into_any_element()
+                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx)
+                        .into_any_element()
                 });
                 for x in answers
                     .iter()
@@ -1599,7 +1600,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     items.push(
                         button(
                             ctx.id(format!("act-{}", x.id)),
-                            x.label.clone(),
+                            shown_label(ctx.card, x),
                             PushStyle::Ghost,
                             cx,
                         )
@@ -1664,7 +1665,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 items.push(
                     button(
                         ctx.id("draft-ok"),
-                        submit.label.clone(),
+                        shown_label(ctx.card, &submit),
                         PushStyle::Default,
                         cx,
                     )
@@ -1684,7 +1685,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     items.push(
                         button(
                             ctx.id(format!("act-{}", x.id)),
-                            x.label.clone(),
+                            shown_label(ctx.card, x),
                             PushStyle::Ghost,
                             cx,
                         )
@@ -1716,14 +1717,15 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let a = a.clone();
                     button(
                         ctx.id("submit"),
-                        submit.label.clone(),
+                        shown_label(ctx.card, &submit),
                         PushStyle::Default,
                         cx,
                     )
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
                     .into_any_element()
                 } else {
-                    disabled_button(ctx.id("submit"), submit.label.clone(), cx).into_any_element()
+                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx)
+                        .into_any_element()
                 });
                 link_buttons(&mut items, cx);
                 // --- inc-cards21: the ask's promise at the right ---
@@ -1741,10 +1743,15 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 let kind = style_kind(x, &mut used);
                 let (a, action) = (a.clone(), (*x).clone());
                 items.push(
-                    button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
-                        .disabled(!live)
-                        .on_click(move |_, window, cx| a.press(&action, window, cx))
-                        .into_any_element(),
+                    button(
+                        ctx.id(format!("act-{}", x.id)),
+                        shown_label(ctx.card, x),
+                        kind,
+                        cx,
+                    )
+                    .disabled(!live)
+                    .on_click(move |_, window, cx| a.press(&action, window, cx))
+                    .into_any_element(),
                 );
             }
             link_buttons(&mut items, cx);
@@ -1763,10 +1770,15 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
             for x in &answers {
                 let kind = style_kind(x, &mut used);
                 items.push(
-                    button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
-                        .disabled(true)
-                        .loading(&x.id == action_id)
-                        .into_any_element(),
+                    button(
+                        ctx.id(format!("act-{}", x.id)),
+                        shown_label(ctx.card, x),
+                        kind,
+                        cx,
+                    )
+                    .disabled(true)
+                    .loading(&x.id == action_id)
+                    .into_any_element(),
                 );
             }
             Some(footer_bar(items, cx))
@@ -1826,8 +1838,13 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let (a, action) = (a.clone(), (*x).clone());
                     let reverse = x.kind() == CardActionKind::Submit
                         && x.style.unwrap_or_default() == CardV2ActionStyle::Default;
-                    let mut b = button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
-                        .on_click(move |_, window, cx| a.press(&action, window, cx));
+                    let mut b = button(
+                        ctx.id(format!("act-{}", x.id)),
+                        shown_label(ctx.card, x),
+                        kind,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| a.press(&action, window, cx));
                     if reverse {
                         b = b.icon(ui::icon(Sym::Retry, px(14.), theme::colors(cx).ink));
                     }
@@ -1970,3 +1987,30 @@ pub(crate) fn state_name(s: &CardState) -> &'static str {
         CardState::Info => "info",
     }
 }
+
+// --- v13/ux-pages ---
+/// The title of an answer button: it ends with `…` when pressing it opens
+/// the confirm sheet first (NATIVE.md §5.2, R26), as `press`
+/// decides.
+fn shown_label(card: &CardV2, action: &CardV2Action) -> String {
+    let kind = action.kind();
+    let irreversible = card
+        .ask
+        .as_ref()
+        .and_then(|a| a.irreversible.as_ref())
+        .is_some();
+    let guarded = kind == CardActionKind::Submit
+        && action.style.unwrap_or_default() != CardV2ActionStyle::Default
+        || submit_action(card).is_some_and(|s| s.id == action.id);
+    let asks_first = matches!(kind, CardActionKind::Submit | CardActionKind::Reject)
+        && (kind == CardActionKind::Submit && guarded && irreversible || action.confirm.is_some());
+    if asks_first {
+        crate::copy::fill(
+            crate::copy::desk::DESK_ACTION_MORE,
+            &[("label", &action.label)],
+        )
+    } else {
+        action.label.clone()
+    }
+}
+// --- end v13/ux-pages ---

@@ -105,8 +105,6 @@ pub struct TimelineView {
     show_header: bool,
     /// The v2 style of the 话题 page (`timeline/v2.rs`).
     v2: bool,
-    /// When the open 话题 opened: rows rise in during the first paint.
-    opened_at: Option<Instant>,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
     members: Vec<Member>,
@@ -206,7 +204,16 @@ impl TimelineView {
     pub fn set_v2(&mut self, v2: bool, cx: &mut Context<Self>) {
         if self.v2 != v2 {
             self.v2 = v2;
+            // Rows change height: measure again, but keep the place (a
+            // search hit opened before the page switched style).
+            let following = self.list.is_following_tail();
+            let top = self.list.logical_scroll_top();
             self.list.reset(self.messages.len());
+            if following {
+                self.list.set_follow_mode(FollowMode::Tail);
+            } else {
+                self.list.scroll_to(top);
+            }
             cx.notify();
         }
     }
@@ -241,7 +248,10 @@ impl TimelineView {
                 cx.notify();
             }),
         ];
-        let list = ListState::new(0, ListAlignment::Bottom, px(800.));
+        // Top-aligned and following the tail: a long 话题 opens at its
+        // newest message, a short one reads from its start block at the top
+        // (no blank band above it).
+        let list = ListState::new(0, ListAlignment::Top, px(800.));
         list.set_follow_mode(FollowMode::Tail);
         let visible_end: Rc<Cell<usize>> = Rc::default();
         let end = visible_end.clone();
@@ -250,7 +260,6 @@ impl TimelineView {
             services,
             show_header: true,
             v2: false,
-            opened_at: None,
             open: None,
             topic: None,
             members: Vec::new(),
@@ -316,7 +325,6 @@ impl TimelineView {
             .as_ref()
             .and_then(|(g, t)| self.services.provider.topic(g, t))
             .map_or(0, |t| t.unread);
-        self.opened_at = open.as_ref().map(|_| Instant::now());
         self.open = open;
         self.messages.clear();
         self.list.reset(0);
@@ -685,6 +693,7 @@ impl Render for TimelineView {
                 .into_any_element();
         };
         self.after_scroll(window, cx);
+        self.place_revealed(cx);
         self.keep_ticking(cx);
         // The list lays out after the header: when what it painted changes
         // whether a card is on screen, draw the header again.
@@ -716,11 +725,11 @@ impl Render for TimelineView {
             } else {
                 t::JUMP_LATEST.to_string()
             };
+            // Its own strip under the list, so it never covers a row.
             div()
-                .absolute()
-                .bottom(space::S12)
-                .left_0()
-                .right_0()
+                .flex_none()
+                .pt(space::S8)
+                .pb(space::S4)
                 .flex()
                 .justify_center()
                 .child(
@@ -732,6 +741,7 @@ impl Render for TimelineView {
                     )),
                 )
         });
+        let search_bar = self.render_search_bar(cx);
         let jump_unread = self.first_unread_above().then(|| {
             div()
                 .absolute()
@@ -801,6 +811,7 @@ impl Render for TimelineView {
                 self.show_header
                     .then(|| self.render_header(&topic, window, cx)),
             )
+            .children(search_bar)
             .child(
                 div()
                     .relative()
@@ -809,9 +820,9 @@ impl Render for TimelineView {
                     .child(timeline)
                     .child(fade)
                     .children(loading)
-                    .children(jump_unread)
-                    .children(jump),
+                    .children(jump_unread),
             )
+            .children(jump)
             // The 话题 page shows a member at work as the plan card at the
             // foot of the list (`timeline/plan.rs`), not the pending row.
             .children((!self.v2).then(|| self.render_live(window, cx)).flatten())
@@ -821,6 +832,98 @@ impl Render for TimelineView {
             )
             .children(self.probe_element())
             .into_any_element()
+    }
+}
+
+impl TimelineView {
+    /// The search bar of a 话题 opened at a search hit (COMPLETENESS §2.17):
+    /// 40 pt under the toolbar, the query, `2 / 7`, the previous and next
+    /// hit, and close (back to the newest message).
+    fn render_search_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::{
+            copy::search as sc,
+            ui::native::{NativeType as _, native_colors},
+        };
+        let search = self.focus.search.as_ref()?;
+        let n = native_colors(cx);
+        let total = search.hits.len();
+        let button = |id: &'static str, sym: Sym, name: &'static str, enabled: bool| {
+            ui::native::disabled_push(
+                ui::native::icon_button_sym(id, sym, name, ui::native::IconSize::Small, cx),
+                !enabled,
+                cx,
+            )
+        };
+        let leading = if self.v2 {
+            v2::LEADING
+        } else {
+            theme::CONTENT_GUTTER
+        };
+        Some(
+            div()
+                .flex_none()
+                .h(crate::ui::native::tokens::height::FOOTER_ROW)
+                .pl(leading)
+                .pr(v2::SIDE)
+                .border_b_1()
+                .border_color(n.separator)
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(ui::sym(Sym::Search, ui::SymSize::INLINE, n.secondary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .max_w(px(240.))
+                        .h(theme::size::CHIP)
+                        .px(space::S8)
+                        .rounded(theme::radius::SM)
+                        .bg(n.fill)
+                        .flex()
+                        .items_center()
+                        .n_body()
+                        .text_color(n.label)
+                        .child(div().min_w_0().one_line().child(search.query.clone())),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .flex_none()
+                        .t_meta()
+                        .tnum()
+                        .text_color(n.secondary)
+                        .child(fill(
+                            sc::BAR_POSITION,
+                            &[
+                                ("n", &(search.index + 1).to_string()),
+                                ("total", &total.to_string()),
+                            ],
+                        )),
+                )
+                .child(
+                    button(
+                        "search-older",
+                        Sym::ChevronUp,
+                        sc::BAR_OLDER,
+                        search.index + 1 < total,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.step_search(true, cx))),
+                )
+                .child(
+                    button(
+                        "search-newer",
+                        Sym::ChevronDown,
+                        sc::BAR_NEWER,
+                        search.index > 0,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.step_search(false, cx))),
+                )
+                .child(
+                    button("search-close", Sym::Close, sc::BAR_CLOSE, true)
+                        .on_click(cx.listener(|this, _, _, cx| this.close_search(cx))),
+                )
+                .into_any_element(),
+        )
     }
 }
 

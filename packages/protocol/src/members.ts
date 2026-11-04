@@ -2,7 +2,10 @@
 // See docs/protocol.md, "Members and preferences" and "Notifications".
 import { z } from "zod";
 import { CharacterId } from "./characters.ts";
-import { MemberLevel, Name } from "./common.ts";
+import { Id, MemberLevel, Name } from "./common.ts";
+
+/** Largest weekly spending limit (US cents): 1,000,000 USD. */
+export const MAX_WEEKLY_BUDGET_CENTS = 100_000_000;
 
 /** `PATCH /v1/members/:id`. Owner: every field. Self: `name` and `role` only. */
 export const UpdateMemberRequest = z.object({
@@ -13,6 +16,10 @@ export const UpdateMemberRequest = z.object({
   deactivated: z.boolean().optional(),
   /** Owner only. null clears the character. */
   character: CharacterId.nullable().optional(),
+  /** 1.1, owner only: another member's id; null clears it. */
+  reportsTo: Id.nullable().optional(),
+  /** 1.1, owner only: the weekly spending limit in US cents; null clears it. */
+  weeklyBudgetCents: z.int().nonnegative().max(MAX_WEEKLY_BUDGET_CENTS).nullable().optional(),
 });
 export type UpdateMemberRequest = z.infer<typeof UpdateMemberRequest>;
 

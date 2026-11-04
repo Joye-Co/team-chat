@@ -415,31 +415,60 @@ impl Render for TopicRail {
         let d = self.data(&g, &t);
         let topic = d.topic.as_ref();
         let run = d.run.as_ref();
-        // NATIVE.md §9.3: 负责, 计划, 改动, 产出, 用到的决定, 在哪干活,
-        // 用时和成本; a section without data is left out.
-        let mut sections: Vec<AnyElement> = Vec::new();
-        if let Some(owner) = topic.and_then(|t| t.owner_id.clone()) {
-            let by = topic
-                .filter(|x| x.created_by != owner)
-                .map(|x| (x.created_by.clone(), x.created_at));
-            // The 负责 card says only what its own member does (DU-1): another member's
-            // run in the same 话题 is not the owner's.
-            let own = run.filter(|r| r.bot_id == owner);
-            sections.push(self.native_owner(&d, &owner, own, by, cx));
+        // COMPLETENESS §2.5: the same sections in every 话题, in this order:
+        // 状态, 负责 (with 提出), 计划, 改动, 产出, 用到的决定, 在哪干活,
+        // 用时和成本. A section with no data keeps its place with one quiet
+        // line; it never disappears.
+        use native::{CHANGES, COST, DECISIONS, OUTPUTS, OWNER, PLAN, WHERE};
+        let mut sections: Vec<AnyElement> = vec![self.native_status(&d, cx)];
+        match topic.and_then(|t| t.owner_id.clone()) {
+            Some(owner) => {
+                let by = topic
+                    .filter(|x| x.created_by != owner)
+                    .map(|x| (x.created_by.clone(), x.created_at));
+                // The 负责 card says only what its own member does (DU-1):
+                // another member's run in the same 话题 is not the owner's.
+                let own = run.filter(|r| r.bot_id == owner);
+                sections.push(self.native_owner(&d, &owner, own, by, cx));
+            }
+            None => sections.push(self.native_empty(
+                OWNER,
+                c::TOPIC_RAIL_OWNER,
+                c::RAIL_EMPTY_OWNER,
+                cx,
+            )),
         }
-        if let Some(r) = run.filter(|r| !r.plan.is_empty()) {
-            sections.push(self.native_plan(&d, r, cx));
-        }
-        sections.extend(self.native_changes(&d, window, cx));
-        sections.extend(self.native_outputs(&d, window, cx));
-        sections.extend(self.native_decisions(&d, cx));
-        if let Some(r) = run {
-            sections.extend(self.native_where(&d, r, window, cx));
-        }
-        sections.extend(self.native_cost(&d, cx));
-        if sections.is_empty() {
-            return rail_empty(cx);
-        }
+        sections.push(match run.filter(|r| !r.plan.is_empty()) {
+            Some(r) => self.native_plan(&d, r, cx),
+            None => self.native_empty(PLAN, c::TOPIC_RAIL_PLAN, c::RAIL_EMPTY_PLAN, cx),
+        });
+        let changes = self.native_changes(&d, window, cx);
+        sections.push(changes.unwrap_or_else(|| {
+            self.native_empty(CHANGES, c::TOPIC_RAIL_CHANGES, c::RAIL_EMPTY_CHANGES, cx)
+        }));
+        let outputs = self.native_outputs(&d, window, cx);
+        sections.push(outputs.unwrap_or_else(|| {
+            self.native_empty(OUTPUTS, c::TOPIC_RAIL_OUTPUTS, c::RAIL_EMPTY_OUTPUTS, cx)
+        }));
+        let decisions = self.native_decisions(&d, cx);
+        sections.push(decisions.unwrap_or_else(|| {
+            self.native_empty(
+                DECISIONS,
+                c::TOPIC_RAIL_DECISIONS,
+                c::RAIL_EMPTY_DECISIONS,
+                cx,
+            )
+        }));
+        let place = run.and_then(|r| self.native_where(&d, r, window, cx));
+        sections.push(
+            place.unwrap_or_else(|| {
+                self.native_empty(WHERE, c::WHERE_WORK, c::RAIL_EMPTY_WHERE, cx)
+            }),
+        );
+        let cost = self.native_cost(&d, cx);
+        sections.push(cost.unwrap_or_else(|| {
+            self.native_empty(COST, c::TOPIC_RAIL_COST, c::RAIL_EMPTY_COST, cx)
+        }));
         div()
             .id("topic-rail")
             .size_full()
