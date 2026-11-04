@@ -106,8 +106,8 @@ impl AppearancePage {
                         .flex()
                         .flex_col()
                         .gap(crate::ui::native::tokens::space::S4)
-                        .child(div().h(px(3.)).w(px(10.)).rounded(px(1.5)).bg(line))
-                        .child(div().h(px(3.)).w(px(8.)).rounded(px(1.5)).bg(line)),
+                        .child(div().h(px(3.)).w(px(10.)).rounded_full().bg(line))
+                        .child(div().h(px(3.)).w(px(8.)).rounded_full().bg(line)),
                 )
                 .child(
                     div()
@@ -117,8 +117,8 @@ impl AppearancePage {
                         .flex()
                         .flex_col()
                         .gap(crate::ui::native::tokens::space::S4)
-                        .child(div().h(px(3.)).w(px(22.)).rounded(px(1.5)).bg(line))
-                        .child(div().h(px(3.)).w(px(16.)).rounded(px(1.5)).bg(line)),
+                        .child(div().h(px(3.)).w(px(22.)).rounded_full().bg(line))
+                        .child(div().h(px(3.)).w(px(16.)).rounded_full().bg(line)),
                 )
         };
         let row = div().size_full().flex();
