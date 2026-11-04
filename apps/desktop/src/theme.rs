@@ -287,6 +287,18 @@ pub mod size {
     pub const SWITCHER_HIT_ROW: Pixels = px(60.);
     pub const SWITCHER_QUERY: Pixels = px(56.);
     pub const SETTINGS_ROW: Pixels = px(60.);
+    /// A settings list row (§8.10): the label at the left, its control at
+    /// the right, inside one rounded group.
+    pub const SETTINGS_LIST_ROW: Pixels = px(52.);
+    /// The text field of a settings list row: fixed, so fields do not
+    /// stretch across the window.
+    pub const SETTINGS_FIELD_WIDTH: Pixels = px(280.);
+    /// The longest value at the right of a settings list row (服务器).
+    pub const SETTINGS_VALUE_MAX: Pixels = px(320.);
+    /// The settings content column: 600 pt of content plus 32 pt each side.
+    pub const SETTINGS_COLUMN: Pixels = px(664.);
+    /// The picture in the 头像 row.
+    pub const SETTINGS_AVATAR: Pixels = px(40.);
     pub const OPTION_ROW: Pixels = px(40.);
     pub const PANEL_ROW: Pixels = px(40.);
     /// Plan and step rows of the side panel's progress (§8.1).
