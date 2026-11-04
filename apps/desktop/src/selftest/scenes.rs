@@ -46,6 +46,17 @@ pub enum Start {
     /// (`fake::v2::refs_samples::with_card_parts`).
     V2RefParts,
     // --- end inc-refs ---
+    // --- v13/ux-pages ---
+    /// The v2 sample team's 群 with nothing synced yet, still connecting:
+    /// the pages draw their skeletons (`selftest::page_states`).
+    V2Unsynced,
+    /// The same, while the server cannot be reached: the pages draw their
+    /// failure Alert with 重试.
+    V2Unreachable,
+    /// The v2 sample team's 群 with no 话题, 产出 or runs, online: the
+    /// pages' Empty states.
+    V2Bare,
+    // --- end v13/ux-pages ---
 }
 
 pub struct Scene {
