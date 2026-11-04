@@ -75,14 +75,10 @@ pub fn sym(sym: Sym, size: SymSize, color: Hsla) -> AnyElement {
     icons::sym(sym, size, color).into_any_element()
 }
 
-/// One line of text cut with `…`.
-pub fn line(text: impl Into<SharedString>) -> gpui::Div {
-    div()
-        .min_w_0()
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_ellipsis()
-        .child(text.into())
+/// One line of text cut with `…`, with the full text in a tooltip when it
+/// was cut (the kit's [`TruncText`](crate::ui::truncate::TruncText), §2.21).
+pub fn line(text: impl Into<SharedString>) -> crate::ui::truncate::TruncText {
+    crate::ui::truncate::TruncText::new(text)
 }
 
 /// The ink of a row: (title, secondary, fill) for its selection state.
@@ -96,13 +92,8 @@ pub struct RowInk {
 impl RowInk {
     pub fn new(selection: Option<(Hsla, Hsla)>, cx: &App) -> Self {
         let k = native_colors(cx);
+        // D10: a selected row is the muted fill with the normal ink.
         match selection {
-            // On `accent` the secondary text is `onAccent`, a little quieter.
-            Some((fill, text)) if fill == k.accent => Self {
-                title: text,
-                secondary: text.opacity(0.78),
-                fill: Some(fill),
-            },
             Some((fill, _)) => Self {
                 title: k.label,
                 secondary: k.secondary,

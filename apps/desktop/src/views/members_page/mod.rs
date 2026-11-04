@@ -390,15 +390,15 @@ impl MembersPage {
             // place); nothing pulses here.
             list = div().id("members-list").flex_1().min_h_0();
         } else if load != PageLoad::Ready {
+            // The list's own shape (§2.14): unframed member rows.
             list = div()
                 .id("members-list")
                 .flex_1()
                 .min_h_0()
-                .p(tsp::S8)
                 .child(page::skeleton_rows(
                     "members-sk",
-                    page::SkeletonKind::Row,
-                    6,
+                    page::SkeletonKind::MemberRow,
+                    8,
                     cx,
                 ));
         } else if !any {
@@ -454,7 +454,6 @@ impl MembersPage {
         last: bool,
         cx: &App,
     ) -> AnyElement {
-        let k = native_colors(cx);
         let p = &self.services.provider;
         let m = &e.member;
         let is_selected = selected == Some(m.id.as_str());
@@ -462,12 +461,10 @@ impl MembersPage {
         // inverted row.
         let _ = (focused, active);
         let ink = RowInk::new(CompactRow::selection_ink(is_selected, false, false, cx), cx);
-        let on_accent = ink.fill == Some(k.accent);
         let mut parts: Vec<String> = m.role.clone().into_iter().collect();
         if me == Some(m.id.as_str()) {
             parts.push(c::MEMBERS_YOU_WORD.to_string());
         }
-        let _ = on_accent;
         // The state is a StatusBadge on the title line (§2.12), never
         // colored text.
         let mut badge: Option<AnyElement> = None;

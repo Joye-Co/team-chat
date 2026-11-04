@@ -1268,7 +1268,7 @@ impl ArtifactPage {
             page::PageLoad::Loading => {
                 return shell(page::skeleton_rows(
                     "artifacts-sk",
-                    page::SkeletonKind::Row,
+                    page::SkeletonKind::TableRow,
                     5,
                     cx,
                 ));
