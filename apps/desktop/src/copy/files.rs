@@ -37,4 +37,7 @@ crate::copy! {
     KIND_IMAGE = "图片",
     KIND_PAGE = "网页",
     META = "{kind} · {size}",
+    // --- v12/fx-pages ---
+    ALERT_OK = "好",
+    // --- end v12/fx-pages ---
 }

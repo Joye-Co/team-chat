@@ -241,9 +241,44 @@ pub fn open_file(
     .detach();
 }
 
-/// Shows an error in the active window (or the first window).
+/// Shows an error in the active window (or the first window) as a Tahoe
+/// alert (NATIVE.md §7.2, §7.4: errors that block use an alert, never a
+/// toast): the app icon, the message and one `好` button (Return or Escape
+/// close it). When the window already shows a sheet or an alert, the error
+/// goes to the log instead of stacking a second one.
 pub fn notify_error(message: String, cx: &mut App) {
-    notify(Notification::error(message), cx);
+    use gpui::ParentElement as _;
+    use crate::ui::native::{
+        AlertLayout, PushStyle, alert_button, metrics, overlays::{app_icon, native_alert},
+    };
+    let target = cx
+        .active_window()
+        .or_else(|| cx.windows().into_iter().next());
+    let Some(window) = target else {
+        tracing::info!("no window for an error alert");
+        return;
+    };
+    let _ = window.update(cx, move |_, window, cx| {
+        if window.has_active_dialog(cx) {
+            tracing::info!("an error came while a dialog was open");
+            return;
+        }
+        let message: gpui::SharedString = message.into();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            native_alert(dialog, cx).on_ok(|_, _, _| true).child(
+                AlertLayout::new(message.clone())
+                    .icon(app_icon(metrics::ALERT_ICON))
+                    .buttons([alert_button(
+                        "files-error-ok",
+                        f::ALERT_OK,
+                        PushStyle::Default,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx))]),
+            )
+        });
+    });
 }
 
 pub fn notify(note: Notification, cx: &mut App) {
