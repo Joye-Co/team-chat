@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::{DeskPage, model::Snapshot};
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use crate::ui::{
     native::{borderless_button, page::PageLoad},
@@ -94,10 +95,12 @@ pub fn render(
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
-        .pt(tsp::S4)
         .pb(tsp::S24)
         .flex()
-        .flex_col();
+        .flex_col()
+        // Pull the first GroupLabel up so its ink starts at y 68 (B2):
+        // the section's own 16 top sits under the header band.
+        .child(div().flex_none().mt(-tsp::S12));
     let offline = || page::compact_empty(Sym::Offline, c::DESK_RAIL_OFFLINE, None, cx);
 
     // 这周: the team's week as a DescriptionList.
@@ -167,6 +170,7 @@ pub fn render(
         queue = queue.row(
             div()
                 .id(SharedString::from(format!("desk-queue-{i}")))
+                .focus_row(false, cx)
                 .h(tsp::S32)
                 .flex()
                 .items_center()
@@ -235,6 +239,7 @@ pub fn render(
         outputs = outputs.row(
             div()
                 .id(SharedString::from(format!("desk-output-{}", a.id)))
+                .focus_row(false, cx)
                 .h(tsp::S32)
                 .flex()
                 .items_center()
@@ -304,16 +309,13 @@ pub fn render(
         ));
     }
     for (i, (name, names, (g, t, run))) in machines.into_iter().enumerate() {
-        let glyph = if name.to_lowercase().contains("mini") {
-            Sym::MacMini
-        } else {
-            Sym::Computer
-        };
+        let glyph = crate::views::group_page::kit::machine_sym(&name, None);
         let users = fill(c::DESK_MACHINE_USERS, &[("names", &names.join("、"))]);
         let nav = services.nav.clone();
         where_ = where_.row(
             div()
                 .id(SharedString::from(format!("desk-machine-{i}")))
+                .focus_row(false, cx)
                 .py(tsp::S6)
                 .flex()
                 .items_center()

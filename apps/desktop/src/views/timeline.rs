@@ -151,6 +151,10 @@ pub struct TimelineView {
     /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
     /// shows (the same toolbar as under the pointer).
     key_focus: gpui::FocusHandle,
+    /// The arrow keys set `hovered` (the pointer clears this), and the
+    /// thread has the keyboard focus this frame: the row draws the ring.
+    keyboard_row: bool,
+    key_focused: bool,
     /// The emoji picker is open for this message row: from the hover
     /// toolbar (`false`) or from the add pill under the reactions (`true`).
     reacting: Option<(String, bool)>,
@@ -295,6 +299,8 @@ impl TimelineView {
             focus: focus::FocusState::default(),
             hovered: None,
             key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            keyboard_row: false,
+            key_focused: false,
             reacting: None,
             runs: Vec::new(),
             live_shown: Vec::new(),
@@ -703,7 +709,16 @@ impl TimelineView {
             Some(i) => i.saturating_add_signed(step).min(last),
             None => last,
         };
-        self.hovered = Some(model::key(&self.messages[ix]).to_string());
+        let key = model::key(&self.messages[ix]).to_string();
+        if self.hovered.as_deref() != Some(key.as_str()) || !self.keyboard_row {
+            // The row's look changes: measure it again (the list caches it).
+            if let Some(old) = current {
+                self.list.remeasure_items(old..old + 1);
+            }
+            self.list.remeasure_items(ix..ix + 1);
+        }
+        self.hovered = Some(key);
+        self.keyboard_row = true;
         self.list.scroll_to_reveal_item(ix);
         cx.notify();
     }
@@ -720,6 +735,7 @@ impl Render for TimelineView {
             self.activation = Some(cx.observe_window_activation(window, |_, _, cx| cx.notify()));
         }
         self.window_active = window.is_window_active();
+        self.key_focused = self.key_focus.is_focused(window);
         let colors = theme::colors(cx);
         let Some(topic) = self.topic.clone() else {
             return div()

@@ -1,7 +1,7 @@
 //! 群 page (Group.dc.html). The group page track owns this file.
 
 crate::copy! {
-    GROUP_PAGE_ACTIVE = "进行中",
+    GROUP_PAGE_ACTIVE = "在做",
     GROUP_PAGE_RECENT_DONE = "最近完成",
     GROUP_PAGE_DECISIONS = "群里的决定",
     GROUP_PAGE_DECISIONS_NOTE = "成员做事前会先读这里。",
@@ -61,7 +61,7 @@ crate::copy! {
     GROUP_PAGE_SHOW_ALL = "看全部 {n} 个话题",
     GROUP_PAGE_SHOW_LESS = "收起",
     GROUP_PAGE_EMPTY_TITLE = "这个群还没有话题",
-    GROUP_PAGE_EMPTY_BODY = "开个话题交给群里的成员。进行中和做完的话题都会列在这里。",
+    GROUP_PAGE_EMPTY_BODY = "开个话题交给群里的成员。在做和做完的话题都会列在这里。",
     GROUP_PAGE_INFO_LINE = "成员、决定和在用的电脑",
     GROUP_PAGE_STATUS_REVIEW = "等你审",
     GROUP_PAGE_STATUS_DECIDE = "等你拍板",
@@ -91,7 +91,10 @@ crate::copy! {
     GROUP_PAGE_COUNT = "共 {n} 个话题",
     GROUP_PAGE_DONE_EMPTY = "这周还没有做完的话题",
     GROUP_PAGE_DONE_EMPTY_BODY = "成员做完一个话题后，会列在这里，带上结果和用到的产出。",
-    GROUP_PAGE_ACTIVE_EMPTY = "现在没有进行中的话题",
+    GROUP_PAGE_ACTIVE_EMPTY = "现在没有在做的话题",
     GROUP_PAGE_DECISIONS_EMPTY = "还没有记下的决定",
     // --- end v14/t3-pages ---
+    // --- v15/r3-pages ---
+    GROUP_PAGE_OFFLINE = "连上后显示",
+    // --- end v15/r3-pages ---
 }

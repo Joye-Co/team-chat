@@ -23,6 +23,7 @@ use super::{
     viewer::{self, Opening},
 };
 
+use crate::ui::native::FocusRow as _;
 use crate::{
     copy::{fill, media as cm},
     markdown,
@@ -50,6 +51,9 @@ pub struct InlineSpec {
 /// Height of the HTML page inline (Media.dc.html: 300).
 pub const HTML_H: f32 = 300.;
 const MD_BODY_H: f32 = 236.;
+/// The source lines of the Markdown excerpt: few enough that wrapped lines
+/// still end above [`MD_BODY_H`].
+const MD_EXCERPT_LINES: usize = 5;
 const GRID_H: f32 = 148.;
 const SINGLE_H: f32 = 300.;
 // Every in-thread item has the one card width (§2.4): min(640, text column).
@@ -206,6 +210,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
     if host::shown_in_pane(id, cx) {
         return host::reference_row(
             ElementId::Name(format!("{}-ref", spec.id).into()),
+            id,
             spec.title.clone(),
             version,
             cx,
@@ -247,11 +252,11 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
     let s = spec.clone();
     let expand = div()
         .id(ElementId::Name(format!("{}-expand", spec.id).into()))
+        .focus_row(false, cx)
         .flex_none()
         .flex()
         .items_center()
         .gap(space::S4)
-        .hover(|st| st.text_color(k.text_1))
         .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
         .child(cm::EXPAND)
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
@@ -287,7 +292,8 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
         )
-        .child(div().h(px(HTML_H)).child(embed))
+        // The page sets its own height: it ends on a whole block (§2.21).
+        .child(embed)
         .child(foot)
         .into_any_element()
 }
@@ -302,7 +308,7 @@ fn markdown_card(
 ) -> AnyElement {
     let k = theme::colors(cx);
     let minutes = (md.stats.chars as f64 / 450.).ceil().max(1.) as u64;
-    let excerpt = text::md_excerpt(&md.text, 8);
+    let excerpt = text::md_excerpt(&md.text, MD_EXCERPT_LINES);
     let mut chips = div().flex().items_center().gap(space::S6);
     if md.stats.tables > 0 {
         chips = chips.child(chip(
@@ -342,11 +348,15 @@ fn markdown_card(
                 .child(open_tool(spec, "open", Opening::default())),
         )
         .child(
+            // The excerpt ends on whole blocks (its first lines, a fence
+            // closed) and the card hugs it: nothing is cut under the footer
+            // (§2.21, A4).
             div()
-                .h(px(MD_BODY_H))
+                .max_h(px(MD_BODY_H))
                 .overflow_hidden()
                 .px(space::S16)
                 .pt(space::S12)
+                .pb(space::S12)
                 .child(markdown::message_body(
                     ElementId::Name(format!("{}-md", spec.id).into()),
                     excerpt,
@@ -356,7 +366,7 @@ fn markdown_card(
         .child(
             footer(cx)
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
-                .hover(|st| st.text_color(k.text_1))
+                .focus_row(false, cx)
                 .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
                 .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
                 .child(div().flex_1())
@@ -401,6 +411,7 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
         div().h(px(SINGLE_H)).flex().items_end().child(
             div()
                 .id(ElementId::Name(format!("{}-img", spec.id).into()))
+                .focus_row(false, cx)
                 .w(px(w))
                 .h(px(h))
                 .rounded(radius::MD)
@@ -422,6 +433,7 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
             row = row.child(
                 div()
                     .id(ElementId::Name(format!("{}-img-{i}", spec.id).into()))
+                    .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                     .relative()
                     .w(px(111.))
                     .h_full()
@@ -469,9 +481,9 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-save", spec.id).into()))
+                        .focus_row(false, cx)
                         .t_meta()
                         .text_color(k.text_2)
-                        .hover(|s| s.text_color(k.text_1))
                         .child(cm::IMG_SAVE_ALL)
                         .on_click(move |_, _, cx| {
                             let refs: Vec<&std::path::Path> =
@@ -560,6 +572,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
     let play = spec.clone();
     let poster = div()
         .id(ElementId::Name(format!("{}-poster", spec.id).into()))
+        .focus_row(false, cx)
         .relative()
         .w(px(VIDEO_W))
         .h(px(h))
@@ -622,6 +635,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-frame-{i}", spec.id).into()))
+                        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                         .w(px(75.))
                         .h(px(42.))
                         .rounded(radius::MARK)
@@ -637,6 +651,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-send-{i}", spec.id).into()))
+                        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                         .invisible()
                         .group_hover(group, |st| st.visible())
                         .absolute()
@@ -802,13 +817,13 @@ fn audio(
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-speed", spec.id).into()))
+                        .focus_row(false, cx)
                         // A borderless text button (NATIVE.md §5.1).
                         .h(px(22.))
                         .px(space::S6)
                         .rounded(radius::SM)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(crate::ui::native::native_colors(cx).fill_hover))
                         .child(mono(SPEEDS[speed].1, k.text_2))
                         .on_click(move |_, _, cx| {
                             speed_state
@@ -861,9 +876,9 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
     let s = spec.clone();
     card(cx)
         .id(ElementId::Name(format!("{}-pdf", spec.id).into()))
+        .focus_row(false, cx)
         .w(px(PDF_W))
         .max_w_full()
-        .hover(|st| st.border_color(k.border_strong))
         .child(thumbs)
         .child(
             div()
@@ -876,12 +891,10 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                 .border_color(k.sep)
                 .child(ui::icon(Sym::Document, theme::icon::ROW, k.text_2))
                 .child(
-                    div()
+                    ui::native::file_name(media.file_name().to_string())
                         .t_small()
                         .medium()
-                        .text_color(k.text_1)
-                        .one_line()
-                        .child(media.file_name().to_string()),
+                        .text_color(k.text_1),
                 )
                 .child(mono(
                     format!(
@@ -928,10 +941,12 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
         .position(|l| !l.trim().is_empty())
         .unwrap_or(0);
     let last = (first + CODE_LINES).min(c.lines.len());
+    // Long lines scroll sideways inside the card, never a hard clip (§2.17).
     let mut body = div()
+        .id(ElementId::Name(format!("{}-code", spec.id).into()))
         .h(px(CODE_LINES as f32 * 20. + 16.))
         .py(space::S8)
-        .overflow_hidden()
+        .overflow_x_scroll()
         .t_code()
         .tnum();
     let mut block = false;
@@ -1066,6 +1081,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         .child(
             div()
                 .id(ElementId::Name(format!("{}-all", spec.id).into()))
+                .focus_row(false, cx)
                 .h(crate::ui::native::tokens::height::TABLE_ROW_COMPACT)
                 .px(space::S16)
                 .flex()
@@ -1073,7 +1089,6 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 .gap(space::S4)
                 .t_meta()
                 .text_color(k.text_2)
-                .hover(|st| st.text_color(k.text_1))
                 .child(fill(
                     cm::TABLE_SHOW_ALL,
                     &[("n", &group_digits(t.total_rows as u64))],

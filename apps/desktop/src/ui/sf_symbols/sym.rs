@@ -131,6 +131,9 @@ concepts! {
     ChevronUp = "chevron.up";
     ChevronLeft = "chevron.left";
     ChevronRight = "chevron.right";
+    /// The first and the last page of a table footer (COMPLETENESS.md §2.7).
+    PageFirst = "chevron.left.2";
+    PageLast = "chevron.right.2";
     /// The pop-up button mark (§5.3).
     PopUp = "chevron.up.chevron.down";
     /// Open elsewhere: a trailing borderless button (§9.3).

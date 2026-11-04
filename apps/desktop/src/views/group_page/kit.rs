@@ -330,12 +330,8 @@ pub fn step_bar(id: &str, plan: &[PlanItem], gap: Pixels, cx: &App) -> Div {
 
 /// `n/m` of a plan: steps done (the current one counts) over all.
 pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize)> {
-    if plan.is_empty() {
-        return None;
-    }
-    let done = plan.iter().filter(|p| p.state == PlanState::Done).count();
-    let current = plan.iter().any(|p| p.state == PlanState::Current) as usize;
-    Some(((done + current).min(plan.len()), plan.len()))
+    // One count everywhere (R2): the step the run is on.
+    crate::views::topic_page::plan_progress(plan).map(|(n, m, _)| (n, m))
 }
 
 /// The live terminal of a run as a small dark screen: `实时` with the
@@ -496,4 +492,85 @@ pub fn artifact_thumb(
                 .children(r.value.map(|v| div().mono().child(v)))
                 .when(r.ok, |el| el.child(div().text_color(k.ok_ink).child("✓")))
         }))
+}
+
+/// The glyph of a computer on the pages (§2.19): the cloud for 云端, a Mac
+/// mini, a notebook, else a desktop computer. One rule for 首页, 群 and 成员.
+pub fn machine_sym(name: &str, machine_id: Option<&str>) -> Sym {
+    let n = name.to_lowercase();
+    if name == crate::copy::settings::CLOUD || machine_id.is_some_and(|id| id.starts_with("cloud"))
+    {
+        Sym::Cloud
+    } else if n.contains("mini") {
+        Sym::MacMini
+    } else if n.contains("book") || n.contains("laptop") || n.contains("笔记本") {
+        Sym::Laptop
+    } else {
+        Sym::Computer
+    }
+}
+
+/// A recorded decision in an inspector row (§2.21: never wrapped
+/// mid-phrase): the question and its answer each on one line that ends in
+/// "…" (the row's tooltip holds the whole text); a decision without the
+/// `问 → 答` shape is one line.
+pub fn decision_text(text: &str, color: Hsla) -> Div {
+    use crate::ui::native::NativeType as _;
+    let parts: Vec<String> = match text.split_once('→') {
+        Some((q, a)) => vec![q.trim().to_string(), format!("→ {}", a.trim())],
+        None => vec![text.to_string()],
+    };
+    div()
+        .flex()
+        .flex_col()
+        .children(parts.into_iter().map(move |t| {
+            crate::ui::truncate::TruncText::new(t)
+                .n_body()
+                .text_color(color)
+        }))
+}
+
+/// The header band of a page's right pane (§2.2): h52 with the one 1 px line
+/// under it, the pane name 16 medium over a 12 muted line (both end in "…"
+/// with the full text in a tooltip), and 32 ghost actions with close at the
+/// far right.
+pub fn pane_header(
+    name: &'static str,
+    line: String,
+    actions: Vec<AnyElement>,
+    cx: &App,
+) -> AnyElement {
+    use crate::ui::native::{NativeType as _, metrics, native_colors};
+    let k = native_colors(cx);
+    div()
+        .flex_none()
+        .h(metrics::TOOLBAR_ROW)
+        .pl(metrics::INSPECTOR_PAD)
+        .pr(metrics::TOOLBAR_TRAILING)
+        .border_b_1()
+        .border_color(k.separator)
+        .flex()
+        .items_center()
+        .gap(tsp::S8)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .n_title3()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(k.label)
+                        .child(name),
+                )
+                .child(
+                    crate::ui::truncate::TruncText::new(line)
+                        .n_subheadline()
+                        .text_color(k.secondary),
+                ),
+        )
+        .children(actions)
+        .into_any_element()
 }

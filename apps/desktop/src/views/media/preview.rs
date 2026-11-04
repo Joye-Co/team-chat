@@ -10,29 +10,18 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
-use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, IntoElement, ParentElement, Pixels, Render,
-    Styled, Window, WindowBounds, div, px,
-};
+use gpui::{AnyWindowHandle, App, Pixels};
 
 use super::{
-    MediaKind,
-    inline::InlineSpec,
     state::Target,
-    states::{self, Lead, Status},
     store::{self, Data, MediaKey},
     viewer::{self, Opening},
 };
 use crate::{
-    app::{Services, main_window_options},
-    copy::media as cm,
+    app::Services,
     data::*,
-    selftest::scenes::{capture_bounds, open_main},
-    theme::{self, Type as _, space},
-    ui::{
-        Sym,
-        web_embed::{Phase, live},
-    },
+    selftest::scenes::open_main,
+    ui::web_embed::{Phase, live},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +196,13 @@ pub struct MediaThread {
     group_id: String,
     topic_id: String,
     extras: Vec<Extra>,
+    /// Card v2 messages at the end of the thread: (message id = card id, author).
+    cards: Vec<(String, String)>,
+    /// 产出 of the states scene: a record and a preview state, no folder.
+    states: Vec<StateArt>,
+    /// Replies the states scene never answers (a version that stays loading).
+    hung:
+        std::sync::Mutex<Vec<futures::channel::oneshot::Sender<Result<ArtifactFolder, FileError>>>>,
     /// Folder and entry of each sample on disk.
     folders: Vec<(Sample, PathBuf, String)>,
 }
@@ -220,6 +216,64 @@ impl MediaThread {
             group_id,
             topic_id,
             extras,
+            cards: Vec::new(),
+            states: Vec::new(),
+            hung: Default::default(),
+            folders: Vec::new(),
+        })
+    }
+
+    /// The main window's first 话题 with `extras` at its end, where an extra may point
+    /// at one of `pages` (web page 产出 read from their folders on disk).
+    pub fn with_pages(
+        inner: Arc<dyn ChatProvider>,
+        extras: Vec<Extra>,
+        pages: Vec<PageArt>,
+    ) -> Arc<Self> {
+        let (group_id, topic_id) = first_topic(&inner);
+        let states = pages
+            .into_iter()
+            .map(|p| StateArt {
+                id: p.id,
+                author: p.author,
+                said: "",
+                title: p.title,
+                entry: "index.html".into(),
+                bytes: list(&p.dir).iter().map(|f| f.size).sum(),
+                media: None,
+                hang: false,
+                dir: Some(p.dir),
+                message: false,
+            })
+            .collect();
+        Arc::new(Self {
+            inner,
+            group_id,
+            topic_id,
+            extras,
+            cards: Vec::new(),
+            states,
+            hung: Default::default(),
+            folders: Vec::new(),
+        })
+    }
+
+    /// The 话题 `topic_id` of `group_id` with the stored Card v2 messages `cards`
+    /// (id, author) at its end: the real thread draws them as it draws any card.
+    pub fn with_cards(
+        inner: Arc<dyn ChatProvider>,
+        group_id: &str,
+        topic_id: &str,
+        cards: Vec<(String, String)>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            group_id: group_id.into(),
+            topic_id: topic_id.into(),
+            extras: Vec::new(),
+            cards,
+            states: Vec::new(),
+            hung: Default::default(),
             folders: Vec::new(),
         })
     }
@@ -247,6 +301,9 @@ impl MediaThread {
             group_id,
             topic_id,
             extras,
+            cards: Vec::new(),
+            states: Vec::new(),
+            hung: Default::default(),
             folders,
         })
     }
@@ -259,13 +316,84 @@ impl MediaThread {
         &self.topic_id
     }
 
+    fn state(&self, id: &str) -> Option<&StateArt> {
+        self.states.iter().find(|a| a.id == id)
+    }
+
+    fn state_detail(&self, a: &StateArt) -> ArtifactDetail {
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let files = match &a.dir {
+            Some(dir) => list(dir),
+            None => vec![ArtifactVersionFile {
+                path: a.entry.clone(),
+                size: a.bytes,
+                mime: String::new(),
+            }],
+        };
+        ArtifactDetail {
+            summary: ArtifactSummary {
+                id: a.id.into(),
+                topic_id: self.topic_id.clone(),
+                kind: if a.dir.is_some() {
+                    ArtifactKind::Page
+                } else {
+                    ArtifactKind::File
+                },
+                title: a.title.clone(),
+                version: 1,
+                size_bytes: Some(a.bytes),
+                created_by: a.author.into(),
+                updated_at: now - 120_000,
+            },
+            group_id: self.group_id.clone(),
+            versions: vec![ArtifactVersionInfo {
+                version: 1,
+                note: None,
+                created_by: a.author.into(),
+                created_at: now - 1_000_000,
+                entry: a.entry.clone(),
+                files,
+            }],
+        }
+    }
+
     fn mine(&self, g: &str, t: &str) -> bool {
         g == self.group_id && t == self.topic_id
     }
 
     fn extra_messages(&self) -> Vec<Message> {
         let now = crate::selftest::clock::utc_now().timestamp_millis();
-        self.extras
+        let cards = self
+            .cards
+            .iter()
+            .enumerate()
+            .map(|(i, (id, author))| Message {
+                id: id.clone(),
+                client_msg_id: format!("c-{id}"),
+                group_id: self.group_id.clone(),
+                topic_id: self.topic_id.clone(),
+                author_id: author.clone(),
+                body: String::new(),
+                mentions: Vec::new(),
+                created_seq: 950_000 + i as u64,
+                created_at: now - 300_000 + i as i64 * 60_000,
+                edited_at: None,
+                deleted_at: None,
+                streaming: false,
+                send_state: SendState::Sent,
+                quote_of: None,
+                attachments: Vec::new(),
+                artifact_refs: Vec::new(),
+                reactions: Vec::new(),
+            });
+        let states = self.states.iter().filter(|a| a.message).map(|a| Extra {
+            author: a.author.into(),
+            body: a.said.into(),
+            streaming: false,
+            artifact: Some(MediaKey::new(a.id, 1)),
+        });
+        let extras: Vec<Extra> = self.extras.iter().cloned().chain(states).collect();
+        extras
             .iter()
             .enumerate()
             .map(|(i, x)| {
@@ -297,6 +425,7 @@ impl MediaThread {
                     reactions: Vec::new(),
                 }
             })
+            .chain(cards)
             .collect()
     }
 
@@ -330,6 +459,36 @@ impl MediaThread {
                 .collect(),
         }
     }
+}
+
+/// A 产出 of the `media-states` scene: what its message points at and how far its
+/// preview got.
+#[derive(Clone)]
+struct StateArt {
+    id: &'static str,
+    author: &'static str,
+    /// The message that points at it (sample data).
+    said: &'static str,
+    title: String,
+    entry: String,
+    bytes: u64,
+    /// The sender's preview state (`artifact.media`), when it sent one.
+    media: Option<(chat_core::proto::MediaKind, chat_core::proto::MediaPreview)>,
+    /// The version never arrives (it stays loading); else it fails to open.
+    hang: bool,
+    /// A web page on disk (the version opens and shows), else no folder.
+    dir: Option<PathBuf>,
+    /// Its own message at the end of the thread (else an [`Extra`] points at it).
+    message: bool,
+}
+
+/// A web page 产出 for a scene's thread: its record and its folder on disk; an
+/// [`Extra`] with `MediaKey::new(id, 1)` points at it.
+pub struct PageArt {
+    pub id: &'static str,
+    pub title: String,
+    pub author: &'static str,
+    pub dir: PathBuf,
 }
 
 /// The first 群 and its first ordinary 话题 (the one `open_first_topic` opens).
@@ -373,6 +532,188 @@ fn list(dir: &std::path::Path) -> Vec<ArtifactVersionFile> {
 }
 
 impl ChatProvider for MediaThread {
+    // The real thread of the base provider: cards, pages, runs and their data.
+    fn card_v2(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Message> {
+        self.inner.card_v2(group_id, message_id)
+    }
+    fn card_v2_answers(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::CardV2Answer> {
+        self.inner.card_v2_answers(group_id, message_id)
+    }
+    fn card_v2_pending(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Pending> {
+        self.inner.card_v2_pending(group_id, message_id)
+    }
+    fn card_v2_events(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        self.inner.card_v2_events(group_id, message_id)
+    }
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: cards_v2::CardV2AnswerRequest,
+    ) {
+        self.inner
+            .answer_card_v2(group_id, topic_id, message_id, answer)
+    }
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        self.inner
+            .withdraw_card_v2_answer(group_id, topic_id, message_id)
+    }
+    fn send_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        self.inner
+            .send_card_event(group_id, topic_id, message_id, request)
+    }
+    fn drop_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        self.inner
+            .drop_card_event(group_id, topic_id, message_id, client_event_id)
+    }
+    fn retry_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) -> bool {
+        self.inner
+            .retry_card_event(group_id, topic_id, message_id, client_event_id)
+    }
+    fn card(&self, group_id: &str, message_id: &str) -> Option<Arc<card::Card>> {
+        self.inner.card(group_id, message_id)
+    }
+    fn card_press_state(&self, group_id: &str, message_id: &str) -> Option<CardPressState> {
+        self.inner.card_press_state(group_id, message_id)
+    }
+    fn card_presses(&self, group_id: &str, message_id: &str) -> Vec<CardPress> {
+        self.inner.card_presses(group_id, message_id)
+    }
+    fn press_card_action(&self, group_id: &str, topic_id: &str, message_id: &str, action_id: &str) {
+        self.inner
+            .press_card_action(group_id, topic_id, message_id, action_id)
+    }
+    fn page_bridge(&self, artifact_id: &str, version: u32) -> Option<page_host::PageBridge> {
+        self.inner.page_bridge(artifact_id, version)
+    }
+    fn page_signals(&self) -> Option<UnboundedReceiver<page_host::PageSignal>> {
+        self.inner.page_signals()
+    }
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        self.inner.fetch_page_data(artifact_id, version)
+    }
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        kind: page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, page_host::PageSendError> {
+        self.inner
+            .send_page_event(artifact_id, version, name, kind, payload)
+    }
+    fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
+        self.inner.artifact_page_events(artifact_id, version)
+    }
+    fn artifact_story(&self, artifact_id: &str) -> Option<v2::ArtifactStory> {
+        self.inner.artifact_story(artifact_id)
+    }
+    fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<PathBuf> {
+        self.inner.artifact_poster(artifact_id, version)
+    }
+    fn artifact_preview(&self, artifact_id: &str, version: u32) -> Option<v2::ArtifactPreview> {
+        self.inner.artifact_preview(artifact_id, version)
+    }
+    fn artifact_thumb(&self, artifact_id: &str) -> Option<pages::ArtifactThumb> {
+        self.inner.artifact_thumb(artifact_id)
+    }
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<pages::ArtifactResponse> {
+        self.inner.artifact_responses(artifact_id)
+    }
+    fn artifact_responses_load(&self, artifact_id: &str) -> pages::ResponsesLoad {
+        self.inner.artifact_responses_load(artifact_id)
+    }
+    fn reload_artifact_responses(&self, artifact_id: &str) {
+        self.inner.reload_artifact_responses(artifact_id)
+    }
+    fn clock_now(&self) -> Millis {
+        self.inner.clock_now()
+    }
+    fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
+        self.inner.runs(group_id, topic_id)
+    }
+    fn active_runs(&self) -> Vec<BotRunSummary> {
+        self.inner.active_runs()
+    }
+    fn run_step_times(&self, run_id: &str) -> Vec<Millis> {
+        self.inner.run_step_times(run_id)
+    }
+    fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
+        self.inner.topic_glance(group_id, topic_id)
+    }
+    fn message_proof(&self, group_id: &str, message_id: &str) -> Vec<v2::Proof> {
+        self.inner.message_proof(group_id, message_id)
+    }
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.inner.message_block_refs(message)
+    }
+    fn refs_supported(&self) -> bool {
+        self.inner.refs_supported()
+    }
+    fn artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        if let Some(a) = self.state(artifact_id) {
+            return a.media.map(|(kind, preview)| chat_core::proto::MediaInfo {
+                kind,
+                bytes: a.bytes,
+                preview,
+                ..Default::default()
+            });
+        }
+        self.inner.artifact_media(artifact_id, version)
+    }
+    fn request_artifact(&self, group_id: &str, topic_id: &str, artifact_id: &str) {
+        self.inner.request_artifact(group_id, topic_id, artifact_id)
+    }
+    fn group_artifacts(&self, group_id: &str) -> Vec<ArtifactSummary> {
+        self.inner.group_artifacts(group_id)
+    }
+    fn all_artifacts(&self) -> Vec<(GroupId, ArtifactSummary)> {
+        self.inner.all_artifacts()
+    }
+    fn topic_decisions(&self, group_id: &str, topic_id: &str) -> Vec<v2::Decision> {
+        self.inner.topic_decisions(group_id, topic_id)
+    }
+    fn topic_changes(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicChanges> {
+        self.inner.topic_changes(group_id, topic_id)
+    }
+    fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
+        self.inner.topic_cost(group_id, topic_id)
+    }
+    fn run_usage(&self, run_id: &str) -> Option<v2::RunUsage> {
+        self.inner.run_usage(run_id)
+    }
+    fn acceptance_criteria(&self, run_id: &str) -> Vec<v2::AcceptanceItem> {
+        self.inner.acceptance_criteria(run_id)
+    }
+
     fn session(&self) -> SessionState {
         self.inner.session()
     }
@@ -417,7 +758,7 @@ impl ChatProvider for MediaThread {
         self.inner.typing(group_id, topic_id)
     }
     fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
-        if self.mine(group_id, topic_id) {
+        if self.mine(group_id, topic_id) && !self.folders.is_empty() {
             self.folders
                 .iter()
                 .map(|(s, dir, entry)| self.detail(*s, dir, entry).summary)
@@ -426,7 +767,54 @@ impl ChatProvider for MediaThread {
             self.inner.artifacts(group_id, topic_id)
         }
     }
+    /// A sample's own folder (the 产出 pane shows the same page as the thread).
+    fn open_artifact_version(
+        &self,
+        artifact_id: &str,
+        version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
+        if let Some(a) = self.state(artifact_id) {
+            if let Some(dir) = &a.dir {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = tx.send(Ok(ArtifactFolder {
+                    artifact_id: artifact_id.to_string(),
+                    version: version.unwrap_or(1),
+                    dir: dir.clone(),
+                    entry: a.entry.clone(),
+                    is_page: true,
+                }));
+                return rx;
+            }
+            if !a.hang {
+                return reply_err(FileError::Other);
+            }
+            let (tx, rx) = futures::channel::oneshot::channel();
+            if let Ok(mut hung) = self.hung.lock() {
+                hung.push(tx);
+            }
+            return rx;
+        }
+        let Some((s, dir, entry)) = self
+            .folders
+            .iter()
+            .find(|(s, _, _)| s.key().artifact_id == artifact_id)
+        else {
+            return self.inner.open_artifact_version(artifact_id, version);
+        };
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(Ok(ArtifactFolder {
+            artifact_id: artifact_id.to_string(),
+            version: version.unwrap_or(s.key().version),
+            dir: dir.clone(),
+            entry: entry.clone(),
+            is_page: matches!(s, Sample::Html | Sample::EmbedInPane),
+        }));
+        rx
+    }
     fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
+        if let Some(a) = self.state(artifact_id) {
+            return Some(self.state_detail(a));
+        }
         self.folders
             .iter()
             .find(|(s, _, _)| s.key().artifact_id == artifact_id)
@@ -526,23 +914,87 @@ pub fn open(
     Ok(handle)
 }
 
-/// The upload and preview rows (`media-states`) in a thread-width column.
+/// `media-states`: the preview states in the real thread (E2, B3), at the
+/// thread's x and width: a ready video, a preview the sender still makes, a version
+/// that is still read (skeleton), one that did not open (the inline Alert with 重试)
+/// and one too big to load by itself. Long names and sizes with `--worst-case`.
 fn open_states(
     services: Services,
     content: gpui::Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    use chat_core::proto::{MediaKind as K, MediaPreview as P};
     store::clear(cx);
-    if let Some((dir, entry)) = write_sample(Sample::Video) {
-        store::request_folder(&Sample::Video.key(), title(Sample::Video), dir, entry, cx);
+    let mut thread = MediaThread::new(services.provider.clone(), vec![Sample::Video]);
+    for (s, dir, entry) in &thread.folders {
+        store::request_folder(&s.key(), title(*s), dir.clone(), entry.clone(), cx);
     }
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    let _ = services;
-    gpui_kit::open_window(options, cx, move |_, cx| cx.new(|_| StatesPreview))
-        .map(|(handle, _)| handle)
-        .map_err(|e| e.to_string())
+    let art = |id, author, said, name: &str, bytes, media, hang| StateArt {
+        id,
+        author,
+        said,
+        title: name.rsplit_once('.').map_or(name, |(t, _)| t).to_string(),
+        entry: name.to_string(),
+        bytes,
+        media,
+        hang,
+        dir: None,
+        message: true,
+    };
+    let states = vec![
+        art(
+            "state-gen",
+            "m-coder",
+            "第二次的录屏也传上来了。",
+            file_name(
+                "重连后重复-第二次.mov",
+                "IMG_20251103_183022_HDR_portrait_重连后消息重复的第二次完整录屏_最终版_v12_edited.mov",
+            ),
+            bytes(3_900_000, 1_099_511_627_776),
+            Some((K::Video, P::Pending)),
+            false,
+        ),
+        art(
+            "state-loading",
+            "m-coder",
+            "昨天的巡检报告。",
+            "巡检报告-11-02.pdf",
+            2_000_000,
+            None,
+            true,
+        ),
+        art(
+            "state-failed",
+            "m-alex",
+            "发布会的稿子，先看一眼。",
+            file_name(
+                "夹夹 3.0 发布会.pdf",
+                "夹夹 3.0 发布会_全渠道版_含演讲者备注和全部动画_最终确认版本_请勿再改.pdf",
+            ),
+            bytes(18_600_000, 1),
+            None,
+            false,
+        ),
+        art(
+            "state-big",
+            "m-alex",
+            "周会全程录像，不急着看。",
+            file_name(
+                "周会全程-4K.mov",
+                "2025 年 11 月 3 日全员周会全程录像（4K，含屏幕共享和全部问答环节）.mov",
+            ),
+            bytes(3_400_000_000, 1_099_511_627_776),
+            None,
+            false,
+        ),
+    ];
+    if let Some(t) = Arc::get_mut(&mut thread) {
+        t.states = states;
+    }
+    let provider: Arc<dyn ChatProvider> = thread;
+    let services = Services::new(provider, cx);
+    crate::selftest::scenes::open_first_topic(&services, cx);
+    open_main(services, content, cx)
 }
 
 /// True once every sample of the scene is read and its pages (if any) drew.
@@ -571,31 +1023,6 @@ pub fn ready(sample: Sample, cx: &App) -> bool {
 }
 
 /// The `media-states` harness: the rows in one thread-width column (640).
-struct StatesPreview;
-
-impl Render for StatesPreview {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
-        div()
-            .size_full()
-            .bg(k.content)
-            .text_color(k.text_1)
-            .flex()
-            .justify_center()
-            .pt(space::S48)
-            .child(
-                div()
-                    .w(crate::ui::native::tokens::card_v2::MAX_WIDTH)
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S24)
-                    .child(states_column(cx))
-                    .child(uploads_column(cx)),
-            )
-    }
-}
-
 /// A file name of the states scene: a long one with `--worst-case` (F65).
 fn file_name(normal: &'static str, worst: &'static str) -> &'static str {
     if crate::selftest::worst_case() {
@@ -612,124 +1039,6 @@ fn bytes(normal: u64, worst: u64) -> u64 {
     } else {
         normal
     }
-}
-
-fn states_column(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    let label = |t: &'static str| div().t_small().semibold().text_color(k.text_1).child(t);
-    div()
-        .w(px(600.))
-        .flex_none()
-        .flex()
-        .flex_col()
-        .gap(space::S12)
-        .child(label(cm::STATES_TITLE))
-        .child(states::row(
-            "st-up",
-            Lead::Icon(Sym::Video),
-            file_name(
-                "重连后重复-第二次.mov",
-                "IMG_20251103_183022_HDR_portrait_重连后消息重复的第二次完整录屏_最终版_v12_edited.mov",
-            ),
-            &Status::Uploading {
-                done: bytes(2_400_000, 0),
-                total: bytes(3_900_000, 1_099_511_627_776),
-            },
-            Some(states::action("st-cancel", cm::CANCEL, None, cx)),
-            cx,
-        ))
-        .child(states::row(
-            "st-gen",
-            Lead::Blank,
-            "重连后重复-第二次.mov",
-            &Status::Generating {
-                duration: Some(21.),
-            },
-            None,
-            cx,
-        ))
-        .child(states::row(
-            "st-ok",
-            store::ready(&Sample::Video.key(), cx)
-                .and_then(|m| match &m.data {
-                    Data::Video(v) => v.poster.clone().map(Lead::Thumb),
-                    _ => None,
-                })
-                .unwrap_or(Lead::Blank),
-            "重连后重复-第二次.mov",
-            &Status::Ready {
-                meta: "0:21 · 3.9 MB · 小王 · 刚刚".into(),
-            },
-            Some(states::ready_mark(cx)),
-            cx,
-        ))
-        .child(states::row(
-            "st-fail",
-            Lead::Icon(Sym::File),
-            file_name(
-                "夹夹 3.0 发布会.key",
-                "夹夹 3.0 发布会_全渠道版_含演讲者备注和全部动画_最终确认版本_请勿再改.key",
-            ),
-            &Status::Failed {
-                size: bytes(18_600_000, 0),
-            },
-            Some(states::action(
-                "st-sys",
-                cm::OPEN_WITH_SYSTEM,
-                Some(Sym::OpenExternal),
-                cx,
-            )),
-            cx,
-        ))
-        .child(states::row(
-            "st-big",
-            Lead::Icon(Sym::Video),
-            file_name(
-                "周会全程-4K.mov",
-                "2025 年 11 月 3 日全员周会全程录像（4K，含屏幕共享和全部问答环节）.mov",
-            ),
-            &Status::TooLarge {
-                limit: 2_000_000_000,
-                size: bytes(3_400_000_000, 1_099_511_627_776),
-            },
-            Some(states::action("st-rm", cm::REMOVE, None, cx)),
-            cx,
-        ))
-}
-
-fn uploads_column(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    let spec = InlineSpec {
-        key: MediaKey::new("sample-missing", 1),
-        kind: MediaKind::Pdf,
-        title: "巡检报告-11-02".into(),
-        bytes: 2_000_000,
-        target: Target::none(),
-        id: "scene-loading".into(),
-    };
-    let big = InlineSpec {
-        key: MediaKey::new("sample-big", 1),
-        kind: MediaKind::Video,
-        title: "周会全程.mov".into(),
-        bytes: 900_000_000,
-        target: Target::none(),
-        id: "scene-big".into(),
-    };
-    div()
-        .w(px(600.))
-        .flex_none()
-        .flex()
-        .flex_col()
-        .gap(space::S12)
-        .child(
-            div()
-                .t_small()
-                .semibold()
-                .text_color(k.text_1)
-                .child(cm::STATE_LOADING),
-        )
-        .child(states::big_row(&big, cx))
-        .child(states::failed_row(&spec, cx))
 }
 
 /// Checks what the pipeline produced (frames, peaks, pages, rows).
@@ -1146,10 +1455,10 @@ export function resumeFrom(s: SyncState) {
 "#;
 
 const REPORT_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><style>
-:root{color-scheme:light dark;--t1:#111113;--t2:#52525B;--t3:#6E6E76;--line:#EBEBED;--ok:#177245;--bg:#fff}
-@media (prefers-color-scheme: dark){:root{--t1:#F1F1F3;--t2:#A9A9B2;--t3:#8C8C95;--line:#252529;--ok:#6AD69C;--bg:#111113}}
+:root{color-scheme:light dark;--t1:var(--tc-fg,#0A0A0A);--t2:var(--tc-muted,#737373);--t3:var(--tc-muted,#737373);--line:var(--tc-border,#E5E5E5);--ok:var(--tc-fg,#0A0A0A);--bg:var(--tc-bg,#fff)}
+@media (prefers-color-scheme: dark){:root{--t1:var(--tc-fg,#FAFAFA);--t2:var(--tc-muted,#A1A1A1);--t3:var(--tc-muted,#A1A1A1);--line:var(--tc-border,#2E2E2E);--ok:var(--tc-fg,#FAFAFA);--bg:var(--tc-bg,#0A0A0A)}}
 html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
-.w{padding:16px 18px}h1{font-size:16px;margin:0;font-weight:600}.s{color:var(--t3);font-size:12px;margin:2px 0 14px}
+.w{padding:0}h1{font-size:16px;margin:0;font-weight:600}.s{color:var(--t3);font-size:12px;margin:2px 0 14px}
 .k{display:flex;gap:10px}.k div{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .k i{display:block;font-style:normal;color:var(--t2);font-size:12px}.k b{display:block;font:600 17px ui-monospace,Menlo,monospace}.k em{font-style:normal;color:var(--ok);font:12px ui-monospace,Menlo,monospace}
 h2{font-size:12px;font-weight:600;margin:16px 0 6px;color:var(--t2)}svg{width:100%;height:110px}

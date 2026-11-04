@@ -1,43 +1,32 @@
-//! Screenshot self-test scenes for [`WebEmbed`]: an HTML 产出 live inline in a 话题 and in
-//! the 产出 pane (with local video and audio), the same 话题 scrolled so the inline page is
-//! cut off at the top, and with a menu over the inline page.
+//! Screenshot self-test scenes for [`WebEmbed`] in the real main window (E2, B3): an
+//! HTML 产出 live inline in the first 话题 and another one (with local video and audio)
+//! in the 产出 pane, the same 话题 scrolled so the inline page goes under the toolbar,
+//! and with the message menu over the inline page.
 //!
-//! The scenes check themselves after the capture ([`verify`]): the page's own pixels (its
-//! orange chart bars, a colour the app never draws) must be in the PNG where the page is,
-//! never above the clip edge, and never under the menu; the video must play and the audio
-//! must load from the 产出's own files.
+//! The scenes check themselves after the capture ([`verify`]): the inline page is shown,
+//! clipped under the toolbar (scrolled) or hidden with its snapshot in its place
+//! (covered); the pane's video plays and its audio loads from the 产出's own files.
 
-use crate::ui::native::tokens::space as tsp;
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use artifact_view::{ArtifactEvent, Content, VersionSpec};
-use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled, Window, WindowBounds, div, point, px,
-};
+use gpui::{AnyWindowHandle, App, AsyncApp, Entity, Pixels, point, px};
 
 use crate::{
-    app::{Services, main_window_options},
-    copy::{artifacts as ca, fill, nav as cn, panel as cp},
-    data::Member,
-    fake,
-    selftest::scenes::capture_bounds,
-    theme::{self, Type as _, space},
-    ui::{
-        self, MemberAvatar,
-        overlay::{menu_row, menu_surface},
-        web_embed::{WebEmbed, WebEmbedSpec, WebEmbedState, live},
+    app::Services,
+    data::ChatProvider,
+    selftest::scenes::{open_first_topic, open_main},
+    ui::web_embed::{Phase, WebEmbedState, live},
+    views::media::{
+        preview::{Extra, MediaThread, PageArt},
+        store::{self, MediaKey},
     },
 };
 
 const INLINE_ID: &str = "selftest-weekly";
 const PANE_ID: &str = "selftest-media";
-/// The page's bar colour (#E8590C). The app's theme has no such orange.
-const BAR: (u8, u8, u8) = (0xE8, 0x59, 0x0C);
-/// The wider trailing panes are 400 pt (the inspector 280).
-const PANE_WIDTH: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
 /// How far the scrolled scene moves the inline page above the clip edge.
 const CUT: Pixels = px(96.);
 
@@ -50,417 +39,307 @@ pub enum Mode {
 
 #[derive(Default)]
 struct Probe {
-    media: Option<serde_json::Value>,
-    menu: Option<Bounds<Pixels>>,
-    scrolled: bool,
+    done: bool,
+    error: Option<String>,
 }
 
 thread_local! {
     static PROBE: RefCell<Probe> = RefCell::new(Probe::default());
 }
 
-pub struct EmbedPreview {
-    mode: Mode,
-    members: Vec<Member>,
-    scroll: ScrollHandle,
-    cover: bool,
-    _poll: gpui::Task<()>,
+fn finish(r: Result<(), String>) {
+    PROBE.with(|p| {
+        let mut p = p.borrow_mut();
+        p.done = true;
+        p.error = r.err();
+    });
 }
 
-impl EmbedPreview {
-    fn new(services: &Services, mode: Mode, cx: &mut Context<Self>) -> Self {
-        PROBE.with(|p| *p.borrow_mut() = Probe::default());
-        let members = ["m-alex", "m-coder", fake::ME, "m-lixue"]
-            .iter()
-            .filter_map(|id| services.provider.member(id))
-            .collect();
-        // Moves the scene into its end state once the pages are ready.
-        let poll = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(50))
-                    .await;
-                let done = this.update(cx, |p, cx| p.step(cx)).unwrap_or(true);
-                if done {
-                    break;
-                }
-            }
-        });
-        Self {
-            mode,
-            members,
-            scroll: ScrollHandle::new(),
-            cover: false,
-            _poll: poll,
-        }
-    }
-
-    /// One step towards the scene's end state. True when there is nothing left to do.
-    fn step(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(inline) = embed(INLINE_ID, cx) else {
-            return false;
-        };
-        let s = inline.read(cx);
-        if *s.phase() != ui::web_embed::Phase::Ready {
-            return false;
-        }
-        match self.mode {
-            Mode::Topic => true,
-            Mode::Scrolled => {
-                let Some(b) = s.bounds() else { return false };
-                let top = theme::TOOLBAR_HEIGHT + theme::HAIRLINE;
-                let delta = b.origin.y - (top - CUT);
-                let offset = self.scroll.offset();
-                self.scroll.set_offset(point(offset.x, offset.y - delta));
-                PROBE.with(|p| p.borrow_mut().scrolled = true);
-                cx.notify();
-                true
-            }
-            Mode::Covered => {
-                if !s.has_snapshot() {
-                    return false;
-                }
-                self.cover = true;
-                cx.notify();
-                true
-            }
-        }
-    }
-
-    fn message(
-        &self,
-        index: usize,
-        text: &'static str,
-        extra: Option<gpui::AnyElement>,
-        cx: &App,
-    ) -> gpui::Div {
-        let k = theme::colors(cx);
-        let member = self.members.get(index % self.members.len().max(1));
-        div()
-            .flex()
-            .flex_row()
-            .gap(space::S12)
-            .child(MemberAvatar::new(member, theme::AVATAR_SIZE))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S2)
-                    // The standard sender block (NATIVE.md §9.2): name in Headline, then
-                    // 岗位 · time as one `secondary` Subheadline run.
-                    .child({
-                        use crate::ui::native::{NativeType as _, native_colors};
-                        let n = native_colors(cx);
-                        let role = member.and_then(|m| m.role.clone());
-                        let time = format!("10:{:02}", 2 + index * 3);
-                        let meta = match role {
-                            Some(r) if !r.trim().is_empty() => format!("{r} · {time}"),
-                            _ => time,
-                        };
-                        div()
-                            .flex()
-                            .items_baseline()
-                            .gap(space::S6)
-                            .child(div().n_headline().text_color(n.label).child(
-                                SharedString::from(
-                                    member.map(|m| m.name.clone()).unwrap_or_default(),
-                                ),
-                            ))
-                            .child(
-                                div()
-                                    .n_subheadline()
-                                    .n_figures()
-                                    .text_color(n.secondary)
-                                    .child(meta),
-                            )
-                    })
-                    .child(div().t_body().text_color(k.text_1).child(text))
-                    .children(extra.map(|e| div().pt(space::S8).w_full().child(e))),
-            )
-    }
+/// The live page of `artifact_id`, loaded.
+fn embed(artifact_id: &str, cx: &App) -> Option<Entity<WebEmbedState>> {
+    live(cx).into_iter().find(|e| {
+        let s = e.read(cx);
+        s.artifact_id() == artifact_id && *s.phase() == Phase::Ready
+    })
 }
 
-impl Render for EmbedPreview {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let version = fill(ca::CARD_VERSION, &[("n", "3")]);
-        // The inline page in its card frame (1 px line on the card fill, §1.7).
-        let inline = WebEmbed::new(INLINE_ID, inline_spec())
-            .height(px(300.))
-            .framed()
-            .pass_scroll(true)
-            .on_event(record);
-        let pane = WebEmbed::new(PANE_ID, pane_spec())
-            .height(px(900.) - crate::ui::native::metrics::TOOLBAR_ROW)
-            .rounded(px(0.))
-            .autoplay(true)
-            .on_event(record);
-
-        let mut topic = div()
-            .w_full()
-            .max_w(theme::MEASURE)
-            .mx_auto()
-            .px(theme::CONTENT_GUTTER)
-            .py(space::S24)
-            .flex()
-            .flex_col()
-            .gap(space::S20)
-            .child(self.message(0, SAMPLE[0], None, cx))
-            .child(self.message(1, SAMPLE[1], Some(inline.into_any_element()), cx));
-        for (i, text) in SAMPLE[2..].iter().enumerate() {
-            topic = topic.child(self.message(i + 2, text, None, cx));
-        }
-        // The inline page is a child of the message row's column.
-        let topic_column = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(
-                crate::ui::native::ToolbarRow::new(SAMPLE_TITLE)
-                    .leading_inset(theme::TRAFFIC_LIGHTS_INSET),
-            )
-            .child(
-                div()
-                    .id("embed-topic-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .child(topic),
-            );
-        let pane_column = div()
-            .w(PANE_WIDTH)
-            .flex_none()
-            .h_full()
-            .flex()
-            .flex_col()
-            .bg(k.content)
-            // The pane's toolbar row (Title 3 over a `secondary` subtitle, like every
-            // toolbar), then the 产出 edge to edge under it.
-            .child(crate::ui::native::ToolbarRow::new(cp::ARTIFACTS).subtitle(version))
-            .child(pane);
-
-        let mut root = div()
-            .size_full()
-            .relative()
-            .flex()
-            .flex_row()
-            .bg(k.content)
-            .text_color(k.text_1)
-            .child(topic_column)
-            .child(
-                div()
-                    .w(px(1.))
-                    .h_full()
-                    .bg(crate::ui::native::native_colors(cx).separator),
-            )
-            .child(pane_column);
-        if self.cover
-            && let Some(b) = embed(INLINE_ID, cx).and_then(|e| e.read(cx).bounds())
-        {
-            let at = point(b.origin.x + tsp::S48, b.origin.y + px(40.));
-            let menu = Bounds {
-                origin: at,
-                // Three menu rows inside the menu padding (ui::overlay::menu_surface).
-                size: gpui::size(
-                    px(220.),
-                    theme::size::MENU_ROW * 3. + crate::ui::native::metrics::MENU_PAD * 2.,
-                ),
-            };
-            PROBE.with(|p| p.borrow_mut().menu = Some(menu));
-            root = root.child(
-                menu_surface(cx)
-                    .id("embed-cover-menu")
-                    .occlude()
-                    .absolute()
-                    .left(at.x)
-                    .top(at.y)
-                    .w(menu.size.width)
-                    .child(menu_row(
-                        "m-open",
-                        Some(ui::Sym::CodeFile),
-                        ca::OPEN,
-                        true,
-                        cx,
-                    ))
-                    .child(menu_row(
-                        "m-copy",
-                        Some(ui::Sym::Copy),
-                        cn::MENU_COPY,
-                        false,
-                        cx,
-                    ))
-                    .child(menu_row(
-                        "m-new",
-                        Some(ui::Sym::Download),
-                        ca::NEW_VERSION,
-                        false,
-                        cx,
-                    )),
-            );
-        }
-        root
-    }
+/// Writes the sample 产出 pages to a temp folder: the weekly report and the media page.
+fn write_pages() -> Option<(PathBuf, PathBuf)> {
+    let root = std::env::temp_dir().join("team-chat-embed-scene");
+    let _ = std::fs::remove_dir_all(&root);
+    let (weekly, media) = (root.join("weekly"), root.join("media"));
+    std::fs::create_dir_all(&weekly).ok()?;
+    std::fs::create_dir_all(&media).ok()?;
+    std::fs::write(weekly.join("index.html"), INLINE_HTML).ok()?;
+    std::fs::write(media.join("index.html"), PANE_HTML).ok()?;
+    std::fs::write(media.join("clip.mp4"), CLIP_MP4).ok()?;
+    std::fs::write(media.join("tone.wav"), tone_wav()).ok()?;
+    Some((weekly, media))
 }
 
-fn record(event: &ArtifactEvent, _: &mut Window, _: &mut App) {
-    if let ArtifactEvent::Emit { name, payload, .. } = event
-        && name == "media"
-    {
-        PROBE.with(|p| p.borrow_mut().media = Some(payload.clone()));
-    }
-}
-
-fn embed(id: &str, cx: &App) -> Option<gpui::Entity<WebEmbedState>> {
-    let spec_id = match id {
-        INLINE_ID => "weekly-report",
-        _ => "demo-media",
-    };
-    live(cx)
-        .into_iter()
-        .find(|e| e.read(cx).artifact_id() == spec_id)
-}
-
-// --- openers ----------------------------------------------------------------
-
+/// Opens the main window on the first 话题 with the sample messages, the weekly report
+/// inline and the media page in the 产出 pane, then moves the scene to its end state.
 pub fn open(
     services: Services,
     content: gpui::Size<Pixels>,
     mode: Mode,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|cx| EmbedPreview::new(&services, mode, cx))
-    })
-    .map(|(handle, _)| handle)
-    .map_err(|e| e.to_string())
+    PROBE.with(|p| *p.borrow_mut() = Probe::default());
+    let (weekly, media) = write_pages().ok_or("cannot write the sample pages")?;
+    store::forget(&MediaKey::new(INLINE_ID, 1), cx);
+    // Messages after the page: a few in the plain scene, all of them when the 话题
+    // scrolls the page under the toolbar.
+    let after = match mode {
+        Mode::Scrolled => &SAMPLE[2..],
+        _ => &SAMPLE[2..4],
+    };
+    let authors = ["m-alex", "m-coder"];
+    let mut extras = vec![
+        Extra {
+            author: authors[0].into(),
+            body: SAMPLE[0].into(),
+            streaming: false,
+            artifact: None,
+        },
+        Extra {
+            author: authors[1].into(),
+            body: SAMPLE[1].into(),
+            streaming: false,
+            artifact: Some(MediaKey::new(INLINE_ID, 1)),
+        },
+    ];
+    extras.extend(after.iter().enumerate().map(|(i, t)| Extra {
+        author: authors[i % 2].into(),
+        body: (*t).into(),
+        streaming: false,
+        artifact: None,
+    }));
+    let thread = MediaThread::with_pages(
+        services.provider.clone(),
+        extras,
+        vec![
+            PageArt {
+                id: INLINE_ID,
+                title: SAMPLE_TITLE.into(),
+                author: authors[1],
+                dir: weekly,
+            },
+            PageArt {
+                id: PANE_ID,
+                title: MEDIA_TITLE.into(),
+                author: authors[1],
+                dir: media,
+            },
+        ],
+    );
+    let provider: Arc<dyn ChatProvider> = thread;
+    let services = Services::new(provider, cx);
+    open_first_topic(&services, cx);
+    services.nav.update(cx, |nav, cx| {
+        nav.toggle_pane(
+            crate::app::RightPane::Artifact {
+                id: PANE_ID.into(),
+                version: None,
+            },
+            cx,
+        )
+    });
+    let handle = open_main(services, content, cx)?;
+    cx.spawn(async move |cx: &mut AsyncApp| finish(run(handle, mode, cx).await))
+        .detach();
+    Ok(handle)
 }
 
-/// True once the scene reached its end state and the pages drew.
-pub fn ready(mode: Mode, cx: &App) -> bool {
-    let (Some(inline), Some(pane)) = (embed(INLINE_ID, cx), embed(PANE_ID, cx)) else {
-        return false;
-    };
-    let (i, p) = (inline.read(cx), pane.read(cx));
-    let loaded = *i.phase() == ui::web_embed::Phase::Ready
-        && *p.phase() == ui::web_embed::Phase::Ready
-        && p.shown()
-        && PROBE.with(|p| p.borrow().media.is_some());
-    loaded
-        && match mode {
-            Mode::Topic => i.shown(),
-            Mode::Scrolled => i.shown() && PROBE.with(|p| p.borrow().scrolled),
-            Mode::Covered => i.covered() && !i.shown() && i.has_snapshot(),
+async fn wait_for<T>(
+    cx: &mut AsyncApp,
+    timeout: Duration,
+    mut f: impl FnMut(&mut App) -> Option<T>,
+) -> Option<T> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(v) = cx.update(|cx| f(cx)) {
+            return Some(v);
         }
-}
-
-/// Checks the captured PNG and the page state. See the module docs.
-pub fn verify(mode: Mode, png: &Path, cx: &mut App) -> Result<(), String> {
-    let (inline, pane) = (embed(INLINE_ID, cx), embed(PANE_ID, cx));
-    let ib = inline
-        .and_then(|e| e.read(cx).bounds())
-        .ok_or("no inline page")?;
-    let pb = pane
-        .and_then(|e| e.read(cx).bounds())
-        .ok_or("no pane page")?;
-    let image = image::open(png)
-        .map_err(|e| format!("cannot read {}: {e}", png.display()))?
-        .to_rgba8();
-    let window_w = cx
-        .windows()
-        .first()
-        .and_then(|w| {
-            w.update(cx, |_, window, _| window.viewport_size().width)
-                .ok()
-        })
-        .unwrap_or(px(1440.));
-    let scale = image.width() as f32 / f32::from(window_w);
-    let count = |b: Bounds<Pixels>| -> usize {
-        let x0 = (f32::from(b.origin.x) * scale).max(0.) as u32;
-        let y0 = (f32::from(b.origin.y) * scale).max(0.) as u32;
-        let x1 = ((f32::from(b.origin.x + b.size.width) * scale) as u32).min(image.width());
-        let y1 = ((f32::from(b.origin.y + b.size.height) * scale) as u32).min(image.height());
-        let mut n = 0;
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let p = image.get_pixel(x, y).0;
-                if p[0].abs_diff(BAR.0) < 24
-                    && p[1].abs_diff(BAR.1) < 24
-                    && p[2].abs_diff(BAR.2) < 24
-                {
-                    n += 1;
-                }
-            }
+        if Instant::now() > deadline {
+            return None;
         }
-        n
-    };
-    let media = PROBE
-        .with(|p| p.borrow().media.clone())
-        .ok_or("no media event")?;
-    let playing = media["video"]["currentTime"].as_f64().unwrap_or(0.) > 0.
-        && media["video"]["videoWidth"].as_u64().unwrap_or(0) > 0;
-    let audio = media["audio"]["duration"].as_f64().unwrap_or(0.);
-    if !playing || !(0.9..1.1).contains(&audio) {
-        return Err(format!("local media did not play: {media}"));
+        cx.background_executor()
+            .timer(Duration::from_millis(50))
+            .await;
     }
-    if count(pb) < 200 {
-        return Err("the pane page is not in the capture".into());
+}
+
+async fn eval(cx: &mut AsyncApp, page: &Entity<WebEmbedState>, script: &str) -> String {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    let script = script.to_string();
+    cx.update(|cx| {
+        page.read(cx).evaluate_text(&script, move |v| {
+            let _ = tx.send(v);
+        })
+    });
+    rx.await.ok().flatten().unwrap_or_default()
+}
+
+/// The pane page's media: the video plays, the audio is read (its length in seconds).
+const MEDIA: &str = "(function(){var v=document.getElementById('v'),a=document.getElementById('a');\
+return JSON.stringify({playing:v.currentTime>0&&v.videoWidth>0,audio:a.duration||0});})()";
+
+async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
+    let inline = wait_for(cx, Duration::from_secs(15), |cx| {
+        embed(INLINE_ID, cx).filter(|e| e.read(cx).shown() && e.read(cx).bounds().is_some())
+    })
+    .await
+    .ok_or("the inline page did not load")?;
+    let pane = wait_for(cx, Duration::from_secs(15), |cx| {
+        embed(PANE_ID, cx).filter(|e| e.read(cx).shown())
+    })
+    .await
+    .ok_or("the 产出 pane page did not load")?;
+    // Local media from the 产出's own files: a real click on the video starts it (a
+    // page in the pane plays media only after the viewer's input).
+    let at: serde_json::Value = serde_json::from_str(
+        &eval(
+            cx,
+            &pane,
+            "(function(){var r=document.getElementById('v').getBoundingClientRect();\
+return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
+        )
+        .await,
+    )
+    .unwrap_or_default();
+    let (x, y) = (
+        at["x"].as_f64().unwrap_or(-1.),
+        at["y"].as_f64().unwrap_or(-1.),
+    );
+    if !cx.update(|cx| pane.read(cx).post_click(x, y, true)) {
+        return Err("the click on the video could not be posted".into());
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let m: serde_json::Value =
+            serde_json::from_str(&eval(cx, &pane, MEDIA).await).unwrap_or_default();
+        let audio = m["audio"].as_f64().unwrap_or(0.);
+        if m["playing"].as_bool() == Some(true) && (0.9..1.1).contains(&audio) {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err(format!("local media did not play: {m}"));
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
     }
     let clip_top = crate::ui::native::metrics::TOOLBAR_ROW;
     match mode {
-        Mode::Topic => {
-            if count(ib) < 2000 {
-                return Err("the inline page is not in the capture".into());
-            }
-        }
+        Mode::Topic => {}
         Mode::Scrolled => {
-            let above = Bounds {
-                origin: ib.origin,
-                size: gpui::size(ib.size.width, (clip_top - ib.origin.y).max(px(0.))),
-            };
-            let below = Bounds {
-                origin: point(ib.origin.x, clip_top + px(1.)),
-                size: gpui::size(ib.size.width, ib.size.height - above.size.height - px(1.)),
-            };
-            if above.size.height < px(40.) {
-                return Err("the inline page did not scroll under the clip edge".into());
+            // Wheel the real thread until the page's top sits CUT above the clip edge.
+            for _ in 0..12 {
+                let top = cx
+                    .update(|cx| inline.read(cx).bounds())
+                    .map(|b| b.origin.y)
+                    .ok_or("the inline page left the layout")?;
+                let want = clip_top - CUT;
+                let delta = want - top;
+                if delta.abs() < px(3.) {
+                    break;
+                }
+                let at = cx
+                    .update(|cx| inline.read(cx).bounds())
+                    .map(|b| point(b.origin.x - px(24.), b.origin.y + b.size.height / 2.))
+                    .unwrap_or(point(px(700.), px(400.)));
+                let _ = cx.update(|cx| {
+                    handle.update(cx, |_, window, cx| {
+                        window.dispatch_event(
+                            gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                                position: at,
+                                delta: gpui::ScrollDelta::Pixels(point(px(0.), delta)),
+                                ..Default::default()
+                            }),
+                            cx,
+                        );
+                    })
+                });
+                cx.background_executor()
+                    .timer(Duration::from_millis(120))
+                    .await;
             }
-            if count(above) > 0 {
-                return Err("the inline page draws above its clip edge".into());
-            }
-            if count(below) < 500 {
-                return Err("the visible part of the inline page is not in the capture".into());
+            let b = cx
+                .update(|cx| inline.read(cx).bounds())
+                .ok_or("the inline page left the layout")?;
+            if b.origin.y > clip_top - px(40.) {
+                return Err(format!(
+                    "the inline page did not scroll under the clip edge (top {:?})",
+                    b.origin.y
+                ));
             }
         }
         Mode::Covered => {
-            let menu = PROBE.with(|p| p.borrow().menu).ok_or("no menu")?;
-            // Inside the rounded corners and the shadow edge.
-            let inner = Bounds {
-                origin: point(menu.origin.x + tsp::S8, menu.origin.y + tsp::S8),
-                size: gpui::size(menu.size.width - tsp::S16, menu.size.height - tsp::S16),
-            };
-            if count(inner) > 0 {
-                return Err("the inline page draws over the menu".into());
-            }
-            // The snapshot draws in the page's place around the menu.
-            if count(ib) < 1000 {
-                return Err("the snapshot of the covered page is not in the capture".into());
-            }
+            // A secondary click on the message over the page opens its menu there;
+            // the page hides under it and its snapshot shows.
+            wait_for(cx, Duration::from_secs(5), |cx| {
+                inline.read(cx).has_snapshot().then_some(())
+            })
+            .await
+            .ok_or("the inline page took no snapshot")?;
+            let b = cx
+                .update(|cx| inline.read(cx).bounds())
+                .ok_or("the inline page left the layout")?;
+            let at = point(b.origin.x + px(48.), b.origin.y + px(24.));
+            let _ = cx.update(|cx| {
+                handle.update(cx, |_, window, cx| {
+                    for e in [
+                        gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                            button: gpui::MouseButton::Right,
+                            position: at,
+                            modifiers: gpui::Modifiers::default(),
+                            click_count: 1,
+                            first_mouse: false,
+                        }),
+                        gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                            button: gpui::MouseButton::Right,
+                            position: at,
+                            modifiers: gpui::Modifiers::default(),
+                            click_count: 1,
+                        }),
+                    ] {
+                        window.dispatch_event(e, cx);
+                    }
+                })
+            });
+            wait_for(cx, Duration::from_secs(5), |cx| {
+                let s = inline.read(cx);
+                (s.covered() && !s.shown()).then_some(())
+            })
+            .await
+            .ok_or("no menu covered the inline page")?;
         }
     }
+    // Let the last frame draw.
+    cx.background_executor()
+        .timer(Duration::from_millis(250))
+        .await;
     Ok(())
+}
+
+/// True once the scene reached its end state.
+pub fn ready(_mode: Mode, _cx: &App) -> bool {
+    PROBE.with(|p| p.borrow().done)
+}
+
+/// The result of the scene's check (see the module docs).
+pub fn verify(_mode: Mode, _png: &Path, _cx: &mut App) -> Result<(), String> {
+    PROBE.with(|p| match &p.borrow().error {
+        Some(e) => Err(e.clone()),
+        None => Ok(()),
+    })
 }
 
 // --- the sample 产出 -----------------------------------------------------------
 
-const SAMPLE_TITLE: &str = "周报：本周合并的改动";
+const SAMPLE_TITLE: &str = "本周合并的改动";
+const MEDIA_TITLE: &str = "登录改动演示";
 const SAMPLE: &[&str] = &[
     "这周的改动合并完了吗？做个周报给大家看看。",
     "做好了，周报在下面，可以直接看。",
@@ -476,25 +355,6 @@ const SAMPLE: &[&str] = &[
     "下周的周报还用这个格式。",
     "可以，数字我会自动更新。",
 ];
-
-fn inline_spec() -> WebEmbedSpec {
-    WebEmbedSpec::new(
-        "weekly-report",
-        VersionSpec::new(
-            3,
-            Content::single("index.html", INLINE_HTML.as_bytes().to_vec()),
-        ),
-    )
-}
-
-fn pane_spec() -> WebEmbedSpec {
-    let files = vec![
-        ("index.html".to_string(), PANE_HTML.as_bytes().to_vec()),
-        ("clip.mp4".to_string(), CLIP_MP4.to_vec()),
-        ("tone.wav".to_string(), tone_wav()),
-    ];
-    WebEmbedSpec::new("demo-media", VersionSpec::new(1, Content::memory(files)))
-}
 
 /// A 2 s test pattern (H.264, 384 x 216).
 const CLIP_MP4: &[u8] = include_bytes!("preview/clip.mp4");
@@ -531,10 +391,9 @@ fn tone_wav() -> Vec<u8> {
 const INLINE_HTML: &str = concat!(
     r#"<!doctype html><html><head><meta charset="utf-8"><style>"#,
     r#"
-:root{color-scheme:light dark;--t1:#1d1d1f;--t2:#6e6e73;--line:rgba(0,0,0,.09);--soft:#F4A261;--bar:#E8590C}
-@media (prefers-color-scheme: dark){:root{--t1:#f2f2f4;--t2:#9a9aa1;--line:rgba(255,255,255,.12);--soft:#8a4a22}}
+:root{color-scheme:light dark;--t1:var(--tc-fg,#0a0a0a);--t2:var(--tc-muted,#737373);--line:var(--tc-border,#e5e5e5);--bar:var(--tc-primary,#171717);--soft:color-mix(in srgb,var(--bar) 20%,transparent)}
 html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{padding:16px 18px}
+.wrap{padding:0}
 h1{font-size:15px;line-height:22px;margin:0;font-weight:600}
 .sub{color:var(--t2);font-size:12px;margin:2px 0 12px}
 .chart{display:flex;align-items:flex-end;gap:14px;height:120px;border-bottom:1px solid var(--line);padding:0 4px}
@@ -564,19 +423,16 @@ h1{font-size:15px;line-height:22px;margin:0;font-weight:600}
 const PANE_HTML: &str = concat!(
     r#"<!doctype html><html><head><meta charset="utf-8"><style>"#,
     r#"
-:root{color-scheme:light dark;--t1:#1d1d1f;--t2:#6e6e73;--line:rgba(0,0,0,.09);--bar:#E8590C}
-@media (prefers-color-scheme: dark){:root{--t1:#f2f2f4;--t2:#9a9aa1;--line:rgba(255,255,255,.12)}}
+:root{color-scheme:light dark;--t1:var(--tc-fg,#0a0a0a);--t2:var(--tc-muted,#737373);--line:var(--tc-border,#e5e5e5);--bar:var(--tc-primary,#171717)}
 html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.6 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{padding:16px 18px}
-h1{font-size:15px;line-height:22px;margin:0;font-weight:600;display:flex;align-items:center;gap:8px}
-h1:before{content:"";width:4px;height:16px;border-radius:2px;background:var(--bar)}
+.wrap{padding:0}
+h1{font-size:16px;line-height:24px;margin:0;font-weight:600}
 .sub{color:var(--t2);font-size:12px;margin:2px 0 12px}
 video{display:block;width:100%;border-radius:8px;background:#000;aspect-ratio:16/9}
 audio{display:block;width:100%;margin-top:12px}
 h2{font-size:13px;margin:16px 0 4px;font-weight:600}
 ul{margin:0;padding-left:18px;color:var(--t1)}
 code{font:12px ui-monospace,Menlo,monospace;background:var(--line);padding:1px 4px;border-radius:4px}
-.bar{height:10px;border-radius:5px;background:var(--bar);margin-top:14px;width:62%}
 "#,
     r#"</style></head><body><div class="wrap">
 <h1>登录改动演示</h1><div class="sub">第 1 版 · 视频和提示音都在这个产出里</div>
@@ -584,16 +440,16 @@ code{font:12px ui-monospace,Menlo,monospace;background:var(--line);padding:1px 4
 <audio id="a" src="tone.wav" controls preload="auto"></audio>
 <h2>改了什么</h2>
 <ul><li>邀请码输错时保留输入，光标停在末尾</li><li>服务器地址折叠成一行 <code>host · 更改</code></li><li>重连时侧栏底部显示提示</li></ul>
-<div class="bar"></div>
 </div>
 <script>
 (function(){
   var v=document.getElementById('v'), a=document.getElementById('a'), sent=false;
+  v.addEventListener('click',function(){v.play();});
   function report(){
     if(sent) return;
     if(!(v.currentTime>0 && a.readyState>=1)) return;
     sent=true;
-    window.artifact.emitEvent('media',{
+    if(window.artifact&&window.artifact.emitEvent) window.artifact.emitEvent('media',{
       video:{readyState:v.readyState,currentTime:v.currentTime,duration:v.duration,videoWidth:v.videoWidth,paused:v.paused},
       audio:{readyState:a.readyState,duration:a.duration}
     });
