@@ -28,7 +28,7 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement as _, Styled,
     Subscription, TitlebarOptions, Window, WindowBounds, WindowOptions, canvas, div, px, size,
 };
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+use gpui_component::button::Button;
 
 use crate::{
     app::Services,
@@ -36,7 +36,7 @@ use crate::{
     data::{MemberLevel, SessionState},
     theme,
     ui::{
-        self, Sym,
+        Sym,
         native::{NativeType as _, emphasized, native_colors},
     },
 };
@@ -265,50 +265,13 @@ impl SettingsView {
     /// over the 11 pt label; the selected one has the `selection` fill and
     /// `accent_text` ink. No hover fill; pressed darkens.
     fn tab(&self, page: Page, window: &Window, cx: &mut Context<Self>) -> Button {
-        let k = native_colors(cx);
-        let on = page == self.page;
-        let active = emphasized(window);
-        let ink = match (on, active) {
-            (true, true) => k.accent_text,
-            (true, false) => k.label,
-            (false, _) => k.secondary,
-        };
-        let rest = if on {
-            k.selection
-        } else {
-            gpui::transparent_black()
-        };
-        Button::new(gpui::SharedString::from(format!(
-            "settings-page-{}",
-            page.slug()
-        )))
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(rest)
-                .foreground(ink)
-                .hover(rest)
-                .active(if on { rest } else { k.fill }),
-        )
-        .h(TAB_HEIGHT)
-        .min_w(TAB_MIN_WIDTH)
-        .px(px(8.))
-        .rounded(TAB_RADIUS)
-        .bg(rest)
-        .accessibility_label(page.title())
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(4.))
-                .child(ui::sym(page.symbol(), ui::SymSize::TAB, ink))
-                .child(
-                    div()
-                        .n_subheadline()
-                        .text_color(ink)
-                        .whitespace_nowrap()
-                        .child(page.title()),
-                ),
+        crate::ui::native::toolbar_tab(
+            gpui::SharedString::from(format!("settings-page-{}", page.slug())),
+            page.symbol(),
+            page.title(),
+            page == self.page,
+            emphasized(window),
+            cx,
         )
         .on_click(cx.listener(move |this, _, window, cx| this.show(page, window, cx)))
     }
@@ -374,7 +337,13 @@ impl Render for SettingsView {
                     )
                     .child(div().h(TABS_BOTTOM)),
             )
-            .child(div().flex_none().h(px(1.)).w_full().bg(k.separator))
+            .child(
+                div()
+                    .flex_none()
+                    .h(crate::ui::native::tokens::layout::BORDER)
+                    .w_full()
+                    .bg(k.separator),
+            )
             .child(
                 div()
                     .id("settings-page")

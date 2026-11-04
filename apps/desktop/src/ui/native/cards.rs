@@ -41,16 +41,12 @@ pub mod card {
     pub const SCRUBBER: Pixels = height::PROGRESS;
 }
 
-/// The card container: radius 12, `fill`, no border, no shadow. Callers add
-/// the 14 pt insets where the content starts (a media block runs to the
-/// edges).
+/// The card container (COMPLETENESS.md §2.4, §1.7): the card surface,
+/// radius 14, a 1 px border, shadow sm; a fill step alone is not an edge.
+/// Callers add the insets where the content starts (a media block runs to
+/// the edges).
 pub fn card_frame(cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .w_full()
-        .rounded(card::RADIUS)
-        .bg(k.fill)
-        .overflow_hidden()
+    super::blocks::card_surface(cx).w_full().overflow_hidden()
 }
 
 /// A quiet well inside a card (draft, diff, code): `fill` on the card's

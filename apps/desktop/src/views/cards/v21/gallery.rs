@@ -131,14 +131,14 @@ fn head(title: &str, note: &str, number: Option<&str>, cx: &App) -> AnyElement {
         .gap(space::S12)
         .children(number.map(|n| {
             div()
-                .text_size(px(12.))
+                .text_size(crate::ui::native::tokens::text::META.0)
                 .mono()
                 .text_color(k.ink_3)
                 .child(n.to_string())
         }))
         .child(
             div()
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(20.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(k.ink)
@@ -597,7 +597,7 @@ impl Render for Gallery21 {
                 .child(
                     div()
                         .max_w(px(760.))
-                        .text_size(px(14.))
+                        .text_size(crate::ui::native::tokens::text::UI.0)
                         .line_height(px(22.))
                         .text_color(k.ink_2)
                         .child(c::G_SUBTITLE),

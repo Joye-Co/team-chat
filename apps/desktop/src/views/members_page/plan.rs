@@ -8,7 +8,7 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
-    SharedString, Styled as _, Subscription, Window, px,
+    SharedString, Styled as _, Subscription, Window,
 };
 use gpui_component::{
     WindowExt as _,
@@ -262,7 +262,7 @@ pub fn open_plan_sheet(
             limit.read(cx).focus_handle(cx).focus(window, cx);
         }
         native_sheet(dialog, SheetWidth::Form, cx)
-            .px(px(0.))
+            .px_0()
             .child(form.clone())
     });
 }

@@ -253,7 +253,7 @@ impl TopicPage {
                         push_button(
                             "pinned-withdraw",
                             c::WITHDRAW,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )
@@ -284,7 +284,7 @@ impl TopicPage {
                     push_button(
                         "pinned-see-changes",
                         c::SEE_CHANGES,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )
@@ -297,7 +297,7 @@ impl TopicPage {
                     push_button(
                         "pinned-request",
                         c::REQUEST_CHANGES_MORE,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )
@@ -335,7 +335,7 @@ impl TopicPage {
                         let style = if Some(i) == default {
                             PushStyle::Default
                         } else {
-                            PushStyle::Standard
+                            PushStyle::Outline
                         };
                         let (g, t, m) = (g.clone(), t.clone(), message_id.clone());
                         push_button(

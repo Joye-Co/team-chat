@@ -21,6 +21,7 @@ use gpui::{
 };
 use gpui_component::avatar::Avatar;
 
+use crate::ui::native::tokens::avatar as avatar_size;
 use crate::{
     characters::{self, CharacterStatus, status::StatusBoard},
     data::Member,
@@ -66,6 +67,7 @@ pub enum Ring {
 
 impl MemberAvatar {
     pub fn new(member: Option<&Member>, size: Pixels) -> Self {
+        let size = snap(size);
         Self {
             id: member.map(|m| m.id.clone()).unwrap_or_default(),
             name: member.map(|m| m.name.clone()).unwrap_or_default(),
@@ -122,10 +124,11 @@ impl RenderOnce for MemberAvatar {
         let size = self.size;
         let surface = self.surface.unwrap_or(k.content);
         let small = size <= px(24.);
+        // §1.8: the presence dot is 8 with a 2 px ring of the surface.
         let (dot_size, dot_offset) = if small {
-            (px(8.), px(-3.))
+            (avatar_size::PRESENCE, px(-3.))
         } else {
-            (px(10.), px(-1.))
+            (avatar_size::PRESENCE, px(-1.))
         };
         let dot = |color: Hsla| {
             div()
@@ -198,15 +201,15 @@ impl RenderOnce for MemberAvatar {
 
         // People: a circle.
         let text = monogram(&self.name, size);
-        let (font, line) = if size <= px(16.) {
-            // Breadcrumb size: one character that keeps a margin in the disc.
-            (px(10.), size)
-        } else if small {
-            type_scale::META
+        // §1.8: the initial is 12 at 16-24, 14 at 32-40, 24 at 64.
+        let font = if size <= px(24.) {
+            type_scale::META.0
+        } else if size <= px(40.) {
+            type_scale::UI.0
         } else {
-            let share = if text.chars().count() > 1 { 0.38 } else { 0.44 };
-            ((size * share).round(), size)
+            crate::ui::native::tokens::text::HERO.0
         };
+        let line = size;
         // The provider gives the downloaded file; a remote URL is not drawn (it needs the
         // token), so the monogram shows until the file is on disk.
         let local = self
@@ -236,7 +239,7 @@ impl RenderOnce for MemberAvatar {
                 .justify_center()
                 .text_size(font)
                 .line_height(line)
-                .semibold()
+                .font_weight(theme::MEDIUM_WEIGHT)
                 .overflow_hidden()
                 .child(text)
                 .into_any_element(),
@@ -256,6 +259,22 @@ impl RenderOnce for MemberAvatar {
 /// The status dot of an avatar (was a ring around it): a small `live` or
 /// `you` dot on the bottom-right corner, cut out of the avatar by a ring in
 /// the surface color, the way macOS draws presence.
+/// The avatar sizes of §1.8: 16, 24, 32, 40, 64. Any other size snaps to
+/// the nearest one (ties go up).
+pub fn snap(size: Pixels) -> Pixels {
+    let mut best = avatar_size::SIZES[0];
+    for s in avatar_size::SIZES {
+        let (d, b) = (
+            (f32::from(s) - f32::from(size)).abs(),
+            (f32::from(best) - f32::from(size)).abs(),
+        );
+        if d < b || (d == b && s > best) {
+            best = s;
+        }
+    }
+    best
+}
+
 fn ring_element(ring: Ring, size: Pixels, surface: Hsla, cx: &App) -> gpui::AnyElement {
     let k = theme::colors(cx);
     let color = match ring {
@@ -467,6 +486,17 @@ pub fn monogram(name: &str, size: Pixels) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn avatar_sizes_snap_to_the_scale() {
+        use gpui::px;
+        assert_eq!(super::snap(px(20.)), px(24.));
+        assert_eq!(super::snap(px(28.)), px(32.));
+        assert_eq!(super::snap(px(57.)), px(64.));
+        assert_eq!(super::snap(px(21.)), px(24.));
+        assert_eq!(super::snap(px(16.)), px(16.));
+        assert_eq!(super::snap(px(36.)), px(40.));
+    }
+
     use super::*;
 
     #[test]

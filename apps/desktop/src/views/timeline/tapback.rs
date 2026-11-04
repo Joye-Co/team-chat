@@ -6,19 +6,15 @@ use gpui::{
     AnyElement, App, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _, div,
     prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
-    hover_card::HoverCard,
-};
+use gpui_component::{button::Button, hover_card::HoverCard};
 
 use crate::ui::{
-    Sym, icon,
-    native::{NativeType as _, borderless_variant, native_colors, popover_surface},
+    Sym,
+    native::{NativeType as _, native_colors, popover_surface},
 };
 
 /// The bubble: 22 pt tall, fully rounded; the emoji is 14 pt.
-pub const BUBBLE: gpui::Pixels = px(22.);
+pub const BUBBLE: gpui::Pixels = crate::ui::native::tokens::height::SM;
 const EMOJI: gpui::Pixels = px(14.);
 /// The accent tint of my own reaction.
 const MINE_TINT: f32 = 0.28;
@@ -34,47 +30,25 @@ pub fn bubble(
     mine: bool,
     cx: &App,
 ) -> Button {
+    // COMPLETENESS.md F30: "mine" is the `muted` fill with a foreground
+    // border (the kit's selected chip), never a tint.
     let k = native_colors(cx);
-    let fill = if mine {
-        k.accent.opacity(MINE_TINT)
-    } else {
-        k.fill
-    };
-    let text = if mine { k.label } else { k.secondary };
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(fill)
-                .foreground(text)
-                .hover(fill)
-                .active(k.fill_hover),
-        )
-        .with_size(gpui_component::Size::Small)
-        .h(BUBBLE)
-        .min_w(BUBBLE + px(6.))
-        .px(px(7.))
-        .rounded(BUBBLE / 2.)
-        .bg(fill)
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .child(div().text_size(EMOJI).line_height(BUBBLE).child(emoji))
-                .when(count > 1, |el| {
-                    el.child(
-                        div()
-                            .n_callout()
-                            .n_figures()
-                            .text_color(text)
-                            .child(if count > 99 {
-                                "99+".to_string()
-                            } else {
-                                count.to_string()
-                            }),
-                    )
-                }),
-        )
+    crate::ui::native::chip_button(id, mine, cx).child(
+        div()
+            .flex()
+            .items_center()
+            .gap(crate::ui::native::tokens::space::S4)
+            .child(div().text_size(EMOJI).line_height(BUBBLE).child(emoji))
+            .when(count > 1, |el| {
+                el.child(
+                    div()
+                        .n_section()
+                        .n_figures()
+                        .text_color(if mine { k.label } else { k.secondary })
+                        .child(crate::ui::native::badge::cap(count as u32)),
+                )
+            }),
+    )
 }
 
 /// A tapback with the names of the members who reacted in a hover popover.
@@ -101,12 +75,11 @@ pub fn with_names(id: impl Into<ElementId>, trigger: Button, names: SharedString
 /// The bubble after the tapbacks that opens the picker: borderless, the
 /// `face.smiling` symbol in `secondary`.
 pub fn add_bubble(id: impl Into<ElementId>, cx: &App) -> Button {
-    let k = native_colors(cx);
-    Button::new(id)
-        .custom(borderless_variant(cx))
-        .with_size(gpui_component::Size::Small)
-        .size(BUBBLE)
-        .p_0()
-        .rounded(BUBBLE / 2.)
-        .child(icon(Sym::Emoji, px(13.), k.secondary))
+    crate::ui::native::icon_button_sym(
+        id,
+        Sym::Emoji,
+        crate::copy::timeline::ADD_REACTION,
+        crate::ui::native::IconSize::Small,
+        cx,
+    )
 }

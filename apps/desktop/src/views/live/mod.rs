@@ -298,7 +298,7 @@ impl LivePane {
             push_button(
                 "live-screen-share",
                 c::LIVE_OPEN_SCREEN_SHARE,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Regular,
                 cx,
             )

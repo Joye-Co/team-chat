@@ -1093,16 +1093,16 @@ impl ComposerView {
             .h(px(24.))
             .pl(space::S6)
             .pr(px(2.))
-            .rounded(px(6.))
+            .rounded(crate::ui::native::tokens::radius::ITEM)
             .bg(k.fill)
             .n_callout()
             .text_color(k.label)
             .child(ui::sym(glyph, ui::SymSize::INLINE_SMALL, k.secondary))
             .child(div().min_w(px(0.)).one_line().child(text))
             .child(
-                ui::icon_button(id, Sym::Close)
+                ui::native::icon_button_bare(id, Sym::Close, ui::native::IconSize::Regular)
                     .with_size(px(20.))
-                    .rounded(px(5.))
+                    .rounded(crate::ui::native::tokens::radius::ITEM)
                     .icon(ui::button_glyph(Sym::Close, px(11.), px(20.)))
                     .named(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
@@ -1163,9 +1163,9 @@ impl ComposerView {
                     m.id
                 ))))
                 .flex_none()
-                .h(px(28.))
+                .h(crate::ui::native::tokens::height::SM)
                 .px(px(6.))
-                .rounded(px(6.))
+                .rounded(crate::ui::native::tokens::radius::ITEM)
                 .flex()
                 .items_center()
                 .gap(space::S8)
@@ -1479,11 +1479,11 @@ impl Render for ComposerView {
                         .child(
                             div()
                                 .px(px(5.))
-                                .rounded(px(5.))
+                                .rounded(crate::ui::native::tokens::radius::ITEM)
                                 .bg(colors.sunken)
                                 .text_color(colors.ink_2)
                                 .t_mono()
-                                .text_size(px(11.))
+                                .text_size(crate::ui::native::tokens::text::META.0)
                                 .line_height(px(18.))
                                 .child("⌘;"),
                         )
@@ -1528,9 +1528,14 @@ impl Render for ComposerView {
                     .t_small()
                     .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
                     .child(
-                        ui::text_button("cancel-edit", crate::copy::common::CANCEL, cx).on_click(
-                            cx.listener(|this, _, window, cx| this.cancel_edit(window, cx)),
-                        ),
+                        ui::native::push_button(
+                            "cancel-edit",
+                            crate::copy::common::CANCEL,
+                            ui::native::PushStyle::Ghost,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.cancel_edit(window, cx))),
                     ),
             );
         }

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, Hsla, InteractiveElement as _, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, px, relative,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::tokens::{NativeType as _, emphasized, metrics, native_colors};
@@ -86,23 +86,25 @@ impl RenderOnce for InspectorSection {
         } else {
             Sf::ChevronDown
         };
+        // COMPLETENESS.md §2.5: px 16, sections 24 apart; the GroupLabel h32
+        // (12 medium muted) with an optional 28 ghost action.
         div()
             .w_full()
             .px(metrics::INSPECTOR_PAD)
-            .pt(px(12.))
-            .pb(px(4.))
+            .pt(super::tokens::space::S16)
+            .pb(super::tokens::space::S8)
             .flex()
             .flex_col()
             .child(
                 div()
                     .id(self.id)
-                    .h(px(24.))
+                    .h(super::tokens::height::ROW)
                     .flex()
                     .items_center()
-                    .gap(px(4.))
+                    .gap(super::tokens::space::S4)
                     .child(symbol(
                         chevron,
-                        px(11.),
+                        super::tokens::icon::SM,
                         Weight::Semibold,
                         k.secondary,
                         window,
@@ -166,7 +168,8 @@ pub fn label_value_with(
                 .min_w(px(0.))
                 .overflow_hidden()
                 .flex()
-                .justify_end()
+                // §2.5: values left-aligned at one x.
+                .justify_start()
                 .n_body()
                 .n_figures()
                 .text_color(k.label)
@@ -188,7 +191,7 @@ pub fn label_value_with(
 /// in the key window, `selection` gray when it does not or the window is
 /// inactive. No hover.
 #[derive(IntoElement)]
-pub struct ListRow {
+pub struct CompactRow {
     id: ElementId,
     selected: bool,
     focused: bool,
@@ -198,7 +201,7 @@ pub struct ListRow {
     on_click: Option<Click>,
 }
 
-impl ListRow {
+impl CompactRow {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -245,31 +248,28 @@ impl ListRow {
         active: bool,
         cx: &App,
     ) -> Option<(Hsla, Hsla)> {
+        // D10: the selected row is the `muted` fill with foreground text,
+        // never an inverted black row, focused or not.
+        let _ = (focused, active);
         let k = native_colors(cx);
-        selected.then(|| {
-            if focused && active {
-                (k.accent, k.on_accent)
-            } else {
-                (k.selection, k.label)
-            }
-        })
+        selected.then_some((k.selection, k.label))
     }
 }
 
-impl ParentElement for ListRow {
+impl ParentElement for CompactRow {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
     }
 }
 
-impl RenderOnce for ListRow {
+impl RenderOnce for CompactRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let active = self
             .inactive
             .map(|i| !i)
             .unwrap_or_else(|| emphasized(window));
-        let sel = ListRow::selection_ink(self.selected, self.focused, active, cx);
+        let sel = CompactRow::selection_ink(self.selected, self.focused, active, cx);
         div()
             .id(self.id)
             .flex_none()
@@ -282,7 +282,9 @@ impl RenderOnce for ListRow {
             .gap(px(8.))
             .n_body()
             .text_color(sel.map(|s| s.1).unwrap_or(k.label))
-            .when_some(sel, |d, (fill, _)| d.bg(fill))
+            .when_some(sel, |d, (fill, _)| {
+                d.bg(fill).font_weight(crate::theme::MEDIUM_WEIGHT)
+            })
             .children(self.children)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
@@ -290,33 +292,19 @@ impl RenderOnce for ListRow {
     }
 }
 
-/// A determinate bar (§5.7): 4 pt, radius 2, `quaternary` track, `label`
-/// fill (or the state color when it shows a state). `value` is 0–1. This is
-/// the one progress drawing of the app: plan steps, budgets, downloads and
-/// uploads all use it (no segmented or dashed bars).
-pub fn determinate_bar(value: f32, color: Option<Hsla>, cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .w_full()
-        .h(metrics::BAR)
-        .rounded(metrics::BAR_RADIUS)
-        .bg(k.quaternary)
-        .child(
-            div()
-                .h_full()
-                .w(relative(value.clamp(0., 1.)))
-                .rounded(metrics::BAR_RADIUS)
-                .bg(color.unwrap_or(k.label)),
-        )
+/// The one Progress (COMPLETENESS.md D12): h4, radius full, track primary at
+/// 20 %, value primary. `value` is 0–1. A state color never fills a bar
+/// (§1.3): `_color` is kept for its callers and ignored.
+pub fn determinate_bar(value: f32, _color: Option<Hsla>, cx: &App) -> gpui::Div {
+    super::feedback::progress(value, cx)
 }
 
-/// A plan of `done` out of `total` steps as a determinate bar (never a
-/// row of segments).
-pub fn steps_bar(done: usize, total: usize, color: Option<Hsla>, cx: &App) -> gpui::Div {
+/// A plan of `done` out of `total` steps: the Progress bar (D12).
+pub fn steps_bar(done: usize, total: usize, _color: Option<Hsla>, cx: &App) -> gpui::Div {
     let value = if total == 0 {
         0.
     } else {
         done as f32 / total as f32
     };
-    determinate_bar(value, color, cx)
+    super::feedback::progress(value, cx)
 }

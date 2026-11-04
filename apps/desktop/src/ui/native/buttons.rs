@@ -1,47 +1,56 @@
-//! Push buttons, pop-up buttons, square `+`/`−` pairs, borderless buttons
-//! and toolbar items (NATIVE.md §5.1–§5.3). Every one is a gpui-component
-//! `Button` given the native shape, size and states here: no hover fill on
-//! push buttons, `fillHover` when pressed, the arrow cursor.
+//! The one Button (COMPLETENESS.md §1.8, §1.9, K03): a gpui-component
+//! `Button` at the three control heights (sm 28, default 32, lg 36), radius
+//! 8, 14 medium text, a 16 icon and gap 8, in the six variants of §1.8.
+//! Icon buttons are the same Button, square (32, sm 28). Toolbar items are
+//! 32 ghost icon buttons (D4). Views build every button from here.
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement, SharedString, Styled, Window,
-    div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
 };
 
-use super::tokens::{NativeColors, NativeType as _, metrics, native_colors};
-use crate::ui::sf_symbols::{Sf, Weight, symbol};
+use super::tokens::{NativeColors, NativeType as _, icon, metrics, native_colors, shadow, space};
+use crate::ui::{
+    icons::{Sym, SymSize, button_sym},
+    sf_symbols::{Sf, Weight, symbol},
+};
 
-/// The look of a push button (§5.2).
+/// The variant of a button (§1.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PushStyle {
-    /// `fill` with `label` text.
-    Standard,
-    /// One per view at most; Return activates it: `accent` fill, `onAccent`
-    /// text.
+    /// The primary action: `primary` fill, `primary-foreground` text. One per
+    /// view; Return activates it.
     Default,
-    /// A standard button whose title says what it destroys; the alert that
-    /// follows makes the red choice. Same look as `Standard`.
+    /// `background` fill, a 1 px `input` border, shadow xs. Cancel is always
+    /// this variant (D11).
+    Outline,
+    /// The `muted` fill, no border.
+    Secondary,
+    /// No fill at rest, `accent` on hover: toolbars and rows.
+    Ghost,
+    /// `destructive` fill, white text: the destructive confirm of an alert.
     Destructive,
+    /// Foreground text, underlined on hover.
+    Link,
 }
 
-/// The size of a push button (§5.2).
+/// The size of a button (§1.8, D3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PushSize {
-    /// 24 pt, radius 6, 12 pt sides, min width 64, Body 13.
+    /// h32, px 16.
     Regular,
-    /// 20 pt, radius 5, 10 pt sides, Callout 12.
+    /// h28, px 12: form rows, table cells, card footers.
     Small,
-    /// 28 pt capsule, 16 pt sides: only the bottom buttons of sheets and
-    /// alerts and the login window.
+    /// h36, px 24: login, a full-page empty state, composer Send.
     Large,
 }
 
 impl PushSize {
-    pub fn height(self) -> gpui::Pixels {
+    pub fn height(self) -> Pixels {
         match self {
             PushSize::Regular => metrics::BUTTON_REGULAR,
             PushSize::Small => metrics::BUTTON_SMALL,
@@ -49,16 +58,12 @@ impl PushSize {
         }
     }
 
-    fn radius(self) -> gpui::Pixels {
-        match self {
-            PushSize::Regular => metrics::BUTTON_REGULAR_RADIUS,
-            PushSize::Small => metrics::BUTTON_SMALL_RADIUS,
-            // §1.8: every button size has radius 8; the capsule goes.
-            PushSize::Large => metrics::BUTTON_REGULAR_RADIUS,
-        }
+    fn radius(self) -> Pixels {
+        // §1.6: every button is radius 8.
+        metrics::BUTTON_REGULAR_RADIUS
     }
 
-    fn pad(self) -> gpui::Pixels {
+    fn pad(self) -> Pixels {
         match self {
             PushSize::Regular => metrics::BUTTON_REGULAR_PAD,
             PushSize::Small => metrics::BUTTON_SMALL_PAD,
@@ -67,38 +72,101 @@ impl PushSize {
     }
 }
 
-/// The (fill, text, pressed fill) of a push button style. Standard and
-/// Destructive are the outline variant of COMPLETENESS.md §1.8 (D11):
-/// `background` fill, a 1 px `input` border, shadow xs.
-fn push_colors(style: PushStyle, k: &NativeColors) -> (Hsla, Hsla, Hsla) {
+/// The colors of a variant: rest fill, text, hover fill, pressed fill and
+/// the border (if any).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Look {
+    fill: Hsla,
+    text: Hsla,
+    hover: Hsla,
+    pressed: Hsla,
+    border: Option<Hsla>,
+}
+
+fn look(style: PushStyle, k: &NativeColors) -> Look {
+    let clear = gpui::transparent_black();
     match style {
-        PushStyle::Standard | PushStyle::Destructive => (k.content, k.label, k.pressed),
-        PushStyle::Default => (k.accent, k.on_accent, k.accent.opacity(0.8)),
+        PushStyle::Default => Look {
+            fill: k.accent,
+            text: k.on_accent,
+            hover: k.accent.opacity(0.9),
+            pressed: k.accent.opacity(0.8),
+            border: None,
+        },
+        PushStyle::Outline => Look {
+            fill: k.content,
+            text: k.label,
+            hover: k.fill_hover,
+            pressed: k.pressed,
+            border: Some(k.quaternary),
+        },
+        PushStyle::Secondary => Look {
+            fill: k.fill,
+            text: k.label,
+            hover: k.fill.opacity(0.8),
+            pressed: k.pressed,
+            border: None,
+        },
+        PushStyle::Ghost => Look {
+            fill: clear,
+            text: k.label,
+            hover: k.fill_hover,
+            pressed: k.pressed,
+            border: None,
+        },
+        // shadcn: `bg-destructive text-white`, at 60 % in dark so the white
+        // text keeps its contrast on the lighter dark-mode red.
+        PushStyle::Destructive => {
+            let fill = if k.is_dark() {
+                k.red.opacity(0.6)
+            } else {
+                k.red
+            };
+            Look {
+                fill,
+                text: gpui::white(),
+                hover: fill.opacity(0.9),
+                pressed: fill.opacity(0.8),
+                border: None,
+            }
+        }
+        PushStyle::Link => Look {
+            fill: clear,
+            text: k.label,
+            hover: clear,
+            pressed: clear,
+            border: None,
+        },
     }
 }
 
-/// The (hover fill, border) of a push button style.
-fn push_edge(style: PushStyle, k: &NativeColors) -> (Hsla, Option<Hsla>) {
-    match style {
-        PushStyle::Standard | PushStyle::Destructive => (k.fill_hover, Some(k.quaternary)),
-        PushStyle::Default => (k.accent.opacity(0.9), None),
-    }
-}
-
-/// A borderless gpui-component variant: no fill at rest, `fillHover` on
-/// hover, `quaternary` when pressed (§5.1, §10: hover is allowed on toolbar
-/// items and borderless buttons only).
-pub fn borderless_variant(cx: &App) -> ButtonCustomVariant {
-    let k = native_colors(cx);
+fn variant(l: Look, cx: &App) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
-        .color(gpui::transparent_black())
-        .foreground(k.label)
-        .hover(k.fill_hover)
-        .active(k.quaternary)
+        .color(l.fill)
+        .foreground(l.text)
+        .hover(l.hover)
+        .active(l.pressed)
 }
 
-/// A push button (§5.2). Chain `.on_click`, `.disabled` as on any
-/// gpui-component button. A title that opens more UI ends with `…`.
+/// Gives a gpui-component button the look of `style`: fill, text, border and
+/// shadow xs for the outline variant. The rest colors are set on the button
+/// itself, so a disabled button keeps them and only fades to 50 %.
+fn styled(b: Button, style: PushStyle, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let l = look(style, &k);
+    b.custom(variant(l, cx))
+        .bg(l.fill)
+        .text_color(l.text)
+        .map(|b| match l.border {
+            Some(edge) => b.border_1().border_color(edge).shadow(shadow::xs()),
+            None => b.border_0(),
+        })
+}
+
+/// A button (§1.8): `label` in 14 medium at `size`, radius 8. Chain
+/// `.icon(..)`, `.on_click(..)`, `.loading(..)` as on any gpui-component
+/// button; disable it with [`disabled_push`]. A title that opens more UI
+/// ends with `…`.
 pub fn push_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -106,49 +174,163 @@ pub fn push_button(
     size: PushSize,
     cx: &App,
 ) -> Button {
-    let k = native_colors(cx);
-    let (fill, text, pressed) = push_colors(style, &k);
-    let (hover, border) = push_edge(style, &k);
-    let variant = ButtonCustomVariant::new(cx)
-        .color(fill)
-        .foreground(text)
-        .hover(hover)
-        .active(pressed);
     let b = Button::new(id)
-        .custom(variant)
         .label(label)
-        .with_size(gpui_component::Size::Small)
+        .with_size(gpui_component::Size::Medium)
         .h(size.height())
         .px(size.pad())
         .rounded(size.radius())
-        .bg(fill)
-        .text_color(text)
-        .map(|b| match border {
-            Some(edge) => b
-                .border_1()
-                .border_color(edge)
-                .shadow(super::tokens::shadow::xs()),
-            None => b.border_0(),
-        });
-    let b = match size {
-        PushSize::Small => b.n_callout(),
-        _ => b.n_body(),
-    };
-    match size {
-        PushSize::Small => b,
-        _ => b.min_w(metrics::BUTTON_MIN_WIDTH),
-    }
+        .n_headline();
+    styled(b, style, cx)
 }
 
-/// A disabled push button: the same variant at 50 % (COMPLETENESS.md §1.8,
-/// D11), so a disabled primary never looks like Cancel.
+/// A ghost button built without an `App` at hand (message extras): the
+/// gpui-component ghost variant, which the theme maps to the `accent` hover,
+/// at `size`, 14 medium.
+pub fn ghost_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    size: PushSize,
+) -> Button {
+    Button::new(id)
+        .ghost()
+        .label(label)
+        .with_size(gpui_component::Size::Medium)
+        .h(size.height())
+        .px(size.pad())
+        .rounded(size.radius())
+        .n_headline()
+}
+
+/// A disabled button: the same variant at 50 % (§1.8, D11), so a disabled
+/// primary never looks like Cancel.
 pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
     b.disabled(disabled).when(disabled, |b| b.opacity(0.5))
 }
 
-/// A pop-up button (§5.3): a push button whose title is the chosen option,
-/// with a 9 pt `chevron.up.chevron.down` at the trailing edge. Chain
-/// `.dropdown_menu(..)` to open the menu.
+/// What an icon button draws: an app concept or an SF Symbol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Glyph {
+    Sym(Sym),
+    Sf(Sf),
+}
+
+impl From<Sym> for Glyph {
+    fn from(s: Sym) -> Self {
+        Glyph::Sym(s)
+    }
+}
+
+impl From<Sf> for Glyph {
+    fn from(s: Sf) -> Self {
+        Glyph::Sf(s)
+    }
+}
+
+impl From<crate::ui::icons::Lucide> for Glyph {
+    fn from(l: crate::ui::icons::Lucide) -> Self {
+        Glyph::Sym(l.into())
+    }
+}
+
+/// The size of an icon button (§1.8): 32, or sm 28. The icon is 16.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconSize {
+    Regular,
+    Small,
+}
+
+impl IconSize {
+    pub fn side(self) -> Pixels {
+        match self {
+            IconSize::Regular => metrics::BUTTON_REGULAR,
+            IconSize::Small => metrics::BUTTON_SMALL,
+        }
+    }
+}
+
+fn glyph_el(glyph: Glyph, ink: Hsla, window: &Window) -> AnyElement {
+    match glyph {
+        Glyph::Sf(sf) => symbol(sf, icon::MD, Weight::Regular, ink, window),
+        Glyph::Sym(s) => {
+            crate::ui::icons::sym(s, SymSize::for_slot(icon::MD), ink).into_any_element()
+        }
+    }
+}
+
+/// A square icon button of `style` (ghost in toolbars and rows): 32 or 28,
+/// radius 8, a 16 icon. `name` is its tooltip and what VoiceOver reads.
+pub fn icon_button_styled(
+    id: impl Into<ElementId>,
+    glyph: impl Into<Glyph>,
+    name: impl Into<SharedString>,
+    style: PushStyle,
+    size: IconSize,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let ink = look(style, &k).text;
+    let side = size.side();
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, style, cx).child(glyph_el(glyph.into(), ink, window))
+}
+
+/// A ghost icon button (§1.8): 32 or 28 square, radius 8, a 16 icon in
+/// `muted-foreground`, `accent` on hover. Named: the name is its tooltip and
+/// what VoiceOver reads.
+pub fn icon_button(
+    id: impl Into<ElementId>,
+    glyph: impl Into<Glyph>,
+    name: impl Into<SharedString>,
+    size: IconSize,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let side = size.side();
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, PushStyle::Ghost, cx).child(glyph_el(glyph.into(), k.secondary, window))
+}
+
+/// An icon button whose icon a gpui-component `Button` draws itself (no
+/// window or `App` at hand): the same 32 / 28 ghost square on the
+/// gpui-component ghost variant, which the theme maps to the `accent` hover.
+/// Name it with [`crate::ui::NamedButton::named`].
+pub fn icon_button_bare(id: impl Into<ElementId>, sym: impl Into<Sym>, size: IconSize) -> Button {
+    let side = size.side();
+    Button::new(id)
+        .ghost()
+        .icon(button_sym(sym.into(), SymSize::for_slot(icon::MD), side))
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+}
+
+/// A ghost button variant for a gpui-component control that is not built
+/// here (a dropdown trigger): no fill at rest, `accent` on hover.
+pub fn borderless_variant(cx: &App) -> ButtonCustomVariant {
+    variant(look(PushStyle::Ghost, &native_colors(cx)), cx)
+}
+
+/// A select / pop-up button (§1.9): an outline button whose title is the
+/// chosen value, a 16 `chevron.up.chevron.down` at the end; the title
+/// truncates with an ellipsis. Chain `.dropdown_menu(..)` to open the menu.
 pub fn popup_button(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
@@ -159,8 +341,8 @@ pub fn popup_button(
     chevron_button(id, title, Sf::Popup, size, window, cx)
 }
 
-/// A pull-down (§5.3): a push button with a trailing `chevron.down`; its
-/// title is the action, not a value.
+/// A pull-down: an outline button with a trailing `chevron.down`; its title
+/// is the action, not a value.
 pub fn pull_down(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
@@ -180,27 +362,41 @@ fn chevron_button(
     cx: &App,
 ) -> Button {
     let k = native_colors(cx);
-    push_button(id, "", PushStyle::Standard, size, cx)
-        .pl(size.pad())
-        .pr(metrics::FIELD_PAD)
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .child(div().flex_1().min_w(px(0.)).child(title.into()))
-                .child(symbol(
-                    chevron,
-                    metrics::POPUP_CHEVRON_SLOT,
-                    Weight::Semibold,
-                    k.secondary,
-                    window,
-                )),
-        )
+    let b = Button::new(id)
+        .with_size(gpui_component::Size::Medium)
+        .h(size.height())
+        .pl(metrics::FIELD_PAD)
+        .pr(space::S8)
+        .rounded(size.radius())
+        .n_body();
+    styled(b, PushStyle::Outline, cx).child(
+        div()
+            .w_full()
+            .min_w(px(0.))
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(title.into()),
+            )
+            .child(symbol(
+                chevron,
+                metrics::POPUP_CHEVRON_SLOT,
+                Weight::Regular,
+                k.secondary,
+                window,
+            )),
+    )
 }
 
-/// The joined 22 × 22 `+` / `−` pair under a list (§5.2): one `fill`
-/// capsule-less rounded rect with two borderless halves.
+/// The joined `+` / `−` pair under a list: two 28 ghost icon buttons in one
+/// outline frame.
 pub fn square_pair(add: Button, remove: Button, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
@@ -209,14 +405,16 @@ pub fn square_pair(add: Button, remove: Button, cx: &App) -> gpui::Div {
         .flex()
         .items_center()
         .rounded(metrics::BUTTON_REGULAR_RADIUS)
-        .bg(k.fill)
+        .border_1()
+        .border_color(k.quaternary)
+        .bg(k.content)
         .overflow_hidden()
         .child(add)
-        .child(div().w(metrics::HAIRLINE).h(px(12.)).bg(k.separator))
+        .child(div().w(px(1.)).h(icon::MD).bg(k.separator))
         .child(remove)
 }
 
-/// One half of a [`square_pair`]: `plus` or the minus sign.
+/// One half of a [`square_pair`]: `plus` or `minus`.
 pub fn square_button(
     id: impl Into<ElementId>,
     add: bool,
@@ -227,36 +425,28 @@ pub fn square_button(
     let k = native_colors(cx);
     let name = name.into();
     let glyph: AnyElement = if add {
-        symbol(Sf::Plus, px(12.), Weight::Medium, k.label, window)
+        symbol(Sf::Plus, icon::MD, Weight::Regular, k.label, window)
     } else {
-        // SF Symbols has `minus`, but the shared symbol table does not list
-        // it yet: the system font's minus sign draws the same stroke.
+        // The shared symbol table has no `minus` yet: the system font's minus
+        // sign draws the same stroke.
         div()
             .n_body()
             .text_color(k.label)
             .child(crate::copy::native_kit::MINUS_SIGN)
             .into_any_element()
     };
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(gpui::transparent_black())
-                .foreground(k.label)
-                .hover(gpui::transparent_black())
-                .active(k.fill_hover),
-        )
+    let b = Button::new(id)
         .with_size(metrics::SQUARE_BUTTON)
         .size(metrics::SQUARE_BUTTON)
         .p_0()
         .rounded(px(0.))
         .accessibility_label(name.clone())
-        .tooltip(name)
-        .child(glyph)
+        .tooltip(name);
+    styled(b, PushStyle::Ghost, cx).child(glyph)
 }
 
-/// A borderless symbol button (inspector `arrow.up.right.square`, row
-/// tools): 24 × 24, radius 6, a 13 pt `secondary` symbol, `fillHover` on
-/// hover.
+/// A ghost icon button in a row (the inspector's open arrow, row tools):
+/// [`icon_button`] at 32.
 pub fn borderless_button(
     id: impl Into<ElementId>,
     sf: Sf,
@@ -264,53 +454,222 @@ pub fn borderless_button(
     window: &Window,
     cx: &App,
 ) -> Button {
-    let k = native_colors(cx);
-    let name = name.into();
-    Button::new(id)
-        .custom(borderless_variant(cx))
-        .with_size(metrics::BUTTON_REGULAR)
-        .size(metrics::BUTTON_REGULAR)
-        .p_0()
-        .rounded(metrics::BUTTON_REGULAR_RADIUS)
-        .accessibility_label(name.clone())
-        .tooltip(name)
-        .child(symbol(sf, px(15.), Weight::Regular, k.secondary, window))
+    icon_button(id, sf, name, IconSize::Regular, window, cx)
 }
 
-/// A borderless text button (`编辑…` in a row): Body 13 `label`, 24 pt,
-/// hover `fillHover`.
+/// A ghost text button in a row (`编辑…`, `使用其他服务器`): sm, 14 medium.
 pub fn borderless_text(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     cx: &App,
 ) -> Button {
-    let k = native_colors(cx);
-    Button::new(id)
-        .custom(borderless_variant(cx))
-        .label(label)
-        .with_size(gpui_component::Size::Small)
-        .h(metrics::BUTTON_REGULAR)
-        .px(px(8.))
-        .rounded(metrics::BUTTON_REGULAR_RADIUS)
-        .text_color(k.label)
-        .n_body()
+    push_button(id, label, PushStyle::Ghost, PushSize::Small, cx)
 }
 
-/// How a toolbar item draws (§5.1).
+/// A select (§1.9) built without a window: an outline button whose title is
+/// the chosen value, a 16 `chevron.up.chevron.down` at the end, the title
+/// truncating at the end; 160 wide unless the caller sets a width. Chain
+/// `.dropdown_menu(..)` to open the menu.
+pub fn select_button(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    size: PushSize,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let b = Button::new(id)
+        .with_size(gpui_component::Size::Medium)
+        .h(size.height())
+        .w(crate::ui::native::tokens::size::SELECT_WIDTH)
+        .pl(metrics::FIELD_PAD)
+        .pr(space::S8)
+        .rounded(size.radius())
+        .n_body();
+    styled(b, PushStyle::Outline, cx).child(
+        div()
+            .w_full()
+            .min_w(px(0.))
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(title.into()),
+            )
+            .child(crate::ui::icons::icon(Sym::PopUp, icon::MD, k.secondary)),
+    )
+}
+
+/// A toggle chip (reactions, scope chips): h28, radius full, px 8. At rest
+/// an outline chip; selected ("mine") the `muted` fill with a foreground
+/// border (COMPLETENESS.md F30), never a state color.
+pub fn chip_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let (fill, edge) = if selected {
+        (k.fill, k.label)
+    } else {
+        (k.content, k.quaternary)
+    };
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(fill)
+                .foreground(k.label)
+                .hover(k.fill_hover)
+                .active(k.pressed),
+        )
+        .with_size(gpui_component::Size::Medium)
+        .h(metrics::BUTTON_SMALL)
+        .min_w(metrics::BUTTON_SMALL)
+        .px(space::S8)
+        .rounded_full()
+        .bg(fill)
+        .border_1()
+        .border_color(edge)
+        .text_color(k.label)
+        .n_section()
+}
+
+/// A ghost button around custom content (an "add member" row in a list):
+/// full width, radius 8, `accent` on hover.
+pub fn row_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    let b = Button::new(id)
+        .with_size(gpui_component::Size::Medium)
+        .w_full()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .n_body();
+    styled(b, PushStyle::Ghost, cx)
+}
+
+/// A square tile in a picker grid (avatar grid): ghost at rest; selected
+/// the `muted` fill with a foreground ring.
+pub fn tile_button(id: impl Into<ElementId>, side: Pixels, selected: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS);
+    styled(b, PushStyle::Ghost, cx)
+        .when(selected, |b| b.bg(k.fill).border_1().border_color(k.label))
+}
+
+/// A tool on the dark media screen (lightbox, video): `ink` icon, white
+/// 10 % hover; a 32 square, or a `round` 36 circle for the pager arrows.
+pub fn screen_button(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    round: bool,
+    ink: Hsla,
+    cx: &App,
+) -> Button {
+    let name = name.into();
+    let side = if round {
+        metrics::BUTTON_LARGE
+    } else {
+        metrics::BUTTON_REGULAR
+    };
+    let rest = if round {
+        gpui::hsla(0., 0., 1., 0.10)
+    } else {
+        gpui::transparent_black()
+    };
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rest)
+                .foreground(ink)
+                .hover(gpui::hsla(0., 0., 1., 0.18))
+                .active(gpui::hsla(0., 0., 1., 0.24)),
+        )
+        .icon(button_sym(sym, SymSize::for_slot(icon::MD), side))
+        .with_size(side)
+        .size(side)
+        .map(|b| {
+            if round {
+                b.rounded_full()
+            } else {
+                b.rounded(metrics::BUTTON_REGULAR_RADIUS)
+            }
+        })
+        .accessibility_label(name.clone())
+        .tooltip(name)
+}
+
+/// A tab of the Settings window's toolbar tab strip (Mac chrome, kept by
+/// COMPLETENESS.md §2.19): an 18 symbol over a 12 label; the selected tab
+/// has the `muted` fill. `active` is the key-window state.
+pub fn toolbar_tab(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    label: impl Into<SharedString>,
+    on: bool,
+    active: bool,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let label = label.into();
+    let ink = match (on, active) {
+        (true, true) => k.accent_text,
+        (true, false) => k.label,
+        (false, _) => k.secondary,
+    };
+    let rest = if on {
+        k.selection
+    } else {
+        gpui::transparent_black()
+    };
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rest)
+                .foreground(ink)
+                .hover(if on { rest } else { k.fill_hover })
+                .active(if on { rest } else { k.fill }),
+        )
+        .h(px(56.))
+        .min_w(px(60.))
+        .px(space::S8)
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .bg(rest)
+        .accessibility_label(label.clone())
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(space::S4)
+                .child(crate::ui::icons::sym(sym, SymSize::TAB, ink))
+                .child(
+                    div()
+                        .n_subheadline()
+                        .text_color(ink)
+                        .whitespace_nowrap()
+                        .child(label),
+                ),
+        )
+}
+
+/// How a toolbar item draws (§2.2, D4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolbarItemKind {
-    /// A plain item: `label` symbol, `fillHover` hover.
+    /// A ghost icon button.
     Plain,
-    /// A toggled item (inspector shown): a 28 pt `selection` pill inset 4 pt
-    /// with the symbol in `accent`.
+    /// A toggled item (its pane is open): the `muted` fill, foreground icon.
     Toggled,
-    /// The one primary action of a window: `accent` circle, `onAccent`
-    /// symbol, at the trailing edge.
+    /// The one primary action of a window: the primary fill.
     Prominent,
 }
 
-/// A 36 × 36 toolbar item with a 15 pt Medium symbol (§5.1, §6). Name it:
-/// the name is its tooltip and what VoiceOver reads.
+/// A toolbar item (D4): a 32 square ghost icon button, radius 8, a 16 icon.
+/// No glass circle and no drop shadow. Named: the name is its tooltip and
+/// what VoiceOver reads.
 pub fn toolbar_item(
     id: impl Into<ElementId>,
     sf: Sf,
@@ -322,43 +681,73 @@ pub fn toolbar_item(
 ) -> Button {
     let k = native_colors(cx);
     let name = name.into();
-    let ink = match kind {
-        ToolbarItemKind::Prominent => k.on_accent,
-        ToolbarItemKind::Toggled if emphasized => k.accent_text,
-        _ if emphasized => k.label,
-        _ => k.secondary,
+    let (style, ink) = match kind {
+        ToolbarItemKind::Prominent => (PushStyle::Default, k.on_accent),
+        ToolbarItemKind::Toggled => (PushStyle::Secondary, k.label),
+        ToolbarItemKind::Plain if emphasized => (PushStyle::Ghost, k.label),
+        ToolbarItemKind::Plain => (PushStyle::Ghost, k.secondary),
     };
-    let glyph = symbol(sf, metrics::TOOLBAR_SYMBOL, Weight::Medium, ink, window);
-    let variant = match kind {
-        ToolbarItemKind::Prominent => ButtonCustomVariant::new(cx)
-            .color(k.accent)
-            .foreground(k.on_accent)
-            .hover(k.accent)
-            .active(k.accent.opacity(0.82)),
-        _ => borderless_variant(cx),
-    };
-    Button::new(id)
-        .custom(variant)
+    let b = Button::new(id)
         .with_size(metrics::TOOLBAR_ITEM)
         .size(metrics::TOOLBAR_ITEM)
         .p_0()
-        .rounded(metrics::TOOLBAR_ITEM / 2.)
-        .when(kind == ToolbarItemKind::Prominent, |b| b.bg(k.accent))
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
         .accessibility_label(name.clone())
-        .tooltip(name)
-        .map(|b| match kind {
-            ToolbarItemKind::Toggled => b.child(
-                div()
-                    .size(metrics::TOOLBAR_PILL)
-                    .rounded_full()
-                    .bg(k.selection)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(glyph),
-            ),
-            _ => b.child(glyph),
-        })
+        .tooltip(name);
+    styled(b, style, cx).child(symbol(sf, icon::MD, Weight::Regular, ink, window))
+}
+
+/// A toolbar item drawn with an app concept (no window at hand): the same
+/// 32 ghost square as [`toolbar_item`]; `toggled` takes the `muted` fill.
+pub fn toolbar_item_sym(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    toggled: bool,
+    emphasized: bool,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let (style, ink) = match (toggled, emphasized) {
+        (true, _) => (PushStyle::Secondary, k.label),
+        (false, true) => (PushStyle::Ghost, k.label),
+        (false, false) => (PushStyle::Ghost, k.secondary),
+    };
+    let b = Button::new(id)
+        .with_size(metrics::TOOLBAR_ITEM)
+        .size(metrics::TOOLBAR_ITEM)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, style, cx).child(crate::ui::icons::sym(sym, SymSize::for_slot(icon::MD), ink))
+}
+
+/// A ghost icon button drawn with an app concept (no window at hand): 32 or
+/// 28, radius 8, a 16 icon in `muted-foreground`. Named.
+pub fn icon_button_sym(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    size: IconSize,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let side = size.side();
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, PushStyle::Ghost, cx).child(crate::ui::icons::sym(
+        sym,
+        SymSize::for_slot(icon::MD),
+        k.secondary,
+    ))
 }
 
 #[cfg(test)]
@@ -374,17 +763,86 @@ mod tests {
         for size in [PushSize::Regular, PushSize::Small, PushSize::Large] {
             assert_eq!(size.radius(), px(8.));
         }
+        assert_eq!(IconSize::Regular.side(), px(32.));
+        assert_eq!(IconSize::Small.side(), px(28.));
+        assert_eq!(metrics::TOOLBAR_ITEM, px(32.));
     }
 
     #[test]
-    fn destructive_looks_standard_and_default_uses_accent() {
-        let k = NativeColors::dark();
-        assert_eq!(
-            push_colors(PushStyle::Destructive, &k),
-            push_colors(PushStyle::Standard, &k)
+    fn the_variants_follow_the_table() {
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            // D11: Cancel (outline) has a border and the background fill; a
+            // primary has the primary fill and no border.
+            let outline = look(PushStyle::Outline, &k);
+            assert_eq!(outline.fill, k.content);
+            assert_eq!(outline.border, Some(k.quaternary));
+            let primary = look(PushStyle::Default, &k);
+            assert_eq!(primary.fill, k.accent);
+            assert!(primary.border.is_none());
+            assert_ne!(primary.fill, outline.fill);
+            // Destructive: red fill, white text.
+            let red = look(PushStyle::Destructive, &k);
+            assert_eq!(red.fill.h, k.red.h);
+            assert_eq!(red.text, gpui::white());
+            // Ghost: no fill at rest, accent on hover.
+            let ghost = look(PushStyle::Ghost, &k);
+            assert_eq!(ghost.fill.a, 0.);
+            assert_eq!(ghost.hover, k.fill_hover);
+            // Secondary: the muted fill.
+            assert_eq!(look(PushStyle::Secondary, &k).fill, k.fill);
+        }
+    }
+}
+
+#[cfg(test)]
+mod naming {
+    /// Every icon-only button has an accessible name (§11): each
+    /// `icon_button_bare(..)` chain calls `.named(..)`, never `.tooltip(..)`
+    /// alone. (`icon_button` and `toolbar_item` take the name as an argument.)
+    #[test]
+    fn bare_icon_buttons_are_named() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![root];
+        let mut unnamed = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") || path.ends_with("buttons.rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (ix, _) in text.match_indices("icon_button_bare(") {
+                    let rest = &text[ix..];
+                    // 500 bytes, cut back to a char boundary (CJK copy nearby).
+                    let end = (0..=rest.len().min(500))
+                        .rev()
+                        .find(|&i| rest.is_char_boundary(i))
+                        .unwrap_or(0);
+                    let chain = &rest[..end];
+                    let named = chain.find(".named(");
+                    let tooltip = chain.find(".tooltip(");
+                    // The hover toolbar builds its buttons in a closure and
+                    // names them where they are used.
+                    if named.is_none()
+                        && !chain.contains("let tool")
+                        && !chain.contains("{id}-{key}")
+                    {
+                        unnamed.push(format!("{}:{ix}", path.display()));
+                    } else if let (Some(n), Some(t)) = (named, tooltip)
+                        && t < n
+                    {
+                        unnamed.push(format!("{}:{ix}", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            unnamed.is_empty(),
+            "icon buttons without a name: {unnamed:?}"
         );
-        assert_eq!(push_colors(PushStyle::Default, &k).0, k.accent);
-        // The pressed fill is one step past the rest fill.
-        assert_ne!(push_colors(PushStyle::Standard, &k).2, k.fill);
     }
 }

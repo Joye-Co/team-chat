@@ -792,7 +792,7 @@ pub mod layout {
     pub const MEASURE: Pixels = px(640.);
     /// The message column gutter (§2.1).
     pub const CONTENT_GUTTER: Pixels = space::S24;
-    pub const HAIRLINE: Pixels = px(0.5);
+    pub const HAIRLINE: Pixels = px(1.);
     pub const BORDER: Pixels = px(1.);
     pub const EMBED_FADE: Pixels = space::S48;
 }
@@ -802,7 +802,7 @@ pub mod metrics {
     use super::{height, radius, space};
     use gpui::{Pixels, px};
 
-    pub const HAIRLINE: Pixels = px(0.5);
+    pub const HAIRLINE: Pixels = px(1.);
     pub const FOCUS_RING: Pixels = px(3.);
 
     // Window (§2.1, §2.2)
@@ -817,7 +817,7 @@ pub mod metrics {
     /// The gutter from the page column (x 264) to the content (x 288).
     pub const CONTENT_LEADING: Pixels = space::S24;
     pub const TOOLBAR_LEADING: Pixels = CONTENT_LEADING;
-    pub const TOOLBAR_TRAILING: Pixels = space::S12;
+    pub const TOOLBAR_TRAILING: Pixels = space::S16;
     pub const TOOLBAR_SYMBOL: Pixels = px(16.);
     pub const SIDEBAR_INSET: Pixels = space::S8;
     pub const SIDEBAR_RADIUS: Pixels = radius::SIDEBAR;
@@ -1108,7 +1108,7 @@ impl<T: Styled> NativeType for T {}
 
 /// The `px(` literals in `src/views` when this ratchet was set. The count
 /// can only go down: lower this number when a change removes literals.
-pub const VIEWS_PX_LITERALS: usize = 1669;
+pub const VIEWS_PX_LITERALS: usize = 1431;
 
 /// `.rounded(px(`, `.text_size(px(`, `.gap(px(` and `.h(px(` literals in
 /// `src/views` when the ratchet was set. Target 0.
@@ -1348,4 +1348,4 @@ mod tests {
 /// The current count of `.rounded(px(`, `.text_size(px(`, `.gap(px(` and
 /// `.h(px(` in `src/views`: the ratchet on the way to
 /// [`VIEWS_SCALE_LITERALS`] (0).
-pub const VIEWS_SCALE_BASELINE: usize = 377;
+pub const VIEWS_SCALE_BASELINE: usize = 193;

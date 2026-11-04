@@ -2,65 +2,54 @@
 //! rows, the @mention popup, the hover toolbar, toasts and banners.
 
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
-    theme::{self, Elevation, Type as _, size, space},
-    ui::{
-        icons::{Sym, icon},
-        rows::{RowSurface, list_row},
-    },
+    theme::{self, Type as _, size, space},
+    ui::icons::{Sym, icon},
+    ui::native::NativeType as _,
 };
 
 /// A level-2 overlay surface: `overlay` fill, radius 12, the overlay shadow
 /// (a visible 1 pt edge in dark mode). Popovers, menus, the switcher,
 /// dialogs and toasts use it.
 pub fn overlay_surface(cx: &App) -> gpui::Div {
-    // v12/kit (NATIVE.md §7.3): `sheet` fill, radius 12, the glass edge and
-    // the `float` shadow.
+    // COMPLETENESS.md §1.9 float surface: opaque `card`, radius 8, a 1 px
+    // border and shadow md.
     let n = crate::ui::native::native_colors(cx);
     div()
-        .bg(n.sheet)
+        .bg(n.menu)
         .text_color(n.label)
         .rounded(crate::ui::native::metrics::MENU_RADIUS)
-        .shadow(n.glass())
+        .border_1()
+        .border_color(n.separator)
+        .shadow(crate::ui::native::tokens::shadow::md())
 }
 
-/// A menu or popover: the overlay surface with padding 4.
+/// A menu surface: the float surface with p 4 (§2.11).
 pub fn menu_surface(cx: &App) -> gpui::Div {
-    // v12/kit: menus at 92 % with 5 pt inner padding (NATIVE.md §7.3).
-    let n = crate::ui::native::native_colors(cx);
     overlay_surface(cx)
-        .bg(n.menu)
+        .min_w(px(128.))
         .p(crate::ui::native::metrics::MENU_PAD)
         .flex()
         .flex_col()
 }
 
-/// The @mention popup (§7.2): 320 wide, radius 10, padding 4, max 240 high.
+/// The @mention popup (§2.11): a menu, w 320, max 8 rows.
 pub fn mention_surface(cx: &App) -> gpui::Div {
     overlay_surface(cx)
         .w(size::MENTION_POPUP_WIDTH)
-        .max_h(px(240.))
-        .rounded(theme::radius::FIELD)
-        .p(space::S4)
+        .max_h(size::MENU_ROW * 8. + crate::ui::native::metrics::MENU_PAD * 2.)
+        .p(crate::ui::native::metrics::MENU_PAD)
         .flex()
         .flex_col()
 }
 
-/// A level-1 float (hover toolbar, jump pill, selected segment): `overlay`
-/// fill, radius 8, the float shadow, padding 2.
+/// A small floating capsule (the hover toolbar): the float surface, p 2.
 pub fn float_surface(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    div()
-        .bg(k.overlay)
-        .rounded(theme::radius::MD)
-        .shadow(k.shadow(Elevation::Float))
-        .p(space::S2)
-        .flex()
-        .items_center()
+    overlay_surface(cx).p(space::S2).flex().items_center()
 }
 
 /// A menu row (§7.12): 32 pt, radius 6, padding 0 8, gap 8, a 16 pt icon in
@@ -72,43 +61,38 @@ pub fn menu_row(
     active: bool,
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
-    let k = theme::colors(cx);
-    // v12/kit: 24 pt rows, radius 6, a 13 pt leading symbol (NATIVE.md
-    // §7.3); the active row is the inset highlight.
-    let _ = k;
+    // §2.11: h32, px 8, radius 6, 14 text, a 16 icon, gap 8; the active row
+    // is the `accent` fill (D10).
     let n = crate::ui::native::native_colors(cx);
-    list_row(id, RowSurface::Overlay, active, cx)
-        .h(size::MENU_ROW)
-        .px(crate::ui::native::metrics::MENU_ROW_PAD)
-        .gap(space::S6)
-        .rounded(crate::ui::native::metrics::MENU_ROW_RADIUS)
-        .t_ui()
-        .text_color(n.label)
-        .when_some(glyph, |el, g| el.child(icon(g, px(13.), n.secondary)))
+    popup_row(id, active, cx)
+        .when_some(glyph, |el, g| {
+            el.child(icon(g, crate::ui::native::tokens::icon::MD, n.secondary))
+        })
         .child(div().flex_1().min_w(px(0.)).one_line().child(label.into()))
 }
 
-/// A 0.5 pt separator between menu groups, with 4 pt margins.
+/// A menu separator (§2.11): 1 px, edge to edge, my 4.
 pub fn menu_separator(cx: &App) -> gpui::Div {
-    // v12/kit: a 1 px `separator` inset to the text column.
-    div()
-        .my(space::S4)
-        .mx(crate::ui::native::metrics::MENU_ROW_PAD)
-        .h(px(1.))
-        .bg(crate::ui::native::native_colors(cx).separator)
+    crate::ui::native::menu_separator(false, cx)
 }
 
-/// A popup row (@mention popup, switcher rows use their own height): 40 pt,
-/// radius 6, padding 0 10, gap 10; the active row shows a trailing
-/// `corner-down-left` 14.
+/// A row of a pop-up list (mention popup, pickers): the menu item of §2.11.
 pub fn popup_row(id: impl Into<ElementId>, active: bool, cx: &App) -> gpui::Stateful<gpui::Div> {
-    let k = theme::colors(cx);
-    list_row(id, RowSurface::Overlay, active, cx)
-        .h(size::POPUP_ROW)
-        .px(space::S10)
-        .gap(space::S10)
+    let n = crate::ui::native::native_colors(cx);
+    div()
+        .id(id)
+        .flex_none()
+        .w_full()
+        .h(size::MENU_ROW)
+        .px(crate::ui::native::metrics::MENU_ROW_PAD)
+        .gap(space::S8)
+        .rounded(crate::ui::native::metrics::MENU_ROW_RADIUS)
+        .flex()
+        .items_center()
         .t_ui()
-        .text_color(k.text_1)
+        .text_color(n.label)
+        .when(active, |el| el.bg(n.fill_hover))
+        .when(!active, |el| el.hover(|s| s.bg(n.fill_hover)))
 }
 
 /// The return glyph at the end of the active popup row.
@@ -157,27 +141,29 @@ impl Toast {
 
 impl RenderOnce for Toast {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
+        // COMPLETENESS.md §2.16: the toast surface, a 16 icon, 14 medium
+        // text, an outline sm action.
+        let n = crate::ui::native::native_colors(cx);
         let glyph_color = match self.tone {
-            Tone::Neutral => k.text_2,
-            Tone::Success => k.success,
-            Tone::Danger => k.danger,
+            Tone::Neutral => n.label,
+            Tone::Success => n.green,
+            Tone::Danger => n.red,
         };
-        overlay_surface(cx)
-            .h(size::TOAST)
-            .max_w(px(420.))
-            .pl(space::S14)
-            .pr(space::S12)
+        crate::ui::native::feedback::toast_surface(cx)
             .flex()
             .items_center()
-            .gap(space::S10)
-            .child(icon(self.glyph, theme::icon::ROW, glyph_color))
+            .gap(space::S12)
+            .child(icon(
+                self.glyph,
+                crate::ui::native::tokens::icon::MD,
+                glyph_color,
+            ))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .t_ui()
-                    .text_color(k.text_1)
+                    .n_headline()
+                    .text_color(n.label)
                     .one_line()
                     .child(self.text),
             )
@@ -226,42 +212,18 @@ impl Banner {
 }
 
 impl RenderOnce for Banner {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
-        div()
-            .flex_none()
-            .w_full()
-            .min_h(size::BANNER)
-            .px(space::S12)
-            .py(space::S6)
-            // v12/kit: a quiet `fill` row, no border, no card.
-            .rounded(theme::radius::MD)
-            .bg(k.field)
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .child(icon(
-                self.glyph,
-                theme::icon::ROW,
-                self.glyph_color.unwrap_or(k.text_2),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .t_small()
-                            .text_color(k.text_1)
-                            .one_line()
-                            .child(self.text),
-                    )
-                    .when_some(self.detail, |el, d| {
-                        el.child(div().t_meta().text_color(k.text_3).one_line().child(d))
-                    }),
-            )
-            .children(self.action)
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        // COMPLETENESS.md §2.15, §2.16: an in-page banner is the Alert.
+        let mut alert = crate::ui::native::feedback::Alert::new(self.glyph, self.text);
+        if let Some(c) = self.glyph_color {
+            alert = alert.icon_color(c);
+        }
+        if let Some(d) = self.detail {
+            alert = alert.description(d);
+        }
+        if let Some(a) = self.action {
+            alert = alert.action(a);
+        }
+        alert
     }
 }

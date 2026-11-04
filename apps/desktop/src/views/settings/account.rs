@@ -24,7 +24,7 @@ use crate::{
     ui::{
         self, Sym, SymSize,
         native::{
-            AlertLayout, GroupedForm, ListRow, NativeCheckbox, NativeTextField, NativeType as _,
+            AlertLayout, CompactRow, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _,
             PushSize, PushStyle, SheetLayout, SheetWidth, alert_button, disabled_push, emphasized,
             metrics, native_colors, push_button, square_button,
         },
@@ -414,7 +414,7 @@ impl AccountPage {
                     alert_button(
                         "device-remove-ok",
                         s::DEVICE_REMOVE_CONFIRM,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         true,
                         cx,
                     )
@@ -426,7 +426,7 @@ impl AccountPage {
                     alert_button(
                         "device-remove-cancel",
                         common::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         false,
                         cx,
                     )
@@ -457,7 +457,7 @@ impl AccountPage {
                     alert_button(
                         "sign-out-ok",
                         s::DEVICE_REMOVE_CONFIRM,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         true,
                         cx,
                     )
@@ -469,7 +469,7 @@ impl AccountPage {
                     alert_button(
                         "sign-out-cancel",
                         common::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         false,
                         cx,
                     )
@@ -517,13 +517,13 @@ impl AccountPage {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(10.))
+                    .gap(crate::ui::native::tokens::space::S12)
                     .child(account_avatar(me.as_ref(), px(88.), cx))
                     .child(
                         push_button(
                             "profile-photo",
                             s::CHANGE_PHOTO,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Small,
                             cx,
                         )
@@ -564,7 +564,7 @@ impl AccountPage {
                                 push_button(
                                     "profile-cancel",
                                     common::CANCEL,
-                                    PushStyle::Standard,
+                                    PushStyle::Outline,
                                     PushSize::Large,
                                     cx,
                                 )
@@ -619,7 +619,7 @@ impl AccountPage {
             .py(px(12.))
             .flex()
             .items_center()
-            .gap(px(14.))
+            .gap(crate::ui::native::tokens::space::S16)
             .child(account_avatar(me.as_ref(), px(64.), cx))
             .child(
                 div()
@@ -627,7 +627,7 @@ impl AccountPage {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
+                    .gap(crate::ui::native::tokens::space::S2)
                     .child(
                         div()
                             .n_title3()
@@ -652,7 +652,7 @@ impl AccountPage {
                     push_button(
                         "profile-edit",
                         s::EDIT,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     ),
@@ -663,11 +663,11 @@ impl AccountPage {
             )
     }
 
-    fn device_row(&self, d: &DeviceInfo, window: &Window, cx: &mut Context<Self>) -> ListRow {
+    fn device_row(&self, d: &DeviceInfo, window: &Window, cx: &mut Context<Self>) -> CompactRow {
         let k = native_colors(cx);
         let selected = self.selected_device.as_deref() == Some(d.id.as_str());
         let focused = self.device_list.is_focused(window);
-        let ink = ListRow::selection_ink(selected, focused, emphasized(window), cx);
+        let ink = CompactRow::selection_ink(selected, focused, emphasized(window), cx);
         let text = ink.map(|i| i.1).unwrap_or(k.label);
         let quiet = if ink.is_some_and(|(fill, _)| fill == k.accent) {
             k.on_accent
@@ -690,7 +690,7 @@ impl AccountPage {
         };
         let id = d.id.clone();
         let list = self.device_list.clone();
-        ListRow::new(ElementId::Name(format!("device-{}", d.id).into()))
+        CompactRow::new(ElementId::Name(format!("device-{}", d.id).into()))
             .height(metrics::FORM_ROW - px(4.))
             .selected(selected)
             .list_focused(focused)
@@ -757,7 +757,7 @@ impl Render for AccountPage {
                     let line = (i > 0).then(|| {
                         div()
                             .mx(metrics::FORM_ROW_INSET + px(4.))
-                            .h(px(1.))
+                            .h(crate::ui::native::tokens::layout::BORDER)
                             .bg(k.separator)
                             .into_any_element()
                     });

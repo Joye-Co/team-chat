@@ -13,7 +13,7 @@ use gpui::{
     StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
 
-use gpui_component::{Selectable as _, Sizable as _, button::ButtonVariants as _};
+use gpui_component::Selectable as _;
 
 use super::{
     inline::{code_line, fit, group_digits},
@@ -145,8 +145,14 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .child(ui::icon(Sym::Alert, px(20.), k.text_3))
                 .child(cm::STATE_FAILED_DETAIL)
                 .child(
-                    ui::secondary_button(id(spec, "sysbig"), cm::OPEN_WITH_SYSTEM, cx)
-                        .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
+                    ui::native::push_button(
+                        id(spec, "sysbig"),
+                        cm::OPEN_WITH_SYSTEM,
+                        ui::PushStyle::Outline,
+                        ui::PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
                 ),
         )
         .into_any_element()
@@ -519,7 +525,7 @@ fn lightbox(
             div()
                 .flex_shrink(1.)
                 .min_w(px(0.))
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(18.))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(s.ink)
@@ -529,7 +535,7 @@ fn lightbox(
         .child(
             div()
                 .flex_none()
-                .text_size(px(11.))
+                .text_size(crate::ui::native::tokens::text::META.0)
                 .line_height(px(14.))
                 .text_color(s.dim)
                 .child(format!(
@@ -566,18 +572,7 @@ fn lightbox(
         );
     }
     let nav = |idn: &str, icon: Sym, label: &'static str| {
-        gpui_component::button::Button::new(id(spec, idn))
-            .custom(
-                gpui_component::button::ButtonCustomVariant::new(cx)
-                    .color(gpui::hsla(0., 0., 1., 0.10))
-                    .foreground(gpui::white())
-                    .hover(gpui::hsla(0., 0., 1., 0.18))
-                    .active(gpui::hsla(0., 0., 1., 0.24)),
-            )
-            .icon(ui::button_glyph(icon, px(18.), px(36.)))
-            .with_size(px(36.))
-            .rounded_full()
-            .accessibility_label(label)
+        ui::native::screen_button(id(spec, idn), icon, label, true, gpui::white(), cx)
     };
     let mut strip = div().flex().justify_center().gap(space::S6);
     for (i, p) in pics.iter().enumerate() {
@@ -586,7 +581,7 @@ fn lightbox(
             div()
                 .id(ElementId::Name(format!("{}-thumb-{i}", spec.id).into()))
                 .w(px(36.))
-                .h(px(48.))
+                .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::MARK)
                 .overflow_hidden()
                 .border_2()
@@ -792,7 +787,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 .capabilities(PLAYER_CAPS),
             )
             .height(px(360.))
-            .rounded(px(10.))
+            .rounded(crate::ui::native::tokens::radius::CONTAINER)
             .autoplay(spec.autoplay)
             .on_event(move |e, _, cx| {
                 if let ArtifactEvent::Emit { name, payload, .. } = e
@@ -827,7 +822,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
             chapters = chapters.child(
                 div()
                     .id(ElementId::Name(format!("{}-ch-{i}", spec.id).into()))
-                    .h(px(32.))
+                    .h(crate::ui::native::tokens::height::DEFAULT)
                     .px(space::S8)
                     .rounded(radius::MD)
                     .flex()
@@ -863,7 +858,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
             div()
                 .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
                 .flex_1()
-                .h(px(48.))
+                .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::SM)
                 .overflow_hidden()
                 .border_2()
@@ -903,7 +898,12 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 .gap(space::S12)
                 .child(div().w_full().h(px(360.)).flex_none().child(player))
                 .when(!v.chapters.is_empty(), |el| el.child(chapters))
-                .child(div().h(px(1.)).bg(k.sep).mx(space::S4))
+                .child(
+                    div()
+                        .h(crate::ui::native::tokens::layout::BORDER)
+                        .bg(k.sep)
+                        .mx(space::S4),
+                )
                 .child(
                     div()
                         .flex()
@@ -920,11 +920,11 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                         )))
                         .child(div().flex_1())
                         .child(
-                            ui::button(
+                            ui::native::push_button(
                                 id(spec, "copyf"),
                                 cm::VIDEO_COPY_FRAME,
-                                ui::ButtonKind::Secondary,
-                                ui::ButtonSize::Sm,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
                                 cx,
                             )
                             .icon(ui::icon(Sym::Copy, px(13.), k.text_2))
@@ -935,11 +935,11 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                             }),
                         )
                         .child(
-                            ui::button(
+                            ui::native::push_button(
                                 id(spec, "sendf"),
                                 cm::VIDEO_SEND_FRAME,
-                                ui::ButtonKind::Secondary,
-                                ui::ButtonSize::Sm,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
                                 cx,
                             )
                             .icon(ui::icon(Sym::Send, px(13.), k.text_2))
@@ -1048,7 +1048,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         .h(px(64.))
         .flex()
         .items_center()
-        .gap(px(1.5))
+        .gap(crate::ui::native::tokens::space::S2)
         .relative();
     for i in 0..bars {
         let n = a.peaks.len().max(1);
@@ -1089,7 +1089,11 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         }
     }
     let tones = [k.text_1, k.text_3, k.border_strong];
-    let mut segs = div().h(px(6.)).w_full().flex().gap(px(2.));
+    let mut segs = div()
+        .h(px(6.))
+        .w_full()
+        .flex()
+        .gap(crate::ui::native::tokens::space::S2);
     let mut legend = div().flex().gap(space::S12);
     if !speakers.is_empty() && a.duration > 0. {
         for (i, c) in a.transcript.iter().enumerate() {
@@ -1140,7 +1144,10 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         .on_change(move |i, _, cx| set.update(cx, |s, cx| s.set_speed(i, cx)))
     };
     let current = a.transcript.iter().rposition(|c| c.t <= position + 0.25);
-    let mut lines = div().flex().flex_col().gap(px(2.));
+    let mut lines = div()
+        .flex()
+        .flex_col()
+        .gap(crate::ui::native::tokens::space::S2);
     for (i, c) in a.transcript.iter().enumerate().take(400) {
         let seek = state.clone();
         let p = a.path.clone();
@@ -1237,7 +1244,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                                 ),
                                 k.text_1,
                             )
-                            .text_size(px(13.)),
+                            .text_size(crate::ui::native::tokens::text::UI.0),
                         )
                         .child(div().flex_1())
                         .child(speeds),
@@ -1311,7 +1318,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
     };
     let side = state.clone();
     let toolbar = div()
-        .h(px(40.))
+        .h(crate::ui::native::tokens::height::FOOTER_ROW)
         .px(space::S12)
         .flex()
         .items_center()
@@ -1328,7 +1335,12 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                     })
                 }),
         )
-        .child(div().w(px(1.)).h(px(16.)).bg(k.sep))
+        .child(
+            div()
+                .w(px(1.))
+                .h(crate::ui::native::tokens::icon::MD)
+                .bg(k.sep),
+        )
         .child(tool(id(spec, "prev"), Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
         .child(
             mono(
@@ -1338,14 +1350,14 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 ),
                 k.text_1,
             )
-            .text_size(px(13.)),
+            .text_size(crate::ui::native::tokens::text::UI.0),
         )
         .child(tool(id(spec, "next"), Sym::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
         .child(div().flex_1())
         .child(tool(id(spec, "zout"), Sym::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
         .child(
             mono(format!("{}%", (zoom * 100.).round()), k.text_1)
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::MONO.0)
                 .w(px(44.))
                 .flex()
                 .justify_center(),
@@ -1379,7 +1391,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                     div()
                         .w(px(w + 4.))
                         .h(px(h + 4.))
-                        .rounded(px(4.))
+                        .rounded(crate::ui::native::tokens::radius::CHECKBOX)
                         .border_2()
                         .border_color(if i == ix {
                             k.text_1
@@ -1462,11 +1474,11 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         )
         .child(
             footer(cx).child(cm::PDF_NOTE).child(div().flex_1()).child(
-                ui::button(
+                ui::native::push_button(
                     id(spec, "preview"),
                     cm::PDF_OPEN_PREVIEW,
-                    ui::ButtonKind::Secondary,
-                    ui::ButtonSize::Sm,
+                    ui::native::PushStyle::Outline,
+                    ui::native::PushSize::Small,
                     cx,
                 )
                 .icon(ui::icon(Sym::OpenExternal, px(13.), k.text_2))
@@ -1689,8 +1701,9 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                         .flex()
                         .one_line();
                     row = row.child(if num {
-                        cell.justify_end()
-                            .child(mono(v, k.text_1).text_size(px(13.)))
+                        cell.justify_end().child(
+                            mono(v, k.text_1).text_size(crate::ui::native::tokens::text::MONO.0),
+                        )
                     } else {
                         cell.t_small().text_color(k.text_1).child(v)
                     });

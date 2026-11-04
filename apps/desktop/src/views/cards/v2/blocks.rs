@@ -42,7 +42,8 @@ pub(crate) fn block_parts(ctx: &Ctx, b: &CardV2Block, cx: &App) -> Option<BlockP
 
 /// 13/20.
 pub(crate) fn small(el: Div) -> Div {
-    el.text_size(px(13.)).line_height(px(20.))
+    el.text_size(crate::ui::native::tokens::text::UI.0)
+        .line_height(px(20.))
 }
 
 /// The blocks of the card body, with their spacing.
@@ -209,7 +210,7 @@ pub(crate) fn block(
     let k = theme::colors(cx);
     match b {
         CardV2Block::Text { text, .. } => div()
-            .text_size(px(14.))
+            .text_size(crate::ui::native::tokens::text::UI.0)
             .line_height(px(22.))
             .text_color(k.ink_2)
             .child(text.clone())
@@ -238,7 +239,10 @@ pub(crate) fn block(
                 cx,
             )
         }
-        CardV2Block::Divider { .. } => div().h(px(1.)).bg(k.line).into_any_element(),
+        CardV2Block::Divider { .. } => div()
+            .h(crate::ui::native::tokens::layout::BORDER)
+            .bg(k.line)
+            .into_any_element(),
         CardV2Block::Link { label, target, .. } => link(ctx, label, target, ix, cx),
         CardV2Block::Decision {
             id,
@@ -623,7 +627,7 @@ fn code(text: &str, cx: &App) -> AnyElement {
         .bg(k.sunken)
         .px(space::S12)
         .py(space::S8)
-        .text_size(px(12.))
+        .text_size(crate::ui::native::tokens::text::META.0)
         .line_height(px(20.))
         .mono()
         .text_color(k.ink)
@@ -838,7 +842,7 @@ pub(crate) fn option_button(
     let style = if recommended {
         nk::PushStyle::Default
     } else {
-        nk::PushStyle::Standard
+        nk::PushStyle::Outline
     };
     let ink = if recommended { n.on_accent } else { n.label };
     nk::disabled_push(
@@ -929,7 +933,7 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         .items_center()
         .gap(space::S8)
         .min_h(px(24.))
-        .text_size(px(13.))
+        .text_size(crate::ui::native::tokens::text::UI.0)
         .line_height(px(18.))
         .child(if sending {
             ui::motion::spinner().color(k.ink_3).into_any_element()
@@ -1038,7 +1042,7 @@ pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> Button {
     ui::native::push_button(
         id,
         label.to_string(),
-        ui::native::PushStyle::Standard,
+        ui::native::PushStyle::Outline,
         ui::native::PushSize::Small,
         cx,
     )
@@ -1120,7 +1124,7 @@ pub(crate) fn line_input(
                 .with_size(gpui_component::Size::Small)
                 .px_0()
                 .py_0()
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(20.))
                 .text_color(k.ink),
             window,
@@ -1133,7 +1137,7 @@ pub(crate) fn line_input(
                 .px_0()
                 .py_0()
                 .h(px(70.))
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(20.))
                 .text_color(k.ink),
             window,
@@ -1561,18 +1565,22 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 })
         };
         let grid = if images.len() >= 3 {
-            div().flex().gap(px(4.)).child(tile(0, px(74.))).child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(tile(1, px(35.)))
-                    .child(tile(2, px(35.))),
-            )
+            div()
+                .flex()
+                .gap(crate::ui::native::tokens::space::S4)
+                .child(tile(0, px(74.)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(crate::ui::native::tokens::space::S4)
+                        .child(tile(1, px(35.)))
+                        .child(tile(2, px(35.))),
+                )
         } else {
             div()
                 .flex()
-                .gap(px(4.))
+                .gap(crate::ui::native::tokens::space::S4)
                 .children((0..images.len()).map(|i| tile(i, px(74.))))
         };
         grid.flex_none()
@@ -1588,7 +1596,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         let first = ix == 0 && drafts.len() > 1;
         texts = texts.child(if first {
             div()
-                .text_size(px(14.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(22.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(k.ink)
@@ -1922,7 +1930,7 @@ pub(crate) fn metrics_with(
                         .gap(space::S2)
                         .child(
                             div()
-                                .text_size(px(16.))
+                                .text_size(crate::ui::native::tokens::text::HEADING.0)
                                 .line_height(px(24.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .mono()
@@ -2101,14 +2109,14 @@ fn diff(
         .flex_col()
         .child(
             div()
-                .h(px(36.))
+                .h(crate::ui::native::tokens::height::LG)
                 .px(space::S12)
                 .flex()
                 .items_center()
                 .gap(space::S8)
                 .border_b_1()
                 .border_color(k.line_2)
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .code_font()
                 .child(
                     div()
@@ -2124,7 +2132,7 @@ fn diff(
         .child(
             div()
                 .py(space::S4)
-                .text_size(px(12.))
+                .text_size(crate::ui::native::tokens::text::META.0)
                 .line_height(m::DIFF_LINE)
                 .code_font()
                 .flex()
@@ -2269,10 +2277,10 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                             .p(space::S8)
                             .flex()
                             .flex_col()
-                            .gap(px(3.))
+                            .gap(crate::ui::native::tokens::space::S4)
                             .child(
                                 div()
-                                    .text_size(px(10.))
+                                    .text_size(crate::ui::native::tokens::text::META.0)
                                     .line_height(px(14.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(k.ink)
@@ -2283,7 +2291,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                             )
                             .children(detail.iter().flat_map(|d| d.lines()).take(3).map(|l| {
                                 div()
-                                    .text_size(px(10.))
+                                    .text_size(crate::ui::native::tokens::text::META.0)
                                     .line_height(px(15.))
                                     .text_color(k.ink_3)
                                     .one_line()
@@ -2316,7 +2324,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_size(px(13.))
+                        .text_size(crate::ui::native::tokens::text::UI.0)
                         .text_color(k.ink_2)
                         .child(fill(c::EVIDENCE_MORE, &[("n", &more.to_string())])),
                 )
@@ -2405,7 +2413,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .flex()
             .items_center()
             .gap(space::S8)
-            .h(px(40.))
+            .h(crate::ui::native::tokens::height::FOOTER_ROW)
             .pl(space::S12)
             .pr(space::S4)
             .rounded(theme::radius::MD)
@@ -2423,7 +2431,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                 super::button(
                     ctx.id("ask-evidence"),
                     fill(c::EVIDENCE_ASK, &[("name", &ctx.author)]),
-                    ui::ButtonKind::Secondary,
+                    ui::native::PushStyle::Outline,
                     cx,
                 )
                 .h(px(30.))

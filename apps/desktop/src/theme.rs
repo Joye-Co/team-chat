@@ -711,7 +711,7 @@ pub struct Colors {
     /// Primary buttons: ink fill with `btn_ink` text (`--btn`).
     pub btn: Hsla,
     pub btn_ink: Hsla,
-    /// The quiet card button (`ButtonKind::Quiet`): a soft fill, no border,
+    /// The quiet card button (`PushStyle::Secondary`): a soft fill, no border,
     /// and its hover and pressed fills (`--btn-quiet`).
     pub btn_quiet: Hsla,
     pub btn_quiet_hover: Hsla,

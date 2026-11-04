@@ -481,26 +481,22 @@ impl TopicListView {
         text
     }
 
-    /// The 40 pt tab band (§8.1): 全部 · 未读 n · 等我 n, gap 24, 16 pt left,
-    /// the active tab underlined on the bottom hairline.
+    /// The filter band (COMPLETENESS.md K09): 全部 · 未读 n · 等我 n as the one
+    /// Segmented control (h32) with count pills, on a 40 band with its
+    /// bottom line.
     fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ui::native::{Segment, Segmented};
         let k = theme::colors(cx);
         let me = self.services.me();
         let is_group = matches!(self.place, Some(Place::Group(_)));
-        let filters: &[TopicFilter] = if is_group {
-            &TopicFilter::ALL
+        let filters: Vec<TopicFilter> = if is_group {
+            TopicFilter::ALL.to_vec()
         } else {
-            &[TopicFilter::All]
+            vec![TopicFilter::All]
         };
-        div()
-            .flex_none()
-            .h(theme::HEADER_SECOND_ROW)
-            .px(space::S16)
-            .flex()
-            .gap(space::S24)
-            .border_b(theme::HAIRLINE)
-            .border_color(k.sep)
-            .children(filters.iter().map(|&f| {
+        let segments: Vec<Segment> = filters
+            .iter()
+            .map(|&f| {
                 let n = if f == TopicFilter::All {
                     0
                 } else {
@@ -509,16 +505,27 @@ impl TopicListView {
                         .filter(|r| f.keeps(&r.topic, me.as_deref()))
                         .count() as u32
                 };
-                let active = f == self.filter || !is_group;
-                ui::tab(
-                    ElementId::Name(SharedString::from(format!("topic-tab-{}", f.label()))),
-                    f.label(),
-                    n,
-                    active,
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.set_filter(f, cx)))
-            }))
+                Segment::Counted(f.label().into(), n)
+            })
+            .collect();
+        let selected = filters.iter().position(|&f| f == self.filter).unwrap_or(0);
+        let view = cx.entity().downgrade();
+        div()
+            .flex_none()
+            .h(theme::HEADER_SECOND_ROW)
+            .px(space::S16)
+            .flex()
+            .items_center()
+            .border_b(theme::HAIRLINE)
+            .border_color(k.sep)
+            .child(
+                Segmented::new("topic-tabs", segments)
+                    .selected(selected)
+                    .on_change(move |ix, _, cx| {
+                        let f = filters[ix];
+                        let _ = view.update(cx, |this, cx| this.set_filter(f, cx));
+                    }),
+            )
     }
 
     /// One topic row (§7.6).
@@ -762,11 +769,15 @@ impl Render for TopicListView {
             )
             .when(is_group, |el| {
                 el.child(
-                    ui::icon_button("new-topic", Sym::Compose)
-                        .named(nav::NEW_TOPIC_TIP)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
-                        })),
+                    ui::native::icon_button_bare(
+                        "new-topic",
+                        Sym::Compose,
+                        ui::native::IconSize::Regular,
+                    )
+                    .named(nav::NEW_TOPIC_TIP)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
+                    })),
                 )
             });
 

@@ -205,7 +205,7 @@ impl CardsGallery {
                         .flex()
                         .flex_col()
                         .gap(space::S4)
-                        .text_size(px(13.))
+                        .text_size(crate::ui::native::tokens::text::UI.0)
                         .line_height(px(20.))
                         .text_color(k.ink_2)
                         .children(rows),
@@ -218,7 +218,7 @@ impl CardsGallery {
                 .child(
                     div()
                         .w(px(10.))
-                        .text_size(px(12.))
+                        .text_size(crate::ui::native::tokens::text::META.0)
                         .mono()
                         .text_color(k.ink_3)
                         .child(i.to_string()),
@@ -248,11 +248,11 @@ impl CardsGallery {
                 .items_center()
                 .gap(space::S6)
                 .h(px(24.))
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .text_color(k.ink_2)
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(crate::ui::native::tokens::text::META.0)
                         .mono()
                         .text_color(k.ink_3)
                         .child(format!("{:02}", s.number())),
@@ -279,7 +279,7 @@ impl CardsGallery {
                     )
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(crate::ui::native::tokens::text::META.0)
                             .mono()
                             .text_color(k.ink_3)
                             .child(c::GALLERY_COUNT),
@@ -288,7 +288,7 @@ impl CardsGallery {
             .child(
                 div()
                     .mt(space::S6)
-                    .text_size(px(14.))
+                    .text_size(crate::ui::native::tokens::text::UI.0)
                     .line_height(px(22.))
                     .text_color(k.ink_2)
                     .child(fill(
@@ -355,7 +355,7 @@ impl CardsGallery {
             .when(s != Section::States, |el| {
                 el.child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(crate::ui::native::tokens::text::META.0)
                         .mono()
                         .text_color(k.ink_3)
                         .child(format!("{:02}", s.number())),
@@ -363,7 +363,7 @@ impl CardsGallery {
             })
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(crate::ui::native::tokens::text::UI.0)
                     .line_height(px(20.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(k.ink)
@@ -792,7 +792,7 @@ impl CardsGallery {
                                     .gap(space::S8)
                                     .child(
                                         div()
-                                            .text_size(px(14.))
+                                            .text_size(crate::ui::native::tokens::text::UI.0)
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(k.ink)
                                             .child(
@@ -807,7 +807,7 @@ impl CardsGallery {
                             )
                             .child(
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(crate::ui::native::tokens::text::UI.0)
                                     .line_height(px(22.))
                                     .text_color(k.ink)
                                     .child(super::samples::ACK_BODY),
@@ -824,12 +824,20 @@ impl CardsGallery {
                                     .w(px(52.))
                                     .rounded(px(13.))
                                     .bg(crate::ui::native::native_colors(cx).fill)
-                                    .child(div().text_size(px(14.)).child("👀"))
+                                    .child(
+                                        div()
+                                            .text_size(crate::ui::native::tokens::text::UI.0)
+                                            .child("👀"),
+                                    )
                                     .child(ui::MemberAvatar::new(jojo.as_ref(), px(16.))),
                             ),
                     ),
             )
-            .child(div().h(px(1.)).bg(k.line))
+            .child(
+                div()
+                    .h(crate::ui::native::tokens::layout::BORDER)
+                    .bg(k.line),
+            )
             .child(meta(div()).text_color(k.ink_3).child(fill(
                 c::GALLERY_ACK_NOTE,
                 &[(

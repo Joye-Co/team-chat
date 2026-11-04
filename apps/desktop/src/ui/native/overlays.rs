@@ -83,7 +83,9 @@ pub fn native_alert(dialog: Dialog, cx: &App) -> Dialog {
         .keyboard(true)
         .overlay_closable(false)
         .bg(k.sheet)
-        .border_color(k.glass_edge)
+        .border_1()
+        .border_color(k.separator)
+        .shadow(super::tokens::shadow::lg())
         .rounded(metrics::SHEET_RADIUS)
         .p(px(0.))
         .gap(px(0.))
@@ -386,18 +388,8 @@ pub fn sym_toolbar_item(
     name: impl Into<gpui::SharedString>,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use gpui_component::button::{Button, ButtonVariants as _};
-    let k = native_colors(cx);
-    let name = name.into();
-    Button::new(id)
-        .custom(super::borderless_variant(cx))
-        .with_size(metrics::TOOLBAR_ITEM)
-        .size(metrics::TOOLBAR_ITEM)
-        .p_0()
-        .rounded(metrics::TOOLBAR_ITEM / 2.)
-        .accessibility_label(name.clone())
-        .tooltip(name)
-        .child(sym.icon(SymSize::TOOLBAR).text_color(k.label))
+    // D4: the 32 ghost square of `toolbar_item`.
+    super::toolbar_item_sym(id, sym, name, false, true, cx)
 }
 
 /// A toolbar item that turns a view on and off (开发者视图): while on, the
@@ -410,33 +402,8 @@ pub fn sym_toolbar_toggle(
     on: bool,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use gpui_component::button::{Button, ButtonVariants as _};
-    let k = native_colors(cx);
-    let name = name.into();
-    let glyph = sym
-        .icon(SymSize::TOOLBAR)
-        .text_color(if on { k.accent_text } else { k.label });
-    Button::new(id)
-        .custom(super::borderless_variant(cx))
-        .with_size(metrics::TOOLBAR_ITEM)
-        .size(metrics::TOOLBAR_ITEM)
-        .p_0()
-        .rounded(metrics::TOOLBAR_ITEM / 2.)
-        .accessibility_label(name.clone())
-        .tooltip(name)
-        .child(if on {
-            div()
-                .size(metrics::TOOLBAR_PILL)
-                .rounded_full()
-                .bg(k.selection)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(glyph)
-                .into_any_element()
-        } else {
-            glyph.into_any_element()
-        })
+    // D4: a 32 ghost square; while on, the `muted` fill.
+    super::toolbar_item_sym(id, sym, name, on, true, cx)
 }
 
 /// A bar on `fill`, radius 12 (§9.2 decision bar): the state symbol, a

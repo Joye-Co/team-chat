@@ -339,7 +339,7 @@ impl Render for NotificationsPage {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(10.))
+                    .gap(crate::ui::native::tokens::space::S12)
                     .child(widgets::time_popup(
                         "notify-digest-time",
                         digest_time,
@@ -424,13 +424,13 @@ impl Render for NotificationsPage {
             div()
                 .flex()
                 .flex_col()
-                .gap(px(6.))
+                .gap(crate::ui::native::tokens::space::S6)
                 .child(
                     div().flex().child(
                         push_button(
                             "notify-groups-open",
                             s::PER_GROUP_OPEN,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )

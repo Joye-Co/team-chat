@@ -1265,21 +1265,21 @@ pub fn page_footer(
             let (a, b) = (artifact_id.to_string(), artifact_id.to_string());
             base.child(div().flex_none().text_color(k.text_2).child(t))
                 .child(
-                    ui::button(
+                    ui::native::push_button(
                         SharedString::from(format!("{id}-retry")),
                         cp::PAGE_RETRY,
-                        ui::ButtonKind::Ghost,
-                        ui::ButtonSize::Sm,
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
                         cx,
                     )
                     .on_click(move |_, _, cx| retry(&a, version, cx)),
                 )
                 .child(
-                    ui::button(
+                    ui::native::push_button(
                         SharedString::from(format!("{id}-stop")),
                         cp::PAGE_STOP_WAITING,
-                        ui::ButtonKind::Ghost,
-                        ui::ButtonSize::Sm,
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
                         cx,
                     )
                     .on_click(move |_, _, cx| stop_waiting(&b, version, cx)),

@@ -75,7 +75,7 @@ pub fn bar_icon(
 ) -> gpui_component::button::Button {
     use crate::ui::NamedButton as _;
     let k = theme::colors(cx);
-    ui::icon_button_sm(id, icon)
+    ui::native::icon_button_bare(id, icon, ui::native::IconSize::Small)
         .named(tip)
         .rounded(px(7.))
         .relative()

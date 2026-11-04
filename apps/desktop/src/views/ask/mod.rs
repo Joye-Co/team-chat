@@ -611,7 +611,7 @@ impl AskPalette {
                     .max_w(STATUS_MAX)
                     .flex()
                     .items_center()
-                    .gap(px(4.))
+                    .gap(crate::ui::native::tokens::space::S4)
                     .n_subheadline()
                     .text_color(ink2)
                     .when(live, |d| {
@@ -956,7 +956,7 @@ impl Render for AskPalette {
             .when(empty && has_query, |el| {
                 el.child(
                     div()
-                        .h(px(56.))
+                        .h(crate::ui::native::tokens::height::LIST_ROW)
                         .flex()
                         .items_center()
                         .justify_center()

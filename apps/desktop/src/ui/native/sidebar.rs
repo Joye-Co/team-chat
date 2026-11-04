@@ -405,23 +405,116 @@ impl RenderOnce for SidebarRow {
     }
 }
 
-/// The sidebar count: a gray capsule, 16 high, tabular figures.
-fn count_capsule(n: u32, cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .flex_none()
-        .h(px(16.))
-        .min_w(px(16.))
-        .px(px(5.))
-        .rounded_full()
-        .bg(k.quaternary)
-        .flex()
-        .items_center()
-        .justify_center()
-        .n_subheadline()
-        .n_figures()
-        .text_color(k.secondary)
-        .child(crate::ui::chip::CountBadge::cap(n))
+/// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
+/// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
+/// or workspace, or the offline state), `chevrons-up-down` 16 at the right.
+/// It opens account and Settings.
+#[derive(IntoElement)]
+pub struct SidebarFooter {
+    id: ElementId,
+    avatar: AnyElement,
+    name: SharedString,
+    second: Option<AnyElement>,
+    on_click: Option<Click>,
+}
+
+impl SidebarFooter {
+    pub fn new(
+        id: impl Into<ElementId>,
+        avatar: impl IntoElement,
+        name: impl Into<SharedString>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            avatar: avatar.into_any_element(),
+            name: name.into(),
+            second: None,
+            on_click: None,
+        }
+    }
+
+    /// The second line as 12 muted text.
+    pub fn detail(mut self, text: impl Into<SharedString>, cx: &App) -> Self {
+        let k = native_colors(cx);
+        self.second = Some(
+            div()
+                .n_footnote()
+                .text_color(k.secondary)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(text.into())
+                .into_any_element(),
+        );
+        self
+    }
+
+    /// The second line as any element (the offline StatusBadge).
+    pub fn second(mut self, el: impl IntoElement) -> Self {
+        self.second = Some(el.into_any_element());
+        self
+    }
+
+    pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.on_click = Some(Rc::new(f));
+        self
+    }
+}
+
+impl RenderOnce for SidebarFooter {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = native_colors(cx);
+        div()
+            .flex_none()
+            .p(metrics::SIDEBAR_ROW_INSET)
+            .border_t_1()
+            .border_color(k.separator)
+            .child(
+                div()
+                    .id(self.id)
+                    .h(super::tokens::height::SIDEBAR_FOOTER - metrics::SIDEBAR_ROW_INSET * 2.)
+                    .px(metrics::SIDEBAR_ROW_INSET)
+                    .rounded(metrics::SIDEBAR_ROW_RADIUS)
+                    .hover(|s| s.bg(k.fill_hover))
+                    .flex()
+                    .items_center()
+                    .gap(super::tokens::space::S8)
+                    .child(div().flex_none().child(self.avatar))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .n_headline()
+                                    .text_color(k.label)
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(self.name),
+                            )
+                            .children(self.second),
+                    )
+                    .child(symbol(
+                        Sf::Popup,
+                        super::tokens::icon::MD,
+                        Weight::Regular,
+                        k.secondary,
+                        window,
+                    ))
+                    .when_some(self.on_click, |d, f| {
+                        d.on_click(move |e, w, cx| f(e, w, cx))
+                    }),
+            )
+    }
+}
+
+/// The sidebar count: the count pill (20, `muted` fill, tabular figures).
+fn count_capsule(n: u32, _cx: &App) -> gpui::Div {
+    // COMPLETENESS.md §1.8: the one count pill.
+    div().flex_none().child(super::badge::CountPill::new(n))
 }
 
 /// The hover group of a sidebar row (its disclosure chevron).

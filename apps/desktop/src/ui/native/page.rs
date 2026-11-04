@@ -469,36 +469,22 @@ impl Status {
 /// A StatusBadge (§2.12): an outline badge, h22, 12 medium text in
 /// `label`, with the state's 12 icon (or an 8 dot for presence) in its
 /// color. Built on gpui-component's `Tag`.
-pub fn status_badge(status: Status, text: impl Into<SharedString>, cx: &App) -> AnyElement {
-    let k = native_colors(cx);
-    let (sym, color) = status.ink(&k);
-    let mark: AnyElement = match sym {
-        Some(s) => icons::sym(s, BADGE_ICON, color).into_any_element(),
-        None => div()
-            .size(px(8.))
-            .rounded_full()
-            .when(status == Status::Online, |d| d.bg(color))
-            .when(status != Status::Online, |d| {
-                d.border_1().border_color(color)
-            })
-            .into_any_element(),
+pub fn status_badge(status: Status, text: impl Into<SharedString>, _cx: &App) -> AnyElement {
+    // COMPLETENESS.md §2.12: the one StatusBadge of the kit.
+    use super::badge::{BadgeState as B, StatusBadge};
+    let state = match status {
+        Status::NeedsYou => B::NeedsYou,
+        Status::Working => B::Working,
+        Status::Stopping => B::Stopping,
+        Status::Queued => B::Queued,
+        Status::Done => B::Done,
+        Status::Failed => B::Failed,
+        Status::Abnormal => B::Abnormal,
+        Status::Online => B::Online,
+        Status::Offline => B::Offline,
+        Status::Deactivated => B::Deactivated,
     };
-    Tag::custom(gpui::transparent_black(), k.label, k.separator)
-        .outline()
-        .rounded_full()
-        .flex_none()
-        .h(m::BADGE)
-        .px(px(8.))
-        .py(px(0.))
-        .gap(px(4.))
-        .n_callout()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .n_figures()
-        .text_color(k.label)
-        .whitespace_nowrap()
-        .child(mark)
-        .child(text.into())
-        .into_any_element()
+    StatusBadge::new(state, text).into_any_element()
 }
 
 /// An outline badge with text only (a type, `v3`): h22, 12 medium.
@@ -826,7 +812,7 @@ pub fn load_failed(id: &str, services: &Services, cx: &App) -> AnyElement {
             super::push_button(
                 SharedString::from(format!("{id}-retry")),
                 cc::PAGE_RETRY,
-                super::PushStyle::Standard,
+                super::PushStyle::Outline,
                 super::PushSize::Small,
                 cx,
             )

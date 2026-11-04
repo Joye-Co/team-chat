@@ -842,30 +842,17 @@ impl TimelineView {
     fn render_search_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::{
             copy::search as sc,
-            ui::native::{NativeType as _, borderless_variant, metrics, native_colors},
-        };
-        use gpui_component::{
-            Disableable as _, Sizable as _,
-            button::{Button, ButtonVariants as _},
+            ui::native::{NativeType as _, native_colors},
         };
         let search = self.focus.search.as_ref()?;
         let n = native_colors(cx);
         let total = search.hits.len();
         let button = |id: &'static str, sym: Sym, name: &'static str, enabled: bool| {
-            Button::new(id)
-                .custom(borderless_variant(cx))
-                .with_size(metrics::BUTTON_REGULAR)
-                .size(metrics::BUTTON_REGULAR)
-                .p_0()
-                .rounded(metrics::BUTTON_REGULAR_RADIUS)
-                .accessibility_label(name)
-                .tooltip(name)
-                .disabled(!enabled)
-                .child(sym.icon(ui::SymSize::INLINE).text_color(if enabled {
-                    n.label
-                } else {
-                    n.tertiary
-                }))
+            ui::native::disabled_push(
+                ui::native::icon_button_sym(id, sym, name, ui::native::IconSize::Small, cx),
+                !enabled,
+                cx,
+            )
         };
         let leading = if self.v2 {
             v2::LEADING

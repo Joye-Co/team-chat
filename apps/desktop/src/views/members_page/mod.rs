@@ -34,7 +34,7 @@ use crate::{
     },
     ui::{
         native::{
-            ListRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
+            CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
             ToolbarItemKind, ToolbarRow, borderless_button, disabled_push, emphasized,
             native_colors,
             page::{self, PageLoad, Status},
@@ -408,7 +408,7 @@ impl MembersPage {
                     push_button(
                         "members-filter-all",
                         c::MEMBERS_FILTER_ALL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -454,7 +454,7 @@ impl MembersPage {
         // D10: the selected row is the muted fill, focused or not; never an
         // inverted row.
         let _ = (focused, active);
-        let ink = RowInk::new(ListRow::selection_ink(is_selected, false, false, cx), cx);
+        let ink = RowInk::new(CompactRow::selection_ink(is_selected, false, false, cx), cx);
         let on_accent = ink.fill == Some(k.accent);
         let mut parts: Vec<String> = m.role.clone().into_iter().collect();
         if me == Some(m.id.as_str()) {
@@ -633,7 +633,7 @@ impl MembersPage {
                     push_button(
                         "member-pause",
                         c::MEMBERS_PAUSE,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -655,7 +655,7 @@ impl MembersPage {
                     push_button(
                         "member-side-chat",
                         c::MEMBERS_SIDE_CHAT,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -1119,7 +1119,7 @@ impl MembersPage {
                 push_button(
                     SharedString::from(format!("member-retry-{i}")),
                     c::MEMBERS_RETRY,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Small,
                     cx,
                 )
@@ -1276,7 +1276,7 @@ impl MembersPage {
                         push_button(
                             "member-approvals-retry",
                             c::MEMBERS_RETRY,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Small,
                             cx,
                         )
@@ -1326,7 +1326,7 @@ impl MembersPage {
             push_button(
                 "member-approvals-edit",
                 c::MEMBERS_EDIT_MORE,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Small,
                 cx,
             )
@@ -1386,7 +1386,7 @@ impl MembersPage {
             push_button(
                 "member-plan-edit",
                 c::MEMBERS_EDIT_MORE,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Small,
                 cx,
             )

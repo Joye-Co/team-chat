@@ -157,22 +157,22 @@ fn button(
 ) -> AnyElement {
     let id = ElementId::Name(part_id(message, format_args!("action-{}", action.id)).into());
     let kind = match action.style.unwrap_or_default() {
-        ActionStyle::Primary => ui::ButtonKind::Primary,
+        ActionStyle::Primary => ui::native::PushStyle::Default,
         // Every other action is a standard push button (NATIVE.md §5.2).
         ActionStyle::Default => {
             let _ = quiet;
-            ui::ButtonKind::Quiet
+            ui::native::PushStyle::Secondary
         }
-        ActionStyle::Danger => ui::ButtonKind::Danger,
+        ActionStyle::Danger => ui::native::PushStyle::Destructive,
     };
     let pressed = sending == Some(action.id.as_str());
     let make = |loading: bool| {
         let press = press_of(action, message, provider);
-        ui::button(
+        ui::native::push_button(
             id.clone(),
             action.label.clone(),
             kind,
-            ui::ButtonSize::Card,
+            ui::native::PushSize::Small,
             cx,
         )
         .loading(loading)
@@ -208,7 +208,7 @@ fn option_row(
     let chosen = mine == Some(action.id.as_str()) || sending == Some(action.id.as_str());
     let blocked = sending.is_some();
     let press = press_of(action, message, provider);
-    let b = nk::push_button(id, "", nk::PushStyle::Standard, nk::PushSize::Regular, cx).child(
+    let b = nk::push_button(id, "", nk::PushStyle::Outline, nk::PushSize::Regular, cx).child(
         div()
             .flex()
             .items_center()

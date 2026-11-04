@@ -19,11 +19,8 @@ use crate::{
     data::v2::ArtifactPreview,
     theme::{self, Type as _, space},
     ui::{
-        self, NamedButton as _, Sym,
-        native::{
-            NativeType as _, PushSize, PushStyle, borderless_variant, metrics, native_colors,
-            push_button,
-        },
+        self, Sym,
+        native::{NativeType as _, PushSize, PushStyle, metrics, native_colors, push_button},
     },
     views::shell::clock,
 };
@@ -77,7 +74,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
                             .child(
                                 div()
                                     .mono()
-                                    .text_size(px(24.))
+                                    .text_size(crate::ui::native::tokens::text::HERO.0)
                                     .line_height(px(32.))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(k.ink)
@@ -85,7 +82,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
                             )
                             .children(m.unit.clone().map(|u| {
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(crate::ui::native::tokens::text::UI.0)
                                     .medium()
                                     .text_color(k.ink_3)
                                     .child(u)
@@ -114,7 +111,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
             .child(
                 div()
                     .mt(space::S6)
-                    .h(px(32.))
+                    .h(crate::ui::native::tokens::height::DEFAULT)
                     .flex()
                     .items_center()
                     .t_meta()
@@ -127,7 +124,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
             .children(preview.rows.iter().enumerate().map(|(i, r)| {
                 let last = i + 1 == preview.rows.len();
                 div()
-                    .h(px(36.))
+                    .h(crate::ui::native::tokens::height::LG)
                     .flex()
                     .items_center()
                     .border_t_1()
@@ -299,16 +296,7 @@ fn header_button(
     name: &'static str,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use gpui_component::{Sizable as _, button::ButtonVariants as _};
-    let n = native_colors(cx);
-    gpui_component::button::Button::new(id)
-        .custom(borderless_variant(cx))
-        .with_size(gpui_component::Size::Small)
-        .size(metrics::BUTTON_REGULAR)
-        .p_0()
-        .rounded(metrics::BUTTON_REGULAR_RADIUS)
-        .child(ui::icon(sym, px(15.), n.secondary))
-        .named(name)
+    crate::ui::native::icon_button_sym(id, sym, name, crate::ui::native::IconSize::Regular, cx)
 }
 
 /// The 产出 pane for one 产出 (`version` or its latest): a 52 pt header in
@@ -401,7 +389,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
                 push_button(
                     "out-open-window-empty",
                     c::OPEN_WINDOW,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Regular,
                     cx,
                 )

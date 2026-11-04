@@ -9,8 +9,8 @@ use gpui::{
     Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Selectable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
+    Disableable as _, WindowExt as _,
+    button::Button,
     clipboard::Clipboard,
     input::{InputEvent, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
@@ -249,22 +249,16 @@ impl MembersPage {
                 .icon(widgets::app_icon(cx))
                 .message(fill(s::DEACTIVATE_BODY, &[("name", &name)]))
                 .buttons([
-                    alert_button(
-                        "deactivate-ok",
-                        s::DEACTIVATE,
-                        PushStyle::Standard,
-                        true,
-                        cx,
-                    )
-                    .on_click(move |_, window, cx| {
-                        let id = id.clone();
-                        page.update(cx, |p, cx| p.set_deactivated(id, true, cx));
-                        window.close_dialog(cx);
-                    }),
+                    alert_button("deactivate-ok", s::DEACTIVATE, PushStyle::Outline, true, cx)
+                        .on_click(move |_, window, cx| {
+                            let id = id.clone();
+                            page.update(cx, |p, cx| p.set_deactivated(id, true, cx));
+                            window.close_dialog(cx);
+                        }),
                     alert_button(
                         "deactivate-cancel",
                         common::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         false,
                         cx,
                     )
@@ -460,7 +454,7 @@ impl MembersPage {
             div()
                 .flex()
                 .items_center()
-                .gap(px(2.))
+                .gap(crate::ui::native::tokens::space::S2)
                 .child(div().n_body().text_color(k.secondary).child("¥"))
                 .child(
                     InlineValueField::new(
@@ -558,12 +552,12 @@ impl Render for MembersPage {
             group.below(
                 div()
                     .flex()
-                    .gap(px(8.))
+                    .gap(crate::ui::native::tokens::space::S8)
                     .child(
                         push_button(
                             "member-invite",
                             s::INVITE_OPEN,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )
@@ -575,7 +569,7 @@ impl Render for MembersPage {
                         push_button(
                             "member-add-ai",
                             s::ADD_AI_OPEN,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )
@@ -608,7 +602,7 @@ fn secret_row(id: &'static str, label: &'static str, value: &str, cx: &App) -> g
         .w_full()
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(crate::ui::native::tokens::space::S4)
         .child(div().n_body().text_color(k.label).child(label))
         .child(
             div()
@@ -623,13 +617,13 @@ fn secret_row(id: &'static str, label: &'static str, value: &str, cx: &App) -> g
                 .border_color(k.separator)
                 .flex()
                 .items_start()
-                .gap(px(6.))
+                .gap(crate::ui::native::tokens::space::S6)
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.))
                         .font_family(theme::MONO_FONT_FAMILY)
-                        .text_size(px(12.))
+                        .text_size(crate::ui::native::tokens::text::META.0)
                         .line_height(px(18.))
                         .text_color(k.label)
                         .child(value.clone()),
@@ -734,7 +728,7 @@ fn sheet_actions(
         push_button(
             SharedString::from(format!("{id}-cancel")),
             common::CANCEL,
-            PushStyle::Standard,
+            PushStyle::Outline,
             PushSize::Large,
             cx,
         )
@@ -769,25 +763,23 @@ pub fn character_picker(
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
     cx: &App,
 ) -> gpui::Div {
-    let accent = theme::colors(cx).accent;
+    let _accent = theme::colors(cx).accent;
     div()
         .flex()
         .flex_wrap()
-        .gap(px(4.))
+        .gap(crate::ui::native::tokens::space::S4)
         .children(CharacterId::ALL.iter().enumerate().map(|(ix, c)| {
             let c = *c;
             let pick = pick.clone();
-            Button::new(ElementId::NamedInteger(id.into(), ix as u64))
-                .ghost()
-                .size(px(40.))
-                .p_0()
-                .selected(selected == Some(c))
-                .when(selected == Some(c), |b| {
-                    b.shadow(ui::rows::focus_ring(accent))
-                })
-                .disabled(disabled)
-                .child(characters::image(c, CharacterStatus::Idle, px(32.)))
-                .on_click(move |_, window, cx| pick(c, window, cx))
+            crate::ui::native::tile_button(
+                ElementId::NamedInteger(id.into(), ix as u64),
+                crate::ui::native::tokens::avatar::LG,
+                selected == Some(c),
+                cx,
+            )
+            .disabled(disabled)
+            .child(characters::image(c, CharacterStatus::Idle, px(32.)))
+            .on_click(move |_, window, cx| pick(c, window, cx))
         }))
 }
 
@@ -1260,7 +1252,7 @@ impl Render for BotForm {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(crate::ui::native::tokens::space::S6)
                     .when(!self.known_runtimes.is_empty(), |d| {
                         let known = self.known_runtimes.clone();
                         let input = self.runtime.clone();
@@ -1329,7 +1321,7 @@ impl Render for BotForm {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap(px(16.))
+                    .gap(crate::ui::native::tokens::space::S16)
                     .child(form)
                     .child(looks),
             )
@@ -1411,7 +1403,7 @@ impl Render for CharacterForm {
             .buttons([push_button(
                 "member-character-cancel",
                 common::CANCEL,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Large,
                 cx,
             )

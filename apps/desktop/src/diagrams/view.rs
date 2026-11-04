@@ -357,19 +357,27 @@ fn header(
                     }),
             )
             .child(
-                ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Sym::Copy)
-                    .named(c::COPY_SOURCE)
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
-                    }),
+                ui::native::icon_button_bare(
+                    ElementId::Name(format!("dcopy-{id}").into()),
+                    Sym::Copy,
+                    ui::native::IconSize::Small,
+                )
+                .named(c::COPY_SOURCE)
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
+                }),
             )
             .when_some(viewer, |el, (spec, n, focus)| {
                 el.child(
-                    ui::icon_button_sm(ElementId::Name(format!("dzoom-{id}").into()), Sym::Expand)
-                        .named(c::ZOOM_IN)
-                        .on_click(move |_, window, cx| {
-                            open_viewer(&spec, &n, focus.clone(), window, cx)
-                        }),
+                    ui::native::icon_button_bare(
+                        ElementId::Name(format!("dzoom-{id}").into()),
+                        Sym::Expand,
+                        ui::native::IconSize::Small,
+                    )
+                    .named(c::ZOOM_IN)
+                    .on_click(move |_, window, cx| {
+                        open_viewer(&spec, &n, focus.clone(), window, cx)
+                    }),
                 )
             })
         })
@@ -537,11 +545,11 @@ fn image_with_hits(
                             .justify_center()
                             .pb(space::S8)
                             .child(
-                                ui::button(
+                                ui::native::push_button(
                                     ElementId::Name(format!("dexpand-{id}").into()),
                                     c::EXPAND,
-                                    ui::ButtonKind::Secondary,
-                                    ui::ButtonSize::Sm,
+                                    ui::native::PushStyle::Outline,
+                                    ui::native::PushSize::Small,
                                     cx,
                                 )
                                 .on_click(move |_, _, cx| {
@@ -705,11 +713,15 @@ fn error_frame(
                 })
                 .child(div().flex_1())
                 .child(
-                    ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Sym::Copy)
-                        .named(c::COPY_SOURCE)
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
-                        }),
+                    ui::native::icon_button_bare(
+                        ElementId::Name(format!("dcopy-{id}").into()),
+                        Sym::Copy,
+                        ui::native::IconSize::Small,
+                    )
+                    .named(c::COPY_SOURCE)
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
+                    }),
                 ),
         )
         .child(

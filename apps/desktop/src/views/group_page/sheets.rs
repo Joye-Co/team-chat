@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Window, px,
+    SharedString, Styled as _, Subscription, Window,
 };
 use gpui_component::{
     WindowExt as _,
@@ -207,7 +207,7 @@ fn open(services: Services, group_id: String, kind: Kind, window: &mut Window, c
             input.update(cx, |s, cx| s.select_all(window, cx));
         }
         native_sheet(dialog, SheetWidth::Form, cx)
-            .px(px(0.))
+            .px_0()
             .child(sheet.clone())
     });
 }

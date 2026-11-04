@@ -162,7 +162,7 @@ pub fn ask_row(
                     push_button(
                         SharedString::from(format!("desk-undo-{key}")),
                         c::DESK_UNDO,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -186,7 +186,7 @@ pub fn ask_row(
                     push_button(
                         SharedString::from(format!("desk-look-{key}")),
                         c::DESK_LOOK,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -203,7 +203,7 @@ pub fn ask_row(
                     push_button(
                         SharedString::from(format!("desk-approve-{key}")),
                         quick_label(&quick),
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -383,7 +383,7 @@ pub fn note_alert(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
     let reply = push_button(
         "desk-note-reply",
         c::DESK_NOTE_REPLY,
-        PushStyle::Standard,
+        PushStyle::Outline,
         PushSize::Small,
         cx,
     )
