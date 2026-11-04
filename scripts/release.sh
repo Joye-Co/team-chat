@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Makes a release: sets the workspace version, builds and checks the DMG and the daemon,
+# Makes a release: checks the release metadata (scripts/release-check.sh), sets the workspace
+# version and the CHANGELOG.md date, builds and checks the DMG and the daemon,
 # commits and tags v<version> on main, creates the GitHub Release, and uploads the DMG to
 # the server so the app can update itself.
 #
@@ -145,6 +146,10 @@ gh auth status >/dev/null 2>&1 || problem "gh is not logged in"
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
 [ -n "$REPO" ] || problem "gh cannot find the GitHub repository of origin"
 CURRENT="$(workspace_version)"
+# The notes must be final now; the version and the date are set below (release-check.sh).
+[ -s "$ROOT/docs/releases/$VERSION.md" ] || problem "no release notes at docs/releases/$VERSION.md"
+grep -qE "^## ${VERSION//./\\.} \((unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})\)$" CHANGELOG.md || problem "CHANGELOG.md has no $VERSION section"
+if grep -qiE '\bdraft\b|草稿' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -152,7 +157,7 @@ if [ "$DRY_RUN" = 1 ]; then
 Release plan (dry run, nothing changed):
   version        $CURRENT -> $VERSION (Cargo.toml [workspace.package])
   build          scripts/build-dmg.sh, scripts/test-dmg.sh, scripts/build-daemon.sh
-  commit         chore(release): $TAG  (Cargo.toml, Cargo.lock)
+  commit         chore(release): $TAG  (Cargo.toml, Cargo.lock, CHANGELOG.md date)
   push           origin HEAD:main, then tag $TAG
   GitHub         ${REPO:-?}: release $TAG$([[ "$VERSION" == *-* ]] && printf ' (prerelease)')
                  assets: $NAME-$VERSION.dmg, daemon, .sha256 files
@@ -166,19 +171,22 @@ fi
 
 need cargo
 log "setting version $VERSION"
-restore() { git checkout --quiet -- Cargo.toml Cargo.lock 2>/dev/null || true; }
+restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
 trap 'restore' ERR
 set_workspace_version "$VERSION"
 cargo_env
 cargo update --workspace --offline --manifest-path "$ROOT/Cargo.toml"
+# "## <version> (unreleased)" gets today's date (UTC).
+sed -i '' "s/^## ${VERSION//./\\.} (unreleased)\$/## $VERSION ($(date -u +%Y-%m-%d))/" CHANGELOG.md
+"$ROOT/scripts/release-check.sh" "$VERSION" || die "release metadata of $VERSION is not final"
 
 "$ROOT/scripts/build-dmg.sh"
 "$ROOT/scripts/test-dmg.sh" "$DMG"
 DAEMON="$("$ROOT/scripts/build-daemon.sh" | tail -n 1)"
 [ -f "$DMG" ] && [ -f "$DAEMON" ] || die "build outputs are missing"
 
-if ! git diff --quiet -- Cargo.toml Cargo.lock; then
-  git add Cargo.toml Cargo.lock
+if ! git diff --quiet -- Cargo.toml Cargo.lock CHANGELOG.md; then
+  git add Cargo.toml Cargo.lock CHANGELOG.md
   git commit --quiet -m "chore(release): $TAG"
 fi
 trap - ERR
