@@ -16,17 +16,21 @@ use gpui::{
     App, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{ActiveTheme as _, Disableable as _};
+use gpui_component::ActiveTheme as _;
 
 use crate::{
     app::{Changes, Services},
-    copy::{dev, fill, process as p},
+    copy::{dev, fill, overlays as o, process as p},
     data::{
         AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess,
         RunStatus, TopicId,
     },
     theme::{self, Type as _, space},
-    ui,
+    ui::{
+        self, Sym,
+        native::{NativeType as _, PushSize, PushStyle, disabled_push, native_colors, push_button},
+        sf_symbols::SymSize,
+    },
     views::time_text,
 };
 
@@ -81,11 +85,36 @@ pub fn run_duration(run: &BotRunSummary, now: Millis) -> Option<u64> {
     Some(end.saturating_sub(start).max(0) as u64)
 }
 
-/// Asks the provider to stop a run (`停止`, DESIGN.md §9.2). No confirmation:
-/// a stop loses nothing. The views show `正在停止…` from
-/// `ChatProvider::run_stopping` until the run ends. A run that already ended
-/// answers `Ok`; any other failure shows the standard error toast.
+/// `停止` (NATIVE.md §7.2): asks in a Tahoe alert in the active window
+/// (停止 in red, 取消 the default), then stops the run with [`stop_run_now`].
 pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
+    let Some(window) = cx.active_window() else {
+        stop_run_now(services, run, cx);
+        return;
+    };
+    let name = services
+        .provider
+        .member(&run.bot_id)
+        .map(|m| m.name)
+        .unwrap_or_default();
+    let (s, r) = (services.clone(), run.clone());
+    let _ = window.update(cx, |_, window, cx| {
+        crate::views::nav::dialogs::destructive_alert(
+            "stop-run",
+            fill(o::STOP_TITLE, &[("name", &name)]),
+            fill(o::STOP_MESSAGE, &[("name", &name)]),
+            o::STOP_OK,
+            move |_, cx| stop_run_now(&s, &r, cx),
+            window,
+            cx,
+        )
+    });
+}
+
+/// Asks the provider to stop a run. The views show `正在停止…` from
+/// `ChatProvider::run_stopping` until the run ends. A run that already ended
+/// answers `Ok`; any other failure shows the standard error notice.
+pub fn stop_run_now(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let reply = services
         .provider
         .cancel_run(&run.group_id, &run.topic_id, &run.id);
@@ -437,7 +466,11 @@ impl ProcessView {
                         .gap(space::S6)
                         .t_meta()
                         .text_color(colors.accent_text)
-                        .child(div().size(px(6.)).rounded_full().bg(colors.accent))
+                        .child(
+                            Sym::Live
+                                .icon(SymSize::INLINE_SMALL)
+                                .text_color(native_colors(cx).blue),
+                        )
                         .child(p::LIVE),
                 )
             })
@@ -530,14 +563,17 @@ impl ProcessView {
             .gap(space::S6)
             .t_meta()
             .child(
-                ui::button(
-                    "download-session",
-                    dev::RUN_DOWNLOAD_SESSION,
-                    ui::ButtonKind::Secondary,
-                    ui::ButtonSize::Sm,
+                disabled_push(
+                    push_button(
+                        "download-session",
+                        dev::RUN_DOWNLOAD_SESSION,
+                        PushStyle::Standard,
+                        PushSize::Small,
+                        cx,
+                    ),
+                    matches!(self.download, Download::Running),
                     cx,
                 )
-                .disabled(matches!(self.download, Download::Running))
                 .on_click(cx.listener(|this, _, _, cx| this.download_session(cx))),
             )
             .when_some(download_line, |el, line| {
@@ -556,17 +592,33 @@ impl ProcessView {
     }
 }
 
-/// The status label of a run (§7.8): a glyph and the word, no fill.
-pub fn status_badge(status: RunStatus, _cx: &App) -> impl IntoElement {
-    use crate::{data::TopicStatus as S, theme::ChipKind as K};
-    let (topic_status, kind) = match status {
-        RunStatus::Created | RunStatus::Cancelled => (S::Open, K::Quiet),
-        RunStatus::Running => (S::InProgress, K::Quiet),
-        RunStatus::Waiting => (S::WaitingAnswer, K::Quiet),
-        RunStatus::Blocked | RunStatus::Failed => (S::Blocked, K::Blocked),
-        RunStatus::Done => (S::Done, K::Quiet),
+/// The status of a run (NATIVE.md §6): its state symbol and the word, no
+/// chip. Working is a `blue` dot, a problem `red`, the rest `secondary`.
+pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
+    let k = native_colors(cx);
+    let (sym, color) = match status {
+        RunStatus::Created => (Sym::Todo, k.secondary),
+        RunStatus::Running => (Sym::Live, k.blue),
+        RunStatus::Waiting => (Sym::Waiting, k.secondary),
+        RunStatus::Blocked => (Sym::Problem, k.red),
+        RunStatus::Failed => (Sym::Failed, k.red),
+        RunStatus::Done => (Sym::Check, k.secondary),
+        RunStatus::Cancelled => (Sym::Stopped, k.secondary),
     };
-    ui::StatusChip::labeled(status_text(status), topic_status, kind).style(ui::ChipStyle::Label)
+    let ink = if matches!(status, RunStatus::Blocked | RunStatus::Failed) {
+        k.red
+    } else {
+        k.secondary
+    };
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .n_subheadline()
+        .text_color(ink)
+        .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))
+        .child(status_text(status))
 }
 
 impl Render for ProcessView {
@@ -648,7 +700,14 @@ impl Render for ProcessView {
                                 .when(retry, |el| {
                                     let id = run.id.clone();
                                     el.child(
-                                        ui::text_button("process-retry", p::RETRY, cx).on_click(
+                                        push_button(
+                                            "process-retry",
+                                            p::RETRY,
+                                            PushStyle::Standard,
+                                            PushSize::Small,
+                                            cx,
+                                        )
+                                        .on_click(
                                             cx.listener(move |this, _, _, cx| {
                                                 this.services.provider.follow_run(&id);
                                                 cx.notify();

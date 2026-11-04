@@ -14,6 +14,9 @@ pub mod selftest;
 #[cfg(target_os = "macos")]
 mod status_item;
 pub mod switcher;
+// --- v12/overlays ---
+pub mod new_topic;
+// --- end v12/overlays ---
 
 use std::collections::HashSet;
 
@@ -89,6 +92,8 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     ]);
     switcher::bind_keys(cx);
     crate::views::ask::bind_keys(cx);
+    // v12/overlays: ⌘Return in the 新话题 sheet.
+    new_topic::bind_keys(cx);
     cx.set_global(NavGlobal {
         services: services.clone(),
         window: None,

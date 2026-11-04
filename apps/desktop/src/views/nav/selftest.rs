@@ -361,6 +361,20 @@ pub mod scenes {
         })
     }
 
+    // --- v12/overlays ---
+    /// The 新话题 sheet over the open 群, a first message typed.
+    pub fn new_topic(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let group = services.nav.read(cx).current_group();
+            super::super::new_topic::open_new_topic(services, group, window, cx);
+        })
+    }
+    // --- end v12/overlays ---
+
     /// The new-group sheet.
     pub fn new_group(
         services: Services,

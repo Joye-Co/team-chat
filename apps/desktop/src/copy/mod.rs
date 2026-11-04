@@ -57,6 +57,9 @@ pub mod topic_rail;
 // --- v12/kit ---
 pub mod native_kit;
 // --- end v12/kit ---
+// --- v12/overlays ---
+pub mod overlays;
+// --- end v12/overlays ---
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
@@ -266,6 +269,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end v12/kit ---
+    // --- v12/overlays ---
+    Section {
+        name: "overlays",
+        entries: overlays::ENTRIES,
+        developer: false,
+    },
+    // --- end v12/overlays ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.

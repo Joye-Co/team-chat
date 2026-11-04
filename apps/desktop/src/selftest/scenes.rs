@@ -90,10 +90,10 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "new-topic",
-        about: "First 群 with no 话题 open: the composer starts a new 话题",
+        about: "The 新话题 sheet over the first 群 (v12/overlays)",
         start: Start::SignedIn,
         setup: open_first_group,
-        open: open_main,
+        open: crate::views::nav::selftest::scenes::new_topic,
     },
     Scene {
         name: "todo",

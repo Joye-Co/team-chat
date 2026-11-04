@@ -67,3 +67,8 @@ pub use crate::ui::motion::spinner;
 // --- track cards: the card parts the kit lacked (ui/native/cards.rs) ---
 pub mod cards;
 // --- end track cards ---
+// --- v12/overlays ---
+/// Overlay parts the kit lacks: the Tahoe alert dialog, the Spotlight panel
+/// (§9.7), the bordered list of a sheet and the app icon.
+pub mod overlays;
+// --- end v12/overlays ---

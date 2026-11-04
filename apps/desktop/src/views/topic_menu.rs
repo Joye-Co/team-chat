@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -16,10 +16,10 @@ use gpui_component::{
 
 use crate::{
     app::Services,
-    copy::{common, realtime as r},
+    copy::{common, overlays as o, realtime as r},
     data::{Member, MemberId, Topic, TopicStatus},
-    theme::{self, Type as _, space},
-    ui::{self, ButtonSpec as _, FieldKind},
+    theme,
+    ui::native::{NativeTextField, SheetWidth, disabled_push, native_sheet, sheet_buttons},
     views::presence_dot,
 };
 
@@ -65,32 +65,20 @@ impl RenameForm {
 impl Render for RenameForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let filled = !self.title.read(cx).value().trim().is_empty();
-        div()
-            .flex()
-            .flex_col()
-            .t_ui()
-            .child(ui::field_label(r::TOPIC_TITLE_LABEL, cx))
-            .child(
-                ui::TextField::new("rename-topic-title", &self.title, FieldKind::Form)
-                    .error(self.error.is_some()),
-            )
-            .when_some(self.error, |el, e| el.child(ui::field_help(e, true, cx)))
-            .child(
-                div()
-                    .pt(space::S20)
-                    .flex()
-                    .justify_end()
-                    .gap(space::S8)
-                    .child(
-                        ui::secondary_button("rename-topic-cancel", common::CANCEL, cx)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    )
-                    .child(
-                        ui::primary_button("rename-topic-save", common::SAVE, cx)
-                            .disabled_fill(!filled, cx)
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
-                    ),
-            )
+        let [cancel, save] = sheet_buttons("rename-topic", common::CANCEL, common::SAVE, cx);
+        crate::views::nav::rename::rename_sheet(
+            r::RENAME_TITLE,
+            o::RENAME_TOPIC_EXPLANATION,
+            o::TOPIC_TITLE,
+            NativeTextField::new("rename-topic-title", &self.title)
+                .width(px(300.))
+                .error(self.error.is_some()),
+            self.error.map(SharedString::from),
+            cancel.on_click(|_, window, cx| window.close_dialog(cx)),
+            disabled_push(save, !filled, cx)
+                .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+            cx,
+        )
     }
 }
 
@@ -129,16 +117,12 @@ pub fn open_rename(
     });
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
-            let handle = form.read(cx).title.read(cx).focus_handle(cx);
-            handle.focus(window, cx);
+            let title = form.read(cx).title.clone();
+            title.read(cx).focus_handle(cx).focus(window, cx);
+            title.update(cx, |state, cx| state.select_all(window, cx));
         }
-        dialog
-            .close_button(false)
-            .p(space::S20)
-            .title(div().t_title().pb(space::S8).child(r::RENAME_TITLE))
-            .child(form.clone())
+        native_sheet(dialog, SheetWidth::Form, cx).child(form.clone())
     });
 }
 
