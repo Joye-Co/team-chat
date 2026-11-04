@@ -766,14 +766,13 @@ fn audio(
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-speed", spec.id).into()))
+                        // A borderless text button (NATIVE.md §5.1).
                         .h(px(22.))
                         .px(space::S6)
                         .rounded(radius::SM)
-                        .border_1()
-                        .border_color(k.border)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(k.hover))
+                        .hover(|s| s.bg(crate::ui::native::native_colors(cx).fill_hover))
                         .child(mono(SPEEDS[speed].1, k.text_2))
                         .on_click(move |_, _, cx| {
                             speed_state
