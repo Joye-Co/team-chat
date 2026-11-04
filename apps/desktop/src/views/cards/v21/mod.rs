@@ -879,16 +879,20 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
     let live = node.ctx.live();
     let mut col = div().flex().flex_col().min_w(px(0.));
     if live {
-        // 问卷 · 3 题 with the progress dashes and 必答 1/2.
-        let dashes = div().flex().gap(px(3.)).children(inputs.iter().map(|q| {
-            let ok = q.id().is_some_and(|id| node.ctx.values.contains_key(id))
-                && form21::problem(node.ctx.card, q, &node.ctx.values).is_none();
-            div()
-                .w(px(16.))
-                .h(px(3.))
-                .rounded_full()
-                .bg(if ok { k.ink } else { k.line_2 })
-        }));
+        // 问卷 · 3 题 with a determinate bar of the answered questions and 必答 1/2
+        // (NATIVE.md §5.7: one progress drawing, no dashes).
+        let answered = inputs
+            .iter()
+            .filter(|q| {
+                q.id().is_some_and(|id| node.ctx.values.contains_key(id))
+                    && form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
+            })
+            .count();
+        let dashes = div().w(px(64.)).child(crate::ui::native::determinate_bar(
+            answered as f32 / inputs.len().max(1) as f32,
+            None,
+            cx,
+        ));
         col = col.child(
             meta(div())
                 .mb(space::S8)

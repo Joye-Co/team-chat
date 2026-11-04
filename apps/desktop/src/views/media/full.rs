@@ -292,7 +292,7 @@ fn html(
     for e in events.iter().rev().take(8) {
         log = log.child(mono(e.clone(), k.text_2));
     }
-    let header = pane_header(Sym::OpenWindow, spec.media.title.clone(), cx)
+    let header = pane_header(Sym::Document, spec.media.title.clone(), cx)
         .child(div().t_meta().text_color(k.text_3).child(cm::KIND_HTML))
         .child(chip(
             fill(cm::VERSION_CHIP, &[("n", &shown.to_string())]),

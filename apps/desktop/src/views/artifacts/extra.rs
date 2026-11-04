@@ -56,8 +56,11 @@ impl MessageExtra for ArtifactRefsExtra {
                         .map(|m| m.name.clone())
                         .unwrap_or_else(|| crate::copy::composer::UNKNOWN_MEMBER.to_string());
                     let (kind, icon) = match d.summary.kind {
-                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Sym::CodeFile),
-                        _ => (ca::CARD_KIND_FILE, Sym::Document),
+                        // The kind symbol (NATIVE.md §6): a page is `doc.text`, an
+                        // image `photo`, any other file `doc`.
+                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Sym::Document),
+                        ArtifactKind::Image => (ca::CARD_KIND_FILE, Sym::Image),
+                        _ => (ca::CARD_KIND_FILE, Sym::File),
                     };
                     let mut meta = format!(
                         "{kind} · {} · {name}",

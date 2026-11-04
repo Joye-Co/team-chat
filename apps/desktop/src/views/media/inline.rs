@@ -259,7 +259,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Sym::OpenWindow, spec.title.clone(), cx)
+            card_header(Sym::Document, spec.title.clone(), cx)
                 .child(version_chip(spec.key.version, cx))
                 .children(notice)
                 .child(

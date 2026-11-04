@@ -5,7 +5,7 @@
 use gpui::{
     AnyElement, App, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window,
-    div, img, prelude::FluentBuilder as _, px, relative,
+    div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, Sizable as _,
@@ -424,20 +424,11 @@ pub(crate) fn table_with_refs(
             .gap(space::S8)
             .when(num, |el| el.justify_end())
             .when_some(pct, |el, p| {
-                el.child(
-                    div()
-                        .w(m::TABLE_PCT_BAR)
-                        .h(px(3.))
-                        .rounded(px(2.))
-                        .bg(k.line_2)
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded(px(2.))
-                                .bg(k.ink_2)
-                                .w(relative((p / 100.).clamp(0., 1.))),
-                        ),
-                )
+                el.child(div().w(m::TABLE_PCT_BAR).child(ui::native::determinate_bar(
+                    (p / 100.).clamp(0., 1.) as f32,
+                    None,
+                    cx,
+                )))
             })
             .child(
                 div()
@@ -608,35 +599,12 @@ fn segments(label: Option<&str>) -> Option<usize> {
     (2..=40).contains(&n).then_some(n)
 }
 
-fn progress_bar(value: f64, label: Option<&str>, count: Option<usize>, cx: &App) -> AnyElement {
+/// Progress (NATIVE.md §5.7): the one determinate bar, 4 pt, radius 2, in `blue` while
+/// it is live work. A counted label (`已重启 9/24`) stays text; no segments.
+fn progress_bar(value: f64, label: Option<&str>, _count: Option<usize>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
     let v = value.clamp(0., 1.) as f32;
-    let bar = match count.or_else(|| segments(label)) {
-        Some(n) => {
-            let lit = (v * n as f32).round() as usize;
-            div()
-                .flex()
-                .gap(px(3.))
-                .children((0..n).map(|i| {
-                    div().flex_1().h(px(4.)).rounded(px(2.)).bg(
-                        if i + 1 < lit || (i < lit && lit == n) {
-                            k.ink_2
-                        } else if i + 1 == lit {
-                            k.live
-                        } else {
-                            k.line_2
-                        },
-                    )
-                }))
-                .into_any_element()
-        }
-        None => div()
-            .h(px(4.))
-            .rounded(px(2.))
-            .bg(k.line_2)
-            .child(div().h_full().rounded(px(2.)).bg(k.live).w(relative(v)))
-            .into_any_element(),
-    };
     div()
         .flex()
         .flex_col()
@@ -644,7 +612,7 @@ fn progress_bar(value: f64, label: Option<&str>, count: Option<usize>, cx: &App)
         .when_some(label, |el, l| {
             el.child(meta(div()).text_color(k.ink_3).child(l.to_string()))
         })
-        .child(bar)
+        .child(ui::native::determinate_bar(v, Some(n.blue), cx))
         .into_any_element()
 }
 
