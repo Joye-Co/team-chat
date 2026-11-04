@@ -7,7 +7,7 @@
 
 use gpui::{
     AnyElement, App, BoxShadow, ElementId, Entity, Focusable as _, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, point,
+    IntoElement, ParentElement, Pixels, RenderOnce, Styled, TextAlign, Window, div, point,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
@@ -52,21 +52,10 @@ fn ring(color: Hsla) -> BoxShadow {
     }
 }
 
-/// The (border, shadows) of a field that fills its column: the same ring
-/// drawn inside the field edge, so it never leaves the content column of a
-/// sheet or group (T1-12, §2.9).
-pub fn field_edge_inset(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
-    let (edge, mut shadows) = field_edge(k, focused, error);
-    if focused || error {
-        for s in &mut shadows {
-            s.inset = true;
-            s.spread_radius = metrics::FOCUS_RING - metrics::HAIRLINE;
-        }
-    }
-    (edge, shadows)
-}
-
-/// The (border, shadows) of a field in its state (§1.8).
+/// The (border, shadows) of a field in its state (§1.8). The focus and
+/// error rings are 3 px outside the 1 px border, never inside it, where they
+/// read as a second border (review 2 R1-07). Every field, a full-width one
+/// too, draws them outside; its column keeps 3 px for them.
 pub fn field_edge(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
     let red = k.red;
     match (error, focused) {
@@ -87,6 +76,7 @@ pub struct NativeTextField {
     error: bool,
     focused: Option<bool>,
     trailing: Option<AnyElement>,
+    align: TextAlign,
 }
 
 impl NativeTextField {
@@ -100,7 +90,15 @@ impl NativeTextField {
             error: false,
             focused: None,
             trailing: None,
+            align: TextAlign::Left,
         }
+    }
+
+    /// Aligns the text, while editing and at rest: `Right` for numbers
+    /// (§2.8 number field).
+    pub fn align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
     }
 
     pub fn size(mut self, size: FieldSize) -> Self {
@@ -149,11 +147,14 @@ impl RenderOnce for NativeTextField {
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
             && !self.disabled;
-        // A field that fills its column draws its ring inside (T1-12).
-        let (edge, shadows) = if self.width.is_none() {
-            field_edge_inset(&k, focused, self.error)
-        } else {
-            field_edge(&k, focused, self.error)
+        let (edge, shadows) = field_edge(&k, focused, self.error);
+        // The value drawn at rest; `None` while editing, when empty (the
+        // placeholder shows) and for a masked input (a secret never shows).
+        let at_rest = {
+            let state = self.state.read(cx);
+            (!focused && !state.presentation().is_masked())
+                .then(|| state.value())
+                .filter(|v| !v.is_empty())
         };
         div()
             .id(self.id)
@@ -165,7 +166,7 @@ impl RenderOnce for NativeTextField {
             .h(self.size.height())
             .px(metrics::FIELD_PAD)
             .rounded(metrics::FIELD_RADIUS)
-            .bg(k.content)
+            .bg(k.control)
             .border_1()
             .border_color(edge)
             .shadow(shadows)
@@ -175,24 +176,42 @@ impl RenderOnce for NativeTextField {
             .gap(space::S8)
             .cursor_text()
             .child(
-                // The text clips at the 12 px padding, never mid-glyph at
-                // the border (T1-12).
+                // The text clips at the 12 px padding, never at the border
+                // (T1-12). At rest a value longer than the field ends in
+                // "…" with the whole value in a tooltip (§2.21), never on a
+                // cut glyph; the input stays mounted under it (invisible),
+                // so a click or Tab still lands in it.
                 div()
                     .flex_1()
                     .min_w(px(0.))
+                    .relative()
                     .overflow_hidden()
-                    .child(placeholder_input(
-                        Input::new(&self.state)
-                            .appearance(false)
-                            .disabled(self.disabled)
-                            .with_size(gpui_component::Size::Small)
-                            .px_0()
-                            .py_0()
-                            .n_body()
-                            .text_color(k.label),
-                        window,
-                        cx,
-                    )),
+                    .child(
+                        div()
+                            .when(at_rest.is_some(), |d| d.opacity(0.))
+                            .child(placeholder_input(
+                                Input::new(&self.state)
+                                    .appearance(false)
+                                    .disabled(self.disabled)
+                                    .with_size(gpui_component::Size::Small)
+                                    .px_0()
+                                    .py_0()
+                                    .n_body()
+                                    .text_align(self.align)
+                                    .text_color(k.label),
+                                window,
+                                cx,
+                            )),
+                    )
+                    .children(at_rest.map(|value| {
+                        div().absolute().inset_0().flex().items_center().child(
+                            crate::ui::truncate::TruncText::new(value)
+                                .w_full()
+                                .n_body()
+                                .text_color(k.label)
+                                .when(self.align == TextAlign::Right, |t| t.text_right()),
+                        )
+                    })),
             )
             .children(self.trailing)
     }
@@ -242,11 +261,7 @@ impl RenderOnce for SearchField {
         let focused = self
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
-        let (edge, shadows) = if self.width.is_none() {
-            field_edge_inset(&k, focused, false)
-        } else {
-            field_edge(&k, focused, false)
-        };
+        let (edge, shadows) = field_edge(&k, focused, false);
         let shadows = if self.sidebar && !focused {
             Vec::new()
         } else {
@@ -263,7 +278,7 @@ impl RenderOnce for SearchField {
             .pl(metrics::FIELD_PAD)
             .pr(metrics::FIELD_PAD)
             .rounded_full()
-            .bg(k.content)
+            .bg(k.control)
             .border_1()
             .border_color(edge)
             .shadow(shadows)
@@ -322,9 +337,9 @@ mod tests {
             assert_eq!(s[0].spread_radius, metrics::FOCUS_RING);
             let (_, s) = field_edge(&k, true, false);
             assert_eq!(s[0].color, k.focus);
-            // T1-12: a full-width field keeps its ring inside its edge.
-            let (_, s) = field_edge_inset(&k, true, false);
-            assert!(s.iter().all(|s| s.inset));
+            // R1-07: the ring is outside the border, never a second border.
+            let (_, s) = field_edge(&k, true, false);
+            assert!(s.iter().all(|s| !s.inset));
         }
     }
 }

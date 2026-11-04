@@ -567,8 +567,19 @@ impl Dialog {
         }
     }
 
-    pub(crate) fn motion_transition(&self, cx: &App) -> Transition {
-        let transition = Transition::new(self.exit_duration(cx));
+    /// The transition of the frame being drawn. A closing dialog leaves
+    /// faster than it came in (team-chat patch, review-animations: exit
+    /// `duration_fast` 120 ms against the 160 ms entrance), except the
+    /// legacy `SlideDown` that keeps one duration both ways.
+    pub(crate) fn motion_transition(&self, closing: bool, cx: &App) -> Transition {
+        let duration = self.exit_duration(cx);
+        let duration =
+            if closing && !duration.is_zero() && self.props.entrance != DialogEntrance::SlideDown {
+                duration.min(cx.theme().motion_tokens().duration_fast)
+            } else {
+                duration
+            };
+        let transition = Transition::new(duration);
         // Use the same curve in both directions: changing the curve at the
         // reversal would resample the entrance at a different position.
         if self.props.entrance == DialogEntrance::SlideDown {

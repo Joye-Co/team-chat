@@ -266,7 +266,7 @@ impl WindowState {
 
             let sample =
                 Presence::new(dialog_presence_id(active_dialog.id), !active_dialog.closing)
-                    .transition(dialog.motion_transition(cx))
+                    .transition(dialog.motion_transition(active_dialog.closing, cx))
                     .sample(window, cx);
             if active_dialog.closing && !sample.should_render() {
                 Self::schedule_dialog_removal(root, active_dialog.id, window, cx);

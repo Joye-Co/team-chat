@@ -21,7 +21,7 @@ use gpui::{
 };
 use gpui_component::tag::Tag;
 
-use super::{NativeType as _, feedback::Bone, native_colors};
+use super::{FocusRow as _, NativeType as _, feedback::Bone, native_colors};
 use crate::{
     app::Services,
     data::ConnectionState,
@@ -215,7 +215,8 @@ pub struct Columns {
 /// A list row (§2.6): h56, px12, gap 12: media 32, title 14 medium over a
 /// 12 muted line, then the right cluster in a fixed order (status, time,
 /// actions) at the widths of [`Columns`]. `separator` draws the 1 px line
-/// under the row, inset to the title x. The caller adds `on_click`.
+/// under the row, inset to the title x. The caller adds `on_click`; the row
+/// is a [`FocusRow`](super::FocusRow) (Tab, Enter / Space, ↑ / ↓, hover).
 #[derive(Default)]
 pub struct PageRow {
     pub media: Option<AnyElement>,
@@ -257,7 +258,9 @@ impl PageRow {
             .items_center()
             .gap(px(12.))
             .when(self.selected, |d| d.bg(k.fill))
-            .when(!self.selected, |d| d.hover(|s| s.bg(k.fill.opacity(0.5))))
+            // Every page row opens something: a tab stop with the focus
+            // ring, Enter / Space run the caller's click, ↑ / ↓ walk the list.
+            .focus_row(self.selected, cx)
             .when(self.dim, |d| d.opacity(0.7))
             .children(self.media.map(|m| div().flex_none().child(m)))
             .child(
@@ -1122,7 +1125,13 @@ pub fn table(
             .flex()
             .items_center()
             .when(ri + 1 < total, |d| d.border_b_1().border_color(k.separator))
-            .hover(|s| s.bg(k.fill.opacity(0.5)))
+            .map(|d| {
+                if click.is_some() {
+                    d.focus_row(false, cx)
+                } else {
+                    d.row_hover(false, cx)
+                }
+            })
             .n_body()
             .text_color(k.label)
             .children(cells.into_iter().enumerate().map(|(i, el)| {

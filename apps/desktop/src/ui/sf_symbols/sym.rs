@@ -26,8 +26,11 @@ macro_rules! concepts {
                 match self { $(Sym::$variant => $sf),* }
             }
 
-            /// How large the symbol draws against its context's point size
-            /// (1 except for marks such as the live dot).
+            /// How large the symbol draws against its context's point size:
+            /// 1, except for marks such as the live dot and for wide symbols
+            /// scaled so their ink fits the same square as the others (an
+            /// 18 tab slot: `person.2` 23 × 15 and `paintpalette` 21.5 × 17
+            /// would stand out; review 2, R4).
             pub fn factor(self) -> f32 {
                 match self { $(Sym::$variant => 1. $(* $factor)?),* }
             }
@@ -42,7 +45,7 @@ concepts! {
     /// 产出.
     Outputs = "square.stack";
     /// 成员, and the 成员 settings tab.
-    Members = "person.2";
+    Members = "person.2" * 0.78;
     /// A 话题 that needs an icon without a state.
     Topic = "number";
     /// New topic, compose.
@@ -110,7 +113,7 @@ concepts! {
     Muted = "bell.slash";
     BellBadge = "bell.badge";
     /// 外观.
-    Appearance = "paintpalette";
+    Appearance = "paintpalette" * 0.84;
     /// 快捷键.
     Shortcuts = "command";
     Keyboard = "keyboard";

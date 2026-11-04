@@ -42,11 +42,29 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-card-button-hover", hover(667., 320., 400)),
     ("state-card-tooltip", hover(900., 530., 1200)),
     // --- end t5-cards ---
+    // --- r1-kit ---
+    ("state-hover-sidebar", hover(120., 225., 300)),
+    (
+        "state-key-sidebar",
+        Steps {
+            pointer: None,
+            keys: &["tab", "tab", "tab", "tab", "down", "down"],
+            settle_ms: 200,
+        },
+    ),
+    // --- end r1-kit ---
 ];
 
 /// The steps of scene `name`, if it has any.
 pub fn steps(name: &str) -> Option<Steps> {
     STEPS.iter().find(|(n, _)| *n == name).map(|(_, s)| *s)
+}
+
+/// Whether scene `name` presses keys with no pointer: the runner then stops
+/// moving the pointer after the keys, since a pointer move ends the keyboard
+/// modality and GPUI would hide the focus ring (`focus_visible`).
+pub fn keys_only(name: &str) -> bool {
+    steps(name).is_some_and(|s| s.pointer.is_none() && !s.keys.is_empty())
 }
 
 /// Where the pointer rests in scene `name`: its hover point, else far

@@ -328,7 +328,10 @@ impl LineWrapper {
             if let Some((front_end_ix, back_start_ix)) =
                 self.should_truncate_line_middle(&line, truncate_width, truncation_affix)
             {
-                let front_end_ix = trim_before_affix(&line, front_end_ix).len();
+                // A middle cut keeps both ends as they are (file names, paths,
+                // emails, IDs): `IMG_2025…_HDR.jpg`, never a dropped `_`, `-`,
+                // `.` or a dropped short token before the `…`. Only spaces go.
+                let front_end_ix = line[..front_end_ix].trim_end().len();
                 let result = SharedString::from(format!(
                     "{}{truncation_affix}{}",
                     &line[..front_end_ix],
@@ -1713,6 +1716,20 @@ mod tests {
             total_run_len,
             result.len()
         );
+    }
+
+    #[test]
+    fn a_middle_cut_keeps_the_extension_and_the_separator() {
+        let mut wrapper = build_wrapper();
+        let name = "IMG_20250914_183022_HDR_final-v2.jpg";
+        let runs = generate_test_runs(&[name.len()]);
+        let (result, _) =
+            wrapper.truncate_line(name.into(), px(120.), "…", &runs, TruncateFrom::Middle);
+        let (front, back) = result.split_once('…').expect("cut in the middle");
+        assert!(back.ends_with(".jpg"), "the extension stays: {result}");
+        assert!(name.starts_with(front), "the front is a plain prefix: {result}");
+        assert!(name.ends_with(back), "the back is a plain suffix: {result}");
+        assert!(!front.is_empty());
     }
 
     #[test]
