@@ -132,7 +132,7 @@ pub(crate) fn sheet(
                         .n_body()
                         .text_color(n.label)
                         .child(format!(
-                            "{}{}{}",
+                            "{} {} {}",
                             c::CONFIRM_TYPE_BEFORE,
                             code,
                             fill(c::CONFIRM_TYPE_AFTER, &[("verb", &verb)])
