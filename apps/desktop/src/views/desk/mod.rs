@@ -470,6 +470,10 @@ impl Render for DeskPage {
                     .child(section(
                         page::section_header(c::DESK_WORKING, None, None, None, cx),
                         page::skeleton_rows("desk-sk-runs", SkeletonKind::Row, 2, cx),
+                    ))
+                    .child(section(
+                        page::section_header(c::DESK_DONE_TODAY, None, None, None, cx),
+                        page::skeleton_rows("desk-sk-done", SkeletonKind::Row, 2, cx),
                     ));
             }
             PageLoad::Ready => {

@@ -1219,23 +1219,38 @@ pub fn page_footer(
     // The text takes the free width; what follows sits at the footer's end.
     .flex_1()
     .min_w_0();
-    let base = crate::views::media::parts::footer(cx)
-        .children(lead)
-        .child(head)
-        // Never cut: the short line, with the whole notice on hover.
-        .children(run_log.map(|(short, whole)| {
-            let whole = SharedString::from(whole);
-            div()
-                .id(SharedString::from(format!("{id}-run-log")))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(space::S4)
-                .whitespace_nowrap()
-                .child(ui::icon(Sym::Info, tsp::S12, k.ink_3))
-                .child(short)
-                .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
-        }));
+    // The card footer (§2.4): px16 on the card's content edge, h40, 12 muted. The
+    // capability text takes the free width and truncates first (tooltip); the run-log
+    // notice and the band keep their room at the right edge.
+    let n = crate::ui::native::native_colors(cx);
+    let base = {
+        use crate::ui::native::NativeType as _;
+        div()
+            .flex_none()
+            .min_h(crate::ui::native::tokens::height::FOOTER_ROW)
+            .px(tsp::S16)
+            .flex()
+            .items_center()
+            .gap(tsp::S8)
+            .n_callout()
+            .text_color(n.secondary)
+    }
+    .children(lead)
+    .child(head)
+    // Never cut: the short line, with the whole notice on hover.
+    .children(run_log.map(|(short, whole)| {
+        let whole = SharedString::from(whole);
+        div()
+            .id(SharedString::from(format!("{id}-run-log")))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .whitespace_nowrap()
+            .child(ui::icon(Sym::Info, tsp::S12, k.ink_3))
+            .child(short)
+            .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
+    }));
     let pill = || {
         div()
             .flex_none()
@@ -1473,22 +1488,27 @@ pub fn reference_row(
         .into_any_element()
 }
 
-/// A chip for the header of a page frame: 已更新到 v{n} or 有 v{n}.
+/// A chip for the header of a page frame: 已更新到 v{n} or 有 v{n}. A notice,
+/// not a state: 12 muted text with a muted 12 icon (§2.12: color only on state
+/// icons and badges).
 pub fn notice_chip(text: String, cx: &App) -> gpui::Div {
-    // A `blue` symbol and text, never a pill (NATIVE.md rule 4).
-    use crate::theme::{Type as _, space};
-    use gpui::{ParentElement as _, Styled as _, div, px};
-    let n = crate::ui::native::native_colors(cx);
+    use crate::ui::native::{NativeType as _, native_colors, tokens::icon};
+    use gpui::{ParentElement as _, Styled as _, div};
+    let n = native_colors(cx);
     div()
         .flex_none()
-        .h(px(20.))
+        .h(crate::ui::native::tokens::height::COUNT)
         .flex()
         .items_center()
-        .gap(space::S4)
-        .t_meta()
-        .text_color(n.blue)
+        .gap(tsp::S4)
+        .n_callout()
+        .text_color(n.secondary)
         .whitespace_nowrap()
-        .child(crate::ui::icon(crate::ui::Sym::Refresh, px(14.), n.blue))
+        .child(crate::ui::icon(
+            crate::ui::Sym::Refresh,
+            icon::SM,
+            n.secondary,
+        ))
         .child(text)
 }
 

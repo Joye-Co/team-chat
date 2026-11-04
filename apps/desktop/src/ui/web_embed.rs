@@ -682,11 +682,16 @@ impl WebEmbedState {
     }
 }
 
-/// `#rrggbb` of a color.
+/// A CSS color: `#rrggbb`, or `rgba(…)` for a token with alpha (dark lines are
+/// white at a low alpha).
 fn hex(c: gpui::Hsla) -> String {
     let c = gpui::Rgba::from(c);
     let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
-    format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
+    if c.a < 0.999 {
+        format!("rgba({},{},{},{:.3})", b(c.r), b(c.g), b(c.b), c.a)
+    } else {
+        format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
+    }
 }
 
 /// The host base stylesheet in this theme's token values (see
