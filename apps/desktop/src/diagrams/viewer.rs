@@ -331,19 +331,34 @@ impl DiagramViewer {
         let refs_on = crate::views::refs::enabled(cx);
         for (i, node) in ready.meta.nodes.iter().enumerate() {
             let (x, y, nw, nh) = hit_rect(node, z);
+            let (_, _, _, oh) = super::view::outline_rect(node, z);
             let origin = self.spec.origin.clone();
             let (nid, label) = (node.id.clone(), node.label.clone());
             let hovered = self.hovered == Some(i);
+            let n = ui::native::native_colors(cx);
+            let _ = &k;
             layer = layer.child(
                 div()
                     .id(ElementId::Name(format!("dv-node-{i}").into()))
                     .absolute()
-                    .left(px(x - 3.))
-                    .top(px(y - 3.))
-                    .w(px(nw + 6.))
-                    .h(px(nh + 6.))
-                    .rounded(radius::MD)
-                    .when(hovered, |el| el.border_1().border_color(k.line_2))
+                    .left(px(x - 2.))
+                    .top(px(y - 2.))
+                    .w(px(nw + 4.))
+                    .h(px(nh + 4.))
+                    // E3: one 1 px outline around the node's box only.
+                    .when(hovered, |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .w(px(nw + 4.))
+                                .h(px(oh + 4.))
+                                .rounded(radius::MD)
+                                .border_1()
+                                .border_color(n.secondary),
+                        )
+                    })
                     // --- inc-refs: 问这里 beside the hovered node.
                     .when(hovered && refs_on, |el| {
                         let (o, nid, label) = (
@@ -351,7 +366,9 @@ impl DiagramViewer {
                             node.id.clone(),
                             node.label.clone(),
                         );
-                        el.child(div().absolute().top(px(-12.)).right(px(-8.)).child(
+                        // Above the node's box, clear of its edge and of the arrows
+                        // beside it.
+                        el.child(div().absolute().bottom_full().right_0().pb(px(2.)).child(
                             crate::views::refs::affordance::inline_button(
                                 &format!("dv-{i}"),
                                 std::rc::Rc::new(move |cx: &App| {

@@ -89,6 +89,18 @@ pub fn hit_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
     )
 }
 
+/// The box a hover or focus outline draws around: a sequence participant's hit area
+/// runs down its whole lifeline, so its outline keeps to the head box at the top
+/// (E3: one outline around the box only).
+pub fn outline_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
+    let (x, y, w, h) = hit_rect(node, scale);
+    if node.kind == "participant" {
+        (x, y, w, h.min(w * 0.6))
+    } else {
+        (x, y, w, h)
+    }
+}
+
 struct Ui {
     width: f32,
     show_source: bool,
@@ -472,7 +484,8 @@ fn image_with_hits(
     let refs_on = crate::views::refs::enabled(cx);
     for (i, node) in ready.meta.nodes.iter().enumerate() {
         let (x, y, w, h) = hit_rect(node, fit.scale);
-        // E3: hover = one 1 px line around the node; focus = the 3 px ring.
+        let (_, _, _, oh) = outline_rect(node, fit.scale);
+        // E3: hover = one 1 px line around the node's box; focus = the 3 px ring.
         let hover_line = hovered == Some(i) && focused != Some(i);
         let hover_ui = ui.clone();
         let origin = spec.origin.clone();
@@ -489,9 +502,18 @@ fn image_with_hits(
                 .h(px(h + 4.))
                 .rounded(radius::MD)
                 .aria_label(node.label.clone())
-                .when(hover_line, |el| el.border_1().border_color(n.secondary))
-                .when(focused == Some(i), |el| {
-                    el.shadow(vec![ring_shadow(n.focus)])
+                .when(hover_line || focused == Some(i), |el| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top_0()
+                            .w(px(w + 4.))
+                            .h(px(oh + 4.))
+                            .rounded(radius::MD)
+                            .when(hover_line, |d| d.border_1().border_color(n.secondary))
+                            .when(focused == Some(i), |d| d.shadow(vec![ring_shadow(n.focus)])),
+                    )
                 })
                 .on_hover(move |on, _, cx| {
                     hover_ui.update(cx, |s, cx| {
