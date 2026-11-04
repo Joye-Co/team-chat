@@ -15,7 +15,7 @@ use crate::{
         v2::{DoneItem, Proof},
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::shell::clock,
 };
 
@@ -23,7 +23,7 @@ use crate::{
 /// leading glyph.
 pub fn chip(
     id: impl Into<SharedString>,
-    glyph: Option<(Lucide, Hsla)>,
+    glyph: Option<(Sym, Hsla)>,
     parts: Vec<AnyElement>,
     cx: &App,
 ) -> AnyElement {
@@ -233,7 +233,7 @@ pub fn render(
                 deletions,
             } => chips.push(chip(
                 id,
-                Some((Lucide::GitPullRequest, k.ink_3)),
+                Some((Sym::PullRequest, k.ink_3)),
                 vec![
                     div().mono().child(format!("#{number}")).into_any_element(),
                     div()
@@ -252,12 +252,12 @@ pub fn render(
             Proof::Tests { passed, failed } => {
                 let (glyph, parts) = if *failed > 0 {
                     (
-                        (Lucide::X, k.bad),
+                        (Sym::Close, k.bad),
                         templated(c::DESK_TESTS_FAILED, "n", &failed.to_string()),
                     )
                 } else {
                     (
-                        (Lucide::Check, k.ok),
+                        (Sym::Check, k.ok),
                         templated(c::DESK_TESTS_PASSED, "n", &passed.to_string()),
                     )
                 };
@@ -265,7 +265,7 @@ pub fn render(
             }
             Proof::Recording { duration_ms } => chips.push(chip(
                 id,
-                Some((Lucide::Play, k.ink_3)),
+                Some((Sym::Play, k.ink_3)),
                 templated(c::DESK_RECORDING, "t", &duration(*duration_ms)),
                 cx,
             )),

@@ -20,7 +20,7 @@ use crate::{
     copy::{common, fill, settings as s},
     data::{MachineCreated, MachineInfo},
     theme::{self, Type as _, space},
-    ui::{self, ButtonSpec as _, Lucide},
+    ui::{self, ButtonSpec as _, Sym},
     views::topic_list::relative_time,
 };
 
@@ -238,7 +238,7 @@ impl MachinesPage {
             .items_center()
             .gap(space::S8)
             .child(
-                ui::icon_button("machines-refresh", Lucide::RotateCcw)
+                ui::icon_button("machines-refresh", Sym::Retry)
                     .named(s::REFRESH)
                     .loading(busy)
                     .on_click(move |_, _, cx| {
@@ -253,7 +253,7 @@ impl MachinesPage {
                     ui::ButtonSize::Page,
                     cx,
                 )
-                .icon(Icon::new(Lucide::Plus))
+                .icon(Icon::new(Sym::Plus))
                 .disabled_fill(!owner, cx)
                 .on_click(move |_, window, cx| {
                     let form = open_add_machine(services.clone(), window, cx);
@@ -314,7 +314,7 @@ impl Render for MachinesPage {
             (None, None) if self.busy_shown => widgets::skeleton_table(3, cx),
             (None, None) => div(),
             (Some(list), _) if list.is_empty() => div().pt(px(72.)).child(
-                ui::EmptyState::new(Lucide::Monitor, s::MACHINES_EMPTY)
+                ui::EmptyState::new(Sym::Computer, s::MACHINES_EMPTY)
                     .description(s::MACHINES_EMPTY_HINT),
             ),
             (Some(list), _) => {
@@ -364,17 +364,19 @@ fn tag_text(label: &str) -> String {
 /// The glyph of a machine by its kind, read from its name and tags: a
 /// notebook gets `laptop`, a server `server`, anything else (a Mac mini, a
 /// desktop) `monitor`.
-fn machine_glyph(m: &MachineInfo) -> Lucide {
+fn machine_glyph(m: &MachineInfo) -> Sym {
     let words: Vec<String> = std::iter::once(m.name.to_lowercase())
         .chain(m.labels.iter().map(|l| l.to_lowercase()))
         .collect();
     let has = |keys: &[&str]| words.iter().any(|w| keys.iter().any(|k| w.contains(k)));
     if has(&["laptop", "macbook", "notebook", "笔记本"]) {
-        Lucide::Laptop
-    } else if has(&["server", "服务器", "linux", "vps", "cloud", "ubuntu"]) {
-        Lucide::Server
+        Sym::Laptop
+    } else if has(&["mini"]) {
+        Sym::MacMini
+    } else if has(&["server", "服务器", "linux", "vps", "cloud", "云", "ubuntu"]) {
+        Sym::Cloud
     } else {
-        Lucide::Monitor
+        Sym::Computer
     }
 }
 
@@ -592,19 +594,19 @@ mod tests {
     fn a_machine_gets_the_glyph_of_its_kind() {
         assert_eq!(
             machine_glyph(&machine("办公室 Mac mini", &["mac"])),
-            Lucide::Monitor
+            Sym::Computer
         );
         assert_eq!(
             machine_glyph(&machine("旧笔记本", &["mac"])),
-            Lucide::Laptop
+            Sym::Laptop
         );
         assert_eq!(
             machine_glyph(&machine("joye-macbook-pro-m4-max", &[])),
-            Lucide::Laptop
+            Sym::Laptop
         );
         assert_eq!(
             machine_glyph(&machine("build-01", &["linux"])),
-            Lucide::Server
+            Sym::Cloud
         );
     }
 

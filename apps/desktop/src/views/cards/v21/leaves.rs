@@ -35,7 +35,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
-    ui::{self, ButtonKind, Lucide},
+    ui::{self, ButtonKind, Sym},
     views::cards::v2::{
         Ctx, blocks as b20, button, disabled_button, form::Val, letter, meta, state::CardState,
     },
@@ -225,7 +225,7 @@ fn option_row(
             .items_center()
             .justify_center()
             .when(picked, |el| {
-                el.child(ui::icon(Lucide::Check, px(12.), k.bg))
+                el.child(ui::icon(Sym::Check, px(12.), k.bg))
             })
     } else if picked {
         b20::key_tile(i, cx).bg(k.ink).text_color(k.bg)
@@ -640,9 +640,9 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 })
                 .child(ui::icon(
                     if up {
-                        Lucide::ChevronUp
+                        Sym::ChevronUp
                     } else {
-                        Lucide::ChevronDown
+                        Sym::ChevronDown
                     },
                     px(14.),
                     if can { k.ink_2 } else { k.ink_3 },
@@ -851,7 +851,7 @@ pub fn rating(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     })
                 })
                 .child(ui::icon(
-                    if on { Lucide::StarFill } else { Lucide::Star },
+                    if on { Sym::StarFill } else { Sym::Star },
                     px(20.),
                     if on { k.ink } else { k.line_2 },
                 ))
@@ -1357,7 +1357,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .items_center()
                     .gap(space::S4)
                     .text_color(k.ok_ink)
-                    .child(ui::icon(Lucide::Check, px(12.), k.ok_ink))
+                    .child(ui::icon(Sym::Check, px(12.), k.ok_ink))
                     .child(c::SLOT_ALL_FREE),
             })
     };
@@ -1617,7 +1617,7 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                 .overflow_hidden()
                 .map(|el| match path {
                     Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
-                    None => el.child(ui::icon(Lucide::Image, px(20.), k.ink_3)),
+                    None => el.child(ui::icon(Sym::Image, px(20.), k.ink_3)),
                 })
                 .into_any_element()
         });
@@ -2261,7 +2261,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 .bg(k.raised)
                 .border_b_1()
                 .border_color(k.line)
-                .child(ui::icon(Lucide::FileText, px(14.), k.ink_3))
+                .child(ui::icon(Sym::Document, px(14.), k.ink_3))
                 .child(
                     b20::small(div())
                         .min_w(px(0.))
@@ -2291,7 +2291,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .items_center()
                         .gap(space::S4)
                         .text_color(k.ink_3)
-                        .child(ui::icon(Lucide::Shield, px(12.), k.ink_3))
+                        .child(ui::icon(Sym::Shield, px(12.), k.ink_3))
                         .child(c::EMBED_SANDBOX),
                 )
                 .child(
@@ -2306,7 +2306,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .cursor_pointer()
                         .hover(|s| s.bg(k.hover))
                         .on_click(move |_, window, cx| a.open(&target, window, cx))
-                        .child(ui::icon(Lucide::ExternalLink, px(14.), k.ink_2)),
+                        .child(ui::icon(Sym::OpenExternal, px(14.), k.ink_2)),
                 ),
         )
         .child(body)
@@ -2321,7 +2321,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 .border_t_1()
                 .border_color(k.line)
                 .text_color(k.ink_3)
-                .child(ui::icon(Lucide::ArrowRight, px(12.), k.ink_3))
+                .child(ui::icon(Sym::ArrowRight, px(12.), k.ink_3))
                 .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
                 .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
         )
@@ -2343,7 +2343,7 @@ pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
         .child(
             div()
                 .pt(px(2.))
-                .child(ui::icon(Lucide::Info, px(14.), k.ink_3)),
+                .child(ui::icon(Sym::Info, px(14.), k.ink_3)),
         )
         .child(
             div().flex().flex_col().gap(space::S4).min_w(px(0.)).child(
@@ -2438,7 +2438,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 ButtonKind::Secondary,
                 cx,
             )
-            .icon(ui::icon(Lucide::RefreshCw, px(14.), k.ink))
+            .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
             .on_click(move |_, _, _| {
                 // The same `clientEventId` when the outbox still has it; else again.
                 if let Some(e) = &last

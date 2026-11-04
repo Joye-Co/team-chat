@@ -20,7 +20,7 @@ use crate::{
     copy::rail as c,
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic},
     theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, Ring, RowSurface},
+    ui::{self, Sym, MemberAvatar, Ring, RowSurface},
 };
 
 type Open<'a> = Option<&'a (String, String)>;
@@ -552,9 +552,9 @@ impl RailView {
         .child(div().flex_none().w(px(12.)).flex().when(can_open, |el| {
             el.child(ui::icon(
                 if expanded {
-                    Lucide::ChevronDown
+                    Sym::ChevronDown
                 } else {
-                    Lucide::ChevronRight
+                    Sym::ChevronRight
                 },
                 px(12.),
                 k.ink_3,

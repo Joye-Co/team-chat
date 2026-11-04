@@ -32,7 +32,7 @@ use crate::{
         v2::{SideChatMessage, SideChatSource, SideChatThread},
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::shell::{PaneView, clock, panes::watch},
 };
 
@@ -186,7 +186,7 @@ impl SideChat {
                     .text_color(k.ink)
                     .child(ui::MemberAvatar::new(member, CHIP_TILE))
                     .child(name.clone())
-                    .child(ui::icon(Lucide::ChevronDown, theme::icon::TAG, k.ink_3)),
+                    .child(ui::icon(Sym::ChevronDown, theme::icon::TAG, k.ink_3)),
             )
             .named(fill(c::SIDE_CHAT_CHANGE_MEMBER, &[("name", &name)]))
             .dropdown_menu(move |mut menu, _window, _cx| {
@@ -228,7 +228,7 @@ impl SideChat {
             .child(picker)
             .child(div().flex_1())
             .child(
-                ui::icon_button_sm("side-chat-close", Lucide::X)
+                ui::icon_button_sm("side-chat-close", Sym::Close)
                     .named(c::SIDE_CHAT_CLOSE)
                     .on_click(move |_, _, cx| {
                         services
@@ -252,7 +252,7 @@ impl SideChat {
             .gap(space::S8)
             .t_meta()
             .text_color(k.ink_2)
-            .child(ui::icon(Lucide::Lock, theme::icon::TAG, k.ink_3))
+            .child(ui::icon(Sym::Lock, theme::icon::TAG, k.ink_3))
             .child(c::SIDE_CHAT_PRIVATE)
     }
 
@@ -461,7 +461,7 @@ impl SideChat {
                     .t_meta()
                     .text_color(k.ink_3)
                     .child(div().flex_none().mt(px(2.)).child(ui::icon(
-                        Lucide::Eye,
+                        Sym::Watch,
                         theme::icon::TAG,
                         k.ink_3,
                     )))
@@ -515,7 +515,7 @@ impl SideChat {
                     .gap(space::S8)
                     .t_small()
                     .text_color(k.ink)
-                    .child(ui::icon(Lucide::Check, theme::icon::CHIP, k.ok))
+                    .child(ui::icon(Sym::Check, theme::icon::CHIP, k.ok))
                     .child(c::SIDE_CHAT_POSTED)
                     .child(
                         div()
@@ -550,7 +550,7 @@ impl SideChat {
                     cx,
                 )
                 .icon(ui::icon(
-                    Lucide::CornerDownRight,
+                    Sym::ReplyIndent,
                     theme::icon::CHIP,
                     k.ink_2,
                 ))
@@ -723,9 +723,9 @@ fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
     let (first, rest) = label.split_once(' ').unwrap_or((label, ""));
     let file_like = first.contains('.') || first.starts_with('#');
     let glyph = if file_like {
-        Lucide::File
+        Sym::File
     } else {
-        Lucide::GitPullRequest
+        Sym::PullRequest
     };
     div()
         .max_w_full()

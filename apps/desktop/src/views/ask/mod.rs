@@ -31,7 +31,7 @@ use crate::{
         TopicStatus,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, Ring},
+    ui::{self, Sym, MemberAvatar, Ring},
     views::{
         nav::switcher::{self, Entry, Target},
         rail::model::{self as rail_model, RowState},
@@ -578,7 +578,7 @@ fn key_box(children: Vec<AnyElement>, cx: &App) -> AnyElement {
 }
 
 fn enter_glyph(cx: &App) -> AnyElement {
-    ui::icon(Lucide::CornerDownLeft, px(12.), theme::colors(cx).ink_2).into_any_element()
+    ui::icon(Sym::Return, px(12.), theme::colors(cx).ink_2).into_any_element()
 }
 
 impl AskPalette {
@@ -813,14 +813,14 @@ impl AskPalette {
                     .ring(Some(Ring::Live))
                     .into_any_element()
             }
-            RowState::Done => ui::icon(Lucide::Check, px(16.), k.ok).into_any_element(),
+            RowState::Done => ui::icon(Sym::Check, px(16.), k.ok).into_any_element(),
             RowState::Waiting => div()
                 .size(px(7.))
                 .rounded_full()
                 .border(px(1.5))
                 .border_color(k.ink_3)
                 .into_any_element(),
-            RowState::Idle => ui::icon(Lucide::Hash, px(16.), k.ink_3).into_any_element(),
+            RowState::Idle => ui::icon(Sym::Topic, px(16.), k.ink_3).into_any_element(),
         };
         let title = crate::views::sidebar::topic_display_title(&topic.title).0;
         let ranges: Vec<Range<usize>> = if title == topic.title {
@@ -877,10 +877,10 @@ impl AskPalette {
             .member(&artifact.created_by)
             .map(|m| fill(c::ASK_ARTIFACT_BY, &[("name", &m.name)]));
         let glyph = match artifact.kind {
-            ArtifactKind::Page => Lucide::ChartLine,
-            ArtifactKind::Image => Lucide::Image,
-            ArtifactKind::Decision => Lucide::Check,
-            ArtifactKind::File => Lucide::File,
+            ArtifactKind::Page => Sym::Chart,
+            ArtifactKind::Image => Sym::Image,
+            ArtifactKind::Decision => Sym::Check,
+            ArtifactKind::File => Sym::File,
         };
         self.row_shell(ix, item, cx)
             .child(
@@ -991,7 +991,7 @@ impl AskPalette {
         };
         let lead: AnyElement = match &entry.member {
             Some(m) => MemberAvatar::new(Some(m), px(22.)).into_any_element(),
-            None => ui::icon(Lucide::Hash, px(16.), k.ink_3).into_any_element(),
+            None => ui::icon(Sym::Topic, px(16.), k.ink_3).into_any_element(),
         };
         let detail = match &entry.target {
             Target::Group(g) => self
@@ -1084,7 +1084,7 @@ impl AskPalette {
                                 .medium()
                                 .child(name),
                         )
-                        .child(ui::icon(Lucide::ChevronDown, px(12.), k.ink_3)),
+                        .child(ui::icon(Sym::ChevronDown, px(12.), k.ink_3)),
                 )
                 .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
                     groups.iter().fold(menu, |menu, (id, name)| {
@@ -1163,8 +1163,8 @@ impl AskPalette {
             .child(hint(
                 key_box(
                     vec![
-                        ui::icon(Lucide::ArrowUp, px(12.), k.ink_2).into_any_element(),
-                        ui::icon(Lucide::ArrowDown, px(12.), k.ink_2).into_any_element(),
+                        ui::icon(Sym::ArrowUp, px(12.), k.ink_2).into_any_element(),
+                        ui::icon(Sym::ArrowDown, px(12.), k.ink_2).into_any_element(),
                     ],
                     cx,
                 ),
@@ -1278,7 +1278,7 @@ impl Render for AskPalette {
                     .gap(space::S12)
                     .border_b_1()
                     .border_color(k.line)
-                    .child(ui::icon(Lucide::Search, px(18.), k.ink_3))
+                    .child(ui::icon(Sym::Search, px(18.), k.ink_3))
                     .child(
                         div().flex_1().min_w(px(0.)).child(ui::placeholder_input(
                             Input::new(&self.query)
@@ -1313,7 +1313,7 @@ impl Render for AskPalette {
                         el.child(
                             div()
                                 .h(px(120.))
-                                .child(ui::EmptyState::new(Lucide::SearchX, c::ASK_EMPTY)),
+                                .child(ui::EmptyState::new(Sym::Search, c::ASK_EMPTY)),
                         )
                     }),
             )

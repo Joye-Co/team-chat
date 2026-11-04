@@ -18,7 +18,7 @@ use crate::{
     copy::media as cm,
     data::{DraftKey, NewFile},
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, Sym, NamedButton as _},
 };
 
 /// The frame of an inline preview: 1 pt border, radius 10, `content` fill.
@@ -35,7 +35,7 @@ pub fn card(cx: &App) -> Div {
 }
 
 /// The header of an inline card: glyph, name, meta, then trailing tools.
-pub fn card_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Div {
+pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
@@ -61,7 +61,7 @@ pub fn card_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Di
 }
 
 /// The header of a full view: 48 pt, glyph, name 15/600, kind or meta, tools on the right.
-pub fn pane_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Div {
+pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
@@ -133,14 +133,14 @@ pub fn footer(cx: &App) -> Div {
 }
 
 /// A named 28 pt tool button.
-pub fn tool(id: impl Into<ElementId>, icon: Lucide, name: &'static str) -> Button {
+pub fn tool(id: impl Into<ElementId>, icon: Sym, name: &'static str) -> Button {
     ui::icon_button_sm(id, icon).named(name)
 }
 
 /// A tool button on the dark screen (lightbox, video): `screen-ink` glyph.
 pub fn screen_tool(
     id: impl Into<ElementId>,
-    icon: Lucide,
+    icon: Sym,
     name: &'static str,
     s: &Screen,
     cx: &App,
@@ -286,7 +286,7 @@ pub fn play_button(
         .justify_center()
         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(label).build(window, cx))
         .child(ui::icon(
-            if playing { Lucide::Pause } else { Lucide::Play },
+            if playing { Sym::Pause } else { Sym::Play },
             px(size * 0.42),
             k.content,
         ))

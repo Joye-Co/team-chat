@@ -18,7 +18,7 @@ use crate::{
     copy::{common, fill, topic_rail as c},
     data::v2::ArtifactPreview,
     theme::{self, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide, NamedButton as _},
+    ui::{self, ButtonKind, ButtonSize, Sym, NamedButton as _},
     views::shell::clock,
 };
 
@@ -145,9 +145,9 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
                             .text_color(k.ink_2)
                             .children(r.ok.map(|ok| {
                                 if ok {
-                                    ui::icon(Lucide::Check, px(13.), k.ok).into_any_element()
+                                    ui::icon(Sym::Check, px(13.), k.ok).into_any_element()
                                 } else {
-                                    ui::icon(Lucide::CircleX, px(13.), k.bad).into_any_element()
+                                    ui::icon(Sym::Failed, px(13.), k.bad).into_any_element()
                                 }
                             }))
                             .children(
@@ -309,7 +309,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
         .flex()
         .items_center()
         .gap(space::S8)
-        .child(ui::icon(Lucide::FileText, px(16.), k.ink_3))
+        .child(ui::icon(Sym::Document, px(16.), k.ink_3))
         .child(
             div()
                 .min_w_0()
@@ -325,7 +325,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
         )))
         .child(div().flex_1())
         .child(
-            ui::icon_button_sm("out-open-window", Lucide::ExternalLink)
+            ui::icon_button_sm("out-open-window", Sym::OpenExternal)
                 .named(c::OPEN_WINDOW)
                 .on_click({
                     let nav = nav.clone();
@@ -336,7 +336,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
                 }),
         )
         .child(
-            ui::icon_button_sm("out-close", Lucide::Close)
+            ui::icon_button_sm("out-close", Sym::Close)
                 .named(common::CLOSE)
                 .on_click({
                     let nav = nav.clone();
@@ -367,7 +367,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
             .items_center()
             .justify_center()
             .gap(space::S12)
-            .child(ui::icon(Lucide::FileText, theme::icon::EMPTY, k.ink_3))
+            .child(ui::icon(Sym::Document, theme::icon::EMPTY, k.ink_3))
             .child(div().t_small().text_color(k.ink_2).child(c::PANE_EMPTY))
             .child(
                 ui::button(

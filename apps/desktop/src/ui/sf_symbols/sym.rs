@@ -204,6 +204,8 @@ concepts! {
     Book = "book";
     Square = "square";
     Asterisk = "asterisk";
+    /// The busy spinner (gpui-component's `Spinner` turns it).
+    Spinner = "progress.indicator";
     /// Not a concept: an icon that has none. Its name is empty, so it always
     /// draws the fallback (visible in debug builds).
     Missing = "";
@@ -313,6 +315,16 @@ impl Sym {
 impl From<Sym> for Icon {
     fn from(sym: Sym) -> Self {
         super::asset::icon_unsized(sym)
+    }
+}
+
+/// A concept as a child element: the inline size, in the parent's text
+/// color (like `.child(IconName::…)` before).
+impl gpui::IntoElement for Sym {
+    type Element = <Icon as gpui::IntoElement>::Element;
+
+    fn into_element(self) -> Self::Element {
+        self.inline().into_element()
     }
 }
 
@@ -482,4 +494,6 @@ lucide! {
     BookOpen => Book,
     Square => Square,
     Asterisk => Asterisk,
+    Loader => Spinner,
+    LoaderCircle => Spinner,
 }

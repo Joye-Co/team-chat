@@ -32,7 +32,7 @@ pub mod viewer;
 
 use gpui::{App, Hsla, Pixels, px, rgb};
 
-use crate::{copy::media as cm, ui::Lucide};
+use crate::{copy::media as cm, ui::Sym};
 
 /// What a 产出 version shows as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,16 +64,16 @@ impl MediaKind {
         }
     }
 
-    pub fn icon(self) -> Lucide {
+    pub fn icon(self) -> Sym {
         match self {
-            MediaKind::Html => Lucide::AppWindow,
-            MediaKind::Markdown | MediaKind::Pdf => Lucide::FileText,
-            MediaKind::Image | MediaKind::ImageSet => Lucide::Image,
-            MediaKind::Video => Lucide::Video,
-            MediaKind::Audio => Lucide::AudioLines,
-            MediaKind::Code => Lucide::FileCode,
-            MediaKind::Table => Lucide::Table,
-            MediaKind::File => Lucide::File,
+            MediaKind::Html => Sym::OpenWindow,
+            MediaKind::Markdown | MediaKind::Pdf => Sym::Document,
+            MediaKind::Image | MediaKind::ImageSet => Sym::Image,
+            MediaKind::Video => Sym::Video,
+            MediaKind::Audio => Sym::Audio,
+            MediaKind::Code => Sym::CodeFile,
+            MediaKind::Table => Sym::Table,
+            MediaKind::File => Sym::File,
         }
     }
 

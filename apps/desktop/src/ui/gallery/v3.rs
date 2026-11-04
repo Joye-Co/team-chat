@@ -10,7 +10,7 @@ use gpui::{
 use crate::{
     fake::v2,
     theme::{self, StateTone, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, JobTag, Lucide, MemberAvatar, Ring, RowSurface},
+    ui::{self, ButtonKind, ButtonSize, JobTag, Sym, MemberAvatar, Ring, RowSurface},
 };
 
 fn section(title: &'static str, cx: &App) -> gpui::Div {
@@ -210,7 +210,7 @@ fn rail_rows(cx: &App) -> gpui::Div {
         .child(row(
             "g-r3",
             false,
-            ui::icon(Lucide::Check, theme::icon::TAG, k.ok).into_any_element(),
+            ui::icon(Sym::Check, theme::icon::TAG, k.ok).into_any_element(),
             "staging 每日巡检",
             Some("09:12"),
         ))
@@ -300,7 +300,7 @@ fn motion(cx: &App) -> gpui::Div {
         // A sample answered now: its check draws.
         .child(ui::motion::check_mark(
             "g-check",
-            ui::icon(Lucide::Check, theme::icon::ROW, k.ok),
+            ui::icon(Sym::Check, theme::icon::ROW, k.ok),
             px(16.),
             ui::motion::just_answered(crate::selftest::clock::now_ms()),
             cx,

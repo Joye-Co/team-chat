@@ -27,7 +27,7 @@ use crate::{
         pages::{ChoiceSketch, TopicGlance, TopicPreview},
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, Ring},
+    ui::{self, Sym, MemberAvatar, Ring},
     views::{
         composer::ComposerView,
         shell::{PageView, TitleBarSpec, clock, member_name, panes::watch},
@@ -203,7 +203,7 @@ impl GroupPage {
                     .child(
                         kit::bar_icon(
                             "group-side-chat",
-                            Lucide::MessageCircle,
+                            Sym::AskAside,
                             c::GROUP_PAGE_SIDE_CHAT,
                             false,
                             cx,
@@ -215,7 +215,7 @@ impl GroupPage {
                     .child(
                         kit::bar_icon(
                             "group-outputs",
-                            Lucide::Layers,
+                            Sym::Outputs,
                             c::GROUP_PAGE_OUTPUTS,
                             false,
                             cx,
@@ -225,7 +225,7 @@ impl GroupPage {
                     .child(
                         kit::bar_icon(
                             "group-settings",
-                            Lucide::Ellipsis,
+                            Sym::More,
                             c::GROUP_PAGE_SETTINGS,
                             false,
                             cx,
@@ -574,7 +574,7 @@ impl GroupPage {
                         .border_color(k.line_2)
                         .bg(k.bg)
                         .text_color(k.ink)
-                        .child(ui::icon(Lucide::Search, px(11.), k.ink_3))
+                        .child(ui::icon(Sym::Search, px(11.), k.ink_3))
                         .child(query.clone())
                         .child(div().flex_1())
                         .child(
@@ -620,7 +620,7 @@ impl GroupPage {
                     .flex()
                     .items_center()
                     .gap(space::S4)
-                    .child(ui::icon(Lucide::Layers, px(12.), k.ink_3))
+                    .child(ui::icon(Sym::Outputs, px(12.), k.ink_3))
                     .child(fill(
                         c::GROUP_PAGE_OUTPUTS_N,
                         &[("n", &outputs.to_string())],
@@ -648,7 +648,7 @@ impl GroupPage {
                     .flex()
                     .items_center()
                     .gap(space::S4)
-                    .child(ui::icon(Lucide::Check, px(12.), k.ok))
+                    .child(ui::icon(Sym::Check, px(12.), k.ok))
                     .child(fill(c::GROUP_PAGE_TESTS_PASSED, &[("n", &n.to_string())]))
             }))
             .children(
@@ -690,7 +690,7 @@ impl GroupPage {
                             .w(px(16.))
                             .flex()
                             .justify_center()
-                            .child(ui::icon(Lucide::Check, px(14.), k.ok)),
+                            .child(ui::icon(Sym::Check, px(14.), k.ok)),
                     )
                     .child(
                         div()
@@ -756,7 +756,7 @@ impl GroupPage {
                     )
                     .h(px(24.))
                     .px(space::S8)
-                    .icon(gpui_component::Icon::new(Lucide::Plus))
+                    .icon(gpui_component::Icon::new(Sym::Plus))
                     .on_click(cx.listener(|this, _, window, cx| this.open_note(window, cx))),
                 )
             });
@@ -988,7 +988,7 @@ impl GroupPage {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(ui::icon(Lucide::Monitor, theme::icon::ROW, k.live)),
+                                .child(ui::icon(Sym::Computer, theme::icon::ROW, k.live)),
                         )
                         .child(
                             div()
@@ -1044,7 +1044,7 @@ impl GroupPage {
                     .mt(space::S10)
                     .w_full()
                     .text_size(px(12.))
-                    .child(ui::icon(Lucide::ArrowRight, px(13.), k.ink))
+                    .child(ui::icon(Sym::ArrowRight, px(13.), k.ink))
                     .on_click(move |_, _, cx| {
                         let (gid, tid, rid) = (gid.clone(), tid.clone(), rid.clone());
                         nav.update(cx, |nav, cx| {
@@ -1270,7 +1270,7 @@ impl Render for GroupPage {
             div().absolute().top(space::S12).right(space::S12).child(
                 kit::bar_icon(
                     "group-aside-open",
-                    Lucide::PanelRight,
+                    Sym::Inspector,
                     c::GROUP_PAGE_EXPAND,
                     false,
                     cx,

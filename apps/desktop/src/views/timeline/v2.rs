@@ -25,7 +25,7 @@ use crate::{
     data::{FileAttachment, Member, Message, RunStatus, v2::ChangeState, v2::Proof},
     markdown,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::{
         files::{OpenAction, open_file, size_text},
         topic_rail::{kind_text, media_time},
@@ -141,7 +141,7 @@ fn chip(cx: &App) -> gpui::Div {
 }
 
 fn check(size: Pixels, color: Hsla) -> AnyElement {
-    ui::icon(Lucide::Check, size, color).into_any_element()
+    ui::icon(Sym::Check, size, color).into_any_element()
 }
 
 impl TimelineView {
@@ -492,7 +492,7 @@ impl TimelineView {
                 } => Some(
                     chip(cx)
                         .mono()
-                        .child(ui::icon(Lucide::GitBranch, px(12.), k.ink_2))
+                        .child(ui::icon(Sym::Branch, px(12.), k.ink_2))
                         .child(format!("#{number}"))
                         .child(div().text_color(k.ok_ink).child(format!("+{additions}")))
                         .child(div().text_color(k.bad_ink).child(format!("−{deletions}")))
@@ -503,7 +503,7 @@ impl TimelineView {
                         .child(if *failed == 0 {
                             check(px(12.), k.ok)
                         } else {
-                            ui::icon(Lucide::CircleAlert, px(12.), k.bad).into_any_element()
+                            ui::icon(Sym::Alert, px(12.), k.bad).into_any_element()
                         })
                         .child(if *failed == 0 {
                             fill(c::TESTS_PASSED, &[("n", &passed.to_string())])
@@ -514,7 +514,7 @@ impl TimelineView {
                 ),
                 Proof::Recording { duration_ms } => Some(
                     chip(cx)
-                        .child(ui::icon(Lucide::Play, px(11.), k.ink_2))
+                        .child(ui::icon(Sym::Play, px(11.), k.ink_2))
                         .child(fill(c::RECORDING, &[("time", &media_time(*duration_ms))]))
                         .into_any_element(),
                 ),
@@ -544,7 +544,7 @@ impl TimelineView {
             };
             links.push(
                 link_row(ElementId::Name(format!("v2-pr-{key}").into()), cx)
-                    .child(ui::icon(Lucide::GitPullRequest, px(15.), k.ink_3))
+                    .child(ui::icon(Sym::PullRequest, px(15.), k.ink_3))
                     .child(
                         div()
                             .flex_none()
@@ -601,7 +601,7 @@ impl TimelineView {
                     ElementId::Name(format!("v2-out-{key}-{artifact_id}").into()),
                     cx,
                 )
-                .child(ui::icon(Lucide::FileText, px(15.), k.ink_3))
+                .child(ui::icon(Sym::Document, px(15.), k.ink_3))
                 .child(
                     div()
                         .min_w_0()
@@ -624,7 +624,7 @@ impl TimelineView {
                         .t_meta()
                         .text_color(k.ink_2)
                         .child(c::OPEN_RIGHT)
-                        .child(ui::icon(Lucide::ChevronRight, px(12.), k.ink_2)),
+                        .child(ui::icon(Sym::ChevronRight, px(12.), k.ink_2)),
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     let pane = pane.clone();
@@ -787,7 +787,7 @@ impl TimelineView {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .child(ui::icon(Lucide::Play, px(8.), k.screen)),
+                                    .child(ui::icon(Sym::Play, px(8.), k.screen)),
                             )
                     } else {
                         div()
@@ -799,7 +799,7 @@ impl TimelineView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(ui::icon(Lucide::File, px(18.), k.ink_3))
+                            .child(ui::icon(Sym::File, px(18.), k.ink_3))
                     };
                     let file_c: FileAttachment = file.clone();
                     let (g, t) = (message.group_id.clone(), message.topic_id.clone());

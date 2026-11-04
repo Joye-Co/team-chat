@@ -14,7 +14,7 @@ use crate::{
     copy::{cards21 as c, fill},
     data::cards_v2::{CardV2Block, ChartKind, PartKey, PartRef, TableSelect},
     theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::cards::v2::{blocks as b20, meta},
 };
 
@@ -161,9 +161,9 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                 .when_some(sorted_here, |el, (_, asc)| {
                     el.child(ui::icon(
                         if asc {
-                            Lucide::ArrowUp
+                            Sym::ArrowUp
                         } else {
-                            Lucide::ArrowDown
+                            Sym::ArrowDown
                         },
                         px(12.),
                         k.ink_2,
@@ -226,7 +226,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(ui::icon(Lucide::Check, px(12.), k.bg))
+                                .child(ui::icon(Sym::Check, px(12.), k.bg))
                         })
                         .when(on && !multiple, |el| el.border(px(5.))),
                 )

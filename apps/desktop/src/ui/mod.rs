@@ -51,7 +51,11 @@ pub use controls::{
     field_label, icon_button, icon_button_sm, placeholder_input, primary_button, secondary_button,
     select_trigger, text_button,
 };
-pub use icons::{AppAssets, Lucide, button_glyph, icon};
+pub use icons::{AppAssets, Sym, button_glyph, icon};
+// --- v12/symbols: the SF Symbols API (NATIVE.md §6) ---
+#[allow(unused_imports)]
+pub use icons::{Lucide, SymSize, sym};
+// --- end v12/symbols ---
 pub use motion::spinner;
 #[allow(unused_imports)]
 pub use overlay::{

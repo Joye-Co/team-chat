@@ -12,7 +12,7 @@ use crate::{
     copy::{cards_v2 as c, fill},
     data::cards_v2::{CardActionKind, CardIntent, CardV2Block, CardV2Message},
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, ButtonKind, Lucide, Ring},
+    ui::{self, ButtonKind, Sym, Ring},
 };
 
 /// The state overview: the strip, then the title on one line.
@@ -208,7 +208,7 @@ pub fn plan_row(
                 .map(|s| format!("{s}/{}", p.total))
                 .unwrap_or_default(),
             c::PLAN_LIVE_VIEW,
-            Lucide::ChevronRight,
+            Sym::ChevronRight,
         )
     } else {
         let mins = msg
@@ -219,7 +219,7 @@ pub fn plan_row(
             mins.map(|m| fill(c::PLAN_TOOK, &[("n", &m)]))
                 .unwrap_or_default(),
             c::PLAN_SEE_PLAN,
-            Lucide::ChevronDown,
+            Sym::ChevronDown,
         )
     };
     let a = super::Answerer {

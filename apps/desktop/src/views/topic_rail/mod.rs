@@ -21,7 +21,7 @@ use crate::{
         v2::{ArtifactPreview, ChangeState, Currency, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::shell::{PaneView, clock, panes::watch, stub_body},
 };
 
@@ -285,7 +285,7 @@ fn label_action(
 }
 
 fn check(size: Pixels, color: Hsla) -> AnyElement {
-    ui::icon(Lucide::Check, size, color).into_any_element()
+    ui::icon(Sym::Check, size, color).into_any_element()
 }
 
 impl TopicRail {
@@ -427,9 +427,9 @@ impl TopicRail {
             )
             .child(ui::icon(
                 if self.plan_open {
-                    Lucide::ChevronUp
+                    Sym::ChevronUp
                 } else {
-                    Lucide::ChevronDown
+                    Sym::ChevronDown
                 },
                 px(12.),
                 k.ink_2,
@@ -673,7 +673,7 @@ impl TopicRail {
                             .child(if checks_ok {
                                 check(px(12.), k.ok)
                             } else {
-                                ui::icon(Lucide::CircleAlert, px(12.), k.bad).into_any_element()
+                                ui::icon(Sym::Alert, px(12.), k.bad).into_any_element()
                             })
                             .child(
                                 div()
@@ -778,7 +778,7 @@ impl TopicRail {
                         .when(theme::is_dark(cx), |el| {
                             el.border_1().border_color(k.line_2)
                         })
-                        .child(ui::icon(Lucide::Play, px(10.), k.screen_ink)),
+                        .child(ui::icon(Sym::Play, px(10.), k.screen_ink)),
                 )
                 .child(c::RECORDING_ROW)
                 .child(div().flex_1())
@@ -893,7 +893,7 @@ impl TopicRail {
                 .text_color(k.ink)
                 .cursor_pointer()
                 .hover(|s| s.bg(k.hover))
-                .child(ui::icon(Lucide::Monitor, px(14.), k.ink_2))
+                .child(ui::icon(Sym::Computer, px(14.), k.ink_2))
                 .child(fill(c::SEE_MACHINE, &[("name", &who)]))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.open_pane(RightPane::Live(run_id.clone()), cx)
@@ -917,7 +917,7 @@ impl TopicRail {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(ui::icon(Lucide::Monitor, px(16.), k.ink_2)),
+                                .child(ui::icon(Sym::Computer, px(16.), k.ink_2)),
                         )
                         .child(
                             div()
@@ -1117,7 +1117,7 @@ impl Render for TopicRail {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let Some((g, t)) = self.services.nav.read(cx).topic.clone() else {
-            return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Inspector, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
         };
         let d = self.data(&g, &t);
         let topic = d.topic.as_ref();
@@ -1147,7 +1147,7 @@ impl Render for TopicRail {
         // 用时和成本
         cards.extend(self.cost_card(&d, cx));
         if cards.is_empty() {
-            return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Inspector, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
         }
         // One id per place, not per 话题: the rail rises on its first paint
         // only, never again on a 话题 switch (§12).
@@ -1214,7 +1214,7 @@ impl Render for ChangesPane {
                 ch.number, ch.title, ch.additions, ch.deletions
             )
         });
-        stub_body(Lucide::GitPullRequest, c::TITLE_CHANGES, line, cx)
+        stub_body(Sym::PullRequest, c::TITLE_CHANGES, line, cx)
     }
 }
 

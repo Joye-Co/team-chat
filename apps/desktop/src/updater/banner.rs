@@ -12,7 +12,7 @@ use crate::ui::NamedButton as _;
 use crate::{
     copy::{fill, update as u},
     theme::{self, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide, icon},
+    ui::{self, ButtonKind, ButtonSize, Sym, icon},
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -79,8 +79,8 @@ fn action_button(action: Action, id: &'static str, updater: &Entity<Updater>, cx
             cx,
         ),
         // The narrow card closes with an `x`; its tooltip names the action.
-        Action::Later => ui::icon_button_sm((id, 2usize), Lucide::X).named(u::LATER),
-        Action::Dismiss => ui::icon_button_sm((id, 3usize), Lucide::X).named(u::DISMISS),
+        Action::Later => ui::icon_button_sm((id, 2usize), Sym::Close).named(u::LATER),
+        Action::Dismiss => ui::icon_button_sm((id, 3usize), Sym::Close).named(u::DISMISS),
     };
     button.on_click(move |_, _, cx| {
         updater.update(cx, |up, cx| match action {
@@ -161,9 +161,9 @@ impl Render for UpdateBanner {
         let failed = matches!(phase, Phase::Failed { .. });
         let manual = matches!(phase, Phase::Manual(_));
         let (glyph, glyph_color) = if failed {
-            (Lucide::CircleAlert, colors.danger)
+            (Sym::Alert, colors.danger)
         } else {
-            (Lucide::Download, colors.accent_text)
+            (Sym::Download, colors.accent_text)
         };
         let (title, detail) = banner_lines(&phase, text.clone());
         let actions: Vec<Button> = actions(&phase)

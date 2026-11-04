@@ -161,10 +161,15 @@ fn thin_stroke(svg: &[u8]) -> Vec<u8> {
 /// at the §6 size for a `glyph` pt slot. The button always draws its icon at
 /// 75 % of its side, so the symbol comes centered in a slot of that size.
 pub fn button_glyph(name: impl Into<Sym>, glyph: Pixels, button: Pixels) -> Icon {
-    let size = SymSize::for_slot(glyph);
+    button_sym(name.into(), SymSize::for_slot(glyph), button)
+}
+
+/// The icon of a gpui-component `Button` of side `button`, with the symbol
+/// at a §6 size ([`SymSize::TOOLBAR`] for toolbar items).
+pub fn button_sym(sym: Sym, size: SymSize, button: Pixels) -> Icon {
     let drawn = f32::from(button) * 0.75;
     Icon::empty().path(super::sf_symbols::asset::path(
-        name.into(),
+        sym,
         SymSize::new(size.point, drawn, size.weight),
     ))
 }

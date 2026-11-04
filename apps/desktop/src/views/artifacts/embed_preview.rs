@@ -258,21 +258,21 @@ impl Render for EmbedPreview {
                     .w(menu.size.width)
                     .child(menu_row(
                         "m-open",
-                        Some(ui::Lucide::FileCode),
+                        Some(ui::Sym::CodeFile),
                         ca::OPEN,
                         true,
                         cx,
                     ))
                     .child(menu_row(
                         "m-copy",
-                        Some(ui::Lucide::Copy),
+                        Some(ui::Sym::Copy),
                         cn::MENU_COPY,
                         false,
                         cx,
                     ))
                     .child(menu_row(
                         "m-new",
-                        Some(ui::Lucide::Download),
+                        Some(ui::Sym::Download),
                         ca::NEW_VERSION,
                         false,
                         cx,

@@ -40,7 +40,7 @@ use crate::{
         StartTopicRequest,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 pub use model::MentionQuery;
@@ -996,16 +996,16 @@ impl Format {
         Format::Code,
     ];
 
-    fn glyph(self) -> Lucide {
+    fn glyph(self) -> Sym {
         match self {
-            Format::Bold => Lucide::Bold,
-            Format::Italic => Lucide::Italic,
-            Format::Strike => Lucide::Strikethrough,
-            Format::Link => Lucide::Link,
-            Format::Numbered => Lucide::ListOrdered,
-            Format::Bulleted => Lucide::List,
-            Format::Quote => Lucide::Quote,
-            Format::Code => Lucide::Code,
+            Format::Bold => Sym::Bold,
+            Format::Italic => Sym::Italic,
+            Format::Strike => Sym::Strikethrough,
+            Format::Link => Sym::Link,
+            Format::Numbered => Sym::NumberedList,
+            Format::Bulleted => Sym::List,
+            Format::Quote => Sym::Quote,
+            Format::Code => Sym::Code,
         }
     }
 
@@ -1075,7 +1075,7 @@ impl ComposerView {
     fn render_chip(
         &self,
         id: ElementId,
-        glyph: Lucide,
+        glyph: Sym,
         text: String,
         on_remove: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
@@ -1096,10 +1096,10 @@ impl ComposerView {
             .child(ui::icon(glyph, theme::icon::CHIP, colors.text_3))
             .child(div().min_w(px(0.)).one_line().child(text))
             .child(
-                ui::icon_button(id, Lucide::X)
+                ui::icon_button(id, Sym::Close)
                     .with_size(px(24.))
                     .rounded(theme::radius::SM)
-                    .icon(ui::button_glyph(Lucide::X, theme::icon::CHIP, px(24.)))
+                    .icon(ui::button_glyph(Sym::Close, theme::icon::CHIP, px(24.)))
                     .named(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
             )
@@ -1285,7 +1285,7 @@ impl Render for ComposerView {
         if let Some(q) = quote {
             chips = chips.child(self.render_chip(
                 "quote-remove".into(),
-                Lucide::TextQuote,
+                Sym::Quote,
                 q.text,
                 |this, cx| this.remove_quote(cx),
                 cx,
@@ -1296,7 +1296,7 @@ impl Render for ComposerView {
             let id = file.id.clone();
             chips = chips.child(self.render_chip(
                 ElementId::Name(SharedString::from(format!("file-remove-{}", file.id))),
-                Lucide::Paperclip,
+                Sym::Attach,
                 file.name,
                 move |this, cx| this.remove_file(&id, cx),
                 cx,
@@ -1317,7 +1317,7 @@ impl Render for ComposerView {
         )
         .when(editing, |b| {
             b.icon(ui::button_glyph(
-                Lucide::Check,
+                Sym::Check,
                 theme::icon::HEADER,
                 theme::size::ICON_BUTTON,
             ))
@@ -1359,21 +1359,21 @@ impl Render for ComposerView {
         .tool(
             ui::composer_tool(
                 "attach",
-                if v2 { Lucide::Paperclip } else { Lucide::Plus },
+                if v2 { Sym::Attach } else { Sym::Plus },
                 c::ATTACH,
             )
             .disabled(!enabled || editing)
             .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
         )
         .tool(
-            ui::composer_tool("mention", Lucide::AtSign, c::MENTION)
+            ui::composer_tool("mention", Sym::Mention, c::MENTION)
                 .disabled(!enabled)
                 .on_click(cx.listener(|this, _, window, cx| this.insert_text("@", window, cx))),
         );
         if !v2 {
             shell = shell
                 .tool(
-                    ui::composer_tool("emoji", Lucide::FaceSlightlySmiling, c::EMOJI)
+                    ui::composer_tool("emoji", Sym::Emoji, c::EMOJI)
                         .disabled(!enabled)
                         .when(self.emoji_open, |b| b.selected(true))
                         .on_click(cx.listener(|this, e: &gpui::ClickEvent, _, cx| {
@@ -1381,7 +1381,7 @@ impl Render for ComposerView {
                         })),
                 )
                 .tool(
-                    ui::composer_tool("format", Lucide::Type, c::FORMAT)
+                    ui::composer_tool("format", Sym::TextFormat, c::FORMAT)
                         .disabled(!enabled)
                         .when(self.format_open, |b| b.selected(true))
                         .on_click(cx.listener(|this, _, _, cx| {

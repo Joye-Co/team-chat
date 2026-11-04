@@ -18,7 +18,7 @@ use crate::{
     theme::{self, Type as _, size, space, type_scale},
     ui::{
         chip::Kbd,
-        icons::{Lucide, button_glyph, icon},
+        icons::{Sym, button_glyph, icon},
     },
 };
 
@@ -207,19 +207,23 @@ impl NamedButton for Button {
     }
 }
 
-/// A ghost icon button: 32 x 32, radius 8, an 18 pt glyph in `text-2` that
-/// turns `text-1` on hover (§4.2). Name it with [`NamedButton::named`].
-pub fn icon_button(id: impl Into<ElementId>, name: Lucide) -> Button {
+/// A ghost icon button: 32 x 32, radius 8, the symbol at the toolbar size
+/// (16 pt Medium, NATIVE.md §6). Name it with [`NamedButton::named`].
+pub fn icon_button(id: impl Into<ElementId>, name: impl Into<Sym>) -> Button {
     Button::new(id)
         .ghost()
-        .icon(button_glyph(name, theme::icon::HEADER, size::ICON_BUTTON))
+        .icon(crate::ui::icons::button_sym(
+            name.into(),
+            crate::ui::SymSize::TOOLBAR,
+            size::ICON_BUTTON,
+        ))
         .with_size(size::ICON_BUTTON)
         .rounded(theme::radius::MD)
 }
 
 /// The `sm` icon button: 28 x 28, radius 6, a 16 pt glyph (section `+`,
 /// buttons inside rows).
-pub fn icon_button_sm(id: impl Into<ElementId>, name: Lucide) -> Button {
+pub fn icon_button_sm(id: impl Into<ElementId>, name: impl Into<Sym>) -> Button {
     Button::new(id)
         .ghost()
         .icon(button_glyph(name, theme::icon::ROW, size::ICON_BUTTON_SM))
@@ -379,7 +383,7 @@ impl RenderOnce for TextField {
             .gap(space::S8)
             .cursor_text()
             .when(search, |el| {
-                el.child(icon(Lucide::Search, theme::icon::ROW, k.text_3))
+                el.child(icon(Sym::Search, theme::icon::ROW, k.text_3))
             })
             .child(
                 div().flex_1().min_w(px(0.)).child(placeholder_input(
@@ -542,7 +546,7 @@ pub fn select_trigger(
         .font_weight(gpui::FontWeight::NORMAL)
         .text_color(k.text_1)
         .child(div().flex_1().min_w(px(0.)).one_line().child(label.into()))
-        .child(icon(Lucide::ChevronsUpDown, theme::icon::CHIP, k.text_3))
+        .child(icon(Sym::PopUp, theme::icon::CHIP, k.text_3))
 }
 
 #[cfg(test)]

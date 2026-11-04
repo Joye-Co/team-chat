@@ -32,7 +32,7 @@ pub use title_bar::{TitleBarSpec, TitleButton, TitleButtonKind, TitleStyle};
 
 use crate::{
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// A page of the main window: it renders its body and says what its title
@@ -56,7 +56,7 @@ pub trait PaneView: Render {
 /// The body of a page or pane that a feature track has not built yet: an
 /// icon, the page's name and one quiet line, centered. Feature tracks replace
 /// it; it never ships in a finished screen.
-pub fn stub_body(icon: Lucide, title: &str, line: Option<String>, cx: &App) -> Div {
+pub fn stub_body(icon: Sym, title: &str, line: Option<String>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .size_full()

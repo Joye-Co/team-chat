@@ -36,7 +36,7 @@ use crate::{
     copy::{fill, rail as c},
     data::{GroupId, Member, MemberId, Topic},
     theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, NamedButton as _, Ring, RowSurface},
+    ui::{self, Sym, MemberAvatar, NamedButton as _, Ring, RowSurface},
     views::{nav::QuickSwitch, shell::layout},
 };
 
@@ -336,9 +336,9 @@ impl RailView {
                     .children(label)
                     .child(ui::icon(
                         if label.is_some() {
-                            Lucide::ChevronDown
+                            Sym::ChevronDown
                         } else {
-                            Lucide::SlidersHorizontal
+                            Sym::Options
                         },
                         if label.is_some() {
                             px(12.)
@@ -365,7 +365,7 @@ impl RailView {
     fn destination(
         &self,
         id: &'static str,
-        icon: Lucide,
+        icon: Sym,
         label: &'static str,
         selected: bool,
         count: Option<usize>,
@@ -378,9 +378,9 @@ impl RailView {
             .h(theme::RAIL_ROW)
             .px(space::S10)
             .gap(space::S10)
-            .child(ui::icon(
+            .child(ui::sym(
                 icon,
-                theme::icon::ROW,
+                ui::SymSize::SIDEBAR,
                 if selected { k.ink } else { k.ink_2 },
             ))
             .child(
@@ -498,7 +498,7 @@ impl RailView {
                     .children(me.map(|m| m.name)),
             )
             .child(
-                ui::icon_button_sm("rail-settings", Lucide::SlidersHorizontal)
+                ui::icon_button_sm("rail-settings", Sym::Options)
                     .named(c::RAIL_SETTINGS)
                     .on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
@@ -526,7 +526,7 @@ impl Render for RailView {
             RailMode::Member => vec![
                 self.destination(
                     "rail-desk",
-                    Lucide::House,
+                    Sym::Home,
                     c::RAIL_DESK,
                     page == Page::Desk,
                     Some(asks),
@@ -535,7 +535,7 @@ impl Render for RailView {
                 ),
                 self.destination(
                     "rail-topics",
-                    Lucide::TextAlignStart,
+                    Sym::AlignLeft,
                     c::RAIL_TOPICS,
                     matches!(page, Page::Topic | Page::Group),
                     None,
@@ -544,7 +544,7 @@ impl Render for RailView {
                 ),
                 self.destination(
                     "rail-artifacts",
-                    Lucide::Layers,
+                    Sym::Outputs,
                     c::RAIL_ARTIFACTS,
                     matches!(page, Page::Artifacts | Page::Artifact),
                     None,
@@ -555,7 +555,7 @@ impl Render for RailView {
             _ => vec![
                 self.destination(
                     "rail-desk",
-                    Lucide::House,
+                    Sym::Home,
                     c::RAIL_DESK,
                     page == Page::Desk,
                     Some(asks),
@@ -564,7 +564,7 @@ impl Render for RailView {
                 ),
                 self.destination(
                     "rail-artifacts",
-                    Lucide::Layers,
+                    Sym::Outputs,
                     c::RAIL_ARTIFACTS,
                     matches!(page, Page::Artifacts | Page::Artifact),
                     None,
@@ -573,7 +573,7 @@ impl Render for RailView {
                 ),
                 self.destination(
                     "rail-members",
-                    Lucide::Users,
+                    Sym::Members,
                     c::RAIL_MEMBERS,
                     page == Page::Members,
                     None,
@@ -642,7 +642,7 @@ impl Render for RailView {
                     .items_center()
                     .justify_end()
                     .child(
-                        ui::icon_button_sm("rail-new-topic", Lucide::SquarePen)
+                        ui::icon_button_sm("rail-new-topic", Sym::Compose)
                             .named(c::RAIL_NEW_TOPIC)
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(NewTopic), cx)
@@ -711,7 +711,7 @@ impl RailView {
             .gap(space::S8)
             .cursor_pointer()
             .hover(|s| s.border_color(k.line_2))
-            .child(ui::icon(Lucide::Search, theme::icon::CHIP, k.ink_3))
+            .child(ui::sym(Sym::Search, ui::SymSize::INLINE, k.ink_3))
             .child(
                 div()
                     .flex_1()

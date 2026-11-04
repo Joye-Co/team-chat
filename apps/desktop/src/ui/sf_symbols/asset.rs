@@ -241,6 +241,14 @@ pub fn prewarm(scale: f32) {
                     paths.push(path_at(sym, size, scale));
                 }
             }
+            // Toolbar and row buttons draw at 75 % of a 32 or 28 pt button.
+            for &sym in Sym::ALL {
+                for slot in [24., 21.] {
+                    for size in [SymSize::TOOLBAR, SymSize::INLINE] {
+                        paths.push(path_at(sym, SymSize::new(size.point, slot, size.weight), scale));
+                    }
+                }
+            }
             for (_, sym) in LUCIDE {
                 paths.push(lucide_path(*sym));
             }

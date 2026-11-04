@@ -206,15 +206,15 @@ impl SettingsView {
 }
 
 impl Page {
-    fn icon(self) -> ui::icons::Lucide {
-        use ui::icons::Lucide;
+    fn icon(self) -> ui::icons::Sym {
+        use ui::icons::Sym;
         match self {
-            Page::Profile => Lucide::User,
-            Page::Members => Lucide::Users,
-            Page::Machines => Lucide::Monitor,
-            Page::Notifications => Lucide::Bell,
-            Page::Appearance => Lucide::Monitor,
-            Page::About => Lucide::Settings,
+            Page::Profile => Sym::Account,
+            Page::Members => Sym::Members,
+            Page::Machines => Sym::MacMini,
+            Page::Notifications => Sym::Bell,
+            Page::Appearance => Sym::Appearance,
+            Page::About => Sym::Info,
         }
     }
 }
@@ -239,9 +239,9 @@ impl Render for SettingsView {
             .h(SECTION_ROW)
             .px(space::S10)
             .gap(space::S10)
-            .child(ui::icon(
+            .child(ui::sym(
                 page.icon(),
-                theme::icon::ROW,
+                ui::SymSize::SIDEBAR,
                 if on { colors.text_1 } else { colors.text_2 },
             ))
             .child(

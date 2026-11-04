@@ -10,7 +10,7 @@ use crate::{
     app::{RightPane, Services},
     copy::artifact_page as c,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::{
         group_page::{kind_label, kit},
         shell::{PaneView, panes::watch, stub_body},
@@ -43,10 +43,10 @@ impl Render for ArtifactPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let RightPane::Artifact { id, version } = self.services.nav.read(cx).visible_pane() else {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };
         let Some(detail) = self.services.provider.artifact(&id) else {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };
         let shown = version.unwrap_or(detail.summary.version);
         // topic track: a 产出 with a provider preview (metrics, table, chart)
@@ -144,7 +144,7 @@ impl Render for ArtifactPane {
                     .child(
                         kit::bar_icon(
                             "artifact-pane-window",
-                            Lucide::ExternalLink,
+                            Sym::OpenExternal,
                             c::ARTIFACT_OPEN_WINDOW,
                             false,
                             cx,
@@ -161,7 +161,7 @@ impl Render for ArtifactPane {
                     .child(
                         kit::bar_icon(
                             "artifact-pane-page",
-                            Lucide::Layers,
+                            Sym::Outputs,
                             c::ARTIFACTS_TITLE,
                             false,
                             cx,

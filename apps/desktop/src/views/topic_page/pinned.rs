@@ -20,7 +20,7 @@ use crate::{
         v2::{AskItem, AskKind, ChangeState},
     },
     theme::{self, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
+    ui::{self, ButtonKind, ButtonSize, Sym},
     views::shell::{clock, member_name},
 };
 
@@ -201,7 +201,7 @@ impl TopicPage {
                     .text_color(k.ink)
                     .child(ui::motion::check_mark(
                         ElementId::Name(format!("{id}-check").into()),
-                        ui::icon(Lucide::Check, px(16.), k.ok),
+                        ui::icon(Sym::Check, px(16.), k.ok),
                         px(16.),
                         ui::motion::just_answered(at),
                         cx,

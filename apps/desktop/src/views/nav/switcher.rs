@@ -29,7 +29,7 @@ use crate::{
         ChatProvider, GroupId, GroupKind, Member, MemberId, SearchHit, SearchQuery, Topic, TopicId,
     },
     theme::{self, Type as _, size, space, type_scale},
-    ui::{self, GroupGlyph, Kbd, KbdHint, Lucide, MemberAvatar, RowSurface, StatusChip},
+    ui::{self, GroupGlyph, Kbd, KbdHint, Sym, MemberAvatar, RowSurface, StatusChip},
     views::{
         search::plain::plain_with_ranges,
         sidebar::{edge_fade, scroll_edges, topic_line, watch_scroll_edges},
@@ -665,7 +665,7 @@ impl Switcher {
         )
         .children(chip)
         .when(active, |el| {
-            el.child(ui::icon(Lucide::CornerDownLeft, theme::icon::ROW, k.text_3))
+            el.child(ui::icon(Sym::Return, theme::icon::ROW, k.text_3))
         })
         .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
             this.pointer_moved(ix, e.position, cx)
@@ -773,7 +773,7 @@ impl Switcher {
         )
         .when(active, |el| {
             el.child(div().h(px(20.)).flex().items_center().child(ui::icon(
-                Lucide::CornerDownLeft,
+                Sym::Return,
                 theme::icon::ROW,
                 k.text_3,
             )))
@@ -870,7 +870,7 @@ impl Render for Switcher {
                 .medium()
                 .child(fill(search_copy::SCOPE_IN_GROUP, &[("name", name)]))
                 .child(
-                    Icon::new(Lucide::X)
+                    Icon::new(Sym::Close)
                         .size(theme::icon::TAG)
                         .text_color(k.text_3),
                 )
@@ -921,7 +921,7 @@ impl Render for Switcher {
                     .gap(space::S12)
                     .border_b(theme::HAIRLINE)
                     .border_color(k.sep)
-                    .child(ui::icon(Lucide::Search, px(20.), k.text_2))
+                    .child(ui::icon(Sym::Search, px(20.), k.text_2))
                     .children(scope_token)
                     .child(
                         div().flex_1().min_w(px(0.)).child(ui::placeholder_input(
@@ -961,7 +961,7 @@ impl Render for Switcher {
                             .children(children)
                             .when(empty, |el| {
                                 el.child(div().h(px(160.)).child(ui::EmptyState::new(
-                                    Lucide::SearchX,
+                                    Sym::Search,
                                     nav::QUICK_SWITCH_EMPTY,
                                 )))
                             }),

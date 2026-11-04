@@ -13,7 +13,7 @@ use gpui_component::{
 
 use crate::{
     theme::{self, Type as _, size, space, type_scale},
-    ui::{Lucide, icon},
+    ui::{Sym, icon},
 };
 
 /// Emoji in the picker: the reactions a team uses most.
@@ -151,7 +151,7 @@ pub fn reaction_add(id: impl Into<ElementId>, cx: &App) -> Button {
         .rounded(size::REACTION / 2.)
         .bg(k.field)
         .child(icon(
-            Lucide::FaceSlightlySmilingPlus,
+            Sym::Emoji,
             theme::icon::ROW,
             k.text_2,
         ))

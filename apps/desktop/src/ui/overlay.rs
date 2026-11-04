@@ -9,7 +9,7 @@ use gpui::{
 use crate::{
     theme::{self, Elevation, Type as _, size, space},
     ui::{
-        icons::{Lucide, icon},
+        icons::{Sym, icon},
         rows::{RowSurface, list_row},
     },
 };
@@ -59,7 +59,7 @@ pub fn float_surface(cx: &App) -> gpui::Div {
 /// `text-2` and `ui` 14 text. `active` is the keyboard-active row.
 pub fn menu_row(
     id: impl Into<ElementId>,
-    glyph: Option<Lucide>,
+    glyph: Option<Sym>,
     label: impl Into<SharedString>,
     active: bool,
     cx: &App,
@@ -100,7 +100,7 @@ pub fn popup_row(id: impl Into<ElementId>, active: bool, cx: &App) -> gpui::Stat
 /// The return glyph at the end of the active popup row.
 pub fn return_hint(cx: &App) -> impl IntoElement {
     icon(
-        Lucide::CornerDownLeft,
+        Sym::Return,
         theme::icon::CHIP,
         theme::colors(cx).text_3,
     )
@@ -118,14 +118,14 @@ pub enum Tone {
 /// `ui` 14 text and an optional `sm` action.
 #[derive(IntoElement)]
 pub struct Toast {
-    glyph: Lucide,
+    glyph: Sym,
     tone: Tone,
     text: SharedString,
     action: Option<AnyElement>,
 }
 
 impl Toast {
-    pub fn new(glyph: Lucide, text: impl Into<SharedString>) -> Self {
+    pub fn new(glyph: Sym, text: impl Into<SharedString>) -> Self {
         Self {
             glyph,
             tone: Tone::Neutral,
@@ -180,7 +180,7 @@ impl RenderOnce for Toast {
 /// text and an optional `sm` action. Never in the topic column.
 #[derive(IntoElement)]
 pub struct Banner {
-    glyph: Lucide,
+    glyph: Sym,
     glyph_color: Option<gpui::Hsla>,
     text: SharedString,
     detail: Option<SharedString>,
@@ -188,7 +188,7 @@ pub struct Banner {
 }
 
 impl Banner {
-    pub fn new(glyph: Lucide, text: impl Into<SharedString>) -> Self {
+    pub fn new(glyph: Sym, text: impl Into<SharedString>) -> Self {
         Self {
             glyph,
             glyph_color: None,

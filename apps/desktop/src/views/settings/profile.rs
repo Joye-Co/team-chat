@@ -16,7 +16,7 @@ use crate::{
     copy::{common, settings as s},
     data::{Change, Member, SessionState},
     theme::{self, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::avatar,
 };
 
@@ -363,7 +363,7 @@ impl Render for ProfilePage {
                         None,
                         Some(
                             ui::secondary_button("sign-out", s::SIGN_OUT, cx)
-                                .icon(Icon::new(Lucide::LogOut))
+                                .icon(Icon::new(Sym::SignOut))
                                 .disabled(!signed_in)
                                 .on_click(cx.listener(|this, _, _, _| {
                                     this.services.provider.sign_out(false)

@@ -11,7 +11,7 @@ use crate::{
     copy::{artifacts as ca, fill},
     data::{ArtifactKind, Message},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -56,8 +56,8 @@ impl MessageExtra for ArtifactRefsExtra {
                         .map(|m| m.name.clone())
                         .unwrap_or_else(|| crate::copy::composer::UNKNOWN_MEMBER.to_string());
                     let (kind, icon) = match d.summary.kind {
-                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Lucide::FileCode),
-                        _ => (ca::CARD_KIND_FILE, Lucide::FileText),
+                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Sym::CodeFile),
+                        _ => (ca::CARD_KIND_FILE, Sym::Document),
                     };
                     let mut meta = format!(
                         "{kind} · {} · {name}",
@@ -75,7 +75,7 @@ impl MessageExtra for ArtifactRefsExtra {
                 None => (
                     crate::copy::panel::ARTIFACTS.to_string(),
                     ca::CARD_LOADING.to_string(),
-                    Lucide::FileCode,
+                    Sym::CodeFile,
                 ),
             };
             let key = if message.id.is_empty() {
@@ -145,7 +145,7 @@ impl MessageExtra for ArtifactRefsExtra {
                     .child(if opening {
                         crate::ui::spinner().into_any_element()
                     } else {
-                        ui::icon(Lucide::ExternalLink, theme::icon::HEADER, k.text_2)
+                        ui::icon(Sym::OpenExternal, theme::icon::HEADER, k.text_2)
                             .into_any_element()
                     })
                     .on_click(move |_, _, cx| {
