@@ -282,7 +282,10 @@ pub fn run_row(
     let (n, m) = r.step();
     let mut rest = vec![snap.name(&r.run.bot_id)];
     rest.extend(r.current_text());
-    rest.extend(r.step_started.and_then(elapsed));
+    let started = r.run.started_at.unwrap_or(r.run.created_at);
+    // One clock (A5): the run's start on the provider's clock, as on 群
+    // and 成员; the time column is the same start.
+    rest.extend(elapsed(services.provider.clock_now(), started));
     let status = if m > 0 {
         fill(
             c::DESK_STATUS_WORKING,
@@ -291,7 +294,6 @@ pub fn run_row(
     } else {
         c::DESK_STATUS_STARTED.to_string()
     };
-    let started = r.run.started_at.unwrap_or(r.run.created_at);
     let nav = services.nav.clone();
     let (g, t, id) = (
         r.run.group_id.clone(),
