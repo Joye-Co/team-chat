@@ -1112,6 +1112,11 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
   `voters`: `"group"` or 1..200 member ids) also names `card.limits`. An unknown block type gets `card.unknown_block`;
   an input of kind `secret` gets `card.secret_deferred`. An invalid card fixture names the
   expected reason in its `reason` field, and both fixture tests check it.
+- Every `fileId` a card names (`image`, `imageChoice` options, `compare` previews, `evidence`
+  and its `posterFileId`) must be a ready file of the same group, and every 产出 (`embed`,
+  `evidence.artifact`, `compare` previews, `ref`/`link` blocks and `link` actions with an
+  `artifact` target) a 产出 (version) of the same group. Else `invalid`, `card.limits`, with
+  `file not in group` or `产出 not in group` in the message; checked on send, edit and patch.
 
 ### Card v2.1
 
