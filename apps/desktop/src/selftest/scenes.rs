@@ -155,6 +155,13 @@ pub const SCENES: &[Scene] = &[
         open: |services, content, cx| open_login(services, content, "^K7QM2X9A", false, cx),
     },
     Scene {
+        name: "login-unreachable",
+        about: "The login card after a code was sent to a server that cannot be reached: the field error under the server",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "@K7QM2X9A", false, cx),
+    },
+    Scene {
         name: "offline",
         about: "The connection banner above the sidebar footer while reconnecting",
         start: Start::Offline,
@@ -1276,16 +1283,27 @@ pub fn open_login(
         let root =
             cx.new(|cx| crate::views::login::LoginWindow::new_for_scene(services, window, cx));
         let login = root.read(cx).login().clone();
-        // A leading `!` submits the code, for the error scene.
-        // A leading `!` submits the code, for the error scene; a leading `~`
-        // sets a custom server instead.
+        // A leading `!` submits the code, for the error scene; `^` shows it
+        // while it is checked; `~` sets a custom server instead; `@` submits
+        // it against a server that cannot be reached.
+        // With `--worst-case` every login scene runs on a 120-character
+        // server URL, and its code becomes a pasted token, a legacy code or
+        // a long wrong code (C2-28).
+        let worst = super::worst_case();
+        let code: &str = if worst { worst_login_code(code) } else { code };
         login.update(cx, |l, cx| {
+            if worst && !code.starts_with('~') {
+                l.preview_server(WORST_SERVER, window, cx);
+            }
             if let Some(code) = code.strip_prefix('!') {
                 l.preview_submit(code, window, cx)
             } else if let Some(code) = code.strip_prefix('^') {
                 l.preview_signing_in(code, window, cx)
             } else if let Some(server) = code.strip_prefix('~') {
                 l.preview_server(server, window, cx)
+            } else if let Some(code) = code.strip_prefix('@') {
+                l.preview_server(UNREACHABLE_SERVER, window, cx);
+                l.preview_submit(code, window, cx)
             } else {
                 l.preview(code, server_open, window, cx)
             }
@@ -1294,6 +1312,25 @@ pub fn open_login(
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())
+}
+
+/// A server the fake provider cannot reach (`.invalid`, RFC 2606).
+const UNREACHABLE_SERVER: &str = "https://team.northwind.invalid";
+
+/// A 120-character custom server URL.
+const WORST_SERVER: &str = "https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2";
+
+/// The worst-case code of a login scene.
+fn worst_login_code(code: &'static str) -> &'static str {
+    match code {
+        // Half a code becomes a pasted access token (a locked line).
+        "K7QM2X" => "tc_live_9fK2mQ7xL0pR4sT8vW1yZ3bD6gH5jN2cE7aU0iO9",
+        // A checked code becomes a 12-character legacy code.
+        "^K7QM2X9A" => "^ABCDEFGHJKLM",
+        "!0000-0000" => "!WRONG-CODE-0000",
+        "~https://team.joye.co" => "~https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2",
+        other => other,
+    }
 }
 
 /// The settings window at its own size (the requested size is ignored).
