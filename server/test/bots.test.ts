@@ -13,7 +13,7 @@ import {
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
-import { ACK_EMOJI } from "../src/bots/proof";
+import { ACK_EMOJI } from "@chat/protocol";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
@@ -239,6 +239,7 @@ describe("runner-backed bots", () => {
     // The acknowledgement is a reaction on the request, not a text line.
     const ack = await c.waitEvent((e) => e.type === "reaction.changed" && e.data.messageId === trigger.id);
     expect(ack).toMatchObject({ actorId: w.bot.id, data: { emoji: ACK_EMOJI, on: true } });
+    expect(ACK_EMOJI).toBe("👀");
     await waitUntil(() => topicStatuses(c, topicId).includes("in_progress"), 5000, "in_progress");
     const owned = c.events().find((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.ownerId);
     expect(owned.data.ownerId).toBe(w.bot.id);

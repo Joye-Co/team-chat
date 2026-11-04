@@ -15,7 +15,7 @@ export const PROOF_TEXT = {
 } as const;
 
 /** The emoji a bot puts on the message that started a run, instead of a text acknowledgement. */
-export const ACK_EMOJI = "👀";
+export { ACK_EMOJI } from "@chat/protocol";
 
 /** Longest result text in the card's text block (v1 text blocks hold 8000 UTF-16 units). */
 const CARD_TEXT_UNITS = 7000;

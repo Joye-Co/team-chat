@@ -5,6 +5,7 @@
 // a resend never posts twice.
 import { readFileSync, statSync } from "node:fs";
 import {
+  ACK_EMOJI,
   AcceptanceItem,
   type ArtifactRef,
   type ArtifactVersion,
@@ -59,8 +60,8 @@ import { type StreamOptions, StreamWriter } from "./stream.ts";
 
 export const SDK_VERSION = "1.1.0";
 
-/** The reaction `ack()` adds by default: "I saw it and work on it". */
-export const ACK_EMOJI = "👀";
+/** The reaction `ack()` adds by default: "I saw it and work on it" (the same one runner runs use). */
+export { ACK_EMOJI };
 
 /** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22+ through undici). */
 export type WebSocketCtor = new (url: string, opts?: { headers?: Record<string, string> }) => WebSocket;
