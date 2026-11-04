@@ -179,7 +179,7 @@ pub fn open_too_many(
     let handle = open_main(services, content, cx)?;
     handle
         .update(cx, |_, window, cx| {
-            window.push_notification(super::too_many_toast().notification(), cx)
+            window.push_notification(super::too_many_toast(|_, _| {}).notification(), cx)
         })
         .map_err(|e| e.to_string())?;
     Ok(handle)

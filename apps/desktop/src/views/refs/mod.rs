@@ -390,19 +390,15 @@ pub fn enabled(cx: &App) -> bool {
 }
 
 /// 最多引用 5 处 as the kit Toast (§2.16): the quote icon, the rule as the title, what to do
-/// as the description; one toast at a time.
-pub fn too_many_toast() -> crate::ui::overlay::Toast {
+/// as the description and the action 换掉最早的一处 (C-06), which drops the oldest chip and
+/// adds the refused one; one toast at a time.
+pub fn too_many_toast(
+    replace: impl Fn(&mut Window, &mut App) + 'static,
+) -> crate::ui::overlay::Toast {
     crate::ui::overlay::Toast::new(crate::ui::Sym::Quote, c::TOO_MANY)
         .description(c::TOO_MANY_DESC)
+        .action_button(c::REPLACE_OLDEST, replace)
         .id("refs-too-many")
-}
-
-fn toast(text: &str, cx: &mut App) {
-    if text == c::TOO_MANY {
-        too_many_toast().push(cx);
-    } else {
-        crate::ui::overlay::Toast::new(crate::ui::Sym::Quote, text.to_string()).push(cx);
-    }
 }
 
 /// The draft chip for a target, in the source's 话题.
@@ -536,6 +532,7 @@ pub fn ask_about_outcome(
             nav.set_right_pane(RightPane::SideChat(mm), cx);
         });
         let key = (group_id, topic_id, member);
+        let (again_key, again_chip, again_at) = (key.clone(), chip.clone(), address.clone());
         let added = h.update(cx, |h, cx| {
             h.side_chat_focused = true;
             let r = h.add_side(key, chip, cx);
@@ -543,7 +540,16 @@ pub fn ask_about_outcome(
             r
         });
         if added == AddRef::Full {
-            toast(c::TOO_MANY, cx);
+            let hub = h.clone();
+            too_many_toast(move |_, cx| {
+                let (key, chip) = (again_key.clone(), again_chip.clone());
+                hub.update(cx, |h, cx| {
+                    h.remove_side(&key, 0, cx);
+                    h.add_side(key, chip, cx);
+                    h.flash(again_at.clone(), cx);
+                });
+            })
+            .push(cx);
         }
         return Asked {
             added,
@@ -554,7 +560,7 @@ pub fn ask_about_outcome(
     // Rule 2: the composer of the part's 话题.
     let key = DraftKey::topic(group_id.clone(), topic_id.clone());
     let before = provider.draft(&key);
-    let added = provider.add_draft_ref(&key, chip);
+    let added = provider.add_draft_ref(&key, chip.clone());
     match added {
         AddRef::Added => {
             if before.refs.is_empty() && !names_someone(&before.body, &before.mentions) {
@@ -588,7 +594,16 @@ pub fn ask_about_outcome(
         AddRef::Duplicate(_) => {
             h.update(cx, |h, cx| h.flash(address, cx));
         }
-        AddRef::Full => toast(c::TOO_MANY, cx),
+        AddRef::Full => {
+            let (p, hub) = (provider.clone(), h.clone());
+            too_many_toast(move |_, cx| {
+                p.remove_draft_ref(&key, 0);
+                if p.add_draft_ref(&key, chip.clone()) == AddRef::Added {
+                    hub.update(cx, |h, cx| h.flash(address.clone(), cx));
+                }
+            })
+            .push(cx);
+        }
         AddRef::Unsupported => {}
     }
     Asked {
