@@ -486,7 +486,8 @@ export function checkEmbeds(sql: SqlStorage, card: CardV2): void {
     for (const name of b.events ?? []) {
       if (!declared.has(name)) throw new ApiError("invalid", `embed ${b.id}: the page does not declare ${name}`, "card.undeclared_event");
     }
-  }  checkFiles(sql, card);
+  }
+  checkFiles(sql, card);
 }
 
 // ---------------------------------------------------------------------------
