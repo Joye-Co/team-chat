@@ -3,9 +3,8 @@
 //! with a table of 群 and their 全部 / 只有 @我 / 不提醒 pop-ups.
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -45,6 +44,8 @@ pub struct NotificationsPage {
     status: Status,
     /// The filter of the 按群设置 sheet.
     filter: Entity<InputState>,
+    /// The scroll of the 按群设置 list.
+    groups_scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -67,6 +68,7 @@ impl NotificationsPage {
             load: Status::Idle,
             status: Status::Idle,
             filter,
+            groups_scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -210,6 +212,12 @@ impl NotificationsPage {
                 let (dms, groups): (Vec<_>, Vec<_>) =
                     all.into_iter().partition(|g| g.kind == GroupKind::Dm);
                 let media = crate::ui::native::tokens::avatar::SM;
+                // Two 群 with one name are told apart by their size (C1-13).
+                let squash = |n: &str| n.split_whitespace().collect::<Vec<_>>().join(" ");
+                let mut seen = std::collections::HashMap::<String, usize>::new();
+                for g in groups.iter() {
+                    *seen.entry(squash(&g.name)).or_default() += 1;
+                }
                 let row = |g: &crate::data::GroupSummary, window: &Window, cx: &App| {
                     let prefs = provider.group_prefs(&g.id);
                     let shown = if prefs.muted {
@@ -226,12 +234,9 @@ impl NotificationsPage {
                         .flatten();
                     let page = this.clone();
                     let gid = g.id.clone();
-                    let name: SharedString = g
-                        .name
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .into();
+                    let name: SharedString = squash(&g.name).into();
+                    let twin =
+                        g.kind != GroupKind::Dm && seen.get(name.as_ref()).is_some_and(|n| *n > 1);
                     let lead = match peer {
                         Some(m) => ui::MemberAvatar::new(Some(m), media)
                             .on(k.group)
@@ -256,6 +261,12 @@ impl NotificationsPage {
                         name,
                     )
                     .media(lead)
+                    .when(twin, |r| {
+                        r.description(crate::copy::fill(
+                            crate::copy::nav::MEMBER_COUNT,
+                            &[("n", &g.member_ids.len().to_string())],
+                        ))
+                    })
                     .value(
                         widgets::popup_fixed(
                             ElementId::Name(format!("notify-{}", g.id).into()),
@@ -325,15 +336,18 @@ impl NotificationsPage {
                     list.into_any_element()
                 };
                 let frame = div()
-                    .id("notify-groups")
                     .w_full()
-                    .max_h(NOTIFY_LIST_MAX)
-                    .overflow_y_scroll()
                     .rounded(metrics::GROUP_RADIUS)
                     .border_1()
                     .border_color(k.separator)
                     .bg(k.group)
-                    .child(body);
+                    .overflow_hidden()
+                    .child(widgets::capped_list(
+                        "notify-groups",
+                        body,
+                        notify_list_max(),
+                        &page.groups_scroll,
+                    ));
                 let failed = match &page.status {
                     Status::Failed(t) => Some(widgets::failed_alert(
                         "notify-groups-failed",
@@ -370,9 +384,12 @@ impl NotificationsPage {
 const LEVEL_WIDTH: gpui::Pixels = crate::ui::native::metrics::LABEL_COLUMN;
 /// More rows than this get a filter above the list (F55).
 const FILTER_FROM: usize = 8;
-/// The list box of the 按群设置 sheet shows 6.5 rows, so the cut row says
-/// it scrolls.
-const NOTIFY_LIST_MAX: gpui::Pixels = px(320.);
+/// The list box of the 按群设置 sheet: its section header, 6 rows and half
+/// of the next, so the cut row says it scrolls (2.9).
+fn notify_list_max() -> gpui::Pixels {
+    crate::ui::native::tokens::height::ROW
+        + widgets::half_row_cap(crate::ui::native::metrics::FORM_ROW, 6)
+}
 
 impl Render for NotificationsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

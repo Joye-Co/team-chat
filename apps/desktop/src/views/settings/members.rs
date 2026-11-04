@@ -545,7 +545,12 @@ impl MembersPage {
                 r.deploy_prod,
                 |r, v| r.deploy_prod = v,
             ))
-            .row(FormRow::new(s::RULES_SPEND).control(spend))
+            // At rest the amount is right-aligned (2.8 number field).
+            .row(FormRow::new(s::RULES_SPEND).control(if owner {
+                widgets::number_at_rest("rules-spend-rest", spend, &self.spend, window, cx)
+            } else {
+                spend.into_any_element()
+            }))
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
         // Alert under the group.
