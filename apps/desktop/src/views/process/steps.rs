@@ -264,10 +264,12 @@ fn render_step(
                 Some(true) => p::STEP_TOOL_OK,
                 Some(false) => p::STEP_TOOL_FAILED,
             };
-            let result_color = match ok {
-                None => colors.text_3,
-                Some(true) => colors.success_text,
-                Some(false) => colors.danger_text,
+            // The result as a status badge: the state color stays on its
+            // symbol, never on the words (D3).
+            let kind = match ok {
+                None => crate::ui::native::StatusKind::Working,
+                Some(true) => crate::ui::native::StatusKind::Done,
+                Some(false) => crate::ui::native::StatusKind::Failed,
             };
             let mut header = div()
                 .flex()
@@ -275,7 +277,7 @@ fn render_step(
                 .gap(space::S6)
                 .t_small()
                 .child(div().text_color(colors.text_2).child(p::STEP_TOOL))
-                .child(div().text_color(result_color).child(result));
+                .child(crate::ui::native::status_badge(kind, result, cx));
             if let Some(code) = exit_code {
                 header = header.child(
                     div()
@@ -391,7 +393,7 @@ fn render_step(
                     el.child(
                         div()
                             .t_small()
-                            .text_color(colors.danger_text)
+                            .text_color(colors.text_1)
                             .child(clip(&e, 600)),
                     )
                 })
@@ -441,7 +443,7 @@ fn render_step(
                 el.child(
                     div()
                         .t_small()
-                        .text_color(colors.danger_text)
+                        .text_color(colors.text_1)
                         .child(clip(&e, 600)),
                 )
             }),

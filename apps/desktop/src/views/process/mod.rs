@@ -628,7 +628,7 @@ fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
         .overflow_hidden()
         .child(
             div()
-                .h(px(40.))
+                .h(ui::native::tokens::height::FOOTER_ROW)
                 .pl(space::S12)
                 .pr(space::S8)
                 .flex()
@@ -762,11 +762,7 @@ impl Render for ProcessView {
                                 .items_center()
                                 .gap(space::S8)
                                 .t_small()
-                                .text_color(if retry {
-                                    colors.danger_text
-                                } else {
-                                    colors.text_3
-                                })
+                                .text_color(if retry { colors.text_2 } else { colors.text_3 })
                                 .when(retry, |el| {
                                     el.child(ui::icon(
                                         ui::Sym::Alert,
