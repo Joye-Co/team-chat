@@ -84,7 +84,9 @@ Done for staging and production on 2026-11-03 (bot `监测`, ops group `运维`,
 `bun scripts/staging-smoke.ts [--env staging] [--upload-mb 100]` measures the V1 bar of
 [docs/PRODUCT.md](PRODUCT.md#v1-production-use-by-5-people-and-5-bots) against a deployed env with
 the owner token and a bot token (it uses one group named `smoke`, made once). Report:
-`.tmp/staging-smoke/report.json`, no tokens. Run it after each staging deploy, before production.
+`.tmp/staging-smoke/report.json` (or `--out <folder>`), no tokens. Run it after each staging
+deploy, before production. `--base http://127.0.0.1:<port>` with `--owner-token` and `--bot-token`
+files runs it against a local `wrangler dev`.
 
 | Check | Bar | Staging, 2026-11-04 (server 1.0.0) |
 | --- | --- | --- |
@@ -94,6 +96,7 @@ the owner token and a bot token (it uses one group named `smoke`, made once). Re
 | Reconnect with a cursor after 5 missed messages | none lost or doubled | 0 lost, 0 doubled |
 | Live notification for a mention | `notify: "mention"` | `mention` |
 | 100 MB upload, read back | same size and SHA-256 | upload 31 s, download 3.8 s, same bytes |
+| Card v2 ask from the bot (`ask.from` requester and owners), send to the owner's live event | p95 < 300 ms | not measured on staging yet (needs a 1.1 server); local `wrangler dev`: p95 6–8 ms (50 samples) |
 
 Not proved by this script, so not claimed as measured: the reconnect after macOS sleep and the
 notification banner on screen (app behavior, checked by hand on the app), a 10,000-message topic

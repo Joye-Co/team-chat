@@ -12,12 +12,15 @@
 //   notify       a bot message that mentions the owner arrives live with notify "mention"
 //   upload       a file of --upload-mb MB (default 100; 0 skips) is accepted and reads back with
 //                the same size and SHA-256
+//   cards        p95 time from the bot's send of a Card v2 ask (ask.from requester and owners,
+//                the per-send requester and member lookups, GAPS PC-16) to its ack, and to the
+//                owner's live event (bar: 300 ms); skipped on a server before 1.1
 // Round trips include the network: `pingMs` (WebSocket ping) is reported next to them so the
 // server part can be read off. Sleep and the macOS notification banner are app behavior and are
 // not measured here.
 //
 // Usage: bun scripts/staging-smoke.ts [--env staging] [--base <url>] [--owner-token <file>]
-//        [--bot-token <file>] [--upload-mb 100] [--samples 20]
+//        [--bot-token <file>] [--upload-mb 100] [--samples 20] [--out <folder>]
 // Token files default to ~/.config/team-chat/<env>/owner-token and the newest
 // ~/.config/team-chat/<env>/bot-*.token. Report (no tokens): .tmp/staging-smoke/report.json.
 // Exits 1 when a check fails or a bar is missed.
@@ -47,7 +50,7 @@ const OWNER = readFileSync(opt("owner-token") ?? join(CONF, "owner-token"), "utf
 const BOT = readFileSync(opt("bot-token") ?? newestBot(), "utf8").trim();
 const UPLOAD_MB = Number(opt("upload-mb", "100"));
 const SAMPLES = Number(opt("samples", "20"));
-const OUT = join(ROOT, ".tmp/staging-smoke");
+const OUT = opt("out") ?? join(ROOT, ".tmp/staging-smoke");
 
 type Frame = { t: string; rid?: string; [k: string]: any };
 
@@ -119,6 +122,13 @@ async function http(token: string, method: string, path: string, body?: unknown)
   return text ? JSON.parse(text) : null;
 }
 
+// At most 20 sends per second per member (server LIMITS.write): a fast (local) server needs a gap.
+const PACE_MS = 60;
+const pace = async (t0: number) => {
+  const left = PACE_MS - (performance.now() - t0);
+  if (left > 0) await new Promise((r) => setTimeout(r, left));
+};
+
 const pct = (xs: number[], p: number) => {
   const s = [...xs].sort((a, b) => a - b);
   return Math.round(s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)] * 10) / 10;
@@ -159,6 +169,7 @@ for (let i = 0; i < SAMPLES; i++) {
   await owner.call({ t: "send", groupId, topicId, clientMsgId: id, body: `送达 ${i} 检索词${run}` });
   await got;
   delivery.push(performance.now() - t0);
+  await pace(t0);
 }
 report.delivery = stats(delivery);
 check("delivery", report.delivery.p95 < 300, `p95 ${report.delivery.p95} ms`);
@@ -254,6 +265,42 @@ if (UPLOAD_MB > 0) {
   const same = back.length === size && createHash("sha256").update(back).digest("hex") === sha256;
   report.upload = { bytes: size, status: put.status, ready: meta?.status === "ready", putMs, getMs, sameBytes: same };
   check("upload", put.ok && meta?.status === "ready" && same, `status ${put.status}, same ${same}`);
+}
+
+// Card v2 asks from the bot in the topic: each send resolves `requester` and `owners`.
+{
+  const card = (i: number) => ({
+    v: 2,
+    rev: 1,
+    intent: "ask",
+    title: `冒烟卡片 ${i}`,
+    fallback: `冒烟卡片 ${i}：选一个`,
+    ask: { id: `a${i}`, from: ["requester", "owners"] },
+    blocks: [{ id: "pick", type: "decision", label: "选一个", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }],
+    actions: [{ id: "send", label: "发送", kind: "submit", style: "primary", inputs: ["pick"] }],
+  });
+  const bc = new Conn(BOT);
+  await bc.open();
+  const ackMs: number[] = [];
+  const deliveryMs: number[] = [];
+  try {
+    for (let i = 0; i < SAMPLES; i++) {
+      const id = `smoke-${run}-c${i}`;
+      const got = owner.wait((f) => f.t === "event" && f.event.type === "message.created" && f.event.data.message.clientMsgId === id);
+      const t0 = performance.now();
+      await bc.call({ t: "send", groupId, topicId, clientMsgId: id, body: `冒烟卡片 ${i}`, cardV2: card(i) });
+      ackMs.push(performance.now() - t0);
+      await got;
+      deliveryMs.push(performance.now() - t0);
+      await pace(t0);
+    }
+    report.cards = { ack: stats(ackMs), delivery: stats(deliveryMs) };
+    check("cards", report.cards.delivery.p95 < 300, `p95 ${report.cards.delivery.p95} ms`);
+  } catch (err) {
+    if (ackMs.length > 0) throw err;
+    report.cards = { skipped: String((err as Error).message ?? err) };
+  }
+  bc.close();
 }
 
 owner.close();
