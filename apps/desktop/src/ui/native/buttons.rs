@@ -307,7 +307,7 @@ pub fn toolbar_item(
     let name = name.into();
     let ink = match kind {
         ToolbarItemKind::Prominent => k.on_accent,
-        ToolbarItemKind::Toggled if emphasized => k.accent,
+        ToolbarItemKind::Toggled if emphasized => k.accent_text,
         _ if emphasized => k.label,
         _ => k.secondary,
     };

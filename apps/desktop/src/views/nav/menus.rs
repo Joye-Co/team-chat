@@ -13,7 +13,7 @@ use crate::{
         NewTopic, OpenArtifacts, OpenDesk, OpenMembers, OpenSettings, Quit, ToggleSideChat,
         ToggleSidePanel, ToggleSidebar,
     },
-    copy::{fill, nav, rail, settings, topic_rail},
+    copy::{connection, fill, nav, rail, settings, topic_rail},
 };
 
 gpui::actions!(
@@ -89,6 +89,10 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::action(topic_rail::TITLE_MACHINE, ShowTopicMachine),
             MenuItem::action(topic_rail::TITLE_CHANGES, ShowTopicChanges),
             MenuItem::separator(),
+            // v12/fx-shell: the connection state lives in the toolbar
+            // subtitle; reconnecting now is a command, not a sidebar row.
+            MenuItem::action(connection::RECONNECT, ReconnectNow),
+            MenuItem::separator(),
             MenuItem::action(nav::MENU_FULL_SCREEN, ToggleFullScreen),
         ]),
         Menu::new(nav::MENU_WINDOW).items([
@@ -158,7 +162,9 @@ gpui::actions!(
         /// 显示 › 电脑: the toolbar's 电脑 pane (a member's computer at work).
         ShowTopicMachine,
         /// 显示 › 改动: the toolbar's 改动 pane (the 话题's PR).
-        ShowTopicChanges
+        ShowTopicChanges,
+        /// 显示 › 立即重连: try the connection again now.
+        ReconnectNow
     ]
 );
 
@@ -241,6 +247,10 @@ pub fn on_view_commands<E: gpui::InteractiveElement>(
     .on_action(move |_: &ShowTopicOutputs, _, cx| outputs(cx))
     .on_action(move |_: &ShowTopicMachine, _, cx| machine(cx))
     .on_action(move |_: &ShowTopicChanges, _, cx| changes(cx))
+    .on_action({
+        let services = services.clone();
+        move |_: &ReconnectNow, _, _| services.provider.reconnect_now()
+    })
 }
 
 /// Toggles the pane of the open 话题's toolbar item `kind`, as a click on
@@ -338,6 +348,7 @@ mod tests {
             ToggleSideChat.name(),
             ToggleSidePanel.name(),
             ToggleSidebar.name(),
+            ReconnectNow.name(),
         ] {
             assert!(actions.iter().any(|a| a == action), "{action} is in 显示");
         }

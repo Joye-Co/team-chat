@@ -2,7 +2,8 @@
 //! body) the shell draws for the current [`Page`].
 
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, Entity, IntoElement, ParentElement, Pixels, Styled,
+    AnyElement, AnyView, App, AppContext as _, Entity, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, Styled,
     Window, div, prelude::FluentBuilder as _, px,
 };
 
@@ -109,3 +110,79 @@ impl Pages {
             .into_any_element()
     }
 }
+
+// --- v12/fx-shell: the empty state ---
+/// The window of a member with no 群 yet (coordinator decision, §9.4): the
+/// toolbar title 首页, then centered `secondary` Body text and two push
+/// buttons, `新建群…` (Default) and `发起私聊…`. No illustration.
+pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App) -> AnyElement {
+    use crate::{
+        copy::{nav, rail},
+        ui::native::{NativeType as _, PushSize, PushStyle, ToolbarRow, push_button},
+        views::nav::{NewGroup, StartDm},
+    };
+    let k = super::chrome::colors(cx);
+    div()
+        .flex_1()
+        .min_w(px(0.))
+        .h_full()
+        .flex()
+        .flex_col()
+        .bg(k.content)
+        .child(
+            ToolbarRow::new(rail::RAIL_DESK)
+                .leading_inset(leading)
+                .inactive(!active),
+        )
+        .child(
+            div()
+                .id("empty-state")
+                .flex_1()
+                .min_h(px(0.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                // Optically centered in the window, not under the toolbar.
+                .pb(crate::ui::native::metrics::TOOLBAR_ROW)
+                .gap(px(16.))
+                .child(
+                    div()
+                        .n_body()
+                        .text_color(k.secondary)
+                        .text_center()
+                        .child(nav::NO_GROUPS_HINT),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(crate::ui::native::metrics::SHEET_BUTTON_GAP)
+                        .child(
+                            push_button(
+                                "empty-start-dm",
+                                nav::MENU_START_DM,
+                                PushStyle::Standard,
+                                PushSize::Regular,
+                                cx,
+                            )
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(StartDm), cx)
+                            }),
+                        )
+                        .child(
+                            push_button(
+                                "empty-new-group",
+                                nav::MENU_NEW_GROUP,
+                                PushStyle::Default,
+                                PushSize::Regular,
+                                cx,
+                            )
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(NewGroup), cx)
+                            }),
+                        ),
+                ),
+        )
+        .into_any_element()
+}
+// --- end v12/fx-shell ---

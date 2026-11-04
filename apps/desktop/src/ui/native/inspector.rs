@@ -124,33 +124,55 @@ impl RenderOnce for InspectorSection {
     }
 }
 
-/// A label/value row (§9.3): label `secondary` at the leading edge, value
-/// `label` at the trailing edge, Body 13, 24 pt.
+/// A label/value row (§9.3): label `secondary` in a fixed leading column
+/// ([`metrics::LABEL_COLUMN`], cut at the tail), at least
+/// [`metrics::LABEL_GAP`] before the value; the value `label` at the
+/// trailing edge, one line, cut at the tail. Body 13, 24 pt. A long value
+/// never runs over its label.
 pub fn label_value(label: impl Into<SharedString>, value: impl IntoElement, cx: &App) -> gpui::Div {
+    label_value_with(label, value, metrics::LABEL_COLUMN, cx)
+}
+
+/// [`label_value`] with a label column `column` wide (a form whose labels
+/// are longer than the inspector's).
+pub fn label_value_with(
+    label: impl Into<SharedString>,
+    value: impl IntoElement,
+    column: gpui::Pixels,
+    cx: &App,
+) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .w_full()
+        .min_w(px(0.))
         .min_h(metrics::INSPECTOR_ROW)
         .flex()
         .items_center()
-        .gap(px(8.))
+        .gap(metrics::LABEL_GAP)
         .child(
             div()
                 .flex_none()
+                .w(column)
                 .n_body()
                 .text_color(k.secondary)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
                 .child(label.into()),
         )
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
+                .overflow_hidden()
                 .flex()
                 .justify_end()
                 .n_body()
                 .n_figures()
                 .text_color(k.label)
-                .child(value),
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(div().min_w(px(0.)).max_w_full().overflow_hidden().text_ellipsis().child(value)),
         )
 }
 
@@ -262,7 +284,9 @@ impl RenderOnce for ListRow {
 }
 
 /// A determinate bar (§5.7): 4 pt, radius 2, `quaternary` track, `label`
-/// fill (or the state color when it shows a state). `value` is 0–1.
+/// fill (or the state color when it shows a state). `value` is 0–1. This is
+/// the one progress drawing of the app: plan steps, budgets, downloads and
+/// uploads all use it (no segmented or dashed bars).
 pub fn determinate_bar(value: f32, color: Option<Hsla>, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
@@ -277,4 +301,11 @@ pub fn determinate_bar(value: f32, color: Option<Hsla>, cx: &App) -> gpui::Div {
                 .rounded(metrics::BAR_RADIUS)
                 .bg(color.unwrap_or(k.label)),
         )
+}
+
+/// A plan of `done` out of `total` steps as a determinate bar (never a
+/// row of segments).
+pub fn steps_bar(done: usize, total: usize, color: Option<Hsla>, cx: &App) -> gpui::Div {
+    let value = if total == 0 { 0. } else { done as f32 / total as f32 };
+    determinate_bar(value, color, cx)
 }

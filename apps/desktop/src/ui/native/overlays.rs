@@ -69,13 +69,14 @@ pub mod spot {
 }
 
 /// Configures a gpui-component dialog as a Tahoe alert (§7.2): 260 wide,
-/// centered in its window, `sheet` fill, radius 22, the glass edge, no close
+/// attached at the top center under the toolbar row like a sheet (a
+/// window-modal alert), `sheet` fill, radius 22, the glass edge, no close
 /// button; Escape cancels. Lay out its inside with [`super::AlertLayout`].
 pub fn native_alert(dialog: Dialog, cx: &App) -> Dialog {
     let k = native_colors(cx);
     dialog
         .entrance(SHEET_ENTRANCE)
-        .centered()
+        .margin_top(metrics::TOOLBAR_ROW)
         .width(metrics::ALERT_WIDTH)
         .close_button(false)
         .keyboard(true)

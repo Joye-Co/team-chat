@@ -64,9 +64,13 @@ for the AI-specific parts (composer pickers, inspector). Images:
 | --- | --- |
 | Window | Min 960 × 620, default 1280 × 820. Content background `content` (§4). |
 | Sidebar | A floating panel inset 8 pt from the window's top, leading and bottom edges, width 248 (drag 200–320), corner radius 18 (concentric with the 26 pt window corner), fill `sidebar`, 0.5 pt edge `glassEdge`, shadow `float` (§4). The traffic lights sit inside it (system position: red light centre about 25, 26 pt from the window corner). The content background runs under the 8 pt gap. |
-| Toolbar row | 52 pt, transparent over the content. Leading: title (15 pt semibold) over subtitle (11 pt, `secondary`), starting 20 pt after the sidebar. Trailing: toolbar groups (§5.1), 36 pt tall with 8 pt above and below, 12 pt from the inspector or window edge. At most three groups. |
+| Toolbar row | 52 pt, transparent over the content. Leading: title (15 pt semibold) over subtitle (11 pt, `secondary`), starting 20 pt after the visible sidebar edge (`metrics::CONTENT_LEADING`, 12 pt from the page column, which starts in the sidebar's 8 pt gap). Trailing: toolbar groups (§5.1), 36 pt tall with 8 pt above and below, 12 pt from the inspector or window edge. At most three groups. |
 | Scroll edge | Content that scrolls under the toolbar fades out over 24 pt (scroll edge effect); no hairline under the toolbar. |
-| Inspector | Width 280, full height edge to edge (Tahoe inspectors do not float), fill `sidebar`, a 1 px `separator` on its leading edge. Toggle with the toolbar item `sidebar.trailing` and ⌥⌘I (View menu). |
+| Content inset | One leading edge for the whole content column: the toolbar title, list headers and rows, transcript avatars and detail titles all start at `metrics::CONTENT_LEADING` (20 pt after the sidebar). With the sidebar hidden the shell shifts the page so content still starts 20 pt from the window edge. |
+| Inspector | Width 280 (`metrics::INSPECTOR_WIDTH`), full height edge to edge (Tahoe inspectors do not float), fill `sidebar`, a 1 px `separator` on its leading edge. Toggle with the toolbar item `sidebar.trailing` and ⌥⌘I (View menu). |
+| Wide panes | 单独问, the 产出 pane and 实时查看 are 400 (`metrics::WIDE_PANE_WIDTH`). One width per pane kind on every screen; the shell sets it, so the trailing column never jumps. A window without room floats the pane over the page. |
+| Pane top | Pane content starts below the 52 pt toolbar row on every screen (`metrics::PANE_TOP`). A pane with a header (单独问, 实时查看, the 产出 pane) draws it in a 52 pt row at its top; the inspector has none, so the shell starts it below the row. |
+| Connection | While the connection is down the toolbar subtitle says `wifi.slash` 连接已断开 · 8 秒后重连 (`secondary`), and 显示 › 立即重连 retries now. Nothing about it sits at the bottom of the sidebar. |
 | Split dividers | 0.5 pt `separator`, 8 pt drag area. |
 
 ## 3. Typography
@@ -98,7 +102,7 @@ red = problem, green = done). Use the macOS semantic values:
 | --- | --- | --- | --- |
 | `content` | #FFFFFF | #1E1E1E | textBackgroundColor |
 | `window` | #FFFFFF | #1E1E1E | settings window background |
-| `sheet` | #FFFFFF | #2C2C2E | sheets, alerts, popovers, menus (menus at 92 %) |
+| `sheet` | #FFFFFF | #2C2C2E | sheets, alerts, popovers, menus (opaque: without a real blur a translucent menu shows the rows behind it) |
 | `sidebar` | #F7F7F8 | #2A2A2C | sidebar and inspector glass (Tahoe Finder measures 250 gray in light) |
 | `group` | #000000 at 4 % | #FFFFFF at 6 % | grouped form section fill: quiet gray, never a white card |
 | `label` | #000000 at 85 % | #FFFFFF at 85 % | labelColor |
@@ -109,9 +113,11 @@ red = problem, green = done). Use the macOS semantic values:
 | `fill` | #000000 at 5 % | #FFFFFF at 8 % | control fill (push button, segmented track) |
 | `fillHover` | #000000 at 8 % | #FFFFFF at 12 % | borderless and toolbar button hover |
 | `selection` | #000000 at 6 % | #FFFFFF at 10 % | sidebar selection (Tahoe: gray fill, accent symbol and text) and unfocused list selection |
-| `accent` | #1D1D1F | #F5F5F7 | app accent (ink): default button, focused selection, switch on, checkbox on |
-| `onAccent` | #FFFFFF | #1D1D1F | text and symbols on `accent` |
-| `focus` | accent at 50 % | accent at 50 % | 3 pt focus ring outside the control |
+| `accent` | #6E6E73 | #6E6E73 | app accent: graphite while the system accent is multicolor (`AppleAccentColor` unset); the person's `NSColor.controlAccentColor` when they picked one. Default button, focused selection, switch on, checkbox on, menu highlight. Never white or black fills. |
+| `onAccent` | #FFFFFF | #FFFFFF | text and symbols on `accent` (5.1:1 on graphite) |
+| `accentText` | `label` | `label` | the accent as text or a symbol on a gray selection (sidebar selection, toggled toolbar item): the system accent when one is picked, else `label` (graphite text on gray does not read) |
+| `ink` | #1D1D1F | #F5F5F7 | the strongest text of the older tokens; never a fill |
+| `focus` | accent at 35 % | accent at 35 % | 3 pt focus halo outside the control |
 | `glassEdge` | #FFFFFF at 70 % | #FFFFFF at 12 % | 0.5 pt inner edge of floating glass |
 | `amber` | #FF9500 | #FF9F0A | systemOrange: needs you |
 | `blue` | #007AFF | #0A84FF | systemBlue: live work |
@@ -147,7 +153,9 @@ shape. The text inside every control is Body 13 pt unless noted.
   Large: 28 pt tall capsule, 16 pt padding: only the bottom buttons of sheets and alerts and the
   login window.
 - Standard: fill `fill`, text `label`. Hover: none. Pressed: `fillHover`.
-- Default (one per view at most, Return activates it): fill `accent`, text `onAccent`.
+- Default (one per view at most, Return activates it): fill `accent`, text `onAccent`. Never
+  inside list rows: rows use Standard Small buttons; the Default action of a row lives in the
+  open item's decision bar or sheet.
 - Destructive: a standard button whose title says what it destroys; the alert that follows
   makes the red choice. Never red outlines.
 - A title that opens more UI ends with `…` (编辑…, 退出登录…, 邀请成员…).
@@ -161,7 +169,8 @@ shape. The text inside every control is Body 13 pt unless noted.
 
 ### 5.4 Switches, checkboxes, radio buttons
 - Switch in a grouped form row: small, 32 × 18 (knob 16, pill). Regular 40 × 24 only for a
-  section's master switch. On: `accent` track; off: `quaternary` track; knob white with shadow.
+  section's master switch. On: `accent` track; off: `quaternary` track; knob white with a soft
+  shadow and a 0.5 pt black edge (20 % in dark, 10 % in light), so it shows on any track.
 - Checkbox 16 × 16, radius 4; on: `accent` fill with an `onAccent` `checkmark` 11 pt.
 - Radio 16 × 16 circle; on: `accent` with an `onAccent` 6 pt dot.
 
@@ -186,6 +195,9 @@ shape. The text inside every control is Body 13 pt unless noted.
 - Spinner (`ProgressView` style) for unknown waits; no skeleton shimmer; no "加载中…" text next to
   a spinner. A determinate bar is 4 pt tall, radius 2, track `quaternary`, fill `label`, or the
   state color when it shows a state.
+- `ui::native::determinate_bar` (and `steps_bar` for n of m plan steps) is the one progress
+  drawing of the app: plans, budgets, uploads and downloads all use it. No segmented, dashed or
+  stepped bars.
 
 ## 6. Icons (SF Symbols)
 
@@ -222,6 +234,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Problem | `exclamationmark.triangle.fill` in `red` |
 | Waiting on someone | `clock` in `secondary` |
 | Computer (team machine) | `desktopcomputer`; laptop `laptopcomputer`; Mac mini `macmini` |
+| Phone (a signed-in device) | `iphone` |
 | Cloud runner | `cloud` |
 | Settings tabs | 通用 `gearshape`, 账号 `person.crop.circle`, 通知 `bell`, 成员 `person.2`, 机器 `macmini`, 外观 `paintpalette`, 快捷键 `command` |
 | Lock / needs approval | `lock` |
@@ -281,7 +294,8 @@ shape. The text inside every control is Body 13 pt unless noted.
 ### 7.1 Sheets
 - Attached to their window: slide down from under the toolbar row (0.25 s ease-out), centered
   horizontally, width 460 (forms) or 560 (lists), radius 22, fill `sheet`, shadow `float`; the
-  window behind dims with black at 20 % (light) or 40 % (dark). Only one sheet at a time.
+  whole window behind dims with black at 20 % (light) or 40 % (dark), toolbar row and sidebar
+  included. Only one sheet at a time.
 - Layout: title (Title 2) top-leading at 24 pt insets, optional one-line explanation (Body,
   `secondary`), the form, then buttons at the bottom trailing edge: `取消` then the default
   button, 12 pt apart, 20 pt from the edges. Escape = 取消, Return = default.
@@ -291,19 +305,26 @@ shape. The text inside every control is Body 13 pt unless noted.
 - For confirmations and errors that block: app icon 48 pt, title (Title 2 at 13 pt bold in the
   Tahoe alert layout), message, optional checkbox (e.g. 同时删除这台 Mac 上的记录), buttons stacked
   full width in the Tahoe style: default on top, `取消` below; the destructive choice has red text.
+  `取消` is always Standard (`alert_button` enforces it), so next to a destructive choice nothing
+  is filled. Titles end with the full-width `？`.
+- A window-modal alert attaches at the top center under the toolbar row, like a sheet, and dims
+  the whole window.
 - Used for: 退出登录…, 离开群…, 停止成员的工作…, 删除…
 
 ### 7.3 Menus and popovers
-- Menus: radius 12, fill `sheet` at 92 % with `glassEdge` and `float`, 5 pt inner padding,
-  rows 24 pt, Body 13 pt, a leading SF Symbol 13 pt for all items of a group or for none,
+- Menus: radius 12, opaque `sheet` fill with `glassEdge` and `float` (dark adds a 0.5 pt black
+  outer hairline), 5 pt inner padding, rows 24 pt with no gap, Body 13 pt, a leading SF Symbol 13 pt for all items of a group or for none,
   shortcut column in `secondary`, 1 px separators inset to the text column. Hover: a rounded row
-  inset 5 pt, radius 6, `accent` fill, `onAccent` text.
+  inset 5 pt, radius 6, `accent` fill, `onAccent` text. This holds for every menu: the app sets
+  gpui-component's `MenuStyle` (`theme::apply_menu_style`, vendored in
+  `third_party/gpui-component`), so `PopupMenu`, dropdown menus and context menus all draw it.
 - Context menus on every row, message, card, member, 产出 and file. Show no keyboard shortcuts
   in context menus. Every context-menu item also exists in the main UI or the menu bar.
 - Popovers: radius 12, `sheet` fill, `float` shadow, an arrow pointing at the control; close on
   outside click. One at a time.
 
 ### 7.4 No toasts
+- No in-UI keyboard hint lines either: shortcuts live in the menu bar.
 - Inline status in the place it changed (a row shows 已发送 / 没有发出 · 重试), a sidebar count, or a
   system notification when the app is in the background. Errors that block use an alert.
 
@@ -343,6 +364,10 @@ Panes:
   when a member works on it, or nothing), title 13 pt (unread: Semibold), trailing 11 pt
   `secondary` count or time. Needs you: `amber` symbol. Unread count: gray capsule 11 pt.
 - 私聊 section: avatar 16 pt + name.
+- Sidebar style 以成员为中心 keeps the destinations 首页 / 产出 / 成员 and lists one row per
+  member: avatar 16, name, a 6 pt state dot at the trailing edge (`amber` something waits on me,
+  `blue` working); headers 在做, 空闲, 不在. A busy member opens to its 话题. Never a comma list
+  of names in one row.
 - Selection (Tahoe): a rounded rect inset 10 pt from the panel sides, radius 7, `selection`
   fill; the selected row's symbol and text use `accent`. No hover fill. No account row, avatar
   strip or settings button at the bottom (HIG: nothing critical at the bottom of a sidebar).
@@ -371,7 +396,9 @@ Panes:
 ### 9.3 Inspector (topic)
 - Sections in this order: 负责, 计划, 改动, 产出, 用到的决定, 在哪干活, 用时和成本.
 - Header: Section style with a disclosure chevron; content rows Body 13 pt; label `secondary`
-  left, value `label` right, or one value per row.
+  left, value `label` right, or one value per row. `label_value` gives the label a fixed 72 pt
+  column, keeps at least 8 pt before the value and cuts both at the tail: a long value never
+  runs over its label.
 - Actions are small push buttons or a trailing `arrow.up.forward` borderless button, never
   "展开 ⌄" / "看改动" text links.
 - 在哪干活 shows the computer or the cloud runner: symbol, name, state dot, `secondary` detail.
@@ -381,6 +408,8 @@ Panes:
 - Rows 56 pt: avatar 32, title Headline, one `secondary` line, trailing time; needs-you rows show
   trailing small push buttons (`看看`, default `批准`). Selection opens the topic.
 - Empty: centered `secondary` Body text `没有要你处理的事`. No illustrations.
+- No 群 yet: the toolbar title 首页, centered `secondary` Body text, then `发起私聊…` and the
+  Default `新建群…`. No illustration.
 
 ### 9.5 成员
 - Two panes: list (avatar 32, name Headline, 岗位 · state Subheadline; 52 pt rows; segmented

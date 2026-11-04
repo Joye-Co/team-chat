@@ -574,7 +574,11 @@ impl RootView {
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
                 // Groups too: the first 群 replaces the welcome (§8.5).
-                if changes.any(|c| matches!(c, Change::Session | Change::Groups)) {
+                // v12/fx-shell: Connection too: the toolbar subtitle says
+                // 连接已断开 · n 秒后重连 while it is down.
+                if changes.any(|c| {
+                    matches!(c, Change::Session | Change::Groups | Change::Connection)
+                }) {
                     cx.notify();
                 }
             }),
@@ -724,13 +728,16 @@ impl Render for RootView {
                 .child(crate::views::shell::chrome::menu_accent(self.rail.clone()))
                 .into_any_element()
         });
-        // No 群 yet: the sidebar and one welcome, nothing else (§8.5, U06).
+        // No 群 yet: the sidebar and the 首页 empty state (v12/fx-shell:
+        // centered text and two push buttons, no illustration).
         if self.services.provider.groups().is_empty() {
+            let leading = if rail_shown {
+                crate::ui::native::metrics::CONTENT_LEADING
+            } else {
+                theme::TRAFFIC_LIGHTS_INSET
+            };
             return root.flex().flex_row().children(rail).child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .child(crate::views::welcome::Welcome),
+                crate::views::shell::pages::empty_page(leading, active, window, cx),
             );
         }
         let page = nav.page();
@@ -747,16 +754,32 @@ impl Render for RootView {
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
         let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
-        // The title starts 20 pt after the sidebar, or past the traffic
-        // lights when the sidebar is hidden.
+        // v12/fx-shell: one leading content inset. The title starts 20 pt
+        // after the visible sidebar edge (`CONTENT_LEADING` from the page
+        // column), or past the traffic lights when the sidebar is hidden;
+        // then the page column shifts by the sidebar's 8 pt gap so lists
+        // still start 20 pt from the window edge.
         let leading = if rail_shown {
-            crate::ui::native::metrics::TOOLBAR_LEADING
+            crate::ui::native::metrics::CONTENT_LEADING
         } else {
-            theme::TRAFFIC_LIGHTS_INSET
+            theme::TRAFFIC_LIGHTS_INSET - crate::ui::native::metrics::SIDEBAR_INSET
         };
         let page_el = self
             .pages
             .render(page, &pane, leading, active, &self.services, window, cx);
+        let page_el = if rail_shown {
+            page_el
+        } else {
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .flex()
+                .pl(crate::ui::native::metrics::SIDEBAR_INSET)
+                .bg(crate::views::shell::chrome::colors(cx).content)
+                .child(page_el)
+                .into_any_element()
+        };
         let pane_el = self.panes.render(&pane, pane_w, floats, cx);
         root.flex()
             .flex_row()
