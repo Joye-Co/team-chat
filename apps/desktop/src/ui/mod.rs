@@ -25,7 +25,6 @@ pub mod chip;
 pub mod composer;
 pub mod controls;
 pub mod emoji;
-pub mod gallery;
 pub mod icons;
 pub mod motion;
 // --- v12/kit: the native component kit (docs/design/NATIVE.md) ---

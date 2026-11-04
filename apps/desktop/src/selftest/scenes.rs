@@ -75,27 +75,6 @@ pub struct Scene {
 /// Every scene, in the default order.
 pub const SCENES: &[Scene] = &[
     Scene {
-        name: "components",
-        about: "The component gallery: every shared component of DESIGN.md §7 in its states",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: |s, c, cx| open_gallery(s, c, 0, cx),
-    },
-    Scene {
-        name: "components-2",
-        about: "The component gallery: the composer, overlays and surfaces",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: |s, c, cx| open_gallery(s, c, 1, cx),
-    },
-    Scene {
-        name: "components-v3",
-        about: "The component gallery: v3 tokens (surfaces, member tints, states, shadows), buttons, tags, rings, rail rows and motion",
-        start: Start::V2,
-        setup: |_, _| {},
-        open: |s, c, cx| open_gallery(s, c, 2, cx),
-    },
-    Scene {
         name: "main",
         about: "First 群 of the sidebar with its newest ordinary 话题 open",
         start: Start::SignedIn,
@@ -737,9 +716,6 @@ pub fn all() -> Vec<&'static Scene> {
         // --- inc-refs ---
         crate::views::refs::scenes::SCENES,
         // --- end inc-refs ---
-        // --- v11/pl-sf-symbols ---
-        crate::ui::sf_symbols::scene::SCENES,
-        // --- end v11/pl-sf-symbols ---
         // --- v12/kit ---
         crate::ui::native::scene::SCENES,
         // --- end v12/kit ---
@@ -988,11 +964,6 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         return Some(check);
     }
     // --- end inc-refs ---
-    // --- v11/pl-sf-symbols ---
-    if name == "sf-symbols" {
-        return Some(crate::ui::sf_symbols::scene::ready);
-    }
-    // --- end v11/pl-sf-symbols ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -1028,11 +999,6 @@ pub fn verify_check(name: &str) -> Option<Verify> {
         return Some(check);
     }
     // --- end v11/media ---
-    // --- v11/pl-sf-symbols ---
-    if name == "sf-symbols" {
-        return Some(crate::ui::sf_symbols::scene::verify);
-    }
-    // --- end v11/pl-sf-symbols ---
     match name {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
@@ -1290,23 +1256,6 @@ pub fn open_login(
             }
         });
         root
-    })
-    .map(|(handle, _)| handle)
-    .map_err(|e| e.to_string())
-}
-
-/// The component gallery (DESIGN.md §16) at 1440 x 900.
-pub fn open_gallery(
-    _services: Services,
-    content: Size<Pixels>,
-    page: u8,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| crate::ui::gallery::Gallery::new(page, window, cx))
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())
