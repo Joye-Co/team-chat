@@ -1156,8 +1156,11 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
 
 fn weekday(at: Millis) -> (String, String, String) {
     use chrono::{Datelike as _, Local, TimeZone as _};
-    let Some(t) = Local.timestamp_millis_opt(at).single() else {
-        return Default::default();
+    let Some(t) =
+        crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single())
+    else {
+        let unknown = crate::views::shell::clock(at);
+        return (unknown.clone(), unknown.clone(), unknown);
     };
     let days: Vec<&str> = c::WEEKDAYS.split(' ').collect();
     let w = days

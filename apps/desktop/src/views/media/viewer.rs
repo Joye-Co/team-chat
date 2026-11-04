@@ -142,14 +142,10 @@ fn apply(state: &Entity<MediaState>, opening: &Opening, cx: &mut App) {
     });
 }
 
-/// `11-03 09:40` in local time.
+/// `09:40` today, `11-03` earlier, `未知` for a missing time: the app's one
+/// zero-safe formatter.
 fn when(at: i64) -> String {
-    use chrono::TimeZone as _;
-    chrono::Local
-        .timestamp_millis_opt(at)
-        .single()
-        .map(|t| t.format("%m-%d %H:%M").to_string())
-        .unwrap_or_default()
+    crate::views::shell::clock(at)
 }
 
 impl Focusable for MediaViewer {
