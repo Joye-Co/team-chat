@@ -9,14 +9,14 @@ use std::collections::HashSet;
 
 use gpui::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Subscription, Window, div,
+    Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{Sizable as _, WindowExt as _};
 
 use super::{Failure, Phase, Updater, version};
 use crate::copy::{fill, overlays as o, update as u};
 use crate::ui::native::{
-    AlertLayout, PushStyle, alert_button, metrics, native_colors,
+    AlertLayout, NativeType as _, PushStyle, alert_button, metrics, native_colors,
     overlays::{app_icon, native_alert},
     spinner,
 };
@@ -74,6 +74,8 @@ pub fn download_share(phase: &Phase) -> Option<f32> {
 /// then the install. Manual and failed updates say what to do.
 pub struct UpdateSheet {
     updater: Entity<Updater>,
+    /// 查看更新内容 was chosen: the notes show in the alert.
+    notes_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -82,8 +84,54 @@ impl UpdateSheet {
         let subscriptions = vec![cx.observe(&updater, |_, _, cx| cx.notify())];
         Self {
             updater,
+            notes_open: false,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Under the ready alert's body (F49): the 12 muted 查看更新内容 link,
+    /// or, once chosen, the notes themselves in a scrolling well.
+    fn notes(&self, notes: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+        let notes = notes.trim();
+        if notes.is_empty() {
+            return None;
+        }
+        let k = native_colors(cx);
+        if self.notes_open {
+            return Some(
+                div()
+                    .id("update-ready-notes")
+                    .w_full()
+                    .max_h(metrics::ALERT_WIDTH / 2.)
+                    .overflow_y_scroll()
+                    .p(crate::ui::native::tokens::space::S8)
+                    .rounded(metrics::GROUP_RADIUS)
+                    .border_1()
+                    .border_color(k.separator)
+                    .bg(k.group)
+                    .n_footnote()
+                    .text_color(k.label)
+                    .child(notes.to_string())
+                    .into_any_element(),
+            );
+        }
+        Some(
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
+                    crate::ui::native::borderless_text("update-ready-notes-link", u::NOTES, cx)
+                        .text_color(k.secondary)
+                        .n_footnote()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.notes_open = true;
+                            cx.notify();
+                        })),
+                )
+                .into_any_element(),
+        )
     }
 }
 
@@ -108,6 +156,7 @@ impl Render for UpdateSheet {
         let u1 = updater.clone();
         let u2 = updater.clone();
         let alert = |title: String| AlertLayout::new(title).icon(app_icon(metrics::ALERT_ICON));
+        let notes = self.notes(&info.notes, cx);
         let layout = match &phase {
             Phase::Ready { .. } => alert(fill(
                 u::READY_TITLE,
@@ -117,6 +166,7 @@ impl Render for UpdateSheet {
                 u::READY_BODY,
                 &[("current", version::CURRENT), ("version", v)],
             ))
+            .when_some(notes, |l, n| l.checkbox(n))
             .buttons([
                 button("update-restart", o::UPDATE_RESTART, PushStyle::Default, cx)
                     .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.install_now(cx))),

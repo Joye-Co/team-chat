@@ -723,15 +723,18 @@ impl Render for Switcher {
                 heights.push((h, true));
             }
         } else if let Some(e) = failed {
-            let title = if e == SearchError::Offline {
-                search_copy::SEARCH_OFFLINE
+            let (title, why) = if e == SearchError::Offline {
+                (
+                    search_copy::SEARCH_OFFLINE,
+                    search_copy::SEARCH_OFFLINE_DESC,
+                )
             } else {
-                search_copy::SEARCH_FAILED
+                (search_copy::SEARCH_FAILED, search_copy::SEARCH_FAILED_DESC)
             };
             let retry = palette::state_button("switcher-retry", search_copy::SEARCH_RETRY, cx)
                 .on_click(cx.listener(|this, _, _, cx| this.requery(cx)))
                 .into_any_element();
-            let (el, h) = palette::error_row("switcher-failed", title, Some(retry), cx);
+            let (el, h) = palette::error_row("switcher-failed", title, why, Some(retry), cx);
             children.push(el);
             heights.push((h, true));
         }
@@ -859,7 +862,13 @@ impl Render for Switcher {
                 ))
             })
             .when(list || has_query, |el| {
-                el.child(palette::footer(palette::basic_hints(cx), cx))
+                // ↑↓ and ↩ only while a row can be chosen.
+                let hints = if self.rows.is_empty() {
+                    palette::close_hints(cx)
+                } else {
+                    palette::basic_hints(cx)
+                };
+                el.child(palette::footer(hints, cx))
             })
     }
 }
@@ -981,8 +990,12 @@ pub mod palette {
         views::rail::model::{RowState, row_state},
     };
 
-    /// The time column: 12 muted tabular, right-aligned, at one x in every row.
-    pub const TIME_SLOT: Pixels = space::S48;
+    /// The time column: 12 muted tabular, right-aligned, at one x in every
+    /// row. It holds the longest date ("2025/12/31"), so the StatusBadge
+    /// before it keeps one x too (2.11).
+    pub fn time_slot() -> Pixels {
+        space::S48 + space::S16 + space::S6
+    }
     /// The reserved ↩ column (shown on the selected row only).
     pub const RETURN_SLOT: Pixels = height::COUNT;
     /// The list's padding (list p 4).
@@ -1065,11 +1078,9 @@ pub mod palette {
             .gap(space::S8)
             .children(status)
             .child(
-                // At least the slot; a long date (2023/11/4) widens its own
-                // row only, the right edge stays at one x.
                 div()
                     .flex_none()
-                    .min_w(TIME_SLOT)
+                    .w(time_slot())
                     .flex()
                     .justify_end()
                     .n_subheadline()
@@ -1141,10 +1152,22 @@ pub mod palette {
         let max = (spot::ROW * (VISIBLE_ROWS + 0.5)).min(room.max(spot::ROW * 3.));
         let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
         if total <= max {
-            total
-        } else {
-            super::whole_rows_height(heights, max - PEEK) + PEEK
+            return total;
         }
+        // The cut always lands on a row: the last row that can show PEEK
+        // under everything above it. A group label before it shows whole.
+        let mut top = gpui::Pixels::ZERO;
+        let mut cut = None;
+        for &(h, is_row) in heights {
+            if top + PEEK > max {
+                break;
+            }
+            if is_row {
+                cut = Some(top + PEEK);
+            }
+            top += h;
+        }
+        cut.unwrap_or_else(|| super::whole_rows_height(heights, max - PEEK) + PEEK)
     }
 
     /// One key hint of the footer: its Kbd caps, then the word.
@@ -1190,6 +1213,12 @@ pub mod palette {
         ]
     }
 
+    /// The hints while no row can be chosen (no match, a failed search):
+    /// esc 关闭 only (2.11, F5).
+    pub fn close_hints(cx: &App) -> Vec<gpui::Div> {
+        vec![hint(&[copy::KEY_ESCAPE], copy::HINT_CLOSE, cx)]
+    }
+
     /// No match (2.13 compact): a 16 icon, "没有找到“X”" and one action.
     pub fn no_match(query: &str, action: AnyElement, cx: &App) -> gpui::Div {
         div()
@@ -1233,23 +1262,34 @@ pub mod palette {
         )]
     }
 
-    /// A failed load in the list (2.15): an Alert row with 重试.
+    /// A failed load in the list (2.15): an Alert row (title, the cause
+    /// or what to do in 14 muted, 重试).
     pub fn error_row(
         id: impl Into<ElementId>,
         title: impl Into<SharedString>,
+        description: impl Into<SharedString>,
         retry: Option<AnyElement>,
         cx: &App,
     ) -> (AnyElement, Pixels) {
+        // The title-only row plus the description line and its gap.
+        let h = height::LIST_ROW + crate::ui::native::tokens::text::UI.1 + space::S2;
         (
             div()
                 .flex_none()
-                .h(height::LIST_ROW)
+                .h(h)
                 .mx(spot::INSET)
                 .flex()
                 .items_center()
-                .child(page_alert(id, AlertKind::Error, title, None, retry, cx))
+                .child(page_alert(
+                    id,
+                    AlertKind::Error,
+                    title,
+                    Some(description.into()),
+                    retry,
+                    cx,
+                ))
                 .into_any_element(),
-            height::LIST_ROW,
+            h,
         )
     }
 }

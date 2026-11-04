@@ -24,7 +24,7 @@ use crate::{
         controls::placeholder_input,
         native::{
             NativeTextField, NativeType as _, PushSize, SheetLayout, SheetWidth, disabled_push,
-            metrics, native_colors, native_sheet, popup_button, sheet_buttons,
+            metrics, native_colors, native_sheet_keyboard, popup_button, sheet_buttons,
         },
     },
     views::rail::model as rail_model,
@@ -273,7 +273,9 @@ pub fn open_new_topic(
             let body = view.read(cx).body.clone();
             body.update(cx, |b, cx| b.focus(window, cx));
         }
-        native_sheet(dialog, SheetWidth::Form, cx)
+        // ⌘N and the rail's 新话题 button send one action, many times a
+        // day: the sheet opens at once, with no slide (review-animations 9).
+        native_sheet_keyboard(dialog, SheetWidth::Form, cx)
             .px(px(0.))
             .child(view.clone())
     });

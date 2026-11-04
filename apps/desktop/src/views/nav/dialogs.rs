@@ -194,6 +194,46 @@ fn dependent_row(text: gpui::SharedString, cx: &App) -> gpui::Div {
         .child(text)
 }
 
+gpui::actions!(
+    member_picker,
+    [PickPrevious, PickNext, PickToggle, PickSubmit]
+);
+
+/// The key context of a [`MemberPicker`]'s search field: ↓ moves into the
+/// list, ⌘↩ runs the default button.
+pub const PICK_FILTER_CONTEXT: &str = "MemberPickerFilter";
+/// The key context of a [`MemberPicker`]'s list (a Tab stop): ↑↓ move the
+/// highlight, Space toggles it, ↩ and ⌘↩ run the default button.
+pub const PICK_LIST_CONTEXT: &str = "MemberPickerList";
+
+/// The member picker's keys (call once at start-up).
+pub fn bind_keys(cx: &mut App) {
+    use gpui::KeyBinding;
+    cx.bind_keys([
+        KeyBinding::new("up", PickPrevious, Some(PICK_FILTER_CONTEXT)),
+        KeyBinding::new("down", PickNext, Some(PICK_FILTER_CONTEXT)),
+        KeyBinding::new("cmd-enter", PickSubmit, Some(PICK_FILTER_CONTEXT)),
+        KeyBinding::new("up", PickPrevious, Some(PICK_LIST_CONTEXT)),
+        KeyBinding::new("down", PickNext, Some(PICK_LIST_CONTEXT)),
+        KeyBinding::new("space", PickToggle, Some(PICK_LIST_CONTEXT)),
+        KeyBinding::new("enter", PickSubmit, Some(PICK_LIST_CONTEXT)),
+        KeyBinding::new("cmd-enter", PickSubmit, Some(PICK_LIST_CONTEXT)),
+    ]);
+}
+
+/// The keyboard highlight of a multi-select [`MemberPicker`] after a move
+/// by `delta` over `n` rows: the first ↓ lands on the first row, then it
+/// stops at the ends (a Mac table does not wrap).
+pub fn pick_step(active: Option<usize>, delta: isize, n: usize) -> Option<usize> {
+    if n == 0 {
+        return None;
+    }
+    Some(match active {
+        None => 0,
+        Some(ix) => (ix as isize + delta).clamp(0, n as isize - 1) as usize,
+    })
+}
+
 /// How a [`MemberPicker`] chooses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PickMode {
@@ -219,6 +259,8 @@ pub struct MemberPicker {
     scroll: gpui::ScrollHandle,
     rows: Vec<gpui::AnyElement>,
     empty: gpui::SharedString,
+    /// The list's focus (a Tab stop with the 3 px ring), when it takes keys.
+    list_focus: Option<gpui::FocusHandle>,
 }
 
 impl MemberPicker {
@@ -235,7 +277,15 @@ impl MemberPicker {
             scroll: scroll.clone(),
             rows,
             empty: empty.into(),
+            list_focus: None,
         }
+    }
+
+    /// Makes the list a Tab stop that takes the picker's keys
+    /// ([`PICK_LIST_CONTEXT`]); it draws the focus ring while focused.
+    pub fn list_focus(mut self, focus: &gpui::FocusHandle) -> Self {
+        self.list_focus = Some(focus.clone());
+        self
     }
 
     /// One row: the checkbox (many) or the trailing check (one), the 24
@@ -249,13 +299,23 @@ impl MemberPicker {
         chosen: bool,
         cx: &App,
     ) -> gpui::Stateful<gpui::Div> {
+        Self::row_highlighted(id, m, mode, chosen, false, cx)
+    }
+
+    /// [`MemberPicker::row`] with the keyboard highlight of a multi-select
+    /// list: the muted row fill (the checkbox shows what is chosen).
+    pub fn row_highlighted(
+        id: gpui::SharedString,
+        m: &Member,
+        mode: PickMode,
+        chosen: bool,
+        highlighted: bool,
+        cx: &App,
+    ) -> gpui::Stateful<gpui::Div> {
         use crate::ui::native::tokens::{icon, radius, space};
         let k = native_colors(cx);
-        let surface = if chosen && mode == PickMode::One {
-            k.selection
-        } else {
-            k.content
-        };
+        let filled = highlighted || (chosen && mode == PickMode::One);
+        let surface = if filled { k.selection } else { k.content };
         let name: gpui::SharedString = m.name.clone().into();
         let tip = name.clone();
         div()
@@ -268,7 +328,7 @@ impl MemberPicker {
             .items_center()
             .gap(space::S8)
             .map(|d| {
-                if chosen && mode == PickMode::One {
+                if filled {
                     d.bg(k.selection)
                 } else {
                     d.hover(|s| s.bg(k.fill.opacity(0.5)))
@@ -332,22 +392,32 @@ impl MemberPicker {
 }
 
 impl gpui::RenderOnce for MemberPicker {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         use crate::ui::native::tokens::{layout, space};
         let k = native_colors(cx);
         let empty = self.rows.is_empty();
         let list_h = PICK_ROW * PICK_VISIBLE + space::S4 * 2. + layout::BORDER * 2.;
+        let focused = self
+            .list_focus
+            .as_ref()
+            .is_some_and(|f| f.is_focused(window));
         div()
             .w_full()
             .flex()
             .flex_col()
             .gap(space::S12)
-            .child(SearchField::new(
-                gpui::SharedString::from(format!("{}-filter", self.id)),
-                &self.filter,
-            ))
             .child(
                 div()
+                    .w_full()
+                    .key_context(PICK_FILTER_CONTEXT)
+                    .child(SearchField::new(
+                        gpui::SharedString::from(format!("{}-filter", self.id)),
+                        &self.filter,
+                    )),
+            )
+            .child(
+                div()
+                    .id(gpui::SharedString::from(format!("{}-list", self.id)))
                     .relative()
                     .flex_none()
                     .w_full()
@@ -356,6 +426,10 @@ impl gpui::RenderOnce for MemberPicker {
                     .bg(k.content)
                     .border_1()
                     .border_color(k.separator)
+                    .when_some(self.list_focus.as_ref(), |d, f| {
+                        d.key_context(PICK_LIST_CONTEXT).track_focus(f)
+                    })
+                    .when(focused, |d| d.shadow(k.focus_ring()))
                     .overflow_hidden()
                     .child(
                         div()
@@ -385,7 +459,11 @@ impl gpui::RenderOnce for MemberPicker {
                             .right_0()
                             .bottom_0()
                             .w(space::S12)
-                            .child(gpui_component::scroll::Scrollbar::vertical(&self.scroll)),
+                            // Shown at rest while the list overflows (2.9).
+                            .child(
+                                gpui_component::scroll::Scrollbar::vertical(&self.scroll)
+                                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+                            ),
                     ),
             )
     }
@@ -515,6 +593,10 @@ pub struct NewGroupForm {
     title: gpui::SharedString,
     /// The server's last refusal, shown under the list until the next edit.
     refusal: Option<AdminError>,
+    /// The list's focus: Tab or ↓ from the search field reach it.
+    list_focus: gpui::FocusHandle,
+    /// The keyboard highlight, an index into the shown rows.
+    active: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -559,7 +641,10 @@ impl NewGroupForm {
                 &filter,
                 window,
                 |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::Change => cx.notify(),
+                    InputEvent::Change => {
+                        this.active = None;
+                        cx.notify()
+                    }
                     // Return runs the default button from the search field too.
                     InputEvent::PressEnter { .. } => this.submit(window, cx),
                     _ => {}
@@ -577,7 +662,52 @@ impl NewGroupForm {
             scroll: gpui::ScrollHandle::new(),
             title: gpui::SharedString::default(),
             refusal: None,
+            list_focus: cx.focus_handle().tab_stop(true),
+            active: None,
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// The members the search field lets through, in list order.
+    fn shown(&self, cx: &App) -> Vec<&Member> {
+        let query = self.filter.read(cx).value().trim().to_lowercase();
+        self.members
+            .iter()
+            .filter(|m| query.is_empty() || m.name.to_lowercase().contains(&query))
+            .collect()
+    }
+
+    /// ↑ / ↓: moves the highlight; from the search field ↓ moves into the
+    /// list, and ↑ on the first row goes back to the field.
+    fn step(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let n = self.shown(cx).len();
+        let in_list = self.list_focus.is_focused(window);
+        if !in_list {
+            if delta < 0 {
+                return;
+            }
+            self.list_focus.focus(window, cx);
+            self.active = pick_step(None, delta, n);
+        } else if delta < 0 && self.active == Some(0) {
+            self.filter.read(cx).focus_handle(cx).focus(window, cx);
+            self.active = None;
+        } else {
+            self.active = pick_step(self.active, delta, n);
+        }
+        if let Some(ix) = self.active {
+            self.scroll.scroll_to_item(ix);
+        }
+        cx.notify();
+    }
+
+    /// Space: checks or unchecks the highlighted row.
+    fn toggle_active(&mut self, cx: &mut Context<Self>) {
+        let id = self
+            .active
+            .and_then(|ix| self.shown(cx).get(ix).map(|m| m.id.clone()));
+        if let Some(id) = id {
+            let on = !self.selected.contains(&id);
+            self.toggle(&id, on, cx);
         }
     }
 
@@ -661,10 +791,11 @@ impl NewGroupForm {
 }
 
 impl Render for NewGroupForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
-        let query = self.filter.read(cx).value().trim().to_lowercase();
         let new_group = self.mode == FormMode::NewGroup;
+        // The highlight shows only while the list has the keyboard.
+        let highlight = self.active.filter(|_| self.list_focus.is_focused(window));
         let typed = self.name.read(cx).value().to_string();
         // A field problem (a name that is too long) turns the default button
         // off and marks the field; an empty name only turns it off.
@@ -679,21 +810,23 @@ impl Render for NewGroupForm {
             };
         let selected: HashSet<&str> = self.selected.iter().map(|s| s.as_str()).collect();
         let rows: Vec<_> = self
-            .members
-            .iter()
-            .filter(|m| query.is_empty() || m.name.to_lowercase().contains(&query))
-            .map(|m| {
+            .shown(cx)
+            .into_iter()
+            .enumerate()
+            .map(|(ix, m)| {
                 let id = m.id.clone();
                 let checked = selected.contains(m.id.as_str());
                 // The whole row toggles the checkbox (a Mac table row).
-                MemberPicker::row(
+                MemberPicker::row_highlighted(
                     gpui::SharedString::from(format!("pick-row-{}", m.id)),
                     m,
                     PickMode::Many,
                     checked,
+                    highlight == Some(ix),
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
+                    this.active = Some(ix);
                     let on = !this.selected.contains(&id);
                     this.toggle(&id, on, cx)
                 }))
@@ -747,7 +880,8 @@ impl Render for NewGroupForm {
             } else {
                 nav::NO_MEMBERS_MATCH
             },
-        );
+        )
+        .list_focus(&self.list_focus);
         // The footer's left slot (2.9): the count, or the error.
         let status = if error {
             crate::ui::native::sheet::sheet_status_error(line, cx).into_any_element()
@@ -778,7 +912,13 @@ impl Render for NewGroupForm {
                 )),
             );
         }
-        layout.body(picker).buttons([cancel, create])
+        div()
+            .w_full()
+            .on_action(cx.listener(|this, _: &PickPrevious, window, cx| this.step(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &PickNext, window, cx| this.step(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PickToggle, _, cx| this.toggle_active(cx)))
+            .on_action(cx.listener(|this, _: &PickSubmit, window, cx| this.submit(window, cx)))
+            .child(layout.body(picker).buttons([cancel, create]))
     }
 }
 
@@ -816,6 +956,20 @@ fn open_sheet<V: gpui::Render>(
             .px(px(0.))
             .child(view.clone())
     });
+}
+
+/// Opens the new-group sheet as the keyboard leaves it: the list has the
+/// focus, the second row is highlighted and checked (a screenshot scene of
+/// ↓ ↓ Space).
+pub fn open_new_group_keyboard(services: Services, window: &mut Window, cx: &mut App) {
+    let form = cx.new(|cx| {
+        let mut f = NewGroupForm::new(services, FormMode::NewGroup, window, cx);
+        f.active = Some(1);
+        f.toggle_active(cx);
+        f
+    });
+    let focus = form.read(cx).list_focus.clone();
+    open_sheet(form, focus, SheetWidth::List, window, cx);
 }
 
 /// Opens the sheet that adds members to a 群 (from the 群 menu).
@@ -879,7 +1033,7 @@ impl DmPicker {
         )];
         Self {
             filter,
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             members,
             active: 0,
             scroll: gpui::ScrollHandle::new(),
@@ -950,31 +1104,26 @@ impl Render for DmPicker {
         let cancel = cancel.on_click(|_, window, cx| window.close_dialog(cx));
         let open = disabled_push(open, empty, cx)
             .on_click(cx.listener(|this, _, window, cx| this.confirm(window, cx)));
+        // The picker's keys (one set for every member picker): ↑↓ move the
+        // chosen row from the search field or the list, ↩ opens it.
         div()
-            .key_context(super::switcher::CONTEXT)
-            .track_focus(&self.focus)
-            .on_action(
-                cx.listener(|this, _: &super::switcher::SelectPrevious, _, cx| this.select(-1, cx)),
-            )
-            .on_action(
-                cx.listener(|this, _: &super::switcher::SelectNext, _, cx| this.select(1, cx)),
-            )
-            .on_action(
-                cx.listener(|this, _: &super::switcher::OpenSelected, window, cx| {
-                    this.confirm(window, cx)
-                }),
-            )
+            .on_action(cx.listener(|this, _: &PickPrevious, _, cx| this.select(-1, cx)))
+            .on_action(cx.listener(|this, _: &PickNext, _, cx| this.select(1, cx)))
+            .on_action(cx.listener(|this, _: &PickSubmit, window, cx| this.confirm(window, cx)))
             .w_full()
             .child(
                 SheetLayout::new(nav::START_DM)
                     .explanation(o::START_DM_EXPLANATION)
-                    .body(MemberPicker::new(
-                        "start-dm",
-                        &self.filter,
-                        &self.scroll,
-                        rows,
-                        nav::NO_MEMBERS_MATCH,
-                    ))
+                    .body(
+                        MemberPicker::new(
+                            "start-dm",
+                            &self.filter,
+                            &self.scroll,
+                            rows,
+                            nav::NO_MEMBERS_MATCH,
+                        )
+                        .list_focus(&self.focus),
+                    )
                     .buttons([cancel, open]),
             )
     }
@@ -1130,6 +1279,17 @@ mod tests {
             validate_group_name("\u{3000}\n").unwrap_err(),
             nav::GROUP_NAME_REQUIRED
         );
+    }
+
+    #[test]
+    fn picker_highlight_enters_at_the_top_and_stops_at_the_ends() {
+        assert_eq!(pick_step(None, 1, 0), None);
+        assert_eq!(pick_step(None, 1, 3), Some(0));
+        assert_eq!(pick_step(Some(0), 1, 3), Some(1));
+        assert_eq!(pick_step(Some(2), 1, 3), Some(2));
+        assert_eq!(pick_step(Some(0), -1, 3), Some(0));
+        // A filter that shrinks the list keeps the highlight on a row.
+        assert_eq!(pick_step(Some(7), 1, 3), Some(2));
     }
 
     #[test]

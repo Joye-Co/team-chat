@@ -1,7 +1,7 @@
 //! The settings window's height follows its pane (NATIVE.md §8): the pane is
 //! measured as it is laid out and the window frame changes with its top edge
 //! fixed, animated in the app (AppKit's own resize animation, about 0.2 s),
-//! at once in self-tests and on the first frame. While a sheet is open the
+//! at once in self-tests, on the first frame and under Reduce Motion. While a sheet is open the
 //! window is at least as tall as the sheet needs.
 
 use std::cell::Cell;
@@ -56,7 +56,8 @@ impl Fit {
             return;
         }
         self.applied.set(target);
-        let animate = self.fitted.replace(true) && super::prefs::saving();
+        // Reduce Motion: the frame changes at once (review-animations).
+        let animate = self.fitted.replace(true) && super::prefs::saving() && !cx.reduce_motion();
         // After this frame and outside the window update: AppKit calls back
         // into the window while it resizes.
         cx.spawn(async move |cx| {

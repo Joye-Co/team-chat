@@ -5,9 +5,8 @@
 //! alert that can also delete this Mac's local copy.
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement, PathPromptOptions, Render, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, ElementId, Entity, Focusable as _, IntoElement, ParentElement,
+    PathPromptOptions, Render, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
@@ -33,9 +32,9 @@ use crate::{
     views::topic_list::relative_time,
 };
 
-/// Device rows shown before the list scrolls inside its group (2.6): six
-/// and a half, so the cut row says there is more.
-const DEVICE_ROWS_SHOWN: f32 = 6.5;
+/// Whole device rows shown before the list scrolls inside its group (2.9):
+/// six, and half of the seventh says there is more.
+const DEVICE_ROWS_SHOWN: usize = 6;
 
 pub const NAME_MAX: usize = 64;
 pub const ROLE_MAX: usize = 64;
@@ -100,6 +99,8 @@ pub struct AccountPage {
     failed_device: Option<String>,
     /// The 退出登录 alert's checkbox.
     wipe: bool,
+    /// The scroll of the capped device list.
+    devices_scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -134,6 +135,7 @@ impl AccountPage {
             selected_device: None,
             failed_device: None,
             wipe: false,
+            devices_scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         this.fill_from_me(window, cx);
@@ -550,20 +552,33 @@ impl AccountPage {
                                 avatar_note.unwrap_or_else(|| widgets::quiet(s::AVATAR_HINT, cx)),
                             ),
                     );
+                // A long name or role ends with "…" at rest (C1-02).
                 let fields = sheet_form()
                     .child(sheet_form_row_invalid(
                         s::NAME,
-                        NativeTextField::new("profile-name", &page.name)
-                            .full_width()
-                            .error(bad(Field::Name)),
+                        widgets::field_at_rest(
+                            "profile-name-rest",
+                            NativeTextField::new("profile-name", &page.name)
+                                .full_width()
+                                .error(bad(Field::Name)),
+                            &page.name,
+                            window,
+                            cx,
+                        ),
                         bad(Field::Name),
                         cx,
                     ))
                     .child(sheet_form_row_invalid(
                         s::ROLE,
-                        NativeTextField::new("profile-role", &page.role)
-                            .full_width()
-                            .error(bad(Field::Role)),
+                        widgets::field_at_rest(
+                            "profile-role-rest",
+                            NativeTextField::new("profile-role", &page.role)
+                                .full_width()
+                                .error(bad(Field::Role)),
+                            &page.role,
+                            window,
+                            cx,
+                        ),
                         bad(Field::Role),
                         cx,
                     ));
@@ -761,14 +776,12 @@ impl AccountPage {
                     .map(|d| self.device_row(d, window, cx))
                     .collect();
                 GroupedForm::new()
-                    .row(
-                        div()
-                            .id("device-rows")
-                            .w_full()
-                            .max_h(metrics::FORM_ROW * DEVICE_ROWS_SHOWN)
-                            .overflow_y_scroll()
-                            .child(widgets::item_rows(rows, tokens::height::SM, cx)),
-                    )
+                    .row(widgets::capped_list(
+                        "device-rows",
+                        widgets::item_rows(rows, tokens::height::SM, cx),
+                        widgets::half_row_cap(metrics::FORM_ROW, DEVICE_ROWS_SHOWN),
+                        &self.devices_scroll,
+                    ))
                     .into_any_element()
             }
             (Some(_), _) => GroupedForm::new()
