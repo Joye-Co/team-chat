@@ -557,6 +557,18 @@ impl Client {
         Ok(self.store().runs_since(since)?)
     }
 
+    /// 重试 (`POST /v1/runs/:id/retry`): a new run with the same request; stores the answer.
+    pub fn retry_run(&self, run_id: &str) -> JoinHandle<Result<BotRun, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let id = run_id.to_string();
+        self.spawn(async move {
+            let run = http.retry_run(&id).await?;
+            store_run_and_emit(&shared, &run)?;
+            Ok(run)
+        })
+    }
+
     /// Pauses a run for 接管 (`POST /v1/runs/:id/pause`) and stores the answer.
     pub fn pause_run(&self, run_id: &str) -> JoinHandle<Result<BotRun, ClientError>> {
         let http = self.http();

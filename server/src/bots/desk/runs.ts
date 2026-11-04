@@ -11,12 +11,18 @@ import { refsText } from "../refs";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, type RunRow } from "./core";
 
+/** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
+export interface RunRequest {
+  m: TopicMessage;
+  followUps: { authorId: string; body: string }[];
+}
+
 export abstract class DeskRuns extends DeskCore {
   // -------------------------------------------------------------------------
   // Starting a run
   // -------------------------------------------------------------------------
 
-  protected async start(m: TopicMessage, followUpOf?: RunRow, followUps: { authorId: string; body: string }[] = []): Promise<void> {
+  protected async start(m: TopicMessage, followUpOf?: RunRow, followUps: { authorId: string; body: string }[] = [], retryOf?: string): Promise<void> {
     const botId = this.botId as string;
     const runner = await loadRunner(this.env.DB, botId);
     if (!runner?.enabled) return;
@@ -31,8 +37,8 @@ export abstract class DeskRuns extends DeskCore {
     // A side chat topic (单独问) gets a read-only run that answers only the asker.
     const kind = claim.contextOf ? RUN_KIND_ASIDE : null;
     this.sql.exec(
-      `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at, follow_up_of, kind)
-       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at, follow_up_of, kind, retry_of)
+       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?)`,
       runId,
       m.groupId,
       m.topicId,
@@ -43,7 +49,10 @@ export abstract class DeskRuns extends DeskCore {
       now,
       followUpOf?.id ?? null,
       kind,
+      retryOf ?? null,
     );
+    // The request as it came, so the run can be retried with the same one.
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `request:${runId}`, JSON.stringify({ m, followUps } satisfies RunRequest));
     const r = this.run(runId) as RunRow;
     await this.serial(runId, async () => {
       try {

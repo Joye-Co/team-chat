@@ -471,6 +471,20 @@ export function registerBotRoutes(): void {
   });
 
   registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/retry",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      const row = await visibleRun(env.DB, a, params.id);
+      const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      const run = unwrap(await deskStub(env, row.bot_id).retry(row.bot_id, row.id, who));
+      await auditStatement(env.DB, a, { action: "run.retry", target: row.id, details: { botId: row.bot_id, runId: run.id } }).run();
+      return run;
+    },
+  });
+
+  registerRoute({
     method: "PUT",
     path: "/v1/runs/:id/acceptance",
     auth: "member",

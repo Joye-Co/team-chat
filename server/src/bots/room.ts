@@ -130,6 +130,16 @@ registerRoomRpc("bots.context", (room, actor, args): SourceContext => {
   return { title: topic.title, messages };
 });
 
+/** The author and body of a message that started a run (retrying a run made before 1.1). */
+registerRoomRpc("bots.request", (room, actor, args) => {
+  const { messageId } = args as { messageId: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  const m = room.sql
+    .exec<{ author_id: string; body: string }>("SELECT author_id, body FROM messages WHERE id = ? AND deleted_at IS NULL", messageId)
+    .toArray()[0];
+  return m ? { authorId: m.author_id, body: m.body } : null;
+});
+
 /** Checks that a topic exists in this group (external bots start runs in it). */
 registerRoomRpc("bots.topicExists", (room, actor, args) => {
   const { topicId } = args as { topicId: string };

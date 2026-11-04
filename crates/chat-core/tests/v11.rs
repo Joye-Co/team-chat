@@ -92,6 +92,7 @@ fn run(id: &str, status: RunStatus, created: u64) -> BotRun {
         acceptance: None,
         paused_by: None,
         kind: None,
+        retry_of: None,
     }
 }
 

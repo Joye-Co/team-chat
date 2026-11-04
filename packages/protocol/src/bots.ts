@@ -44,6 +44,8 @@ export const BotRun = z.object({
   pausedBy: Id.optional(),
   /** "aside": a read-only side chat run (单独问). Absent = a normal run. Unknown values read as normal. */
   kind: z.string().min(1).max(32).optional(),
+  /** 1.1: the run this one retries (`POST /v1/runs/:id/retry`). */
+  retryOf: Id.optional(),
 });
 export type BotRun = z.infer<typeof BotRun>;
 

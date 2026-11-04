@@ -92,6 +92,18 @@ impl HttpClient {
     /// 1.1, the run's requester or an owner: pauses an active run for 接管 (docs/protocol.md,
     /// "Run fields, pause and resume"). Answers with the run (`pausedBy` set); `conflict` when
     /// it ended, is paused already, or its machine cannot pause.
+    /// 1.1 重试: a new run with the same request (`POST /v1/runs/:id/retry`); the answer has
+    /// `retryOf`.
+    pub async fn retry_run(&self, run_id: &str) -> ApiResult<BotRun> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/runs/{}/retry", enc(run_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     pub async fn pause_run(&self, run_id: &str) -> ApiResult<BotRun> {
         self.call::<(), _>(
             Method::POST,

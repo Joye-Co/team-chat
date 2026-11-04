@@ -340,6 +340,49 @@ describe("1.1 runs", () => {
     d.close();
   });
 
+  it("retry an ended run with the same request, for the requester or an owner, audited", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, []);
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await startRun(w, c, d);
+    const retry = (m: TestMember, id = runId) => api(`/v1/runs/${id}/retry`, { token: m.token, body: {} });
+    // Not while it runs.
+    expect((await retry(w.human)).status).toBe(409);
+    const seq = d.done(runId, { status: "failed", error: "tests failed" });
+    await d.acked(runId, seq);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "failed");
+    expect((await retry(w.other)).status).toBe(403);
+    expect((await retry(w.bot)).status).toBe(403);
+    const again = await retry(w.human);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ retryOf: runId, topicId, requestedBy: w.human.id });
+    expect(again.body.id).not.toBe(runId);
+    const assign = await d.next((f) => f.t === "run.assign" && f.runId === again.body.id);
+    expect(assign.prompt).toContain("@dev ship it");
+    const got = await api(`/v1/runs/${again.body.id}`, { token: w.human.token });
+    expect(got.body.retryOf).toBe(runId);
+    // One active run per topic: no second retry while the first one runs.
+    expect((await retry(w.owner)).status).toBe(409);
+    const audits = await audited("run.retry", runId);
+    expect(audits.results.map((r) => r.actor_id)).toEqual([w.human.id]);
+    // An owner retries too, once the retry ended.
+    d.send({ t: "run.accept", runId: again.body.id });
+    const seq2 = d.done(again.body.id, { status: "failed", error: "again" });
+    await d.acked(again.body.id, seq2);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === again.body.id && e.data.run.status === "failed");
+    // A run made before requests were kept: the request is read from its message.
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
+      state.storage.sql.exec("DELETE FROM meta WHERE key = ?", `request:${runId}`);
+    });
+    const third = await retry(w.owner, runId);
+    expect(third.status, JSON.stringify(third.body)).toBe(200);
+    expect(third.body).toMatchObject({ retryOf: runId, requestedBy: w.human.id });
+    const assign3 = await d.next((f) => f.t === "run.assign" && f.runId === third.body.id);
+    expect(assign3.prompt).toContain("@dev ship it");
+    c.close();
+    d.close();
+  });
+
   it("let a run's daemon upload files and make 产出 as the runner member, shown as proof in the done card", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, ["output"]);

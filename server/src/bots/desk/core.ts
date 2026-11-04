@@ -76,6 +76,9 @@ export type RunRow = {
   // desk-5 (1.1 interaction loop)
   /** 1 while the CLI is inside a turn (turn.started without turn.completed). */
   in_turn: number;
+  // desk-6 (1.1 retry)
+  /** The run this one retries (`POST /v1/runs/:id/retry`), or null. */
+  retry_of: string | null;
 };
 
 export const ACTIVE = "ended_at IS NULL";
@@ -261,6 +264,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             CREATE TABLE run_refs_seen (run_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY (run_id, message_id));
           `,
         },
+        {
+          // 1.1 retry: the run a run retries. Old rows read as NULL (not a retry); their request
+          // is read from the room when they are retried (meta `request:{runId}` holds it for new runs).
+          name: "desk-6-retry",
+          up: `ALTER TABLE runs ADD COLUMN retry_of TEXT;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -327,6 +336,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (acceptance && acceptance.length > 0) run.acceptance = acceptance;
     if (r.paused_by) run.pausedBy = r.paused_by;
     if (r.kind) run.kind = r.kind;
+    if (r.retry_of) run.retryOf = r.retry_of;
     return run;
   }
 
@@ -483,7 +493,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
-  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[]): Promise<void>;
+  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[], retryOf?: string): Promise<void>;
   /** A RunEvent `output` (`chat-run`, 1.1): performed and answered by the interaction module. */
   protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, f: { at: number; serverAt?: number }): Promise<void>;
 }

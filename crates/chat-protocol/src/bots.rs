@@ -197,6 +197,13 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub kind: Option<String>,
+    /// 1.1: the run this one retries (`POST /v1/runs/:id/retry`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub retry_of: Option<String>,
 }
 
 /// `BotRun.kind` of a read-only side chat run (单独问).

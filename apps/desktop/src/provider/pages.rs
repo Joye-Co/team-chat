@@ -16,7 +16,7 @@ use crate::{
     copy::{artifact_page as ca, fill, group_page as cg, members_page as cm},
     data::{
         AdminError, AdminReply, Change, ChatProvider as _, SendRequest, pages::ArtifactResponse,
-        reply_now, v2::Decision,
+        v2::Decision,
     },
 };
 
@@ -380,34 +380,65 @@ impl CoreProvider {
             .collect()
     }
 
-    /// 重试: asks the member in the run's 话题 to run again (a normal
-    /// message that mentions it).
+    /// 重试: a new run with the same request (`POST /v1/runs/:id/retry`). A server
+    /// without that route gets the old way: a message in the run's 话题 that
+    /// mentions the member.
     pub(super) fn retry_member_problem_inner(
         &self,
         member_id: &str,
         run_id: &str,
     ) -> AdminReply<()> {
+        let (tx, rx) = futures::channel::oneshot::channel();
         let Some(a) = self.account() else {
-            return reply_now(Err(AdminError::Unsupported));
+            let _ = tx.send(Err(AdminError::Unsupported));
+            return rx;
         };
-        let week_ago = (crate::selftest::clock::now_ms() - 14 * 24 * 3_600_000).max(0) as u64;
+        // Any run the cache has, however old: the member page lists the stuck ones.
         let run = a
             .client
-            .runs_since(week_ago)
+            .runs_since(0)
             .unwrap_or_default()
             .into_iter()
             .find(|r| r.id == run_id && r.bot_id == member_id);
         let Some(run) = run else {
-            return reply_now(Err(AdminError::Unsupported));
+            let _ = tx.send(Err(AdminError::Unsupported));
+            return rx;
         };
-        let name = self.member(member_id).map(|m| m.name).unwrap_or_default();
-        self.send(SendRequest {
-            group_id: run.group_id,
-            topic_id: run.topic_id,
-            body: fill(cm::MEMBERS_RETRY_MESSAGE, &[("name", &name)]),
-            mentions: vec![member_id.to_string()],
-            quote_of: None,
+        let handle = a.client.retry_run(run_id);
+        let this = self.clone();
+        let member = member_id.to_string();
+        let change = vec![Change::Runs {
+            group_id: run.group_id.clone(),
+            topic_id: run.topic_id.clone(),
+        }];
+        a.client.spawn(async move {
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(e) => Err(chat_core::ClientError::Runtime(e.to_string())),
+            };
+            match result {
+                Ok(_) => {
+                    this.emit(change);
+                    let _ = tx.send(Ok(()));
+                }
+                Err(chat_core::ClientError::Api(chat_core::ApiError::Server { status: 404, .. })) => {
+                    // An older server: ask in the 话题 instead.
+                    let name = this.member(&member).map(|m| m.name).unwrap_or_default();
+                    this.send(SendRequest {
+                        group_id: run.group_id,
+                        topic_id: run.topic_id,
+                        body: fill(cm::MEMBERS_RETRY_MESSAGE, &[("name", &name)]),
+                        mentions: vec![member],
+                        quote_of: None,
+                    });
+                    let _ = tx.send(Ok(()));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "cannot retry a run");
+                    let _ = tx.send(Err(super::settings::admin_error(&e)));
+                }
+            }
         });
-        reply_now(Ok(()))
+        rx
     }
 }

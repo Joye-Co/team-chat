@@ -992,6 +992,7 @@ BotRun += {
   acceptance?: AcceptanceItem[]                     // at most 20; replaced as a whole
   pausedBy?: string                                 // present while paused (接管): who
   kind?: string                                     // "aside" = side chat run; absent = normal
+  retryOf?: string                                  // the run this one retries
 }
 AcceptanceItem = { text /* 1..500 */, state: "pending" | "pass" | "fail",
                    evidence?: { text? /* <= 1000 */, fileId?, url?, artifact?: ArtifactRef } }
@@ -1005,6 +1006,7 @@ Machine += { features?: string[], takeoverUrl?: string }
 | `POST /v1/runs/:id/pause` | the run's requester or an owner | | `BotRun` with `pausedBy`; `conflict` when the run ended, is paused, or its machine lacks feature `pause`; audited as `run.pause` |
 | `POST /v1/runs/:id/resume` | the run's requester or an owner | `ResumeRunRequest` | `BotRun` without `pausedBy`; `conflict` when not paused; audited as `run.resume` |
 | `PUT /v1/runs/:id/acceptance` | the run's bot | `SetRunAcceptanceRequest` | `BotRun`; `conflict` when the run ended; an equal list stores nothing |
+| `POST /v1/runs/:id/retry` | the run's requester or an owner (people) | | the new `BotRun` with `retryOf`: the same request (author, text, follow-ups) as a new run of the same runner member in the same topic; `conflict` when the run is still active, was started with `POST /v1/runs`, the topic has an active run, or the member cannot take runs; audited as `run.retry` |
 
 Rules:
 
