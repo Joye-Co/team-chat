@@ -320,14 +320,22 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
                                     .child(b20::line_input(&field, !live, window, cx)),
                             ),
                     )
+                    // Over the limit: neutral text with a red icon (owner
+                    // decision v15, field errors).
                     .child(
                         meta(div())
                             .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(space::S4)
                             .mono()
                             .text_color(if n > form21::OTHER_MAX {
-                                k.bad_ink
+                                k.ink
                             } else {
                                 k.ink_3
+                            })
+                            .when(n > form21::OTHER_MAX, |el| {
+                                el.child(ui::icon(Sym::Failed, px(12.), k.bad))
                             })
                             .child(format!("{n}/{}", form21::OTHER_MAX)),
                     ),

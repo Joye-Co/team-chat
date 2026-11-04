@@ -1572,11 +1572,19 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                                     .text_color(k.ink)
                                     .child(label.unwrap_or("").to_string()),
                             )
+                            // Over the limit: neutral text with a red icon
+                            // (owner decision v15, field errors).
                             .child(
                                 meta(div())
                                     .ml_auto()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S4)
                                     .mono()
-                                    .text_color(if over { k.bad_ink } else { k.ink_3 })
+                                    .text_color(if over { k.ink } else { k.ink_3 })
+                                    .when(over, |el| {
+                                        el.child(ui::icon(Sym::Failed, px(12.), k.bad))
+                                    })
                                     .child(counter),
                             ),
                     )
@@ -1677,6 +1685,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .line_height(px(22.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(k.ink)
+                .line_clamp(2)
                 .child(t)
         } else {
             div()
@@ -1690,7 +1699,13 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                         )
                     })
                 })
-                .child(small(div()).text_color(k.ink_2).child(t))
+                // The well previews the text; 改一下 shows all of it.
+                .child(
+                    small(div())
+                        .text_color(k.ink_2)
+                        .line_clamp(DRAFT_LINES)
+                        .child(t),
+                )
         });
     }
     div()
@@ -1706,6 +1721,9 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         .child(texts)
         .into_any_element()
 }
+
+/// Lines of draft text the well previews.
+const DRAFT_LINES: usize = 6;
 
 /// A group: a label and its blocks; a group of drafts and images is the
 /// draft well.
