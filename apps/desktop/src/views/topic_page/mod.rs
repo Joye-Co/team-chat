@@ -109,9 +109,9 @@ fn tone_of(badge: BadgeState) -> StateTone {
     }
 }
 
-/// Where a run's plan stands: `(n, total, step)`, with `n` the step it is
-/// on (or the steps done when none is on) and `step` the text of that
-/// step. `None` when the run has no plan.
+/// Where a run's plan stands: `(done, total, step)`, the one count rule of
+/// §2.12 (badge, meta and bar all say done/total), and `step` the text of
+/// the step it is on. `None` when the run has no plan.
 pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize, Option<String>)> {
     if plan.is_empty() {
         return None;
@@ -119,10 +119,7 @@ pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize, Option<String>)
     let current = plan
         .iter()
         .position(|p| matches!(p.state, PlanState::Current | PlanState::Waiting));
-    let n = current.map_or_else(
-        || plan.iter().filter(|p| p.state == PlanState::Done).count(),
-        |i| i + 1,
-    );
+    let n = plan.iter().filter(|p| p.state == PlanState::Done).count();
     Some((n, plan.len(), current.map(|i| plan[i].text.clone())))
 }
 
@@ -494,7 +491,7 @@ mod tests {
     fn plan_progress_names_the_current_step() {
         assert_eq!(
             plan_progress(&plan()),
-            Some((3, 5, Some("跑一万条消息的压测".into())))
+            Some((2, 5, Some("跑一万条消息的压测".into())))
         );
         let done = vec![
             PlanItem::new("a", PlanState::Done),
@@ -535,7 +532,8 @@ mod tests {
     fn a_run_reads_as_member_step_and_progress() {
         let r = run("now", RunStatus::Running, 3, plan());
         let line = run_state(&r, "Forge", None, Some("me"), |_| String::new());
-        assert_eq!(line.text, "Forge 在做 3/5");
+        // §2.12: done/total (2 of 5 steps done, on the third).
+        assert_eq!(line.text, "Forge 在做 2/5");
         assert_eq!(line.detail.as_deref(), Some("跑一万条消息的压测"));
         assert_eq!(line.tone, StateTone::Live);
         assert!(!line.paused);
