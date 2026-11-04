@@ -68,6 +68,9 @@ pub fn ready(_cx: &App) -> bool {
 
 /// The result of the scene's check.
 pub fn verify(_png: &std::path::Path, _cx: &mut App) -> Result<(), String> {
+    // The capture is taken: later scenes start with no sent page event (the
+    // sample 页面里的回应 lists the sent ones).
+    sent_page_events::take();
     PROBE.with(|p| {
         let p = p.borrow();
         match (&p.error, p.done) {

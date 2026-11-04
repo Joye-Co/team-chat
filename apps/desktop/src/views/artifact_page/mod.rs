@@ -1224,6 +1224,7 @@ impl ArtifactPage {
             .group(
                 nk::SearchField::new("artifacts-search", &search)
                     .sidebar()
+                    .clearable()
                     .width(px(200.)),
             )
             .group(div().flex_none().w(px(0.)));

@@ -225,6 +225,7 @@ pub struct SearchField {
     sidebar: bool,
     width: Option<Pixels>,
     focused: Option<bool>,
+    clearable: bool,
 }
 
 impl SearchField {
@@ -235,7 +236,15 @@ impl SearchField {
             sidebar: false,
             width: None,
             focused: None,
+            clearable: false,
         }
+    }
+
+    /// A clear × at the trailing edge while the field has text (it empties
+    /// the field and keeps the focus in it).
+    pub fn clearable(mut self) -> Self {
+        self.clearable = true;
+        self
     }
 
     /// The sidebar's field: the same shape with no shadow (§2.1).
@@ -301,6 +310,7 @@ impl RenderOnce for SearchField {
                     .child(placeholder_input(
                         Input::new(&self.state)
                             .appearance(false)
+                            .cleanable(self.clearable)
                             .with_size(gpui_component::Size::Small)
                             .px_0()
                             .py_0()
