@@ -1,9 +1,10 @@
-//! The 话题 page (Topic.dc.html): the existing timeline and composer under
-//! the shell's title bar (群 /, title, state sentence, pane buttons).
+//! The 话题 page (NATIVE.md §9.2): the timeline and composer under the
+//! shell's toolbar row (title = the 话题, subtitle = 群 · status words, the
+//! 单独问 / 产出 / PR group and the inspector toggle).
 //!
-//! The timeline draws in its v2 style (`timeline/v2.rs`); under it, in the
-//! same 720 pt column, the pinned decision card (`pinned.rs`) sits above the
-//! 96 pt composer.
+//! The timeline draws in its v2 style (`timeline/v2.rs`); under it, with
+//! the transcript's 24 pt side insets, the decision bar (`pinned.rs`) sits
+//! above the native composer (`composer/native.rs`).
 
 pub mod output_pane;
 mod pinned;
@@ -273,6 +274,14 @@ pub fn pane_buttons(services: &Services, group_id: &str, topic_id: &str) -> Vec<
     out
 }
 
+/// The toolbar items of a 话题 (NATIVE.md §9.2): 单独问, 产出 and PR as
+/// one group, then the inspector toggle. The member's computer opens from
+/// the inspector's 在哪干活 and the View menu, not from the toolbar.
+pub fn toolbar_buttons(mut buttons: Vec<TitleButton>) -> Vec<TitleButton> {
+    buttons.retain(|b| b.kind != TitleButtonKind::Machine);
+    buttons
+}
+
 impl PageView for TopicPage {
     fn title_bar(&self, cx: &App) -> TitleBarSpec {
         let Some((g, t)) = self.services.nav.read(cx).topic.clone() else {
@@ -285,28 +294,32 @@ impl PageView for TopicPage {
             .map(|x| crate::views::sidebar::topic_display_title(&x.title).0)
             .unwrap_or_default();
         let state = state_sentence(&self.services, &g, &t);
+        // NATIVE.md §9.2: no breadcrumb; the 群 leads the subtitle, the
+        // status words follow it (`开发 · 需要你审 PR #61`), and the shell
+        // draws the needs-you symbol from the state's tone.
         TitleBarSpec {
-            breadcrumb: group,
+            breadcrumb: None,
             title,
             style: TitleStyle::Topic,
-            subtitle: None,
+            subtitle: group,
             state: state.as_ref().map(|s| (s.text.clone(), s.tone)),
             state_detail: state.as_ref().and_then(|s| s.detail.clone()),
             state_paused: state.as_ref().is_some_and(|s| s.paused),
             state_name: state.as_ref().and_then(|s| s.name.clone()),
-            buttons: pane_buttons(&self.services, &g, &t),
+            buttons: toolbar_buttons(pane_buttons(&self.services, &g, &t)),
         }
     }
 }
 
 impl Render for TopicPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let open = self.services.nav.read(cx).topic.clone();
         let pinned = open
             .as_ref()
-            .and_then(|(g, t)| self.render_pinned(g, t, cx));
-        let column = timeline_v2::COLUMN;
+            .and_then(|(g, t)| self.render_pinned(g, t, window, cx));
+        // NATIVE.md §9.2: the decision bar and the composer take the full
+        // content width with the transcript's 24 pt side insets.
         div()
             .size_full()
             .flex()
@@ -318,19 +331,13 @@ impl Render for TopicPage {
                     .flex_none()
                     .w_full()
                     .px(timeline_v2::SIDE)
+                    .pt(space::S8)
+                    .pb(space::S16)
                     .flex()
-                    .justify_center()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(column)
-                            .pb(space::S16)
-                            .flex()
-                            .flex_col()
-                            .gap(space::S8)
-                            .children(pinned)
-                            .child(self.composer.clone()),
-                    ),
+                    .flex_col()
+                    .gap(space::S10)
+                    .children(pinned)
+                    .child(self.composer.clone()),
             )
     }
 }
