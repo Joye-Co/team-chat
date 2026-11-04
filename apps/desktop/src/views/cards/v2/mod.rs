@@ -616,6 +616,26 @@ impl Answerer {
         });
     }
 
+    /// 停止… of the run `run_id` in the card's topic: the same alert and
+    /// stop as the thread's working card (`process::stop_run`).
+    pub fn stop_run(&self, run_id: &str, window: &mut Window, cx: &mut App) {
+        let Some(services) = window
+            .root::<RootView>()
+            .flatten()
+            .map(|r| r.read(cx).services().clone())
+        else {
+            return;
+        };
+        if let Some(run) = self
+            .provider
+            .runs(&self.group_id, &self.topic_id)
+            .into_iter()
+            .find(|r| r.id == run_id)
+        {
+            crate::views::process::stop_run(&services, &run, cx);
+        }
+    }
+
     /// v11/pb-cards: scrolls the card's 话题 to message `id` and highlights it.
     pub fn open_message(&self, id: &str, window: &mut Window, cx: &mut App) {
         let Some(nav) = self.nav(window, cx) else {
@@ -1406,8 +1426,137 @@ pub(crate) fn one_line_text(text: &str) -> String {
 
 /// The whole card: header (member, state), title, blocks, footer, in one
 /// `fill` container with 14 pt insets.
+/// A card at work (§2.4 working card, R5-01): the thread's `WorkingCard`
+/// (one component): avatar 24 + `<name> 正在做：<step>` + `在做 3/5`, the one
+/// Progress, the card's title and blocks, then the time used and 查看 and
+/// 停止… (when the plan follows a run I asked for). `None`: not at work.
+fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+    use crate::copy::timeline as tl;
+    use crate::views::timeline::plan::{USED, WorkingCard, span_text};
+    let CardState::Executing { answer, progress } = ctx.state else {
+        return None;
+    };
+    if progress.waiting || !matches!(ctx.mode, CardMode::Topic | CardMode::Desk) {
+        return None;
+    }
+    let n = ui::native::native_colors(cx);
+    let p = &ctx.env.provider;
+    let step = progress
+        .current
+        .clone()
+        .unwrap_or_else(|| one_line_text(&ctx.card.title));
+    let title = fill(
+        tl::PLAN_DOING_NAMED,
+        &[("name", &ctx.author), ("step", &step)],
+    );
+    let badge = if progress.total > 0 {
+        fill(
+            c::STRIP_WORKING_COUNT,
+            &[
+                ("n", &progress.done.to_string()),
+                ("total", &progress.total.to_string()),
+            ],
+        )
+    } else {
+        c::STRIP_WORKING.to_string()
+    };
+    let bar = (progress.total > 0).then_some((progress.done, progress.done, progress.total));
+    let body = if super::v21::is_21(ctx.card) {
+        super::v21::body(ctx, window, cx)
+    } else {
+        blocks::body(ctx, window, cx)
+    };
+    let content = div()
+        .flex()
+        .flex_col()
+        .min_w(px(0.))
+        .child(self::title(ctx, false, cx))
+        .children(body);
+    // Footer: the time used and the start, then 查看 and 停止….
+    let run_id = ctx.card.all_blocks().iter().find_map(|b| match b {
+        CardV2Block::Plan { run_id, .. } => run_id.clone(),
+        _ => None,
+    });
+    let run = run_id.as_ref().and_then(|id| {
+        p.runs(&ctx.msg.group_id, &ctx.msg.topic_id)
+            .into_iter()
+            .find(|r| &r.id == id)
+    });
+    let started = run
+        .as_ref()
+        .and_then(|r| r.started_at)
+        .or(answer.as_ref().map(|a| a.at))
+        .unwrap_or(ctx.msg.created_at);
+    let used = fill(
+        tl::PLAN_FOOTER,
+        &[
+            ("used", &span_text(USED, ctx.env.now() - started)),
+            ("time", &crate::views::shell::clock(started)),
+        ],
+    );
+    let a = ctx.answerer();
+    let view = {
+        let (a, id) = (a.clone(), run_id.clone());
+        ui::native::push_button(
+            ctx.id("working-view"),
+            tl::PLAN_VIEW,
+            PushStyle::Ghost,
+            ui::native::PushSize::Small,
+            cx,
+        )
+        .on_click(move |_, window, cx| a.open_live(id.as_deref(), window, cx))
+    };
+    let me = ctx.me.as_deref();
+    let stop = run
+        .filter(|r| r.status.is_active() && crate::views::process::asked_by(r, me))
+        .map(|r| {
+            let stopping = p.run_stopping(&r.id);
+            let id = r.id.clone();
+            let a = a.clone();
+            ui::native::push_button(
+                ctx.id("working-stop"),
+                tl::PLAN_STOP,
+                PushStyle::Outline,
+                ui::native::PushSize::Small,
+                cx,
+            )
+            .loading(stopping)
+            .disabled(stopping)
+            .on_click(move |_, window, cx| a.stop_run(&id, window, cx))
+        });
+    let footer = div()
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .child(
+            ui::truncate::TruncText::new(used)
+                .flex_1()
+                .n_footnote()
+                .n_figures()
+                .text_color(n.secondary),
+        )
+        .child(view)
+        .children(stop);
+    Some(
+        WorkingCard {
+            id: ctx.id("working"),
+            member: p.member(&ctx.msg.author_id),
+            title,
+            badge: (BadgeState::Working, badge),
+            progress: bar,
+            trailing: None,
+            body: Some(content.into_any_element()),
+            footer: Some(footer.into_any_element()),
+        }
+        .render(cx),
+    )
+}
+
 fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     super::v21::interact::conflict_toast(ctx, cx);
+    if let Some(card) = working(ctx, window, cx) {
+        return card;
+    }
     let header = header(ctx, cx);
     let has_header = header.is_some();
     // --- inc-integrate: 就这张卡提问 on the header (the whole card, `blockId` `card`) ---

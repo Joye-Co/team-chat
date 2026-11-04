@@ -203,8 +203,9 @@ pub fn plan_row(
                 fill(c::PLAN_LIVE_LINE, &[("name", &name)]),
                 p.current.clone().unwrap_or_default()
             ),
-            p.step
-                .map(|s| format!("{s}/{}", p.total))
+            // One count rule (§2.12): steps done of all, as the card's badge.
+            (p.total > 0)
+                .then(|| format!("{}/{}", p.done, p.total))
                 .unwrap_or_default(),
             c::PLAN_LIVE_VIEW,
             Sym::ChevronRight,

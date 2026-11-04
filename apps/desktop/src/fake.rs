@@ -1571,6 +1571,62 @@ impl ChatProvider for FakeProvider {
         rx
     }
 
+    /// What waits on me, as the default lists it, with the question itself
+    /// as the ask's title: the asker's newest message in the 话题 (the pinned
+    /// banner then names the question, not the 话题 title).
+    fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {
+        self.todo()
+            .into_iter()
+            .filter(|t| t.reason == TodoReason::WaitingOnMe)
+            .map(|t| {
+                let from = t
+                    .topic
+                    .owner_id
+                    .clone()
+                    .unwrap_or_else(|| t.topic.created_by.clone());
+                let question = self
+                    .messages(&t.group_id, &t.topic.id, 50)
+                    .messages
+                    .into_iter()
+                    .rev()
+                    .find(|m| m.author_id == from && m.deleted_at.is_none())
+                    .and_then(|m| {
+                        // The line that asks (it ends in a question mark),
+                        // else the first line; without a leading @mention.
+                        let line = m
+                            .body
+                            .lines()
+                            .find(|l| l.trim_end().ends_with(['？', '?']))
+                            .or_else(|| m.body.lines().next())?
+                            .trim();
+                        let line = match line.strip_prefix('@') {
+                            Some(rest) => rest.split_once(' ').map_or(rest, |(_, r)| r).trim(),
+                            None => line,
+                        };
+                        Some(line.to_string())
+                    })
+                    .filter(|b| !b.trim().is_empty());
+                let review = t.topic.status == TopicStatus::WaitingReview;
+                crate::data::v2::AskItem {
+                    group_id: t.group_id,
+                    topic_id: t.topic.id.clone(),
+                    message_id: None,
+                    from,
+                    kind: if review {
+                        crate::data::v2::AskKind::Review
+                    } else {
+                        crate::data::v2::AskKind::Topic
+                    },
+                    // A review keeps the 话题 title (the change under review).
+                    title: question
+                        .filter(|_| !review)
+                        .unwrap_or_else(|| t.topic.title.clone()),
+                    at: t.topic.last_activity_at,
+                }
+            })
+            .collect()
+    }
+
     /// This week of a member from the same data as 首页's 今天完成 and
     /// 最近的产出: 话题 it owns that are done, and 产出 it made, in the last
     /// 7 days (fixtures agree, A5).
