@@ -324,6 +324,34 @@ async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
             };
             shots.push(entry);
         }
+        // Acceptance (review 3 §4): every state scene differs from the scene it
+        // starts from, so a hover or focus that draws nothing fails the run.
+        let suffix = if options.worst_case { "-worst" } else { "" };
+        for scene in &options.scenes {
+            let Some(base) = states::base(scene.name) else {
+                continue;
+            };
+            if !options.scenes.iter().any(|s| s.name == base) {
+                continue;
+            }
+            let file = |name: &str| {
+                options
+                    .dir
+                    .join(format!("{name}-{}{suffix}.png", mode.name()))
+            };
+            match capture::same_pixels(&file(scene.name), &file(base)) {
+                Ok(false) => {}
+                Ok(true) => {
+                    all_ok = false;
+                    eprintln!("{}: FAILED: draws the same pixels as {base}", scene.name);
+                    shots.push(
+                        serde_json::json!({ "scene": scene.name, "theme": mode.name(),
+                        "ok": false, "error": format!("same pixels as {base}") }),
+                    );
+                }
+                Err(error) => eprintln!("{}: cannot compare with {base}: {error}", scene.name),
+            }
+        }
     }
     cx.update(|cx| cx.set_window_appearance(None));
     let manifest = serde_json::json!({

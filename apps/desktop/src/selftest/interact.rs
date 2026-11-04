@@ -75,6 +75,16 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-focus-card-option", keys(&["tab", "down"])),
     ("state-focus-picker", keys(&["tab", "tab", "down"])),
     // --- end v15/r5-cards ---
+    // --- v16/c-cards ---
+    ("state-hover-page-row", hover(535., 201., 300)),
+    ("state-hover-artifact-row", hover(893., 189., 300)),
+    // The last tab stops are the last row's "⋯", then the row itself.
+    (
+        "state-focus-artifact-row",
+        keys(&["shift-tab", "shift-tab"]),
+    ),
+    ("state-hover-settings-row", hover(320., 673., 300)),
+    // --- end v16/c-cards ---
 ];
 
 /// The steps of scene `name`, if it has any.
