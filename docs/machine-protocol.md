@@ -261,7 +261,12 @@ How the 1.1 daemon does each one:
   every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. CLIs start tool
   commands in process groups or sessions of their own (Claude Code's Bash tool, Codex exec), so
   the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
-  each of their groups, scanning again until a scan finds nothing new. It never signals its own
+  each of their groups, scanning again until a scan finds nothing new. A tool that daemonized
+  (its parent exited, so its parent is pid 1 and it is no longer below the CLI) is found by
+  `CHAT_RUN_ID=<run id>` in its environment (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ` on
+  Linux; only processes of the daemon's own user) and gets the same signals, also when the run
+  ends or is cancelled after the CLI exited. macOS does not show the environment of its own
+  platform binaries (`/bin/sleep`), so such an orphan is not found there. It never signals its own
   group, pid 1, or a process outside the run's tree. Resume and cancel send `SIGCONT` to the
   same groups. The daemon keeps each target's start time (libproc, or the `starttime` field of
   `/proc/<pid>/stat`) and checks it before each later signal, so a pid that now belongs to

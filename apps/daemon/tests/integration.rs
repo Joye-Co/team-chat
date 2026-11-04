@@ -1639,3 +1639,90 @@ async fn a_follow_up_run_resumes_the_session() {
         .unwrap()
         .unwrap();
 }
+
+/// A tool that daemonized (its parent exited, so it is no longer below the CLI) still stops on
+/// pause, continues on resume and is gone after cancel: the daemon finds it by the run's
+/// `CHAT_RUN_ID` in its environment.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pause_and_cancel_cover_orphaned_tools() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("o1", "fake", "orphan", None)).await;
+    let dir = tmp.path().join("work/runs/o1/work");
+    wait_file(&dir.join("fake.pid")).await;
+    let orphan: i32 = wait_file(&dir.join("orphan.txt"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+    let _reap = Reap(vec![orphan]);
+    let ticks = dir.join("orphan.ticks");
+    wait_file(&ticks).await;
+
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "o1".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "o1", true, |f| is_paused(f, true)).await;
+    assert!(
+        proc_state(orphan).contains('T'),
+        "orphan not stopped: {}",
+        proc_state(orphan)
+    );
+    let before = file_len(&ticks);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(file_len(&ticks), before, "a stopped orphan made progress");
+
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "o1".into(),
+            note: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "o1", true, |f| is_paused(f, false)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        file_len(&ticks) > before,
+        "orphan did not tick after resume"
+    );
+
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "o1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "o1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    for _ in 0..100 {
+        if !alive(orphan) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!alive(orphan), "orphan left after cancel");
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

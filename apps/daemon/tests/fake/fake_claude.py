@@ -6,6 +6,8 @@ writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped proces
 "spawn" starts two tool children like a CLI's shell tool, one in a new session (setsid) and one
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
 to children.txt and then hangs like "hang";
+"orphan" starts a ticker that daemonizes (its parent exits; it appends to orphan.ticks every
+0.05 s and its pid goes to orphan.txt), then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
 mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and runs
 `chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json;
@@ -62,6 +64,13 @@ for line in sys.stdin:
         kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], start_new_session=True, **quiet),
                 subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], process_group=0, **quiet)]
         open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
+        open("fake.pid", "w").write(str(os.getpid()))
+        time.sleep(600)
+    if "orphan" in text:
+        # A tool that daemonizes: the shell starts a ticker in the background and exits, so the
+        # ticker's parent is pid 1 and it is no longer below the CLI.
+        loop = "import time\nwhile True:\n    open('orphan.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n"
+        subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
     if "hang" in text:

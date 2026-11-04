@@ -412,6 +412,7 @@ async fn run_runtime(
         );
     };
     let run_dir = spec.run_dir.clone();
+    let spec_run_id = spec.run_id.clone();
     let (emit_tx, mut emit_rx) = mpsc::unbounded_channel();
     let (rt_tx, rt_rx) = mpsc::unbounded_channel::<Control>();
     let fut = rt.start(spec, emit_tx, rt_rx);
@@ -435,7 +436,7 @@ async fn run_runtime(
         if let Some(p) = paused.as_mut().filter(|p| p.stopped.is_none())
             && let Some(pgid) = run_pgid(&run_dir)
         {
-            proctree::stop(pgid, &mut p.tools);
+            proctree::stop(pgid, &spec_run_id, &mut p.tools);
             p.stopped = Some(pgid);
         }
         let hold_until = gate
@@ -462,7 +463,7 @@ async fn run_runtime(
                         let pgid = run_pgid(&run_dir);
                         let mut tools = vec![];
                         if let Some(pgid) = pgid {
-                            proctree::stop(pgid, &mut tools);
+                            proctree::stop(pgid, &spec_run_id, &mut tools);
                         }
                         paused = Some(Paused { since: Instant::now(), stopped: pgid, tools });
                         for ev in gate.push(RunEvent::Paused { paused: true, by }) {
