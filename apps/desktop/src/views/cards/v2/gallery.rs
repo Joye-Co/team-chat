@@ -3,8 +3,8 @@
 //! section. The `cards-v2*` screenshot scenes open it at one section.
 
 use gpui::{
-    AnyElement, App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    AnyElement, App, Context, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -106,11 +106,19 @@ impl Section {
 pub struct CardsGallery {
     services: Services,
     start: Section,
+    /// The gallery's own focus, on its root, like the app's root view: the
+    /// window focuses it, so the first Tab goes through `FocusNext` and lands
+    /// on the first tab stop (a card option, E3).
+    pub focus: FocusHandle,
 }
 
 impl CardsGallery {
-    pub fn new(services: Services, start: Section) -> Self {
-        Self { services, start }
+    pub fn new(services: Services, start: Section, cx: &mut Context<Self>) -> Self {
+        Self {
+            services,
+            start,
+            focus: cx.focus_handle(),
+        }
     }
 
     fn env(&self) -> CardEnv {
@@ -901,6 +909,9 @@ impl Render for CardsGallery {
         }
         div()
             .id("cards-v2-gallery")
+            .track_focus(&self.focus)
+            .on_action(|_: &crate::app::FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &crate::app::FocusPrev, window, cx| window.focus_prev(cx))
             .size_full()
             .bg(k.bg)
             .text_color(k.ink)
