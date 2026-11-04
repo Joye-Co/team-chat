@@ -130,6 +130,9 @@ pub struct Notification {
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     on_close: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     transition_status: ToastTransitionStatus,
+    /// The hover close button at the top right (default on). An app that
+    /// draws its own close in [`Notification::content`] turns it off.
+    close_button: bool,
 }
 
 impl From<String> for Notification {
@@ -190,6 +193,7 @@ impl Notification {
             on_click: None,
             on_close: None,
             transition_status: ToastTransitionStatus::Starting,
+            close_button: true,
         }
     }
 
@@ -353,6 +357,12 @@ impl Notification {
         self
     }
 
+    /// Show or hide the hover close button (default shown).
+    pub fn close_button(mut self, show: bool) -> Self {
+        self.close_button = show;
+        self
+    }
+
     /// Dismiss the notification.
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = window;
@@ -452,24 +462,26 @@ impl Render for Notification {
                     .when_some(content, |this, content| this.child(content)),
             )
             .when_some(action, |this, action| this.child(action))
-            .child(
-                div()
-                    .absolute()
-                    .top_1()
-                    .right_1()
-                    .invisible()
-                    .group_hover("", |this| this.visible())
-                    .child(
-                        Button::new("close")
-                            .icon(IconName::Close)
-                            .ghost()
-                            .xsmall()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.dismiss(window, cx);
-                            })),
-                    ),
-            )
+            .when(self.close_button, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_1()
+                        .right_1()
+                        .invisible()
+                        .group_hover("", |this| this.visible())
+                        .child(
+                            Button::new("close")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .xsmall()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.dismiss(window, cx);
+                                })),
+                        ),
+                )
+            })
             .when_some(self.on_click.clone(), |this, on_click| {
                 this.on_click(cx.listener(move |view, event, window, cx| {
                     view.dismiss(window, cx);

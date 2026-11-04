@@ -3,6 +3,7 @@
 //! native selection (accent when focused, gray when not or when the window
 //! is inactive, no hover); the determinate bar and the spinner (§5.7).
 
+use crate::ui::truncate::TruncText;
 use std::rc::Rc;
 
 use gpui::{
@@ -16,15 +17,29 @@ use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
 type Click = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// The inspector column (§2): 280 wide, edge to edge, `sidebar` fill, a
-/// 1 px `separator` on its leading edge.
+/// The inspector column (§2.1, §2.5): 320 wide, edge to edge, the
+/// `background` fill (T1-10), a 1 px `separator` on its leading edge.
 pub fn inspector_column(cx: &App) -> gpui::Div {
+    right_pane(metrics::INSPECTOR_WIDTH, cx)
+}
+
+/// The fill of every right pane (inspector, Home rail, side chat, live and
+/// 产出 panes): `background`, never the sidebar fill (§2.1, T1-10).
+pub fn pane_fill(cx: &App) -> Hsla {
+    native_colors(cx).content
+}
+
+/// A right pane of `width` (§2.1, §2.5): edge to edge, [`pane_fill`], a
+/// 1 px `separator` on its leading edge, a column. Use
+/// `metrics::INSPECTOR_WIDTH` (320: inspector, side chat, Home rail) or
+/// `metrics::WIDE_PANE_WIDTH` (400: live and 产出 panes).
+pub fn right_pane(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
-        .w(metrics::INSPECTOR_WIDTH)
+        .w(width)
         .h_full()
-        .bg(k.sidebar)
+        .bg(pane_fill(cx))
         .border_l_1()
         .border_color(k.separator)
         .flex()
@@ -152,15 +167,11 @@ pub fn label_value_with(
         .items_center()
         .gap(metrics::LABEL_GAP)
         .child(
-            div()
+            TruncText::new(label)
                 .flex_none()
                 .w(column)
                 .n_body()
-                .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label.into()),
+                .text_color(k.secondary),
         )
         .child(
             div()
@@ -180,6 +191,7 @@ pub fn label_value_with(
                         .min_w(px(0.))
                         .max_w_full()
                         .overflow_hidden()
+                        .whitespace_nowrap()
                         .text_ellipsis()
                         .child(value),
                 ),

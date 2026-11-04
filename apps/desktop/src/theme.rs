@@ -255,7 +255,8 @@ fn apply(t: &mut Theme, dark: bool) {
     t.border = k.border;
     t.input = k.control_border;
     t.ring = p.ring;
-    t.selection = soft(p.info, 0.25);
+    // Text selection is neutral (T1-15, §1.3): foreground at 15 %.
+    t.selection = soft(p.foreground, 0.15);
     t.caret = p.foreground;
     t.overlay = p.scrim;
     t.accent = p.accent;
@@ -289,13 +290,15 @@ fn apply(t: &mut Theme, dark: bool) {
     t.button_secondary_foreground = p.foreground;
 
     // State colors (§1.3): fills and their white text.
-    t.danger = p.destructive;
-    t.danger_hover = p.destructive.opacity(0.9);
-    t.danger_active = p.destructive.opacity(0.8);
+    // One destructive fill in both modes (T1-15): white text at 4.8:1.
+    let danger_fill = c(crate::ui::native::tokens::DESTRUCTIVE_FILL);
+    t.danger = danger_fill;
+    t.danger_hover = danger_fill.opacity(0.9);
+    t.danger_active = danger_fill.opacity(0.8);
     t.danger_foreground = white;
-    t.button_danger = p.destructive;
-    t.button_danger_hover = p.destructive.opacity(0.9);
-    t.button_danger_active = p.destructive.opacity(0.8);
+    t.button_danger = danger_fill;
+    t.button_danger_hover = danger_fill.opacity(0.9);
+    t.button_danger_active = danger_fill.opacity(0.8);
     t.button_danger_foreground = white;
     t.success = p.success;
     t.success_hover = p.success;
@@ -418,6 +421,10 @@ fn apply(t: &mut Theme, dark: bool) {
     t.mono_font_size = text::MONO.0;
     t.radius = r::CONTROL;
     t.radius_lg = r::CONTAINER;
+    // Toasts (§2.16, T1-06): bottom-right, 16 from the window edges, 360.
+    t.notification.placement = gpui::Anchor::BottomRight;
+    t.notification.width = px(360.);
+    t.notification.margins = gpui_component::Edges::all(space::S16);
     t.shadow = true;
     t.focus_ring = true;
     t.scrollbar_mode = ScrollbarMode::Scrolling;
@@ -645,21 +652,23 @@ pub mod motion {
     // v3 motion (CONCEPT2 §5). Loops only for live signals; never animate
     // selection, keyboard navigation, screen switches, counts or the theme.
 
-    /// First paint: cards and rows rise in one after another this far apart.
-    pub const STAGGER: Duration = Duration::from_millis(45);
-    /// At most this many items take part in a stagger; the rest come with
-    /// the last one, so a long list never waits.
+    /// First paint: no stagger (T1-17, review-animations 4): a page opens
+    /// after a click, and a list that waits for its last row reads slow.
+    pub const STAGGER: Duration = Duration::ZERO;
+    /// At most this many items take part in a stagger.
     pub const STAGGER_MAX: usize = 8;
-    /// The rise of a card or row on first paint (`tc-rise`).
-    pub const RISE_IN: Duration = Duration::from_millis(360);
+    /// The rise of a card or row on first paint (`tc-rise`): under 200 ms.
+    pub const RISE_IN: Duration = Duration::from_millis(180);
     /// Side chat and panes enter: opacity plus [`PANE_TRAVEL`] from the right.
     pub const PANE_ENTER: Duration = Duration::from_millis(200);
     pub const PANE_TRAVEL: gpui::Pixels = gpui::px(12.);
     /// One breath of a live ring or a current plan dot (`tc-breathe`).
     pub const BREATHE: Duration = Duration::from_millis(2400);
-    /// The opacity a breathing ring swings between.
-    pub const BREATHE_HIGH: f32 = 0.8;
-    pub const BREATHE_LOW: f32 = 0.25;
+    /// The opacity a breathing mark swings between. Both 1 (T1-16): a mark
+    /// that fades to 25 % falls to 1.4:1 on `muted`; working is a spinner
+    /// (§2.12), and a breathing mark stays at full strength.
+    pub const BREATHE_HIGH: f32 = 1.0;
+    pub const BREATHE_LOW: f32 = 1.0;
     /// The check of an answered card draws in (`tc-draw`).
     pub const CHECK_DRAW: Duration = Duration::from_millis(300);
 
@@ -667,17 +676,18 @@ pub mod motion {
     /// The terminal cursor of 实时查看 blinks once this often (`tc-blink`).
     pub const LIVE_CURSOR_BLINK: Duration = Duration::from_millis(1100);
     /// The 回放 track fills in once (`tc-fill`).
-    pub const LIVE_TRACK_FILL: Duration = Duration::from_millis(600);
+    pub const LIVE_TRACK_FILL: Duration = Duration::from_millis(250);
     /// Chart bars grow from zero once.
-    pub const BAR_GROW: Duration = Duration::from_millis(400);
+    pub const BAR_GROW: Duration = Duration::from_millis(250);
     /// The blink half-period of a live terminal cursor (`tc-blink`).
     pub const CURSOR_BLINK: Duration = Duration::from_millis(500);
 
     // dfix-motion (1.1.0): chart lines, and what counts as just answered.
-    /// A chart line draws in once (§12: 600–700 ms).
-    pub const LINE_DRAW: Duration = Duration::from_millis(650);
+    /// A chart line draws in once: under 300 ms with its series stagger
+    /// (T1-17, review-animations 4).
+    pub const LINE_DRAW: Duration = Duration::from_millis(240);
     /// Each further chart series starts this much later.
-    pub const SERIES_STAGGER: Duration = Duration::from_millis(50);
+    pub const SERIES_STAGGER: Duration = Duration::from_millis(20);
     /// An answer this recent draws its check; older ones show it still.
     pub const JUST_ANSWERED: Duration = Duration::from_secs(4);
 }
@@ -1394,7 +1404,7 @@ pub fn set_system_accent(accent: Option<Hsla>) -> bool {
 
 /// The app accent of a mode: graphite, or the system accent.
 pub fn app_accent(dark: bool) -> Hsla {
-    system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).accent)
+    system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).primary)
 }
 
 /// Text and symbols on the app accent: white on graphite and on a system
@@ -1402,7 +1412,7 @@ pub fn app_accent(dark: bool) -> Hsla {
 pub fn accent_ink(dark: bool) -> Hsla {
     match system_accent() {
         Some(_) => c(0xFFFFFFFF),
-        None => crate::ui::native::NativeColors::for_mode(dark).on_accent,
+        None => crate::ui::native::NativeColors::for_mode(dark).on_primary,
     }
 }
 
