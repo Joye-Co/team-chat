@@ -294,3 +294,49 @@ describe("录屏 evidence (PC-3)", () => {
     cbot.close();
   });
 });
+
+describe("backfill of rooms from before the cards2 tables (PC-15)", () => {
+  it("gives an old waiting topic its base, private cards their mark and old answers their decision", async () => {
+    const { runInDurableObject } = await import("cloudflare:test");
+    const { runMigrations } = await import("../src/core/migrations");
+    const { roomMigrationSteps } = await import("../src/core/room");
+    const w = await world();
+    const [ca, cb, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bob), w.connect(w.bot)]);
+    const ask = base({
+      intent: "ask",
+      title: "今天发版吗？",
+      ask: { from: [w.alice.id], record: true },
+      blocks: [{ id: "pick", type: "decision", deliver: "immediate", options: [{ id: "yes", label: "发" }, { id: "no", label: "不发" }] }],
+    });
+    const recorded = (await send(cbot, w.gid, ask)).result.message;
+    const r1 = await ca.request({ t: "card.event", groupId: w.gid, messageId: recorded.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "pick", event: "choice.submit", value: { value: "yes" } });
+    expect(r1, JSON.stringify(r1)).toMatchObject({ ok: true });
+    const waiting = (await send(cbot, w.gid, { ...ask, title: "合并吗？", ask: { from: [w.alice.id] } }, { topicId: recorded.topicId })).result.message;
+    const poll = base({
+      intent: "ask",
+      ask: { from: ["owners"], blocking: false },
+      blocks: [{ id: "p", type: "poll", label: "投", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], voters: [w.bob.id], closesAt: Date.now() + 3600_000, fallbackText: "投" }],
+    });
+    const priv = (await send(cbot, w.gid, poll, { topicId: recorded.topicId })).result.message;
+    await cb.waitEvent((e) => e.type === "message.created" && e.data.message.id === priv.id);
+    const room = env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(w.gid));
+    // The room as a development build left it: no base, no private mark, no decision row.
+    await runInDurableObject(room, (_o, state) => {
+      const sql = state.storage.sql;
+      expect(sql.exec("SELECT status FROM topics WHERE id = ?", recorded.topicId).one().status).toBe("waiting_answer");
+      sql.exec("DELETE FROM card_topic_base");
+      sql.exec("DELETE FROM card_private");
+      sql.exec("DELETE FROM card_decisions");
+      sql.exec("DELETE FROM migrations WHERE name = 'cards2-8-backfill'");
+      expect(runMigrations(state.storage, roomMigrationSteps())).toEqual(["cards2-8-backfill"]);
+      expect(sql.exec("SELECT status FROM card_topic_base WHERE topic_id = ?", recorded.topicId).toArray()).toEqual([{ status: "in_progress" }]);
+      expect(sql.exec("SELECT message_id FROM card_private").toArray()).toEqual([{ message_id: priv.id }]);
+      expect(sql.exec("SELECT message_id, action_label FROM card_decisions").toArray()).toEqual([{ message_id: recorded.id, action_label: "发" }]);
+    });
+    // The answer closes the last blocking ask: the topic leaves waiting_answer.
+    const r2 = await ca.request({ t: "card.event", groupId: w.gid, messageId: waiting.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "pick", event: "choice.submit", value: { value: "no" } });
+    expect(r2, JSON.stringify(r2)).toMatchObject({ ok: true });
+    await ca.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === recorded.topicId && e.data.status === "in_progress");
+    for (const c of [ca, cb, cbot]) c.close();
+  });
+});

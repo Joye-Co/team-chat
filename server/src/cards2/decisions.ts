@@ -92,7 +92,15 @@ export function storedCard(sql: SqlStorage, messageId: string): { card: CardV2; 
 registerEventWriter((event: ArchivedEvent, sql) => {
   if (event.type !== "card.answered") return;
   const d = event.data as CardAnswerArgs;
-  const stored = storedCard(sql, d.messageId);
+  recordAnswerDecision(sql, event, storedCard(sql, d.messageId));
+});
+
+/**
+ * Stores the group decision of a `card.answered` event, given the card at the answered rev
+ * (the live writer passes the stored card; the backfill the card from the log).
+ */
+export function recordAnswerDecision(sql: SqlStorage, event: ArchivedEvent, stored: { card: CardV2; topicId: string } | undefined): void {
+  const d = event.data as CardAnswerArgs;
   if (!stored || stored.card.rev !== d.rev || stored.card.ask?.record !== true) return;
   // A private card (a non-public poll, an anonymous questionnaire) records no group decision:
   // a decision names who answered (cards2/privacy).
@@ -116,7 +124,7 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     event.actorId,
     event.at,
   );
-});
+}
 
 // A deleted card message keeps no decision rows (live deletes and imports).
 registerEventWriter((event: ArchivedEvent, sql) => {

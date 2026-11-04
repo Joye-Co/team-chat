@@ -242,6 +242,19 @@ describe("github hook", () => {
     cs = (await cards(c, gid)).get(topic.id) as any[];
     expect(JSON.stringify(cs[0].card)).toContain("server: 通过");
 
+    // A check that starts shows as pending until its result comes (check_run).
+    const run = (action: string, status: string, conclusion: string | null) => ({
+      action,
+      check_run: { name: "e2e", head_sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", status, conclusion, html_url: "https://github.com/x", pull_requests: [{ number: 42 }] },
+      repository: { full_name: REPO, html_url: `https://github.com/${REPO}` },
+    });
+    await ok("check_run", run("created", "in_progress", null));
+    cs = (await cards(c, gid)).get(topic.id) as any[];
+    expect(JSON.stringify(cs[0].card)).toContain("e2e: 进行中");
+    await ok("check_run", run("completed", "completed", "success"));
+    cs = (await cards(c, gid)).get(topic.id) as any[];
+    expect(JSON.stringify(cs[0].card)).toContain("e2e: 通过");
+
     await ok("pull_request_review", reviewEvent("changes_requested", "rev-gh"));
     expect((await topics(c, gid)).get(topic.id)).toMatchObject({ status: "in_progress", waitingOn: [owner.id] });
 

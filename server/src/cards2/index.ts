@@ -25,6 +25,7 @@ import { EVENT_KEEP_MS, eventRow, extOf, messageRow, pruneEvents } from "./store
 
 import "./decisions";
 import "./restore";
+import "./backfill";
 
 export {
   type CardEventDelivery,

@@ -654,7 +654,8 @@ Rules:
 - `/in` topic choice: `topicId` (a topic of the hook's group); else `topicKey` (the first post
   with a new key starts a topic titled `title`, later posts go to that topic; keys are per hook);
   else the hook's `topicId`; else a new topic. `clientMsgId` dedupes per hook as for `send`.
-- `/github` handles `pull_request`, `pull_request_review`, `check_suite`, `workflow_run` and
+- `/github` handles `pull_request`, `pull_request_review`, `check_suite`, `workflow_run`,
+  `check_run` (1.1: a check that is created or re-run shows as pending, `进行中`, until it completes) and
   `ping`; others answer `{ ok: true }` and are dropped. One topic per pull request with topic key
   `github:<owner>/<repo>#<number>`; CI results go to the topic of the pull request of their head
   commit, else to `github:<owner>/<repo>@<branch>`. Posts are card messages.

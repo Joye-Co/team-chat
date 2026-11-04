@@ -117,7 +117,8 @@ dropped (`ping` too).
   title and owner stay as they are.
 - **One status card per PR**, posted once and then edited: state (opened, draft, ready for review,
   review requested, approved, changes requested, merged, closed), reviewers and the CI results of
-  the current head commit (`check_suite` and `workflow_run` with action `completed`). New commits
+  the current head commit (`check_suite` and `workflow_run` with action `completed`; `check_run`
+  shows a started check as pending until it completes). New commits
   (`synchronize`) clear the CI lines; results for an older commit are ignored. If someone deletes
   the card, the next event posts a new one in the same topic.
 - **Topic status follows the PR**. The adapter sends a change only when the computed value
