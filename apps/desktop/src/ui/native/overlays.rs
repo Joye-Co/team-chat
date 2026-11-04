@@ -369,3 +369,44 @@ mod tests {
         let _ = weighted("", &[0..1]);
     }
 }
+
+/// A 36 × 36 toolbar item for a concept the [`super::toolbar_item`] table
+/// does not list (expand, collapse, close in a pane's toolbar row): a 16 pt
+/// Medium symbol in `label`, `fillHover` on hover. Named: the name is its
+/// tooltip and what VoiceOver reads.
+pub fn sym_toolbar_item(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<gpui::SharedString>,
+    cx: &App,
+) -> gpui_component::button::Button {
+    use gpui_component::button::{Button, ButtonVariants as _};
+    let k = native_colors(cx);
+    let name = name.into();
+    Button::new(id)
+        .custom(super::borderless_variant(cx))
+        .with_size(metrics::TOOLBAR_ITEM)
+        .size(metrics::TOOLBAR_ITEM)
+        .p_0()
+        .rounded(metrics::TOOLBAR_ITEM / 2.)
+        .accessibility_label(name.clone())
+        .tooltip(name)
+        .child(sym.icon(SymSize::TOOLBAR).text_color(k.label))
+}
+
+/// A bar on `fill`, radius 12 (§9.2 decision bar): the state symbol, a
+/// Headline title and a `secondary` line, push buttons at the trailing edge.
+pub fn decision_bar(cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .flex_none()
+        .min_h(px(48.))
+        .pl(px(14.))
+        .pr(px(10.))
+        .py(px(8.))
+        .rounded(px(12.))
+        .bg(k.fill)
+        .flex()
+        .items_center()
+        .gap(px(10.))
+}

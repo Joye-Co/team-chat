@@ -18,9 +18,7 @@ use gpui::{
     Styled, Subscription, Task, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 
-use gpui_component::Disableable as _;
 
-use crate::ui::NamedButton as _;
 use crate::{
     app::{RightPane, Services},
     copy::{fill, live as c, nav as n},
@@ -29,7 +27,15 @@ use crate::{
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
     },
     theme::{self, Type as _, motion, space},
-    ui::{self, ButtonKind, ButtonSize, Sym},
+    ui::{
+        self, Sym,
+        native::{
+            NativeType as _, PushSize, PushStyle, ToolbarGroup, borderless_text, disabled_push,
+            metrics, native_colors, push_button,
+            overlays::{decision_bar, sym_toolbar_item},
+        },
+        sf_symbols::SymSize,
+    },
     views::{
         process::{ProcessView, stop_run},
         shell::{PaneView, clock, member_name, panes::watch, stub_body},
@@ -158,6 +164,10 @@ impl LivePane {
         .detach();
     }
 
+    /// The pane's toolbar row (NATIVE.md §2): `Forge 的电脑` (Title 3) over
+    /// the state, the machine and the time it has run (Subheadline,
+    /// `secondary`, the state as a symbol, no pill); 放大 and 关闭 as
+    /// toolbar items in one capsule.
     fn header(
         &self,
         bot: &str,
@@ -166,55 +176,18 @@ impl LivePane {
         held_by_me: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let chip = |content: AnyElement, color| {
-            div()
-                .flex_none()
-                .h(px(20.))
-                .px(px(7.))
-                .rounded(theme::radius::SM)
-                .bg(k.sunken)
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .t_meta()
-                .text_color(color)
-                .child(content)
-        };
-        let state = match &screen.paused_by {
-            Some(_) if held_by_me => Some(chip(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .child(ui::icon(Sym::Pointer, px(11.), k.ink))
-                    .child(c::LIVE_YOU_HOLD)
-                    .into_any_element(),
-                k.ink,
+        let n = native_colors(cx);
+        let state: Option<(Sym, gpui::Hsla, String)> = match &screen.paused_by {
+            Some(_) if held_by_me => Some((Sym::Pointer, n.label, c::LIVE_YOU_HOLD.to_string())),
+            Some(who) => Some((
+                Sym::Pointer,
+                n.secondary,
+                fill(
+                    c::LIVE_HELD_BY_OTHER,
+                    &[("who", &member_name(&self.services, who))],
+                ),
             )),
-            Some(who) => Some(chip(
-                div()
-                    .child(fill(
-                        c::LIVE_HELD_BY_OTHER,
-                        &[("who", &member_name(&self.services, who))],
-                    ))
-                    .into_any_element(),
-                k.ink,
-            )),
-            None if run.status.is_active() => Some(chip(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .child(ui::motion::breathe(
-                        "live-now-dot",
-                        div().size(px(6.)).rounded_full().bg(k.live),
-                        cx,
-                    ))
-                    .child(c::LIVE_NOW)
-                    .into_any_element(),
-                k.live_ink,
-            )),
+            None if run.status.is_active() => Some((Sym::Live, n.blue, c::LIVE_NOW.to_string())),
             None => None,
         };
         let end = run.ended_at.unwrap_or_else(now_ms);
@@ -223,60 +196,85 @@ impl LivePane {
             .or(run.started_at)
             .map(|s| elapsed_text((end - s).max(0), cx));
         let close = self.services.clone();
-        div()
-            .flex_none()
-            .h(HEADER)
-            .pl(SIDE)
-            .pr(space::S12)
+        let dot = || div().flex_none().child("·");
+        let mut subtitle = div()
             .flex()
             .items_center()
-            .gap(space::S10)
+            .gap(px(4.))
+            .min_w(px(0.))
+            .n_subheadline()
+            .n_figures()
+            .text_color(n.secondary);
+        let mut first = true;
+        if let Some((sym, color, text)) = state {
+            subtitle = subtitle
+                .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))
+                .child(div().flex_none().text_color(n.label).child(text));
+            first = false;
+        }
+        if let Some(m) = screen.machine_name.clone() {
+            if !first {
+                subtitle = subtitle.child(dot());
+            }
+            subtitle = subtitle.child(div().min_w_0().one_line().child(m));
+            first = false;
+        }
+        if let Some(e) = elapsed {
+            if !first {
+                subtitle = subtitle.child(dot());
+            }
+            subtitle = subtitle.child(div().flex_none().child(e));
+        }
+        div()
+            .flex_none()
+            .h(metrics::TOOLBAR_ROW)
+            .pl(metrics::TOOLBAR_LEADING)
+            .pr(metrics::TOOLBAR_TRAILING)
+            .flex()
+            .items_center()
+            .gap(metrics::TOOLBAR_GROUP_GAP)
             .child(
                 div()
-                    .t_small()
-                    .semibold()
-                    .text_color(k.ink)
-                    .child(fill(c::LIVE_COMPUTER, &[("name", bot)])),
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .n_title3()
+                            .text_color(n.label)
+                            .one_line()
+                            .child(fill(c::LIVE_COMPUTER, &[("name", bot)])),
+                    )
+                    .child(subtitle),
             )
-            .children(state)
-            .children(screen.machine_name.clone().map(|m| {
-                div()
-                    .min_w_0()
-                    .one_line()
-                    .t_meta()
-                    .text_color(k.ink_3)
-                    .child(m)
-            }))
-            .child(div().flex_1())
-            .children(elapsed)
-            .child(
-                ui::icon_button_sm(
+            .child(ToolbarGroup::new([
+                sym_toolbar_item(
                     "live-expand",
                     if self.expanded {
                         Sym::Collapse
                     } else {
                         Sym::Expand
                     },
+                    if self.expanded {
+                        c::LIVE_COLLAPSE
+                    } else {
+                        c::LIVE_EXPAND
+                    },
+                    cx,
                 )
-                .named(if self.expanded {
-                    c::LIVE_COLLAPSE
-                } else {
-                    c::LIVE_EXPAND
-                })
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.expanded = !this.expanded;
                     cx.notify();
                 })),
-            )
-            .child(
-                ui::icon_button_sm("live-close", Sym::Close)
-                    .named(c::LIVE_CLOSE)
-                    .on_click(move |_, _, cx| {
+                sym_toolbar_item("live-close", Sym::Close, c::LIVE_CLOSE, cx).on_click(
+                    move |_, _, cx| {
                         close
                             .nav
                             .update(cx, |nav, cx| nav.set_right_pane(RightPane::None, cx))
-                    }),
-            )
+                    },
+                ),
+            ]))
     }
 
     /// 你在操作 Forge 的电脑 · Forge 已暂停 [在屏幕共享里打开] [交还].
@@ -289,7 +287,6 @@ impl LivePane {
         can_control: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let k = theme::colors(cx);
         let who = screen
             .paused_by
             .as_deref()
@@ -300,62 +297,59 @@ impl LivePane {
         } else {
             fill(c::LIVE_HELD_OTHER, &[("who", &who), ("name", bot)])
         };
+        let n = native_colors(cx);
         let share = screen_share_url(screen).map(|url| {
             let name = bot.to_string();
-            ui::button(
+            push_button(
                 "live-screen-share",
                 c::LIVE_OPEN_SCREEN_SHARE,
-                ButtonKind::Secondary,
-                ButtonSize::Md,
+                PushStyle::Standard,
+                PushSize::Regular,
                 cx,
             )
-            .icon(ui::icon(Sym::ScreenShare, theme::icon::CHIP, k.ink_2))
             .on_click(move |_, _, _| {
                 crate::views::artifacts::window::ask_before_screen_share(&name, url.clone())
             })
         });
         let hand_back = {
             let run = run.clone();
-            ui::button(
+            push_button(
                 "live-hand-back",
                 c::LIVE_HAND_BACK,
-                ButtonKind::Primary,
-                ButtonSize::Md,
+                PushStyle::Default,
+                PushSize::Regular,
                 cx,
             )
             .on_click(cx.listener(move |this, _, _, cx| this.pause(&run, false, cx)))
         };
-        ui::motion::rise(
-            "live-held-banner",
-            0,
-            div()
-                .flex_none()
-                .h(BANNER)
-                .mb(space::S12)
-                .pl(space::S14)
-                .pr(space::S8)
-                .rounded(theme::radius::LG)
-                .border_1()
-                .border_color(k.line_2)
-                .bg(k.bg)
-                .shadow(k.lift())
-                .flex()
-                .items_center()
-                .gap(space::S10)
-                .child(ui::icon(Sym::Pointer, theme::icon::ROW, k.ink))
-                .child(div().t_small().medium().text_color(k.ink).child(title))
-                .child(
-                    div()
-                        .t_small()
-                        .text_color(k.ink_3)
-                        .one_line()
-                        .child(fill(c::LIVE_HELD_PAUSED, &[("name", bot)])),
-                )
-                .child(div().flex_1())
-                .children(share)
-                .children(can_control.then_some(hand_back)),
-            cx,
-        )
+        // A decision bar (NATIVE.md §9.2): on `fill`, no border, no shadow.
+        decision_bar(cx)
+            .mb(px(12.))
+            .child(Sym::Pointer.icon(SymSize::INLINE).text_color(n.label))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().n_headline().text_color(n.label).one_line().child(title))
+                    .child(
+                        div()
+                            .n_subheadline()
+                            .text_color(n.secondary)
+                            .one_line()
+                            // The copy starts with a separator for an inline
+                            // run; on its own line it goes.
+                            .child(
+                                fill(c::LIVE_HELD_PAUSED, &[("name", bot)])
+                                    .trim_start_matches(['·', ' '])
+                                    .to_string(),
+                            ),
+                    ),
+            )
+            .children(share)
+            .children(can_control.then_some(hand_back))
+            .into_any_element()
     }
 
     /// The screen: a menu bar and the terminal window over the backdrop.
@@ -854,11 +848,9 @@ impl LivePane {
                 .pt(space::S12)
                 .px(space::S14)
                 .pb(space::S4)
-                .rounded(theme::radius::LG)
-                .border_1()
-                .border_color(k.line)
-                .bg(k.bg)
-                .shadow(k.lift())
+                // A grouped section (§8): `group` fill, no border, no shadow.
+                .rounded(metrics::GROUP_RADIUS)
+                .bg(native_colors(cx).group)
                 .child(
                     div()
                         .flex()
@@ -1042,11 +1034,8 @@ impl LivePane {
             div()
                 .flex_none()
                 .mt(space::S16)
-                .rounded(theme::radius::LG)
-                .border_1()
-                .border_color(k.line)
-                .bg(k.bg)
-                .shadow(k.lift())
+                .rounded(metrics::GROUP_RADIUS)
+                .bg(native_colors(cx).group)
                 .overflow_hidden()
                 .child(
                     div()
@@ -1098,39 +1087,38 @@ impl LivePane {
         can_control: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let k = theme::colors(cx);
         let active = run.status.is_active();
         let stopping = self.services.provider.run_stopping(&run.id);
+        let n = native_colors(cx);
         let take = (!held && active && can_control).then(|| {
             let run = run.clone();
-            ui::button(
+            push_button(
                 "live-take-over",
                 c::LIVE_TAKE_OVER,
-                ButtonKind::Primary,
-                ButtonSize::Md,
+                PushStyle::Default,
+                PushSize::Regular,
                 cx,
             )
-            .icon(ui::icon(
-                Sym::Pointer,
-                theme::icon::CHIP,
-                k.btn_ink,
-            ))
             .on_click(cx.listener(move |this, _, _, cx| this.pause(&run, true, cx)))
         });
+        // 停止 asks in an alert first (停止成员的工作, NATIVE.md §7.2).
         let stop = active.then(|| {
             let (services, run) = (self.services.clone(), run.clone());
-            ui::button(
-                "live-stop",
-                if stopping {
-                    c::LIVE_STOPPING
-                } else {
-                    c::LIVE_STOP
-                },
-                ButtonKind::Secondary,
-                ButtonSize::Md,
+            disabled_push(
+                push_button(
+                    "live-stop",
+                    if stopping {
+                        c::LIVE_STOPPING
+                    } else {
+                        c::LIVE_STOP
+                    },
+                    PushStyle::Destructive,
+                    PushSize::Regular,
+                    cx,
+                ),
+                stopping,
                 cx,
             )
-            .disabled(stopping)
             .on_click(move |_, _, cx| stop_run(&services, &run, cx))
         });
         let hint = if held && held_by_me {
@@ -1141,43 +1129,38 @@ impl LivePane {
             None
         };
         let developer_on = self.developer.is_some();
+        // The bottom bar: the hint at the leading edge, the developer view
+        // as a borderless button, then 停止 and the default 接管 at the
+        // trailing edge.
         div()
             .flex_none()
-            .px(SIDE)
-            .py(space::S12)
+            .px(px(20.))
+            .py(px(12.))
             .border_t_1()
-            .border_color(k.line)
+            .border_color(n.separator)
             .flex()
-            .flex_wrap()
             .items_center()
-            .gap(space::S12)
-            .children(take)
-            .children(stop)
+            .gap(px(12.))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .one_line()
-                    .t_meta()
-                    .text_color(k.ink_3)
+                    .n_subheadline()
+                    .text_color(n.secondary)
                     .children(hint),
             )
             .child(
-                ui::button(
+                borderless_text(
                     "live-developer",
                     if developer_on {
                         c::LIVE_BACK_TO_SCREEN
                     } else {
                         c::LIVE_DEVELOPER
                     },
-                    ButtonKind::Ghost,
-                    ButtonSize::Sm,
                     cx,
                 )
-                .when(!developer_on, |b| {
-                    b.icon(ui::icon(Sym::OpenExternal, theme::icon::TAG, k.ink_2))
-                })
-                .text_color(k.ink_2)
+                .text_color(n.secondary)
                 .on_click(cx.listener(|this, _, _, cx| {
                     if this.developer.take().is_none() {
                         let services = this.services.clone();
@@ -1188,6 +1171,8 @@ impl LivePane {
                     cx.notify();
                 })),
             )
+            .children(stop)
+            .children(take)
     }
 }
 
@@ -1313,7 +1298,6 @@ fn blinking_cursor(run_id: &str, cx: &App) -> AnyElement {
 
 impl Render for LivePane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
         let Some((g, t, run_id)) = self.target(cx) else {
             return stub_body(Sym::Computer, c::LIVE_EMPTY, None, cx).into_any_element();
         };
@@ -1432,7 +1416,7 @@ impl Render for LivePane {
             .size_full()
             .flex()
             .flex_col()
-            .bg(k.raised)
+            .bg(native_colors(cx).content)
             .child(self.header(&bot, &screen, &run, held_by_me, cx))
             .child(body)
             .child(self.footer(&run, &bot, &step_text, held, held_by_me, can_control, cx))
