@@ -7,9 +7,9 @@ use chat_core::proto::{self, CardV2, CardV2Block, MemberLevel};
 
 use super::CoreProvider;
 use crate::data::{
-    TodoReason, TopicStatus,
+    ChatProvider as _, TodoReason, TopicStatus,
     card::{ActionStyle, CardTone},
-    v2::{AskItem, AskKind},
+    v2::{AskItem, AskKind, DeskNote, QueuedItem},
 };
 
 /// Messages of a waiting 话题 searched for its newest card.
@@ -48,6 +48,58 @@ pub fn kind_of_v1(card: &proto::Card) -> AskKind {
 }
 
 impl CoreProvider {
+    /// Jojo's one-line priority (首页): the newest `desk.noted` of the default 单独问 member
+    /// (Jojo, else the first bot) in any 群. None when it has no note.
+    pub(super) fn desk_note_inner(&self) -> Option<DeskNote> {
+        let a = self.account()?;
+        let who = self.side_chat_default_member()?;
+        let notes = a.client.desk_notes().unwrap_or_default();
+        let n = notes.into_iter().find(|n| n.member_id == who)?;
+        Some(DeskNote {
+            member_id: n.member_id,
+            text: n.text,
+            at: n.at.min(i64::MAX as u64) as i64,
+        })
+    }
+
+    /// 排队: runs that wait for a free machine (created, no machine, `queuedAt`), in queue
+    /// order per member.
+    pub(super) fn queue_inner(&self) -> Vec<QueuedItem> {
+        let Some(a) = self.account() else {
+            return Vec::new();
+        };
+        let mut runs: Vec<_> = a
+            .client
+            .active_runs()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.is_queued())
+            .collect();
+        runs.sort_by_key(|r| {
+            (
+                r.queue_position.unwrap_or(u32::MAX),
+                r.queued_at.unwrap_or(r.created_at),
+            )
+        });
+        let mut titles = std::collections::HashMap::new();
+        runs.into_iter()
+            .map(|r| {
+                let title = titles
+                    .entry(r.group_id.clone())
+                    .or_insert_with(|| self.topics(&r.group_id))
+                    .iter()
+                    .find(|t| t.id == r.topic_id)
+                    .map(|t| t.title.clone())
+                    .unwrap_or_default();
+                QueuedItem {
+                    member_id: r.bot_id,
+                    title,
+                    at: None,
+                }
+            })
+            .collect()
+    }
+
     /// 需要你拍板: each 话题 that waits on me, with its newest card that I
     /// have not answered yet (a v2 ask I may answer, else a v1 card with
     /// buttons from someone else). Without one it is a plain 话题 ask.

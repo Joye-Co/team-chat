@@ -2140,7 +2140,21 @@ impl ChatProvider for CoreProvider {
         self.media_duration_inner(file)
     }
 
-    // desk_note and queue keep their empty defaults: 1.1 has no data source for them.
+    fn desk_note(&self) -> Option<crate::data::v2::DeskNote> {
+        self.desk_note_inner()
+    }
+
+    fn queue(&self) -> Vec<crate::data::v2::QueuedItem> {
+        self.queue_inner()
+    }
+
+    fn group_purpose(&self, group_id: &str) -> Option<String> {
+        self.account()?
+            .client
+            .group_purpose(group_id)
+            .ok()
+            .flatten()
+    }
 
     // --- end provider track ---
 
