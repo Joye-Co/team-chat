@@ -226,33 +226,106 @@ pub fn state_sentence(services: &Services, group_id: &str, topic_id: &str) -> Op
     Some(topic_state(p.as_ref(), services.me().as_deref(), &topic))
 }
 
+/// Whether the provider has my answer to an ask: one on its way or stored
+/// (a Card v2 answer to its current rev, a v1 press). An ask with no card
+/// (the 话题 itself waits on me) has none.
+pub fn ask_answered(p: &dyn ChatProvider, me: &str, ask: &crate::data::v2::AskItem) -> bool {
+    let Some(m) = ask.message_id.as_deref() else {
+        return false;
+    };
+    let g = ask.group_id.as_str();
+    if let Some(card) = p.card_v2(g, m) {
+        let sending = p
+            .card_v2_pending(g, m)
+            .is_some_and(|x| matches!(x.phase, crate::data::cards_v2::CardV2SendPhase::Sending));
+        return sending
+            || p.card_v2_answers(g, m)
+                .iter()
+                .any(|a| a.actor_id == me && a.rev == card.card.rev);
+    }
+    p.card_presses(g, m).iter().any(|x| x.actor_id == me)
+}
+
+/// The asks for me in one 话题 (newest first), and whether each one has my
+/// answer at the provider ([`ask_answered`]).
+pub fn asks_in_topic(
+    p: &dyn ChatProvider,
+    me: Option<&str>,
+    group_id: &str,
+    topic_id: &str,
+) -> Vec<(crate::data::v2::AskItem, bool)> {
+    let Some(me) = me else {
+        return Vec::new();
+    };
+    let mut asks: Vec<_> = p
+        .asks_for_me()
+        .into_iter()
+        .filter(|a| a.group_id == group_id && a.topic_id == topic_id)
+        .map(|a| {
+            let done = ask_answered(p, me, &a);
+            (a, done)
+        })
+        .collect();
+    asks.sort_by_key(|(a, _)| std::cmp::Reverse(a.at));
+    asks
+}
+
+/// The words of an open ask for me (§2.12): a review is 等你审, any other
+/// ask 等你回答.
+pub fn ask_words(kind: crate::data::v2::AskKind) -> &'static str {
+    use crate::copy::common as cm;
+    match kind {
+        crate::data::v2::AskKind::Review => cm::STATUS_WAITING_REVIEW_ME,
+        _ => cm::STATUS_WAITING_ANSWER_ME,
+    }
+}
+
 /// [`state_sentence`] from the provider and the signed-in member (the
-/// sidebar and the palette read it without `Services`). In order: a merge
-/// in progress, my review, an answer from me, a member stopping, at work
-/// or paused, a failed run, then the 话题's own status.
+/// sidebar and the palette read it without `Services`). In order (§2.12,
+/// T-03): a merge in progress, then what waits on me (my review, an open
+/// ask, the 话题 itself), then a member stopping, at work or paused, a
+/// failed run, then the 话题's own status. 在做 only while a run works.
 pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> StateLine {
-    use crate::copy::{common as cm, fill, topic_rail as c};
+    use crate::copy::{common as cm, fill, rail as cr, topic_rail as c};
     let (g, t) = (topic.group_id.as_str(), topic.id.as_str());
     let name = |id: &str| p.member(id).map(|m| m.name).unwrap_or_default();
     let owner = topic.owner_id.as_deref().map(name).unwrap_or_default();
+    let changes = p.topic_changes(g, t);
+    if let Some(ch) = &changes
+        && ch.state == crate::data::v2::ChangeState::Merging
+    {
+        return StateLine::plain(
+            fill(c::STATE_MERGING, &[("name", &owner)]),
+            BadgeState::Merging,
+        )
+        .short(c::STATE_MERGING_SHORT);
+    }
+    let asks = asks_in_topic(p, me, g, t);
+    let open: Vec<_> = asks
+        .iter()
+        .filter(|(_, done)| !done)
+        .map(|(a, _)| a)
+        .collect();
+    if let Some(ask) = open.first() {
+        // The provider's pinned ask knows a v1 approval that is the PR's
+        // review.
+        let kind = p
+            .pinned_ask(g, t)
+            .filter(|x| x.message_id == ask.message_id)
+            .map_or(ask.kind, |x| x.kind);
+        let review = kind == crate::data::v2::AskKind::Review;
+        let text = match &changes {
+            Some(ch) if review => fill(c::STATE_REVIEW, &[("n", &ch.number.to_string())]),
+            _ => ask_words(kind).to_string(),
+        };
+        return StateLine::plain(text, BadgeState::NeedsYou).short(c::STATE_YOU_SHORT);
+    }
     let mine = me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
-    if let Some(ch) = p.topic_changes(g, t) {
-        if ch.state == crate::data::v2::ChangeState::Merging {
-            return StateLine::plain(
-                fill(c::STATE_MERGING, &[("name", &owner)]),
-                BadgeState::Merging,
-            )
-            .short(c::STATE_MERGING_SHORT);
-        }
-        if p.pinned_ask(g, t)
-            .is_some_and(|a| a.kind == crate::data::v2::AskKind::Review)
-        {
-            return StateLine::plain(
-                fill(c::STATE_REVIEW, &[("n", &ch.number.to_string())]),
-                BadgeState::NeedsYou,
-            )
-            .short(c::STATE_YOU_SHORT);
-        }
+    // B1-06: every ask for me here has my answer at the provider, though
+    // the 话题 still lists me: answered, until the server's state follows.
+    if mine && !asks.is_empty() {
+        return StateLine::plain(cr::RAIL_ANSWERED.to_string(), BadgeState::Done)
+            .short(cr::RAIL_ANSWERED);
     }
     if mine {
         let text = match topic.status {
@@ -275,11 +348,12 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         }
         let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
         let mut line = run_state(run, &who, paused_by.as_deref(), me, name);
-        // A2-11: two members at work are one state, `2 个成员在做`; the
-        // sidebar keeps the lead run's `3/5`.
+        // A2-11: two members at work are one state, `2 个成员在做`.
         let at_work = working_runs(&runs).len();
         if at_work > 1 && !line.paused {
             line.text = fill(c::STATE_MANY_WORKING, &[("n", &at_work.to_string())]);
+            // A2-05: the sidebar says the same words, not the lead's `2/5`.
+            line.short = line.text.clone();
             line.name = None;
             line.detail = None;
         }
