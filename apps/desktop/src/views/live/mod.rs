@@ -193,11 +193,9 @@ impl LivePane {
         // A live run says so with the one StatusBadge (§2.12), not a blue dot.
         let live_badge = (screen.paused_by.is_none() && run.status.is_active())
             .then(|| StatusBadge::new(BadgeState::Working, c::LIVE_NOW).dense());
-        let end = run.ended_at.unwrap_or_else(now_ms);
-        let elapsed = screen
-            .started_at
-            .or(run.started_at)
-            .map(|s| elapsed_text((end - s).max(0), cx));
+        // P-01: the run's time on the one clock of every page.
+        let elapsed = crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), &run)
+            .map(|ms| elapsed_text(ms, cx));
         let close = self.services.clone();
         let dot = || div().flex_none().child("·");
         let mut subtitle = div()

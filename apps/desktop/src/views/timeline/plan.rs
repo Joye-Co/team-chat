@@ -377,6 +377,8 @@ impl TimelineView {
         let open = !self.plan_collapsed.contains(&run.id);
         let progress_of = crate::views::topic_page::plan_progress(&run.plan);
         let now = crate::selftest::clock::now_ms();
+        // P-01: the run's time on the one clock of every page.
+        let used = crate::views::topic_page::run_elapsed_text(self.services.provider.as_ref(), run);
         let stopping = self.services.provider.run_stopping(&run.id);
         let current = run
             .plan
@@ -574,13 +576,10 @@ impl TimelineView {
                     .n_footnote()
                     .n_figures()
                     .text_color(n.secondary)
-                    .children(run.started_at.map(|at| {
+                    .children(run.started_at.zip(used).map(|(at, used)| {
                         fill(
                             t::PLAN_FOOTER,
-                            &[
-                                ("used", &span_text(USED, now - at)),
-                                ("time", &model::clock(at)),
-                            ],
+                            &[("used", &used), ("time", &model::clock(at))],
                         )
                     })),
             )

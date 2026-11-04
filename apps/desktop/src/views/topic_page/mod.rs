@@ -123,6 +123,22 @@ pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize, Option<String>)
     Some((n, plan.len(), current.map(|i| plan[i].text.clone())))
 }
 
+/// How long a run has worked (P-01): from its start to its end, or to the
+/// provider's now. Every place that says a run's time (首页, 群, 成员, the
+/// live pane, the working card) reads this one clock, so one run never
+/// shows two times. `None` before the run starts.
+pub fn run_elapsed(p: &dyn ChatProvider, run: &BotRunSummary) -> Option<i64> {
+    let start = run.started_at?;
+    let end = run.ended_at.unwrap_or_else(|| p.clock_now());
+    Some((end - start).max(0))
+}
+
+/// [`run_elapsed`] in words: `已用 35 分钟`, `已用 2 小时 5 分钟`.
+pub fn run_elapsed_text(p: &dyn ChatProvider, run: &BotRunSummary) -> Option<String> {
+    use crate::views::timeline::plan;
+    run_elapsed(p, run).map(|ms| plan::span_text(plan::USED, ms))
+}
+
 /// The run a member works on in this 话题 now: active and not waiting for
 /// a person (an answer or a review is said elsewhere), the latest first.
 pub fn working_run(runs: &[BotRunSummary]) -> Option<&BotRunSummary> {
