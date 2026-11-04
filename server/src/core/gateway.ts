@@ -391,7 +391,9 @@ export class MemberGateway extends DurableObject<Env> {
 
       const feature = frameHandlers.get(frame.t);
       const rate = CORE_RATE[frame.t] ?? feature?.rate ?? "write";
-      if (rate !== "none" && !this.buckets[rate].take()) throw new ApiError("rate_limited", "too many frames");
+      if (rate !== "none" && !this.buckets[rate].take()) {
+        throw new ApiError("rate_limited", "too many frames", undefined, this.buckets[rate].waitMs());
+      }
 
       const c = this.frameContext(ws, state);
       for (const v of [...(frameValidators.get("*") ?? []), ...(frameValidators.get(frame.t) ?? [])]) {

@@ -239,6 +239,8 @@ export const ErrorBody = z.object({
   message: z.string(),
   /** 1.1: the specific reason, e.g. `card.already_answered` (no new `ErrorCode` values). */
   reason: z.string().min(1).max(64).optional(),
+  /** 1.1, `rate_limited`: wait at least this long before the next try. */
+  retryAfterMs: z.int().nonnegative().optional(),
 });
 export type ErrorBody = z.infer<typeof ErrorBody>;
 

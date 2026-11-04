@@ -7,11 +7,15 @@ export class ApiError extends Error {
     message: string,
     /** 1.1: the specific rule (`ErrorBody.reason`), e.g. `card.already_answered`. */
     readonly reason?: string,
+    /** 1.1, `rate_limited`: `ErrorBody.retryAfterMs`. */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
   toBody(): ErrorBody {
-    return this.reason ? { code: this.code, message: this.message, reason: this.reason } : { code: this.code, message: this.message };
+    const body: ErrorBody = this.reason ? { code: this.code, message: this.message, reason: this.reason } : { code: this.code, message: this.message };
+    if (this.retryAfterMs !== undefined) body.retryAfterMs = Math.max(0, Math.ceil(this.retryAfterMs));
+    return body;
   }
 }
 

@@ -2,6 +2,7 @@
 export {
   ACK_EMOJI,
   Bot,
+  DEFAULT_WRITE_RATE,
   SDK_VERSION,
   type AnswerValue,
   type ArtifactEventContext,

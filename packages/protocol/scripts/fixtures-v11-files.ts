@@ -89,6 +89,10 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
     id: "01JC0RUN00000000000000QUE2", botId: ID.bot, groupId: ID.general, topicId: ID.topic, status: "created", requestedBy: ID.alice, createdAt: T0, updatedAt: T0, queuedAt: T0, queuePosition: 1,
   }, "1.1: created, no machine, waiting for a free one");
 
+  // SF-10: how long a rate-limited client waits.
+  ok("http/error-response-retry-after.json", "ErrorBody", { code: "rate_limited", message: "too many frames", retryAfterMs: 50 });
+  ok("server/ack-rate-limited.json", "ServerFrame", { t: "ack", rid: "r300", ok: false, error: { code: "rate_limited", message: "too many frames", retryAfterMs: 50 } });
+
   // SF-7: a table is at most 200 MB.
   const table = { kind: "table", mime: "text/csv", bytes: 120_000, rows: 124, cols: 6, preview: "ready" };
   const createCsv = { groupId: ID.general, topicId: ID.topic, title: "报名表", kind: "file", entry: "a.csv", files: [{ path: "a.csv", fileId: FILE }], media: table };

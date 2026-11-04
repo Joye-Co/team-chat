@@ -94,6 +94,13 @@ export interface BotOptions {
   /** How long `stop()` waits for running handlers. Default 10 s. */
   stopTimeoutMs?: number;
   /**
+   * Client-side pacing of write frames (send, edit, delete, topic.update, cards, page bridge).
+   * The server allows about 20 per second per member and answers `rate_limited` above it; the
+   * bot sends at most `rate` per second with bursts of `burst` (default 18 and 18), so a burst
+   * of sends lands instead of failing. On `rate_limited` it waits the server's `retryAfterMs`.
+   */
+  writeRate?: { rate: number; burst: number };
+  /**
    * Run `onMention` and `onMessage` for messages from other bots too. Default false: two bots
    * that answer each other would loop until the rate limit stops them. Turn it on only when
    * the handlers cannot answer a bot with a message that reaches that bot again.
@@ -379,6 +386,43 @@ export interface EventContext {
 }
 
 type Handler<C> = (ctx: C) => unknown | Promise<unknown>;
+
+/** Frames the server counts in its read, delta or no bucket; every other frame is a write. */
+const NOT_WRITES = new Set(["hello", "ping", "delta", "typing", "read", "fetch", "history", "search"]);
+/** Default client-side write pace: a little under the server's 20 per second. */
+export const DEFAULT_WRITE_RATE = { rate: 18, burst: 18 };
+
+/** Token bucket of the client-side write pace. */
+class Pace {
+  private tokens: number;
+  private last = Date.now();
+  private readonly rate: number;
+  private readonly burst: number;
+  constructor(rate: number, burst: number) {
+    this.rate = rate;
+    this.burst = burst;
+    this.tokens = burst;
+  }
+  private refill(): void {
+    const now = Date.now();
+    this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) / 1000) * this.rate);
+    this.last = now;
+  }
+  /** Takes a token, or returns the milliseconds until one is there. */
+  take(): number {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return 0;
+    }
+    return Math.ceil(((1 - this.tokens) / this.rate) * 1000);
+  }
+  /** The server said wait: no tokens until then. */
+  block(ms: number): void {
+    this.refill();
+    this.tokens = Math.min(this.tokens, -((ms / 1000) * this.rate) + 1);
+  }
+}
 
 interface Pending {
   rid: string;
@@ -1357,9 +1401,47 @@ export class Bot {
   }
 
   private trySend(p: Pending): void {
+    if (!NOT_WRITES.has(p.frame.t)) {
+      // Writes go out in order, at the client-side pace.
+      if (!this.paceQueue.includes(p)) this.paceQueue.push(p);
+      this.pumpWrites();
+      return;
+    }
     if (this.sendRaw(p.frame)) {
       p.sent = true;
       p.attempts++;
+    }
+  }
+
+  private pace: Pace | null = null;
+  private readonly paceQueue: Pending[] = [];
+  private paceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Sends queued writes while the pace allows; waits for the next token otherwise. */
+  private pumpWrites(): void {
+    if (this.paceTimer) return;
+    const r = this.opts.writeRate ?? DEFAULT_WRITE_RATE;
+    this.pace ??= new Pace(r.rate, r.burst);
+    while (this.paceQueue.length > 0) {
+      const p = this.paceQueue[0] as Pending;
+      if (this.pending.get(p.rid) !== p) {
+        this.paceQueue.shift();
+        continue;
+      }
+      if (!this.ws || this.ws.readyState !== 1 || !this.ready) return; // resent after the next welcome
+      const wait = this.pace.take();
+      if (wait > 0) {
+        this.paceTimer = setTimeout(() => {
+          this.paceTimer = null;
+          this.pumpWrites();
+        }, wait);
+        return;
+      }
+      this.paceQueue.shift();
+      if (this.sendRaw(p.frame)) {
+        p.sent = true;
+        p.attempts++;
+      }
     }
   }
 
@@ -1367,12 +1449,15 @@ export class Bot {
     const p = this.pending.get(rid);
     if (!p) return;
     if (!ok) {
-      const e = value as { code: ChatError["code"]; message: string; reason?: string };
-      if (e.code === "rate_limited" && !p.noRateRetry && Date.now() + 1000 * p.attempts < p.deadline) {
+      const e = value as { code: ChatError["code"]; message: string; reason?: string; retryAfterMs?: number };
+      // The server says how long to wait (1.1); older servers: 1 s more per attempt.
+      const wait = typeof e.retryAfterMs === "number" && e.retryAfterMs >= 0 ? Math.max(e.retryAfterMs, 50) : 1000 * p.attempts;
+      if (e.code === "rate_limited" && !p.noRateRetry && Date.now() + wait < p.deadline) {
         p.sent = false;
+        if (!NOT_WRITES.has(p.frame.t)) this.pace?.block(wait);
         setTimeout(() => {
           if (this.pending.get(rid) === p) this.trySend(p);
-        }, 1000 * p.attempts);
+        }, wait);
         return;
       }
       this.pending.delete(rid);

@@ -322,6 +322,18 @@ describe("bot sdk e2e", () => {
     await waitFor("delete event", () => events.find((e) => e.type === "message.deleted" && e.data.messageId === r.message.id));
   });
 
+  test("paces a burst of 50 sends so all of them land (GAPS SF-10)", async () => {
+    const t = await bot.startTopic(generalId, { title: "burst", body: "start" });
+    const target = { groupId: generalId, topicId: t.topic!.id };
+    const started = Date.now();
+    const sent = await Promise.all(Array.from({ length: 50 }, (_, i) => bot.send(target, { body: `burst ${i}` })));
+    expect(sent.map((r) => r.message.body)).toEqual(Array.from({ length: 50 }, (_, i) => `burst ${i}`));
+    // 18 at once, then 18 per second: about 1.8 s, never a rate_limited failure.
+    expect(Date.now() - started).toBeGreaterThan(1000);
+    const seqs = sent.map((r) => r.message.createdSeq);
+    expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+  });
+
   test("validates frames before sending", async () => {
     const err = await bot.send({ groupId: generalId }, { body: "x".repeat(40_000) }).catch((e) => e);
     expect(err).toBeInstanceOf(ChatError);

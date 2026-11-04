@@ -139,6 +139,7 @@ fn card_live_write(id: &str, op: &OutboxOp) -> Option<LiveWrite> {
 /// The error a live write gets when it never left this client.
 pub(crate) fn offline_error() -> ErrorBody {
     ErrorBody {
+        retry_after_ms: None,
         code: ErrorCode::Internal,
         message: "not connected".into(),
         reason: Some("client.offline".into()),
@@ -152,6 +153,7 @@ pub(crate) fn emit_live_ack(
     result: Result<Option<serde_json::Value>, ErrorBody>,
 ) {
     let bad_result = || ErrorBody {
+        retry_after_ms: None,
         code: ErrorCode::Internal,
         message: "ack without a valid result".into(),
         reason: None,
@@ -1501,6 +1503,7 @@ impl Session {
             return None;
         }
         let err = error.unwrap_or(ErrorBody {
+            retry_after_ms: None,
             code: ErrorCode::Internal,
             message: String::new(),
             reason: None,

@@ -354,3 +354,28 @@ describe("SF-3 desk notes", () => {
     c.close();
   });
 });
+
+describe("SF-10 rate limit answers", () => {
+  it("say how long to wait, and a rate-limited send leaves no gap in the write order", async () => {
+    const owner = await createMember({ level: "owner" });
+    const gid = await createGroup(owner, []);
+    const { c } = await Client.connect(owner.token);
+    const topicId = (await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "burst" })).topic.id;
+    const rids = Array.from({ length: 30 }, () => c.rid());
+    for (const [i, rid] of rids.entries()) c.send({ t: "send", rid, groupId: gid, topicId, clientMsgId: clientMsgId(), body: `m${i}` });
+    const acks = await Promise.all(rids.map((rid) => c.next((f) => f.rid === rid)));
+    const limited = acks.filter((a) => !a.ok);
+    expect(limited.length).toBeGreaterThan(0);
+    for (const a of limited) {
+      expect(a.error.code).toBe("rate_limited");
+      expect(a.error.retryAfterMs).toBeGreaterThan(0);
+      expect(a.error.retryAfterMs).toBeLessThanOrEqual(1000);
+    }
+    // After the wait, the next send goes through at once (no 2 s turn wait for the refused ones).
+    await new Promise((r) => setTimeout(r, Math.max(...limited.map((a) => a.error.retryAfterMs))));
+    const t0 = Date.now();
+    await c.ok({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "after" });
+    expect(Date.now() - t0).toBeLessThan(1500);
+    c.close();
+  });
+});

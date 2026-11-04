@@ -149,7 +149,7 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
 { t: "event", event: Event }
 { t: "transient", event: TransientEvent }
 { t: "ack", rid, ok: true, result?: unknown }
-{ t: "ack", rid, ok: false, error: { code: ErrorCode, message: string } }
+{ t: "ack", rid, ok: false, error: { code: ErrorCode, message: string, reason?, retryAfterMs? /* 1.1 */ } }
 { t: "page", rid, groupId, events: Event[], hasMore: boolean, lastSeq: number }
 { t: "history", rid, groupId, topicId, messages: Message[], hasMore: boolean }
 { t: "directory", members?: Member[], groups?: GroupSummary[], removedGroupIds?: string[] }
@@ -159,6 +159,14 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
 ErrorCode = "unauthorized" | "forbidden" | "not_found" | "invalid" | "conflict"
           | "rate_limited" | "too_large" | "unsupported_protocol" | "internal"
 ```
+
+- Frame limits per member (all its sockets together): write frames (`send`, `edit`, `delete`,
+  `topic.update` and feature writes such as `card.*` and `artifact.*`) about 20 per second with
+  bursts of 20; `delta` 100 per second, bursts of 200; reads (`read`, `fetch`, `history`,
+  `typing`, `search`) 50 per second, bursts of 100. Over a limit the ack is `rate_limited` with
+  `error.retryAfterMs` (1.1): the time until the next frame of that class fits. A rate-limited
+  frame gets no write number, so later writes of the socket do not wait for it. Clients pace
+  writes below the limit (the bot SDK sends at most 18 per second by default, `writeRate`).
 
 ### Rules
 

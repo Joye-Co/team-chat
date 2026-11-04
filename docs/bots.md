@@ -90,7 +90,9 @@ await bot.start();
 - **Follow rules**: the bot follows a topic it created, posted in, was mentioned in, was added
   to `waitingOn` of, or became owner of, as the server does. `bot.setFollow(...)` changes it.
 - **Writes** wait for the connection and are resent after a reconnect (`send` is idempotent
-  by `clientMsgId`). Rate-limited writes are retried. A request fails with `timeout` after
+  by `clientMsgId`). Writes are paced on the client at 18 per second with bursts of 18
+  (`writeRate`; the server allows about 20 per member), so a burst of 50 sends lands in order.
+  Rate-limited writes are retried after the server's `retryAfterMs`. A request fails with `timeout` after
   `requestTimeoutMs` (60 s). Frames are checked against the protocol schemas before sending.
 - **Streaming**: `send` with `streaming: true`, `delta` frames batched every 100 ms, and a final
   `edit` with the full body and `streaming: false`. After a reconnect the writer sends the full
