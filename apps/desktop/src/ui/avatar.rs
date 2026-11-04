@@ -253,7 +253,15 @@ impl RenderOnce for MemberAvatar {
                 .line_height(line)
                 .font_weight(theme::MEDIUM_WEIGHT)
                 .overflow_hidden()
-                .child(text)
+                // No name yet (bare data, first sync): a person glyph, never
+                // a blank disc (B-16).
+                .map(|d| {
+                    if text.is_empty() {
+                        d.child(icon(Sym::Person, size * 0.5, k.text_2))
+                    } else {
+                        d.child(text)
+                    }
+                })
                 .into_any_element(),
         };
         div()
