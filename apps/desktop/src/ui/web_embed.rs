@@ -215,6 +215,8 @@ pub struct WebEmbedState {
     autoplay: bool,
     radius: Pixels,
     pad: Pixels,
+    /// The page fills a content area (on the background), not a card.
+    fill: bool,
     remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
@@ -263,6 +265,7 @@ impl WebEmbedState {
             autoplay: false,
             radius: px(0.),
             pad: crate::ui::native::tokens::space::S24,
+            fill: false,
             remember: true,
             on_event: None,
             on_host: None,
@@ -434,6 +437,7 @@ impl WebEmbedState {
         self.autoplay = embed.autoplay;
         self.radius = embed.radius;
         self.pad = embed.pad;
+        self.fill = embed.fill;
         self.remember = embed.remember;
         self.on_event = embed.on_event.clone();
         self.on_host = embed.on_host.clone();
@@ -567,7 +571,7 @@ impl WebEmbedState {
         if self.phase != Phase::Ready {
             return;
         }
-        let css = base_css(self.pad, cx);
+        let css = base_css(self.pad, self.fill, cx);
         if self.base.as_deref() == Some(css.as_str()) {
             return;
         }
@@ -579,7 +583,8 @@ impl WebEmbedState {
     }
 
     /// Reads, after `delay_ms`, where an inline page ends on a whole block
-    /// (`window.__tcEnd`, kept by the cover script) and shrinks the frame to it.
+    /// (`window.__tcEnd`, kept by the cover script; a heading is never the
+    /// last block: it goes with the block it heads, §2.21) and shrinks the frame to it.
     fn measure_end_later(&self, cx: &mut Context<Self>, delay_ms: u64) {
         if !self.pass_scroll {
             return;
@@ -791,8 +796,15 @@ fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
 
 /// The host base stylesheet in this theme's token values (see
 /// [`WebEmbedState::apply_base`]).
-fn base_css(pad: Pixels, cx: &App) -> String {
+fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
     let k = crate::ui::native::native_colors(cx);
+    // The surface the page sits on: the background when it fills a content
+    // area, else its card's fill (see `WebEmbed::render`).
+    let surface = if fill {
+        k.content
+    } else {
+        theme::colors(cx).raised
+    };
     let scheme = if theme::is_dark(cx) { "dark" } else { "light" };
     format!(
         ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
@@ -817,9 +829,10 @@ pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8
         bg = hex(k.content),
         fg = hex(k.label),
         muted = hex(k.secondary),
-        // Opaque on the page background: a line the page draws twice (a row
-        // and its cells) keeps the token's value (§2.22, D2).
-        border = hex(over(k.separator, k.content)),
+        // Opaque on the page's own surface (the card fill inline): a line
+        // the page draws twice (a row and its cells) keeps the token's value
+        // and its contrast on that surface (§2.22, D2, D4).
+        border = hex(over(k.separator, surface)),
         fill = hex(k.fill),
     )
 }
@@ -874,6 +887,10 @@ var cut=h,all=document.body?document.body.getElementsByTagName('*'):[];\
 for(var pass=0;pass<6;pass++){{var top=cut;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;\
 var r=el.getBoundingClientRect();if(r.height<=0||r.width<=0||r.top>=cut||r.bottom<=cut)continue;\
 if(atomic(el,r)&&r.top<top)top=r.top;}}if(top>=cut)break;cut=top;}}\
+var hs=document.body?document.body.querySelectorAll('h1,h2,h3,h4,h5,h6,figcaption'):[],lh=null,lb=-1;\
+for(var j=0;j<hs.length;j++){{var q=hs[j].getBoundingClientRect();if(q.height>0&&q.bottom<=cut&&q.bottom>lb){{lb=q.bottom;lh=q;}}}}\
+if(lh){{var after=false;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d||/^(H[1-6]|FIGCAPTION)$/.test(el.tagName.toUpperCase()))continue;\
+var r=el.getBoundingClientRect();if(r.height>0&&r.width>0&&r.top>=lb-1&&r.bottom<=cut&&atomic(el,r)){{after=true;break;}}}}if(!after)cut=lh.top;}}\
 if(cut<h*0.35)cut=h;window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
 window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
 try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\

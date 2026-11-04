@@ -91,7 +91,7 @@ pub enum Band {
 /// The words and state of a footer band at one moment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BandView {
-    /// 等 {name} 回应 (spinner).
+    /// 等 {name} 回应 (clock, muted: waiting on someone else, §2.12).
     Waiting(String),
     /// {name} 还在处理 (spinner).
     Working(String),
@@ -1276,7 +1276,14 @@ pub fn page_footer(
             .child(text)
     };
     match view {
-        BandView::Waiting(t) | BandView::Working(t) => base.child(busy(t)),
+        // §2.12: waiting on someone else is the muted clock; the spinner
+        // stays for work the member is doing.
+        BandView::Waiting(t) => base.child(
+            pill()
+                .child(ui::icon(Sym::Waiting, tsp::S12, k.text_2))
+                .child(t),
+        ),
+        BandView::Working(t) => base.child(busy(t)),
         BandView::NoAnswer(t) => {
             let (a, b) = (artifact_id.to_string(), artifact_id.to_string());
             base.child(div().flex_none().text_color(k.text_2).child(t))
