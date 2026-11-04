@@ -240,6 +240,7 @@ async fn duplicate_ack_is_handled() {
         .outbox_push(&chat_core::OutboxItem {
             id: cmid.clone(),
             op: chat_core::OutboxOp::Send {
+                from_aside: None,
                 card_v2: None,
                 context: None,
                 cause_event_id: None,

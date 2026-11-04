@@ -875,9 +875,10 @@ impl Session {
                     context,
                     cause_event_id,
                     block_refs,
+                    from_aside,
                     ..
                 } => ClientFrame::Send(SendFrame {
-                    from_aside: None,
+                    from_aside,
                     rid: rid.clone(),
                     group_id,
                     topic_id,

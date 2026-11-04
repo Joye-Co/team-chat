@@ -488,6 +488,7 @@ impl Client {
                 &cmd_tx,
                 crate::new_id(),
                 OutboxOp::Send {
+                    from_aside: None,
                     group_id: dm_group_id.clone(),
                     topic_id: None,
                     title: req.title,
@@ -546,6 +547,16 @@ impl Client {
     // ------------------------------------------------------------------
     // Runs: desk, pause and resume, live terminal
     // ------------------------------------------------------------------
+
+    /// 1.1: desk notes of every group (首页), newest first.
+    pub fn desk_notes(&self) -> Result<Vec<crate::DeskNoteRow>, ClientError> {
+        Ok(self.store().desk_notes()?)
+    }
+
+    /// 1.1: the purpose line of a group, from the cache.
+    pub fn group_purpose(&self, group_id: &str) -> Result<Option<String>, ClientError> {
+        Ok(self.store().group(group_id)?.and_then(|g| g.group.purpose))
+    }
 
     /// Active runs of every group (正在做), newest change first.
     pub fn active_runs(&self) -> Result<Vec<BotRun>, ClientError> {

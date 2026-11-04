@@ -105,6 +105,9 @@ pub enum OutboxOp {
         /// 1.1: refs to parts (引用提问).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         block_refs: Option<Vec<crate::proto::BlockRefInput>>,
+        /// 1.1: the side chat answer this send posts to its source topic.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_aside: Option<crate::proto::AsideOrigin>,
         /// A follow-up into a topic that is still being started: the `clientMsgId` of the
         /// topic's first message. The row waits until that message is acked or applied, and
         /// then gets the topic id.

@@ -268,6 +268,21 @@ fn side_message(
     }
 }
 
+/// When the answer `answer_id` went into the source topic: the message whose `fromAside`
+/// names it, else (messages from before 1.1 `fromAside`) my first one with the same text.
+fn posted_state(
+    answer_id: &str,
+    text: &str,
+    answer_at: Millis,
+    by_origin: &std::collections::HashMap<String, Millis>,
+    mine: &[(String, Millis)],
+) -> Option<Millis> {
+    by_origin
+        .get(answer_id)
+        .copied()
+        .or_else(|| posted_at(text, answer_at, mine))
+}
+
 /// When a suggestion went into the source topic: my first message there with the same text
 /// at or after the answer (`mine` = my messages and queued sends there: body, time).
 fn posted_at(text: &str, answer_at: Millis, mine: &[(String, Millis)]) -> Option<Millis> {
@@ -336,26 +351,44 @@ impl CoreProvider {
             .filter(|m| m.deleted_at.flatten().is_none())
             .map(|m| side_message(m, &links, &title))
             .collect();
-        // A posted suggestion is my message in the source topic: read it from there, so a
-        // restart never offers it again.
+        // A posted suggestion is a message in the source topic whose `fromAside` names the
+        // answer (1.1, GAPS SF-4): read it from there, so a restart never offers it again.
+        // Messages from before `fromAside` fall back to my message with the same text.
         if messages.iter().any(|m| m.suggestion.is_some()) {
             let me = a.me.id.as_str();
-            let mut mine: Vec<(String, Millis)> = a
+            let source_msgs = a
                 .client
                 .messages(&source, None, POSTED_SCAN)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|m| m.author_id == me && !m.is_deleted())
-                .map(|m| (m.body, m.created_at as Millis))
-                .collect();
+                .unwrap_or_default();
+            let mut by_origin: std::collections::HashMap<String, Millis> = Default::default();
+            let mut mine: Vec<(String, Millis)> = Vec::new();
+            for m in source_msgs.into_iter().filter(|m| !m.is_deleted()) {
+                if let Some(o) = &m.from_aside {
+                    by_origin
+                        .entry(o.message_id.clone())
+                        .or_insert(m.created_at as Millis);
+                } else if m.author_id == me {
+                    mine.push((m.body, m.created_at as Millis));
+                }
+            }
             for item in a.client.pending_sends(&source).unwrap_or_default() {
-                if let chat_core::store::OutboxOp::Send { body, .. } = item.op {
-                    mine.push((body, item.created_at as Millis));
+                if let chat_core::store::OutboxOp::Send {
+                    body, from_aside, ..
+                } = item.op
+                {
+                    match from_aside {
+                        Some(o) => {
+                            by_origin
+                                .entry(o.message_id)
+                                .or_insert(item.created_at as Millis);
+                        }
+                        None => mine.push((body, item.created_at as Millis)),
+                    }
                 }
             }
             for m in &mut messages {
                 if let Some(s) = &mut m.suggestion {
-                    s.posted_at = posted_at(&s.text, m.at, &mine);
+                    s.posted_at = posted_state(&m.id, &s.text, m.at, &by_origin, &mine);
                 }
             }
         }
@@ -493,6 +526,37 @@ impl CoreProvider {
             .for_generation(generation)
             .posted
             .insert(message_id.to_string(), now_ms());
+        let source = self.resolve_topic(topic_id);
+        let origin = self
+            .side_topic(group_id, &source, member_id)
+            .and_then(|side| {
+                let dm = self.account()?.client.dm_with(member_id).ok().flatten()?;
+                Some(chat_core::proto::AsideOrigin {
+                    group_id: dm,
+                    topic_id: side,
+                    message_id: message_id.to_string(),
+                })
+            });
+        // The source topic exists on the server (a side chat needs its id): send with
+        // `fromAside`, so the server stores where it came from and refuses a second post.
+        if let (Some(origin), Some(a)) = (origin, self.account())
+            && super::convert::pending_cid(&source).is_none()
+        {
+            if let Err(e) = a.client.send(chat_core::SendRequest {
+                group_id: group_id.to_string(),
+                topic_id: Some(source),
+                body: text,
+                from_aside: Some(origin),
+                ..Default::default()
+            }) {
+                tracing::warn!(error = %e, "post to topic refused");
+            }
+            self.emit(vec![crate::data::Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+            return;
+        }
         use crate::data::ChatProvider as _;
         self.send(SendRequest {
             group_id: group_id.to_string(),
@@ -718,5 +782,21 @@ mod tests {
         assert_eq!(posted_at("让 Forge 补一个多端测试", 100, &mine), Some(300));
         assert_eq!(posted_at("让 Forge 补一个多端测试", 400, &mine), None);
         assert_eq!(posted_at("另一个建议", 0, &mine), None);
+    }
+
+    #[test]
+    fn a_suggestion_is_posted_when_a_message_names_its_answer_also_after_an_edit() {
+        // After a restart: the posted message was edited, so its text no longer matches; its
+        // `fromAside` still names the answer (GAPS SF-4), and only that answer.
+        let by_origin = std::collections::HashMap::from([("A1".to_string(), 120)]);
+        let mine = vec![("改过的文字".to_string(), 120)];
+        assert_eq!(
+            posted_state("A1", "建议：重连后补发", 100, &by_origin, &mine),
+            Some(120)
+        );
+        assert_eq!(
+            posted_state("A2", "建议：重连后补发", 100, &by_origin, &mine),
+            None
+        );
     }
 }
