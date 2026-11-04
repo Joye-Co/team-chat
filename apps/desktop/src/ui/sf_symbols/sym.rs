@@ -206,6 +206,10 @@ concepts! {
     Asterisk = "asterisk";
     /// The busy spinner (gpui-component's `Spinner` turns it).
     Spinner = "progress.indicator";
+    /// Find and replace (gpui-component's input search).
+    Replace = "arrow.left.arrow.right";
+    /// A bottom panel toggle (gpui-component's dock).
+    BottomPanel = "rectangle.bottomthird.inset.filled";
     /// Not a concept: an icon that has none. Its name is empty, so it always
     /// draws the fallback (visible in debug builds).
     Missing = "";
@@ -495,5 +499,11 @@ lucide! {
     Square => Square,
     Asterisk => Asterisk,
     Loader => Spinner,
+    Minimize => Collapse,
+    Inspector => Inspector,
+    CaseSensitive => TextFormat,
+    Replace => Replace,
+    PanelBottom => BottomPanel,
+    PanelBottomOpen => BottomPanel,
     LoaderCircle => Spinner,
 }

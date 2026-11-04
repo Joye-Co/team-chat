@@ -214,7 +214,7 @@ impl Page {
             Page::Machines => Sym::MacMini,
             Page::Notifications => Sym::Bell,
             Page::Appearance => Sym::Appearance,
-            Page::About => Sym::Info,
+            Page::About => Sym::General,
         }
     }
 }
