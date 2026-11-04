@@ -787,6 +787,10 @@ describe("page event declarations", () => {
     expect(MAX_PATTERN_INPUT).toBe(serverPattern.MAX_PATTERN_INPUT);
   });
 
+  test("the SDK and the server use one pattern module, not two copies", () => {
+    expect(patternProblem).toBe(serverPattern.patternProblem);
+  });
+
   test("a declaration with a refused pattern fails before any request", async () => {
     const decl = [{ name: "form.submit", schema: { type: "object", properties: { code: { type: "string", pattern: "(?<!x)y" } } } }];
     expect(() => checkArtifactEvents(decl as never)).toThrow(ChatError);

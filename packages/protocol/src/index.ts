@@ -114,6 +114,7 @@ export * from "./topic.ts";
 export * from "./reads.ts";
 export * from "./card.ts";
 export * from "./card2.ts";
+export * from "./pattern.ts";
 export * from "./diagram.ts";
 export * from "./media.ts";
 export * from "./desk.ts";
