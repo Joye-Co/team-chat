@@ -162,7 +162,7 @@ crate::copy! {
     GALLERY_S_FORM = "表单",
     GALLERY_S_FORM_NOTE = "最多 8 个字段。必填项没填完，提交不可用，并写明还差什么。",
     GALLERY_S_PLAN = "计划",
-    GALLERY_S_PLAN_NOTE = "只用三个符号：✓ 做完，● 正在做（蓝色），○ 还没做。等人的一步写明等谁。",
+    GALLERY_S_PLAN_NOTE = "只用三个符号：✓ 做完，转圈 正在做，○ 还没做。等人的一步写明等谁。",
     GALLERY_S_DATA = "数据",
     GALLERY_S_DATA_NOTE = "数字、折线、表格。变化用符号写出来，不只靠颜色；越低越好的指标，下降也算好。",
     GALLERY_S_DIFF = "对比",

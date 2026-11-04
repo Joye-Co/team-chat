@@ -29,7 +29,13 @@ fn open_stop_with(
     if hold {
         fake.hold_stop(p::RUN);
     }
-    let services = Services::new(fake, cx);
+    // With `--worst-case` the stop alert and 正在停止… read worst-case names.
+    let provider: std::sync::Arc<dyn crate::data::ChatProvider> = if crate::selftest::worst_case() {
+        crate::selftest::worst_case::WorstCase::new(fake)
+    } else {
+        fake
+    };
+    let services = Services::new(provider, cx);
     p::open_running(&services, cx);
     let handle = open_main(services.clone(), content, cx)?;
     Ok((handle, services))

@@ -31,10 +31,18 @@ const fn hover(x: f32, y: f32, settle_ms: u64) -> Steps {
     }
 }
 
+const fn keys(keys: &'static [&'static str]) -> Steps {
+    Steps {
+        pointer: None,
+        keys,
+        settle_ms: 200,
+    }
+}
+
 /// One line per scene.
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
-    ("state-hover-message", hover(400., 250., 600)),
+    ("state-hover-message", hover(600., 315., 600)),
     ("state-hover-code", hover(690., 424., 400)),
     // --- end t5 ---
     // --- t5-cards ---
@@ -42,6 +50,13 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-card-button-hover", hover(667., 320., 400)),
     ("state-card-tooltip", hover(900., 530., 1200)),
     // --- end t5-cards ---
+    // --- v15/r5-cards ---
+    ("state-hover-sidebar", hover(120., 294., 200)),
+    ("state-focus-sidebar", keys(&["shift-tab"])),
+    ("state-focus-page-list", keys(&["tab"])),
+    ("state-focus-card-option", keys(&["tab"])),
+    ("state-focus-picker", keys(&["tab"])),
+    // --- end v15/r5-cards ---
 ];
 
 /// The steps of scene `name`, if it has any.

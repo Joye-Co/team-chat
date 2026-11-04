@@ -402,6 +402,7 @@ impl Gallery21 {
                 item(
                     c::I_REPORT_NARROW,
                     c::I_REPORT_NARROW_NOTE,
+                    // A 480 box: under ROW_FOLD the row stacks (E2).
                     self.card(
                         REPORT,
                         me,
@@ -410,7 +411,8 @@ impl Gallery21 {
                         CardMode::Desk,
                         window,
                         cx,
-                    ),
+                    )
+                    .map(|card| div().w(NARROW_BOX).child(card).into_any_element()),
                     true,
                     cx,
                 ),
@@ -428,17 +430,20 @@ impl Gallery21 {
                         cx,
                     ))
                     .child(item(
-                        c::I_PENDING_HARD,
+                        c::I_PENDING_SOFT,
                         "",
-                        self.card(PEND_HARD, me, None, "a", CardMode::Desk, window, cx),
+                        self.card(PEND_SLOW, me, None, "a", CardMode::Desk, window, cx),
                         true,
                         cx,
                     ))
                     .into_any_element();
+                // 没有回应 with 重试 and 不等了 sits at the top of its column, so
+                // the whole state shows in the window (E2); the columns read
+                // top to bottom in stage order.
                 let right = item(
-                    c::I_PENDING_SOFT,
+                    c::I_PENDING_HARD,
                     "",
-                    self.card(PEND_SLOW, me, None, "a", CardMode::Desk, window, cx),
+                    self.card(PEND_HARD, me, None, "a", CardMode::Desk, window, cx),
                     true,
                     cx,
                 );
@@ -624,3 +629,6 @@ impl Render for Gallery21 {
             )
     }
 }
+
+/// The width of the narrow named state of the report card, under `ROW_FOLD`.
+const NARROW_BOX: gpui::Pixels = gpui::px(480.);

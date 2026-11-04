@@ -480,7 +480,8 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
     let words = interact::stage_words(stage, author);
     Some(match stage {
         S::Quiet => return None,
-        S::Wait | S::Slow => (words, String::new(), PendTone::Live),
+        // The author has it: waiting on someone else is the muted clock (§2.12).
+        S::Wait | S::Slow => (words, String::new(), PendTone::Quiet),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
         S::OfflineLive | S::Busy | S::Refused => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
     })
@@ -521,7 +522,8 @@ pub fn page_pending(ctx: &Ctx, cx: &gpui::App) -> Option<(String, PendTone)> {
             version,
             ..
         } => match host::band(artifact_id, *version, cx)? {
-            BandView::Waiting(t) | BandView::Working(t) => Some((t, PendTone::Live)),
+            BandView::Working(t) => Some((t, PendTone::Live)),
+            BandView::Waiting(t) => Some((t, PendTone::Quiet)),
             BandView::NoAnswer(t) => Some((t, PendTone::Quiet)),
             _ => None,
         },

@@ -912,7 +912,10 @@ impl ChatProvider for FakeProvider {
 
     fn login(&self, request: LoginRequest) {
         let ok = match &request.credential {
-            Credential::InviteCode(code) => code != "WRONG-CODE-0000" && code != "0000-0000",
+            Credential::InviteCode(code) => !matches!(
+                code.as_str(),
+                "WRONG-CODE-0000" | "0000-0000" | "0000-0000-0000"
+            ),
             Credential::Token(token) => token.len() > 3,
         };
         // A `.invalid` host (RFC 2606) never answers: the login-unreachable scene.

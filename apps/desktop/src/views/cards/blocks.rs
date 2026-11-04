@@ -220,15 +220,30 @@ fn render_fields(fields: &[CardField], cx: &App) -> AnyElement {
                         .text_color(k.text_3)
                         .child(f.label.clone()),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .text_color(k.text_1)
-                        .child(f.value.clone()),
-                )
+                .child(field_value(&f.value, k.text_1))
         }))
         .into_any_element()
+}
+
+/// A field value: a sentence wraps; one token with no space (a file name,
+/// a URL, an e-mail) stays on one line, cut in the middle so its end shows,
+/// with the full text in a tooltip (§2.21).
+fn field_value(value: &str, color: gpui::Hsla) -> AnyElement {
+    let token = !value.trim().contains(char::is_whitespace) && value.chars().count() > 24;
+    if token {
+        ui::truncate::TruncText::new(value.to_string())
+            .middle()
+            .flex_1()
+            .text_color(color)
+            .into_any_element()
+    } else {
+        div()
+            .flex_1()
+            .min_w(px(0.))
+            .text_color(color)
+            .child(value.to_string())
+            .into_any_element()
+    }
 }
 
 /// Width of a table column from its longest cell, in pixels.
