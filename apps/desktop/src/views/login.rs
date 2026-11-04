@@ -577,26 +577,25 @@ impl LoginWindow {
             view
         });
         let hub = services.hub.clone();
-        let subscriptions = vec![cx.subscribe_in(
-            &hub,
-            window,
-            move |_, _, changes: &Changes, window, cx| {
-                if !changes.any(|c| matches!(c, Change::Session)) {
-                    return;
-                }
-                if matches!(services.provider.session(), SessionState::SignedIn { .. }) {
-                    let services = services.clone();
-                    window.defer(cx, move |window, cx| {
-                        if let Err(e) = crate::app::open_main_window(services, true, None, cx) {
-                            eprintln!("failed to open the window: {e}");
-                            return;
-                        }
-                        cx.set_global(LoginWindowGlobal(None));
-                        window.remove_window();
-                    });
-                }
-            },
-        )];
+        let subscriptions =
+            vec![
+                cx.subscribe_in(&hub, window, move |_, _, changes: &Changes, window, cx| {
+                    if !changes.any(|c| matches!(c, Change::Session)) {
+                        return;
+                    }
+                    if matches!(services.provider.session(), SessionState::SignedIn { .. }) {
+                        let services = services.clone();
+                        window.defer(cx, move |window, cx| {
+                            if let Err(e) = crate::app::open_main_window(services, true, None, cx) {
+                                eprintln!("failed to open the window: {e}");
+                                return;
+                            }
+                            cx.set_global(LoginWindowGlobal(None));
+                            window.remove_window();
+                        });
+                    }
+                }),
+            ];
         Self {
             login,
             _subscriptions: subscriptions,
@@ -665,7 +664,10 @@ pub fn show_login_window(services: Services, cx: &mut gpui::App) -> bool {
     let open = cx
         .try_global::<LoginWindowGlobal>()
         .and_then(|g| g.0)
-        .is_some_and(|h| h.update(cx, |_, window, _| window.activate_window()).is_ok());
+        .is_some_and(|h| {
+            h.update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+        });
     if !open && let Err(e) = open_window(services, true, cx) {
         eprintln!("failed to open the login window: {e}");
     }

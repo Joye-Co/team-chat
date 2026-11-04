@@ -64,7 +64,10 @@ pub enum Phase {
         total: u64,
     },
     /// Downloaded and verified: waits for the user's 重启安装.
-    Ready { info: UpdateInfo, dmg: PathBuf },
+    Ready {
+        info: UpdateInfo,
+        dmg: PathBuf,
+    },
     /// Downloaded; waits for pending sends before it installs.
     WaitingForSends(UpdateInfo),
     Installing(UpdateInfo),
@@ -165,7 +168,10 @@ pub fn menu_item(phase: &Phase) -> (String, bool) {
             fill(o::UPDATE_INSTALLING_TITLE, &[("version", &i.version)]),
             false,
         ),
-        Phase::Manual(i) => (fill(o::UPDATE_MANUAL_TITLE, &[("version", &i.version)]), true),
+        Phase::Manual(i) => (
+            fill(o::UPDATE_MANUAL_TITLE, &[("version", &i.version)]),
+            true,
+        ),
         Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. } => {
             (o::MENU_CHECK.to_string(), true)
         }
@@ -216,8 +222,10 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
     cx.set_global(UpdaterGlobal(updater.clone()));
     cx.on_action(|_: &UpdateCommand, cx| on_update_command(cx));
     // The app menu's item follows the phase.
-    cx.observe(&updater, |_, cx| crate::views::nav::menus::refresh_menus(cx))
-        .detach();
+    cx.observe(&updater, |_, cx| {
+        crate::views::nav::menus::refresh_menus(cx)
+    })
+    .detach();
     let weak = updater.downgrade();
     cx.spawn(async move |cx| {
         loop {

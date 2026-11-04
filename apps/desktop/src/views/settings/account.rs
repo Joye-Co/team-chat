@@ -7,8 +7,7 @@
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
     InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, PathPromptOptions, Render,
-    Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
@@ -488,106 +487,112 @@ impl AccountPage {
             cx.notify();
         });
         let first = std::cell::Cell::new(true);
-        widgets::open_sheet(window, cx, SheetWidth::Form, px(500.), move |dialog, window, cx| {
-            if first.replace(false) {
-                let handle = this.read(cx).name.read(cx).focus_handle(cx);
-                handle.focus(window, cx);
-            }
-            let page = this.read(cx);
-            let me = page.me();
-            let busy = page.save.busy();
-            // A field problem turns 完成 off and shows one quiet footnote;
-            // an empty name only turns it off (NATIVE.md §7.4).
-            let typed_name = page.name.read(cx).value().to_string();
-            let problem = validate(&typed_name, &page.role.read(cx).value()).err();
-            let footnote = problem
-                .as_ref()
-                .filter(|(f, _)| !(*f == Field::Name && typed_name.trim().is_empty()))
-                .map(|(_, e)| e.clone());
-            let invalid = problem.is_some();
-            let avatar_status = widgets::native_status(&page.avatar, cx);
-            let choose = this.clone();
-            let (cancel, done, ok) = (this.clone(), this.clone(), this.clone());
-            let photo = div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(10.))
-                .child(account_avatar(me.as_ref(), px(88.), cx))
-                .child(
-                    push_button(
-                        "profile-photo",
-                        s::CHANGE_PHOTO,
-                        PushStyle::Standard,
-                        PushSize::Small,
-                        cx,
+        widgets::open_sheet(
+            window,
+            cx,
+            SheetWidth::Form,
+            px(500.),
+            move |dialog, window, cx| {
+                if first.replace(false) {
+                    let handle = this.read(cx).name.read(cx).focus_handle(cx);
+                    handle.focus(window, cx);
+                }
+                let page = this.read(cx);
+                let me = page.me();
+                let busy = page.save.busy();
+                // A field problem turns 完成 off and shows one quiet footnote;
+                // an empty name only turns it off (NATIVE.md §7.4).
+                let typed_name = page.name.read(cx).value().to_string();
+                let problem = validate(&typed_name, &page.role.read(cx).value()).err();
+                let footnote = problem
+                    .as_ref()
+                    .filter(|(f, _)| !(*f == Field::Name && typed_name.trim().is_empty()))
+                    .map(|(_, e)| e.clone());
+                let invalid = problem.is_some();
+                let avatar_status = widgets::native_status(&page.avatar, cx);
+                let choose = this.clone();
+                let (cancel, done, ok) = (this.clone(), this.clone(), this.clone());
+                let photo = div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(account_avatar(me.as_ref(), px(88.), cx))
+                    .child(
+                        push_button(
+                            "profile-photo",
+                            s::CHANGE_PHOTO,
+                            PushStyle::Standard,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .disabled(page.avatar.busy())
+                        .on_click(move |_, _, cx| choose.update(cx, |p, cx| p.choose_avatar(cx))),
                     )
-                    .disabled(page.avatar.busy())
-                    .on_click(move |_, _, cx| choose.update(cx, |p, cx| p.choose_avatar(cx))),
-                )
-                .children(avatar_status);
-            let fields = sheet_form()
-                .pt(px(4.))
-                .child(sheet_form_row(
-                    s::NAME,
-                    NativeTextField::new("profile-name", &page.name)
-                        .width(metrics::FIELD_NAME_WIDTH),
-                    cx,
-                ))
-                .child(sheet_form_row(
-                    s::ROLE,
-                    NativeTextField::new("profile-role", &page.role)
-                        .width(metrics::FIELD_NAME_WIDTH),
-                    cx,
-                ))
-                .children(footnote.map(|f| sheet_footnote(f, cx)));
-            dialog
-                .on_ok(move |_, window, cx| {
-                    ok.update(cx, |p, cx| p.save(window, cx));
-                    false
-                })
-                .on_cancel(move |_, window, cx| {
-                    cancel.update(cx, |p, cx| p.reset_fields(window, cx));
-                    true
-                })
-                .child(
-                    SheetLayout::new(s::EDIT_PROFILE)
-                        .explanation(s::EDIT_PROFILE_HINT)
-                        .body(photo)
-                        .body(fields)
-                        .buttons([
-                            push_button(
-                                "profile-cancel",
-                                common::CANCEL,
-                                PushStyle::Standard,
-                                PushSize::Large,
-                                cx,
-                            )
-                            .on_click({
-                                let page = this.clone();
-                                move |_, window, cx| {
-                                    page.update(cx, |p, cx| p.reset_fields(window, cx));
-                                    window.close_dialog(cx);
-                                }
-                            }),
-                            disabled_push(
+                    .children(avatar_status);
+                let fields = sheet_form()
+                    .pt(px(4.))
+                    .child(sheet_form_row(
+                        s::NAME,
+                        NativeTextField::new("profile-name", &page.name)
+                            .width(metrics::FIELD_NAME_WIDTH),
+                        cx,
+                    ))
+                    .child(sheet_form_row(
+                        s::ROLE,
+                        NativeTextField::new("profile-role", &page.role)
+                            .width(metrics::FIELD_NAME_WIDTH),
+                        cx,
+                    ))
+                    .children(footnote.map(|f| sheet_footnote(f, cx)));
+                dialog
+                    .on_ok(move |_, window, cx| {
+                        ok.update(cx, |p, cx| p.save(window, cx));
+                        false
+                    })
+                    .on_cancel(move |_, window, cx| {
+                        cancel.update(cx, |p, cx| p.reset_fields(window, cx));
+                        true
+                    })
+                    .child(
+                        SheetLayout::new(s::EDIT_PROFILE)
+                            .explanation(s::EDIT_PROFILE_HINT)
+                            .body(photo)
+                            .body(fields)
+                            .buttons([
                                 push_button(
-                                    "profile-done",
-                                    s::DONE,
-                                    PushStyle::Default,
+                                    "profile-cancel",
+                                    common::CANCEL,
+                                    PushStyle::Standard,
                                     PushSize::Large,
                                     cx,
-                                ),
-                                busy || invalid,
-                                cx,
-                            )
-                            .on_click(move |_, window, cx| {
-                                done.update(cx, |p, cx| p.save(window, cx))
-                            }),
-                        ]),
-                )
-        });
+                                )
+                                .on_click({
+                                    let page = this.clone();
+                                    move |_, window, cx| {
+                                        page.update(cx, |p, cx| p.reset_fields(window, cx));
+                                        window.close_dialog(cx);
+                                    }
+                                }),
+                                disabled_push(
+                                    push_button(
+                                        "profile-done",
+                                        s::DONE,
+                                        PushStyle::Default,
+                                        PushSize::Large,
+                                        cx,
+                                    ),
+                                    busy || invalid,
+                                    cx,
+                                )
+                                .on_click(move |_, window, cx| {
+                                    done.update(cx, |p, cx| p.save(window, cx))
+                                }),
+                            ]),
+                    )
+            },
+        );
     }
 
     fn header(&self, cx: &mut Context<Self>) -> gpui::Div {
@@ -644,7 +649,13 @@ impl AccountPage {
             )
             .child(
                 disabled_push(
-                    push_button("profile-edit", s::EDIT, PushStyle::Standard, PushSize::Regular, cx),
+                    push_button(
+                        "profile-edit",
+                        s::EDIT,
+                        PushStyle::Standard,
+                        PushSize::Regular,
+                        cx,
+                    ),
                     me.is_none(),
                     cx,
                 )
@@ -724,7 +735,9 @@ impl Render for AccountPage {
                     // 退出登录… alert).
                     let (page, id) = (page.clone(), d.id.clone());
                     div()
-                        .id(gpui::ElementId::Name(format!("device-menu-{}", d.id).into()))
+                        .id(gpui::ElementId::Name(
+                            format!("device-menu-{}", d.id).into(),
+                        ))
                         .child(self.device_row(d, window, cx))
                         .context_menu(move |menu, _, _| {
                             let (page, id) = (page.clone(), id.clone());
@@ -803,24 +816,33 @@ impl Render for AccountPage {
         let devices = div()
             .id("device-list")
             .track_focus(&self.device_list)
-            .on_key_down(move |e: &KeyDownEvent, window, cx| match e.keystroke.key.as_str() {
-                "up" | "down" => {
-                    let down = e.keystroke.key == "down";
-                    key_page.update(cx, |p, cx| p.move_selection(down, cx));
-                    cx.stop_propagation();
-                }
-                "backspace" | "delete" => {
-                    Self::confirm_remove_device(key_page.clone(), window, cx);
-                    cx.stop_propagation();
-                }
-                _ => {}
-            })
+            .on_key_down(
+                move |e: &KeyDownEvent, window, cx| match e.keystroke.key.as_str() {
+                    "up" | "down" => {
+                        let down = e.keystroke.key == "down";
+                        key_page.update(cx, |p, cx| p.move_selection(down, cx));
+                        cx.stop_propagation();
+                    }
+                    "backspace" | "delete" => {
+                        Self::confirm_remove_device(key_page.clone(), window, cx);
+                        cx.stop_propagation();
+                    }
+                    _ => {}
+                },
+            )
             .child(
                 GroupedForm::new()
                     .header(s::DEVICES)
                     // List rows inset their selection; the text lines up
                     // with the other groups' 12 pt.
-                    .row(div().py(px(4.)).mx(px(-4.)).flex().flex_col().children(rows))
+                    .row(
+                        div()
+                            .py(px(4.))
+                            .mx(px(-4.))
+                            .flex()
+                            .flex_col()
+                            .children(rows),
+                    )
                     .below(div().flex().child(remove)),
             );
         let sign_out_page = page.clone();
@@ -872,7 +894,9 @@ fn account_avatar(me: Option<&Member>, size: gpui::Pixels, cx: &App) -> gpui::An
             .text_color(k.label)
             .child(ui::avatar::monogram(&m.name, size))
             .into_any_element(),
-        _ => ui::MemberAvatar::new(me, size).on(k.window).into_any_element(),
+        _ => ui::MemberAvatar::new(me, size)
+            .on(k.window)
+            .into_any_element(),
     }
 }
 

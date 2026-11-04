@@ -2,8 +2,8 @@
 //! version with 检查更新; 开发者视图; 发送诊断… opens a sheet.
 
 use gpui::{
-    AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
-    Subscription, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _, WindowExt as _,
@@ -139,82 +139,84 @@ impl GeneralPage {
             }
         });
         let first = std::cell::Cell::new(true);
-        widgets::open_sheet(window, cx, SheetWidth::Form, px(440.), move |dialog, window, cx| {
-            let k = native_colors(cx);
-            let description = this.read(cx).description.clone();
-            let handle = description.read(cx).focus_handle(cx);
-            if first.replace(false) {
-                handle.focus(window, cx);
-            }
-            let focused = handle.is_focused(window);
-            let (busy, failed, no_server) = {
+        widgets::open_sheet(
+            window,
+            cx,
+            SheetWidth::Form,
+            px(440.),
+            move |dialog, window, cx| {
+                let k = native_colors(cx);
+                let description = this.read(cx).description.clone();
+                let handle = description.read(cx).focus_handle(cx);
+                if first.replace(false) {
+                    handle.focus(window, cx);
+                }
+                let focused = handle.is_focused(window);
+                let (busy, failed, no_server) = {
+                    let page = this.read(cx);
+                    (
+                        page.status.busy(),
+                        matches!(page.status, Status::Failed(_)),
+                        page.server().is_empty(),
+                    )
+                };
+                let field = div()
+                    .w_full()
+                    .px(metrics::FIELD_PAD)
+                    .py(px(4.))
+                    .rounded(metrics::FIELD_RADIUS)
+                    .bg(k.content)
+                    .border_1()
+                    .border_color(if failed { k.red } else { k.separator })
+                    .when(focused, |d| d.shadow(k.focus_ring()))
+                    .child(crate::ui::placeholder_input(
+                        Textarea::new(&description)
+                            .appearance(false)
+                            .n_body()
+                            .text_color(k.label),
+                        window,
+                        cx,
+                    ));
                 let page = this.read(cx);
-                (
-                    page.status.busy(),
-                    matches!(page.status, Status::Failed(_)),
-                    page.server().is_empty(),
-                )
-            };
-            let field = div()
-                .w_full()
-                .px(metrics::FIELD_PAD)
-                .py(px(4.))
-                .rounded(metrics::FIELD_RADIUS)
-                .bg(k.content)
-                .border_1()
-                .border_color(if failed {
-                    k.red
-                } else {
-                    k.separator
-                })
-                .when(focused, |d| d.shadow(k.focus_ring()))
-                .child(crate::ui::placeholder_input(
-                    Textarea::new(&description)
-                        .appearance(false)
-                        .n_body()
-                        .text_color(k.label),
-                    window,
-                    cx,
-                ));
-            let page = this.read(cx);
-            let send_page = this.clone();
-            let ok_page = this.clone();
-            dialog
-                .on_ok(move |_, window, cx| {
-                    ok_page.update(cx, |p, cx| p.send(window, cx));
-                    false
-                })
-                .child(
-                    SheetLayout::new(s::DIAGNOSTICS_TITLE)
-                        .explanation(s::DIAGNOSTICS_ROW_HINT)
-                        .body(field)
-                        .when_some(widgets::native_status(&page.status, cx), |l, st| l.body(st))
-                        .buttons([
-                            push_button(
-                                "diagnostics-cancel",
-                                common::CANCEL,
-                                PushStyle::Standard,
-                                PushSize::Large,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                            disabled_push(
+                let send_page = this.clone();
+                let ok_page = this.clone();
+                dialog
+                    .on_ok(move |_, window, cx| {
+                        ok_page.update(cx, |p, cx| p.send(window, cx));
+                        false
+                    })
+                    .child(
+                        SheetLayout::new(s::DIAGNOSTICS_TITLE)
+                            .explanation(s::DIAGNOSTICS_ROW_HINT)
+                            .body(field)
+                            .when_some(widgets::native_status(&page.status, cx), |l, st| l.body(st))
+                            .buttons([
                                 push_button(
-                                    "diagnostics-send",
-                                    s::DIAGNOSTICS_SUBMIT,
-                                    PushStyle::Default,
+                                    "diagnostics-cancel",
+                                    common::CANCEL,
+                                    PushStyle::Standard,
                                     PushSize::Large,
                                     cx,
-                                ),
-                                busy || no_server,
-                                cx,
-                            )
-                            .on_click(move |_, window, cx| {
-                                send_page.update(cx, |p, cx| p.send(window, cx))
-                            }),
-                        ]),
-                )
-        });
+                                )
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                                disabled_push(
+                                    push_button(
+                                        "diagnostics-send",
+                                        s::DIAGNOSTICS_SUBMIT,
+                                        PushStyle::Default,
+                                        PushSize::Large,
+                                        cx,
+                                    ),
+                                    busy || no_server,
+                                    cx,
+                                )
+                                .on_click(move |_, window, cx| {
+                                    send_page.update(cx, |p, cx| p.send(window, cx))
+                                }),
+                            ]),
+                    )
+            },
+        );
     }
 
     /// The version row (NATIVE.md §8): the update state as its detail and
@@ -246,15 +248,13 @@ impl GeneralPage {
                 )
                 .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.start_update(cx))),
             ),
-            Some(ref p @ Phase::Downloading { .. }) => row.control(
-                div()
-                    .w(px(120.))
-                    .child(determinate_bar(
-                        crate::updater::banner::download_share(p).unwrap_or(0.),
-                        None,
-                        cx,
-                    )),
-            ),
+            Some(ref p @ Phase::Downloading { .. }) => {
+                row.control(div().w(px(120.)).child(determinate_bar(
+                    crate::updater::banner::download_share(p).unwrap_or(0.),
+                    None,
+                    cx,
+                )))
+            }
             Some(Phase::Ready { .. }) => row.control(
                 push_button(
                     "about-restart",
@@ -269,13 +269,25 @@ impl GeneralPage {
                 row.control(spinner().with_size(metrics::SPINNER).color(k.secondary))
             }
             Some(Phase::Manual(_)) => row.control(
-                push_button("about-dismiss", u::DISMISS, PushStyle::Standard, PushSize::Regular, cx)
-                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
+                push_button(
+                    "about-dismiss",
+                    u::DISMISS,
+                    PushStyle::Standard,
+                    PushSize::Regular,
+                    cx,
+                )
+                .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
             ),
             Some(Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. }) | None => row
                 .control(
-                    push_button("about-check", u::CHECK, PushStyle::Standard, PushSize::Regular, cx)
-                        .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.check_now(cx))),
+                    push_button(
+                        "about-check",
+                        u::CHECK,
+                        PushStyle::Standard,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.check_now(cx))),
                 ),
         }
     }
@@ -291,7 +303,10 @@ impl Render for GeneralPage {
         } else {
             s::ON_LAUNCH_HOME
         };
-        let switch = |id: &'static str, on: bool, name: &'static str, set: fn(&mut prefs::LocalPrefs, bool)| {
+        let switch = |id: &'static str,
+                      on: bool,
+                      name: &'static str,
+                      set: fn(&mut prefs::LocalPrefs, bool)| {
             NativeSwitch::new(id, on)
                 .name(name)
                 .on_change(move |next, window, _| {
@@ -299,21 +314,27 @@ impl Render for GeneralPage {
                     window.refresh();
                 })
         };
-        let launch = popup_button("general-launch", launch_title, PushSize::Regular, window, cx)
-            .dropdown_menu(move |menu, _, _| {
-                [(false, s::ON_LAUNCH_HOME), (true, s::ON_LAUNCH_LAST)]
-                    .into_iter()
-                    .fold(menu, |menu, (last, label)| {
-                        menu.item(
-                            PopupMenuItem::new(label)
-                                .checked(last == p.launch_last_topic)
-                                .on_click(move |_, window, _| {
-                                    prefs::update(|p| p.launch_last_topic = last);
-                                    window.refresh();
-                                }),
-                        )
-                    })
-            });
+        let launch = popup_button(
+            "general-launch",
+            launch_title,
+            PushSize::Regular,
+            window,
+            cx,
+        )
+        .dropdown_menu(move |menu, _, _| {
+            [(false, s::ON_LAUNCH_HOME), (true, s::ON_LAUNCH_LAST)]
+                .into_iter()
+                .fold(menu, |menu, (last, label)| {
+                    menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(last == p.launch_last_topic)
+                            .on_click(move |_, window, _| {
+                                prefs::update(|p| p.launch_last_topic = last);
+                                window.refresh();
+                            }),
+                    )
+                })
+        });
         let options = GroupedForm::new()
             .row(FormRow::new(s::ON_LAUNCH).control(launch))
             .row(FormRow::new(s::LAUNCH_AT_LOGIN).control(switch(
@@ -378,7 +399,10 @@ impl Render for GeneralPage {
                 _ => String::new(),
             };
             dev_group = dev_group
-                .row(FormRow::new(fill(dev::CONNECTION, &[("state", &connection)])))
+                .row(FormRow::new(fill(
+                    dev::CONNECTION,
+                    &[("state", &connection)],
+                )))
                 .row(FormRow::new(fill(dev::SERVER, &[("url", &server)])))
                 .row(FormRow::new(fill(dev::MEMBER_ID, &[("id", &me)])));
         }

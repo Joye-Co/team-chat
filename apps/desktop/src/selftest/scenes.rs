@@ -1106,7 +1106,8 @@ pub fn open_login(
 ) -> Result<AnyWindowHandle, String> {
     let options = crate::views::login::window_options(false, cx);
     gpui_kit::open_window(options, cx, move |window, cx| {
-        let root = cx.new(|cx| crate::views::login::LoginWindow::new_for_scene(services, window, cx));
+        let root =
+            cx.new(|cx| crate::views::login::LoginWindow::new_for_scene(services, window, cx));
         let login = root.read(cx).login().clone();
         // A leading `!` submits the code, for the error scene.
         // A leading `!` submits the code, for the error scene; a leading `~`

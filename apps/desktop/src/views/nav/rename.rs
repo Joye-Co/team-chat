@@ -7,8 +7,8 @@
 use std::cell::Cell;
 
 use gpui::{
-    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render, Styled as _,
-    SharedString, Subscription, Window, px,
+    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
+    SharedString, Styled as _, Subscription, Window, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -16,8 +16,7 @@ use gpui_component::{
 };
 
 use super::dialogs::{
-    error_alert, form_field_width, sheet_footnote, sheet_form, sheet_form_row,
-    validate_group_name,
+    error_alert, form_field_width, sheet_footnote, sheet_form, sheet_form_row, validate_group_name,
 };
 use crate::{
     app::Services,
@@ -205,7 +204,9 @@ pub fn open_with(
             name.read(cx).focus_handle(cx).focus(window, cx);
             name.update(cx, |state, cx| state.select_all(window, cx));
         }
-        native_sheet(dialog, SheetWidth::Form, cx).px(px(0.)).child(form.clone())
+        native_sheet(dialog, SheetWidth::Form, cx)
+            .px(px(0.))
+            .child(form.clone())
     });
     if let Some(e) = refusal {
         refused(e, window, cx);

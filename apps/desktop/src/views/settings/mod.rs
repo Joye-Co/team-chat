@@ -16,8 +16,8 @@ mod members;
 pub(crate) use members::{open_add_bot, open_invite};
 mod notifications;
 pub mod prefs;
-mod shortcuts;
 pub mod selftest;
+mod shortcuts;
 pub(crate) mod widgets;
 mod window_fit;
 

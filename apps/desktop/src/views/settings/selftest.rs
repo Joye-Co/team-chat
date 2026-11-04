@@ -792,11 +792,10 @@ pub fn open_device_remove(
         // The list loads off the UI thread.
         let id = wait_for(cx, |cx| {
             cx.update(|cx| {
-                account.read(cx).devices().map(|list| {
-                    list.iter()
-                        .find(|d| !d.this_mac)
-                        .map(|d| d.id.clone())
-                })
+                account
+                    .read(cx)
+                    .devices()
+                    .map(|list| list.iter().find(|d| !d.this_mac).map(|d| d.id.clone()))
             })
         })
         .await

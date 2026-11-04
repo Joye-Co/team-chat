@@ -23,9 +23,9 @@ use crate::{
     ui::{
         self,
         native::{
-            AlertLayout, NativeCheckbox, NativeTextField, NativeType as _,
-            PushStyle, SearchField, SheetLayout, SheetWidth, alert_button, disabled_push, metrics,
-            native_colors, native_sheet,
+            AlertLayout, NativeCheckbox, NativeTextField, NativeType as _, PushStyle, SearchField,
+            SheetLayout, SheetWidth, alert_button, disabled_push, metrics, native_colors,
+            native_sheet,
             overlays::{app_icon, sheet_list, sheet_list_row},
             sheet_buttons,
         },
@@ -85,7 +85,13 @@ fn form_row(
         .w_full()
         .flex()
         .gap(FORM_GAP)
-        .map(|d| if top { d.items_start() } else { d.items_center() })
+        .map(|d| {
+            if top {
+                d.items_start()
+            } else {
+                d.items_center()
+            }
+        })
         .child(
             div()
                 .flex_none()
@@ -549,7 +555,9 @@ fn open_sheet<V: gpui::Render>(
         if first.replace(false) {
             focus.focus(window, cx);
         }
-        native_sheet(dialog, width, cx).px(px(0.)).child(view.clone())
+        native_sheet(dialog, width, cx)
+            .px(px(0.))
+            .child(view.clone())
     });
 }
 
