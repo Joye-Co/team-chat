@@ -14,7 +14,7 @@ use gpui_component::menu::ContextMenuExt as _;
 
 use super::{RailView, modes::TopicItem};
 use crate::ui::native::{
-    BadgeState, SidebarRow, SidebarSection,
+    SidebarRow, SidebarSection,
     sidebar::{RightColumn, SidebarMedia},
 };
 
@@ -78,8 +78,6 @@ impl RailView {
             )
             .selected(*selected)
             .unread(unread);
-        let badge = || RightColumn::Status(line.badge, line.short.clone().into());
-        let urgent = matches!(line.badge, BadgeState::NeedsYou | BadgeState::Failed);
         // §2.1: inside one group every item has a 16 media or none has; the
         // 话题 under a member (indented) get the 话题 symbol, as the member
         // rows of that group have avatars.
@@ -88,14 +86,13 @@ impl RailView {
         } else {
             row.media_kind(SidebarMedia::None)
         };
-        row = row.right(if urgent && !line.short.is_empty() {
-            badge()
-        } else if unread {
-            RightColumn::Count(topic.unread as u32)
-        } else if !line.short.is_empty() {
-            badge()
-        } else {
+        // §2.1, T-08: one right-column kind in a group. The state badge wins;
+        // an unread 话题 shows the unread dot by its title, never a count
+        // pill beside the badges.
+        row = row.right(if line.short.is_empty() {
             RightColumn::None
+        } else {
+            RightColumn::Status(line.badge, line.short.clone().into())
         });
         let _ = cx;
         let row = row.on_click(move |_, _, cx| {
