@@ -1751,9 +1751,11 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
             .items_center()
             .gap(space::S12)
             .child(
+                // FormRow label (§2.8): one line in the 112 column, cut at the end.
                 b20::small(div())
                     .flex_none()
                     .w(m::FORM_LABEL)
+                    .one_line()
                     .text_color(k.ink)
                     .child(label.clone()),
             )
@@ -1766,10 +1768,11 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
             .child(
                 b20::small(div())
                     .flex_none()
-                    .min_w(px(64.))
+                    .min_w(m::TABLE_NUM_COL)
                     .flex()
                     .justify_end()
-                    .mono()
+                    .whitespace_nowrap()
+                    .n_figures()
                     .text_color(k.ink)
                     .child(shown),
             )
