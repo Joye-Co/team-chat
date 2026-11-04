@@ -635,9 +635,6 @@ impl WebEmbedState {
     }
 }
 
-/// Height of the fade at the cut edge of an inline page, in points.
-const FADE_H: f32 = 48.;
-
 /// The script that puts the fade into a page (or recolors it): `rgb` is `r,g,b`.
 fn fade_script(rgb: &str) -> String {
     format!(
@@ -653,7 +650,7 @@ try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
 if(document.body)o.observe(document.body);}}catch(_){{}}d.__tcUpdate=u;}}\
 d.style.background='linear-gradient(to bottom,rgba({rgb},0),rgba({rgb},1))';\
 d.__tcUpdate();}})()",
-        h = FADE_H,
+        h = f32::from(theme::EMBED_FADE),
     )
 }
 

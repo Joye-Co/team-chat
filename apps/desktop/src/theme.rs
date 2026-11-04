@@ -160,6 +160,8 @@ pub const CONTENT_GUTTER: Pixels = px(24.);
 pub const HAIRLINE: Pixels = px(0.5);
 /// Border width of controls, cards, fields and the composer.
 pub const BORDER: Pixels = px(1.);
+/// Height of the fade at the cut edge of an inline 产出 page (MEDIA §1 inline HTML).
+pub const EMBED_FADE: Pixels = px(48.);
 
 /// Spacing scale (§4.1): 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 44. 10 and 14
 /// are for row and card insets only.
