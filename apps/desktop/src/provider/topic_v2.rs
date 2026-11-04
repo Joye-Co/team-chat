@@ -103,7 +103,9 @@ fn small(v: u64) -> u32 {
     v.min(u32::MAX as u64) as u32
 }
 
-/// 改动 of a PR link. `approved` makes an open PR 合并中.
+/// 改动 of a PR link. An open PR is 合并中 while GitHub has its merge queued (`merge` without
+/// `error`); a stopped merge (`merge.error`) is open again. Only a link with no merge state
+/// (servers before 1.1, repos without merge queue or auto-merge) falls back to `approved`.
 pub fn changes_of(pr: &proto::PrLink, approved: bool) -> TopicChanges {
     let passed = pr
         .checks
@@ -113,8 +115,12 @@ pub fn changes_of(pr: &proto::PrLink, approved: bool) -> TopicChanges {
     let state = match pr.state.as_str() {
         "merged" => ChangeState::Merged,
         "closed" => ChangeState::Closed,
-        _ if approved => ChangeState::Merging,
-        _ => ChangeState::Open,
+        _ => match &pr.merge {
+            Some(m) if m.error.is_none() => ChangeState::Merging,
+            Some(_) => ChangeState::Open,
+            None if approved => ChangeState::Merging,
+            None => ChangeState::Open,
+        },
     };
     TopicChanges {
         number: small(pr.number),
@@ -160,6 +166,14 @@ pub fn usage_of(run: &proto::BotRun) -> Option<RunUsage> {
 fn approve_action_v2(card: &CardV2) -> Option<String> {
     let submit = |a: &&proto::CardV2Action| a.kind() == CardActionKind::Submit;
     let actions = card.actions();
+    // 1.1: the author marks it (`role: "approve"`). A card that marks any action with a role
+    // gets no guess.
+    if let Some(a) = actions.iter().find(|a| a.is_approve()) {
+        return Some(a.id.clone());
+    }
+    if actions.iter().any(|a| a.role.is_some()) {
+        return None;
+    }
     actions
         .iter()
         .filter(submit)
@@ -341,6 +355,48 @@ pub fn preview_of_html(html: &str) -> Option<ArtifactPreview> {
             .find(|t| !t.is_empty());
     }
     Some(preview)
+}
+
+/// The author's preview card of a version (`ArtifactVersion.preview`, GAPS SF-11): its title,
+/// summary and figures. `fallback_title` (the 产出 title) fills a preview that has none.
+/// Rows and tables still come from the page (`merge_scraped`).
+pub fn preview_of_version(p: &proto::ArtifactPreview, fallback_title: &str) -> ArtifactPreview {
+    ArtifactPreview {
+        title: cut(
+            p.title
+                .clone()
+                .unwrap_or_else(|| fallback_title.to_string()),
+            80,
+        ),
+        summary: p.summary.clone().map(|t| cut(t, 160)),
+        metrics: p
+            .metrics
+            .iter()
+            .flatten()
+            .map(|m| crate::data::v2::PreviewMetric {
+                label: m.label.clone(),
+                value: m.value.clone(),
+                unit: None,
+                note: m.delta.clone(),
+            })
+            .collect(),
+        ..ArtifactPreview::default()
+    }
+}
+
+/// The author's preview with what only the page has (its table), when the page was read.
+fn merge_scraped(mut author: ArtifactPreview, scraped: Option<ArtifactPreview>) -> ArtifactPreview {
+    if let Some(s) = scraped {
+        author.table_title = s.table_title;
+        author.columns = s.columns;
+        author.rows = s.rows;
+        author.chart_title = s.chart_title;
+        author.chart_note = s.chart_note;
+        author.bars = s.bars;
+        author.axis = s.axis;
+        author.eyebrow = author.eyebrow.or(s.eyebrow);
+    }
+    author
 }
 
 /// A list thumbnail from a preview: the title and its first rows.
@@ -815,17 +871,26 @@ impl CoreProvider {
             return p.clone();
         }
         let row = a.client.artifact(artifact_id).ok().flatten()?;
-        if row.artifact.kind != proto::ArtifactKind::Html {
-            return None;
-        }
         let v = row.versions.iter().find(|v| v.version == version)?;
+        // The author's preview comes first (any kind); the page only adds its table.
+        let author = v
+            .preview
+            .as_ref()
+            .map(|p| preview_of_version(p, &row.artifact.title));
+        if row.artifact.kind != proto::ArtifactKind::Html {
+            return author;
+        }
         let Some(dir) = a.client.cached_artifact_version(artifact_id, version) else {
             if fetch {
                 self.fetch_version(artifact_id, version);
             }
-            return None;
+            return author;
         };
-        let preview = read_page(&dir.join(&v.entry)).and_then(|html| preview_of_html(&html));
+        let scraped = read_page(&dir.join(&v.entry)).and_then(|html| preview_of_html(&html));
+        let preview = match author {
+            Some(p) => Some(merge_scraped(p, scraped)),
+            None => scraped,
+        };
         lock(&self.shared.topic_v2.inner)
             .for_generation(generation)
             .previews
@@ -943,6 +1008,79 @@ mod tests {
             ..pr
         };
         assert_eq!(changes_of(&merged, true).state, ChangeState::Merged);
+    }
+
+    #[test]
+    fn merging_follows_the_pr_merge_state_not_the_approve_answer() {
+        let pr = proto::PrLink {
+            repo: "a/b".into(),
+            number: 61,
+            url: "https://github.com/a/b/pull/61".into(),
+            state: "open".into(),
+            merge: Some(proto::PrMerge {
+                queued_at: 1,
+                error: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(changes_of(&pr, false).state, ChangeState::Merging);
+        // GitHub dequeued it (merge conflict): the topic leaves 合并中, approved or not.
+        let failed = proto::PrLink {
+            merge: Some(proto::PrMerge {
+                queued_at: 1,
+                error: Some("merge conflict".into()),
+            }),
+            ..pr.clone()
+        };
+        assert_eq!(changes_of(&failed, true).state, ChangeState::Open);
+    }
+
+    #[test]
+    fn the_author_preview_comes_before_the_scraped_page() {
+        let p: proto::ArtifactPreview = serde_json::from_value(serde_json::json!({
+            "summary": "这周报名 38 人，B 站最多。",
+            "metrics": [{ "label": "报名", "value": "38 人", "delta": "+12" }]
+        }))
+        .unwrap();
+        let author = preview_of_version(&p, "报名看板");
+        assert_eq!(author.title, "报名看板");
+        assert_eq!(
+            author.summary.as_deref(),
+            Some("这周报名 38 人，B 站最多。")
+        );
+        assert_eq!(author.metrics.len(), 1);
+        assert_eq!(
+            (
+                author.metrics[0].value.as_str(),
+                author.metrics[0].note.as_deref()
+            ),
+            ("38 人", Some("+12"))
+        );
+        let scraped = preview_of_html(
+            "<h1>别的标题</h1><p>别的</p><table><tr><td>B 站</td><td>9</td></tr></table>",
+        );
+        let merged = merge_scraped(author, scraped);
+        assert_eq!(merged.title, "报名看板");
+        assert_eq!(merged.rows.len(), 1);
+    }
+
+    #[test]
+    fn the_approve_action_is_the_one_with_role_approve() {
+        let card: CardV2 = serde_json::from_value(serde_json::json!({
+            "v": 2, "rev": 1, "intent": "ask", "title": "合并？", "fallback": "x", "blocks": [],
+            "actions": [
+                { "id": "changes", "label": "要改", "style": "primary" },
+                { "id": "merge", "label": "合并", "role": "approve" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(approve_action_v2(&card).as_deref(), Some("merge"));
+        let unknown: CardV2 = serde_json::from_value(serde_json::json!({
+            "v": 2, "rev": 1, "intent": "ask", "title": "合并？", "fallback": "x", "blocks": [],
+            "actions": [{ "id": "ok", "label": "好", "style": "primary", "role": "later" }]
+        }))
+        .unwrap();
+        assert_eq!(approve_action_v2(&unknown), None);
     }
 
     #[test]
