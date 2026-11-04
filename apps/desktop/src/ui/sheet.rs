@@ -11,12 +11,13 @@ use crate::theme::{self, size};
 /// which paints the page color (`content`) by default: in dark mode that
 /// blends into the dimmed page.
 fn overlay_fill<T: Styled>(dialog: T, cx: &App) -> T {
-    let k = theme::colors(cx);
-    dialog.bg(k.overlay).border_color(k.overlay_edge())
+    // v12/kit: the `sheet` fill with the 0.5 pt glass edge (NATIVE.md §7).
+    let n = crate::ui::native::native_colors(cx);
+    dialog.bg(n.sheet).border_color(n.glass_edge)
 }
 
 /// Width of an alert.
-pub const ALERT_WIDTH: gpui::Pixels = size::ALERT_WIDTH;
+pub const ALERT_WIDTH: gpui::Pixels = crate::ui::native::metrics::ALERT_WIDTH;
 /// Width of the quick switcher.
 pub const SWITCHER_WIDTH: gpui::Pixels = size::SWITCHER_WIDTH;
 /// The switcher sits this far below the window top.
@@ -31,7 +32,9 @@ fn entrance(keyed: bool) -> DialogEntrance {
     if keyed {
         DialogEntrance::None
     } else {
-        DialogEntrance::Fade
+        // v12/kit: a sheet slides down from under the toolbar while it fades
+        // in (NATIVE.md §7.1).
+        crate::ui::native::sheet::SHEET_ENTRANCE
     }
 }
 
@@ -47,11 +50,13 @@ pub trait SheetExt: Sized {
 
 impl SheetExt for Dialog {
     fn sheet(self, cx: &App) -> Self {
+        // v12/kit (NATIVE.md §7.1): attached under the toolbar row, 460
+        // wide, radius 22; the window behind dims (theme `overlay`).
         overlay_fill(self, cx)
             .entrance(entrance(false))
-            .centered()
-            .width(size::DIALOG_WIDTH)
-            .rounded(theme::radius::LG)
+            .margin_top(crate::ui::native::metrics::TOOLBAR_ROW)
+            .width(crate::ui::native::metrics::SHEET_WIDTH)
+            .rounded(crate::ui::native::metrics::SHEET_RADIUS)
     }
 
     fn keyed(self, keyed: bool) -> Self {
@@ -61,10 +66,12 @@ impl SheetExt for Dialog {
 
 impl SheetExt for AlertDialog {
     fn sheet(self, cx: &App) -> Self {
+        // v12/kit: the Tahoe alert (NATIVE.md §7.2): 260 wide, radius 22.
         overlay_fill(self, cx)
             .entrance(entrance(false))
             .centered()
             .width(ALERT_WIDTH)
+            .rounded(crate::ui::native::metrics::SHEET_RADIUS)
     }
 
     fn keyed(self, keyed: bool) -> Self {
@@ -87,8 +94,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sheets_fade_in_place_and_keyboard_sheets_do_not_animate() {
-        assert_eq!(entrance(false), DialogEntrance::Fade);
+    fn sheets_slide_down_and_keyboard_sheets_do_not_animate() {
+        assert_eq!(entrance(false), DialogEntrance::FadeSlide);
         assert_eq!(entrance(true), DialogEntrance::None);
     }
 }

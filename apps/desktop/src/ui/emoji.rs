@@ -46,7 +46,8 @@ pub fn picker_cell(
         .items_center()
         .justify_center()
         .rounded(theme::radius::SM)
-        .cursor_pointer()
+        // v12/kit: the arrow cursor (NATIVE.md §10); a picker cell is a
+        // menu-like item, so its hover stays.
         .text_size(px(20.))
         .hover(|el| el.bg(colors.hover))
         .active(|el| el.bg(colors.pressed))

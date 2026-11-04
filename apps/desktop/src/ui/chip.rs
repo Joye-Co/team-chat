@@ -1,5 +1,9 @@
 //! Status marks, badges, counts, the role tag and kbd (DESIGN.md §7.8, §7.9).
 //!
+//! v12/kit (NATIVE.md §1 rule 4, "No pills"): every mark below now draws as
+//! a symbol plus text in the state color with no capsule fill; the only
+//! capsule left is the gray count. The table keeps the old roles for the API.
+//!
 //! | Mark | Shape | Use |
 //! | --- | --- | --- |
 //! | [`StatusChip`] chip | 22 pt, filled | `you` in the start block, `info` in the topic header |
@@ -192,15 +196,17 @@ impl RenderOnce for StatusChip {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
         let colors = theme::chip_colors(self.kind, self.status, cx);
-        let glyph = status_glyph(self.status).filter(|_| self.style != ChipStyle::Compact);
+        let glyph = status_glyph(self.status);
         let (height, max_w) = match self.style {
             ChipStyle::Compact => (size::CHIP_COMPACT, size::CHIP_COMPACT_MAX),
             _ => (size::CHIP, size::CHIP_MAX),
         };
-        let filled = self.style != ChipStyle::Label;
-        // A quiet 等你… label keeps `text-2` text with the `you-glyph` glyph.
-        let text = if !filled && self.kind == ChipKind::You {
-            k.text_2
+        // v12/kit: no pills (NATIVE.md §1 rule 4). Every style draws the
+        // state symbol plus text in the state color, never a filled capsule;
+        // `ChipStyle` is kept for its callers.
+        let filled = false;
+        let text = if self.kind == ChipKind::You {
+            k.you_glyph
         } else {
             colors.text
         };
@@ -220,10 +226,7 @@ impl RenderOnce for StatusChip {
                 })
             })
             .t_meta_medium()
-            .when(
-                self.style == ChipStyle::Compact || self.kind == ChipKind::You && filled,
-                |el| el.semibold(),
-            )
+            .font_weight(gpui::FontWeight::NORMAL)
             .text_color(text)
             .when_some(glyph, |el, g| {
                 let glyph_color = if !filled && self.kind == ChipKind::You {
@@ -287,23 +290,27 @@ impl RenderOnce for CountBadge {
             return div().into_any_element();
         }
         let k = theme::colors(cx);
+        // v12/kit: the only count capsule is the gray sidebar count
+        // (NATIVE.md §1 rule 4): `quaternary` fill, `secondary` 11 pt
+        // figures; a mention count keeps its `@` in red text.
+        let n = crate::ui::native::native_colors(cx);
         let (bg, fg) = match self.kind {
-            BadgeKind::Mention | BadgeKind::MentionCount => (k.badge, k.on_accent),
-            BadgeKind::Unread => (k.count_solid, k.on_accent),
-            BadgeKind::Count | BadgeKind::Todo => (k.count_bg, k.count_text),
+            BadgeKind::Mention | BadgeKind::MentionCount => (n.quaternary, n.red),
+            _ => (n.quaternary, n.secondary),
         };
+        let _ = k;
         div()
             .flex_none()
-            .h(size::BADGE)
-            .min_w(size::BADGE)
-            .px(space::S6)
+            .h(px(16.))
+            .min_w(px(16.))
+            .px(px(5.))
             .rounded_full()
             .bg(bg)
             .text_color(fg)
             .flex()
             .items_center()
             .justify_center()
-            .t_section()
+            .t_meta()
             .tnum()
             .child(Self::text(self.count, self.kind))
             .into_any_element()
@@ -330,16 +337,12 @@ impl RenderOnce for RoleTag {
         let k = theme::colors(cx);
         div()
             .flex_none()
-            .h(size::ROLE_TAG)
-            .px(space::S6)
-            .rounded(theme::radius::SM)
-            .bg(k.field)
+            // v12/kit: 岗位 is `secondary` text after the name, no tag pill
+            // (NATIVE.md §1 rule 4, §9.2).
             .flex()
             .items_center()
-            .gap(space::S4)
-            .t_meta_medium()
+            .t_meta()
             .text_color(k.text_2)
-            .child(icon(Lucide::Bot, theme::icon::TAG, k.text_2))
             .child(div().one_line().max_w(px(120.)).child(self.label))
     }
 }
@@ -414,10 +417,7 @@ impl RenderOnce for JobTag {
         let text = cut_to(&self.label, JOB_TAG_TEXT_MAX, window);
         div()
             .flex_none()
-            .h(theme::TAG_HEIGHT)
-            .px(space::S6)
-            .rounded(theme::TAG_RADIUS)
-            .bg(k.sunken)
+            // v12/kit: plain `secondary` text, no tag pill (NATIVE.md §9.2).
             .flex()
             .items_center()
             .t_meta()
@@ -445,15 +445,11 @@ impl RenderOnce for Kbd {
         let k = theme::colors(cx);
         div()
             .flex_none()
-            .h(size::KBD)
-            .min_w(size::KBD)
-            .px(px(5.))
-            .rounded(theme::radius::SM)
-            .bg(k.field)
+            // v12/kit: a shortcut reads as menu text, `secondary`, no keycap.
             .flex()
             .items_center()
             .justify_center()
-            .t_meta_medium()
+            .t_ui()
             .text_color(k.text_2)
             .child(self.label)
     }

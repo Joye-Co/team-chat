@@ -18,17 +18,25 @@ use crate::{
 /// (a visible 1 pt edge in dark mode). Popovers, menus, the switcher,
 /// dialogs and toasts use it.
 pub fn overlay_surface(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
+    // v12/kit (NATIVE.md §7.3): `sheet` fill, radius 12, the glass edge and
+    // the `float` shadow.
+    let n = crate::ui::native::native_colors(cx);
     div()
-        .bg(k.overlay)
-        .text_color(k.text_1)
-        .rounded(theme::radius::LG)
-        .shadow(k.shadow(Elevation::Overlay))
+        .bg(n.sheet)
+        .text_color(n.label)
+        .rounded(crate::ui::native::metrics::MENU_RADIUS)
+        .shadow(n.glass())
 }
 
 /// A menu or popover: the overlay surface with padding 4.
 pub fn menu_surface(cx: &App) -> gpui::Div {
-    overlay_surface(cx).p(space::S4).flex().flex_col()
+    // v12/kit: menus at 92 % with 5 pt inner padding (NATIVE.md §7.3).
+    let n = crate::ui::native::native_colors(cx);
+    overlay_surface(cx)
+        .bg(n.menu)
+        .p(crate::ui::native::metrics::MENU_PAD)
+        .flex()
+        .flex_col()
 }
 
 /// The @mention popup (§7.2): 320 wide, radius 10, padding 4, max 240 high.
@@ -65,23 +73,29 @@ pub fn menu_row(
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
     let k = theme::colors(cx);
+    // v12/kit: 24 pt rows, radius 6, a 13 pt leading symbol (NATIVE.md
+    // §7.3); the active row is the inset highlight.
+    let _ = k;
+    let n = crate::ui::native::native_colors(cx);
     list_row(id, RowSurface::Overlay, active, cx)
         .h(size::MENU_ROW)
-        .px(space::S8)
-        .gap(space::S8)
+        .px(crate::ui::native::metrics::MENU_ROW_PAD)
+        .gap(space::S6)
+        .rounded(crate::ui::native::metrics::MENU_ROW_RADIUS)
         .t_ui()
-        .text_color(k.text_1)
-        .when_some(glyph, |el, g| el.child(icon(g, theme::icon::ROW, k.text_2)))
+        .text_color(n.label)
+        .when_some(glyph, |el, g| el.child(icon(g, px(13.), n.secondary)))
         .child(div().flex_1().min_w(px(0.)).one_line().child(label.into()))
 }
 
 /// A 0.5 pt separator between menu groups, with 4 pt margins.
 pub fn menu_separator(cx: &App) -> gpui::Div {
+    // v12/kit: a 1 px `separator` inset to the text column.
     div()
         .my(space::S4)
-        .mx(space::S4)
-        .h(theme::HAIRLINE)
-        .bg(theme::colors(cx).sep)
+        .mx(crate::ui::native::metrics::MENU_ROW_PAD)
+        .h(px(1.))
+        .bg(crate::ui::native::native_colors(cx).separator)
 }
 
 /// A popup row (@mention popup, switcher rows use their own height): 40 pt,
@@ -224,10 +238,9 @@ impl RenderOnce for Banner {
             .min_h(size::BANNER)
             .px(space::S12)
             .py(space::S6)
+            // v12/kit: a quiet `fill` row, no border, no card.
             .rounded(theme::radius::MD)
-            .bg(k.raised)
-            .border_1()
-            .border_color(k.border)
+            .bg(k.field)
             .flex()
             .items_center()
             .gap(space::S10)
