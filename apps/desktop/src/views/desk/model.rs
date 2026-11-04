@@ -239,6 +239,50 @@ impl Snapshot {
     }
 }
 
+/// Asks I answered on 首页 this session (by ask key), also while the answer
+/// waits in the undo window. The sidebar 首页 count and the 首页 subtitle
+/// both read [`waiting_on_me`], so they never disagree.
+#[derive(Default)]
+pub struct DeskAnswers {
+    pub keys: std::collections::HashSet<String>,
+}
+
+impl gpui::Global for DeskAnswers {}
+
+/// How many asks wait on me: the provider's asks minus every ask I
+/// answered (sent, queued, or answered here and not sent yet).
+pub fn waiting_on_me(services: &Services, cx: &gpui::App) -> usize {
+    let p = &services.provider;
+    let me = services.me();
+    let local = cx.try_global::<DeskAnswers>();
+    p.asks_for_me()
+        .into_iter()
+        .filter(|item| {
+            let key = item
+                .message_id
+                .clone()
+                .unwrap_or_else(|| format!("topic-{}", item.topic_id));
+            if local.is_some_and(|l| l.keys.contains(&key)) {
+                return false;
+            }
+            let Some(m) = item.message_id.as_deref() else {
+                return true;
+            };
+            let card = p.card(&item.group_id, m);
+            let card_v2 = p.card_v2(&item.group_id, m).map(|c| c.card);
+            recorded(
+                services,
+                item,
+                m,
+                card.as_deref(),
+                card_v2.as_deref(),
+                me.as_deref(),
+            )
+            .is_none()
+        })
+        .count()
+}
+
 /// My answer to an ask that the provider already has.
 fn recorded(
     services: &Services,

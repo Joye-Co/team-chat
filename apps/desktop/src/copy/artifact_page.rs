@@ -45,4 +45,22 @@ crate::copy! {
     ARTIFACTS_NO_MATCH = "没有找到",
     ARTIFACT_KIND_TIME = "{kind} · {time}",
     // --- end track cards ---
+    // --- v13/ux-pages: the 产出 recipe (COMPLETENESS.md §2.18) ---
+    ARTIFACTS_COL_BY = "做的人",
+    ARTIFACTS_COL_VERSION = "版本",
+    ARTIFACTS_COL_UPDATED = "更新",
+    ARTIFACTS_FOOTER = "{n} 个产出",
+    ARTIFACTS_FOOTER_MATCH = "找到 {n} 个，共 {total} 个产出",
+    ARTIFACTS_VERSION = "v{v}",
+    ARTIFACTS_TILE_META = "v{v} · {topic}",
+    ARTIFACTS_EMPTY_BODY = "成员做好的网页、文档和图片会放在这里，每个都带着版本和来龙去脉。",
+    ARTIFACTS_NO_MATCH_TITLE = "没有找到“{q}”",
+    ARTIFACTS_NO_MATCH_BODY = "换个词试试，或者清空搜索看全部产出。",
+    ARTIFACTS_CLEAR_SEARCH = "清空搜索",
+    ARTIFACTS_MORE = "更多操作",
+    ARTIFACTS_DAY_TODAY = "今天",
+    ARTIFACTS_DAY_YESTERDAY = "昨天",
+    ARTIFACTS_DAY = "{m} 月 {d} 日",
+    ARTIFACT_NO_NOTE = "无说明",
+    // --- end v13/ux-pages ---
 }

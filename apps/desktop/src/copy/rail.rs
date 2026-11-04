@@ -30,6 +30,11 @@ crate::copy! {
     RAIL_IDLE = "空闲",
     RAIL_AWAY = "不在",
     RAIL_PEOPLE = "同事",
+    // --- v13/ux-pages ---
+    RAIL_AI_MEMBERS = "AI 成员",
+    RAIL_TAIL = "{word} · {n}",
+    RAIL_WAITS_ON_YOU_N = "等你 {n}",
+    // --- end v13/ux-pages ---
     RAIL_NAMES_SEP = "、",
     RAIL_OPTIONS = "侧栏选项",
     RAIL_TEAM_STRIP = "成员：{busy} 位在忙，共 {n} 位",
