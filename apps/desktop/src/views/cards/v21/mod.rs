@@ -401,17 +401,18 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
             continue;
         }
         let el = render_node(&node, b, window, cx);
-        // Two inserted blocks in a row share one tint, with a hairline between them.
-        let inserted = |x: &CardV2Block| {
+        // Top-level blocks the rev inserted or changed that follow each other share one
+        // tinted run: no gap, a hairline between them (`interact::decorate`).
+        let tinted = |x: &CardV2Block| {
             snapshot
                 .diff
                 .as_ref()
                 .filter(|d| d.to == ctx.card.rev)
                 .zip(x.id())
-                .is_some_and(|(d, id)| d.inserted.contains(id))
+                .is_some_and(|(d, id)| d.changed.contains_key(id))
         };
         let gap = match (prev, b) {
-            (Some(p), b) if inserted(p) && inserted(b) => px(0.),
+            (Some(p), b) if tinted(p) && tinted(b) => px(0.),
             (Some(CardV2Block::Row { .. }), _) | (_, CardV2Block::Row { .. }) => space::S16,
             (Some(_), CardV2Block::Group { .. }) => space::S14,
             _ => space::S12,

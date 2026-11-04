@@ -839,21 +839,21 @@ pub fn decorate(
         // A top-level block spans the card's width (its 16 pt padding), as the artboard
         // draws it; a nested one gets a small rounded tint.
         let top = node.depth == 0;
-        let after_inserted = top
+        // A block right after another tinted one joins its run: the body drops the gap
+        // between them and a hairline splits them.
+        let after_tinted = top
             && diff.is_some_and(|d| {
                 let pos = node.tree.top.iter().position(|x| x.id() == Some(id));
                 pos.and_then(|i| i.checked_sub(1))
                     .and_then(|i| node.tree.top[i].id())
-                    .is_some_and(|prev| d.inserted.contains(prev))
+                    .is_some_and(|prev| d.changed.contains_key(prev))
             });
         let tinted = if top {
             div()
                 .mx(-space::S16)
                 .px(space::S16)
                 .py(space::S12)
-                .when(after_inserted && inserted, |el| {
-                    el.border_t_1().border_color(k.line)
-                })
+                .when(after_tinted, |el| el.border_t_1().border_color(k.line))
                 .child(col)
         } else {
             div()
