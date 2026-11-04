@@ -13,6 +13,8 @@ export interface AnswerData {
   actionId?: string;
   inputs?: Record<string, unknown>;
   editedValues?: Record<string, string>;
+  /** A counts-only poll: the votes per option (the run gets no single vote). */
+  tally?: Record<string, number>;
   answerId?: string;
   askId?: string;
   eventId?: string;
@@ -76,6 +78,7 @@ export function answerEnvelopeData(card: CardV2, a: AnswerData, actor: { id: str
   if (a.value !== undefined) data.value = a.value;
   if (a.inputs !== undefined) data.inputs = a.inputs;
   if (a.editedValues !== undefined) data.editedValues = a.editedValues;
+  if (a.tally !== undefined) data.tally = a.tally;
   data.actor = actor;
   const blocks = answerBlocks(card, a);
   if (a.blockId && blocks[a.blockId]) data.block = blocks[a.blockId];
@@ -94,6 +97,7 @@ export function answerText(card: CardV2, a: AnswerData, actor: { id: string; nam
   else if (a.blockId) lines.push(`Block: ${a.blockId} (${a.event ?? "choice.submit"})`);
   const choices = chosenLabels(card, a.inputs ?? (a.blockId && a.value !== undefined ? { [a.blockId]: (a.value as { value?: unknown })?.value ?? a.value } : undefined));
   if (choices.length > 0) lines.push(`Chosen: ${choices.join(", ")}`);
+  if (a.tally) lines.push(`Votes so far: ${Object.entries(a.tally).map(([k, n]) => `${k} ${n}`).join(", ")}`);
   lines.push(envelope(inputId, "card.answer", answerEnvelopeData(card, a, actor)));
   return lines.join("\n");
 }

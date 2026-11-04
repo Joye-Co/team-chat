@@ -694,6 +694,22 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     eventId: EV(2),
     block: { id: "check", type: "decision", label: "这个数据对不对？", options: [{ id: "right", label: "对" }, { id: "wrong", label: "不对" }] },
   });
+  ok(
+    "machine/run.answer-poll-tally.json",
+    "MachineDownFrame",
+    {
+      t: "run.answer",
+      runId: RUN,
+      inputId: "in-9",
+      source: { kind: "card", messageId: M, askId: "where", answerId: "01JC0AN0000000000000000002", rev: 1 },
+      blockId: "where",
+      event: "choice.submit",
+      actor: { id: "anonymous", name: "anonymous" },
+      eventId: EV(3),
+      tally: { a: 2, b: 1 },
+    },
+    "a vote of a counts-only poll: no voter, no value, the tally",
+  );
   ok("machine/run.interaction-card.json", "MachineDownFrame", {
     t: "run.interaction",
     runId: RUN,

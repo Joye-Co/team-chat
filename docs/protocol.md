@@ -1234,10 +1234,13 @@ member gets its own view, live, in `fetch` pages, in `history` and in acks. The 
 their own answers in full. Every other answer, `card.answered`, `card.retracted` and the state
 `message.updated` they cause carry `actorId: "anonymous"` (not a member id), and
 `cardState.ask.answeredBy`, `tallyBy` and the voter in `lastCause`/`cause` are left out. The
-card's author gets the values of `card.answered`, and for an anonymous questionnaire the other
-answers in `cardState.answers` (with `actorId: "anonymous"`); other members get neither (a poll's
-`tally` is for everyone). Every viewer of a private card gets `cardState.answerCount`, the
-number of live answers of the current ask round (the aggregate in place of hidden answers). The derived v1 status of an answered private card is "已回答".
+author of an anonymous questionnaire gets the values of `card.answered` and the other answers
+in `cardState.answers` (with `actorId: "anonymous"`). The author of a counts-only poll gets only
+the aggregate: `card.answered` without the values, and the `tally` (a runner author's run gets
+`run.answer` with `tally` and no value). Other members get neither (a poll's `tally` is for
+everyone). Every viewer of a private card gets `cardState.answerCount`, the number of live
+answers of the current ask round (the aggregate in place of hidden answers). The derived v1
+status of an answered private card is "已回答".
 
 The card's author never learns who used a private card. An SDK author gets the live
 `card.event` transient with `actorId: "anonymous"`. A runner author's run gets `run.answer`

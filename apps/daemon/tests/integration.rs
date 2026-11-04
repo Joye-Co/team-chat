@@ -1251,6 +1251,7 @@ async fn interaction_envelope_and_chat_run() {
             },
             event_id: Some("EV2".into()),
             block: Some(serde_json::json!({ "id": "check", "type": "decision" })),
+            tally: None,
         }),
     )
     .await;

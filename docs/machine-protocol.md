@@ -306,7 +306,8 @@ no credentials pass through chat. The server shows the address to owners and run
 ```ts
 // server -> daemon (feature "interact"; an old daemon gets run.input with the text envelope instead)
 { t: "run.answer", runId, inputId, source: { kind: "card", messageId, askId, answerId, rev },
-  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */ }
+  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */,
+  tally? /* counts-only poll: votes per option now */ }
 { t: "run.interaction", runId, inputId,
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
   event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
@@ -319,6 +320,9 @@ run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 
 On a private card (a non-public poll, an anonymous questionnaire; protocol.md "Private
 answers"), `actor` is `{ id: "anonymous", name: "anonymous" }`, and `run.input.authorId` too.
+The voter's id is not in the room's hand-off to the run either. A vote of a poll that shows
+counts only carries no `value`, `inputs` or `editedValues`: it has `tally` (votes per option
+id now) instead, in the envelope too.
 
 The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn: a
 `<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`

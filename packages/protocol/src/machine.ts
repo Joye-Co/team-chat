@@ -300,6 +300,8 @@ export const RunAnswerFrame = z.object({
   eventId: Id.optional(),
   /** The block the answer names, as it was at `source.rev` (the CLI has no copy of the card). */
   block: z.json().optional(),
+  /** A poll that shows counts only: the votes per option now; `value`/`inputs` are then absent. */
+  tally: z.record(z.string(), z.int().nonnegative()).optional(),
 });
 export type RunAnswerFrame = z.infer<typeof RunAnswerFrame>;
 export const RunInteractionSource = z.discriminatedUnion("kind", [

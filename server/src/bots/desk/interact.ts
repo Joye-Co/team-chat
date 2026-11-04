@@ -333,6 +333,7 @@ export abstract class DeskInteract extends DeskTakeover {
     for (const k of ["actionId", "blockId", "value", "inputs", "editedValues", "eventId"] as const) {
       if (a.answer[k] !== undefined) frame[k] = a.answer[k];
     }
+    if (a.tally) frame.tally = a.tally;
     if (a.answer.blockId) {
       const block = answerBlocks(a.card, a.answer)[a.answer.blockId];
       if (block !== undefined) frame.block = block;

@@ -162,7 +162,7 @@ export abstract class DeskInput extends DeskStall {
       if (!(await this.botActive())) return;
       const actor = { id: a.actorId, name: a.actorName };
       const inputId = ulid();
-      const text = answerText(a.card, a.answer, actor, inputId);
+      const text = answerText(a.card, a.tally ? { ...a.answer, tally: a.tally } : a.answer, actor, inputId);
       const m: TopicMessage = {
         groupId: a.groupId,
         topicId: a.topicId,

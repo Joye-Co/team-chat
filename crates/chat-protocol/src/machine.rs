@@ -208,6 +208,9 @@ pub struct RunAnswerFrame {
     /// The block the answer names, as it was at `source.rev` (the CLI has no copy of the card).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Value>,
+    /// A poll that shows counts only: the votes per option now; `value`/`inputs` are then absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tally: Option<BTreeMap<String, u64>>,
 }
 
 /// `run.interaction.source`: a live card event or a page event.

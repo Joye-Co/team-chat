@@ -14,7 +14,7 @@ import {
   registerRoomRpc,
 } from "../core/registry";
 import { storedCard } from "../cards2/decisions";
-import { ANONYMOUS_ID, hidesCause } from "../cards2/privacy";
+import { ANONYMOUS_ID, storedPrivacy } from "../cards2/privacy";
 import type { AnswerData } from "./answers";
 import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
 import type { Env } from "../core/env";
@@ -210,6 +210,8 @@ export interface CardAnswerIn {
   actorName: string;
   /** The card at the answered rev. */
   card: CardV2;
+  /** A counts-only poll: the votes per option now, in place of the voter's choice. */
+  tally?: Record<string, number>;
 }
 
 export type MemberInfo = { id: string; name: string; kind: string; level: string; deactivated: number; runner: number };
@@ -246,10 +248,18 @@ type OutboxCard = { botId: string; messageId: string; actionId: string; actorId:
 type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & { mentions: string[]; blockRefs?: BlockRef[] };
 /**
  * The card as it was answered: the author may edit it before the hand-off is delivered.
- * `anonymous`: the card is private (cards2/privacy), so the run gets no actor; the row keeps it
- * only to check that a person answered.
+ * `anonymous`: the card is private (cards2/privacy), so the run gets no actor; such a row holds
+ * `ANONYMOUS_ID` as `actorId` (rows written before held the voter) and delivery finds the voter's
+ * kind through the card event (`answer.eventId`). `poll`: a poll that shows counts only; the row
+ * holds no values and the run gets the tally.
  */
-type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2; anonymous?: boolean };
+type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2; anonymous?: boolean; poll?: boolean };
+
+/** An answer of a counts-only poll without what the voter chose. */
+function withoutValues(a: AnswerData): AnswerData {
+  const { value: _v, inputs: _i, editedValues: _e, ...rest } = a;
+  return rest;
+}
 
 type OutboxRow = {
   id: number;
@@ -281,7 +291,16 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     const stored = storedCard(sql, answer.messageId);
     if (!stored || stored.authorId === event.actorId) return;
     const payload: OutboxAnswer = { botId: stored.authorId, seq: event.seq, answer, actorId: event.actorId, card: stored.card };
-    if (hidesCause(sql, answer.messageId)) payload.anonymous = true;
+    // A private card's voter never leaves the room, not even in the outbox (cards2/privacy).
+    const privacy = storedPrivacy(sql, answer.messageId);
+    if (privacy) {
+      payload.anonymous = true;
+      payload.actorId = ANONYMOUS_ID;
+    }
+    if (privacy === "poll") {
+      payload.poll = true;
+      payload.answer = withoutValues(answer);
+    }
     enqueue(sql, "answer", stored.topicId, payload);
     return;
   }
@@ -378,25 +397,44 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
   await deskStub(c.env, target).onMessage(target, args);
 }
 
+/** The voter of a stored answer, from the room's card event (private cards keep it only there). */
+function answerActor(sql: SqlStorage, a: OutboxAnswer): string {
+  if (a.actorId !== ANONYMOUS_ID || !a.answer.eventId) return a.actorId;
+  return sql.exec<{ actor_id: string }>("SELECT actor_id FROM card_events WHERE event_id = ?", a.answer.eventId).toArray()[0]?.actor_id ?? a.actorId;
+}
+
+/** The tally of a poll card now (cards2 state), for a counts-only poll's author. */
+function currentTally(sql: SqlStorage, messageId: string): Record<string, number> | undefined {
+  const row = sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", messageId).toArray()[0];
+  if (!row?.ext) return undefined;
+  return (JSON.parse(row.ext) as { cardState?: { tally?: Record<string, number> } }).cardState?.tally;
+}
+
 /** A card answer, to the runner bot that made the card. */
 async function deliverAnswer(c: DeliverContext, row: OutboxRow): Promise<void> {
   const a = JSON.parse(row.payload) as OutboxAnswer;
-  const byId = await memberInfo(c.env.DB, [a.botId, a.actorId]);
+  const voter = answerActor(c.sql, a);
+  const byId = await memberInfo(c.env.DB, [a.botId, voter]);
   const bot = byId.get(a.botId);
   // SDK bots and people read the stored event; only runner bots need a hand-off.
   if (!bot || bot.kind !== "bot" || !bot.runner || bot.deactivated) return;
-  const who = byId.get(a.actorId);
+  const who = byId.get(voter);
   const args: CardAnswerIn = {
     groupId: c.groupId,
     topicId: row.topic_id,
     seq: a.seq,
-    answer: a.answer,
+    // Rows written before the poll rule may still hold the values.
+    answer: a.poll ? withoutValues(a.answer) : a.answer,
     actorId: a.anonymous ? ANONYMOUS_ID : a.actorId,
     actorKind: who && !who.deactivated ? (who.kind as "human" | "bot") : null,
     actorLevel: who && !who.deactivated && !a.anonymous ? (who.level as "owner" | "member") : null,
     actorName: a.anonymous ? ANONYMOUS_ID : (who?.name ?? a.actorId),
     card: a.card,
   };
+  if (a.poll) {
+    const tally = currentTally(c.sql, a.answer.messageId);
+    if (tally) args.tally = tally;
+  }
   await deskStub(c.env, a.botId).cardAnswer(a.botId, args);
 }
 
