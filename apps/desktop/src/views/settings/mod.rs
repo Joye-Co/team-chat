@@ -263,13 +263,13 @@ impl SettingsView {
 
     /// One toolbar tab (§8): a gpui-component button with the 18 pt symbol
     /// over the 11 pt label; the selected one has the `selection` fill and
-    /// `accent` ink. No hover fill; pressed darkens.
+    /// `accent_text` ink. No hover fill; pressed darkens.
     fn tab(&self, page: Page, window: &Window, cx: &mut Context<Self>) -> Button {
         let k = native_colors(cx);
         let on = page == self.page;
         let active = emphasized(window);
         let ink = match (on, active) {
-            (true, true) => k.accent,
+            (true, true) => k.accent_text,
             (true, false) => k.label,
             (false, _) => k.secondary,
         };

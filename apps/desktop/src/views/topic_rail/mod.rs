@@ -428,8 +428,10 @@ impl Render for TopicRail {
             .size_full()
             .overflow_y_scroll()
             .bg(k.sidebar)
-            // Content starts below the 52 pt toolbar row, as on 首页 and 群.
-            .pt(crate::ui::native::metrics::TOOLBAR_ROW - gpui::px(12.))
+            // The shell starts the inspector below the 52 pt toolbar row
+            // (shell/panes.rs, PANE_TOP). Pull up by the section's own 12 pt
+            // top padding so the first header row starts at 52, as on 首页.
+            .mt(-gpui::px(12.))
             .pb(space::S16)
             .flex()
             .flex_col()
