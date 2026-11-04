@@ -18,6 +18,8 @@ crate::copy! {
     VIEW_SOURCE = "看原文",
     COPY_SOURCE = "复制原文",
     COPY_IMAGE = "复制图片",
+    SAVE = "存到本机",
+    OPEN_WITH_SYSTEM = "用系统应用打开",
     EXPAND = "展开",
     COLLAPSE = "收起",
     ASK_HERE = "问这里",

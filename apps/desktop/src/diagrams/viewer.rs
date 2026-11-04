@@ -32,8 +32,9 @@ pub const STEPS: &[f32] = &[
 ];
 /// Arrow keys move this far.
 pub const ARROW_STEP: f32 = 40.;
-/// Space around the diagram inside the canvas (page padding + card padding).
-const MARGIN: f32 = 56.;
+/// Space around the diagram inside the canvas (review 3 C-02: fit the width
+/// with 24 on each side).
+const MARGIN: f32 = 24.;
 /// The height of the 看原文 pane under the diagram.
 const SOURCE_PANE: f32 = 200.;
 
@@ -52,12 +53,31 @@ pub struct ViewerSpec {
 /// never draws it under 12 px (a larger diagram scrolls instead).
 pub const FIT_FLOOR: f32 = 12. / 13.;
 
-/// The zoom that fits the diagram in the viewport, at most 100 % and at
-/// least [`FIT_FLOOR`].
-pub fn fit_zoom(w: f32, h: f32, viewport_w: f32, viewport_h: f32) -> f32 {
-    let zw = (viewport_w - 2. * MARGIN).max(1.) / w.max(1.);
-    let zh = (viewport_h - 2. * MARGIN).max(1.) / h.max(1.);
-    zw.min(zh).clamp(FIT_FLOOR, 1.0)
+/// The zoom that fits the diagram's width in the viewport (24 on each side),
+/// at most 100 % and at least [`FIT_FLOOR`]: a taller diagram scrolls down
+/// from its top, a wider one at the floor scrolls sideways from its left.
+pub fn fit_zoom(w: f32, viewport_w: f32) -> f32 {
+    ((viewport_w - 2. * MARGIN).max(1.) / w.max(1.)).clamp(FIT_FLOOR, 1.0)
+}
+
+/// Writes the drawn picture to `<temp>/<slug>-diagrams/<name>.png`, for 存到本机 (copied
+/// into 下载 from there) and 用系统应用打开.
+fn export_png(image: &gpui::Image, name: &str) -> Option<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join(format!("{}-diagrams", env!("PRODUCT_SLUG")));
+    std::fs::create_dir_all(&dir).ok()?;
+    let safe: String = name
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '/' | ':' | '\\') {
+                '-'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let path = dir.join(format!("{safe}.png"));
+    std::fs::write(&path, image.bytes()).ok()?;
+    Some(path)
 }
 
 /// The sheet height: the window under the toolbar row, 48 short, at most 760.
@@ -101,6 +121,9 @@ pub struct DiagramViewer {
     focus: FocusHandle,
     viewport: (f32, f32),
     hovered: Option<usize>,
+    /// The height the body needs at the current zoom (the drawing, its margins and
+    /// 看原文), once drawn: the sheet hugs it.
+    content_h: Option<f32>,
 }
 
 // --- inc-refs: a scene opens the viewer with a node under the pointer (问这里 shows).
@@ -126,7 +149,14 @@ pub fn open(spec: ViewerSpec, window: &mut Window, cx: &mut App) -> Entity<Diagr
             focus.focus(window, cx);
         }
         let back = back.clone();
-        let h = sheet_height(window);
+        // The sheet hugs a short diagram (no blank band under it, A1) and stops
+        // at the window's height; a taller one scrolls.
+        let h = match view.read(cx).content_h {
+            Some(c) => sheet_height(window)
+                .min(ui::native::metrics::TOOLBAR_ROW + px(c))
+                .max(px(240.)),
+            None => sheet_height(window),
+        };
         ui::native::native_sheet(dialog, ui::native::SheetWidth::List, cx)
             .px(px(0.))
             .h(h)
@@ -152,6 +182,7 @@ impl DiagramViewer {
             focus: cx.focus_handle().tab_stop(true),
             viewport: (0., 0.),
             hovered: PREVIEW_HOVER.with(|h| h.take()),
+            content_h: None,
         }
     }
 
@@ -176,9 +207,9 @@ impl DiagramViewer {
 
     fn fit(&mut self, cx: &mut Context<Self>) {
         let Some(r) = self.ready(cx) else { return };
-        let (vw, vh) = self.viewport;
+        let (vw, _) = self.viewport;
         if vw > 0. {
-            self.zoom = fit_zoom(r.meta.width, r.meta.height, vw, vh);
+            self.zoom = fit_zoom(r.meta.width, vw);
             self.fitted = true;
             self.scroll.set_offset(Point::default());
             cx.notify();
@@ -218,6 +249,11 @@ impl DiagramViewer {
         let k = theme::colors(cx);
         let kind = self.spec.normalized.kind;
         let image = ready.map(|r| r.image.clone());
+        let file_name = self
+            .spec
+            .title
+            .clone()
+            .unwrap_or_else(|| kind.word().to_string());
         let n = ui::native::native_colors(cx);
         div()
             .flex_none()
@@ -300,16 +336,53 @@ impl DiagramViewer {
                         cx.notify();
                     })),
             )
+            // The zoom group, a separator, then the fixed set of every viewer in
+            // the media order: copy, download, open, close (F52, §2.2).
             .child(
-                ui::native::icon_button_bare("dv-img", Sym::Image, ui::native::IconSize::Small)
+                div()
+                    .flex_none()
+                    .mx(space::S4)
+                    .w(ui::native::metrics::HAIRLINE)
+                    .h(space::S16)
+                    .bg(n.separator),
+            )
+            .child({
+                let image = image.clone();
+                ui::native::icon_button_bare("dv-img", Sym::Copy, ui::native::IconSize::Small)
                     .named(c::COPY_IMAGE)
                     .disabled(image.is_none())
                     .on_click(move |_, _, cx| {
                         if let Some(i) = &image {
                             cx.write_to_clipboard(ClipboardItem::new_image(i));
                         }
-                    }),
-            )
+                    })
+            })
+            .child({
+                let (image, name) = (image.clone(), file_name.clone());
+                ui::native::icon_button_bare("dv-save", Sym::Download, ui::native::IconSize::Small)
+                    .named(c::SAVE)
+                    .disabled(image.is_none())
+                    .on_click(move |_, _, cx| {
+                        if let Some(path) = image.as_deref().and_then(|i| export_png(i, &name)) {
+                            crate::views::media::parts::save_to_downloads(&[path.as_path()], cx);
+                        }
+                    })
+            })
+            .child({
+                let name = file_name;
+                ui::native::icon_button_bare(
+                    "dv-open",
+                    Sym::OpenExternal,
+                    ui::native::IconSize::Small,
+                )
+                .named(c::OPEN_WITH_SYSTEM)
+                .disabled(image.is_none())
+                .on_click(move |_, _, cx| {
+                    if let Some(path) = image.as_deref().and_then(|i| export_png(i, &name)) {
+                        cx.open_with_system(&path);
+                    }
+                })
+            })
             .child(
                 ui::native::icon_button_bare("dv-close", Sym::Close, ui::native::IconSize::Small)
                     .named(c::CLOSE)
@@ -399,34 +472,40 @@ impl DiagramViewer {
             );
         }
         // One panel (Quick Look): the drawing sits on the panel itself, no card inside.
-        // Centered while it is smaller than the viewport (at fit), from the top left when
-        // zoomed past it.
+        // It starts at the top, 24 in; centered sideways only while it fits, else from
+        // the left edge so nothing is cut at either side (C-02).
+        // A definite size, so the canvas scrolls exactly to the drawing's edges.
+        let fits = w + 2. * MARGIN <= self.viewport.0 + 0.5;
         div()
-            .min_w(gpui::relative(1.))
-            .min_h(gpui::relative(1.))
+            .flex_none()
+            .w(px((w + 2. * MARGIN).max(self.viewport.0)))
+            .h(px(h + 2. * MARGIN))
             .flex()
-            .items_center()
-            .justify_center()
-            .child(div().p(px(32.)).flex_none().child(layer))
+            .when(fits, |d| d.justify_center())
+            .child(div().p(px(MARGIN)).flex_none().child(layer))
             .into_any_element()
     }
 }
 
 impl Render for DiagramViewer {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let ready = self.ready(cx);
         if !self.fitted
             && self.viewport.0 > 0.
             && let Some(r) = &ready
         {
-            self.zoom = fit_zoom(
-                r.meta.width,
-                r.meta.height,
-                self.viewport.0,
-                self.viewport.1,
-            );
+            self.zoom = fit_zoom(r.meta.width, self.viewport.0);
             self.fitted = true;
+        }
+        let want = ready.as_ref().map(|r| {
+            r.meta.height * self.zoom
+                + 2. * MARGIN
+                + if self.show_source { SOURCE_PANE } else { 0. }
+        });
+        if want != self.content_h {
+            self.content_h = want;
+            window.refresh();
         }
         let entity = cx.entity();
         let measure = canvas(
@@ -534,6 +613,14 @@ impl Render for DiagramViewer {
                                         },
                                     ))
                                     .child(body),
+                            )
+                            // Both scrollbars show while the diagram is larger than the
+                            // sheet, so a cut edge always reads as "scrolls" (C-02).
+                            .child(
+                                div().absolute().inset_0().child(
+                                    gpui_component::scroll::Scrollbar::new(&self.scroll)
+                                        .mode(gpui_component::scroll::ScrollbarMode::Always),
+                                ),
                             ),
                     )
                     .when(self.show_source, |el| {
@@ -625,12 +712,12 @@ mod tests {
 
     #[test]
     fn fit_never_upscales_and_stays_in_range() {
-        assert_eq!(fit_zoom(400., 300., 1200., 800.), 1.0);
-        let z = fit_zoom(1180., 400., 1224., 800.);
-        assert!((z - 1112. / 1180.).abs() < 1e-3, "{z}");
-        assert_eq!(fit_zoom(2224., 400., 1224., 800.), FIT_FLOOR);
+        assert_eq!(fit_zoom(400., 1200.), 1.0);
+        let z = fit_zoom(1200., 1224.);
+        assert!((z - 1176. / 1200.).abs() < 1e-3, "{z}");
+        assert_eq!(fit_zoom(2224., 1224.), FIT_FLOOR);
         // A huge diagram keeps 12 px text and scrolls.
-        assert_eq!(fit_zoom(100_000., 100., 1200., 800.), FIT_FLOOR);
+        assert_eq!(fit_zoom(100_000., 1200.), FIT_FLOOR);
     }
 
     #[test]
