@@ -462,6 +462,35 @@ describe("answers", () => {
   });
 });
 
+describe("cards after a restart", () => {
+  test("a live event on an old card loads it by its saved seq in one read, however many messages came after it", async () => {
+    const server = new FakeServer();
+    const store = new MemoryStateStore();
+    const card = report();
+    const mid = "01JC0MSG000000000000000077";
+    const seq = 5000;
+    store.save({ v: 1, memberId: BOT_ID, cursors: {}, following: {}, cards: { [mid]: { groupId: GROUP_ID, topicId: TOPIC_ID, seq } } });
+    // The topic has 5000 newer messages: pages from the newest never reach the card.
+    let n = 0;
+    server.on("history", (f) => {
+      const before = (f.beforeSeq as number | undefined) ?? 10_000;
+      if (before === seq + 1) return { ok: true, result: { messages: [message({ id: mid, kind: "card", card: { v: 1, title: card.title, blocks: [] }, cardV2: card, createdSeq: seq })], hasMore: true } };
+      const messages = Array.from({ length: 100 }, (_, i) => message({ id: `01JC0MSGOTHER${String(n++).padStart(13, "0")}`, createdSeq: before - 1 - i }));
+      return { ok: true, result: { messages, hasMore: true } };
+    });
+    const got: CardEventContext[] = [];
+    const bot = await start(server, store);
+    bot.onCardEvent(async (ctx) => {
+      got.push(ctx);
+      await ctx.resolve("ignored");
+    });
+    server.transient(liveEvent(mid));
+    for (let i = 0; i < 300 && got.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(got[0]?.card.title).toBe("10 月数据月报");
+    expect(server.of("history").map((f) => [f.beforeSeq, f.limit])).toEqual([[seq + 1, 1]]);
+  });
+});
+
 describe("causes outside the server's window", () => {
   /** A server that, like the real one, takes no cause older than 30 minutes. */
   function strictServer(old: Set<string>) {

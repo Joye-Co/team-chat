@@ -2343,11 +2343,28 @@ export class Bot {
     return undefined;
   }
 
+  /**
+   * A message from the topic history: one of my card messages by its saved `createdSeq` (one
+   * read, however old the card is), else by paging back from the newest.
+   */
+  private async readMessage(groupId: string, topicId: string, messageId: string): Promise<Message | undefined> {
+    const ref = this.state.cards[messageId];
+    if (ref?.seq !== undefined && ref.groupId === groupId) {
+      const r = await this.history(groupId, topicId, { beforeSeq: ref.seq + 1, limit: 1 });
+      const m = r.messages.find((x) => x.id === messageId);
+      if (m) {
+        this.noteMessage(m);
+        return m;
+      }
+    }
+    return this.findMessage(groupId, topicId, messageId);
+  }
+
   /** The newest known v2 card of a message: the cache, else the topic history. */
   private async ensureCard(groupId: string, topicId: string, messageId: string): Promise<CardV2 | undefined> {
     const known = this.cardCache.get(messageId);
     if (known) return known;
-    const m = await this.findMessage(groupId, topicId, messageId);
+    const m = await this.readMessage(groupId, topicId, messageId);
     if (m?.cardV2) this.cacheCard(messageId, m.cardV2, m.cardState);
     return this.cardCache.get(messageId);
   }
@@ -2376,7 +2393,7 @@ export class Bot {
     if (newer()) return newer();
     const topicId = this.state.cards[messageId]?.topicId ?? this.messageCache.get(messageId)?.topicId;
     if (!topicId) return undefined;
-    const m = await this.findMessage(groupId, topicId, messageId);
+    const m = await this.readMessage(groupId, topicId, messageId);
     if (m?.cardV2) this.cacheCard(messageId, m.cardV2, m.cardState);
     return newer();
   }
