@@ -50,6 +50,9 @@ pub struct InlineSpec {
 /// Height of the HTML page inline (Media.dc.html: 300).
 pub const HTML_H: f32 = 300.;
 const MD_BODY_H: f32 = 236.;
+/// The source lines of the Markdown excerpt: few enough that wrapped lines
+/// still end above [`MD_BODY_H`].
+const MD_EXCERPT_LINES: usize = 5;
 const GRID_H: f32 = 148.;
 const SINGLE_H: f32 = 300.;
 // Every in-thread item has the one card width (§2.4): min(640, text column).
@@ -206,6 +209,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
     if host::shown_in_pane(id, cx) {
         return host::reference_row(
             ElementId::Name(format!("{}-ref", spec.id).into()),
+            id,
             spec.title.clone(),
             version,
             cx,
@@ -287,7 +291,8 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
         )
-        .child(div().h(px(HTML_H)).child(embed))
+        // The page sets its own height: it ends on a whole block (§2.21).
+        .child(embed)
         .child(foot)
         .into_any_element()
 }
@@ -302,7 +307,7 @@ fn markdown_card(
 ) -> AnyElement {
     let k = theme::colors(cx);
     let minutes = (md.stats.chars as f64 / 450.).ceil().max(1.) as u64;
-    let excerpt = text::md_excerpt(&md.text, 8);
+    let excerpt = text::md_excerpt(&md.text, MD_EXCERPT_LINES);
     let mut chips = div().flex().items_center().gap(space::S6);
     if md.stats.tables > 0 {
         chips = chips.child(chip(
@@ -342,11 +347,15 @@ fn markdown_card(
                 .child(open_tool(spec, "open", Opening::default())),
         )
         .child(
+            // The excerpt ends on whole blocks (its first lines, a fence
+            // closed) and the card hugs it: nothing is cut under the footer
+            // (§2.21, A4).
             div()
-                .h(px(MD_BODY_H))
+                .max_h(px(MD_BODY_H))
                 .overflow_hidden()
                 .px(space::S16)
                 .pt(space::S12)
+                .pb(space::S12)
                 .child(markdown::message_body(
                     ElementId::Name(format!("{}-md", spec.id).into()),
                     excerpt,
@@ -928,10 +937,12 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
         .position(|l| !l.trim().is_empty())
         .unwrap_or(0);
     let last = (first + CODE_LINES).min(c.lines.len());
+    // Long lines scroll sideways inside the card, never a hard clip (§2.17).
     let mut body = div()
+        .id(ElementId::Name(format!("{}-code", spec.id).into()))
         .h(px(CODE_LINES as f32 * 20. + 16.))
         .py(space::S8)
-        .overflow_hidden()
+        .overflow_x_scroll()
         .t_code()
         .tnum();
     let mut block = false;
