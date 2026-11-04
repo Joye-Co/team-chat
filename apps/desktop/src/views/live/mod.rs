@@ -86,6 +86,8 @@ pub struct LivePane {
     /// 开发者视图: the run's process view in place of the screen.
     developer: Option<Entity<ProcessView>>,
     poll: Option<(String, Task<()>)>,
+    /// The body's scroll, for its scrollbar (a cue at rest, R2-06).
+    scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -98,6 +100,7 @@ impl LivePane {
             expanded: false,
             developer: None,
             poll: None,
+            scroll: gpui::ScrollHandle::new(),
         }
     }
 
@@ -1602,9 +1605,9 @@ impl Render for LivePane {
                 .into_any_element(),
             None => div()
                 .id("live-body")
-                .flex_1()
-                .min_h(px(0.))
+                .size_full()
                 .overflow_y_scroll()
+                .track_scroll(&self.scroll)
                 .child(
                     div()
                         // First content at y 68 (§2.2: 16 under the header).
@@ -1645,6 +1648,31 @@ impl Render for LivePane {
                         })),
                 )
                 .into_any_element(),
+        };
+        // R2-06, A4: when the sections run past the footer, the scrollbar
+        // shows at rest, so a row under the footer reads as more to scroll,
+        // never as a cut (§2.21).
+        let body: AnyElement = if self.developer.is_some() {
+            body
+        } else {
+            div()
+                .relative()
+                .flex_1()
+                .min_h(px(0.))
+                .child(body)
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .w(space::S12)
+                        .child(
+                            gpui_component::scroll::Scrollbar::vertical(&self.scroll)
+                                .mode(gpui_component::scroll::ScrollbarMode::Always),
+                        ),
+                )
+                .into_any_element()
         };
 
         div()

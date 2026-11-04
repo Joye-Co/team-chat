@@ -774,12 +774,11 @@ impl TimelineView {
                                 // F3: cut in the middle, so the extension
                                 // stays; the whole name in the tooltip.
                                 .child(
-                                    crate::ui::truncate::TruncText::new(name)
+                                    crate::ui::truncate::file_name(name)
                                         .id(SharedString::from(format!(
                                             "v2-file-name-{}-{i}",
                                             message.id
                                         )))
-                                        .middle()
                                         .n_headline()
                                         .text_color(n.label),
                                 )
