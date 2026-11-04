@@ -153,6 +153,17 @@ await bot.endRun({ groupId, topicId }, "done", "已发出");
 Runner-backed bots get `conflict` from `setPlan`: their runner sets the plan from the coding
 CLI's own to-do list (Claude Code's TodoWrite, Codex plan updates).
 
+### The bot's line on the 首页 desk (1.1)
+
+`bot.http.setDeskNote(groupId, text)` sets the bot's one-line priority for the group, which
+members see at the top of 首页 ("今天先把 1.1 发出去"). At most 140 characters after trimming;
+`""` clears it, and the same text again stores nothing (`seq: null`). `deskNotes(groupId)` lists
+the notes of the group's bots.
+
+```ts
+await bot.http.setDeskNote(groupId, "今天先把 1.1 发出去");
+```
+
 ## 3a. 1.1: Card v2, answers, side chats, page events
 
 These need a 1.1 server. `examples/ask-bot.ts` uses all of them.
@@ -495,6 +506,9 @@ Codex 的计划更新)生成。
   `ctx.done({ title, summary, evidence, refs, metrics })` 发一张「做完了」卡片(Card v2,intent
   `done`)并结束这次运行,`failed: true` 则以失败结束:卡片开头加一个 `fail` 证据块 `failed`
   (文字为 `failedLabel`,默认「没有完成」),给 1.0.x 客户端的 v1 卡片用 `danger` 色调。
+- **首页的一句话(1.1)**:`bot.http.setDeskNote(groupId, text)` 设置机器人在这个群里今天最重要的
+  一句话,成员在首页顶部看到(例如「今天先把 1.1 发出去」)。去掉首尾空白后最多 140 个字;`""`
+  清除;同样的文字再发一次不保存(`seq: null`)。`deskNotes(groupId)` 列出群里机器人的这句话。
 - **卡片构造函数**:`askCard`、`decisionCard`、`approvalCard`、`draftCard`、`formCard`、`doneCard`
   生成合法的 v2 卡片,不合协议时抛出 `ChatError`(`invalid`)。`from` 指定谁能回答(成员 id、
   `"requester"`、`"owners"`),`record: true` 表示答案是群里的决定,`irreversible` 说明不可撤销的

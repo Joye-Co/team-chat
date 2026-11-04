@@ -67,6 +67,20 @@ pub struct Member {
         skip_serializing_if = "Option::is_none"
     )]
     pub character: Option<Option<CharacterId>>,
+    /// 1.1: who the member reports to (汇报给); `None` = nobody.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reports_to: Option<String>,
+    /// 1.1: the weekly spending limit in US cents (限额); `None` = none.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub weekly_budget_cents: Option<u64>,
 }
 
 impl Member {

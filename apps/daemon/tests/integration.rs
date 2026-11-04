@@ -869,6 +869,21 @@ async fn pause_resume_answer_acceptance_and_aside() {
         "CLI not stopped: {}",
         proc_state(pid)
     );
+    // A second pause while stopped (its resume was lost) is reported again, so the server
+    // can clear pausedBy on the next `paused: false` (SB-16).
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "p1".into(),
+            by: Some("u2".into()),
+        },
+    )
+    .await;
+    let again = collect(&mut ws, "p1", true, |f| is_paused(f, true)).await;
+    assert!(again.iter().any(|f| matches!(f,
+        Up::RunEvent { event: RunEvent::Paused { paused: true, by: Some(b) }, .. } if b == "u2")));
+    assert!(proc_state(pid).contains('T'), "CLI not stopped");
+    frames.extend(again);
     let ticks = std::fs::read_to_string(dir.join("ticks.txt")).unwrap();
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert_eq!(

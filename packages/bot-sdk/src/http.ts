@@ -5,6 +5,7 @@ import type {
   AddArtifactVersionRequest,
   ArtifactEventDecl,
   BotRun,
+  DeskNotesResponse,
   EndRunRequest,
   RunPlanItem,
   StartRunRequest,
@@ -20,6 +21,7 @@ import type {
   Member,
   PostMessageRequest,
   PutArtifactMediaResponse,
+  PutDeskNoteResponse,
   SendResult,
 } from "@chat/protocol";
 import { MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
@@ -206,6 +208,20 @@ export class HttpClient {
 
   getRun(runId: string): Promise<BotRun> {
     return this.request<BotRun>("GET", `/v1/runs/${encodeURIComponent(runId)}`);
+  }
+
+  /**
+   * `PUT /v1/desk-note` (1.1): this bot's one-line priority for the 首页 desk in the group
+   * (at most 140 characters after trimming; `""` clears it). `seq` is null when the text did not
+   * change. People get `forbidden`; a group the bot is not in, `not_found`.
+   */
+  setDeskNote(groupId: string, text: string): Promise<PutDeskNoteResponse> {
+    return this.retried(() => this.request<PutDeskNoteResponse>("PUT", "/v1/desk-note", { json: { groupId, text } }));
+  }
+
+  /** `GET /v1/groups/:id/desk-notes` (1.1): the desk notes of the group's bots, newest first. */
+  deskNotes(groupId: string): Promise<DeskNotesResponse> {
+    return this.request<DeskNotesResponse>("GET", `/v1/groups/${encodeURIComponent(groupId)}/desk-notes`);
   }
 
   // ---------------------------------------------------------------------------

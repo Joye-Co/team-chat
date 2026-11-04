@@ -458,7 +458,13 @@ async fn run_runtime(
                 let Some(c) = c else { control_open = false; continue };
                 match c {
                     RunCtl::Pause { by } => {
+                        // Already stopped (the resume before this pause never came): report the
+                        // pause again, so the server counts every pause it sent and a later
+                        // `paused: false` clears pausedBy (GAPS SB-16).
                         if paused.is_some() {
+                            for ev in gate.push(RunEvent::Paused { paused: true, by }) {
+                                event(ev);
+                            }
                             continue;
                         }
                         let pgid = run_pgid(&run_dir);

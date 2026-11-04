@@ -12,6 +12,9 @@ export interface MemberRow {
   created_at: number;
   /** jojo-friends character id (migration 0004); absent before it ran. */
   character?: string | null;
+  /** 1.1 (migration 0008): 汇报给 and the weekly spending limit; absent before it ran. */
+  reports_to?: string | null;
+  weekly_budget_cents?: number | null;
 }
 
 export interface GroupRow {
@@ -40,6 +43,8 @@ export function toMember(row: MemberRow): Member {
   // Only known ids reach the wire: clients reject unknown ones.
   const character = CharacterId.safeParse(row.character);
   if (character.success) m.character = character.data;
+  if (row.reports_to) m.reportsTo = row.reports_to;
+  if (typeof row.weekly_budget_cents === "number" && row.weekly_budget_cents >= 0) m.weeklyBudgetCents = row.weekly_budget_cents;
   return m;
 }
 

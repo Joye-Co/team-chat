@@ -1,0 +1,15 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "a bot that reports to Joye with a weekly limit of 50 USD",
+  "value": {
+    "id": "01JBX0BOT000000000000000AC",
+    "kind": "bot",
+    "name": "Forge",
+    "role": "开发",
+    "level": "member",
+    "character": "o08",
+    "reportsTo": "01JBX0OWNER0000000000000AA",
+    "weeklyBudgetCents": 5000
+  }
+}

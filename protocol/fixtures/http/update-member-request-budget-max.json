@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "limit: the largest weekly limit",
+  "value": {
+    "weeklyBudgetCents": 100000000
+  }
+}

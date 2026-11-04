@@ -1,0 +1,14 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "a limit of 0: the member may spend nothing",
+  "value": {
+    "id": "01JBX0BOT000000000000000AC",
+    "kind": "bot",
+    "name": "Forge",
+    "role": "开发",
+    "level": "member",
+    "character": "o08",
+    "weeklyBudgetCents": 0
+  }
+}

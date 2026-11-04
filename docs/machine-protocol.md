@@ -276,8 +276,15 @@ How the 1.1 daemon does each one:
   `SIGCONT`, moves the deadline by the paused time, emits `paused { paused: false }`, and sends
   `note` (cut to 2000 characters) as the next input with `inputId` `resume-<n>`. A
   `run.cancel` while paused sends `SIGCONT` first (a stopped process cannot handle
-  `SIGTERM`), emits `paused { paused: false }`, then cancels as usual. A repeated pause, or a
-  resume of a run that is not paused, does nothing.
+  `SIGTERM`), emits `paused { paused: false }`, then cancels as usual. A repeated pause
+  signals nothing but emits `paused { paused: true, by }` again, so the server counts every
+  pause it sent and the next `paused { paused: false }` clears `pausedBy` (a resume the daemon
+  never got leaves the CLI stopped). A resume of a run that is not paused does nothing.
+  Checked with the real Claude Code CLI (`apps/daemon/e2e/real-cli-pause.ts`, a 10-minute pause
+  of a shell loop in its Bash tool): every process of the run stays stopped, nothing is written,
+  the run keeps `pausedBy` and is not marked stalled, and after the resume the loop goes on and
+  the run ends `done`. A CLI's own tool timeout counts the paused time: Claude Code's Bash
+  tool gave up waiting right after the resume and the loop went on in the background.
 - **answer**: the CLI gets `text` (when not empty) followed by a fenced `json` block for
   `answer` and one for `artifactEvent`, each after a line that labels it as untrusted data from a
   member of the group. The fence is longer than any backtick run in the data, so the data cannot
@@ -337,7 +344,7 @@ no credentials pass through chat. The server shows the address to owners and run
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
   event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
-RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply", body: JSON }
+RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note", body: JSON }
 // server -> daemon
 { t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
@@ -363,6 +370,7 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 | `interaction.resolve` | `{ eventId, result: "ignored" \| "failed", note? }` | `chat-run resolve --event ev --result ignored\|failed [--note …]` |
 | `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
 | `artifact.reply` | `{ eventId, ok: true, payload? }` or `{ eventId, ok: false, error: { code: "declined", message } }` | `chat-run artifact reply --event ev --file reply.json` or `--decline "…"` |
+| `desk.note` (1.1) | `{ text }`: the bot's desk note in the run's group, with the rules of `PUT /v1/desk-note` (protocol.md "Desk notes"); result `{ seq }` | `chat-run desk note --text "…"` (`""` clears) |
 
 `chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
 `<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs

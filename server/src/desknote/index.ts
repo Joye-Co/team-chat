@@ -5,9 +5,9 @@
 import { type DeskNote, type DeskNotesResponse, MAX_DESK_NOTE_CHARS, normalizeGroupText, PutDeskNoteRequest, type PutDeskNoteResponse } from "@chat/protocol";
 import type { AuthContext } from "../core/auth";
 import { isGroupMember } from "../core/db";
-import { roomStub } from "../core/env";
+import { type Env, roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
-import { registerEventWriter, registerRoomMigration, registerRoomRpc, registerRoute } from "../core/registry";
+import { type Actor, registerEventWriter, registerRoomMigration, registerRoomRpc, registerRoute } from "../core/registry";
 import { actorOf } from "../files/store";
 
 const SET_RPC = "desknote.set";
@@ -46,6 +46,16 @@ registerRoomRpc(LIST_RPC, (room, actor): DeskNotesResponse => {
   return { notes };
 });
 
+/**
+ * Sets the desk note of bot `actor` in `groupId` (`PUT /v1/desk-note` and the `chat-run desk
+ * note` output of a run): normalized like a group name, at most MAX_DESK_NOTE_CHARS.
+ */
+export async function setDeskNote(env: Env, groupId: string, actor: Actor, raw: string): Promise<PutDeskNoteResponse> {
+  const text = normalizeGroupText(raw);
+  if ([...text].length > MAX_DESK_NOTE_CHARS) throw new ApiError("invalid", `a desk note is at most ${MAX_DESK_NOTE_CHARS} characters`);
+  return unwrap(await roomStub(env, groupId).rpc(groupId, SET_RPC, actor, { text })) as PutDeskNoteResponse;
+}
+
 registerRoute({
   method: "PUT",
   path: "/v1/desk-note",
@@ -55,9 +65,7 @@ registerRoute({
     const req = await body(PutDeskNoteRequest);
     if (a.member.kind !== "bot") throw new ApiError("forbidden", "only bot members set a desk note");
     if (!(await isGroupMember(env.DB, req.groupId, a.memberId))) throw new ApiError("not_found", "group not found");
-    const text = normalizeGroupText(req.text);
-    if ([...text].length > MAX_DESK_NOTE_CHARS) throw new ApiError("invalid", `a desk note is at most ${MAX_DESK_NOTE_CHARS} characters`);
-    return unwrap(await roomStub(env, req.groupId).rpc(req.groupId, SET_RPC, actorOf(a), { text }));
+    return setDeskNote(env, req.groupId, actorOf(a), req.text);
   },
 });
 

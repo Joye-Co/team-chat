@@ -4,12 +4,13 @@
 // starting a short follow-up run within the limits; the `expect` of an ack; and the `chat-run`
 // outputs of a run (RunEvent `output`), performed as the bot with the rules of the matching
 // WebSocket frames and answered with `run.output.result`.
-import { ClientFrame, type ExpectMode, type RunInteractionFrame } from "@chat/protocol";
+import { ClientFrame, type ExpectMode, MAX_DESK_NOTE_CHARS, type RunInteractionFrame } from "@chat/protocol";
 import { isGroupMember } from "../../core/db";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, schemaReason, toErrorBody, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { type FrameContext, frameHandlers, frameValidators } from "../../core/registry";
+import { setDeskNote } from "../../desknote";
 import { answerBlocks, cardEventText, pageEventText } from "../answers";
 import { linkStub } from "../env";
 import { ETA_MS, type InteractionIn } from "../interact";
@@ -409,6 +410,12 @@ export abstract class DeskInteract extends DeskTakeover {
   protected async performOutput(r: RunRow, op: string, outputId: string, body: unknown): Promise<Result<unknown>> {
     return result(async () => {
       if (r.kind === "aside") throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
+      // 1.1: the desk note has no WebSocket frame; it is `PUT /v1/desk-note` in the run's group.
+      if (op === "desk.note") {
+        const text = (body as { text?: unknown } | null)?.text;
+        if (typeof text !== "string" || text.length > 4 * MAX_DESK_NOTE_CHARS) throw new ApiError("invalid", "invalid output: text is a string");
+        return setDeskNote(this.env, r.group_id, this.actor(), text);
+      }
       const raw = this.outputFrame(r, op, outputId, body);
       const handler = frameHandlers.get(raw.t);
       const schema = raw.t === "send" ? ClientFrame : handler?.schema ?? ClientFrame;

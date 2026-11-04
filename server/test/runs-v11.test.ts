@@ -382,6 +382,33 @@ describe("1.1 runs", () => {
     d.close();
   });
 
+  it("clear pausedBy on paused: false after the daemon skipped a pause because the run was still stopped (SB-16)", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const { c } = await Client.connect(w.human.token);
+    const { runId } = await startRun(w, c, d);
+    const pause = () => api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} });
+    expect((await pause()).status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    // The resume reaches the server but the daemon never acts on it: the CLI stays stopped.
+    expect((await api(`/v1/runs/${runId}/resume`, { token: w.human.token, body: {} })).status).toBe(200);
+    await d.next((f) => f.t === "run.resume");
+    // The next pause finds the CLI already stopped; the daemon reports the pause again.
+    expect((await pause()).status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    // The daemon then goes on by itself (for example after a restart of the CLI).
+    const on = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, on);
+    const got = await api(`/v1/runs/${runId}`, { token: w.human.token });
+    expect(got.status).toBe(200);
+    expect(got.body.pausedBy).toBeUndefined();
+    expect((await pause()).status).toBe(200);
+    c.close();
+    d.close();
+  });
+
   it("retry an ended run with the same request, for the requester or an owner, audited", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, []);
@@ -554,6 +581,32 @@ describe("1.1 runs", () => {
     expect(assign.kind).toBeUndefined();
     c.close();
     cs.close();
+    d.close();
+  });
+});
+
+describe("desk note from a run (chat-run desk note)", () => {
+  it("sets, keeps and clears the bot's desk note in the run's group; a bad body is refused", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["output"]);
+    const { c } = await Client.connect(w.human.token);
+    const { runId } = await startRun(w, c, d);
+    const out = async (outputId: string, body: unknown) => {
+      d.event(runId, { type: "output", outputId, op: "desk.note", body });
+      return d.next((f) => f.t === "run.output.result" && f.runId === runId && f.outputId === outputId);
+    };
+    const set = await out("o1", { text: "  今天先把 1.1 发出去 " });
+    expect(set, JSON.stringify(set)).toMatchObject({ ok: true, result: { seq: expect.any(Number) } });
+    const noted = await c.waitEvent((e) => e.type === "desk.noted" && e.seq === set.result.seq);
+    expect(noted).toMatchObject({ groupId: w.gid, actorId: w.bot.id, data: { text: "今天先把 1.1 发出去" } });
+    expect(await out("o2", { text: "今天先把 1.1 发出去" })).toMatchObject({ ok: true, result: { seq: null } });
+    expect(await out("o3", { text: 5 })).toMatchObject({ ok: false, error: { code: "invalid" } });
+    expect(await out("o4", { text: "长".repeat(141) })).toMatchObject({ ok: false, error: { code: "invalid" } });
+    const list = await api(`/v1/groups/${w.gid}/desk-notes`, { token: w.human.token });
+    expect(list.body.notes).toEqual([{ memberId: w.bot.id, text: "今天先把 1.1 发出去", at: expect.any(Number), seq: set.result.seq }]);
+    expect(await out("o5", { text: "" })).toMatchObject({ ok: true, result: { seq: expect.any(Number) } });
+    expect((await api(`/v1/groups/${w.gid}/desk-notes`, { token: w.human.token })).body.notes).toEqual([]);
+    c.close();
     d.close();
   });
 });

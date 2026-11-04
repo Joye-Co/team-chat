@@ -360,3 +360,37 @@ describe("frame source of an attachment (PC-14)", () => {
     ca.close();
   });
 });
+
+describe("member directory of card writes (PC-16)", () => {
+  it("names the owners of now: a level change drops the cached directory and a new room member is read", async () => {
+    const w = await world();
+    const second = await createMember({ level: "owner", name: "Second" });
+    const add = await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: second.id } });
+    expect(add.status, JSON.stringify(add.body)).toBe(200);
+    const cbot = await w.connect(w.bot);
+    const ask = (title: string) =>
+      base({
+        intent: "ask",
+        title,
+        ask: { id: title, from: ["owners"] },
+        blocks: [{ id: "pick", type: "decision", deliver: "immediate", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }],
+      });
+    const from = async (title: string) => {
+      const r = await send(cbot, w.gid, ask(title));
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      return [...r.result.message.cardState.ask.from].sort();
+    };
+    expect(await from("one")).toEqual([w.owner.id, second.id].sort());
+    // A second card right after reads the cached directory: the same owners.
+    expect(await from("two")).toEqual([w.owner.id, second.id].sort());
+    const down = await api(`/v1/members/${second.id}`, { method: "PATCH", token: w.owner.token, body: { level: "member" } });
+    expect(down.status, JSON.stringify(down.body)).toBe(200);
+    expect(await from("three")).toEqual([w.owner.id]);
+    // An owner made outside the routes (no members-changed hook) who joins the room is read
+    // because the cached directory does not know them.
+    const third = await createMember({ level: "owner", name: "Third" });
+    expect((await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: third.id } })).status).toBe(200);
+    expect(await from("four")).toEqual([w.owner.id, third.id].sort());
+    cbot.close();
+  });
+});
