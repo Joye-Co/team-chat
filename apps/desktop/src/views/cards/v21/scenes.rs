@@ -118,9 +118,7 @@ pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
             let retry = ids("card-band-retry");
             vec![check(
                 retry.contains(super::samples::FAILED),
-                format!(
-                    "the red 失败 band of an answer that did not get there has 重试 ({retry:?})"
-                ),
+                format!("an answer that did not get there has one 重试 ({retry:?})"),
             )]
         }),
         "interact_pending" => Some(|_, _| {

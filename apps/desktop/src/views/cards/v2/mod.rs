@@ -972,23 +972,16 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let a = ctx.answerer();
     match ctx.state {
         CardState::SendFailed { action_id, .. } => {
-            crate::selftest::drawn::mark("card-band-retry", ctx.msg.message_id.clone());
             let action = ctx
                 .card
                 .actions()
                 .iter()
                 .find(|x| &x.id == action_id)
                 .cloned();
-            let Some(action) = action else {
-                // A 2.1 answer of a block (an immediate commit): the band's 重试 sends the
-                // same answer again (CARD21 §2).
-                let resend = super::v21::leaves::resend_answer(ctx);
-                return Some(
-                    quiet(ctx.id("retry"), c::STRIP_RETRY)
-                        .on_click(move |_, _, _| resend())
-                        .into_any_element(),
-                );
-            };
+            // A 2.1 answer of a block (an immediate commit): the footer's 重试 sends
+            // the same answer again (CARD21 §2); one 重试 per card (§2.15).
+            let action = action.filter(|_| !super::v21::is_21(ctx.card))?;
+            crate::selftest::drawn::mark("card-band-retry", ctx.msg.message_id.clone());
             Some(
                 quiet(ctx.id("retry"), c::STRIP_RETRY)
                     .on_click(move |_, window, cx| a.press(&action, window, cx))
@@ -1329,7 +1322,9 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
     let n = ui::native::native_colors(cx);
     div()
         .when(has_header, |el| el.mt(ui::native::cards::card::STACK))
-        .n_title3()
+        // A compact card's title: 14 semibold (§2.4).
+        .n_headline()
+        .font_weight(FontWeight::SEMIBOLD)
         .text_color(n.label)
         // A title is one line of text: line breaks and runs of spaces collapse
         // (break-ui), and it wraps at most to 2 lines.
@@ -1356,12 +1351,34 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// A card that is not fetched yet (§2.14): a 640 × 120 skeleton, radius 14,
-/// where the card will be.
-pub(crate) fn loading_card(_cx: &App) -> AnyElement {
-    ui::native::skeleton(gpui::relative(1.), m::CHART + space::S20)
+/// A card that is not fetched yet (§2.14): the card frame with skeletons in
+/// the final shapes: the 24 author circle and the header line, the title line,
+/// then two body lines.
+pub(crate) fn loading_card(cx: &App) -> AnyElement {
+    let line = |w: f32| ui::native::skeleton(gpui::relative(w), px(14.));
+    frame(false, cx)
         .max_w(m::MAX_WIDTH)
-        .rounded(ui::native::cards::card::RADIUS)
+        .p(ui::native::cards::card::INSET)
+        .flex()
+        .flex_col()
+        .gap(space::S12)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(
+                    ui::native::skeleton(
+                        ui::native::cards::card::AVATAR,
+                        ui::native::cards::card::AVATAR,
+                    )
+                    .rounded_full(),
+                )
+                .child(line(0.4)),
+        )
+        .child(line(0.7))
+        .child(line(1.))
+        .child(line(0.55))
         .into_any_element()
 }
 
@@ -1509,7 +1526,6 @@ fn note(text: String, lock: bool, cx: &App) -> AnyElement {
     let n = ui::native::native_colors(cx);
     div()
         .n_subheadline()
-        .ml_auto()
         .min_w(px(0.))
         .flex_shrink(1.)
         .flex()
@@ -1525,7 +1541,41 @@ fn note(text: String, lock: bool, cx: &App) -> AnyElement {
 }
 
 fn footer_bar(children: Vec<AnyElement>, cx: &App) -> AnyElement {
-    card_footer(cx).children(children).into_any_element()
+    footer_stack(children, None, cx)
+}
+
+/// The footer with its description (§2.4): the description always sits above
+/// the actions, on its own line.
+pub(crate) fn footer_stack(
+    children: Vec<AnyElement>,
+    note: Option<AnyElement>,
+    cx: &App,
+) -> AnyElement {
+    match note {
+        None => card_footer(cx).children(children).into_any_element(),
+        Some(note) => {
+            let inset = ui::native::cards::card::INSET;
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap(space::S8)
+                .px(inset)
+                .pt(ui::native::cards::card::STACK)
+                .pb(inset)
+                .child(note)
+                .when(!children.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .children(children),
+                    )
+                })
+                .into_any_element()
+        }
+    }
 }
 
 /// The footer under the blocks: no band, no rule, no fill; 14 pt insets
@@ -1563,6 +1613,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         .collect();
     let a = ctx.answerer();
     let mut items: Vec<AnyElement> = Vec::new();
+    let mut desc: Option<AnyElement> = None;
     // --- inc-cards21: a non-blocking ask inside a report, and 2.1 footers ---
     if let Some(f) = super::v21::leaves::footer(ctx, window, cx) {
         return f;
@@ -1645,8 +1696,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 } else {
                     fill(c::FORM_READY, &[("name", &ctx.author)])
                 };
-                items.push(note(text, false, cx));
-                return Some(footer_bar(items, cx));
+                desc = Some(note(text, false, cx));
+                return Some(footer_stack(items, desc.take(), cx));
             }
             if has_draft(ctx.card) {
                 let submit = submit_action(ctx.card)?.clone();
@@ -1675,8 +1726,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .on_click(move |_, _, cx| form.update(cx, |f, cx| f.set_editing(false, cx)))
                         .into_any_element(),
                     );
-                    items.push(note(c::DRAFT_REPLACES.into(), false, cx));
-                    return Some(footer_bar(items, cx));
+                    desc = Some(note(c::DRAFT_REPLACES.into(), false, cx));
+                    return Some(footer_stack(items, desc.take(), cx));
                 }
                 let a2 = a.clone();
                 let s2 = submit.clone();
@@ -1714,7 +1765,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 }
                 link_buttons(&mut items, cx);
                 items.extend(lock_note(ctx, live, cx));
-                return Some(footer_bar(items, cx));
+                return Some(footer_stack(items, desc.take(), cx));
             }
             if takes_input(ctx.card) {
                 // A decision with three or more options: an optional note
@@ -1750,10 +1801,10 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 if super::v21::is_21(ctx.card)
                     && let Some(p) = ctx.card.ask.as_ref().and_then(|a| a.promise.clone())
                 {
-                    items.push(note(p, false, cx));
+                    desc = Some(note(p, false, cx));
                 }
                 // --- end inc-cards21 ---
-                return Some(footer_bar(items, cx));
+                return Some(footer_stack(items, desc.take(), cx));
             }
             // An approval: the card's buttons, one primary.
             let mut used = false;
@@ -1777,7 +1828,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
             if items.is_empty() {
                 return None;
             }
-            Some(footer_bar(items, cx))
+            Some(footer_stack(items, desc.take(), cx))
         }
         CardState::Sending { action_id } => {
             // The pressed control spins; the rest wait.
@@ -1799,7 +1850,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     .into_any_element(),
                 );
             }
-            Some(footer_bar(items, cx))
+            Some(footer_stack(items, desc.take(), cx))
         }
         CardState::Executing { progress, .. } if progress.waiting && links.is_empty() => None,
         CardState::Executing { .. } => {
@@ -1836,9 +1887,9 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
             }
             link_buttons(&mut items, cx);
             if plan {
-                items.push(note(c::PLAN_IN_PLACE.into(), false, cx));
+                desc = Some(note(c::PLAN_IN_PLACE.into(), false, cx));
             }
-            Some(footer_bar(items, cx))
+            Some(footer_stack(items, desc.take(), cx))
         }
         CardState::Done { .. } | CardState::Failed { .. } | CardState::Info => {
             // A result keeps its reverse action at hand (回滚到 v2.13), and
@@ -1874,16 +1925,16 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 return None;
             }
             if let Some(t) = note_text {
-                items.push(note(t, false, cx));
+                desc = Some(note(t, false, cx));
             }
-            Some(footer_bar(items, cx))
+            Some(footer_stack(items, desc.take(), cx))
         }
         CardState::Answered { .. } => {
             if links.is_empty() {
                 return None;
             }
             link_buttons(&mut items, cx);
-            Some(footer_bar(items, cx))
+            Some(footer_stack(items, desc.take(), cx))
         }
         CardState::Expired | CardState::Superseded => None,
     }

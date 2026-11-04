@@ -2346,14 +2346,11 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         return None;
     }
     let k = theme::colors(cx);
-    let bar = |items: Vec<AnyElement>| {
-        crate::views::cards::v2::card_footer(cx)
-            .children(items)
-            .into_any_element()
+    let bar = |items: Vec<AnyElement>, note: Option<AnyElement>| {
+        crate::views::cards::v2::footer_stack(items, note, cx)
     };
     let note = |t: String| {
         meta(div())
-            .ml_auto()
             .min_w(px(0.))
             .one_line()
             .text_color(k.ink_3)
@@ -2361,37 +2358,42 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
             .into_any_element()
     };
     if only_input_unknown(ctx) && matches!(ctx.state, CardState::Pending) {
-        return Some(Some(bar(vec![
-            button(
-                ctx.id("update"),
-                fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
-                PushStyle::Outline,
-                cx,
-            )
-            .on_click(|_, _, cx| {
-                if let Some(u) = crate::updater::global(cx) {
-                    u.update(cx, |u, cx| u.check_now(cx));
-                }
-            })
-            .into_any_element(),
-            note(c::UNKNOWN_FOOT.into()),
-        ])));
+        return Some(Some(bar(
+            vec![
+                button(
+                    ctx.id("update"),
+                    fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
+                    PushStyle::Outline,
+                    cx,
+                )
+                .on_click(|_, _, cx| {
+                    if let Some(u) = crate::updater::global(cx) {
+                        u.update(cx, |u, cx| u.check_now(cx));
+                    }
+                })
+                .into_any_element(),
+            ],
+            Some(note(c::UNKNOWN_FOOT.into()).into_any_element()),
+        )));
     }
     // My answer did not get there: 重试 with the same answer, and it goes again by itself.
     if let CardState::SendFailed { .. } = ctx.state {
         let resend = resend_answer(ctx);
-        return Some(Some(bar(vec![
-            button(
-                ctx.id("retry21"),
-                c::PENDING_RETRY.to_string(),
-                PushStyle::Outline,
-                cx,
-            )
-            .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
-            .on_click(move |_, _, _| resend())
-            .into_any_element(),
-            note(c::SEND_AUTO.into()),
-        ])));
+        crate::selftest::drawn::mark("card-band-retry", ctx.msg.message_id.clone());
+        return Some(Some(bar(
+            vec![
+                button(
+                    ctx.id("retry21"),
+                    c::PENDING_RETRY.to_string(),
+                    PushStyle::Outline,
+                    cx,
+                )
+                .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
+                .on_click(move |_, _, _| resend())
+                .into_any_element(),
+            ],
+            Some(note(c::SEND_AUTO.into()).into_any_element()),
+        )));
     }
     // A poll: the rules, no submit (a press votes).
     if let Some(CardV2Block::Poll {
@@ -2412,10 +2414,11 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 })
                 .into_any_element(),
         ];
+        // No buttons here: the rules read as one line.
         if changeable.unwrap_or(false) {
-            items.push(note(c::POLL_CHANGEABLE.into()));
+            items.push(note(c::POLL_CHANGEABLE.into()).into_any_element());
         }
-        return Some(Some(bar(items)));
+        return Some(Some(bar(items, None)));
     }
     // Only immediate blocks (a confirm, a single pick): the press is the answer.
     let surface = ctx.card.surface_ids();
@@ -2467,10 +2470,13 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 .into_any_element()
             });
         }
-        if let Some(p) = ctx.card.ask.as_ref().and_then(|a| a.promise.clone()) {
-            items.push(note(p));
-        }
-        return Some((!items.is_empty()).then(|| bar(items)));
+        let desc = ctx
+            .card
+            .ask
+            .as_ref()
+            .and_then(|a| a.promise.clone())
+            .map(|p| note(p).into_any_element());
+        return Some((!items.is_empty()).then(|| bar(items, desc)));
     }
     let _ = mix;
     None

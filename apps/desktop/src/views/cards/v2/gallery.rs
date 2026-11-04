@@ -763,6 +763,9 @@ impl CardsGallery {
                 .h(px(168.))
                 .rounded(theme::radius::LG)
                 .bg(mix(k.sunken, k.bg, 0.6))
+                // A fill step alone is not an edge (§1.7, D5).
+                .border_1()
+                .border_color(k.line)
                 .pt(space::S24)
                 .pr(space::S24)
                 .flex()

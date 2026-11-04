@@ -234,7 +234,9 @@ pub fn render_card(
             el.child(
                 div()
                     .min_w(px(0.))
-                    .n_title3()
+                    // A compact card's title: 14 semibold (§2.4).
+                    .n_headline()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(n.label)
                     .line_clamp(2)
                     .child(title),
