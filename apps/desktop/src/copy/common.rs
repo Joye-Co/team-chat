@@ -10,6 +10,7 @@ crate::copy! {
     YESTERDAY = "昨天",
     TOMORROW = "明天",
     MONTH_DAY = "{m}月{d}日",
+    TIME_UNKNOWN = "未知",
     CONNECTING = "正在连接…",
     RECONNECTING = "连接已断开，正在重连…",
     CONNECTION_OFFLINE = "未连接",

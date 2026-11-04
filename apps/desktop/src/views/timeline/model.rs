@@ -205,11 +205,10 @@ pub fn day_label(day: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
 /// the date divider above it).
 pub fn clock(at: Millis) -> String {
     use chrono::TimeZone as _;
-    chrono::Local
-        .timestamp_millis_opt(at)
-        .single()
+    crate::views::shell::known(at)
+        .and_then(|at| chrono::Local.timestamp_millis_opt(at).single())
         .map(|t| t.format("%H:%M").to_string())
-        .unwrap_or_default()
+        .unwrap_or_else(|| crate::copy::common::TIME_UNKNOWN.to_string())
 }
 
 /// A body of one to three emoji and nothing else: drawn at 32/40 (Slack).

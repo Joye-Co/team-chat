@@ -97,13 +97,23 @@ pub fn section_label(label: &str, count: Option<usize>, cx: &App) -> Div {
 }
 
 /// A wall-clock time as the v2 screens print it in mono: `09:42` today,
-/// `昨天 09:42`, `明天 08:00`, or `11-01` further away.
+/// `昨天 09:42`, `明天 08:00`, `11-01` further away this year and
+/// `2025-11-01` in another year. A missing time (0 or less, or out of
+/// range) is `未知`, never `01-01` or 1970 (§2.15, F2).
+///
+/// This is the one zero-time-safe date formatter of the app: desk, group,
+/// machines and cards call it instead of formatting a `Millis` themselves.
 pub fn clock(at: crate::data::Millis) -> String {
-    use chrono::{Local, TimeZone as _};
-    let Some(then) = Local.timestamp_millis_opt(at).single() else {
-        return String::new();
+    clock_at(at, crate::selftest::clock::local_now())
+}
+
+/// [`clock`] against a given "now" (tests).
+pub fn clock_at(at: crate::data::Millis, now: chrono::DateTime<chrono::Local>) -> String {
+    use chrono::{Datelike as _, Local, TimeZone as _};
+    let Some(then) = known(at).and_then(|at| Local.timestamp_millis_opt(at).single()) else {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
     };
-    let today = crate::selftest::clock::local_now().date_naive();
+    let today = now.date_naive();
     if then.date_naive() == today {
         then.format("%H:%M").to_string()
     } else if then.date_naive().succ_opt() == Some(today) {
@@ -114,9 +124,51 @@ pub fn clock(at: crate::data::Millis) -> String {
         )
     } else if today.succ_opt() == Some(then.date_naive()) {
         format!("{} {}", crate::copy::common::TOMORROW, then.format("%H:%M"))
-    } else {
+    } else if then.year() == now.year() {
         then.format("%m-%d").to_string()
+    } else {
+        then.format("%Y-%m-%d").to_string()
     }
+}
+
+/// A day as [`clock`] prints it without the time: `11-01`, `2025-11-01`
+/// in another year, `未知` for a missing time.
+pub fn day(at: crate::data::Millis) -> String {
+    use chrono::{Datelike as _, Local, TimeZone as _};
+    let Some(then) = known(at).and_then(|at| Local.timestamp_millis_opt(at).single()) else {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    };
+    if then.year() == crate::selftest::clock::local_now().year() {
+        then.format("%m-%d").to_string()
+    } else {
+        then.format("%Y-%m-%d").to_string()
+    }
+}
+
+/// A time range on one line (§2.15): `10:21–14:21` today, `11-01
+/// 10:21–14:21` on another day, both ends in full across days. A missing
+/// end shows the start only.
+pub fn clock_range(start: crate::data::Millis, end: crate::data::Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let local = |at| known(at).and_then(|at| Local.timestamp_millis_opt(at).single());
+    let (Some(a), Some(b)) = (local(start), local(end)) else {
+        return clock(start);
+    };
+    if a.date_naive() != b.date_naive() {
+        return format!("{}–{}", clock(start), clock(end));
+    }
+    let times = format!("{}–{}", a.format("%H:%M"), b.format("%H:%M"));
+    if a.date_naive() == crate::selftest::clock::local_now().date_naive() {
+        times
+    } else {
+        format!("{} {times}", day(start))
+    }
+}
+
+/// `Some(at)` when the time is set: 0 and negative times are "missing"
+/// (an unset field on the wire), not 1970.
+pub fn known(at: crate::data::Millis) -> Option<crate::data::Millis> {
+    (at > 0).then_some(at)
 }
 
 /// A member's name, or an empty string.
@@ -167,4 +219,28 @@ pub fn topic_path(services: &crate::app::Services, group_id: &str, topic_id: &st
         .map(|t| t.title)
         .unwrap_or_default();
     format!("{group} / {topic}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Local, TimeZone as _};
+
+    #[test]
+    fn clock_never_prints_epoch_and_adds_the_year() {
+        let now = Local.with_ymd_and_hms(2026, 11, 3, 12, 0, 0).unwrap();
+        let ms = |y, m, d, h| {
+            Local
+                .with_ymd_and_hms(y, m, d, h, 5, 0)
+                .unwrap()
+                .timestamp_millis()
+        };
+        assert_eq!(clock_at(0, now), "未知");
+        assert_eq!(clock_at(-5, now), "未知");
+        assert_eq!(clock_at(ms(2026, 11, 3, 9), now), "09:05");
+        assert_eq!(clock_at(ms(2026, 11, 2, 9), now), "昨天 09:05");
+        assert_eq!(clock_at(ms(2026, 11, 4, 9), now), "明天 09:05");
+        assert_eq!(clock_at(ms(2026, 10, 30, 9), now), "10-30");
+        assert_eq!(clock_at(ms(2025, 10, 30, 9), now), "2025-10-30");
+    }
 }

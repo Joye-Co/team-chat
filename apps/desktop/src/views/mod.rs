@@ -115,8 +115,8 @@ pub fn status_chip(
 /// Short local time for lists and the timeline: 刚刚, N 分钟前, HH:MM, 昨天, M月D日.
 pub fn time_text(at: Millis) -> String {
     let now = crate::selftest::clock::local_now();
-    let Some(then) = Local.timestamp_millis_opt(at).single() else {
-        return String::new();
+    let Some(then) = shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single()) else {
+        return common::TIME_UNKNOWN.to_string();
     };
     let ago = now.signed_duration_since(then);
     if ago.num_minutes() < 1 {
@@ -130,6 +130,8 @@ pub fn time_text(at: Millis) -> String {
         then.format("%H:%M").to_string()
     } else if then.date_naive().succ_opt() == Some(now.date_naive()) {
         common::YESTERDAY.to_string()
+    } else if then.year() != now.year() {
+        shell::day(at)
     } else {
         fill(
             common::MONTH_DAY,
