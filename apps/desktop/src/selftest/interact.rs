@@ -16,7 +16,7 @@ pub struct Steps {
     /// Where the pointer rests while the window draws (`None`: outside).
     pub pointer: Option<(f32, f32)>,
     /// Keys pressed once after the first frame, in order (`"tab"`,
-    /// `"shift-tab"`, `"down"`).
+    /// `"shift-tab"`, `"down"`). Write the struct out for a key scene.
     pub keys: &'static [&'static str],
     /// Extra wait after the keys and the pointer, for a hover delay or a
     /// tooltip (ms).
@@ -31,19 +31,10 @@ const fn hover(x: f32, y: f32, settle_ms: u64) -> Steps {
     }
 }
 
-const fn keys(keys: &'static [&'static str]) -> Steps {
-    Steps {
-        pointer: None,
-        keys,
-        settle_ms: 200,
-    }
-}
-
 /// One line per scene.
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
     ("state-hover-message", hover(400., 250., 600)),
-    ("state-focus-tab", keys(&["tab"])),
     ("state-hover-code", hover(690., 424., 400)),
     // --- end t5 ---
     // --- t5-cards ---

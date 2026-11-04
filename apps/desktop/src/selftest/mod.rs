@@ -27,6 +27,7 @@ pub mod interact;
 pub mod page_states;
 // --- end v13/ux-pages ---
 pub mod scenes;
+pub mod shaped;
 pub mod states;
 pub mod worst_case;
 
@@ -192,6 +193,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         ),
         // --- end v13/ux-pages ---
         // --- inc-refs
+        Start::Shaped(shape) => shaped::Shaped::new(fake::FakeProvider::new(), shape),
         Start::V2Refs => fake::v2::V2Samples::with_refs(),
         Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),
         // --- provider track ---
@@ -248,6 +250,12 @@ fn run(options: Options) -> i32 {
             // windows (grey traffic lights).
             cx.set_activation_policy(ActivationPolicy::Accessory);
             capture::keep_frames();
+            // The focus scenes press Tab: the app's Tab stops, as in the real
+            // window (`app::install_menus_and_actions` binds them there).
+            cx.bind_keys([
+                gpui::KeyBinding::new("tab", crate::app::FocusNext, None),
+                gpui::KeyBinding::new("shift-tab", crate::app::FocusPrev, None),
+            ]);
             let started = Instant::now();
             cx.spawn(async move |cx| {
                 let ok = run_all(&options, cx).await;

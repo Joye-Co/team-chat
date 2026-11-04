@@ -6,7 +6,10 @@
 //! needs a pointer or a key press also adds one line to
 //! [`super::interact`].
 
-use super::scenes::{Scene, Start, open_first_topic, open_main};
+use super::{
+    scenes::{Scene, Start, open_first_topic, open_main},
+    shaped::Shape,
+};
 
 /// Every state scene, in track order.
 pub const SCENES: &[Scene] = &[
@@ -19,17 +22,31 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
-        name: "state-focus-tab",
-        about: "main after one Tab: the first focusable control shows its 3 px focus ring",
-        start: Start::SignedIn,
-        setup: open_first_topic,
-        open: open_main,
-    },
-    Scene {
         name: "state-hover-code",
         about: "process with the pointer on a code fence's action strip: 问这里 shows only on hover",
         start: Start::SignedIn,
         setup: crate::views::process::preview::open_running,
+        open: open_main,
+    },
+    Scene {
+        name: "topic-no-messages",
+        about: "A 话题 with no messages yet: the thread-start block and the empty thread (§2.13)",
+        start: Start::Shaped(Shape::NoMessages),
+        setup: open_first_topic,
+        open: open_main,
+    },
+    Scene {
+        name: "topic-older-loading",
+        about: "A 话题 while its older messages load: skeleton rows above the first message (§2.14)",
+        start: Start::Shaped(Shape::OlderLoading),
+        setup: open_first_topic,
+        open: open_main,
+    },
+    Scene {
+        name: "sidebar-first-sync",
+        about: "Signed in, connecting, nothing synced yet: the sidebar and page before the first sync (§2.14)",
+        start: Start::Shaped(Shape::FirstSync),
+        setup: |_, _| {},
         open: open_main,
     },
     // --- end t5 ---

@@ -60,6 +60,9 @@ pub enum Start {
     /// pages' Empty states.
     V2Bare,
     // --- end v13/ux-pages ---
+    /// The sample data with one part reshaped for a state scene
+    /// ([`super::shaped`]): no messages, older messages loading, first sync.
+    Shaped(super::shaped::Shape),
 }
 
 pub struct Scene {
