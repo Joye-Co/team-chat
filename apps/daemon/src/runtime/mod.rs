@@ -394,8 +394,20 @@ impl PlanTracker {
         &mut self,
         items: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Option<RunEvent> {
+        self.update_at(items, crate::proto::now_ms())
+    }
+
+    /// [`PlanTracker::update`] at `now` (ms): an item that becomes `current` gets `startedAt`,
+    /// one that becomes `done` gets `endedAt`; both stay while the item's text and state stay.
+    pub fn update_at<'a>(
+        &mut self,
+        items: impl IntoIterator<Item = (&'a str, &'a str)>,
+        now: u64,
+    ) -> Option<RunEvent> {
         use crate::proto::{MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, RunPlanItem, RunPlanState};
-        let plan: Vec<RunPlanItem> = items
+        let prev = self.last.take();
+        let last = prev.as_deref().unwrap_or_default();
+        let mut plan: Vec<RunPlanItem> = items
             .into_iter()
             .filter_map(|(text, status)| {
                 let state = match status {
@@ -405,14 +417,35 @@ impl PlanTracker {
                     _ => return None,
                 };
                 let text: String = text.trim().chars().take(MAX_PLAN_TEXT_CHARS).collect();
-                (!text.is_empty()).then_some(RunPlanItem { text, state })
+                (!text.is_empty()).then(|| RunPlanItem::new(text, state))
             })
             .take(MAX_PLAN_ITEMS)
             .collect();
-        if self.last.as_ref() == Some(&plan) {
+        for item in &mut plan {
+            let before = last.iter().find(|p| p.text == item.text);
+            let started = before.and_then(|p| p.started_at);
+            match item.state {
+                RunPlanState::Current => item.started_at = started.or(Some(now)),
+                RunPlanState::Done => {
+                    item.started_at = started;
+                    item.ended_at = match before {
+                        Some(p) if p.state == RunPlanState::Done => p.ended_at,
+                        _ => Some(now),
+                    };
+                }
+                _ => {}
+            }
+        }
+        let same = prev.is_some()
+            && last.len() == plan.len()
+            && last
+                .iter()
+                .zip(&plan)
+                .all(|(a, b)| a.text == b.text && a.state == b.state);
+        self.last = Some(plan.clone());
+        if same {
             return None;
         }
-        self.last = Some(plan.clone());
         Some(RunEvent::Plan { items: plan })
     }
 }

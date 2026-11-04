@@ -93,6 +93,9 @@ crate::copy! {
     PLAN_ALL_DONE = "{n} 步都做完了",
     PLAN_SEE_PLAN = "看计划",
     PLAN_TOOK = "用时 {n} 分钟",
+    PLAN_ELAPSED = "已 {n} 分钟",
+    PLAN_ESTIMATE = "预计 {n} 分钟",
+    PLAN_ELAPSED_OF = "已 {n} 分钟 · 预计 {m} 分钟",
     PLAN_LIVE_LINE = "{name} 在做：",
     PLAN_LIVE_VIEW = "实时查看",
 

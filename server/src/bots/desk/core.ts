@@ -101,7 +101,10 @@ export function sanitizePlan(items: unknown): RunPlan | null {
   const out: RunPlan = [];
   for (const it of items) {
     const parsed = RunPlanItem.safeParse({ ...(it as object), text: typeof it?.text === "string" ? [...it.text.trim()].slice(0, MAX_PLAN_TEXT_CHARS).join("") : it?.text });
-    if (parsed.success) out.push({ text: parsed.data.text, state: parsed.data.state });
+    if (parsed.success) {
+      const { text, state, startedAt, endedAt, estimateMs } = parsed.data;
+      out.push({ text, state, ...(startedAt !== undefined ? { startedAt } : {}), ...(endedAt !== undefined ? { endedAt } : {}), ...(estimateMs !== undefined ? { estimateMs } : {}) });
+    }
     if (out.length === MAX_PLAN_ITEMS) break;
   }
   return out;

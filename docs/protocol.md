@@ -697,7 +697,9 @@ BotRun = { id, botId, groupId, topicId, machineId?, status: RunStatus, requested
            createdAt, startedAt?, endedAt?, updatedAt, summary? /* <= 280 */,
            plan?: RunPlanItem[] /* the latest plan; absent = none */ }
 RunPlanState = "done" | "current" | "waiting" | "pending"
-RunPlanItem = { text /* 1..200 code points */, state: RunPlanState }
+RunPlanItem = { text /* 1..200 code points */, state: RunPlanState,
+                startedAt? /* 1.1, ms: became current */, endedAt? /* 1.1, ms: became done */,
+                estimateMs? /* 1.1: the bot's estimate */ }
 RunPlan = RunPlanItem[]                    // in order, at most 30 items
 StartRunRequest = { groupId, topicId, plan?: RunPlan }
 SetRunPlanRequest = { plan: RunPlan }      // replaces the whole plan; [] clears it

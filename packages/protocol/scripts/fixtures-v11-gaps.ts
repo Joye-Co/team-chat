@@ -57,4 +57,12 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   ok("entities/card-v2-evidence-tests-recording.json", "CardV2", proof, "the server's test counts and a screen recording");
   bad("entities/card-v2-evidence-tests-negative.json", "CardV2", { ...proof, blocks: [{ type: "evidence", id: "tests", label: "测试", tests: { passed: -1, failed: 0 } }] }, "counts are not negative");
   bad("entities/card-v2-evidence-recording-no-file.json", "CardV2", { ...proof, blocks: [{ type: "evidence", id: "rec", label: "录屏", recording: { durationMs: 1 } }] }, "a recording names its file");
+
+  // SB-10: times and estimates of plan steps.
+  ok("http/set-run-plan-request-times.json", "SetRunPlanRequest", { plan: [
+    { text: "读代码", state: "done", startedAt: T0, endedAt: T0 + 240_000 },
+    { text: "修 sync 测试", state: "current", startedAt: T0 + 240_000, estimateMs: 600_000 },
+    { text: "开 PR", state: "pending", estimateMs: 120_000 },
+  ] }, "steps with when they started and ended, and an estimate");
+  bad("http/set-run-plan-request-negative-estimate.json", "SetRunPlanRequest", { plan: [{ text: "读代码", state: "current", estimateMs: -1 }] }, "estimateMs is not negative");
 }

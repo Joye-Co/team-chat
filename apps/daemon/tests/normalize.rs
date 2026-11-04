@@ -456,3 +456,26 @@ fn plans_keep_at_most_30_items_and_every_plan_round_trips() {
     assert_eq!(back, ev);
     chat_protocol::check_plan("plan", items).unwrap();
 }
+
+#[test]
+fn plan_items_get_their_start_and_end_times() {
+    use chat_protocol::RunPlanState;
+    let mut t = daemon::runtime::PlanTracker::default();
+    let plan = |ev: Option<RunEvent>| match ev {
+        Some(RunEvent::Plan { items }) => items,
+        other => panic!("{other:?}"),
+    };
+    let a = plan(t.update_at([("读代码", "in_progress"), ("改", "pending")], 1_000));
+    assert_eq!(a[0].started_at, Some(1_000));
+    assert_eq!(a[1].started_at, None);
+    // Unchanged texts and states send nothing, and keep the first start.
+    assert!(t.update_at([("读代码", "in_progress"), ("改", "pending")], 2_000).is_none());
+    let b = plan(t.update_at([("读代码", "completed"), ("改", "in_progress")], 61_000));
+    assert_eq!((b[0].state, b[0].started_at, b[0].ended_at), (RunPlanState::Done, Some(1_000), Some(61_000)));
+    assert_eq!(b[1].started_at, Some(61_000));
+    let c = plan(t.update_at([("读代码", "completed"), ("改", "completed")], 90_000));
+    assert_eq!(c[0].ended_at, Some(61_000));
+    assert_eq!((c[1].started_at, c[1].ended_at), (Some(61_000), Some(90_000)));
+    chat_protocol::check_plan("plan", &c).unwrap();
+}
+

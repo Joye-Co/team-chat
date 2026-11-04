@@ -1683,6 +1683,21 @@ fn group(
 // ---------------------------------------------------------------------------
 // Plans
 
+/// 已 N 分钟 (· 预计 M 分钟) of the current plan item, from its `startedAt` and `estimateMs`.
+pub(crate) fn plan_time(it: &RunPlanItem, now: crate::data::Millis) -> Option<String> {
+    let mins = |ms: u64| (ms / 60_000).max(1).to_string();
+    let elapsed = it
+        .started_at
+        .map(|t| mins((now.max(0) as u64).saturating_sub(t)));
+    let estimate = it.estimate_ms.map(mins);
+    match (elapsed, estimate) {
+        (Some(n), Some(m)) => Some(fill(c::PLAN_ELAPSED_OF, &[("n", &n), ("m", &m)])),
+        (Some(n), None) => Some(fill(c::PLAN_ELAPSED, &[("n", &n)])),
+        (None, Some(m)) => Some(fill(c::PLAN_ESTIMATE, &[("n", &m)])),
+        (None, None) => None,
+    }
+}
+
 fn plan(
     ctx: &Ctx,
     b: &CardV2Block,
@@ -1748,15 +1763,17 @@ fn plan(
                         .child(c::PLAN_SEE_QUESTION)
                         .into_any_element(),
                 ),
-                RunPlanState::Current => progress.as_ref().and_then(|(_, l)| {
-                    l.clone().map(|l| {
+                RunPlanState::Current => progress
+                    .as_ref()
+                    .and_then(|(_, l)| l.clone())
+                    .or_else(|| plan_time(it, ctx.env.now()))
+                    .map(|l| {
                         meta(div())
                             .mono()
                             .text_color(k.ink_3)
                             .child(l)
                             .into_any_element()
-                    })
-                }),
+                    }),
                 _ => None,
             };
             let bar = progress
@@ -2717,6 +2734,21 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
 mod tests {
     use super::*;
     use crate::copy::topic_rail as rail;
+
+    #[test]
+    fn a_current_plan_step_says_how_long_it_runs() {
+        let mut it = RunPlanItem::new("读代码", RunPlanState::Current);
+        assert_eq!(plan_time(&it, 0), None);
+        it.started_at = Some(1_000);
+        assert_eq!(plan_time(&it, 1_000 + 5 * 60_000).as_deref(), Some("已 5 分钟"));
+        it.estimate_ms = Some(20 * 60_000);
+        assert_eq!(
+            plan_time(&it, 1_000 + 5 * 60_000).as_deref(),
+            Some("已 5 分钟 · 预计 20 分钟")
+        );
+        it.started_at = None;
+        assert_eq!(plan_time(&it, 0).as_deref(), Some("预计 20 分钟"));
+    }
 
     #[test]
     fn protocol_pr_states_show_in_chinese() {

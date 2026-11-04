@@ -127,7 +127,7 @@ RunEvent =
   | { type: "approval.request", approvalId, itemId?, title, detail? }   // answer with run.approval
   | { type: "approval.resolved", approvalId, decision: "approve" | "deny" }
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
-  | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md)
+  | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md); the daemon sets startedAt / endedAt when a step becomes current / done
   | { type: "status",           state: "preparing" | "running" | "retrying" | "stalled" | "error", message? }
   | { type: "acceptance",       items: AcceptanceItem[] }               // 1.1: replaces BotRun.acceptance
   | { type: "paused",           paused: boolean, by? }                  // 1.1: after run.pause / run.resume

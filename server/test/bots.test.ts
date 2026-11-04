@@ -692,6 +692,15 @@ describe("run plans", () => {
     expect(withPlan().at(-1).data.run.plan).toEqual(plan2);
     const n = withPlan().filter((e) => JSON.stringify(e.data.run.plan) === JSON.stringify(plan2)).length;
     expect(n).toBe(1);
+    // 1.1: step times and estimates are kept.
+    const timed = [
+      { text: "读代码", state: "done", startedAt: 1_000, endedAt: 61_000 },
+      { text: "改", state: "current", startedAt: 61_000, estimateMs: 600_000 },
+    ];
+    const st = d.event(runId, { type: "plan", items: timed });
+    await d.acked(runId, st);
+    const gotTimed = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.plan?.[1]?.startedAt === 61_000);
+    expect(gotTimed.data.run.plan).toEqual(timed);
     // Items past the limits are cut to them (a newer or broken daemon), bad items are dropped.
     const s2 = d.event(runId, {
       type: "plan",

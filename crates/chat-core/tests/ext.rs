@@ -1294,10 +1294,7 @@ async fn cancel_run_stops_an_active_run_and_takes_an_ended_one_quietly() {
 }
 
 fn plan_item(text: &str, state: RunPlanState) -> RunPlanItem {
-    RunPlanItem {
-        text: text.into(),
-        state,
-    }
+    RunPlanItem::new(text, state)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
