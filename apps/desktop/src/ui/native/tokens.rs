@@ -1055,7 +1055,8 @@ pub mod card_v21 {
     pub const DEBOUNCE_TEXT: Duration = Duration::from_millis(600);
     pub const DEBOUNCE_DRAFT: Duration = Duration::from_millis(1000);
     pub const CHANGE_IN: Duration = Duration::from_millis(200);
-    pub const CHANGE_FLASH: Duration = Duration::from_millis(1600);
+    /// The flash of a changed part: 700 ms (T1-17). Its tint is muted.
+    pub const CHANGE_FLASH: Duration = Duration::from_millis(700);
     pub const HOVER_ASK: Duration = Duration::from_millis(300);
     pub const PART_FLASH: Duration = Duration::from_millis(600);
     pub const CHART_PICK_FILL: f32 = 0.06;
