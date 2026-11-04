@@ -59,6 +59,8 @@ pub mod m {
     pub const MEDIA: Pixels = px(32.);
     /// The footer row of a list.
     pub const FOOTER_ROW: Pixels = px(40.);
+    /// The footer under a table: the count and the pagination (§2.7).
+    pub const TABLE_FOOTER: Pixels = px(48.);
     /// A count pill.
     pub const PILL: Pixels = px(20.);
     /// A badge.
@@ -371,6 +373,122 @@ pub fn list_footer(
         .children(trailing)
 }
 
+/// Where a table is in its pages, and how to move: `go(page)` with a
+/// 1-based page. With one page every direction is disabled at 50 %.
+pub struct Pager {
+    pub page: usize,
+    pub pages: usize,
+    pub go: Option<std::rc::Rc<dyn Fn(usize, &mut gpui::Window, &mut App)>>,
+}
+
+impl Pager {
+    /// One page, nothing to move to.
+    pub fn single() -> Self {
+        Self {
+            page: 1,
+            pages: 1,
+            go: None,
+        }
+    }
+}
+
+/// The footer under a table (§2.7): px 16, h48, border-t; the count (`共 68
+/// 个`, or `已选 0 / 68 行`) 14 muted at the left; at the right `第 1 / 7
+/// 页` 14 medium and the first, previous, next and last outline icon buttons
+/// 28, gap 8. A direction that is not available is disabled at 50 %, never
+/// hidden.
+pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: &App) -> gpui::Div {
+    use super::buttons::{IconSize, disabled_push, icon_button_outline};
+    let k = native_colors(cx);
+    let Pager { page, pages, go } = pager;
+    let pages = pages.max(1);
+    let page = page.clamp(1, pages);
+    let label = crate::copy::fill(
+        crate::copy::kit::TABLE_PAGE,
+        &[("page", &page.to_string()), ("pages", &pages.to_string())],
+    );
+    let nav = |slug: &str, sym: Sym, name: &'static str, to: usize| {
+        let enabled = to != page && go.is_some();
+        let go = go.clone();
+        disabled_push(
+            icon_button_outline(
+                SharedString::from(format!("{id}-{slug}")),
+                sym,
+                name,
+                IconSize::Small,
+                cx,
+            ),
+            !enabled,
+            cx,
+        )
+        .when_some(go.filter(|_| enabled), move |b, go| {
+            b.on_click(move |_, window, cx| go(to, window, cx))
+        })
+    };
+    div()
+        .flex_none()
+        .h(m::TABLE_FOOTER)
+        .px(px(16.))
+        .border_t_1()
+        .border_color(k.separator)
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(16.))
+        .child(
+            TruncText::new(count)
+                .min_w(px(0.))
+                .n_body()
+                .n_figures()
+                .text_color(k.secondary),
+        )
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(32.))
+                .child(
+                    div()
+                        .n_body()
+                        .n_figures()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(k.label)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(nav(
+                            "first",
+                            Sym::PageFirst,
+                            crate::copy::kit::TABLE_FIRST,
+                            1,
+                        ))
+                        .child(nav(
+                            "previous",
+                            Sym::ChevronLeft,
+                            crate::copy::kit::TABLE_PREVIOUS,
+                            page.saturating_sub(1).max(1),
+                        ))
+                        .child(nav(
+                            "next",
+                            Sym::ChevronRight,
+                            crate::copy::kit::TABLE_NEXT,
+                            (page + 1).min(pages),
+                        ))
+                        .child(nav(
+                            "last",
+                            Sym::PageLast,
+                            crate::copy::kit::TABLE_LAST,
+                            pages,
+                        )),
+                ),
+        )
+}
+
 /// A KPI card (§2.4): label 14 muted, the number 24 semibold tabular, a
 /// 14 muted footer line; radius 14, border, shadow xs, p 24.
 pub fn kpi_card(
@@ -678,8 +796,18 @@ pub enum SkeletonKind {
 /// The pitch of a member list row.
 pub const MEMBER_ROW: Pixels = px(56.);
 
-/// `n` skeleton rows of `kind` at the real row height and frame.
+/// The rows a table skeleton shows (§2.14: 3 to 6, never a screenful).
+pub const TABLE_SKELETON_ROWS: std::ops::RangeInclusive<usize> = 3..=6;
+
+/// `n` skeleton rows of `kind` at the real row height and frame. A
+/// `TableRow` skeleton shows 3 to 6 rows; prefer [`skeleton_table`], which
+/// draws one bar per column of the real table.
 pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyElement {
+    let n = if kind == SkeletonKind::TableRow {
+        n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end())
+    } else {
+        n
+    };
     let k = native_colors(cx);
     let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
     let rows = (0..n).map(|i| {
@@ -819,8 +947,12 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
     }
 }
 
-/// `n` skeleton KPI cards in one row, at the card height.
+/// `n` skeleton KPI cards in one row, at the card height (§2.14): each bar
+/// sits in the line box of the text it stands for (label 14/20, number
+/// 24/32, foot 14/20, the same gaps as [`kpi_card`]), so the skeleton is as
+/// tall as the card (132).
 pub fn skeleton_cards(n: usize, cx: &App) -> AnyElement {
+    let line = |h: Pixels, bone: Bone| div().h(h).flex().items_center().child(bone);
     div()
         .flex()
         .gap(m::GRID_GAP)
@@ -828,20 +960,10 @@ pub fn skeleton_cards(n: usize, cx: &App) -> AnyElement {
             card(cx)
                 .flex_1()
                 .p(m::GUTTER)
-                .gap(px(8.))
-                .child(
-                    Bone::new()
-                        .h(px(14.))
-                        .w(gpui::relative(0.5))
-                        .rounded(px(8.)),
-                )
-                .child(Bone::new().h(px(28.)).w(px(48.)).rounded(px(8.)))
-                .child(
-                    Bone::new()
-                        .h(px(12.))
-                        .w(gpui::relative(0.7))
-                        .rounded(px(8.)),
-                )
+                .gap(px(4.))
+                .child(line(px(20.), Bone::new().h(px(14.)).w(gpui::relative(0.5))))
+                .child(line(KPI_NUMBER.1, Bone::new().h(KPI_NUMBER.0).w(px(48.))))
+                .child(line(px(20.), Bone::new().h(px(14.)).w(gpui::relative(0.7))).mt(px(2.)))
         }))
         .into_any_element()
 }
@@ -1029,6 +1151,16 @@ pub fn desc_row(label: impl Into<SharedString>, value: impl IntoElement, cx: &Ap
         )
 }
 
+/// A [`desc_row`] whose value is text: one line cut with `…`, the whole
+/// value in a tooltip when cut (§2.21, F3).
+pub fn desc_row_text(
+    label: impl Into<SharedString>,
+    value: impl Into<SharedString>,
+    cx: &App,
+) -> gpui::Div {
+    desc_row(label, TruncText::new(value).w_full(), cx)
+}
+
 /// A stat of a KPI strip inside a card: label 12 muted over a 24
 /// semibold tabular number and an optional 12 muted note.
 pub fn stat(
@@ -1072,8 +1204,8 @@ pub struct Col {
     pub right: bool,
 }
 
-/// A compact table (§2.7): header row h40 with 12 medium muted labels on
-/// the muted fill, rows h48 with 1 px lines between them, cells px12
+/// A page table (§2.7): header row h40 with 14 medium labels on the muted
+/// fill, rows h48 with 1 px lines between them, cells px12
 /// (first and last px16), one line each, truncating. The frame is the
 /// card's or the caller's.
 pub fn table(
@@ -1110,10 +1242,11 @@ pub fn table(
         .border_b_1()
         .border_color(k.separator)
         .children(cols.iter().enumerate().map(|(i, c)| {
+            // A page table's header is 14 medium foreground (§2.7).
             cell(i, c.right, c.width)
-                .n_callout()
+                .n_body()
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(k.secondary)
+                .text_color(k.label)
                 .child(c.header.clone())
         }));
     let total = rows.len();
@@ -1141,6 +1274,53 @@ pub fn table(
             .when_some(click, |d, f| d.on_click(move |e, w, cx| f(e, w, cx)))
     });
     div().flex().flex_col().child(header).children(body)
+}
+
+/// The loading shape of a [`table`] (§2.14): its frame, the h40 header with
+/// one bar per column, and `n` (3 to 6) h48 rows with one bar per column at
+/// the column's width and alignment.
+pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+    let k = native_colors(cx);
+    let n = n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end());
+    let count = cols.len();
+    let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
+    let row = |h: Pixels, bar: Pixels, on_fill: bool, seed: usize| {
+        div()
+            .flex_none()
+            .h(h)
+            .flex()
+            .items_center()
+            .children(cols.iter().enumerate().map(move |(i, c)| {
+                let w = widths[(seed + i) % widths.len()];
+                div()
+                    .min_w(px(0.))
+                    .when_some(c.width, |d, w| d.flex_none().w(w))
+                    .when(c.width.is_none(), |d| d.flex_1())
+                    .pl(if i == 0 { px(16.) } else { px(12.) })
+                    .pr(if i + 1 == count { px(16.) } else { px(0.) })
+                    .flex()
+                    .when(c.right, |d| d.justify_end())
+                    .child(
+                        Bone::new()
+                            .h(bar)
+                            .w(gpui::relative(if c.width.is_none() { w } else { 0.7 }))
+                            .on_fill(on_fill),
+                    )
+            }))
+    };
+    frame(cx)
+        .id(SharedString::from(format!("{id}-skeleton")))
+        .child(
+            row(super::tokens::height::TABLE_HEAD, px(12.), true, 3)
+                .bg(k.fill)
+                .border_b_1()
+                .border_color(k.separator),
+        )
+        .children((0..n).map(|i| {
+            row(super::tokens::height::TABLE_ROW, px(14.), false, i)
+                .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
+        }))
+        .into_any_element()
 }
 
 /// One line of text that truncates with `…` (a table cell, a meta line).

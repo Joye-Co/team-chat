@@ -588,6 +588,11 @@ impl TimelineView {
             .when(v2 && hovered && !deleted, |el| {
                 el.bg(crate::ui::native::native_colors(cx).fill.opacity(0.5))
             })
+            // R2-12, E3: the row the arrow keys reached shows the kit's
+            // focus ring (R1-01), distinct from the hover band.
+            .when(hovered && self.keyboard_row && self.key_focused, |el| {
+                el.shadow(crate::ui::native::row_focus_ring(cx))
+            })
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {
                 let band = crate::ui::native::native_colors(cx).fill;
@@ -598,6 +603,8 @@ impl TimelineView {
                 if *hovering {
                     if this.hovered.as_deref() != Some(key.as_str()) {
                         this.hovered = Some(key);
+                        // The pointer takes the row back from the keys.
+                        this.keyboard_row = false;
                         cx.notify();
                     }
                 } else if this.hovered.as_deref() == Some(key.as_str()) {

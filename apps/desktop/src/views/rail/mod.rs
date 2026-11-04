@@ -147,8 +147,9 @@ impl RailView {
             services,
             cache: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
-            // R2-12, E3: Tab reaches the sidebar; ↑↓ then walk its rows.
-            focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            // Tab reaches the rows themselves (FocusRow); the list keeps a
+            // handle for the arrow keys when it is focused as a whole.
+            focus: cx.focus_handle(),
             search,
             show_inactive: false,
             show_all: false,
@@ -503,9 +504,17 @@ impl Render for RailView {
             .flex_col()
             .track_focus(&self.focus)
             .key_context(KEY_CONTEXT)
-            .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.move_selection(-1, cx)))
-            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
-            .on_action(cx.listener(|this, _: &OpenSelected, _, cx| this.move_selection(0, cx)))
+            // R2-12 with the kit's FocusRow (R1-01): while a row has the
+            // keyboard focus, ↑↓ move that focus and Enter / Space open the
+            // row (the row's own keys); with the list itself focused, ↑↓
+            // move the selection and open it, as a Mac sidebar does.
+            .on_action(
+                cx.listener(|this, _: &SelectPrevious, window, cx| this.list_key(-1, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &SelectNext, window, cx| this.list_key(1, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenSelected, window, cx| this.list_key(0, window, cx)),
+            )
             // §2.1: the traffic-light band holds the lights only (drawn by
             // the system). Dragging it moves the window, as a title bar does.
             .child(
@@ -665,6 +674,16 @@ impl RailView {
     /// click does, over every row that opens something: 首页, 产出, 成员,
     /// then the 群 headers (their pages), 话题 and 私聊. A step of 0 opens
     /// the selected row again.
+    /// An arrow or Return in the sidebar: the list's own selection when the
+    /// list is focused, else the focused row handles it.
+    fn list_key(&mut self, step: isize, window: &Window, cx: &mut Context<Self>) {
+        if self.focus.is_focused(window) {
+            self.move_selection(step, cx);
+        } else {
+            cx.propagate();
+        }
+    }
+
     fn move_selection(&mut self, step: isize, cx: &mut Context<Self>) {
         self.refresh(cx);
         let Some(entries) = self.cache.as_ref().map(|c| c.entries.clone()) else {

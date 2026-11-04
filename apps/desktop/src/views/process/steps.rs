@@ -95,29 +95,47 @@ fn block(_cx: &App) -> gpui::Div {
 fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
+    // The thread's scroll cue (R1-04): a 16 fade into the box fill at the
+    // right edge, over the 16 right padding, so a line that fits ends
+    // before it and a longer one reads as cut by a scroll edge, not a clip.
+    let fade = div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .w(space::S16)
+        .bg(gpui::linear_gradient(
+            90.,
+            gpui::linear_color_stop(k.code_bg.opacity(0.), 0.),
+            gpui::linear_color_stop(k.code_bg, 1.),
+        ));
     div()
-        .id(id)
         .mt(space::S2)
+        .relative()
         .w_full()
         .min_w(px(0.))
         .rounded(theme::radius::MD)
         .border_1()
         .border_color(n.separator)
         .bg(k.code_bg)
-        .overflow_x_scroll()
+        .overflow_hidden()
         .child(
-            div()
-                .px(space::S12)
-                .py(space::S8)
-                .t_code()
-                .whitespace_nowrap()
-                .text_color(k.text_1)
-                .children(
-                    text.lines()
-                        .map(|l| div().child(l.to_string()))
-                        .collect::<Vec<_>>(),
-                ),
+            div().id(id).w_full().overflow_x_scroll().child(
+                div()
+                    .pl(space::S12)
+                    .pr(space::S16)
+                    .py(space::S8)
+                    .t_code()
+                    .whitespace_nowrap()
+                    .text_color(k.text_1)
+                    .children(
+                        text.lines()
+                            .map(|l| div().child(l.to_string()))
+                            .collect::<Vec<_>>(),
+                    ),
+            ),
         )
+        .child(fade)
 }
 
 /// Where a path is cut: the folders before the last two parts, and those

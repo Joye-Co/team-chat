@@ -157,12 +157,11 @@ fn image_preview(
             .child(line)
             .into_any_element()
     };
-    let name_line = div()
+    let name_line = crate::ui::truncate::file_name(file.name.clone())
+        .id(SharedString::from(format!("{}-name", id("image"))))
         .max_w_full()
         .t_meta()
         .text_color(k.text_3)
-        .one_line()
-        .child(file.name.clone())
         .into_any_element();
     let inner = match (&thumb, state) {
         // GPUI's `overflow_hidden` clips to the box, not to its corner
@@ -295,15 +294,12 @@ fn row_frame(
                 .flex()
                 .flex_col()
                 .child(
-                    // Middle cut on the measured width: the last 12 characters
-                    // and the extension stay (§15).
-                    div()
+                    // R1-06: the kit's file name: a middle cut that keeps the
+                    // extension, the whole name in a tooltip when cut.
+                    crate::ui::truncate::file_name(file.name.clone())
+                        .id(SharedString::from(format!("{group}-name")))
                         .n_headline()
-                        .text_color(n.label)
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis_middle()
-                        .child(file.name.clone()),
+                        .text_color(n.label),
                 )
                 .child(
                     div()

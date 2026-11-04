@@ -425,6 +425,8 @@ fn apply(t: &mut Theme, dark: bool) {
     t.notification.placement = gpui::Anchor::BottomRight;
     t.notification.width = px(360.);
     t.notification.margins = gpui_component::Edges::all(space::S16);
+    // A focused composer lifts toasts over itself (R1-15).
+    t.notification.margins.bottom = crate::ui::overlay::toast_bottom();
     t.shadow = true;
     t.focus_ring = true;
     t.scrollbar_mode = ScrollbarMode::Scrolling;
