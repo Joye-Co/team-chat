@@ -248,3 +248,30 @@ describe("catalogs per socket (PC-13)", () => {
     for (const c of [cbot, v20, v21, old]) c.close();
   });
 });
+
+describe("引用提问 from 单独问 (PC-7)", () => {
+  it("stores a side chat ref to a part of a group card for a member of both and refuses others", async () => {
+    const w = await world();
+    const [ca, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bot)]);
+    const card = (await send(cbot, w.gid, base({ blocks: [{ id: "t", type: "table", columns: ["渠道", "数"], rows: [["B 站", "3"]] }] }))).result.message;
+    const dm = await api("/v1/dms", { token: w.alice.token, body: { memberId: w.bot.id } });
+    expect(dm.status, JSON.stringify(dm.body)).toBe(200);
+    const ref = { messageId: card.id, sourceGroupId: w.gid, cardRev: 1, blockId: "t", part: { kind: "cell", keys: { row: 0, col: 1 } }, label: "B 站 · 3" };
+    const sent = await ca.request({ t: "send", groupId: dm.body.group.id, clientMsgId: clientMsgId(), body: "这个数对吗？", blockRefs: [ref] });
+    expect(sent, JSON.stringify(sent)).toMatchObject({ ok: true });
+    expect(sent.result.message.blockRefs[0]).toMatchObject({ ...ref, sourceAuthorId: w.bot.id, sourceTopicId: card.topicId });
+    expect(sent.result.message.body).toContain("> ↳ B 站 · 3");
+    // A member of the DM's bot who is not in the group is refused.
+    const outsider = await createMember({ name: "Eve" });
+    const co = await w.connect(outsider);
+    const dm2 = await api("/v1/dms", { token: outsider.token, body: { memberId: w.bot.id } });
+    expect(dm2.status).toBe(200);
+    const no = await co.request({ t: "send", groupId: dm2.body.group.id, clientMsgId: clientMsgId(), body: "?", blockRefs: [ref] });
+    expect(no, JSON.stringify(no)).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    // In a group, a ref to another group is refused.
+    const other = await createGroup(w.owner, [w.alice.id]);
+    const g = await ca.request({ t: "send", groupId: other, clientMsgId: clientMsgId(), body: "?", blockRefs: [ref] });
+    expect(g).toMatchObject({ ok: false, error: { code: "invalid" } });
+    for (const c of [ca, cbot, co]) c.close();
+  });
+});

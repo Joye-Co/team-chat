@@ -33,4 +33,10 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   bad("entities/card-v2-status-unknown.json", "CardV2", { ...done, status: "paused" }, "status is executing or failed");
   ok("client/card.patch-status.json", "ClientFrame", { t: "card.patch", rid: "r204", groupId: G, messageId: M, baseRev: 2, ops: [{ op: "card", props: { status: "failed" } }] });
   ok("client/card.patch-status-clear.json", "ClientFrame", { t: "card.patch", rid: "r205", groupId: G, messageId: M, baseRev: 3, ops: [{ op: "card", props: { status: null } }] }, "null clears the status");
+
+  // PC-7: 引用提问 from a side chat (单独问) to the group it is about.
+  const asideRef = { messageId: M, sourceGroupId: G, cardRev: 3, blockId: "channels", part: { kind: "cell", keys: { row: "bili", col: 1 } }, label: "B 站 · 新增群 9" };
+  ok("entities/block-ref-input-other-group.json", "BlockRefInput", asideRef, "a side chat quotes a cell of a card in the group it is about");
+  ok("entities/block-ref-other-group.json", "BlockRef", { ...asideRef, sourceAuthorId: ID.bot, sourceTopicId: ID.topic });
+  bad("entities/block-ref-input-bad-group.json", "BlockRefInput", { ...asideRef, sourceGroupId: "" }, "sourceGroupId is an id");
 }

@@ -91,6 +91,11 @@ const blockRefFields = {
   messageId: Id.optional(),
   /** A 产出 version (same group). */
   artifact: z.object({ artifactId: Id, version: z.int().positive() }).optional(),
+  /**
+   * 1.1: the group of the source when it is not this group: a side chat (单独问) quoting a
+   * message or 产出 of the group it is about. The sender must be a member of both.
+   */
+  sourceGroupId: Id.optional(),
   /** The Card v2 `rev` the sender saw. */
   cardRev: CardRev.optional(),
   blockId: BlockRefId,

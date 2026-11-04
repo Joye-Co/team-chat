@@ -1,0 +1,20 @@
+{
+  "kind": "BlockRef",
+  "valid": true,
+  "value": {
+    "messageId": "01JBX0MSG000000000000000AE",
+    "sourceGroupId": "01JBX0GENERAL000000000000A",
+    "cardRev": 3,
+    "blockId": "channels",
+    "part": {
+      "kind": "cell",
+      "keys": {
+        "row": "bili",
+        "col": 1
+      }
+    },
+    "label": "B 站 · 新增群 9",
+    "sourceAuthorId": "01JBX0BOT000000000000000AC",
+    "sourceTopicId": "01JBX0TOPIC0000000000000AD"
+  }
+}

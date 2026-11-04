@@ -1294,11 +1294,17 @@ decodes media.
 
 ```ts
 PartRef = { kind: PartKind /* 1..16 of [a-z], open set */, keys?: Record</* [a-z]{1,16} */ string, string /* <= 256 */ | int >= 0> /* <= 4 */ }
-BlockRefInput = { messageId? | artifact? { artifactId, version } /* exactly one */, cardRev?, blockId, part?, label /* 1..120, no control characters */, value? /* <= 2048 bytes */ }
+BlockRefInput = { messageId? | artifact? { artifactId, version } /* exactly one */, sourceGroupId? /* 1.1 */, cardRev?, blockId, part?, label /* 1..120, no control characters */, value? /* <= 2048 bytes */ }
 BlockRef = BlockRefInput & { sourceAuthorId?, sourceTopicId, deleted?: true /* label "", no value */ }
 Message += { blockRefs?: BlockRef[] /* <= 5 */ }    send / PostMessageRequest += { blockRefs?: BlockRefInput[] /* 1..5 */ }
 message.updated data += { blockRefs? }
 ```
+
+`sourceGroupId` (1.1): a side chat (单独问) in a DM quotes a message or 产出 of the group it is
+about. It is allowed only in a DM, the sender must be a member of that group (`forbidden`
+otherwise), and that group's room checks the source as it checks its own refs; the stored ref
+keeps `sourceGroupId`. Absent (or this group): the source is in this group. A delete in the
+source group does not clear the ref of the side chat (the asker keeps the quote line).
 
 `blockId` is a Card v2 block id, `card`, `page` (a 产出 page), `v1:<0..49>` or `md:<0..199>`.
 Table keys: `row` = `rowKeys[i]` when present, else the 0-based row index; `col` = the 0-based

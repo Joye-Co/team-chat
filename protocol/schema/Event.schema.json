@@ -9202,6 +9202,10 @@
                           "version"
                         ]
                       },
+                      "sourceGroupId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
                       "cardRev": {
                         "type": "integer",
                         "exclusiveMinimum": 0,
@@ -18174,6 +18178,10 @@
                       "artifactId",
                       "version"
                     ]
+                  },
+                  "sourceGroupId": {
+                    "type": "string",
+                    "minLength": 1
                   },
                   "cardRev": {
                     "type": "integer",

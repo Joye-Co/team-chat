@@ -208,6 +208,14 @@ pub struct BlockRefInput {
         skip_serializing_if = "Option::is_none"
     )]
     pub artifact: Option<ArtifactVersionRef>,
+    /// 1.1: the group of the source when it is not this group: a side chat (单独问) quoting a
+    /// message or 产出 of the group it is about. The sender must be a member of both.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_group_id: Option<String>,
     /// The Card v2 `rev` the sender saw.
     #[serde(
         default,
@@ -274,6 +282,9 @@ impl BlockRefInput {
         if let Some(a) = &self.artifact {
             check_id("blockRefs.artifact.artifactId", &a.artifact_id)?;
             check_positive("blockRefs.artifact.version", Some(a.version))?;
+        }
+        if let Some(g) = &self.source_group_id {
+            check_id("blockRefs.sourceGroupId", g)?;
         }
         check_positive("blockRefs.cardRev", self.card_rev)?;
         if !is_block_ref_id(&self.block_id) {
