@@ -15,20 +15,12 @@ use gpui::{
 };
 use gpui_component::Theme;
 
-use crate::{
-    theme,
-    ui::native::{NativeColors, metrics, native_colors},
-};
+use crate::ui::native::{NativeColors, metrics, native_colors};
 
 /// The native colors of the current mode with the app accent: the system
 /// accent when the person picked one, and the focus halo at 35 %.
 pub fn colors(cx: &App) -> NativeColors {
-    let mut k = native_colors(cx);
-    let dark = k.is_dark();
-    k.accent = theme::app_accent(dark);
-    k.on_accent = theme::accent_ink(dark);
-    k.focus = k.accent.opacity(theme::FOCUS_HALO);
-    k
+    native_colors(cx)
 }
 
 /// How far content fades out under the toolbar row (§2 scroll edge).

@@ -241,7 +241,13 @@ impl NativeColors {
 
 /// The native colors of the current mode.
 pub fn native_colors(cx: &App) -> NativeColors {
-    NativeColors::for_mode(theme::is_dark(cx))
+    // v12 integration: the system accent (or ink) and the 35 % focus halo.
+    let dark = theme::is_dark(cx);
+    let mut k = NativeColors::for_mode(dark);
+    k.accent = theme::app_accent(dark);
+    k.on_accent = theme::accent_ink(dark);
+    k.focus = k.accent.opacity(theme::FOCUS_HALO);
+    k
 }
 
 /// Whether `window` draws its selection with emphasis (§4 Inactive window):
