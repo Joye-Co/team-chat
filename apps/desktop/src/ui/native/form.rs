@@ -68,6 +68,10 @@ impl RenderOnce for GroupedForm {
             .w_full()
             .rounded(metrics::GROUP_RADIUS)
             .bg(k.group)
+            // §1.7, §2.8: a fill step alone is not an edge; the group box
+            // keeps a 1 px border line in both modes.
+            .border_1()
+            .border_color(k.separator)
             .flex()
             .flex_col();
         for (ix, row) in self.rows.into_iter().enumerate() {

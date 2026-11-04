@@ -16,48 +16,20 @@
 //! The shape alone says bot or person.
 
 use gpui::{
-    App, Global, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
+    App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::avatar::Avatar;
 
 use crate::{
-    app::{Changes, Services},
     characters::{self, CharacterStatus, status::StatusBoard},
-    data::{Change, Member},
+    data::Member,
     theme::{self, Type as _, type_scale},
     ui::icons::{Sym, icon},
 };
 
 /// Ring around presence dots and pips.
 const DOT_RING: Pixels = px(2.);
-
-/// My member id, for the ink disc. Kept from the session so an avatar does
-/// not ask the provider while it paints.
-struct Viewer(Option<String>);
-
-impl Global for Viewer {}
-
-/// Keeps [`Viewer`] equal to the signed-in member. Call once at start.
-pub fn track_viewer(services: &Services, cx: &mut App) {
-    cx.set_global(Viewer(services.me()));
-    let source = services.clone();
-    cx.subscribe(&services.hub, move |_, changes: &Changes, cx| {
-        if changes.any(|c| matches!(c, Change::Session)) {
-            cx.set_global(Viewer(source.me()));
-        }
-    })
-    .detach();
-}
-
-/// Whether `id` is me.
-fn is_viewer(id: &str, cx: &App) -> bool {
-    !id.is_empty()
-        && cx
-            .try_global::<Viewer>()
-            .and_then(|v| v.0.as_deref())
-            .is_some_and(|me| me == id)
-}
 
 #[derive(IntoElement)]
 pub struct MemberAvatar {
@@ -253,13 +225,12 @@ impl RenderOnce for MemberAvatar {
             None => div()
                 .size(size)
                 .rounded_full()
-                .map(|el| {
-                    if is_viewer(&self.id, cx) {
-                        el.bg(k.btn).text_color(k.btn_ink)
-                    } else {
-                        el.bg(k.avatar_bg).text_color(k.avatar_fg)
-                    }
-                })
+                // §1.8: one fallback for every person, me included: the muted
+                // fill, a 1 px border line (§2.22) and the initial in foreground.
+                .bg(k.avatar_bg)
+                .text_color(k.avatar_fg)
+                .border_1()
+                .border_color(k.border)
                 .flex()
                 .items_center()
                 .justify_center()
