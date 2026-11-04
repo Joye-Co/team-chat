@@ -200,4 +200,20 @@ pub const SCENES: &[Scene] = &[
         },
     },
     // --- end t5-cards ---
+    // --- r1-kit ---
+    Scene {
+        name: "state-hover-sidebar",
+        about: "首页 with the pointer on a sidebar row: the row hover, muted at 50 % (§2.1, R1-02)",
+        start: Start::V2,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "state-key-sidebar",
+        about: "首页 after Tab and ↓ ↓: keyboard focus on a sidebar row, a ring distinct from the selected row (E3, R1-01)",
+        start: Start::V2,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: open_main,
+    },
+    // --- end r1-kit ---
 ];

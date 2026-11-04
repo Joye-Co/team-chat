@@ -10,6 +10,7 @@
 //! | [`badge`] | COMPLETENESS §2.12 | the outline status badge |
 //! | [`buttons`] | §5.1–§5.3 | push, pop-up, pull-down, square pair, borderless, toolbar items |
 //! | [`sidebar`] | §2, §9.1 | floating panel, section headers, 32 pt rows |
+//! | [`focus`] | COMPLETENESS §2.6, E3 | the focusable row: tab stop, arrows, focus ring, hover |
 //! | [`form`] | §5.6, §8 | grouped forms, form rows, inline value field |
 //! | [`fields`] | §5.6 | standalone text field, search field |
 //! | [`toggles`] | §5.4 | switch, checkbox, radio |
@@ -24,6 +25,7 @@ pub mod blocks;
 pub mod buttons;
 pub mod feedback;
 pub mod fields;
+pub mod focus;
 pub mod form;
 pub mod inspector;
 pub mod menu;
@@ -58,7 +60,9 @@ pub use feedback::{
     skeleton, skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
-pub use fields::{FieldSize, NativeTextField, SearchField, field_edge, field_edge_inset};
+pub use fields::{FieldSize, NativeTextField, SearchField, field_edge};
+#[allow(unused_imports)]
+pub use focus::{Arrows, FocusRow, row_focus_ring};
 #[allow(unused_imports)]
 pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_state};
 #[allow(unused_imports)]
@@ -90,7 +94,7 @@ pub use toolbar::{ToolbarGroup, ToolbarRow, toolbar_slot};
 /// The one truncating label (T1-02): `…` at the end or in the middle, the
 /// full text in a tooltip when cut.
 #[allow(unused_imports)]
-pub use crate::ui::truncate::{Cut, TruncText};
+pub use crate::ui::truncate::{Cut, TruncText, file_name};
 
 /// The busy spinner (§5.7): for unknown waits, never with "加载中…" text.
 #[allow(unused_imports)]
