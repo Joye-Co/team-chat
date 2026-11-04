@@ -629,7 +629,7 @@ fn markdown_view(
         toc = toc.child(
             div()
                 .id(ElementId::Name(format!("{}-toc-{i}", spec.id).into()))
-        .focus_row(false, cx)
+                .focus_row(false, cx)
                 .px(space::S8)
                 .py(space::S4)
                 .rounded(radius::SM)
@@ -788,7 +788,7 @@ fn lightbox(
         strip = strip.child(
             div()
                 .id(ElementId::Name(format!("{}-thumb-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .w(px(36.))
                 .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::MARK)
@@ -1021,7 +1021,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
             chapters = chapters.child(
                 div()
                     .id(ElementId::Name(format!("{}-ch-{i}", spec.id).into()))
-        .focus_row(false, cx)
+                    .focus_row(false, cx)
                     .h(crate::ui::native::tokens::height::DEFAULT)
                     .px(space::S8)
                     .rounded(radius::MD)
@@ -1057,7 +1057,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
         strip = strip.child(
             div()
                 .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex_1()
                 .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::SM)
@@ -1354,7 +1354,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         lines = lines.child(
             div()
                 .id(ElementId::Name(format!("{}-cue-{i}", spec.id).into()))
-        .focus_row(false, cx)
+                .focus_row(false, cx)
                 .min_h(px(32.))
                 .px(space::S8)
                 .py(space::S6)
@@ -1597,7 +1597,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         thumbs = thumbs.child(
             div()
                 .id(ElementId::Name(format!("{}-pt-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex()
                 .flex_col()
                 .items_center()
@@ -1883,7 +1883,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
             cols,
             div()
                 .id(ElementId::Name(format!("{}-h-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex_1()
                 .min_w(px(0.))
                 .h_full()

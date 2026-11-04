@@ -650,7 +650,7 @@ impl WebEmbedState {
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
                     if s.remember {
-                        remember_preview(&s.artifact_id().to_string(), s.version(), image.clone());
+                        remember_preview(s.artifact_id(), s.version(), image.clone());
                     }
                     s.snapshot = Some(image);
                     cx.notify();

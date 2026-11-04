@@ -976,9 +976,9 @@ fn selector_key(selector: &str) -> String {
     format!("sha256:{hex}")
 }
 
-/// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
-/// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
-/// 最多引用 5 处 (from [`refs::ask_about_outcome`]); a chip in 单独问 shows in its composer.
+// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
+// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
+// 最多引用 5 处 (from `refs::ask_about_outcome`); a chip in 单独问 shows in its composer.
 // --- the footer band ---------------------------------------------------------------------
 
 /// The band of a version's pages now, in words.
