@@ -17,18 +17,20 @@ use gpui_component::input::InputState;
 use super::{
     buttons::{
         PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text, disabled_push,
-        popup_button, pull_down, push_button, square_button, square_pair, toolbar_item,
+        popup_button, pull_down, push_button, toolbar_item,
     },
     fields::{FieldSize, NativeTextField, SearchField},
     form::{FormRow, GroupedForm, InlineValueField},
-    inspector::{CompactRow, InspectorSection, determinate_bar, inspector_column, label_value},
+    inspector::{CompactRow, InspectorSection, inspector_column, label_value},
     menu::{MenuRow, menu_separator, menu_surface, popover_surface},
     segmented::{Segment, Segmented},
     sheet::{
         AlertLayout, SheetLayout, SheetWidth, alert_button, alert_surface, sheet_buttons,
         sheet_surface,
     },
-    sidebar::{SidebarRow, SidebarSection, floating_sidebar},
+    sidebar::{
+        RightColumn, SidebarGroup, SidebarMedia, SidebarRow, SidebarSection, floating_sidebar,
+    },
     toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize},
     tokens::{NativeColors, NativeType as _, metrics, native_colors},
     toolbar::{ToolbarGroup, ToolbarRow},
@@ -67,6 +69,29 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| open(s, c, 2, cx),
     },
 ];
+
+/// A device row's value and its "⋯" action (§2.19).
+fn device_value(
+    id: &'static str,
+    value: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .child(div().n_body().text_color(k.secondary).child(value))
+        .child(super::icon_button(
+            id,
+            Sf::More,
+            t::DEVICE_MORE,
+            super::IconSize::Small,
+            window,
+            cx,
+        ))
+}
 
 fn open(
     _services: Services,
@@ -151,7 +176,6 @@ fn hstack() -> gpui::Div {
 
 impl NativeKit {
     fn sidebar(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let k = native_colors(cx);
         let avatar = |cx: &App| MemberAvatar::new(None, px(16.)).on(native_colors(cx).sidebar);
         floating_sidebar(cx)
             .h(px(452.))
@@ -187,26 +211,35 @@ impl NativeKit {
             )
             .child(SidebarRow::new("kit-outputs", t::OUTPUTS).symbol(Sf::Outputs))
             .child(SidebarRow::new("kit-members", t::MEMBERS).symbol(Sf::Members))
-            .child(SidebarSection::new("kit-sec-dev", t::GROUP_DEV).show_chevron(true))
+            // One media kind per group; state in the right column (§2.1).
             .child(
-                SidebarRow::new("kit-t-a", t::TOPIC_A)
-                    .state_symbol(Sf::Alert, k.amber)
-                    .unread(true)
-                    .trailing(t::TIME_A),
+                SidebarGroup::new(
+                    SidebarSection::new("kit-sec-dev", t::GROUP_DEV).show_chevron(true),
+                    SidebarMedia::None,
+                )
+                .row(SidebarRow::new("kit-t-a", t::TOPIC_A).unread(true).right(
+                    RightColumn::Status(
+                        crate::ui::native::BadgeState::NeedsYou,
+                        t::ST_NEEDS_YOU.into(),
+                    ),
+                ))
+                .row(
+                    SidebarRow::new("kit-t-b", t::TOPIC_B)
+                        .unread(true)
+                        .right(RightColumn::Count(3)),
+                )
+                .row(
+                    SidebarRow::new("kit-t-c", t::TOPIC_C)
+                        .right(RightColumn::Time(t::TIME_B.into())),
+                ),
             )
             .child(
-                SidebarRow::new("kit-t-b", t::TOPIC_B)
-                    .leading(avatar(cx))
-                    .count(3)
-                    .unread(true),
+                SidebarGroup::new(
+                    SidebarSection::new("kit-sec-dm", t::GROUP_DM),
+                    SidebarMedia::Avatar,
+                )
+                .row(SidebarRow::new("kit-dm-a", t::INS_MEMBER_VALUE).leading(avatar(cx))),
             )
-            .child(
-                SidebarRow::new("kit-t-c", t::TOPIC_C)
-                    .state_symbol(Sf::Done, k.secondary)
-                    .trailing(t::TIME_B),
-            )
-            .child(SidebarSection::new("kit-sec-dm", t::GROUP_DM))
-            .child(SidebarRow::new("kit-dm-a", t::INS_MEMBER_VALUE).leading(avatar(cx)))
             .into_any_element()
     }
 
@@ -376,11 +409,6 @@ impl NativeKit {
                         t::INVITE,
                         PushSize::Regular,
                         window,
-                        cx,
-                    ))
-                    .child(square_pair(
-                        square_button("kb-add", true, t::ADD, window, cx),
-                        square_button("kb-rm", false, t::REMOVE, window, cx),
                         cx,
                     ))
                     .child(borderless_button("kb-open", Sf::Open, t::OPEN, window, cx))
@@ -578,22 +606,18 @@ impl NativeKit {
             .child(
                 GroupedForm::new()
                     .header(t::FORM_DEVICES)
-                    .footer(t::FORM_DEVICES_FOOTER)
+                    // Row actions are visible in the row: a ghost 28 "⋯"
+                    // (§2.19), never select-then-"−".
                     .row(
                         FormRow::new(t::DEVICE_A)
                             .leading(device(Sf::Computer, window, cx))
-                            .value(t::THIS_MAC, cx),
+                            .control(device_value("kform-more-a", t::THIS_MAC, window, cx)),
                     )
                     .row(
                         FormRow::new(t::DEVICE_B)
                             .leading(device(Sf::Machines, window, cx))
-                            .value(t::LAST_SEEN, cx),
-                    )
-                    .below(square_pair(
-                        square_button("kform-add", true, t::ADD, window, cx),
-                        square_button("kform-rm", false, t::REMOVE, window, cx),
-                        cx,
-                    )),
+                            .control(device_value("kform-more-b", t::LAST_SEEN, window, cx)),
+                    ),
             )
             .into_any_element()
     }
@@ -724,7 +748,7 @@ impl NativeKit {
                     InspectorSection::new("ki-cost", t::INS_COST)
                         .row(label_value(t::INS_TIME, t::INS_TIME_VALUE, cx))
                         .row(label_value(t::INS_COST, t::INS_COST_VALUE, cx))
-                        .row(div().pt(px(6.)).child(determinate_bar(0.44, None, cx))),
+                        .row(div().pt(px(6.)).child(super::progress(0.44, cx))),
                 ),
         );
         let row = |id: &'static str, title: &'static str, cx: &App| {
@@ -762,9 +786,9 @@ impl NativeKit {
                 .flex_col()
                 .gap(px(10.))
                 .child(caption(t::PROGRESS_LABEL, &k))
-                .child(determinate_bar(0.62, None, cx))
-                .child(determinate_bar(0.3, Some(k.blue), cx))
-                .child(determinate_bar(1.0, Some(k.green), cx))
+                // D12: one Progress (and its steps variant), no colored bars.
+                .child(super::progress(0.62, cx))
+                .child(super::progress_steps(3, 5, cx))
                 .child(hstack().child(crate::ui::motion::spinner())),
         );
         // A sheet attached under the toolbar of a dimmed window.

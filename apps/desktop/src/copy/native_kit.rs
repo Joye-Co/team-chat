@@ -110,6 +110,7 @@ crate::copy! {
     CONTINUE = "继续",
     CANCEL = "取消",
     ADD = "添加",
+    DEVICE_MORE = "更多操作",
     REMOVE = "移除",
     OPEN = "打开",
     // Pop-ups, segmented
@@ -125,7 +126,7 @@ crate::copy! {
     LAUNCH_AT_LOGIN = "登录时启动",
     SOUND = "声音",
     MENU_BAR = "菜单栏里显示",
-    DELETE_LOCAL = "同时删除这台 Mac 上的聊天记录和下载的产出",
+    DELETE_LOCAL = "同时删除本机数据",
     ALL_MESSAGES = "全部消息",
     ONLY_MENTIONS = "只有 @我",
     // Fields
@@ -139,7 +140,6 @@ crate::copy! {
     FORM_GENERAL = "通用",
     FORM_ON_LAUNCH = "启动时",
     FORM_DEVICES = "登录的设备",
-    FORM_DEVICES_FOOTER = "选中一台设备，再按 − 让它退出登录。",
     THIS_MAC = "这台 Mac",
     DEVICE_A = "Joye 的 MacBook Pro",
     DEVICE_B = "办公室 Mac mini",
