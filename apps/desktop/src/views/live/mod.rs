@@ -484,7 +484,7 @@ impl LivePane {
                     .flex_col()
                     .text_size(px(12.))
                     .line_height(px(20.))
-                    .mono()
+                    .code_font()
                     .children(rows)
                     .children(cursor),
             );

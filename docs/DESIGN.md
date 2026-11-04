@@ -201,8 +201,9 @@ back to Menlo), `mono_font.size` 12, `radius` 8, `radius.lg` 12, `shadow` true, 
 
 ## 3. Typography
 
-System font (SF Pro; PingFang SC for Han; Apple Color Emoji). Mono: SF Mono, Menlo fallback,
-tabular figures. Weights 400, 500, 600. Glyphs render without font-smoothing dilation (the vendored
+System font (SF Pro; PingFang SC for Han; Apple Color Emoji). Figures (times, counts,
+versions, costs) use the system font with tabular figures (OpenType `tnum`), not a mono font.
+Mono (Menlo) is only for code. Weights 400, 500, 600. Glyphs render without font-smoothing dilation (the vendored
 gpui patch in docs/ARCHITECTURE.md).
 
 **Closed scale.** Each style is size, line height and weight together.
@@ -215,15 +216,27 @@ gpui patch in docs/ARCHITECTURE.md).
 | `body` | 14 / 22 | 400; 500 lead-ins | Message text, composer, card body, side chat answers |
 | `ui` | 13 / 20 | 400; 500 names and selected rows; 600 section headings | Rail rows, buttons, fields, message names, menu rows, card fields, rail-card text |
 | `meta` | 12 / 18 | 400; 500 rail-card labels and group headers in the rail | Times, tags, breadcrumbs, labels, hints, chips |
-| `mono` | 12 / 18 | 400 | Every time, count, version, id, step counter, line count, cost, fps (`10:42`, `3/5`, `v2`, `+214 −63`, `¥6.20`) |
-| `num` | 24 / 30 | 600 mono figures | Metric values in data cards and 这周 stats |
-| `code` | 12 / 18 | 400 mono | Diffs, terminal lines, inline code |
+| `mono` (figures) | 12 / 18 | 400 | Every time, count, version, step counter, line count, cost, fps (`10:42`, `3/5`, `v2`, `+214 −63`, `¥6.20`, `明天 08:00`, `12 个文件`): the system font with tabular figures. The name stays from the artboards; the app helper is `.mono()` / `.t_mono()` |
+| `num` | 24 / 30 | 600 tabular figures | Metric values in data cards and 这周 stats |
+| `code` | 12 / 18 | 400 mono (Menlo) | Code, diffs, terminal lines, ids and hashes, type-to-confirm codes, host names. The app helper is `.code_font()` / `.t_code()` |
 | `code-entry` | 20 / 28 | 500 | Invite code boxes only (login) |
+
+**Three levels.** Hierarchy comes from weight and color first, size second:
+
+| Level | Style | Where |
+| --- | --- | --- |
+| 1 Lead | 600, `ink` | Titles (page, topic, card), the author name that heads a timeline group (`ui` 14 / 600) |
+| 2 Read | 400, `ink`; 500 for a selected or active row | Message and card body (`body` 14 / 22), rail rows, rail-card text |
+| 3 Meta | 400, `ink-3` (500 for labels) | Times, 岗位, breadcrumbs, labels, counts (`meta` 12 / 16 and figures) |
+
+Quiet rows and secondary lines in between use `ink-2` (rail rows that wait on nobody, card body
+under a title). A screen never shows a fourth weight-and-color pair.
 
 Rules:
 - Nothing a reader reads under 12. Thumbnails of real content are exempt (principle 1).
-- Every number is mono, including inside running Chinese text where it stands alone (`3/5`, `09:55`);
-  digits inside a sentence (`148 项通过`) may stay in the body font.
+- Every number uses tabular figures, including inside running Chinese text where it stands alone
+  (`3/5`, `09:55`); digits inside a sentence (`148 项通过`) may stay plain. Real mono only for code
+  (the `code` row): mono times and counts read like a terminal.
 - Titles get `letter-spacing −0.01em` in the artboards; GPUI has no tracking control, so the app
   draws them at 0 (accepted difference).
 - A card never uses more than three sizes.

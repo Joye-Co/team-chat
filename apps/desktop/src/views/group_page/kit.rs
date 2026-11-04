@@ -404,7 +404,7 @@ pub fn mini_screen(
                             .flex_1()
                             .min_w_0()
                             .one_line()
-                            .mono()
+                            .code_font()
                             .text_size(px(10.))
                             .line_height(px(12.))
                             .text_color(k.screen_dim)
@@ -416,7 +416,7 @@ pub fn mini_screen(
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .mono()
+                    .code_font()
                     .text_size(px(10.))
                     .line_height(px(12.))
                     .children(lines.into_iter().map(|l| {

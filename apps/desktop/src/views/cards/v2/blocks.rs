@@ -2114,7 +2114,7 @@ fn diff(
                 .border_b_1()
                 .border_color(k.line)
                 .text_size(px(13.))
-                .mono()
+                .code_font()
                 .child(
                     div()
                         .flex_1()
@@ -2131,7 +2131,7 @@ fn diff(
                 .py(space::S4)
                 .text_size(px(12.))
                 .line_height(m::DIFF_LINE)
-                .mono()
+                .code_font()
                 .flex()
                 .flex_col()
                 .children(lines),

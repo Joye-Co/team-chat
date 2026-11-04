@@ -712,15 +712,25 @@ pub trait Type: Styled + Sized {
         self.type_role(type_scale::CARD_TITLE)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 12 / 16 monospace with tabular figures: counts, times, sizes and
-    /// costs in v3 (`.mono`).
+    /// 12 / 16 figures: counts, times, sizes, versions and costs (`.mono`
+    /// in the artboards). The system font with tabular figures, so columns
+    /// of numbers line up without reading like a terminal (§3).
     fn t_mono(self) -> Self {
-        self.type_role(type_scale::META)
-            .font_family(MONO_FONT_FAMILY)
-            .font_features(tabular())
+        self.type_role(type_scale::META).figures()
     }
-    /// Monospace tabular figures at the inherited size (`.mono`).
+    /// Tabular figures in the system font at the inherited size: times,
+    /// counts, versions and costs (§3). Real monospace is [`Type::code_font`].
     fn mono(self) -> Self {
+        self.figures()
+    }
+    /// The system font with tabular figures (`tnum`), set explicitly so a
+    /// figure inside a code run still reads as a number.
+    fn figures(self) -> Self {
+        self.font_family(FONT_FAMILY).font_features(tabular())
+    }
+    /// Real monospace at the inherited size: code, diffs, terminal lines,
+    /// ids and hashes, host names (§3).
+    fn code_font(self) -> Self {
         self.font_family(MONO_FONT_FAMILY).font_features(tabular())
     }
     /// Older name of [`Type::t_heading`].

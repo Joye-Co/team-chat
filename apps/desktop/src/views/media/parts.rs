@@ -84,13 +84,12 @@ pub fn pane_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Di
         )
 }
 
-/// Monospaced meta text with tabular figures (`text-3`).
+/// Meta figures: the system font with tabular figures (`text-3`, §3).
 pub fn mono(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .text_size(px(12.))
         .line_height(px(16.))
-        .font_family(theme::MONO_FONT_FAMILY)
-        .tnum()
+        .figures()
         .text_color(color)
         .whitespace_nowrap()
         .child(text.into())
