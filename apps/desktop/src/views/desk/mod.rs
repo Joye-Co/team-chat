@@ -1,6 +1,7 @@
-//! 首页: the desk (Main.dc.html). Jojo's one-line priority, 需要你拍板 (asks
-//! for me as real cards I answer in place), 做完了 today with proof chips,
-//! and at the right 正在做 (live terminals and plan progress) and 排队.
+//! 首页 (NATIVE.md §9.4): a Mail-like list under the toolbar row (title
+//! 首页, subtitle `3 件事等你拍板`), grouped by 需要你拍板, 正在做 and 做完了,
+//! with Jojo's one-line priority above it; the inspector at the right shows
+//! 正在做 (plan bars) and 排队 as inspector rows.
 //!
 //! The page keeps a snapshot of what it shows and rebuilds it when the
 //! provider reports a change, so the frame path reads memory only.
@@ -12,6 +13,7 @@
 
 pub mod ask;
 pub mod done;
+pub mod list;
 pub mod model;
 pub mod scenes;
 pub mod working;
@@ -19,28 +21,33 @@ pub mod working;
 use std::{collections::HashMap, rc::Rc, time::Duration};
 
 use gpui::{
-    App, Context, InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
+    App, Context, InteractiveElement as _, IntoElement, ParentElement, Render,
     StatefulInteractiveElement as _, Styled, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
 
 use crate::{
     app::{Changes, Services},
-    copy::desk as c,
+    copy::{desk as c, fill},
     data::Millis,
-    theme::{self, Type as _, space},
-    ui::{self, Sym},
-    views::shell::{PageView, TitleBarSpec},
+    ui::{
+        self,
+        native::{
+            NativeType as _, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized, native_colors,
+            toolbar_item,
+        },
+        sf_symbols::Sf,
+    },
+    views::{
+        group_page::rows,
+        shell::{PageView, TitleBarSpec},
+    },
 };
 
 pub use model::{Answer, AskCard, Snapshot};
 
 /// How long an answer waits before it is sent; 撤回 shows meanwhile.
 pub const UNDO_WINDOW: Duration = Duration::from_secs(5);
-/// The main column: cards and rows (Main.dc.html `max-width: 680px`).
-pub const MAIN_MEASURE: gpui::Pixels = px(680.);
-/// The 正在做 column, padding included (`flex: 1 1 320px`).
-pub const SIDE_WIDTH: gpui::Pixels = px(320.);
 
 /// An answer I made on the desk this session.
 #[derive(Clone, Debug)]
@@ -62,7 +69,7 @@ pub struct DeskPage {
     answers: HashMap<String, LocalAnswer>,
     /// Asks I answered this session, so they stay in place as records.
     kept: Vec<AskCard>,
-    /// The 正在做 column is hidden.
+    /// The inspector (正在做, 排队) is hidden.
     side_hidden: bool,
     next_token: u64,
     _subscriptions: Vec<Subscription>,
@@ -223,230 +230,169 @@ pub fn today_line() -> String {
 }
 
 impl PageView for DeskPage {
-    /// The 首页 draws its own header inside its centered column, and the
-    /// 正在做 column runs up to the window top (Main.dc.html), so the shell
-    /// draws no title bar here.
+    /// The 首页 draws its own toolbar row (the inspector runs up to the
+    /// window top, §2), so the shell draws no title bar here.
     fn title_bar(&self, _cx: &App) -> TitleBarSpec {
         TitleBarSpec::default()
     }
 }
 
-/// A section header: an optional 6 pt dot, the name 13/600 and a quiet
-/// trailing part (a mono count or `今天`).
-fn section_header(
-    label: &str,
-    dot: Option<gpui::Hsla>,
-    trailing: Option<(String, bool)>,
-    cx: &App,
-) -> gpui::Div {
-    let k = theme::colors(cx);
-    div()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .h(px(24.))
-        .children(dot.map(|d| div().flex_none().size(px(6.)).rounded_full().bg(d)))
-        .child(
-            div()
-                .t_small()
-                .semibold()
-                .text_color(k.ink)
-                .child(label.to_string()),
-        )
-        .children(trailing.map(|(text, mono)| {
-            div()
-                .t_meta()
-                .text_color(k.ink_3)
-                .when(mono, |el| el.mono())
-                .child(text)
-        }))
-}
-
 impl Render for DeskPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
+        let k = native_colors(cx);
         let snap = self.snapshot();
-        let quiet = snap.asks.is_empty() && snap.done.is_empty();
+        let waiting = snap
+            .asks
+            .iter()
+            .filter(|a| !list::is_answered(a, self))
+            .count();
+        let quiet = snap.asks.is_empty() && snap.done.is_empty() && snap.runs.is_empty();
         let side_has_data = !snap.runs.is_empty() || !snap.queue.is_empty();
         let show_side = side_has_data && !self.side_hidden;
 
-        let header = div()
-            .flex_none()
-            .h(theme::TITLE_BAR)
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .child(
-                div()
-                    .flex_none()
-                    .t_page_title()
-                    .text_color(k.ink)
-                    .child(c::DESK_TITLE),
+        let subtitle = if waiting > 0 {
+            fill(c::DESK_SUBTITLE_ASKS, &[("n", &waiting.to_string())])
+        } else {
+            today_line()
+        };
+        let mut toolbar = ToolbarRow::new(c::DESK_TITLE)
+            .subtitle(subtitle)
+            .leading_inset(rows::toolbar_leading(&self.services, cx));
+        if side_has_data {
+            let name = if show_side {
+                c::DESK_HIDE_SIDE
+            } else {
+                c::DESK_SHOW_SIDE
+            };
+            let kind = if show_side {
+                ToolbarItemKind::Toggled
+            } else {
+                ToolbarItemKind::Plain
+            };
+            toolbar = toolbar.group(ToolbarGroup::new([toolbar_item(
+                "desk-inspector",
+                Sf::PaneRight,
+                name,
+                kind,
+                emphasized(window),
+                window,
+                cx,
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .one_line()
-                    .t_small()
-                    .text_color(k.ink_3)
-                    .child(today_line()),
-            )
-            .when(side_has_data && self.side_hidden, |el| {
-                el.child(side_toggle("desk-show-side", false, cx))
-            });
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.side_hidden = !this.side_hidden;
+                cx.notify();
+            }))]));
+        }
 
         let note = snap.note.as_ref().map(|n| {
             let member = snap.member(&n.member_id);
-            let name = member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
-            let from = crate::copy::fill(c::DESK_NOTE_FROM, &[("name", &name)]);
+            let from = fill(c::DESK_NOTE_FROM, &[("name", &snap.name(&n.member_id))]);
             let text = gpui::StyledText::new(format!("{from}{}", n.text)).with_highlights([(
                 0..from.len(),
                 gpui::HighlightStyle {
-                    color: Some(k.ink),
-                    font_weight: Some(theme::MEDIUM_WEIGHT),
+                    color: Some(k.label),
                     ..Default::default()
                 },
             )]);
-            let full = SharedString::from(format!("{from}{}", n.text));
-            let row = div()
-                .id("desk-note")
-                .mt(space::S6)
+            div()
+                .flex_none()
+                .px(rows::TEXT_START)
+                .pb(px(4.))
                 .flex()
-                .items_start()
-                .gap(space::S10)
-                .t_small()
-                .text_color(k.ink_2)
-                .child(
-                    div()
-                        .flex_none()
-                        .mt(px(1.))
-                        .child(ui::MemberAvatar::new(member.as_ref(), px(18.))),
-                )
-                // Two lines, then an ellipsis; the whole note is the tooltip.
+                .items_center()
+                .gap(px(8.))
+                .n_body()
+                .text_color(k.secondary)
+                .child(ui::MemberAvatar::new(member.as_ref(), px(16.)))
                 .child(
                     div()
                         .flex_1()
-                        .min_w_0()
-                        .line_clamp(2)
+                        .min_w(px(0.))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
                         .text_ellipsis()
                         .child(text),
                 )
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
-                });
-            ui::motion::rise("desk-note", 0, row, cx)
         });
 
-        let ask_count = snap.asks.len();
-        let asks = (!snap.asks.is_empty()).then(|| {
-            div()
-                .mt(space::S24)
-                .flex()
-                .flex_col()
-                .child(section_header(
-                    c::DESK_NEEDS_YOU,
-                    Some(k.you),
-                    Some((ask_count.to_string(), true)),
-                    cx,
-                ))
-                .child(
-                    div()
-                        .mt(space::S10)
-                        .flex()
-                        .flex_col()
-                        .gap(space::S12)
-                        .children(snap.asks.iter().enumerate().map(|(i, a)| {
-                            let card = ask::render(a, self, window, cx);
-                            ui::motion::rise(
-                                SharedString::from(format!("desk-ask-rise-{}", a.key())),
-                                i + 1,
-                                card,
-                                cx,
-                            )
-                        })),
-                )
-        });
-
-        let done = (!snap.done.is_empty()).then(|| {
-            div()
-                .mt(px(36.))
-                .flex()
-                .flex_col()
-                .child(section_header(
-                    c::DESK_DONE_TODAY,
-                    None,
-                    Some((c::DESK_TODAY.to_string(), false)),
-                    cx,
-                ))
-                .child(div().mt(space::S6).flex().flex_col().children(
-                    snap.done.iter().enumerate().map(|(i, d)| {
-                        done::render(d, ask_count + 1 + i, &snap, &self.services, cx)
-                    }),
-                ))
-        });
-
-        let empty = quiet.then(|| {
-            div().mt(px(96.)).child(
-                ui::EmptyState::new(Sym::Done, c::DESK_EMPTY)
-                    .description(c::DESK_EMPTY_LINE),
-            )
-        });
-
-        let main = div()
-            .id("desk-main")
+        let mut body = div()
+            .id("desk-list")
             .flex_1()
-            .min_w(px(0.))
-            .h_full()
+            .min_h(px(0.))
             .overflow_y_scroll()
-            .px(px(40.))
-            .pb(px(56.))
-            .child(
+            .pb(px(20.))
+            .flex()
+            .flex_col()
+            .children(note);
+        if !snap.asks.is_empty() {
+            let n = snap.asks.len();
+            body = body
+                .child(rows::section_header(
+                    c::DESK_NEEDS_YOU,
+                    (waiting > 0).then(|| waiting.to_string()),
+                    cx,
+                ))
+                .children(
+                    snap.asks
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| list::ask_row(a, i + 1 == n, self, &snap, cx))
+                        .collect::<Vec<_>>(),
+                );
+        }
+        if !snap.runs.is_empty() {
+            let n = snap.runs.len();
+            body = body
+                .child(rows::section_header(
+                    c::DESK_WORKING,
+                    Some(n.to_string()),
+                    cx,
+                ))
+                .children(snap.runs.iter().enumerate().map(|(i, r)| {
+                    list::run_row(i, r, i + 1 == n, &snap, &self.services, cx)
+                }));
+        }
+        if !snap.done.is_empty() {
+            let n = snap.done.len();
+            body = body
+                .child(rows::section_header(
+                    c::DESK_DONE_TODAY,
+                    Some(c::DESK_TODAY.to_string()),
+                    cx,
+                ))
+                .children(snap.done.iter().enumerate().map(|(i, d)| {
+                    list::done_row(i, d, i + 1 == n, &snap, &self.services, cx)
+                }));
+        }
+        if quiet {
+            body = body.child(
                 div()
-                    .w_full()
-                    .max_w(MAIN_MEASURE)
-                    .mx_auto()
+                    .flex_1()
                     .flex()
-                    .flex_col()
-                    .child(header)
-                    .children(note)
-                    .children(asks)
-                    .children(empty)
-                    .children(done),
+                    .items_center()
+                    .justify_center()
+                    .n_body()
+                    .text_color(k.secondary)
+                    .child(c::DESK_NOTHING),
             );
+        }
 
         div()
             .size_full()
             .flex()
-            .bg(k.bg)
-            .child(main)
+            .bg(k.content)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(toolbar)
+                    .child(body),
+            )
             .when(show_side, |el| {
                 el.child(working::render(&snap, &self.services, cx))
             })
     }
-}
-
-/// The 28 pt button that hides or shows the 正在做 column.
-pub fn side_toggle(id: &'static str, hide: bool, cx: &mut Context<DeskPage>) -> impl IntoElement {
-    let k = theme::colors(cx);
-    let name = if hide {
-        c::DESK_HIDE_SIDE
-    } else {
-        c::DESK_SHOW_SIDE
-    };
-    div()
-        .id(id)
-        .flex_none()
-        .size(theme::TITLE_BUTTON)
-        .rounded(px(7.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .hover(|s| s.bg(k.hover))
-        .child(ui::icon(Sym::Inspector, theme::icon::ROW, k.ink_3))
-        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(name).build(window, cx))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.side_hidden = hide;
-            cx.notify();
-        }))
 }

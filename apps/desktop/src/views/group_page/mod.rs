@@ -7,6 +7,7 @@
 //! side column has its own header from the top of the window.
 
 pub mod kit;
+pub mod rows;
 pub mod scenes;
 
 use gpui::{
