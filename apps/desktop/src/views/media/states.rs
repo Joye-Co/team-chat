@@ -10,7 +10,6 @@ use gpui::{
 };
 
 use super::{
-    MediaKind,
     inline::InlineSpec,
     parts, size_text,
     store::Media,
@@ -193,50 +192,61 @@ fn small_button(
     }
 }
 
-/// The preview could not load (download failed): file row with 用系统应用打开.
+/// The preview could not load (download failed): the inline Alert (§2.15) in the
+/// preview's place, with `重试` (reads the version again) and `打开`.
 pub fn failed_row(spec: &InlineSpec, cx: &App) -> gpui::Stateful<Div> {
-    let s = spec.clone();
-    row(
+    use crate::ui::native::page::{AlertKind, page_alert};
+    let (s, again) = (spec.clone(), spec.clone());
+    let actions = div()
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .child(
+            small_button(format!("{}-sys", spec.id), cm::OPEN, None, cx).on_click(
+                move |_, _, cx| {
+                    viewer::open(
+                        s.key.clone(),
+                        s.title.clone(),
+                        s.target.clone(),
+                        Opening::default(),
+                        cx,
+                    )
+                },
+            ),
+        )
+        .child(
+            small_button(format!("{}-retry", spec.id), cm::RETRY, None, cx).on_click(
+                move |_, _, cx| {
+                    super::store::forget(&again.key, cx);
+                    if let Some(p) = again.target.provider.clone() {
+                        super::store::request_artifact(&p, &again.key, &again.title, cx);
+                    }
+                    cx.refresh_windows();
+                },
+            ),
+        );
+    page_alert(
         ElementId::Name(format!("{}-failed", spec.id).into()),
-        Lead::Icon(spec.kind.icon()),
-        spec.title.clone(),
-        &Status::Failed { size: spec.bytes },
-        Some(
-            small_button(
-                format!("{}-sys", spec.id),
-                cm::OPEN,
-                Some(Sym::OpenExternal),
-                cx,
-            )
-            .on_click(move |_, _, cx| {
-                viewer::open(
-                    s.key.clone(),
-                    s.title.clone(),
-                    s.target.clone(),
-                    Opening::default(),
-                    cx,
-                )
-            })
-            .into_any_element(),
-        ),
+        AlertKind::Error,
+        cm::STATE_FAILED,
+        Some(cm::STATE_FAILED_RETRY.into()),
+        Some(actions.into_any_element()),
         cx,
     )
-    .max_w(super::INLINE_W)
+    .w(super::INLINE_W)
+    .max_w_full()
 }
 
-/// The version is on disk but this machine cannot make a preview of it.
+/// The version is on disk but this machine cannot make a preview of it: the
+/// inline Alert (§2.15) with 用系统应用打开 (a retry would fail the same way).
 pub fn failed_media_row(spec: &InlineSpec, media: &Media, cx: &App) -> gpui::Stateful<Div> {
+    use crate::ui::native::page::{AlertKind, page_alert};
     let path = media.entry_path();
-    let icon = if media.kind == MediaKind::File {
-        spec.kind.icon()
-    } else {
-        media.kind.icon()
-    };
-    row(
+    page_alert(
         ElementId::Name(format!("{}-failed", spec.id).into()),
-        Lead::Icon(icon),
-        media.file_name().to_string(),
-        &Status::Failed { size: media.bytes },
+        AlertKind::Error,
+        cm::STATE_FAILED,
+        Some(cm::STATE_FAILED_HINT.into()),
         Some(
             small_button(
                 format!("{}-sys", spec.id),
@@ -249,7 +259,8 @@ pub fn failed_media_row(spec: &InlineSpec, media: &Media, cx: &App) -> gpui::Sta
         ),
         cx,
     )
-    .max_w(super::INLINE_W)
+    .w(super::INLINE_W)
+    .max_w_full()
 }
 
 /// A large version that the timeline does not load by itself.
