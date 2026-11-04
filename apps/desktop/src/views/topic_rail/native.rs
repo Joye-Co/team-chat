@@ -16,7 +16,7 @@ use super::{
 use crate::{
     app::RightPane,
     copy::{fill, topic_rail as c},
-    data::{BotRunSummary, PlanState, v2::ChangeState},
+    data::{BotRunSummary, PlanState, RunStatus, v2::ChangeState},
     theme::{Type as _, space},
     ui::{
         self, Sym, SymSize,
@@ -148,6 +148,10 @@ impl TopicRail {
                         })
                         .into_any_element(),
                 )
+            }
+            // A run that failed or was stopped says so (never 做完了).
+            Some(r) if matches!(r.status, RunStatus::Failed | RunStatus::Cancelled) => {
+                Some(crate::views::process::status_badge(r.status, cx).into_any_element())
             }
             Some(r) if r.ended_at.is_some() => Some(
                 div()
@@ -636,15 +640,72 @@ impl TopicRail {
             ));
         }
         if let (Some(a), Some(b)) = (cost.started_at, cost.ended_at) {
-            section = section.row(label_value(
-                c::INSPECTOR_WHEN,
-                fill(
-                    c::INSPECTOR_WHEN_VALUE,
-                    &[("range", &format!("{}–{}", clock(a), clock(b)))],
-                ),
-                cx,
-            ));
+            section = section.row(label_value(c::INSPECTOR_WHEN, when_range(a, b), cx));
         }
         Some(section.into_any_element())
+    }
+}
+
+/// When the work ran: `今天 09:14–09:55`, `11-01 10:21–14:21` on one other
+/// day, or `10-31 22:10 – 11-01 01:05` across days (never `今天 11-01–11-01`).
+fn when_range(a: crate::data::Millis, b: crate::data::Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let (Some(start), Some(end)) = (
+        Local.timestamp_millis_opt(a).single(),
+        Local.timestamp_millis_opt(b).single(),
+    ) else {
+        return String::new();
+    };
+    let today = crate::selftest::clock::local_now().date_naive();
+    let times = format!("{}–{}", start.format("%H:%M"), end.format("%H:%M"));
+    if start.date_naive() != end.date_naive() {
+        fill(
+            c::INSPECTOR_WHEN_SPAN,
+            &[
+                ("start", &start.format("%m-%d %H:%M").to_string()),
+                ("end", &end.format("%m-%d %H:%M").to_string()),
+            ],
+        )
+    } else if start.date_naive() == today {
+        fill(c::INSPECTOR_WHEN_VALUE, &[("range", &times)])
+    } else {
+        fill(
+            c::INSPECTOR_WHEN_DAY,
+            &[
+                ("day", &start.format("%m-%d").to_string()),
+                ("range", &times),
+            ],
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Local, TimeZone as _};
+
+    use super::when_range;
+
+    fn at(y: i32, m: u32, d: u32, h: u32, min: u32) -> crate::data::Millis {
+        Local
+            .with_ymd_and_hms(y, m, d, h, min, 0)
+            .single()
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    #[test]
+    fn a_range_on_another_day_names_the_day_once() {
+        assert_eq!(
+            when_range(at(2020, 11, 1, 10, 21), at(2020, 11, 1, 14, 21)),
+            "11-01 10:21–14:21"
+        );
+    }
+
+    #[test]
+    fn a_range_across_days_names_both_days() {
+        assert_eq!(
+            when_range(at(2020, 10, 31, 22, 10), at(2020, 11, 1, 1, 5)),
+            "10-31 22:10 – 11-01 01:05"
+        );
     }
 }

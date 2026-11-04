@@ -131,6 +131,8 @@ crate::copy! {
     INSPECTOR_COST = "成本",
     INSPECTOR_WHEN = "时间",
     INSPECTOR_WHEN_VALUE = "今天 {range}",
+    INSPECTOR_WHEN_DAY = "{day} {range}",
+    INSPECTOR_WHEN_SPAN = "{start} – {end}",
     INSPECTOR_FILES = "{n} 个文件",
     OPEN_OUTPUT = "打开产出",
     OPEN_CHANGES = "看改动",
