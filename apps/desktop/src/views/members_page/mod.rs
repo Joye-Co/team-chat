@@ -1671,6 +1671,7 @@ impl MembersPage {
                 3,
                 cx,
             ))
+            .child(page::skeleton_cards(2, cx))
     }
 }
 

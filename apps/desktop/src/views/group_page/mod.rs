@@ -895,6 +895,16 @@ impl Render for GroupPage {
                     )),
                     false,
                 ));
+                content = content.child(section(
+                    page::section_header(c::GROUP_PAGE_RECENT_DONE, None, None, None, cx),
+                    div().child(page::skeleton_rows(
+                        "group-sk-done",
+                        page::SkeletonKind::Row,
+                        4,
+                        cx,
+                    )),
+                    false,
+                ));
             }
             PageLoad::Ready if n == 0 && done.is_empty() => {
                 content = content.child(

@@ -1269,7 +1269,7 @@ impl ArtifactPage {
                 return shell(page::skeleton_rows(
                     "artifacts-sk",
                     page::SkeletonKind::TableRow,
-                    5,
+                    14,
                     cx,
                 ));
             }
