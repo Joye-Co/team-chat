@@ -98,7 +98,7 @@ crate::copy! {
     DESK_STATUS_DONE = "完成",
     DESK_JUST_HANDLED = "刚处理",
     DESK_SUBTITLE_SYNCING = "正在同步…",
-    DESK_SUBTITLE_OFFLINE = "未连接",
+    DESK_SUBTITLE_OFFLINE = "离线",
     DESK_RAIL_LINE_WEEK = "这周的进度、排队的事和在用的电脑",
     DESK_WEEK = "这周",
     DESK_WEEK_DONE = "完成的话题",
