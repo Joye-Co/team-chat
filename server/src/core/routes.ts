@@ -31,7 +31,7 @@ import { type Env, gatewayStub, roomStub } from "./env";
 import { ApiError, unwrap } from "./errors";
 import { ulid } from "./ids";
 import { logger } from "./logger";
-import { memberDeactivatedHooks, registerRoute } from "./registry";
+import { memberDeactivatedHooks, membersChangedHooks, registerRoute } from "./registry";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEFAULT_GROUP_NAME = "全员";
@@ -75,6 +75,7 @@ export function notifyGroupChanged(env: Env, waitUntil: Wait, groupId: string, m
 
 /** Pushes a directory frame with changed members to every active member. */
 export async function notifyMembersChanged(env: Env, waitUntil: Wait, changed: MemberRow[]): Promise<void> {
+  await membersChanged(env, changed.map((m) => m.id));
   const all = await listMembers(env.DB);
   const frame = { t: "directory", members: changed.map(toMember) };
   for (const m of all) {
@@ -170,6 +171,18 @@ export async function afterDeactivate(env: Env, memberId: string): Promise<void>
       await hook(env, memberId);
     } catch (err) {
       logger.error("member deactivated hook failed", { memberId, err });
+    }
+  }
+  await membersChanged(env, [memberId]);
+}
+
+/** Runs the members-changed hooks (features drop what they cached about these members). */
+export async function membersChanged(env: Env, memberIds: string[]): Promise<void> {
+  for (const hook of membersChangedHooks) {
+    try {
+      await hook(env, memberIds);
+    } catch (err) {
+      logger.error("members changed hook failed", { memberIds, err });
     }
   }
 }

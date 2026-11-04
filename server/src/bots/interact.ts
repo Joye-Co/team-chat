@@ -8,6 +8,7 @@ import { type Env, gatewayStub } from "../core/env";
 import { featureTransient } from "../core/gateway";
 import type { RoomContext } from "../core/registry";
 import { type CardEventDelivery, registerCardEventHandler, registerRequesterResolver } from "../cards2/delivery";
+import { onDirectoryForget } from "../cards2/state";
 import { answerBlocks } from "./answers";
 import { deskStub } from "./env";
 import { memberInfo } from "./room";
@@ -242,10 +243,27 @@ registerCardEventHandler(async (room, e) => {
   return deliverCardEvent(room, e.authorId, live);
 });
 
+/**
+ * GAPS PC-16: whether a card's author is a runner member, kept per isolate for RUNNER_TTL_MS so
+ * a card send needs no D1 read for it. Dropped with the cards directory (a member or runner
+ * change, members-changed hook).
+ */
+const RUNNER_TTL_MS = 60_000;
+const runnerKinds = new Map<string, { at: number; runner: boolean }>();
+onDirectoryForget(() => runnerKinds.clear());
+
+async function isRunner(env: Env, authorId: string): Promise<boolean> {
+  const now = Date.now();
+  const c = runnerKinds.get(authorId);
+  if (c && now - c.at < RUNNER_TTL_MS) return c.runner;
+  const runner = (await responder(env, authorId)).kind === "runner";
+  runnerKinds.set(authorId, { at: now, runner });
+  return runner;
+}
+
 /** "requester" of a runner member's card: the person who asked its active run in the topic. */
 registerRequesterResolver(async (room, authorId, topicId) => {
-  const r = await responder(room.env, authorId);
-  if (r.kind !== "runner") return undefined;
+  if (!(await isRunner(room.env, authorId))) return undefined;
   try {
     return (await deskStub(room.env, authorId).requesterFor(authorId, topicId)) ?? undefined;
   } catch (err) {
