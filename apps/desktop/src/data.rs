@@ -1559,6 +1559,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Owners: 汇报给 and 限额 of a member (`PATCH /v1/members/:id` with `reportsTo` and
+    /// `weeklyBudgetCents`; `None` clears). Answers with the stored member.
+    fn set_member_plan(&self, _member_id: &str, _plan: pages::MemberPlan) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// The machines and their health, fresh from the server.
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
         reply_now(Err(AdminError::Unsupported))
@@ -1795,6 +1800,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// The one-line purpose of a 群 under its title.
     fn group_purpose(&self, _group_id: &str) -> Option<String> {
         None
+    }
+    /// Sets the purpose line of a 群 (`PATCH /v1/groups/:id` with `purpose`; `""` clears).
+    /// Same rights as a rename. Emits `Change::Groups` when stored.
+    fn set_group_purpose(&self, _group_id: &str, _purpose: String) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
     }
     /// The member 单独问 talks to by default: Jojo, else the first bot.
     fn side_chat_default_member(&self) -> Option<MemberId> {
@@ -2222,6 +2232,12 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn artifact_responses(&self, _artifact_id: &str) -> Vec<pages::ArtifactResponse> {
         Vec::new()
     }
+    /// Where the read of the server's page log of a 产出 stands. Cheap.
+    fn artifact_responses_load(&self, _artifact_id: &str) -> pages::ResponsesLoad {
+        pages::ResponsesLoad::Ready
+    }
+    /// Reads the server's page log of a 产出 again now (重试).
+    fn reload_artifact_responses(&self, _artifact_id: &str) {}
     /// Events a version of a 产出 page may send back (`emitEvent`): only
     /// declared names, and only on versions a bot member made.
     fn artifact_page_events(&self, _artifact_id: &str, _version: u32) -> Vec<String> {

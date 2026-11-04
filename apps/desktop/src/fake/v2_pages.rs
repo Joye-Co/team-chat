@@ -308,6 +308,7 @@ pub fn member_extras(p: &V2Samples, member_id: &str) -> MemberExtras {
         topic: Some((DEV.into(), T_INVITE.into())),
         title: "登录页支持邀请码".into(),
         note: Some("你选好输入框后开始".into()),
+        queued_at: None,
     }];
     let mut decisions = p.topic_decisions(DEV, T_RECONNECT);
     decisions.extend(

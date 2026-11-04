@@ -74,4 +74,15 @@ crate::copy! {
     GROUP_PAGE_OUTPUTS_EMPTY = "还没有产出",
     GROUP_PAGE_WHERE_EMPTY = "现在没有电脑在干活",
     // --- end v13/ux-pages ---
+    // --- v13/wire ---
+    GROUP_PAGE_PURPOSE_MORE = "修改群说明…",
+    GROUP_PAGE_PURPOSE_TITLE = "群说明",
+    GROUP_PAGE_PURPOSE_EXPLANATION = "写在群名下面，说这个群做什么。群里的人都能看到。",
+    GROUP_PAGE_PURPOSE_LABEL = "说明",
+    GROUP_PAGE_PURPOSE_PLACEHOLDER = "比如：qqbot 的上线、巡检和告警",
+    GROUP_PAGE_PURPOSE_TOO_LONG = "最多 200 个字",
+    GROUP_PAGE_PURPOSE_REFUSED = "没能保存群说明",
+    GROUP_PAGE_RECORD_REFUSED = "没能记下这条决定",
+    GROUP_PAGE_RECORD_TOO_LONG = "最多 1000 个字",
+    // --- end v13/wire ---
 }

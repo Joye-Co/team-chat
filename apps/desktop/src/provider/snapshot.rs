@@ -22,7 +22,9 @@ use super::{CoreProvider, desk::kind_of_v2, files::artifact_summary, lock};
 use crate::data::{
     ArtifactSummary, BotRunSummary, Change, ChatProvider as _, GroupId, Millis, TodoReason, Topic,
     TopicStatus,
-    pages::{Delivery, DeliveryKind, DeliveryState, MemberExtras, MemberTool, RecentDone},
+    pages::{
+        Delivery, DeliveryKind, DeliveryState, MemberExtras, MemberTool, QueuedWork, RecentDone,
+    },
     v2::{
         AskItem, AskKind, ChangeState, Currency, DoneItem, MemberMachine, MemberProblem,
         MemberStats,
@@ -206,13 +208,14 @@ impl CoreProvider {
             .into_iter()
             .filter(visible)
             .collect();
-        let active: Vec<proto::BotRun> = a
+        // 排队: runs that wait for a free machine are not 正在做; they go to the queue.
+        let (queued, active): (Vec<proto::BotRun>, Vec<proto::BotRun>) = a
             .client
             .active_runs()
             .unwrap_or_default()
             .into_iter()
             .filter(visible)
-            .collect();
+            .partition(|r| r.is_queued());
 
         let ask_messages: Vec<proto::Message> = a
             .client
@@ -225,6 +228,7 @@ impl CoreProvider {
         let wanted: Vec<(String, String)> = week_runs
             .iter()
             .chain(active.iter())
+            .chain(queued.iter())
             .map(|r| (r.group_id.clone(), r.topic_id.clone()))
             .chain(
                 ask_messages
@@ -244,12 +248,13 @@ impl CoreProvider {
 
         // 正在做: the run summaries (with machine names) of the 话题 with an active run.
         let mut seen = HashSet::new();
+        let queued_ids: HashSet<&str> = queued.iter().map(|r| r.id.as_str()).collect();
         for r in &active {
             if seen.insert((r.group_id.clone(), r.topic_id.clone())) {
                 snap.active_runs.extend(
                     self.runs_inner(&r.group_id, &r.topic_id)
                         .into_iter()
-                        .filter(|s| s.status.is_active()),
+                        .filter(|s| s.status.is_active() && !queued_ids.contains(s.id.as_str())),
                 );
             }
         }
@@ -340,6 +345,14 @@ impl CoreProvider {
         // 成员: this week per member.
         let machines = self.remote_machines(&a.client);
         let members = self.members();
+        // 汇报给 and 限额 are on the synced member rows.
+        let plans: HashMap<String, (Option<String>, Option<u64>)> = a
+            .client
+            .members()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| (m.id, (m.reports_to, m.weekly_budget_cents)))
+            .collect();
         for m in &members {
             let mine: Vec<&proto::BotRun> = week_runs.iter().filter(|r| r.bot_id == m.id).collect();
             let mut stats = MemberStats::default();
@@ -367,6 +380,32 @@ impl CoreProvider {
             stats.topics_this_week = week_topics.len() as u32;
             stats.cost_cents_this_week = cost;
             stats.cost_currency = Currency::Usd;
+            if let Some((reports_to, budget)) = plans.get(&m.id) {
+                stats.reports_to = reports_to.clone().filter(|r| !r.is_empty() && *r != m.id);
+                extras.budget_cents = *budget;
+            }
+            // 排队 of this member, in its queue order.
+            let mut mine_queued: Vec<&proto::BotRun> =
+                queued.iter().filter(|r| r.bot_id == m.id).collect();
+            mine_queued.sort_by_key(|r| {
+                (
+                    r.queue_position.unwrap_or(u32::MAX),
+                    r.queued_at.unwrap_or(r.created_at),
+                )
+            });
+            stats.queued = mine_queued.len() as u32;
+            extras.queued = mine_queued
+                .iter()
+                .map(|r| QueuedWork {
+                    topic: Some((r.group_id.clone(), r.topic_id.clone())),
+                    title: topics
+                        .get(&r.topic_id)
+                        .map(|t| t.title.clone())
+                        .unwrap_or_default(),
+                    note: None,
+                    queued_at: r.queued_at.map(ms),
+                })
+                .collect();
             for r in active.iter().filter(|r| r.bot_id == m.id) {
                 let key = (r.group_id.clone(), r.topic_id.clone());
                 if !stats.active.contains(&key) {

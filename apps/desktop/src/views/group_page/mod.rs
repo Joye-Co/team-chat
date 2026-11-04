@@ -12,30 +12,25 @@
 pub mod kit;
 pub mod rows;
 pub mod scenes;
+mod sheets;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    Window, div, px,
+    AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
-use gpui_component::{
-    WindowExt as _,
-    input::{InputEvent, InputState},
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
-};
+use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
 use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
-    copy::{common, fill, group_page as c, nav as nav_copy},
+    copy::{fill, group_page as c, nav as nav_copy},
     data::{ArtifactKind, BotRunSummary, PlanState, Topic, TopicStatus},
     ui::{
         native::{
-            InspectorSection, NativeTextField, NativeType as _, PushSize, PushStyle, SheetLayout,
-            SheetWidth, ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button, emphasized,
-            inspector_column, metrics, native_colors, native_sheet,
+            InspectorSection, NativeType as _, PushSize, PushStyle, ToolbarGroup, ToolbarItemKind,
+            ToolbarRow, borderless_button, emphasized, inspector_column, metrics, native_colors,
             page::{self, PageLoad, Status},
-            push_button, sheet_buttons, toolbar_item,
+            push_button, toolbar_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -79,53 +74,7 @@ impl GroupPage {
     }
 }
 
-/// 记一条…: a sheet (§7.1) with one field; Return or 记下 records the
-/// decision, Escape or 取消 closes it.
-pub fn open_record_sheet(services: Services, group: String, window: &mut Window, cx: &mut App) {
-    if window.has_active_dialog(cx) {
-        return;
-    }
-    let input =
-        cx.new(|cx| InputState::new(window, cx).placeholder(c::GROUP_PAGE_RECORD_PLACEHOLDER));
-    let save = {
-        let (services, group, input) = (services.clone(), group.clone(), input.clone());
-        move |window: &mut Window, cx: &mut App| {
-            let text = input.read(cx).value().trim().to_string();
-            if text.is_empty() {
-                return;
-            }
-            let _ = services.provider.record_decision(&group, text);
-            window.close_dialog(cx);
-        }
-    };
-    let on_enter = save.clone();
-    let sub = window.subscribe(&input, cx, move |_, e: &InputEvent, window, cx| {
-        if let InputEvent::PressEnter { .. } = e {
-            on_enter(window, cx);
-        }
-    });
-    let first = std::cell::Cell::new(true);
-    window.open_dialog(cx, move |dialog, window, cx| {
-        let _keep = &sub;
-        if first.replace(false) {
-            input.update(cx, |s, cx| s.focus(window, cx));
-        }
-        let [cancel, ok] = sheet_buttons("group-record", common::CANCEL, c::GROUP_PAGE_SAVE, cx);
-        let save = save.clone();
-        native_sheet(dialog, SheetWidth::Form, cx).child(
-            SheetLayout::new(c::GROUP_PAGE_RECORD_TITLE)
-                .explanation(c::GROUP_PAGE_DECISIONS_NOTE)
-                .body(
-                    NativeTextField::new("group-record-field", &input)
-                        .width(metrics::SHEET_WIDTH - metrics::SHEET_PAD * 2.),
-                )
-                .buttons([
-                    cancel.on_click(|_, window, cx| window.close_dialog(cx)),
-                    ok.on_click(move |_, window, cx| save(window, cx)),
-                ]),
-        )
-    });
-}
+pub use sheets::{open_purpose_sheet, open_record_sheet};
 
 impl PageView for GroupPage {
     fn title_bar(&self, cx: &App) -> TitleBarSpec {
@@ -1006,7 +955,9 @@ fn group_menu(
         return menu;
     }
     let (rename, add, leave) = (services.clone(), services.clone(), services.clone());
+    let purpose = services.clone();
     let (g1, g2, g3) = (g.clone(), g.clone(), g);
+    let purpose_group = g1.id.clone();
     menu.item(
         PopupMenuItem::new(nav_copy::RENAME_GROUP).on_click(move |_, window, cx| {
             nav_views::rename::open_rename_group(
@@ -1016,6 +967,11 @@ fn group_menu(
                 window,
                 cx,
             )
+        }),
+    )
+    .item(
+        PopupMenuItem::new(c::GROUP_PAGE_PURPOSE_MORE).on_click(move |_, window, cx| {
+            open_purpose_sheet(purpose.clone(), purpose_group.clone(), window, cx)
         }),
     )
     .item(

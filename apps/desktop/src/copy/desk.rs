@@ -71,7 +71,7 @@ crate::copy! {
     DESK_KPI_WORKING_NONE = "现在没有在干活的",
     DESK_KPI_DONE_FOOT = "最近 {time}",
     DESK_KPI_DONE_NONE = "今天还没有",
-    DESK_KPI_QUEUE_FOOT = "下一个 {time}",
+    DESK_KPI_QUEUE_FOOT = "最早 {time} 开始排队",
     DESK_KPI_QUEUE_NONE = "没有排队的事",
     DESK_NOTE_TITLE = "{name} 的提醒",
     DESK_NOTE_REPLY = "回复",

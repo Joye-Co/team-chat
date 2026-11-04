@@ -142,6 +142,8 @@ pub struct QueuedWork {
     pub title: String,
     /// When or after what it starts (`你选好输入框后开始`).
     pub note: Option<String>,
+    /// When it joined the queue (`BotRun.queuedAt`).
+    pub queued_at: Option<Millis>,
 }
 
 /// The 成员 page beyond [`super::v2::MemberStats`].
@@ -156,7 +158,7 @@ pub struct MemberExtras {
     /// 产出 this week by kind: PRs and pages.
     pub prs_this_week: u32,
     pub pages_this_week: u32,
-    /// The weekly spending limit.
+    /// The weekly spending limit in US cents (`Member.weeklyBudgetCents`).
     pub budget_cents: Option<u64>,
     pub deliveries: Vec<Delivery>,
     pub tools: Vec<MemberTool>,
@@ -174,4 +176,25 @@ pub struct ArtifactResponse {
     pub at: Option<Millis>,
     /// The 话题 where it goes on.
     pub topic: Option<(GroupId, TopicId)>,
+}
+
+/// 汇报给 and 限额 of a member, as an owner sets them (`PATCH /v1/members/:id`). `None`
+/// clears the field.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MemberPlan {
+    pub reports_to: Option<MemberId>,
+    /// US cents, 0..=100_000_000.
+    pub weekly_budget_cents: Option<u64>,
+}
+
+/// Where the server's page log of a 产出 (页面里的回应) stands.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResponsesLoad {
+    /// Read (or nothing to read).
+    #[default]
+    Ready,
+    /// The first read is on its way.
+    Loading,
+    /// The last read failed.
+    Failed,
 }

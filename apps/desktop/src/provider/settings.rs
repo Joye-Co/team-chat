@@ -15,7 +15,7 @@ use chat_core::{
 
 use super::{CoreProvider, convert};
 use crate::data::{
-    AdminError, AdminReply, BotCreated, CharacterId, GroupKind, GroupPrefs, InviteCreated,
+    AdminError, AdminReply, BotCreated, Change, CharacterId, GroupKind, GroupPrefs, InviteCreated,
     InviteRequest, MachineCreated, MachineInfo, Member, MemberKind, MemberLevel, NotifyLevel,
     RunnerSetup, SecretText, reply_now,
 };
@@ -303,6 +303,23 @@ impl CoreProvider {
         self.patch_member(id.to_string(), req)
     }
 
+    /// 汇报给 and 限额 (owners): both fields at once, `None` clears.
+    pub(super) fn set_member_plan_inner(
+        &self,
+        id: &str,
+        plan: crate::data::pages::MemberPlan,
+    ) -> AdminReply<Member> {
+        let req = UpdateMemberRequest {
+            reports_to: Some(plan.reports_to.filter(|r| !r.is_empty())),
+            weekly_budget_cents: Some(plan.weekly_budget_cents),
+            ..Default::default()
+        };
+        if req.validate().is_err() {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        self.patch_member(id.to_string(), req)
+    }
+
     pub(super) fn set_member_character_inner(
         &self,
         id: &str,
@@ -476,6 +493,28 @@ impl CoreProvider {
                     tracing::warn!(error = %e, "rename group refused");
                     admin_error(&e)
                 })?;
+            Ok(())
+        })
+    }
+
+    /// The purpose line of a 群 (`""` clears it); the server normalizes it.
+    pub(super) fn set_group_purpose_inner(
+        &self,
+        group_id: &str,
+        purpose: String,
+    ) -> AdminReply<()> {
+        let gid = group_id.to_string();
+        let this = self.clone();
+        self.request(move |client, _| async move {
+            client
+                .set_group_purpose(&gid, &purpose)
+                .await
+                .map_err(|_| AdminError::Other)?
+                .map_err(|e| {
+                    tracing::warn!(error = %e, "group purpose refused");
+                    admin_error(&e)
+                })?;
+            this.emit(vec![Change::Groups]);
             Ok(())
         })
     }
