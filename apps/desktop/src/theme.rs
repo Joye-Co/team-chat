@@ -135,6 +135,14 @@ pub const TAG_RADIUS: Pixels = px(5.);
 /// A ring around a tile or circle: 3 pt out, 1.5 pt wide.
 pub const RING_GAP: Pixels = px(3.);
 pub const RING_WIDTH: Pixels = px(1.5);
+/// A right-pane rail section (topic rail, 正在做, 群资料, 来龙去脉, 工作环境):
+/// no border, fill or shadow; sections sit on the rail surface and a 1 pt
+/// `line` divides them (§7.8). Its vertical and side padding.
+pub const RAIL_SECTION_PAD_Y: Pixels = px(14.);
+pub const RAIL_SECTION_PAD_X: Pixels = px(4.);
+/// How far the hover fill of a row in a boxless list (refs, links) reaches
+/// past the text on each side (`ui::inset_row`).
+pub const LIST_ROW_BLEED: Pixels = px(8.);
 
 /// The width of the 实时查看 pane in a window `window_w` wide.
 pub fn live_pane_width(window_w: Pixels) -> Pixels {
@@ -199,6 +207,8 @@ pub mod radius {
     pub const FIELD: Pixels = px(10.);
     /// Cards, the composer, popovers, dialogs, the switcher, settings tables.
     pub const LG: Pixels = px(12.);
+    /// Card actions (`size::BUTTON_CARD`): every kind shares it.
+    pub const BUTTON_CARD: Pixels = px(7.);
 
     // Older names, mapped onto the v2.1 steps.
     pub const XS: Pixels = MARK;
@@ -242,6 +252,11 @@ pub mod size {
     use gpui::{Pixels, px};
     /// Button `sm`: inline in a message or card row (重试).
     pub const BUTTON_SM: Pixels = px(28.);
+    /// Card actions (Card v2 footers, 首页 asks, the pinned card): one height
+    /// for primary, quiet and text actions (§7.5).
+    pub const BUTTON_CARD: Pixels = px(28.);
+    /// Side padding of a card action.
+    pub const BUTTON_CARD_PAD: Pixels = px(12.);
     /// Button `md`: the default (card actions, dialogs).
     pub const BUTTON_MD: Pixels = px(32.);
     /// Button `md` page primary (settings `添加成员 ▾`).
@@ -874,6 +889,11 @@ pub struct Colors {
     /// Primary buttons: ink fill with `btn_ink` text (`--btn`).
     pub btn: Hsla,
     pub btn_ink: Hsla,
+    /// The quiet card button (`ButtonKind::Quiet`): a soft fill, no border,
+    /// and its hover and pressed fills (`--btn-quiet`).
+    pub btn_quiet: Hsla,
+    pub btn_quiet_hover: Hsla,
+    pub btn_quiet_pressed: Hsla,
     /// State: amber means "you" (needs your decision), only that.
     pub you: Hsla,
     pub you_ink: Hsla,
@@ -1349,6 +1369,9 @@ fn build(dark: bool) -> Colors {
         sel,
         btn,
         btn_ink,
+        btn_quiet: p(0xF1F1F3FF, 0x222226FF),
+        btn_quiet_hover: p(0xE8E8EBFF, 0x2A2A2FFF),
+        btn_quiet_pressed: p(0xE1E1E5FF, 0x313137FF),
         you,
         you_ink,
         live,
@@ -1675,8 +1698,11 @@ pub mod card_v2 {
     pub const CHIP_RADIUS: Pixels = px(7.);
     /// Proof chips (`✓ 24 项通过`).
     pub const PROOF: Pixels = px(26.);
-    /// Footer buttons.
-    pub const BUTTON: Pixels = px(32.);
+    /// Footer buttons (`size::BUTTON_CARD`).
+    pub const BUTTON: Pixels = super::size::BUTTON_CARD;
+    /// The footer sits in the card, under the blocks: no band, no rule, no
+    /// fill (one container level, §7.10). Its bottom padding.
+    pub const FOOTER_BOTTOM: Pixels = px(14.);
     /// Plan rows.
     pub const PLAN_ROW: Pixels = px(28.);
     /// Reference rows and their glyph tile.

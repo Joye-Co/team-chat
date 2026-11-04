@@ -33,6 +33,9 @@ pub enum ButtonSize {
     Page,
     /// 40 pt, 15/500, padding 18, radius 10: login, empty states, submit.
     Lg,
+    /// 28 pt, 13/500, padding 12, radius 7: every card action (Card v2
+    /// footers, 首页 asks, the pinned card), whatever its kind.
+    Card,
 }
 
 /// Button variants (§7.3).
@@ -46,6 +49,9 @@ pub enum ButtonKind {
     Ghost,
     /// Destructive, in its own row or dialog.
     Danger,
+    /// The secondary action of a card: a soft `sunken` fill, no border and
+    /// no shadow, so a card keeps one outline (§7.5).
+    Quiet,
 }
 
 /// Applies the v2.1 metrics to a gpui-component `Button`.
@@ -85,6 +91,12 @@ impl ButtonSpec for Button {
                 px(18.),
                 theme::radius::FIELD,
                 type_scale::BUTTON_LG,
+            ),
+            ButtonSize::Card => (
+                size::BUTTON_CARD,
+                size::BUTTON_CARD_PAD,
+                theme::radius::BUTTON_CARD,
+                type_scale::SMALL,
             ),
         };
         self.with_size(gpui_component::Size::Medium)
@@ -129,6 +141,13 @@ pub fn button(
             .shadow(k.sec_hi()),
         ButtonKind::Ghost => b.ghost(),
         ButtonKind::Danger => b.danger(),
+        ButtonKind::Quiet => b.custom(
+            ButtonCustomVariant::new(cx)
+                .color(k.btn_quiet)
+                .foreground(k.ink)
+                .hover(k.btn_quiet_hover)
+                .active(k.btn_quiet_pressed),
+        ),
     };
     b.spec(size)
 }

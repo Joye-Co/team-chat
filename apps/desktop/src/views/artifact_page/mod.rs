@@ -1034,20 +1034,17 @@ impl ArtifactPage {
             })),
             cx,
         )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S10)
-                .children(cards.into_iter().enumerate().map(|(i, el)| {
-                    ui::motion::rise(
-                        SharedString::from(format!("artifact-side-{i}")),
-                        i + 1,
-                        div().child(el),
-                        cx,
-                    )
-                })),
-        )
+        .child(ui::rail_stack(
+            cards.into_iter().enumerate().map(|(i, el)| {
+                ui::motion::rise(
+                    SharedString::from(format!("artifact-side-{i}")),
+                    i + 1,
+                    div().child(el),
+                    cx,
+                )
+            }),
+            cx,
+        ))
         .into_any_element()
     }
 

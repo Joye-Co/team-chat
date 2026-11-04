@@ -2096,10 +2096,10 @@ fn diff(
     }
     let adds = adds.unwrap_or(counted_a);
     let dels = dels.unwrap_or(counted_d);
+    // A soft `sunken` well, no outline: the card keeps the only edge.
     div()
         .rounded(theme::radius::MD)
-        .border_1()
-        .border_color(k.line)
+        .bg(k.sunken)
         .overflow_hidden()
         .flex()
         .flex_col()
@@ -2110,9 +2110,8 @@ fn diff(
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .bg(k.raised)
                 .border_b_1()
-                .border_color(k.line)
+                .border_color(k.line_2)
                 .text_size(px(13.))
                 .mono()
                 .child(
@@ -2159,9 +2158,7 @@ pub(crate) fn proof_chip(
         .h(m::PROOF)
         .px(space::S8)
         .rounded(m::CHIP_RADIUS)
-        .border_1()
-        .border_color(k.line)
-        .bg(k.bg)
+        .bg(k.sunken)
         .text_color(k.ink_2)
         .when_some(glyph, |el, (g, color)| {
             el.child(ui::icon(g, px(13.), color))
@@ -2670,9 +2667,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .items_center()
                 .gap(space::S12)
                 .min_h(m::REF_ROW)
-                .px(space::S16)
                 .py(space::S8)
-                .when(i > 0, |el| el.border_t_1().border_color(k.line))
                 .when(!gone, |el| {
                     el.cursor_pointer()
                         .hover(|s| s.bg(k.hover))
@@ -2707,14 +2702,15 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 }),
         )
     });
-    div()
-        .rounded(theme::radius::LG)
-        .border_1()
-        .border_color(k.line)
-        .bg(k.bg)
-        .overflow_hidden()
-        .children(rows)
-        .into_any_element()
+    // No box of its own inside the card: rows divided by a hairline, their
+    // hover reaching past the text (one container level, §7.10).
+    ui::divided(
+        rows.map(|r| ui::inset_row(r).into_any_element()),
+        theme::LIST_ROW_BLEED,
+        cx,
+    )
+    .mx(-theme::LIST_ROW_BLEED)
+    .into_any_element()
 }
 
 #[cfg(test)]

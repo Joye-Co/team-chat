@@ -117,6 +117,7 @@ There is no separate placeholder token: placeholders use `ink-3`, so they pass 4
 | `hover` | `#F0F0F2` | `#1D1D20` | Hover fill of rows and ghost buttons |
 | `sel` | `#E9E9EC` | `#26262A` | Selected rail row, selected pane button, selected tab or segment, active row in ⌘K and menus. Grey, not an accent tint |
 | `btn` / `btn-ink` | `#111113` / `#FFFFFF` | `#F1F1F3` / `#111113` | Primary buttons (18.9:1); the viewer's own avatar |
+| `btn-quiet` | `#F1F1F3` | `#222226` | The quiet card button (secondary action in a card): soft fill, no border. Hover `#E8E8EB` / `#2A2A2F`, pressed `#E1E1E5` / `#313137` |
 | `person` | `#E6E6E9` | `#2C2C31` | People's avatar circle without a photo (initial in `ink-2`) |
 
 ### 2.4 State colors
@@ -241,6 +242,7 @@ separate groups with 10 to 16; separate sections with 24 or more.
 | --- | --- | --- | --- | --- | --- |
 | Button `md` (default: card actions, pane footers) | 32 | `ui` 13/500 | 0 14 | 8 | 16 |
 | Button `sm` (inline: 记一条, 重试 in a row, 选这个) | 28 | `ui` 13/500 | 0 10 | 7 | 14 |
+| Card action (Card v2 footers, 首页 asks, the pinned card: primary, quiet and text alike) | 28 | `ui` 13/500 | 0 12 | 7 | 14 |
 | Text action (看改动, 验收报告, 展开) | 28 to 32 | `ui` 13 `ink-2` | 0 10 | 8 | — |
 | Title-bar icon button | 28 × 28 | — | — | 7 | 16 |
 | Rail icon button (新话题) | 28 × 28 | — | — | 7 | 16 |
@@ -294,7 +296,7 @@ with `--worst-case` data.
 | Level | Shadow | Used by |
 | --- | --- | --- |
 | 0 | none | Rails, title bars, rows, timeline messages |
-| 1 `lift` | §2.6 | Cards, rail cards, file rows, pinned decision card, the composer (`sec-hi`) |
+| 1 `lift` | §2.6 | Cards, file rows, pinned decision card, the composer (`sec-hi`). Rail sections have none (§7.8) |
 | 2 `pop` | §2.6 | ⌘K, menus, popovers, dialogs, notifications, toasts |
 
 Only levels 1 and 2 have shadows. Dark mode has no `lift`: cards separate by their `line` border.
@@ -302,8 +304,8 @@ Only levels 1 and 2 have shadows. Dark mode has no `lift`: cards separate by the
 ## 6. Shape
 
 - **Radii**: 2 progress segments; 5 tags (岗位) and kbd; 6 chips, state tags, small thumbnails;
-  7 `sm` buttons, rail group headers, title-bar icon buttons; 8 buttons, rail rows, fields; 9 option
-  buttons, the rail search field; 10 file rows, data wells; 12 cards, rail cards, the pinned
+  7 `sm` buttons and card actions, rail group headers, title-bar icon buttons; 8 buttons, rail rows, fields; 9 option
+  buttons, the rail search field; 10 file rows, data wells; 12 cards, the pinned
   decision card; 14 the composer; 16 overlays (⌘K, dialogs). Concentric rule: outer = inner +
   padding.
 - **Edges**: 1 pt everywhere (`line` for cards and hairlines, `line-2` for controls). No 0.5 pt
@@ -386,8 +388,12 @@ radius 12, 36 pt rows, active row `sel`).
 
 ### 7.5 Buttons
 
-Variants: **primary** (ink, one per card or view), **secondary** (bordered), **text action**
-(no border, `ink-2`), **danger** (only in a confirm dialog: `bad` fill, white label). Labels are
+Variants: **primary** (ink, one per card or view), **secondary** (bordered), **quiet** (the
+secondary of a card: `btn-quiet` fill, no border, no shadow), **text action** (no border, `ink-2`),
+**danger** (only in a confirm dialog: `bad` fill, white label). Every action in a card is the
+28 pt card action (§4.2): one height and one radius 7 for primary, quiet and text, so a card's
+action row reads light; the primary stays the only ink fill. Bordered secondaries stay for pages,
+dialogs and settings. Labels are
 verbs from the copy catalog (`批准合并`, `发布到生产`, `确认发布`, `接管`, `交还`, `停止`). Destructive
 or irreversible actions open a confirm step (§7.10 批准).
 
@@ -421,7 +427,11 @@ record line (§7.10 answered) for 4 s, then leaves; the record stays in the time
 
 ### 7.8 Rail card (topic rail, 群资料, 工作环境, 来龙去脉, 正在做)
 
-Radius 12, 1 pt `line`, `bg`, `lift`, padding 12, cards 10 pt apart, rail padding 16 12. Label row:
+A rail section, not a boxed card: no border, fill or shadow; sections sit on the pane's `rail`
+surface, padding 14 4, and a 1 pt `line` (inset 4) divides each two (`ui::rail_section`,
+`ui::rail_stack`). Rail padding 4 16 16 for the topic rail; side columns keep their 52 pt header.
+The same holds for 正在做 (a clickable run section hovers with an 8 pt bleed, radius 8; its
+terminal thumbnail keeps its own radius 8), 群资料, 来龙去脉 and 工作环境. Label row:
 `meta` 500 `ink-3` + optional right text action (`看改动`, `打开`, `展开`, `记一条`). A card with no data is
 not drawn.
 
@@ -467,15 +477,17 @@ choose layout or colors, stream half-formed text into a card, post progress nobo
 skip the confirm step before an irreversible action.
 
 **Anatomy.** Card: radius 12, 1 pt `line`, `bg`, `lift`, width `min(680, box)` (首页) or the
-message column. Body padding 14 16 16:
+message column. The card is the only outlined level: nothing inside it has both an outline and a
+fill (lists are divided rows, wells are soft fills, proof chips are `sunken` pills). Body padding
+14 16 16:
 1. Header (18 pt): 20 tile + name `ui` 500 + 岗位 tag + `群 / 话题` breadcrumb (`meta` `ink-3`, topic in
    `ink-2`, a link) + mono time at the right: when the card message was created (a new rev or
    an edit changes the card, not this time). In the card's own topic the breadcrumb is dropped and
    the intent state takes its place (`✓ 做完了`); the 28 pt gutter avatar stays beside the card.
 2. Title: `card-title` 16/24, 10 pt below the header; one sentence that says what is wanted.
 3. Blocks (below), 10 to 12 pt apart.
-4. Footer: padding 10 16, 1 pt `line` top, `raised` fill: primary, secondary, text actions, gap 8,
-   and an optional right note `meta` `ink-3` (`发布前会再确认一次`, `🔒 发出后不能撤回` as `lock` 13 +
+4. Footer: in the card under the blocks, no band, no rule and no fill (`ui::card_footer`): padding
+   0 16 14, card actions (§4.2) primary, quiet, text, gap 8, and an optional right note `meta` `ink-3` (`发布前会再确认一次`, `🔒 发出后不能撤回` as `lock` 13 +
    text). Exactly one primary. A two-option choice needs no footer.
 
 **Intents** set the header state and the amber rule: `ask` (needs someone; amber dot before the
@@ -495,10 +507,10 @@ section on 首页, `需要你拍板` only for the asked viewer), `done` (`✓ �
 | Metric (数据) | Up to 4 numbers in a row of cells split by 1 pt `line`: label `meta` `ink-3`, value `num`, change `meta` mono (`+12% 比 9 月`; up or down said with a sign, never by color alone; lower-is-better metrics say so) + a tiny bar or sparkline |
 | Chart | One line or bar chart, `ink` for the main series, `ink-3` / `line-2` for others, labels on the lines, axis `meta` mono; a legend only for more than 3 series |
 | Table | Header `meta` `ink-3` over a 1 pt `line`; 32 pt rows (`TABLE_ROW`), 1 pt `line` between. A column whose cells are all numbers (after the first) is a number column: right-aligned at the row end, mono cells, as wide as its widest header or cell and at least `TABLE_NUM_COL` (52 pt); text columns share the rest. A percent cell has a 48 pt bar (`TABLE_PCT_BAR`) before it. A total is an ordinary last row (Card v2 has no `summaryRow`): when its first cell is `合计` it is drawn 600 with a 1 pt `line-2` rule above. A link to the full 产出 |
-| Diff (对比) | File header (`src/sync/reconnect.ts` mono + `+5 −2`), one hunk in `code` on `raised` with `ok` / `bad` 10 % line fills (code text stays `ink`), `还有 11 个文件`, `在 GitHub 打开` |
+| Diff (对比) | A `sunken` well, radius 8, no outline: file header (`src/sync/reconnect.ts` mono + `+5 −2`) over a 1 pt `line-2`, one hunk in `code` with `ok` / `bad` 10 % line fills (code text stays `ink`), `还有 11 个文件`, `在 GitHub 打开` |
 | Evidence (证据) | Up to 3 thumbnails (real screenshots, radius 6) then `+n`; a recording tile with mono duration; test result chips (`✓ 测试 148 项通过 · 0 失败`). No evidence: a neutral line `这次没有附证据` + secondary `让 Watch 补上` (never red) |
-| Refs (链接) | One row style for PR, 产出, 话题, 成员: 16 glyph or tile · name `ui` 500 · one line `meta` `ink-3` · right state. Stale state says how old (`PR 状态 10 分钟前`); a deleted 产出 keeps a row `产出已删除 · 原来是「…」` |
-| Proof chips | 26 pt, radius 7, 1 pt `line`: `#61 +214 −63`, `✓ 测试 148 项通过`, `▶ 录屏 0:42` (mono numbers) |
+| Refs (链接) | No box of its own: rows divided by a 1 pt `line`, their hover fill reaching 8 pt past the text (`ui::divided`, `ui::inset_row`). One row style for PR, 产出, 话题, 成员: 16 glyph or tile · name `ui` 500 · one line `meta` `ink-3` · right state. Stale state says how old (`PR 状态 10 分钟前`); a deleted 产出 keeps a row `产出已删除 · 原来是「…」` |
+| Proof chips | 26 pt, radius 7, `sunken` fill, no border: `#61 +214 −63`, `✓ 测试 148 项通过`, `▶ 录屏 0:42` (mono numbers) |
 | v1 blocks | Text, fields, table, list, progress, code, image, divider, link render with the same tokens |
 
 **States** (each one is drawn; the card changes in place, no new message):

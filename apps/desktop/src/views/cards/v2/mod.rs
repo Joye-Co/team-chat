@@ -1445,17 +1445,20 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
 // ---------------------------------------------------------------------------
 // Footer and buttons
 
-/// A footer button: 32 pt, radius 8, 13/500.
+/// A footer button: 28 pt, radius 7, 13/500 (`ButtonSize::Card`). A
+/// secondary answer takes the quiet soft fill, so the card keeps one
+/// outline.
 pub(crate) fn button(
     id: SharedString,
     label: impl Into<SharedString>,
     kind: ButtonKind,
     cx: &App,
 ) -> Button {
-    ui::button(id, label, kind, ButtonSize::Md, cx)
-        .h(m::BUTTON)
-        .text_size(px(13.))
-        .line_height(px(20.))
+    let kind = match kind {
+        ButtonKind::Secondary => ButtonKind::Quiet,
+        other => other,
+    };
+    ui::button(id, label, kind, ButtonSize::Card, cx)
 }
 
 /// A disabled primary: `sunken` fill, `ink-3` text, no shadow.
@@ -1504,19 +1507,7 @@ fn note(text: String, lock: bool, cx: &App) -> AnyElement {
 }
 
 fn footer_bar(children: Vec<AnyElement>, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    div()
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .px(space::S16)
-        .py(space::S10)
-        .border_t_1()
-        .border_color(k.line)
-        .bg(k.raised)
-        .children(children)
-        .into_any_element()
+    ui::card_footer(cx).children(children).into_any_element()
 }
 
 /// The footer for the card's state, or `None`.

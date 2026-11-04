@@ -117,11 +117,10 @@ fn chip(cx: &App) -> gpui::Div {
         .flex()
         .items_center()
         .gap(space::S6)
-        .h(px(26.))
-        .px(px(9.))
-        .rounded(px(7.))
-        .border_1()
-        .border_color(k.line)
+        .h(theme::card_v2::PROOF)
+        .px(space::S8)
+        .rounded(theme::card_v2::CHIP_RADIUS)
+        .bg(k.sunken)
         .t_meta()
         .text_color(k.ink_2)
 }
@@ -580,7 +579,6 @@ impl TimelineView {
                     ElementId::Name(format!("v2-out-{key}-{artifact_id}").into()),
                     cx,
                 )
-                .when(!links.is_empty(), |el| el.border_t_1().border_color(k.line))
                 .child(ui::icon(Lucide::FileText, px(15.), k.ink_3))
                 .child(
                     div()
@@ -682,14 +680,11 @@ impl TimelineView {
                     )
                 })
                 .when(!links.is_empty(), |el| {
+                    // No box of its own inside the card (one container level).
                     el.child(
-                        div()
-                            .mt(space::S12)
-                            .rounded(theme::radius::FIELD)
-                            .border_1()
-                            .border_color(k.line)
-                            .overflow_hidden()
-                            .children(links),
+                        ui::divided(links, theme::LIST_ROW_BLEED, cx)
+                            .mt(space::S8)
+                            .mx(-theme::LIST_ROW_BLEED),
                     )
                 }),
         );
@@ -847,11 +842,9 @@ impl TimelineView {
 /// A 38 pt link row inside a done card.
 fn link_row(id: ElementId, cx: &App) -> gpui::Stateful<gpui::Div> {
     let k = theme::colors(cx);
-    div()
-        .id(id)
+    ui::inset_row(div().id(id))
         .w_full()
         .h(px(38.))
-        .px(space::S12)
         .flex()
         .items_center()
         .gap(space::S10)
