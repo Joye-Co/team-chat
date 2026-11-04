@@ -126,7 +126,7 @@ Each state has a mark color (dots, rings, glyphs), an ink (text) and, for amber,
 | Token | L | D | Contrast of the ink L / D | Means |
 | --- | --- | --- | --- | --- |
 | `you` / `you-ink` / `you-bg` | `#E8590C` / `#B54708` / `#FFF4EC` | `#F27A2E` / `#F7A26A` / `#2B1C12` | 5.4 / 9.3 (5.0 / 8.1 on `you-bg`) | The viewer is waited on (需要你拍板, 等你). Only the waited-on viewer sees amber |
-| `live` / `live-ink` | `#3B6EF5` / `#2453D1` | `#6B93F7` / `#93B1FA` | 6.5 / 8.9 | Live work: breathing rings, the current plan step, the computer-active dot, 实时 |
+| `live` / `live-ink` | `#3B6EF5` / `#2453D1` | `#6B93F7` / `#93B1FA` | 6.5 / 8.9 | Live work: status dots, the current plan step, the computer-active dot, 实时 |
 | `ok` / `ok-ink` | `#1F9D55` / `#177245` | `#3CC27A` / `#6AD69C` | 6.0 / 10.5 | Done steps, passed checks, `+` line counts |
 | `bad` / `bad-ink` | `#E5484D` / `#C42B30` | `#F2555A` / `#FF8A8E` | 5.6 / 8.3 | 卡住了, failed checks, errors, `−` line counts |
 
@@ -269,9 +269,11 @@ Hit area is at least 28 × 28.
 
 - Icons: Lucide, stroke 1.75 at 16 pt; stroke 2 to 2.5 at 12 to 13 pt. 16 in rows, buttons and the
   title bar; 15 in the rail search; 13 for check glyphs inside text; 12 for chevrons.
-- Avatar sizes: 16 in rail rows and event lines; 18 to 20 in card headers and tags; 24 in rail
-  cards and the team strip (22 tile + ring); 28 in timeline gutters, member list rows and the desk
-  正在做 cards; 40 in a ⌘K 交代 row; 48 in a member detail header.
+- Avatar sizes: 16 in rail rows and event lines; 18 to 20 in card headers, tags and the team
+  strip (20); 24 in rail cards; 28 in timeline gutters, member list rows and the desk 正在做 cards;
+  40 in a ⌘K 交代 row; 48 in a member detail header.
+- Character art is rasterized at the avatar's device pixel size (size × window scale), so a
+  tile is drawn 1:1 and stays crisp at every size; never a bundled bitmap stretched or squeezed.
 
 ### 4.4 Main window
 
@@ -364,22 +366,23 @@ repeat it). Don't: put a primary button in a title bar (except 交代给 X on a 
 
 Anatomy, top to bottom: header (52: traffic lights, `square-pen` 新话题 28 pt at the right) · search
 field `搜索或交代` with `⌘K` kbd (34 pt, `bg`, 1 pt `line`, `sec-hi`, radius 9; opens ⌘K) · 10 pt ·
-destinations (30 pt rows, radius 8, padding 0 10, gap 10, icon 16 + `ui`): 首页 (`house`, trailing
+destinations (28 pt rows, radius 8, padding 0 10, gap 10, icon 16 + `ui`): 首页 (`house`, trailing
 count in `you-ink` mono when something needs you), 产出 (`layers`), 成员 (`users`) · 16 pt · the
 mode's list (§8.2) · the team strip · the footer.
 
 | Part | Value |
 | --- | --- |
 | Section header | 28 pt, padding 0 6 0 10: label `meta` 500 `ink-3` (`话题`, `成员`); right a 22 pt ghost menu button (`我参与的 ▾`, `先看在忙的 ▾`) |
-| Group header | 26 pt, radius 7, padding 0 10 0 8, gap 6: chevron 12 + 群 name `meta` 500 `ink-3`; clicking the name opens the 群 page, the chevron collapses |
-| Topic row | 30 pt, radius 8, padding 0 10, gap 8: a 16 pt state slot · title `ui` (one line, `…`) · trailing mono `meta` `ink-3` (`3/5`, `09:12`) or `等小王` |
-| State slot | One by priority: 7 pt `you` dot (the topic waits on the viewer) > the working member's 16 pt tile with a breathing `live` ring > `circle` 8 pt hollow `ink-3` ring (waits on someone else) > `check` 13 `ok` (做完了 today) > nothing |
-| Team strip | 24 pt tiles of the active members (working first, then waiting on the viewer) with their rings, gap 4, then `+8` `meta` `ink-3`; click opens 成员 |
+| Group header | 24 pt, radius 7, padding 0 10 0 8, gap 6: chevron 12 + 群 name `meta` 500 `ink-3`; clicking the name opens the 群 page, the chevron collapses |
+| Topic row | 28 pt, radius 8, padding 0 10, gap 8: a 16 pt state slot · title `ui` (one line, `…`; `ink` when it needs someone, `ink-2` when quiet) · trailing figures `meta` `ink-3` (`3/5`, `09:12`) or `等小王` |
+| State slot | One set, one visual size, by priority: 6 pt `you` dot (the topic waits on the viewer) > the working member's 16 pt tile with its `live` status dot (mode C: a 6 pt `live` dot) > 6 pt hollow `ink-3` ring, 1.25 pt (waits on someone else) > `check` 12 `ink-3` (做完了 today; quiet, not green) > nothing |
+| Team strip | 20 pt tiles of the active members (waiting on the viewer first, then working) with their status dots, gap 6, then `+8` `meta` `ink-3`; click opens 成员 |
 | Footer | 40 pt: 22 pt viewer circle (`btn` / `btn-ink` initial) + name `ui` 500 + a 28 pt `sliders-horizontal` settings button |
 | Scroll edges | 24 pt fade from `rail` at top and bottom while the list scrolls |
 
-States: §7.1. Selected row: `sel`, `ink` 500. The rail shows one selection at a time (a
-destination, a 群 header or a topic).
+States: §7.1, with the rail's own lighter fills: hover `rail-hover` (`#F2F2F4` / `#1C1C1F`),
+selected `rail-sel` (`#EDEDF0` / `#222226`), text `ink` 500. The selection is a soft highlight,
+not a block. The rail shows one selection at a time (a destination, a 群 header or a topic).
 
 ### 7.4 Composer
 
@@ -450,7 +453,7 @@ Topic rail cards, in this order:
 | 电脑 | `monitor` 28 tile + `Mac mini` + `Forge 用完了 · 09:52`; right `○ 空闲` or `● 在用` (`live`) + text action `看 Forge 的电脑` |
 | 用时和成本 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
 
-### 7.9 Member identity: avatars, rings and tags
+### 7.9 Member identity: avatars, status dots and tags
 
 - **People**: circle, `person` fill, initial `ink-2` 600 (one character for CJK, one letter at 28 pt
   and below, two letters at 40 pt and above). The viewer's own circle is `btn` with a `btn-ink`
@@ -461,14 +464,15 @@ Topic rail cards, in this order:
   for the member's current status sits centered at **72 %** of the tile (rules and art in
   docs/ROSTER.md and `apps/desktop/assets/characters/`). The tile is `aria-hidden`; the name is
   always text beside it.
-- **Status art** by context: a working ring → `working`; a waiting ring or an ask to the viewer →
+- **Status art** by context: a working dot → `working`; a waiting dot or an ask to the viewer →
   `needs-input`; a finished result in that spot (做完了 rows and cards, answered states, proof) →
   `success`; queued (排队) → `idle`; else the member's overall status. One overall status per member
   across all its runs: needs input > error > working > idle.
-- **Rings** replace v2's pips: a 1.5 pt ring, 3 pt outside the tile (`inset −3`), radius tile + 3.
-  `live` and **breathing** (opacity 0.8 ↔ 0.25, 2.4 s, ease-in-out) while working; `you`, static,
-  while it waits on the viewer; `bad`, static, when stuck; none when idle. A ring is drawn inside
-  the slot's layout box, so rows keep their height. Rings show from 16 pt up.
+- **Status dots** (were rings): a dot on the avatar's bottom-right corner, cut out of the avatar
+  by a 1.5 pt ring in the surface color (the macOS presence look). 6 pt on a 16 pt avatar, 7 up
+  to 24, 8 up to 32, 10 above. `live` while working; `you` while it waits on the viewer; none
+  when idle. Static: a breathing dot at list sizes reads as a flicker. The dot is drawn over the
+  avatar's box, so rows keep their height. Dots show from 16 pt up.
 - **岗位 tag** after a member's name: 18 pt, radius 5, `sunken`, padding 0 6, `meta` `ink-2` (`开发`,
   `运维`). People show 岗位 as plain `meta` `ink-3`.
 
@@ -811,7 +815,7 @@ Page title bar: `首页` + date. Column max 680, starting 24 pt under the title 
 
 Right column **正在做 n** (320, `rail`): cards per active run, 10 pt apart: a live terminal
 thumbnail (only for runs with tool events: `screen`, 120 tall, traffic dots, `● 实时` tag, mono
-lines scrolling, fps) above a body: 28 tile with breathing ring + name `ui` 500 + topic + `3/5`
+lines scrolling, fps) above a body: 28 tile with its `live` status dot + name `ui` 500 + topic + `3/5`
 mono, line 2 the current step + `已 3 分钟`, then the plan segments. **排队** card only when queued
 runs exist: rows with 16 tile + `Pocket 发晨报` + mono `明早 08:00`.
 
@@ -985,8 +989,8 @@ ms; only live signals loop.
 | What | Animation | Reduce motion |
 | --- | --- | --- |
 | First paint of a page (cards, rows, rail cards) | Rise once: opacity 0 → 1 + 6 pt offset, 360 ms, stagger 40–50 ms, at most 8 items; later items appear at once | Opacity 150 ms, no stagger |
-| Live ring on a working member | Breathing opacity 0.8 ↔ 0.25, 2.4 s ease-in-out loop | Static at 0.8 |
-| Current plan step dot | Same breathing | Static |
+| Status dot on a working member's avatar | None: static (§7.9) | same |
+| Current plan step dot | Breathing opacity 0.8 ↔ 0.25, 2.4 s ease-in-out loop | Static |
 | Live terminal / screen | New lines revealed one by one (opacity 120 ms); thumbnails scroll content up linearly (9 s loop); caret blinks 1 s steps | Lines appear at once; no scroll; caret steady |
 | fps and counters on a live screen | Change value without animation, at most 2 per second | same |
 | Answering a card | Controls fade out 120 ms; the record line rises in (200 ms); the check stroke draws 300 ms (240 ms in small sizes), 80 ms after | Record appears; check drawn at once |
@@ -1124,7 +1128,7 @@ Cards
 - [ ] 产出 media: inline and full forms per Media; upload and preview states with words, not color.
 
 Members and motion
-- [ ] Character art at 72 % of the tile, right status per context; rings breathe only while working.
+- [ ] Character art at 72 % of the tile, drawn at device pixel size, right status per context; status dots, not rings.
 - [ ] Members acknowledge with a reaction; no progress messages in the topic.
 - [ ] Motion per §12; reduce motion checked; nothing animates on selection or navigation.
 

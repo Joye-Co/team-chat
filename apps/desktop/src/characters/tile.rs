@@ -59,12 +59,32 @@ pub fn tile_path(character: CharacterId, status: CharacterStatus, size: Pixels) 
 }
 
 /// The fitted character art filling a tile of `size` (the tile itself, its
-/// tint and radius, are drawn by `ui::MemberAvatar`).
-pub fn tile_image(character: CharacterId, status: CharacterStatus, size: Pixels) -> Img {
-    img(tile_path(character, status, size))
+/// tint and radius, are drawn by `ui::MemberAvatar`), rasterized at the
+/// window's `scale` so it is drawn 1:1 in device pixels. GPUI rasterizes an
+/// SVG image at twice its own `width` (`SMOOTH_SVG_SCALE_FACTOR`), so the
+/// bundled 32 pt art over a 28 pt tile was a 64 px bitmap squeezed into 56
+/// device pixels, which reads soft.
+pub fn tile_image(
+    character: CharacterId,
+    status: CharacterStatus,
+    size: Pixels,
+    scale: f32,
+) -> Img {
+    img(device_path(tile_path(character, status, size), size, scale))
         .size(size)
         .flex_none()
 }
+
+/// `path` with the device pixel width the loader rasterizes at (`…svg@56`).
+pub fn device_path(path: SharedString, size: Pixels, scale: f32) -> SharedString {
+    let px = (f32::from(size) * scale.max(1.)).ceil().max(1.) as u32;
+    format!("{path}{DEVICE_MARK}{px}").into()
+}
+
+/// Separates a tile path from its device pixel width.
+const DEVICE_MARK: char = '@';
+/// GPUI rasterizes an SVG image at this multiple of its `width`.
+const GPUI_SVG_SCALE: f32 = gpui::SMOOTH_SVG_SCALE_FACTOR;
 
 /// The asset path of the art of `character` at `status` and `size`, without
 /// the marks up to 64 pt.
@@ -85,6 +105,10 @@ pub fn load(path: &str) -> Option<Vec<u8>> {
         Some(rest) => (rest, true),
         None => (path.strip_prefix(CLEAN_PREFIX)?, false),
     };
+    let (rest, device_px) = match rest.rsplit_once(DEVICE_MARK) {
+        Some((rest, px)) => (rest, px.parse::<u32>().ok()),
+        None => (rest, None),
+    };
     let (id, file) = rest.split_once('/')?;
     let source = assets::load(&format!("characters/{id}/{file}"))?;
     let size: f32 = file
@@ -97,6 +121,9 @@ pub fn load(path: &str) -> Option<Vec<u8>> {
     if size <= SMALL_MAX {
         svg = small_art(&svg);
     }
+    if let Some(px) = device_px {
+        svg = set_root_size(&svg, px);
+    }
     if !fit {
         return Some(svg.into_bytes());
     }
@@ -107,6 +134,28 @@ pub fn load(path: &str) -> Option<Vec<u8>> {
         svg = replace_view_box(&svg, &format!("{x:.1} {y:.1} {side:.1} {side:.1}"));
     }
     Some(svg.into_bytes())
+}
+
+/// Sets the `width` and `height` of the root `<svg>` so GPUI rasterizes the
+/// image at `px` device pixels.
+fn set_root_size(svg: &str, px: u32) -> String {
+    let side = format!("{}", px as f32 / GPUI_SVG_SCALE);
+    let Some(end) = svg.find('>') else {
+        return svg.to_string();
+    };
+    let mut head = svg[..end].to_string();
+    for attr in ["width", "height"] {
+        let key = format!(" {attr}=\"");
+        if let Some(start) = head.find(&key) {
+            let from = start + key.len();
+            if let Some(len) = head[from..].find('"') {
+                head.replace_range(from..from + len, &side);
+            }
+        } else {
+            head.push_str(&format!(" {attr}=\"{side}\""));
+        }
+    }
+    format!("{head}{}", &svg[end..])
 }
 
 fn replace_view_box(svg: &str, value: &str) -> String {
@@ -270,6 +319,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_tile_rasterizes_at_its_device_pixel_size() {
+        let path = device_path(
+            tile_path(CharacterId::Jojo, CharacterStatus::Idle, px(28.)),
+            px(28.),
+            2.,
+        );
+        assert!(path.ends_with("@56"), "{path}");
+        let svg = String::from_utf8(load(&path).expect("loads")).unwrap();
+        let head = &svg[..svg.find('>').unwrap()];
+        assert!(head.contains(" width=\"28\""), "{head}");
+        assert!(head.contains(" height=\"28\""), "{head}");
     }
 
     #[test]

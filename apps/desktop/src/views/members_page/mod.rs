@@ -477,7 +477,11 @@ impl MembersPage {
             .cursor_pointer()
             .when(is_selected, |el| el.bg(k.sel))
             .when(!is_selected, |el| el.hover(|s| s.bg(k.hover)))
-            .child(MemberAvatar::new(Some(m), px(28.)).ring(ring))
+            .child(
+                MemberAvatar::new(Some(m), px(28.))
+                    .ring(ring)
+                    .on(if is_selected { k.sel } else { k.bg }),
+            )
             .child(
                 div()
                     .flex_1()

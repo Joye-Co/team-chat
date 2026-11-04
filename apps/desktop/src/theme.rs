@@ -124,17 +124,35 @@ pub const PAGE_MIN_WIDTH: Pixels = px(480.);
 pub const PAGE_MEASURE: Pixels = px(720.);
 /// Title bar icon buttons (单独问, 产出, 电脑, 改动, rail toggle).
 pub const TITLE_BUTTON: Pixels = px(28.);
-/// Rail rows (destinations and 话题): 30 pt; group headers 26 pt.
-pub const RAIL_ROW: Pixels = px(30.);
-pub const RAIL_GROUP_ROW: Pixels = px(26.);
+/// Rail rows (destinations and 话题): 28 pt; group headers 24 pt.
+pub const RAIL_ROW: Pixels = px(28.);
+pub const RAIL_GROUP_ROW: Pixels = px(24.);
 /// The slot at the start of a rail row (state dot, tile, check).
 pub const RAIL_SLOT: Pixels = px(16.);
+/// The state set of a rail row, one visual size (§7.3): a 6 pt dot (filled
+/// `you` for 需要你, hollow `ink-3` for 等别人), a 12 pt `ink-3` check for
+/// 做完了, the doing member's tile with its status dot for 在做.
+pub const RAIL_STATE_DOT: Pixels = px(6.);
+pub const RAIL_STATE_STROKE: Pixels = px(1.25);
+pub const RAIL_STATE_CHECK: Pixels = px(12.);
 /// The 岗位 tag after a member's name: 18 pt, radius 5.
 pub const TAG_HEIGHT: Pixels = px(18.);
 pub const TAG_RADIUS: Pixels = px(5.);
-/// A ring around a tile or circle: 3 pt out, 1.5 pt wide.
-pub const RING_GAP: Pixels = px(3.);
-pub const RING_WIDTH: Pixels = px(1.5);
+/// The status dot on an avatar's corner (working, waits on me): 6 pt on a
+/// 16 pt avatar, 7 up to 24, 8 up to 32, 10 above (§7.9).
+pub fn avatar_status_dot(avatar: Pixels) -> Pixels {
+    if avatar <= px(16.) {
+        px(6.)
+    } else if avatar <= px(24.) {
+        px(7.)
+    } else if avatar <= px(32.) {
+        px(8.)
+    } else {
+        px(10.)
+    }
+}
+/// The ring in the surface color that cuts the status dot out of the avatar.
+pub const AVATAR_STATUS_CUT: Pixels = px(1.5);
 
 /// The width of the 实时查看 pane in a window `window_w` wide.
 pub fn live_pane_width(window_w: Pixels) -> Pixels {
@@ -881,6 +899,11 @@ pub struct Colors {
     pub line_2: Hsla,
     /// Selection: grey, never an accent tint (`--sel`).
     pub sel: Hsla,
+    /// The selected row of the left rail: a lighter grey than `sel`, so the
+    /// current 话题 reads as a soft highlight, not a block (§7.3).
+    pub rail_sel: Hsla,
+    /// Hover of a left rail row, a step under `rail_sel`.
+    pub rail_hover: Hsla,
     /// Primary buttons: ink fill with `btn_ink` text (`--btn`).
     pub btn: Hsla,
     pub btn_ink: Hsla,
@@ -1303,6 +1326,8 @@ fn build(dark: bool) -> Colors {
     let line_2 = p(0xDCDCE0FF, 0x34343AFF);
     let hover = p(0xF0F0F2FF, 0x1D1D20FF);
     let sel = p(0xE9E9ECFF, 0x26262AFF);
+    let rail_sel = p(0xEDEDF0FF, 0x222226FF);
+    let rail_hover = p(0xF2F2F4FF, 0x1C1C1FFF);
     let btn = p(0x111113FF, 0xF1F1F3FF);
     let btn_ink = p(0xFFFFFFFF, 0x111113FF);
     let you = p(0xE8590CFF, 0xF27A2EFF);
@@ -1357,6 +1382,8 @@ fn build(dark: bool) -> Colors {
         line,
         line_2,
         sel,
+        rail_sel,
+        rail_hover,
         btn,
         btn_ink,
         you,
