@@ -118,10 +118,11 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "login",
-        about: "The login view",
+        about: "The login window",
         start: Start::SignedOut,
         setup: |_, _| {},
-        open: open_main,
+        // v12/fx-overlays: the login window, not the main window.
+        open: |services, content, cx| open_login(services, content, "", false, cx),
     },
     Scene {
         name: "login-code",
@@ -232,7 +233,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-about",
-        about: "Settings: 通用 (about card, diagnostics, developer view)",
+        about: "Settings: 通用 after 检查更新: 已是最新版本 (v12/fx-overlays)",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_about,
@@ -271,21 +272,21 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "update",
-        about: "The quiet banner of a new version above the 话题",
+        about: "Settings › 通用: a new version found, 更新到 … in the version row (v12/fx-overlays)",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::updater::preview::open_available,
     },
     Scene {
         name: "update-dl",
-        about: "The update banner while the new version downloads",
+        about: "Settings › 通用: the download's progress in the version row (v12/fx-overlays)",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::updater::preview::open_downloading,
     },
     Scene {
         name: "update-manual",
-        about: "The update banner when the app cannot be replaced",
+        about: "Settings › 通用: the app cannot be replaced, 知道了 in the version row (v12/fx-overlays)",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::updater::preview::open_manual,
@@ -464,14 +465,16 @@ pub const SCENES: &[Scene] = &[
         about: "main-* with the 过程 tab: 停止 on the pending row and in the 过程 header, for the member who asked",
         start: Start::SignedIn,
         setup: |_, _| {},
-        open: crate::views::timeline::preview::open_stop,
+        // v12/fx-overlays: 实时查看 on the run's steps with the 停止 alert.
+        open: crate::views::live::scenes::open_stop,
     },
     Scene {
         name: "stop-stopping",
         about: "The stop scene after 停止 was pressed: both show 正在停止… until the run ends",
         start: Start::SignedIn,
         setup: |_, _| {},
-        open: crate::views::timeline::preview::open_stopping,
+        // v12/fx-overlays: 实时查看 with 正在停止….
+        open: crate::views::live::scenes::open_stopping,
     },
     Scene {
         name: "topic-short",
@@ -1091,19 +1094,19 @@ pub fn open_main(
     .map_err(|e| e.to_string())
 }
 
-/// The main window signed out, with the login form filled for a scene.
+/// The login window (signed out), with the form filled for a scene.
+/// v12/fx-overlays: the small login window at its own size (the requested
+/// size is ignored).
 pub fn open_login(
     services: Services,
-    content: Size<Pixels>,
+    _content: Size<Pixels>,
     code: &'static str,
     server_open: bool,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
+    let options = crate::views::login::window_options(false, cx);
     gpui_kit::open_window(options, cx, move |window, cx| {
-        let root = cx.new(|cx| RootView::new(services, None, window, cx));
+        let root = cx.new(|cx| crate::views::login::LoginWindow::new_for_scene(services, window, cx));
         let login = root.read(cx).login().clone();
         // A leading `!` submits the code, for the error scene.
         // A leading `!` submits the code, for the error scene; a leading `~`

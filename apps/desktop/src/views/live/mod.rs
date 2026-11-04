@@ -142,23 +142,16 @@ impl LivePane {
         } else {
             p.hand_back_run(&run.group_id, &run.topic_id, &run.id)
         };
-        let template = if take {
-            c::LIVE_TAKE_OVER_FAILED
+        let title = if take {
+            crate::copy::overlays::TAKE_OVER_REFUSED
         } else {
-            c::LIVE_HAND_BACK_FAILED
+            crate::copy::overlays::HAND_BACK_REFUSED
         };
         cx.spawn(async move |cx: &mut gpui::AsyncApp| {
             let result = reply.await.unwrap_or(Err(AdminError::Other));
             if let Err(e) = result {
-                cx.update(|cx| {
-                    crate::views::files::notify_error(
-                        fill(
-                            template,
-                            &[("reason", crate::views::settings::widgets::error_text(e))],
-                        ),
-                        cx,
-                    )
-                });
+                // A refusal blocks: an alert, no toast (NATIVE.md §7.4).
+                cx.update(|cx| alert_in_active_window(title, e, cx));
             }
         })
         .detach();
@@ -1182,6 +1175,76 @@ impl LivePane {
     }
 }
 
+impl LivePane {
+    /// The run's steps (the process view) and a bottom bar with 停止.
+    fn steps_only(&mut self, run: &BotRunSummary, cx: &mut Context<Self>) -> gpui::Div {
+        let n = native_colors(cx);
+        let view = match &self.developer {
+            Some(v) => v.clone(),
+            None => {
+                let services = self.services.clone();
+                let view = cx.new(|cx| ProcessView::new(services, cx));
+                view.update(cx, |v, cx| {
+                    v.set_titled(false);
+                    v.set_visible(true, cx)
+                });
+                self.developer = Some(view.clone());
+                view
+            }
+        };
+        let stopping = self.services.provider.run_stopping(&run.id);
+        let stop = run.status.is_active().then(|| {
+            let (services, run) = (self.services.clone(), run.clone());
+            disabled_push(
+                push_button(
+                    "live-stop",
+                    if stopping {
+                        c::LIVE_STOPPING
+                    } else {
+                        c::LIVE_STOP
+                    },
+                    PushStyle::Destructive,
+                    PushSize::Regular,
+                    cx,
+                ),
+                stopping,
+                cx,
+            )
+            .on_click(move |_, _, cx| stop_run(&services, &run, cx))
+        });
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(n.content)
+            // The pane's toolbar row (52 pt): its title, Title 3.
+            .child(
+                div()
+                    .flex_none()
+                    .h(metrics::TOOLBAR_ROW)
+                    .px(space::S16)
+                    .flex()
+                    .items_center()
+                    .n_title3()
+                    .text_color(n.label)
+                    .child(crate::copy::process::RUNS),
+            )
+            .child(div().flex_1().min_h(px(0.)).child(view))
+            .children(stop.map(|stop| {
+                div()
+                    .flex_none()
+                    .px(px(20.))
+                    .py(px(12.))
+                    .border_t_1()
+                    .border_color(n.separator)
+                    .flex()
+                    .items_center()
+                    .child(div().flex_1())
+                    .child(stop)
+            }))
+    }
+}
+
 impl PaneView for LivePane {
     fn width(&self, window_w: Pixels) -> Pixels {
         if self.expanded {
@@ -1190,6 +1253,21 @@ impl PaneView for LivePane {
         } else {
             theme::live_pane_width(window_w)
         }
+    }
+}
+
+/// Opens the error alert of a refused request in the active window.
+fn alert_in_active_window(title: &'static str, e: AdminError, cx: &mut App) {
+    if let Some(window) = cx.active_window() {
+        let _ = window.update(cx, |_, window, cx| {
+            crate::views::nav::dialogs::error_alert(
+                title,
+                crate::views::settings::widgets::error_text(e),
+                |_, _| {},
+                window,
+                cx,
+            )
+        });
     }
 }
 
@@ -1308,9 +1386,13 @@ impl Render for LivePane {
             return stub_body(Sym::Computer, c::LIVE_EMPTY, None, cx).into_any_element();
         };
         let p = self.services.provider.clone();
-        let run = p.runs(&g, &t).into_iter().find(|r| r.id == run_id);
-        let (Some(run), Some(screen)) = (run, p.machine_screen(&run_id)) else {
+        let Some(run) = p.runs(&g, &t).into_iter().find(|r| r.id == run_id) else {
             return stub_body(Sym::Computer, c::LIVE_EMPTY, None, cx).into_any_element();
+        };
+        // v12/fx-overlays: a run without a screen (a cloud runner, an older
+        // server) shows its steps, with 停止 while it runs.
+        let Some(screen) = p.machine_screen(&run_id) else {
+            return self.steps_only(&run, cx).into_any_element();
         };
         if run.status.is_active() {
             self.ensure_polling(&run_id, cx);

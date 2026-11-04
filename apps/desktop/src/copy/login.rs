@@ -11,7 +11,7 @@ crate::copy! {
     CODE_TOKEN = "已粘贴登录凭证",
     CODE_LEGACY = "已粘贴邀请码",
     CHANGE_SERVER = "更改",
-    OTHER_SERVER = "使用其他服务器",
+    OTHER_SERVER = "使用其他服务器…",
     CODE_PLACEHOLDER = "XXXX-XXXX",
     CODE_HINT = "向管理员要一个邀请码。粘贴带横线或空格的格式也可以。",
     SUBMIT = "加入",

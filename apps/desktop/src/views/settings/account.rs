@@ -17,9 +17,10 @@ use gpui_component::{
 };
 
 use super::widgets::{self, Status, answer};
+use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row};
 use crate::{
     app::{Changes, Services},
-    copy::{common, fill, settings as s},
+    copy::{common, fill, overlays as o, settings as s},
     data::{Change, DeviceInfo, DeviceKind, Member, SessionState},
     ui::{
         self, Sym, SymSize,
@@ -240,7 +241,7 @@ impl AccountPage {
         let window_handle = window.window_handle();
         cx.spawn(async move |this, cx| {
             let result = answer(reply).await;
-            let ok = result.is_ok();
+            let refused = result.as_ref().err().copied();
             let _ = this.update(cx, |this, cx| {
                 this.save = match result {
                     Ok(m) => {
@@ -251,13 +252,21 @@ impl AccountPage {
                 };
                 cx.notify();
             });
-            if ok {
-                let _ = window_handle.update(cx, |_, window, cx| {
+            let _ = window_handle.update(cx, |_, window, cx| match refused {
+                None => {
                     if window.has_active_dialog(cx) {
                         window.close_dialog(cx);
                     }
-                });
-            }
+                }
+                // A refusal blocks: an alert over the sheet, which stays.
+                Some(e) => crate::views::nav::dialogs::error_alert(
+                    o::PROFILE_REFUSED,
+                    widgets::error_text(e),
+                    |_, _| {},
+                    window,
+                    cx,
+                ),
+            });
         })
         .detach();
     }
@@ -418,7 +427,7 @@ impl AccountPage {
                     alert_button(
                         "device-remove-cancel",
                         common::CANCEL,
-                        PushStyle::Default,
+                        PushStyle::Standard,
                         false,
                         cx,
                     )
@@ -461,7 +470,7 @@ impl AccountPage {
                     alert_button(
                         "sign-out-cancel",
                         common::CANCEL,
-                        PushStyle::Default,
+                        PushStyle::Standard,
                         false,
                         cx,
                     )
@@ -485,48 +494,17 @@ impl AccountPage {
                 handle.focus(window, cx);
             }
             let page = this.read(cx);
-            let k = native_colors(cx);
             let me = page.me();
             let busy = page.save.busy();
-            let error_of = |field: Field| {
-                page.field_error
-                    .as_ref()
-                    .filter(|(f, _)| *f == field)
-                    .map(|(_, e)| e.clone())
-            };
-            let field_row = |label: &'static str,
-                             id: &'static str,
-                             state: &Entity<InputState>,
-                             error: Option<String>,
-                             cx: &App| {
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .w(px(72.))
-                            .h(metrics::FIELD)
-                            .flex()
-                            .items_center()
-                            .justify_end()
-                            .n_body()
-                            .text_color(k.label)
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .child(
-                                NativeTextField::new(id, state)
-                                    .width(metrics::FIELD_NAME_WIDTH)
-                                    .error(error.is_some()),
-                            )
-                            .children(error.map(|e| widgets::field_error(e, cx))),
-                    )
-            };
+            // A field problem turns 完成 off and shows one quiet footnote;
+            // an empty name only turns it off (NATIVE.md §7.4).
+            let typed_name = page.name.read(cx).value().to_string();
+            let problem = validate(&typed_name, &page.role.read(cx).value()).err();
+            let footnote = problem
+                .as_ref()
+                .filter(|(f, _)| !(*f == Field::Name && typed_name.trim().is_empty()))
+                .map(|(_, e)| e.clone());
+            let invalid = problem.is_some();
             let avatar_status = widgets::native_status(&page.avatar, cx);
             let choose = this.clone();
             let (cancel, done, ok) = (this.clone(), this.clone(), this.clone());
@@ -536,7 +514,7 @@ impl AccountPage {
                 .flex_col()
                 .items_center()
                 .gap(px(10.))
-                .child(ui::MemberAvatar::new(me.as_ref(), px(88.)).on(k.sheet))
+                .child(account_avatar(me.as_ref(), px(88.), cx))
                 .child(
                     push_button(
                         "profile-photo",
@@ -549,39 +527,21 @@ impl AccountPage {
                     .on_click(move |_, _, cx| choose.update(cx, |p, cx| p.choose_avatar(cx))),
                 )
                 .children(avatar_status);
-            let fields = div()
-                .w_full()
+            let fields = sheet_form()
                 .pt(px(4.))
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(10.))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        // Centered as a block; the labels line up.
-                        .mr(px(40.))
-                        .child(field_row(
-                            s::NAME,
-                            "profile-name",
-                            &page.name,
-                            error_of(Field::Name),
-                            cx,
-                        ))
-                        .child(field_row(
-                            s::ROLE,
-                            "profile-role",
-                            &page.role,
-                            error_of(Field::Role),
-                            cx,
-                        )),
-                );
-            let failed = match &page.save {
-                Status::Failed(_) => widgets::native_status(&page.save, cx),
-                _ => None,
-            };
+                .child(sheet_form_row(
+                    s::NAME,
+                    NativeTextField::new("profile-name", &page.name)
+                        .width(metrics::FIELD_NAME_WIDTH),
+                    cx,
+                ))
+                .child(sheet_form_row(
+                    s::ROLE,
+                    NativeTextField::new("profile-role", &page.role)
+                        .width(metrics::FIELD_NAME_WIDTH),
+                    cx,
+                ))
+                .children(footnote.map(|f| sheet_footnote(f, cx)));
             dialog
                 .on_ok(move |_, window, cx| {
                     ok.update(cx, |p, cx| p.save(window, cx));
@@ -596,7 +556,6 @@ impl AccountPage {
                         .explanation(s::EDIT_PROFILE_HINT)
                         .body(photo)
                         .body(fields)
-                        .body(div().flex().justify_center().children(failed))
                         .buttons([
                             push_button(
                                 "profile-cancel",
@@ -620,7 +579,7 @@ impl AccountPage {
                                     PushSize::Large,
                                     cx,
                                 ),
-                                busy,
+                                busy || invalid,
                                 cx,
                             )
                             .on_click(move |_, window, cx| {
@@ -656,7 +615,7 @@ impl AccountPage {
             .flex()
             .items_center()
             .gap(px(14.))
-            .child(ui::MemberAvatar::new(me.as_ref(), px(64.)).on(k.window))
+            .child(account_avatar(me.as_ref(), px(64.), cx))
             .child(
                 div()
                     .flex_1()
@@ -761,14 +720,15 @@ impl Render for AccountPage {
                 .clone()
                 .iter()
                 .map(|d| {
-                    // The context menu: 让这台设备退出登录 (this Mac: 退出登录…).
+                    // The context menu: 退出这台设备的登录… (this Mac: the
+                    // 退出登录… alert).
                     let (page, id) = (page.clone(), d.id.clone());
                     div()
                         .id(gpui::ElementId::Name(format!("device-menu-{}", d.id).into()))
                         .child(self.device_row(d, window, cx))
                         .context_menu(move |menu, _, _| {
                             let (page, id) = (page.clone(), id.clone());
-                            menu.item(PopupMenuItem::new(s::DEVICE_REMOVE).on_click(
+                            menu.item(PopupMenuItem::new(o::DEVICE_SIGN_OUT_MENU).on_click(
                                 move |_, window, cx| {
                                     page.update(cx, |p, cx| p.select_device(Some(id.clone()), cx));
                                     Self::confirm_remove_device(page.clone(), window, cx);
@@ -776,6 +736,19 @@ impl Render for AccountPage {
                             ))
                         })
                         .into_any_element()
+                })
+                .enumerate()
+                .flat_map(|(i, row)| {
+                    // A hairline between rows, inset 12 pt from the group
+                    // edges (the list sits 4 pt outside them).
+                    let line = (i > 0).then(|| {
+                        div()
+                            .mx(metrics::FORM_ROW_INSET + px(4.))
+                            .h(px(1.))
+                            .bg(k.separator)
+                            .into_any_element()
+                    });
+                    line.into_iter().chain(std::iter::once(row))
                 })
                 .collect(),
             (Some(_), _) => vec![
@@ -848,7 +821,7 @@ impl Render for AccountPage {
                     // List rows inset their selection; the text lines up
                     // with the other groups' 12 pt.
                     .row(div().py(px(4.)).mx(px(-4.)).flex().flex_col().children(rows))
-                    .below(widgets::list_controls(remove, s::DEVICES_FOOTER, cx)),
+                    .below(div().flex().child(remove)),
             );
         let sign_out_page = page.clone();
         widgets::pane()
@@ -878,6 +851,28 @@ impl Render for AccountPage {
                     }),
                 ),
             )
+    }
+}
+
+/// My avatar in the 账号 header: a photo, or a letter disk on the quiet
+/// `quaternary` fill with `label` initials (never the bright ink disk).
+fn account_avatar(me: Option<&Member>, size: gpui::Pixels, cx: &App) -> gpui::AnyElement {
+    let k = native_colors(cx);
+    match me {
+        Some(m) if m.avatar_url.is_none() && !m.is_bot() => div()
+            .flex_none()
+            .size(size)
+            .rounded_full()
+            .bg(k.quaternary)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(size * 0.42)
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(k.label)
+            .child(ui::avatar::monogram(&m.name, size))
+            .into_any_element(),
+        _ => ui::MemberAvatar::new(me, size).on(k.window).into_any_element(),
     }
 }
 

@@ -556,7 +556,7 @@ pub mod scenes {
     }
 
     /// The 重命名群 dialog after the server refused: a new name typed and
-    /// the error under the field.
+    /// the refusal in an alert over it.
     pub fn rename_group_error(
         services: Services,
         content: Size<Pixels>,
@@ -565,12 +565,11 @@ pub mod scenes {
         over_main(services, content, cx, |services, window, cx| {
             if let Some(g) = open_group(&services, cx) {
                 let typed = format!("{} · 新名称", g.name);
-                let error = crate::copy::nav::RENAME_GROUP_FORBIDDEN.into();
                 super::super::rename::open_with(
                     services,
                     g.id,
                     g.name,
-                    Some((typed, error)),
+                    Some((typed, crate::data::AdminError::Forbidden)),
                     window,
                     cx,
                 );

@@ -15,21 +15,23 @@ use gpui_component::{
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
+use super::dialogs::{form_field_width, sheet_form, sheet_form_row, sheet_form_row_top};
 use crate::{
     app::Services,
     copy::{common, overlays as o},
     data::{GroupId, StartTopicRequest},
     ui::{
         controls::placeholder_input,
-        native::overlays::field_error,
         native::{
-            FormRow, GroupedForm, NativeTextField, NativeType as _, PushSize, SheetLayout,
-            SheetWidth, disabled_push, metrics, native_colors, native_sheet, popup_button,
-            sheet_buttons,
+            NativeTextField, NativeType as _, PushSize, SheetLayout, SheetWidth, disabled_push,
+            metrics, native_colors, native_sheet, popup_button, sheet_buttons,
         },
     },
     views::rail::model as rail_model,
 };
+
+/// The first message field: four lines of Body text.
+const BODY_FIELD: gpui::Pixels = px(88.);
 
 gpui::actions!(new_topic, [StartTopic]);
 
@@ -69,7 +71,6 @@ pub struct NewTopicSheet {
     group: Option<GroupId>,
     title: Entity<InputState>,
     body: Entity<TextareaState>,
-    error: Option<&'static str>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -102,9 +103,8 @@ impl NewTopicSheet {
                     }
                 },
             ),
-            cx.subscribe(&body, |this, _, event: &InputEvent, cx| {
+            cx.subscribe(&body, |_, _, event: &InputEvent, cx| {
                 if let InputEvent::Change = event {
-                    this.error = None;
                     cx.notify();
                 }
             }),
@@ -115,7 +115,6 @@ impl NewTopicSheet {
             group,
             title,
             body,
-            error: None,
             _subscriptions: subscriptions,
         }
     }
@@ -125,9 +124,8 @@ impl NewTopicSheet {
             return;
         };
         let body = self.body.read(cx).value().trim().to_string();
+        // An empty message only turns 开始 off (NATIVE.md §7.4).
         if body.is_empty() {
-            self.error = Some(o::NEW_TOPIC_BODY_REQUIRED);
-            cx.notify();
             return;
         }
         let title = crate::views::topic_menu::validate_title(&self.title.read(cx).value()).ok();
@@ -184,21 +182,20 @@ impl Render for NewTopicSheet {
                     })
                 });
         let body_focused = self.body.read(cx).focus_handle(cx).is_focused(window);
+        let field_w = form_field_width(SheetWidth::Form);
+        // A quiet multi-line field: `content` fill, a 1 px `separator` edge,
+        // and the soft focus halo only while it has the focus.
         let body_field = div()
             .id("new-topic-body")
-            .w_full()
-            .h(px(96.))
+            .w(field_w)
+            .h(BODY_FIELD)
             .px(metrics::FIELD_PAD)
             .py(px(4.))
             .rounded(metrics::FIELD_RADIUS)
             .bg(k.content)
             .border_1()
-            .border_color(if self.error.is_some() {
-                k.red
-            } else {
-                k.separator
-            })
-            .when_focus(body_focused, k.focus_ring())
+            .border_color(k.separator)
+            .when_focus(body_focused, soft_halo(k.focus))
             .cursor_text()
             .child(placeholder_input(
                 Textarea::new(&self.body)
@@ -219,29 +216,14 @@ impl Render for NewTopicSheet {
                 SheetLayout::new(o::NEW_TOPIC_TITLE)
                     .explanation(o::NEW_TOPIC_EXPLANATION)
                     .body(
-                        GroupedForm::new()
-                            .row(FormRow::new(o::NEW_TOPIC_GROUP).control(group_popup))
-                            .row(
-                                FormRow::new(o::NEW_TOPIC_NAME).control(
-                                    NativeTextField::new("new-topic-title", &self.title)
-                                        .width(px(280.)),
-                                ),
-                            ),
-                    )
-                    .body(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .px(px(2.))
-                                    .n_headline()
-                                    .text_color(k.label)
-                                    .child(o::NEW_TOPIC_BODY),
-                            )
-                            .child(body_field)
-                            .children(self.error.map(|e| field_error(e, cx))),
+                        sheet_form()
+                            .child(sheet_form_row(o::NEW_TOPIC_GROUP, group_popup, cx))
+                            .child(sheet_form_row(
+                                o::NEW_TOPIC_NAME,
+                                NativeTextField::new("new-topic-title", &self.title).width(field_w),
+                                cx,
+                            ))
+                            .child(sheet_form_row_top(o::NEW_TOPIC_BODY, body_field, cx)),
                     )
                     .buttons([
                         cancel.on_click(|_, window, cx| window.close_dialog(cx)),
@@ -250,6 +232,18 @@ impl Render for NewTopicSheet {
                     ]),
             )
     }
+}
+
+/// The soft focus halo of the multi-line field: the focus color, spread
+/// 3 pt and blurred 2 pt, so a tall field does not read as a thick frame.
+fn soft_halo(focus: gpui::Hsla) -> Vec<gpui::BoxShadow> {
+    vec![gpui::BoxShadow {
+        color: focus.opacity(0.7),
+        offset: gpui::point(px(0.), px(0.)),
+        blur_radius: px(2.),
+        spread_radius: px(2.5),
+        inset: false,
+    }]
 }
 
 trait WhenFocus {
@@ -278,7 +272,7 @@ pub fn open_new_topic(
             let body = view.read(cx).body.clone();
             body.update(cx, |b, cx| b.focus(window, cx));
         }
-        native_sheet(dialog, SheetWidth::Form, cx).child(view.clone())
+        native_sheet(dialog, SheetWidth::Form, cx).px(px(0.)).child(view.clone())
     });
     sheet
 }

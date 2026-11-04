@@ -6,7 +6,7 @@ use gpui::{
     Subscription, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    WindowExt as _,
+    Sizable as _, WindowExt as _,
     input::{InputEvent, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
@@ -17,11 +17,12 @@ use super::{
 };
 use crate::{
     app::{Changes, Services},
-    copy::{common, dev, fill, settings as s, update as u},
+    copy::{common, dev, fill, overlays as o, settings as s, update as u},
     data::{Change, ConnectionState, SessionState},
     ui::native::{
         FormRow, GroupedForm, NativeSwitch, NativeType as _, PushSize, PushStyle, SheetLayout,
-        SheetWidth, disabled_push, metrics, native_colors, popup_button, push_button,
+        SheetWidth, determinate_bar, disabled_push, metrics, native_colors, popup_button,
+        push_button, spinner,
     },
     updater::{self, Phase, banner::banner_text, version},
 };
@@ -216,13 +217,18 @@ impl GeneralPage {
         });
     }
 
-    /// The version row's detail (the update state) and its button.
+    /// The version row (NATIVE.md §8): the update state as its detail and
+    /// one control: 检查更新, 更新到 …, the download's progress bar, or
+    /// 重启安装 once the update is ready.
     fn update_row(&self, cx: &mut Context<Self>) -> FormRow {
+        let k = native_colors(cx);
         let phase = self.updater.as_ref().map(|u| u.read(cx).phase().clone());
         let detail = match &phase {
             None | Some(Phase::Idle) => s::UPDATE_STATE_IDLE.to_string(),
             Some(Phase::Checking) => u::CHECKING.to_string(),
             Some(Phase::UpToDate) => u::UP_TO_DATE.to_string(),
+            // The steps go in the group's footer: a detail is one line.
+            Some(Phase::Manual(_)) => u::BANNER_MANUAL.to_string(),
             Some(other) => banner_text(other).unwrap_or_default(),
         };
         let row = FormRow::new(fill(u::VERSION, &[("version", version::CURRENT)])).detail(detail);
@@ -240,12 +246,37 @@ impl GeneralPage {
                 )
                 .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.start_update(cx))),
             ),
+            Some(ref p @ Phase::Downloading { .. }) => row.control(
+                div()
+                    .w(px(120.))
+                    .child(determinate_bar(
+                        crate::updater::banner::download_share(p).unwrap_or(0.),
+                        None,
+                        cx,
+                    )),
+            ),
+            Some(Phase::Ready { .. }) => row.control(
+                push_button(
+                    "about-restart",
+                    o::UPDATE_RESTART,
+                    PushStyle::Default,
+                    PushSize::Regular,
+                    cx,
+                )
+                .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.install_now(cx))),
+            ),
+            Some(Phase::WaitingForSends(_) | Phase::Installing(_) | Phase::Checking) => {
+                row.control(spinner().with_size(metrics::SPINNER).color(k.secondary))
+            }
+            Some(Phase::Manual(_)) => row.control(
+                push_button("about-dismiss", u::DISMISS, PushStyle::Standard, PushSize::Regular, cx)
+                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
+            ),
             Some(Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. }) | None => row
                 .control(
                     push_button("about-check", u::CHECK, PushStyle::Standard, PushSize::Regular, cx)
                         .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.check_now(cx))),
                 ),
-            _ => row,
         }
     }
 }
@@ -305,6 +336,11 @@ impl Render for GeneralPage {
             )));
         let nav = self.services.nav.clone();
         let mut about = GroupedForm::new().row(self.update_row(cx));
+        if let Some(up) = &self.updater
+            && matches!(up.read(cx).phase(), Phase::Manual(_))
+        {
+            about = about.footer(fill(u::MANUAL, &[("product", env!("PRODUCT_NAME"))]));
+        }
         if !server.is_empty() {
             about = about.row(FormRow::new(s::SERVER).value(server.clone(), cx));
         }

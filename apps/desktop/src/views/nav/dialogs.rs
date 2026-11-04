@@ -23,14 +23,159 @@ use crate::{
     ui::{
         self,
         native::{
-            AlertLayout, FormRow, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _,
+            AlertLayout, NativeCheckbox, NativeTextField, NativeType as _,
             PushStyle, SearchField, SheetLayout, SheetWidth, alert_button, disabled_push, metrics,
             native_colors, native_sheet,
-            overlays::{app_icon, field_error, native_alert, sheet_list, sheet_list_row},
+            overlays::{app_icon, sheet_list, sheet_list_row},
             sheet_buttons,
         },
     },
 };
+
+// --- v12/fx-overlays: the one form pattern of every sheet ---
+
+/// The label column of a sheet form: fits 第一条消息 (five characters).
+pub const FORM_LABEL: gpui::Pixels = px(72.);
+/// The gap between a label and its control.
+pub const FORM_GAP: gpui::Pixels = px(8.);
+/// The space between the rows of a sheet form.
+pub const FORM_ROW_GAP: gpui::Pixels = px(12.);
+
+/// The width a control takes in the form of a `width` sheet: from the
+/// control column to the sheet's trailing inset.
+pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
+    width.px() - metrics::SHEET_PAD * 2. - FORM_LABEL - FORM_GAP
+}
+
+/// A sheet form (the Messages Name and Photo sheet): right-aligned labels
+/// in one column, standalone controls on the sheet background, no group
+/// fill under them.
+pub fn sheet_form() -> gpui::Div {
+    div().w_full().flex().flex_col().gap(FORM_ROW_GAP)
+}
+
+/// One row of a [`sheet_form`]: the label right-aligned in the label column,
+/// the control after it, centred on the control's first line.
+pub fn sheet_form_row(
+    label: impl Into<gpui::SharedString>,
+    control: impl IntoElement,
+    cx: &App,
+) -> gpui::Div {
+    form_row(label.into(), control.into_any_element(), false, cx)
+}
+
+/// A row whose control is taller than one line (a multi-line field, a
+/// grid): the label sits on the control's first line.
+pub fn sheet_form_row_top(
+    label: impl Into<gpui::SharedString>,
+    control: impl IntoElement,
+    cx: &App,
+) -> gpui::Div {
+    form_row(label.into(), control.into_any_element(), true, cx)
+}
+
+fn form_row(
+    label: gpui::SharedString,
+    control: gpui::AnyElement,
+    top: bool,
+    cx: &App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .w_full()
+        .flex()
+        .gap(FORM_GAP)
+        .map(|d| if top { d.items_start() } else { d.items_center() })
+        .child(
+            div()
+                .flex_none()
+                .w(FORM_LABEL)
+                .min_h(metrics::FIELD)
+                .flex()
+                .items_center()
+                .justify_end()
+                .n_body()
+                .text_color(k.label)
+                .child(label),
+        )
+        .child(div().flex_1().min_w(px(0.)).flex().child(control))
+}
+
+/// The one quiet footnote of a sheet form (a field problem, a hint):
+/// Subheadline in `secondary`, on the control column. Never red.
+pub fn sheet_footnote(text: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
+    div()
+        .w_full()
+        .pl(FORM_LABEL + FORM_GAP)
+        .n_subheadline()
+        .text_color(native_colors(cx).secondary)
+        .child(text.into())
+}
+
+/// Configures a dialog as a window-modal alert (§7.2): the Tahoe alert,
+/// attached at the top centre of its window under the toolbar row, as a
+/// sheet is, not floating in the middle.
+pub fn window_alert(
+    dialog: gpui_component::dialog::Dialog,
+    cx: &App,
+) -> gpui_component::dialog::Dialog {
+    let k = native_colors(cx);
+    dialog
+        .entrance(crate::ui::native::sheet::SHEET_ENTRANCE)
+        .margin_top(metrics::TOOLBAR_ROW)
+        .width(metrics::ALERT_WIDTH)
+        .close_button(false)
+        .keyboard(true)
+        .overlay_closable(false)
+        .bg(k.sheet)
+        .border_color(k.glass_edge)
+        .rounded(metrics::SHEET_RADIUS)
+        .p(px(0.))
+        .gap(px(0.))
+}
+
+/// A blocking error (§7.4): an alert with the app icon, the title, the
+/// message and one default `好`. `then` runs after it closes (a sheet the
+/// error ends closes with it).
+pub fn error_alert(
+    title: impl Into<gpui::SharedString>,
+    message: impl Into<gpui::SharedString>,
+    then: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let title = title.into();
+    let message = message.into();
+    let then = std::rc::Rc::new(then);
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let on_ok = then.clone();
+        let on_click = then.clone();
+        window_alert(dialog, cx)
+            .on_ok(move |_, window, cx| {
+                let on_ok = on_ok.clone();
+                window.defer(cx, move |window, cx| on_ok(window, cx));
+                true
+            })
+            .child(
+                AlertLayout::new(title.clone())
+                    .icon(app_icon(metrics::ALERT_ICON))
+                    .message(message.clone())
+                    .buttons([alert_button(
+                        "error-alert-ok",
+                        o::ALERT_OK,
+                        PushStyle::Default,
+                        false,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        window.close_dialog(cx);
+                        on_click(window, cx);
+                    })]),
+            )
+    });
+}
+
+// --- end v12/fx-overlays ---
 
 /// Members I can add to a group or DM: everyone but me and deactivated members.
 pub fn pickable_members(members: &[Member], me: Option<&str>) -> Vec<Member> {
@@ -86,7 +231,6 @@ pub struct NewGroupForm {
     members: Vec<Member>,
     /// In pick order.
     selected: Vec<MemberId>,
-    error: Option<gpui::SharedString>,
     scroll: gpui::ScrollHandle,
     /// The sheet title of 添加成员 (with the 群 name).
     title: gpui::SharedString,
@@ -123,10 +267,7 @@ impl NewGroupForm {
                 window,
                 |this, _, event: &InputEvent, window, cx| match event {
                     InputEvent::PressEnter { .. } => this.submit(window, cx),
-                    InputEvent::Change => {
-                        this.error = None;
-                        cx.notify();
-                    }
+                    InputEvent::Change => cx.notify(),
                     _ => {}
                 },
             ),
@@ -149,7 +290,6 @@ impl NewGroupForm {
             filter,
             members,
             selected: Vec::new(),
-            error: None,
             scroll: gpui::ScrollHandle::new(),
             title: gpui::SharedString::default(),
             _subscriptions: subscriptions,
@@ -178,11 +318,8 @@ impl NewGroupForm {
                             r.await.unwrap_or(Err(AdminError::Other)).map(|_| ())
                         })
                     }
-                    Err(error) => {
-                        self.error = Some(error.into());
-                        cx.notify();
-                        return;
-                    }
+                    // The default button is off while the name has a problem.
+                    Err(_) => return,
                 }
             }
             FormMode::AddMembers { group_id } => {
@@ -199,7 +336,6 @@ impl NewGroupForm {
             }
         };
         self.busy = true;
-        self.error = None;
         cx.notify();
         // The dialog stays open until the server answers, so a refusal can be shown.
         cx.spawn_in(window, async move |this, cx| {
@@ -209,10 +345,21 @@ impl NewGroupForm {
                 match result {
                     Ok(()) => window.close_dialog(cx),
                     Err(e) => {
-                        if this.mode == FormMode::NewGroup {
+                        let title = if this.mode == FormMode::NewGroup {
                             super::clear_pending(cx);
-                        }
-                        this.error = Some(crate::views::settings::widgets::error_text(e).into());
+                            o::NEW_GROUP_REFUSED
+                        } else {
+                            o::ADD_MEMBERS_REFUSED
+                        };
+                        // A refusal blocks: an alert over the sheet, which
+                        // stays open so the user can try again.
+                        error_alert(
+                            title,
+                            crate::views::settings::widgets::error_text(e),
+                            |_, _| {},
+                            window,
+                            cx,
+                        );
                         cx.notify();
                     }
                 }
@@ -227,9 +374,15 @@ impl Render for NewGroupForm {
         let k = native_colors(cx);
         let query = self.filter.read(cx).value().trim().to_lowercase();
         let new_group = self.mode == FormMode::NewGroup;
+        let typed = self.name.read(cx).value().to_string();
+        // A field problem (a name that is too long) turns the default button
+        // off and shows one quiet footnote; an empty name only turns it off.
+        let name_problem = (new_group && !typed.trim().is_empty())
+            .then(|| validate_group_name(&typed).err())
+            .flatten();
         let ready = !self.busy
             && if new_group {
-                !self.name.read(cx).value().trim().is_empty()
+                !typed.trim().is_empty() && name_problem.is_none()
             } else {
                 !self.selected.is_empty()
             };
@@ -275,106 +428,79 @@ impl Render for NewGroupForm {
         let create = disabled_push(create, !ready, cx)
             .loading(self.busy)
             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
-        let error = self.error.clone();
+        let field_w = form_field_width(SheetWidth::List);
+        let members = div()
+            .w(field_w)
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(SearchField::new("new-group-filter", &self.filter).width(px(220.)))
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .flex_none()
+                            .n_subheadline()
+                            .n_figures()
+                            .text_color(k.secondary)
+                            .child(fill(
+                                nav::SELECTED_COUNT,
+                                &[("n", &self.selected.len().to_string())],
+                            )),
+                    ),
+            )
+            .child(
+                sheet_list(7, cx).child(
+                    div()
+                        .id("new-group-members")
+                        .size_full()
+                        .py(px(5.))
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .flex()
+                        .flex_col()
+                        .children(rows)
+                        .when(empty, |el| {
+                            el.child(
+                                div()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .n_body()
+                                    .text_color(k.secondary)
+                                    .child(if self.members.is_empty() {
+                                        nav::ALL_MEMBERS_IN
+                                    } else {
+                                        nav::NO_MEMBERS_MATCH
+                                    }),
+                            )
+                        }),
+                ),
+            );
         SheetLayout::new(title)
             .explanation(if new_group {
                 o::NEW_GROUP_EXPLANATION
             } else {
                 o::ADD_MEMBERS_EXPLANATION
             })
-            .when_body(new_group, || {
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        GroupedForm::new().row(
-                            FormRow::new(o::GROUP_NAME).control(
-                                NativeTextField::new("new-group-name", &self.name)
-                                    .width(px(280.))
-                                    .error(error.is_some()),
-                            ),
-                        ),
-                    )
-                    .children(error.clone().map(|e| field_error(e, cx)))
-                    .into_any_element()
-            })
             .body(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(12.))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .n_headline()
-                                    .text_color(k.label)
-                                    .child(o::MEMBERS),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .n_subheadline()
-                                    .n_figures()
-                                    .text_color(k.secondary)
-                                    .child(fill(
-                                        nav::SELECTED_COUNT,
-                                        &[("n", &self.selected.len().to_string())],
-                                    )),
-                            )
-                            .child(
-                                SearchField::new("new-group-filter", &self.filter).width(px(200.)),
-                            ),
-                    )
-                    .child(
-                        sheet_list(7, cx).child(
-                            div()
-                                .id("new-group-members")
-                                .size_full()
-                                .py(px(5.))
-                                .overflow_y_scroll()
-                                .track_scroll(&self.scroll)
-                                .flex()
-                                .flex_col()
-                                .children(rows)
-                                .when(empty, |el| {
-                                    el.child(
-                                        div()
-                                            .size_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .n_body()
-                                            .text_color(k.secondary)
-                                            .child(if self.members.is_empty() {
-                                                nav::ALL_MEMBERS_IN
-                                            } else {
-                                                nav::NO_MEMBERS_MATCH
-                                            }),
-                                    )
-                                }),
-                        ),
-                    )
-                    .when_some(error.filter(|_| !new_group), |el, e| {
-                        el.child(field_error(e, cx))
-                    }),
+                sheet_form()
+                    .when(new_group, |f| {
+                        f.child(sheet_form_row(
+                            o::GROUP_NAME,
+                            NativeTextField::new("new-group-name", &self.name).width(px(280.)),
+                            cx,
+                        ))
+                        .when_some(name_problem, |f, p| f.child(sheet_footnote(p, cx)))
+                    })
+                    .child(sheet_form_row_top(o::MEMBERS, members, cx)),
             )
             .buttons([cancel, create])
-    }
-}
-
-/// A body part that only some sheets have.
-trait WhenBody {
-    fn when_body(self, show: bool, f: impl FnOnce() -> gpui::AnyElement) -> Self;
-}
-
-impl WhenBody for SheetLayout {
-    fn when_body(self, show: bool, f: impl FnOnce() -> gpui::AnyElement) -> Self {
-        if show { self.body(f()) } else { self }
     }
 }
 
@@ -423,7 +549,7 @@ fn open_sheet<V: gpui::Render>(
         if first.replace(false) {
             focus.focus(window, cx);
         }
-        native_sheet(dialog, width, cx).child(view.clone())
+        native_sheet(dialog, width, cx).px(px(0.)).child(view.clone())
     });
 }
 
@@ -625,9 +751,11 @@ pub fn open_start_dm(services: Services, window: &mut Window, cx: &mut App) {
     open_sheet(picker, focus, SheetWidth::List, window, cx);
 }
 
-/// Opens a Tahoe alert (§7.2) with a destructive choice: the app icon, the
-/// title and message, the red `destructive` button on top and `取消` (the
-/// default: Return) below. `on_confirm` runs when the red button is chosen.
+/// Opens a Tahoe alert (§7.2) with a destructive choice, attached at the
+/// top centre of the window: the app icon, the title and message, the red
+/// `destructive` button on top and a Standard `取消` below (Return and
+/// Escape cancel; no button is filled). `on_confirm` runs when the red
+/// button is chosen.
 pub fn destructive_alert(
     id: &'static str,
     title: String,
@@ -640,8 +768,8 @@ pub fn destructive_alert(
     let on_confirm = std::rc::Rc::new(on_confirm);
     window.open_dialog(cx, move |dialog, _, cx| {
         let on_confirm = on_confirm.clone();
-        native_alert(dialog, cx)
-            // Return chooses the default button, `取消`.
+        window_alert(dialog, cx)
+            // Return cancels: a destructive choice is never the default.
             .on_ok(|_, _, _| true)
             .child(
                 AlertLayout::new(title.clone())
@@ -653,7 +781,7 @@ pub fn destructive_alert(
                                 window.close_dialog(cx);
                                 on_confirm(window, cx);
                             }),
-                        alert_button((id, 1usize), common::CANCEL, PushStyle::Default, false, cx)
+                        alert_button((id, 1usize), common::CANCEL, PushStyle::Standard, false, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ]),
             )

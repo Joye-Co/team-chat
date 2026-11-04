@@ -86,34 +86,38 @@ pub fn run_duration(run: &BotRunSummary, now: Millis) -> Option<u64> {
 }
 
 /// `停止` (NATIVE.md §7.2): asks in a Tahoe alert in the active window
-/// (停止 in red, 取消 the default), then stops the run with [`stop_run_now`].
+/// (停止 in red, a Standard 取消), then stops the run with [`stop_run_now`].
 pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let Some(window) = cx.active_window() else {
         stop_run_now(services, run, cx);
         return;
     };
+    let (s, r) = (services.clone(), run.clone());
+    let _ = window.update(cx, |_, window, cx| confirm_stop(&s, &r, window, cx));
+}
+
+/// The 停止 alert in `window`.
+pub fn confirm_stop(services: &Services, run: &BotRunSummary, window: &mut Window, cx: &mut App) {
     let name = services
         .provider
         .member(&run.bot_id)
         .map(|m| m.name)
         .unwrap_or_default();
     let (s, r) = (services.clone(), run.clone());
-    let _ = window.update(cx, |_, window, cx| {
-        crate::views::nav::dialogs::destructive_alert(
-            "stop-run",
-            fill(o::STOP_TITLE, &[("name", &name)]),
-            fill(o::STOP_MESSAGE, &[("name", &name)]),
-            o::STOP_OK,
-            move |_, cx| stop_run_now(&s, &r, cx),
-            window,
-            cx,
-        )
-    });
+    crate::views::nav::dialogs::destructive_alert(
+        "stop-run",
+        fill(o::STOP_TITLE, &[("name", &name)]),
+        fill(o::STOP_MESSAGE, &[("name", &name)]),
+        o::STOP_OK,
+        move |_, cx| stop_run_now(&s, &r, cx),
+        window,
+        cx,
+    )
 }
 
 /// Asks the provider to stop a run. The views show `正在停止…` from
 /// `ChatProvider::run_stopping` until the run ends. A run that already ended
-/// answers `Ok`; any other failure shows the standard error notice.
+/// answers `Ok`; any other failure blocks and opens an alert (no toast).
 pub fn stop_run_now(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let reply = services
         .provider
@@ -122,17 +126,24 @@ pub fn stop_run_now(services: &Services, run: &BotRunSummary, cx: &mut App) {
         let result = reply.await.unwrap_or(Err(AdminError::Other));
         if let Err(e) = result {
             cx.update(|cx| {
-                crate::views::files::notify_error(
-                    fill(p::STOP_FAILED, &[("reason", stop_error_text(e))]),
-                    cx,
-                )
+                if let Some(window) = cx.active_window() {
+                    let _ = window.update(cx, |_, window, cx| {
+                        crate::views::nav::dialogs::error_alert(
+                            o::STOP_REFUSED,
+                            stop_error_text(e),
+                            |_, _| {},
+                            window,
+                            cx,
+                        )
+                    });
+                }
             });
         }
     })
     .detach();
 }
 
-/// Why a stop failed, for the toast.
+/// Why a stop failed, for its alert.
 pub fn stop_error_text(e: AdminError) -> &'static str {
     match e {
         // Only people in the run's 群 stop runs; the server says forbidden.
@@ -174,10 +185,17 @@ pub struct ProcessView {
     /// The run the poll loop follows.
     polling: Option<String>,
     download: Download,
+    /// Shows its own 工作记录 header (off when a pane's toolbar row names it).
+    titled: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl ProcessView {
+    /// A pane's toolbar row names the view: no 工作记录 header inside.
+    pub fn set_titled(&mut self, titled: bool) {
+        self.titled = titled;
+    }
+
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
@@ -202,6 +220,7 @@ impl ProcessView {
             visible: false,
             polling: None,
             download: Download::Idle,
+            titled: true,
             _subscriptions: subscriptions,
         };
         this.open_topic(open, cx);
@@ -670,7 +689,9 @@ impl Render for ProcessView {
             (None, true, true) => Some((p::NO_STEPS, false)),
             _ => None,
         };
-        body.child(section(p::RUNS, cx))
+        let titled = self.titled;
+        body.when(titled, |el| el.child(section(p::RUNS, cx)))
+            .when(!titled, |el| el.pt(space::S4))
             .child(div().mx(-space::S8).flex().flex_col().children(rows))
             .when_some(run, |el, run| {
                 el.child(self.render_run_details(&run, developer, cx))

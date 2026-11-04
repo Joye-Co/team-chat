@@ -646,7 +646,15 @@ scene_opener!(open_profile, Page::Account);
 scene_opener!(open_members, Page::Members);
 scene_opener!(open_machines, Page::Machines);
 scene_opener!(open_notifications, Page::Notifications);
-scene_opener!(open_about, Page::General);
+/// 通用 after 检查更新 (the version row says 已是最新版本), so it differs
+/// from `settings-general`.
+pub fn open_about(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    crate::updater::preview::open_up_to_date(services, content, cx)
+}
 scene_opener!(open_general, Page::General);
 
 /// 快捷键: the menus' key bindings must exist, as in the app.
@@ -700,13 +708,27 @@ pub fn open_members_end(
     open_end(services, Page::Members, cx)
 }
 
-/// 通知 scrolled to its end: 勿扰 and 按群设置….
+/// 通知 with its lower groups at work: 每日摘要 and 勿扰 on (the pane fits
+/// the window, so "the end" is these groups in use, not a scroll).
 pub fn open_notifications_end(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    open_end(services, Page::Notifications, cx)
+    let (handle, view) = open_page(services, Page::Notifications, cx)?;
+    after_fit(handle, cx, move |_, cx| {
+        let page = view.read(cx).notifications().clone();
+        page.update(cx, |p, cx| {
+            p.change(
+                |p| {
+                    p.digest_at = Some(crate::data::NotifyPreferences::DIGEST_DEFAULT);
+                    p.quiet_enabled = true;
+                },
+                cx,
+            )
+        });
+    });
+    Ok(handle)
 }
 
 /// The 编辑资料 sheet over 账号.
@@ -939,6 +961,15 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: open_device_remove,
     },
+    // --- v12/fx-overlays ---
+    Scene {
+        name: "update-ready",
+        about: "The 重启安装 sheet over the main window once a downloaded update is ready",
+        start: Start::SignedIn,
+        setup: crate::selftest::scenes::open_first_topic,
+        open: crate::updater::preview::open_ready,
+    },
+    // --- end v12/fx-overlays ---
     Scene {
         name: "settings-notify-groups",
         about: "Settings: the 按群设置通知 sheet over 通知",
