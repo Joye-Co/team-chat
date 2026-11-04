@@ -11,9 +11,9 @@
 //!   我参与的 switch between 我参与的 and 全部话题.
 //! - B 以「需要我」为中心: 需要你 / 在做 / 等别人 / 做完了 · 今天 (folded);
 //!   the pull-down picks the 群.
-//! - C 以成员为中心: members that are busy first, each opening to its
-//!   话题; idle members in one row; 同事 below. 话题 replaces 成员 among the
-//!   destinations.
+//! - C 以成员为中心: one row per member (avatar 16, a state dot) under
+//!   the headers 在做, 空闲 and 不在; a busy member opens to its 话题. The
+//!   destinations stay 首页 / 产出 / 成员.
 
 // --- v12/behavior ---
 mod menus;
@@ -395,35 +395,8 @@ impl Render for RailView {
             view.update(cx, |this, cx| this.entry(ix, cx))
         })
         .size_full();
-        // C trades 成员 for 话题 among the destinations: its list is members.
-        let destinations: Vec<AnyElement> = match mode {
-            RailMode::Member => vec![
-                self.destination(
-                    "rail-desk",
-                    Sf::Desk,
-                    c::RAIL_DESK,
-                    page == Page::Desk,
-                    Some(asks),
-                    |n, cx| n.open_desk(cx),
-                ),
-                self.destination(
-                    "rail-topics",
-                    Sf::Group,
-                    c::RAIL_TOPICS,
-                    matches!(page, Page::Topic | Page::Group),
-                    None,
-                    choose_topics,
-                ),
-                self.destination(
-                    "rail-artifacts",
-                    Sf::Outputs,
-                    c::RAIL_ARTIFACTS,
-                    matches!(page, Page::Artifacts | Page::Artifact),
-                    None,
-                    |n, cx| n.open_artifacts(cx),
-                ),
-            ],
-            _ => vec![
+        // The same three destinations in every sidebar style (§9.1).
+        let destinations: Vec<AnyElement> = vec![
                 self.destination(
                     "rail-desk",
                     Sf::Desk,
@@ -448,8 +421,7 @@ impl Render for RailView {
                     None,
                     |n, cx| n.open_members(None, cx),
                 ),
-            ],
-        };
+        ];
         let new_topic = self
             .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx)
             .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx));
@@ -515,8 +487,13 @@ impl Render for RailView {
                     )
                     .child(rows),
             )
-            // App banners (connection, update) sit at the end of the list.
-            .children(crate::views::banners::slot(cx))
+            // v12/fx-shell: nothing about the connection at the bottom of
+            // the sidebar (it is the toolbar subtitle and a 显示 command);
+            // only an update that runs while its sheet is hidden.
+            .children(
+                cx.try_global::<crate::views::banners::AppBanners>()
+                    .map(|b| b.update.clone()),
+            )
     }
 }
 
@@ -608,23 +585,6 @@ impl RailView {
     }
 }
 // --- end v12/behavior ---
-
-/// C's 话题 destination: the 群 of the open 话题, else the first 群.
-fn choose_topics(nav: &mut crate::app::Navigation, cx: &mut Context<crate::app::Navigation>) {
-    let group = match (&nav.place, &nav.topic) {
-        (_, Some((g, _))) => Some(g.clone()),
-        (Some(Place::Group(g)), None) => Some(g.clone()),
-        _ => None,
-    };
-    if let Some(g) = group {
-        nav.place = None;
-        nav.open_group(g, cx);
-    } else {
-        nav.place = Some(Place::Todo);
-        nav.topic = None;
-        cx.notify();
-    }
-}
 
 impl RailView {
     /// The `搜索` capsule (§5.6): 30 pt, under the traffic-light row. A
