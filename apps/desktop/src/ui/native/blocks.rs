@@ -11,6 +11,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
+use super::focus::FocusRow as _;
 use super::tokens::{
     NativeType as _, avatar, height, metrics, native_colors, radius, shadow, space,
 };
@@ -442,9 +443,7 @@ impl RenderOnce for ListRow {
             .items_center()
             .gap(space::S12)
             .when(self.selected, |d| d.bg(k.selection))
-            .when(!self.selected && clickable, |d| {
-                d.hover(|s| s.bg(k.fill.opacity(0.5)))
-            })
+            .when(clickable, |d| d.focus_row(self.selected, cx))
             .children(self.media)
             .child(
                 div()

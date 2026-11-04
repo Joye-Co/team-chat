@@ -1,6 +1,7 @@
 //! The floating sidebar (NATIVE.md §2, §9.1): the glass panel frame,
 //! section headers with a disclosure chevron on hover, and 32 pt rows with
-//! the Tahoe selection (gray fill, accent symbol and text, no hover).
+//! the Tahoe selection (gray fill, accent symbol and text) and the row hover
+//! (muted 50 %).
 
 use std::rc::Rc;
 
@@ -12,6 +13,7 @@ use gpui::{
 
 use super::{
     badge::{BadgeState, StatusBadge},
+    focus::{Arrows, FocusRow as _},
     tokens::{NativeType as _, emphasized, metrics, native_colors},
 };
 use crate::{
@@ -164,9 +166,13 @@ pub enum RowLeading {
     Element(AnyElement),
 }
 
-/// A 32 pt sidebar row (§9.1). Selection: a rounded rect inset 10 pt from
-/// the panel sides, radius 7, `selection` fill; its symbol and text use
-/// `accent`. No hover fill. An inactive window draws the text `label`.
+/// A 32 pt sidebar row (§9.1, COMPLETENESS.md §2.1). Selection: a rounded
+/// rect inset 8 from the panel sides, `selection` (muted) fill; its symbol
+/// and text use `accent`. Hover: muted at 50 %, drawn at once. Padding 8 and
+/// gap 8, so the title of a row without media starts at the x of the group
+/// label. A row with `on_click` is a [`FocusRow`]: a tab stop with the focus
+/// ring, Enter / Space open it, ↑ / ↓ move the focus. An inactive window
+/// draws the text `label`.
 #[derive(IntoElement)]
 pub struct SidebarRow {
     id: ElementId,
@@ -433,12 +439,19 @@ impl RenderOnce for SidebarRow {
             .flex_none()
             .h(metrics::SIDEBAR_ROW)
             .mx(metrics::SIDEBAR_ROW_INSET)
-            .px(px(6.))
+            .px(px(8.))
             .rounded(metrics::SIDEBAR_ROW_RADIUS)
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(px(8.))
             .when(self.selected, |d| d.bg(k.selection))
+            .map(|d| {
+                if self.on_click.is_some() {
+                    d.focus_row(self.selected, cx)
+                } else {
+                    d.row_hover(self.selected, cx)
+                }
+            })
             .when(slot, |d| {
                 d.child(
                     div()
@@ -555,7 +568,7 @@ impl RenderOnce for SidebarFooter {
                     .h(super::tokens::height::SIDEBAR_FOOTER - metrics::SIDEBAR_ROW_INSET * 2.)
                     .px(metrics::SIDEBAR_ROW_INSET)
                     .rounded(metrics::SIDEBAR_ROW_RADIUS)
-                    .hover(|s| s.bg(k.fill_hover))
+                    .focus_row_with(false, Arrows::Owner, cx)
                     .flex()
                     .items_center()
                     .gap(super::tokens::space::S8)

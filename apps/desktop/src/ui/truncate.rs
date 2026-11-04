@@ -148,6 +148,14 @@ impl TruncText {
     }
 }
 
+/// A file name on one line (§2.21, F3; review 2 R1-06): cut in the middle so
+/// the start and the extension stay (`IMG_2025…_HDR.jpg`), the whole name in
+/// a tooltip when cut. Every attachment, upload, download and media title
+/// uses it; style it like a `div` (type, color, width).
+pub fn file_name(name: impl Into<SharedString>) -> TruncText {
+    TruncText::new(name).middle()
+}
+
 fn hash(text: &str) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -311,6 +319,33 @@ mod tests {
             window.update(cx, |_, _, _| ()).unwrap();
         }
         assert_ne!(hash("a"), hash("b"));
+    }
+
+    /// R1-06: a file name cut in the middle keeps its start and its
+    /// extension, and the kept parts are plain prefix and suffix (no `_`,
+    /// `-` or `.` dropped before the `…`).
+    #[gpui::test]
+    fn a_file_name_keeps_its_extension(cx: &mut TestAppContext) {
+        let name = "IMG_20250914_183022_HDR_final-v2.jpg";
+        let font = gpui::font(".SystemUIFont");
+        let runs = [gpui::TextRun {
+            len: name.len(),
+            font: font.clone(),
+            ..Default::default()
+        }];
+        let text_system = cx.text_system().clone();
+        let mut wrapper = text_system.line_wrapper(font, px(14.));
+        let (cut, _) = wrapper.truncate_line(
+            name.into(),
+            px(140.),
+            "…",
+            &runs,
+            gpui::TruncateFrom::Middle,
+        );
+        let (front, back) = cut.split_once('…').expect("cut in the middle");
+        assert!(back.ends_with(".jpg"), "{cut}");
+        assert!(name.starts_with(front) && !front.is_empty(), "{cut}");
+        assert!(name.ends_with(back), "{cut}");
     }
 
     #[test]

@@ -45,10 +45,12 @@ impl SheetWidth {
 }
 
 /// How a sheet enters from a click: sliding down from under the toolbar
-/// while it fades in (160 ms, out curve), unless Reduce Motion is on
-/// (gpui-component shows the end state then). A sheet opened from the
-/// keyboard many times a day (⌘N 新话题) opens at once: see
-/// [`native_sheet_keyboard`] (T1-13, review-animations 9).
+/// while it fades in (160 ms, out curve), and how it leaves: the same path
+/// back in 120 ms (`duration_fast`; an exit is faster than its entrance,
+/// review-animations 2). With Reduce Motion on, gpui-component shows the end
+/// state at once both ways. A sheet opened from a keyboard shortcut many
+/// times a day (⌘N 新话题) must call [`native_sheet_keyboard`] so it opens
+/// and closes at once (T1-13, review-animations 9).
 pub const SHEET_ENTRANCE: DialogEntrance = DialogEntrance::FadeSlide;
 
 /// [`native_sheet`] for a sheet opened by a keyboard shortcut: no motion,
@@ -405,5 +407,70 @@ mod tests {
             PushStyle::Outline
         );
         assert_eq!(alert_style("离开", PushStyle::Default), PushStyle::Default);
+    }
+
+    struct Host;
+
+    impl gpui::Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div().size_full()
+        }
+    }
+
+    fn frame(cx: &mut gpui::VisualTestContext) {
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    fn mounted(cx: &mut gpui::VisualTestContext) -> bool {
+        cx.debug_bounds("dialog-0").is_some()
+    }
+
+    /// R1-08 (review-animations 2): a sheet leaves in `duration_fast`
+    /// (120 ms), faster than its 160 ms entrance; a keyboard sheet neither
+    /// enters nor leaves with motion.
+    #[gpui::test]
+    fn a_sheet_leaves_faster_than_it_enters(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use gpui_component::WindowExt as _;
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::set_mode(gpui_component::ThemeMode::Light, cx);
+            cx.set_reduce_motion(false);
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let host = cx.new(|_| Host);
+            gpui_component::Root::new(host, window, cx)
+        });
+        let (fast, normal) = cx.update(|_, cx| {
+            let m = gpui_component::ActiveTheme::theme(cx).motion_tokens();
+            (m.duration_fast, m.duration_normal)
+        });
+        assert_eq!(fast, crate::theme::motion::FAST);
+        assert!(fast < normal);
+        for keyboard in [false, true] {
+            cx.update(|window, cx| {
+                window.open_dialog(cx, move |d, _, cx| {
+                    let d = d.child("body");
+                    if keyboard {
+                        native_sheet_keyboard(d, SheetWidth::Form, cx)
+                    } else {
+                        native_sheet(d, SheetWidth::Form, cx)
+                    }
+                })
+            });
+            cx.run_until_parked();
+            cx.background_executor.advance_clock(normal);
+            frame(cx);
+            assert!(mounted(cx), "the sheet is open");
+            cx.update(|window, cx| window.close_dialog(cx));
+            frame(cx);
+            assert_eq!(mounted(cx), !keyboard, "a keyboard sheet closes at once");
+            cx.background_executor
+                .advance_clock(fast + std::time::Duration::from_millis(5));
+            frame(cx);
+            frame(cx);
+            assert!(!mounted(cx), "the sheet is gone after 120 ms");
+        }
     }
 }

@@ -295,6 +295,34 @@ mod tests {
         }
     }
 
+    /// The Settings tab symbols fill the same 18 square: the wide ones
+    /// (成员 `person.2`, 外观 `paintpalette`) are scaled down by their
+    /// factor so their ink is about as wide as 通用's gear.
+    #[test]
+    fn wide_tab_symbols_fit_the_tab_square() {
+        let width = |sym: Sym| {
+            let m = raster::draw(
+                sym.name(),
+                point_for_slot(18.) * sym.factor(),
+                Weight::Regular,
+                18.,
+                2.,
+            )
+            .unwrap_or_else(|| panic!("{} draws", sym.name()));
+            let (x0, _, x1, _) = m.ink;
+            (x1 - x0) as f32 / 2.
+        };
+        let gear = width(Sym::General);
+        for sym in [Sym::Members, Sym::Appearance] {
+            let w = width(sym);
+            assert!(
+                w <= 18.5 && (w - gear).abs() <= 2.5,
+                "{}: {w} vs gear {gear}",
+                sym.name()
+            );
+        }
+    }
+
     #[test]
     fn a_color_keeps_the_mask_and_changes_the_ink() {
         let m = raster::draw("bell", 13., Weight::Regular, 16., 2.).expect("bell");
