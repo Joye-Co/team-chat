@@ -201,6 +201,16 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let id = &spec.key.artifact_id;
     let version = spec.key.version;
+    // While the 产出 pane shows this page, the thread keeps one reference row
+    // instead of a second live copy (§2.17, F36).
+    if host::shown_in_pane(id, cx) {
+        return host::reference_row(
+            ElementId::Name(format!("{}-ref", spec.id).into()),
+            spec.title.clone(),
+            version,
+            cx,
+        );
+    }
     // inc-host: the page host's bridge (capabilities by author, live data, asks, refs).
     let page_spec = match spec.target.provider.as_deref() {
         Some(p) => {

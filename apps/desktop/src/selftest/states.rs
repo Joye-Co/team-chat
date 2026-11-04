@@ -49,6 +49,20 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: open_main,
     },
+    Scene {
+        name: "media-embed-in-pane",
+        about: "An HTML 产出 in the thread while the 产出 pane shows it: the embed is one reference row (§2.17)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::media::preview::open(
+                s,
+                c,
+                crate::views::media::preview::Sample::EmbedInPane,
+                cx,
+            )
+        },
+    },
     // --- end t5 ---
     // --- t5-media ---
     Scene {

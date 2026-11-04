@@ -56,6 +56,9 @@ pub enum Sample {
     ViewerLoading,
     /// The viewer sheet after the version could not be read.
     ViewerFailed,
+    /// The HTML 产出 in the thread while the 产出 pane shows it: the inline
+    /// embed is one reference row (§2.17, F36).
+    EmbedInPane,
 }
 
 impl Sample {
@@ -75,13 +78,14 @@ impl Sample {
             "media-inline-av" => Sample::InlineAv,
             "media-viewer-loading" => Sample::ViewerLoading,
             "media-viewer-failed" => Sample::ViewerFailed,
+            "media-embed-in-pane" => Sample::EmbedInPane,
             _ => return None,
         })
     }
 
     fn key(self) -> MediaKey {
         let id = match self {
-            Sample::Html => "sample-report",
+            Sample::Html | Sample::EmbedInPane => "sample-report",
             Sample::Markdown => "sample-review",
             Sample::Images => "sample-images",
             Sample::Video => "sample-video",
@@ -104,6 +108,7 @@ impl Sample {
             Sample::InlineDocs => vec![Sample::Html, Sample::Markdown, Sample::Pdf],
             Sample::InlineAv => vec![Sample::Images, Sample::Video, Sample::Audio],
             Sample::ViewerLoading | Sample::ViewerFailed => vec![Sample::Code],
+            Sample::EmbedInPane => vec![Sample::Html],
             s => vec![s],
         }
     }
@@ -111,7 +116,11 @@ impl Sample {
     /// The sample whose viewer sheet the scene opens.
     fn viewer(self) -> Option<Sample> {
         match self {
-            Sample::InlineDocs | Sample::InlineData | Sample::InlineAv | Sample::States => None,
+            Sample::InlineDocs
+            | Sample::InlineData
+            | Sample::InlineAv
+            | Sample::States
+            | Sample::EmbedInPane => None,
             s => Some(s),
         }
     }
@@ -468,7 +477,9 @@ pub fn open(
     }
     store::clear(cx);
     let shown = match sample {
-        Sample::InlineDocs | Sample::InlineData | Sample::InlineAv => sample.needs(),
+        Sample::InlineDocs | Sample::InlineData | Sample::InlineAv | Sample::EmbedInPane => {
+            sample.needs()
+        }
         Sample::ViewerLoading | Sample::ViewerFailed => vec![Sample::Code],
         Sample::Code => vec![Sample::Code, Sample::Table],
         s => vec![s],
@@ -480,6 +491,12 @@ pub fn open(
     let provider: Arc<dyn ChatProvider> = thread.clone();
     let services = Services::new(provider.clone(), cx);
     crate::selftest::scenes::open_first_topic(&services, cx);
+    if sample == Sample::EmbedInPane {
+        let id = Sample::Html.key().artifact_id;
+        services.nav.update(cx, |nav, cx| {
+            nav.toggle_pane(crate::app::RightPane::Artifact { id, version: None }, cx)
+        });
+    }
     let handle = open_main(services, content, cx)?;
     if let Some(v) = sample.viewer() {
         let target = match v {
@@ -761,7 +778,7 @@ fn write_sample(s: Sample) -> Option<(PathBuf, String)> {
     std::fs::create_dir_all(&dir).ok()?;
     let w = |name: &str, bytes: &[u8]| std::fs::write(dir.join(name), bytes).ok();
     let entry = match s {
-        Sample::Html => {
+        Sample::Html | Sample::EmbedInPane => {
             w("index.html", REPORT_HTML.as_bytes())?;
             "index.html"
         }
