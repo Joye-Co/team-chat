@@ -545,7 +545,7 @@ impl CoreProvider {
         self.state().generation
     }
 
-    fn pr_link(&self, topic_id: &str) -> Option<proto::PrLink> {
+    pub(super) fn pr_link(&self, topic_id: &str) -> Option<proto::PrLink> {
         let a = self.account()?;
         a.client
             .topic_links(&self.resolve_topic(topic_id))

@@ -25,6 +25,8 @@ const SERVER: &str = "http://127.0.0.1:9";
 
 pub const ME: &str = "01SEEDME000000000000000000";
 pub const FORGE: &str = "01SEEDFORGE000000000000000";
+/// A bot that has not run this week.
+pub const SCOUT: &str = "01SEEDSCOUT000000000000000";
 pub const GROUP: &str = "01SEEDGROUP000000000000000";
 pub const TOPIC: &str = "01SEEDTOPIC000000000000000";
 pub const TOPIC_WEEKLY: &str = "01SEEDWEEKLY00000000000000";
@@ -82,6 +84,9 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
     let forge: proto::Member = from(json!({
         "id": FORGE, "kind": "bot", "name": "Forge", "role": "工程师", "level": "member"
     }));
+    let scout: proto::Member = from(json!({
+        "id": SCOUT, "kind": "bot", "name": "Scout", "role": "调研", "level": "member"
+    }));
     let group: proto::GroupSummary = from(json!({
         "group": { "id": GROUP, "kind": "group", "name": "开发", "memberIds": [ME, FORGE],
                    "createdBy": ME, "createdAt": now - 86_400_000 },
@@ -91,7 +96,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
     let client = open_client(SERVER, String::new(), &dir).expect("a cache");
     let store = client.store();
     store
-        .apply_welcome(&me, &[me.clone(), forge], &[group])
+        .apply_welcome(&me, &[me.clone(), forge, scout], &[group])
         .expect("welcome");
 
     let min = 60_000;
@@ -459,3 +464,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+// desktop-data: the page aggregates on the seeded cache (成员, 首页, 群, 产出).
+#[cfg(test)]
+mod data_tests;

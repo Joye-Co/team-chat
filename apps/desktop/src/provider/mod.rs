@@ -47,6 +47,8 @@ pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+// desktop-data: cached aggregates of the 首页, 成员, 群 and 产出 pages.
+mod snapshot;
 // provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
 pub mod seeded;
 mod topic_v2;
@@ -183,6 +185,8 @@ struct Shared {
     // --- inc-refs ---
     refs: refs::RefsCache,
     // --- end inc-refs ---
+    /// Aggregates of the pages, rebuilt on a change (`provider/snapshot.rs`).
+    snapshots: snapshot::SnapshotCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -223,6 +227,7 @@ impl CoreProvider {
                 topic_v2: topic_v2::TopicV2Cache::default(),
                 page_signals: page_host::PageSignals::default(),
                 refs: refs::RefsCache::default(),
+                snapshots: snapshot::SnapshotCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -243,6 +248,7 @@ impl CoreProvider {
         if changes.is_empty() {
             return;
         }
+        self.shared.snapshots.note(&changes);
         // A pending topic id stays open in the views after its ack: name it too.
         let aliases: Vec<(String, String)> = {
             let s = self.state();
@@ -1980,7 +1986,15 @@ impl ChatProvider for CoreProvider {
     // --- desk track (1.1.0 首页): provider/desk.rs ---
 
     fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {
-        self.desk_asks()
+        self.snapshot().asks.clone()
+    }
+
+    fn done_today(&self) -> Vec<crate::data::v2::DoneItem> {
+        self.snapshot().done_today.clone()
+    }
+
+    fn active_runs(&self) -> Vec<crate::data::BotRunSummary> {
+        self.snapshot().active_runs.clone()
     }
 
     // Card v2 reads and answers come from the cards v2 track above.
@@ -2074,6 +2088,24 @@ impl ChatProvider for CoreProvider {
 
     fn retry_member_problem(&self, member_id: &str, run_id: &str) -> AdminReply<()> {
         self.retry_member_problem_inner(member_id, run_id)
+    }
+
+    // desktop-data: the page aggregates come from one cached snapshot (provider/snapshot.rs).
+
+    fn member_stats(&self, member_id: &str) -> Option<crate::data::v2::MemberStats> {
+        self.member_stats_inner(member_id)
+    }
+
+    fn member_extras(&self, member_id: &str) -> crate::data::pages::MemberExtras {
+        self.member_extras_inner(member_id)
+    }
+
+    fn all_artifacts(&self) -> Vec<(GroupId, ArtifactSummary)> {
+        self.snapshot().artifacts.clone()
+    }
+
+    fn group_recent_done(&self, group_id: &str) -> Vec<crate::data::pages::RecentDone> {
+        self.group_recent_done_inner(group_id)
     }
 
     // --- end pages track ---

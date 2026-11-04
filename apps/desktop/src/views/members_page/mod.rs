@@ -24,7 +24,7 @@ use crate::{
     data::{
         BotRunSummary, GroupKind, Member, PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
-        v2::MemberStats,
+        v2::{Currency, MemberStats},
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide, MemberAvatar, Ring},
@@ -151,8 +151,9 @@ fn count_word(n: usize) -> String {
         .unwrap_or_else(|| n.to_string())
 }
 
-fn money(cents: u64) -> String {
-    fill(c::MEMBERS_MONEY, &[("v", &(cents / 100).to_string())])
+/// Cents in the currency the data has, never converted (`$0.85`, `¥6.20`).
+fn money(cents: u64, currency: Currency) -> String {
+    crate::views::topic_rail::money_text(cents, currency)
 }
 
 impl MembersPage {
@@ -1042,6 +1043,7 @@ impl MembersPage {
                 .into_any_element(),
             false,
         );
+        let currency = e.stats.cost_currency;
         let cost = e.stats.cost_cents_this_week.unwrap_or(0);
         let pct = e
             .extras
@@ -1058,7 +1060,7 @@ impl MembersPage {
             .children(
                 e.extras
                     .budget_cents
-                    .map(|b| fill(c::MEMBERS_LIMIT, &[("v", &money(b))])),
+                    .map(|b| fill(c::MEMBERS_LIMIT, &[("v", &money(b, currency))])),
             )
             .into_any_element();
         let bar = pct.map(|pct| {
@@ -1077,12 +1079,16 @@ impl MembersPage {
                 ))
                 .into_any_element()
         });
-        let cost_tile = tile(
-            cost_label,
-            money(cost),
-            bar.unwrap_or_else(|| div().into_any_element()),
-            false,
-        );
+        // No tile when no run reported a cost: ¥0 or $0 would be a wrong number.
+        let cost_tile = e.stats.cost_cents_this_week.map(|_| {
+            tile(
+                cost_label,
+                money(cost, currency),
+                bar.unwrap_or_else(|| div().into_any_element()),
+                false,
+            )
+        });
+        let cols = if cost_tile.is_some() { 3 } else { 2 };
         div()
             .mt(space::S20)
             .child(kit::section_head(c::MEMBERS_THIS_WEEK, None, cx))
@@ -1092,10 +1098,10 @@ impl MembersPage {
                 ui::card(cx)
                     .mt(space::S8)
                     .grid()
-                    .grid_cols(3)
+                    .grid_cols(cols)
                     .child(done)
                     .child(outputs)
-                    .child(cost_tile),
+                    .children(cost_tile),
                 cx,
             ))
             .into_any_element()

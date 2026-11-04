@@ -1579,7 +1579,7 @@ fn job_topic(j: &UploadJob, me: &str) -> Topic {
     }
 }
 
-fn artifact_summary(a: &proto::Artifact, view_topic: &str) -> ArtifactSummary {
+pub(super) fn artifact_summary(a: &proto::Artifact, view_topic: &str) -> ArtifactSummary {
     ArtifactSummary {
         id: a.id.clone(),
         topic_id: view_topic.to_string(),

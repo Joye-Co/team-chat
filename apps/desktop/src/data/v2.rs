@@ -283,6 +283,8 @@ pub struct MemberStats {
     pub done_this_week: u32,
     pub artifacts_this_week: u32,
     pub cost_cents_this_week: Option<u64>,
+    /// The currency of [`MemberStats::cost_cents_this_week`] (never converted).
+    pub cost_currency: Currency,
     pub reports_to: Option<MemberId>,
     /// 需要批准的事 (merge to main, release to production…).
     pub needs_approval: Vec<String>,

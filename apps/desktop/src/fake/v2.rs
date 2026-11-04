@@ -1553,6 +1553,7 @@ impl ChatProvider for V2Samples {
             stats.done_this_week = 6;
             stats.artifacts_this_week = 4;
             stats.cost_cents_this_week = Some(13_200);
+            stats.cost_currency = crate::data::v2::Currency::Cny;
             stats.reports_to = Some(TATA.into());
             stats.needs_approval = vec![
                 "合并到 main".into(),
