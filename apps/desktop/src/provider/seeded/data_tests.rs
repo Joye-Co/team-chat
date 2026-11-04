@@ -435,3 +435,52 @@ fn done_card_checks_acceptance_proof_and_video_length_come_from_the_protocol() {
     let _ = s.p.messages(GROUP, TOPIC, 50);
     assert_eq!(s.p.media_duration(&file), Some(42_500));
 }
+
+#[test]
+fn group_decisions_of_one_account_are_not_shown_to_the_next() {
+    use crate::data::v2::Decision;
+    let s = Seeded::new("accounts");
+    s.p.seed_group_decisions_for_test(
+        GROUP,
+        vec![Decision {
+            id: "01SEEDSERVER-1".into(),
+            group_id: GROUP.into(),
+            topic_id: Some(TOPIC.into()),
+            text: "只给 Joye 看的决定".into(),
+            by: ME.into(),
+            at: s.now as i64,
+        }],
+    );
+    assert!(
+        s.p.group_decisions(GROUP)
+            .iter()
+            .any(|d| d.id == "01SEEDSERVER-1")
+    );
+
+    // Someone else signs in on this computer, in a 群 with the same id.
+    s.p.sign_out_local_for_selftest();
+    let other: proto::Member = from(json!({
+        "id": "01SEEDOTHER000000000000000", "kind": "human", "name": "Lin", "level": "member"
+    }));
+    let group: proto::GroupSummary = from(json!({
+        "group": { "id": GROUP, "kind": "group", "name": "开发",
+                   "memberIds": ["01SEEDOTHER000000000000000"],
+                   "createdBy": ME, "createdAt": s.now - 86_400_000 },
+        "lastSeq": 0, "readSeq": 0, "unread": 0, "mentions": 0
+    }));
+    let dir = session::account_dir(&s.root, SERVER, &other.id);
+    let client = open_client(SERVER, String::new(), &dir).expect("a cache");
+    client
+        .store()
+        .apply_welcome(&other, std::slice::from_ref(&other), &[group])
+        .expect("welcome");
+    s.p.install(
+        SavedSession {
+            server_url: SERVER.into(),
+            member: other,
+        },
+        client,
+        dir,
+    );
+    assert_eq!(s.p.group_decisions(GROUP), Vec::<Decision>::new());
+}

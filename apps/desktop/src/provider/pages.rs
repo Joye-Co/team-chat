@@ -59,10 +59,28 @@ fn choice(card: &CardV2, row: &DecisionRow) -> String {
 
 /// Decisions per 群 from `GET /v1/groups/:id/decisions`. The server keeps the card as it was
 /// answered, so a decision stays after its author edits the card (the cache only has the
-/// newest card). Fetched again when the cache gets a newer local decision.
+/// newest card). Fetched again when the cache gets a newer local decision. Kept per account:
+/// a sign-in as someone else starts empty.
 #[derive(Default)]
 pub(super) struct DecisionsCache {
-    inner: Mutex<HashMap<String, DecisionsEntry>>,
+    inner: Mutex<DecisionsMap>,
+}
+
+#[derive(Default)]
+struct DecisionsMap {
+    generation: u64,
+    groups: HashMap<String, DecisionsEntry>,
+}
+
+impl DecisionsMap {
+    /// The entries of this account; an older account's are dropped.
+    fn of(&mut self, generation: u64) -> &mut HashMap<String, DecisionsEntry> {
+        if self.generation != generation {
+            self.generation = generation;
+            self.groups.clear();
+        }
+        &mut self.groups
+    }
 }
 
 /// Page events most kept per 产出 in the local log.
@@ -183,13 +201,14 @@ impl CoreProvider {
             return local;
         };
         let key = local.first().map(|d| d.id.clone());
+        let generation = self.state().generation;
         let mut map = self
             .shared
             .decisions
             .inner
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let entry = map.entry(group_id.to_string()).or_default();
+        let entry = map.of(generation).entry(group_id.to_string()).or_default();
         if !entry.in_flight && (entry.list.is_none() || entry.local_key != key) {
             entry.in_flight = true;
             entry.local_key = key;
@@ -215,7 +234,11 @@ impl CoreProvider {
                         .inner
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
-                    let entry = map.entry(group.clone()).or_default();
+                    if map.generation != generation {
+                        // Another account signed in meanwhile: this list is not theirs.
+                        return;
+                    }
+                    let entry = map.of(generation).entry(group.clone()).or_default();
                     entry.in_flight = false;
                     if let Some(page) = &fetched {
                         let mut list: Vec<Decision> = page
@@ -548,5 +571,24 @@ mod tests {
         assert_eq!(names, ["seen", "pick", "mine-later"]);
         assert!(log.due("A"));
         assert!(!log.due("A"));
+    }
+}
+
+#[cfg(test)]
+impl CoreProvider {
+    /// Tests: a server list of 群里的决定 for a 群, as if it was fetched now.
+    pub(super) fn seed_group_decisions_for_test(&self, group_id: &str, list: Vec<Decision>) {
+        let generation = self.state().generation;
+        let mut map = self
+            .shared
+            .decisions
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let key = self.local_decisions(group_id).first().map(|d| d.id.clone());
+        let entry = map.of(generation).entry(group_id.to_string()).or_default();
+        entry.list = Some(list);
+        entry.local_key = key;
+        entry.in_flight = false;
     }
 }
