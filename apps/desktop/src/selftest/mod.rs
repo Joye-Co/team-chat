@@ -316,6 +316,10 @@ async fn shoot(
     let provider = provider(scene.start, options.worst_case);
     let content = options.size;
     let handle: AnyWindowHandle = cx.update(|cx| {
+        // Every scene starts from an empty media store: a scene that put its own page
+        // under a sample 产出's key (the host scenes) must not leak it into a later scene
+        // that shows that 产出, whatever the scene order.
+        crate::views::media::store::clear(cx);
         let services = Services::new(provider, cx);
         (scene.setup)(&services, cx);
         (scene.open)(services, content, cx)
