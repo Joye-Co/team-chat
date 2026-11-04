@@ -145,11 +145,13 @@ impl TimelineView {
             } else {
                 item.into_any_element()
             };
-            // NATIVE.md §9.2: the transcript takes the full content width
-            // with 24 pt side insets; message text stops at 680 pt.
+            // NATIVE.md §9.2: the transcript takes the full content width;
+            // avatars start on the shared leading inset, the trailing inset
+            // is 24 pt; message text stops at 680 pt.
             return div()
                 .w_full()
-                .px(super::v2::SIDE - ROW_INSET)
+                .pl(super::v2::LEADING - ROW_INSET)
+                .pr(super::v2::SIDE - ROW_INSET)
                 .child(item)
                 .into_any_element();
         }
@@ -635,9 +637,10 @@ impl TimelineView {
             .into_any_element()
     }
 
-    /// The reactions under the body and attachments (§7.5): 26 pt pills 6 pt
-    /// apart, then the add pill while the message is hovered. A click toggles my reaction; the tooltip
-    /// names everyone who reacted.
+    /// The reactions under the body and attachments: Messages-style
+    /// tapbacks (an emoji and a count in a quiet bubble, mine tinted with
+    /// the accent), 4 pt apart, then the add bubble while the message is
+    /// hovered. A click toggles my reaction; hovering shows the names.
     fn render_reactions(&self, message: &Message, key: &str, cx: &mut Context<Self>) -> AnyElement {
         let me = self.me.clone().unwrap_or_default();
         let name = |id: &str| {
@@ -654,7 +657,6 @@ impl TimelineView {
             .map(|(i, r)| {
                 let names: Vec<String> = r.member_ids.iter().map(|id| name(id)).collect();
                 let mine = r.member_ids.contains(&me);
-                let label = ui::emoji::reaction_label(&names);
                 let known: Vec<&str> = names
                     .iter()
                     .filter(|n| !n.is_empty())
@@ -666,47 +668,50 @@ impl TimelineView {
                 );
                 let emoji = r.emoji.clone();
                 let m = message.clone();
-                ui::emoji::reaction_pill(
+                let bubble = super::tapback::bubble(
                     ElementId::Name(format!("reaction-{key}-{i}").into()),
                     r.emoji.clone().into(),
-                    label.into(),
+                    r.member_ids.len(),
                     mine,
                     cx,
                 )
-                .tooltip(tip)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.react(&m, &emoji, !mine, cx);
-                }))
-                .into_any_element()
+                }));
+                super::tapback::with_names(
+                    ElementId::Name(format!("reaction-names-{key}-{i}").into()),
+                    bubble,
+                    tip.into(),
+                )
             })
             .collect::<Vec<_>>();
-        // Like Slack, the add pill shows on the hovered message (or while its
-        // picker is open); it keeps its place so the line never reflows.
+        // The add bubble shows on the hovered message (or while its picker
+        // is open); it keeps its place so the line never reflows.
         let show_add = self.hovered.as_deref() == Some(key)
             || self.reacting.as_ref() == Some(&(key.to_string(), true));
         let add = self.reaction_picker(
             message,
             key,
             true,
-            ui::emoji::reaction_add(ElementId::Name(format!("reaction-add-{key}").into()), cx)
+            super::tapback::add_bubble(ElementId::Name(format!("reaction-add-{key}").into()), cx)
                 .named(t::ADD_REACTION),
             cx,
         );
-        // The add pill rides with the last reaction in one unbreakable
-        // group, so the hidden pill never wraps onto a blank line of its own.
+        // The add bubble rides with the last reaction in one unbreakable
+        // group, so the hidden bubble never wraps onto a blank line of its own.
         let mut pills = pills;
         let last = pills.pop();
         div()
-            .mt(space::S6)
+            .mt(space::S4)
             .flex()
             .flex_wrap()
-            .gap(space::S6)
+            .gap(space::S4)
             .children(pills)
             .child(
                 div()
                     .flex()
                     .flex_none()
-                    .gap(space::S6)
+                    .gap(space::S4)
                     .children(last)
                     .child(div().when(!show_add, |el| el.invisible()).child(add)),
             )

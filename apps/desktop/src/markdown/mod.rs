@@ -32,10 +32,7 @@ use source::{
     link_mentions, normalize_fences,
 };
 
-use crate::{
-    copy::timeline as t,
-    theme::{self, Type as _},
-};
+use crate::{copy::timeline as t, theme};
 
 /// URL schemes a link in a message may open. Anything else (file:, javascript:,
 /// custom app schemes) is not opened.
@@ -425,14 +422,13 @@ impl MarkdownPlugin for MentionPlugin {
         cx: &mut App,
     ) -> Option<InlineElement> {
         let mention = node.data::<Mention>()?;
-        let k = theme::colors(cx);
-        let (bg, fg) = if mention.me {
-            (k.me_bg, k.me_text)
-        } else {
-            (k.mention_bg, k.accent_text)
-        };
-        // The pill covers the font's ascent and descent, like an inline span
-        // background, and sits on the line's baseline.
+        // --- v12/fx-topic: a mention is Semibold `label` text with no
+        // background; a mention of me is `amber` text (NATIVE.md rule 4).
+        let k = crate::ui::native::native_colors(cx);
+        let fg = if mention.me { k.amber } else { k.label };
+        // --- end v12/fx-topic ---
+        // The text covers the font's ascent and descent and sits on the
+        // line's baseline.
         let text_system = window.text_system();
         let font_id = text_system.resolve_font(&context.text_style().font());
         let ascent = text_system.ascent(font_id, context.font_size());
@@ -458,11 +454,8 @@ impl MarkdownPlugin for MentionPlugin {
         let pill = div()
             .id(ElementId::Name(format!("mention-{member}-{at}").into()))
             .ml(gap)
-            .px(theme::space::S3)
-            .rounded(theme::radius::MARK)
-            .bg(bg)
             .text_color(fg)
-            .medium()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
             .line_height(ascent + descent)
             .cursor_pointer()
             .when(!mention.me, move |el| {

@@ -27,6 +27,9 @@ mod model;
 pub mod plan;
 pub mod preview;
 mod row;
+// --- v12/fx-topic: Messages-style tapbacks ---
+mod tapback;
+// --- end v12/fx-topic ---
 pub mod selftest;
 pub mod v2;
 
