@@ -965,7 +965,7 @@ html,body{margin:0;height:100%;background:#16161A;color:#C9C9D1;font:12px -apple
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent}
 .big{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;border:0;background:rgba(255,255,255,.8);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .big svg{width:20px;height:20px;margin-left:3px}
-.bar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;font:12px ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.bar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;font:12px -apple-system,"PingFang SC",sans-serif;font-variant-numeric:tabular-nums}
 .bar button{background:none;border:0;color:#C9C9D1;cursor:pointer;padding:4px;display:flex;align-items:center;border-radius:6px}
 .bar button:hover{background:rgba(255,255,255,.08)}
 .bar svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
@@ -974,8 +974,8 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 .segs{position:absolute;left:0;right:0;top:6px;height:4px;display:flex;gap:3px}
 .seg{height:4px;border-radius:2px;background:rgba(255,255,255,.22);position:relative;overflow:hidden}
 .seg b{position:absolute;left:0;top:0;bottom:0;background:#C9C9D1}
-.thumb{position:absolute;top:2px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#fff}
-.speed{border:1px solid rgba(255,255,255,.25)!important;border-radius:6px;padding:2px 7px!important;font:12px ui-monospace,Menlo,monospace}
+.thumb{position:absolute;top:3px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.speed{padding:2px 7px!important;font:12px -apple-system,sans-serif;font-variant-numeric:tabular-nums}
 </style></head><body><div class="wrap">
 <div class="stage"><video id="v" src="{SRC}" poster="{POSTER}" playsinline preload="metadata"></video>
 <button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="#141416"/></svg></button></div>
@@ -1111,27 +1111,18 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
     let path = a.path.clone();
     let (toggle, back, fwd) = (state.clone(), state.clone(), state.clone());
     let (pb, pf) = (path.clone(), path.clone());
-    let mut speeds = div()
-        .flex()
-        .p(px(2.))
-        .gap(px(2.))
-        .rounded(radius::MD)
-        .bg(k.code_bg);
-    for (i, (_, label)) in SPEEDS.iter().enumerate() {
+    // The speed choice is a segmented control (NATIVE.md §5.5).
+    let speeds = {
         let set = state.clone();
-        speeds = speeds.child(
-            div()
-                .id(ElementId::Name(format!("{}-sp-{i}", spec.id).into()))
-                .h(px(24.))
-                .px(space::S8)
-                .rounded(radius::SM)
-                .flex()
-                .items_center()
-                .when(i == speed, |el| el.bg(k.content).shadow_xs())
-                .child(mono(*label, if i == speed { k.text_1 } else { k.text_2 }))
-                .on_click(move |_, _, cx| set.update(cx, |s, cx| s.set_speed(i, cx))),
-        );
-    }
+        crate::ui::native::Segmented::new(
+            ElementId::Name(format!("{}-sp", spec.id).into()),
+            SPEEDS
+                .iter()
+                .map(|(_, l)| crate::ui::native::Segment::Label((*l).into())),
+        )
+        .selected(speed)
+        .on_change(move |i, _, cx| set.update(cx, |s, cx| s.set_speed(i, cx)))
+    };
     let current = a.transcript.iter().rposition(|c| c.t <= position + 0.25);
     let mut lines = div().flex().flex_col().gap(px(2.));
     for (i, c) in a.transcript.iter().enumerate().take(400) {

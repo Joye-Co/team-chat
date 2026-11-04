@@ -1161,7 +1161,7 @@ pub fn page_footer(
     cx: &App,
 ) -> gpui::Div {
     use crate::{
-        theme::{Type as _, radius, space},
+        theme::{Type as _, space},
         ui::{self, Sym},
     };
     use gpui::{
@@ -1238,12 +1238,8 @@ pub fn page_footer(
     let pill = || {
         div()
             .flex_none()
+            // Symbol + text, no box (NATIVE.md rule 4).
             .h(px(24.))
-            .px(space::S8)
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(k.border)
-            .bg(k.content)
             .flex()
             .items_center()
             .gap(space::S6)
@@ -1305,20 +1301,20 @@ pub fn page_footer(
 
 /// A chip for the header of a page frame: 已更新到 v{n} or 有 v{n}.
 pub fn notice_chip(text: String, cx: &App) -> gpui::Div {
-    use crate::theme::{Type as _, radius, space};
+    // A `blue` symbol and text, never a pill (NATIVE.md rule 4).
+    use crate::theme::{Type as _, space};
     use gpui::{ParentElement as _, Styled as _, div, px};
-    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     div()
         .flex_none()
         .h(px(20.))
-        .px(space::S6)
-        .rounded(radius::SM)
-        .bg(k.info_bg)
         .flex()
         .items_center()
+        .gap(space::S4)
         .t_meta()
-        .text_color(k.info_text)
+        .text_color(n.blue)
         .whitespace_nowrap()
+        .child(crate::ui::icon(crate::ui::Sym::Refresh, px(14.), n.blue))
         .child(text)
 }
 

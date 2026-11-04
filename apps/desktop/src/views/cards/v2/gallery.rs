@@ -247,13 +247,7 @@ impl CardsGallery {
                 .flex()
                 .items_center()
                 .gap(space::S6)
-                .h(px(28.))
-                .px(space::S10)
-                .rounded(theme::radius::MD)
-                .border_1()
-                .border_color(k.line)
-                .bg(k.bg)
-                .shadow(k.sec_hi())
+                .h(px(24.))
                 .text_size(px(13.))
                 .text_color(k.ink_2)
                 .child(
@@ -345,7 +339,8 @@ impl CardsGallery {
                     .mt(space::S32)
                     .flex()
                     .flex_wrap()
-                    .gap(space::S6)
+                    .gap_x(space::S20)
+                    .gap_y(space::S6)
                     .children(chips),
             )
             .into_any_element()
@@ -730,12 +725,7 @@ impl CardsGallery {
             .flex()
             .justify_center()
             .child(
-                div()
-                    .w_full()
-                    .max_w(px(440.))
-                    .rounded(px(16.))
-                    .bg(k.bg)
-                    .shadow(k.pop())
+                crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
                     .overflow_hidden()
                     .child(confirm::sheet(
                         &text,
@@ -763,8 +753,6 @@ impl CardsGallery {
             div()
                 .h(px(168.))
                 .rounded(theme::radius::LG)
-                .border_1()
-                .border_color(k.line)
                 .bg(mix(k.sunken, k.bg, 0.6))
                 .pt(space::S24)
                 .pr(space::S24)
@@ -834,10 +822,8 @@ impl CardsGallery {
                                     .h(px(26.))
                                     .px(space::S8)
                                     .w(px(52.))
-                                    .rounded(px(7.))
-                                    .border_1()
-                                    .border_color(k.line)
-                                    .bg(k.bg)
+                                    .rounded(px(13.))
+                                    .bg(crate::ui::native::native_colors(cx).fill)
                                     .child(div().text_size(px(14.)).child("👀"))
                                     .child(ui::MemberAvatar::new(jojo.as_ref(), px(16.))),
                             ),

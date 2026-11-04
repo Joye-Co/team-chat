@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, SharedString, Styled, StyledImage as _, div, img, prelude::FluentBuilder as _,
-    px, relative,
+    px,
 };
 
 use super::{
@@ -42,15 +42,14 @@ pub enum Status {
 fn lead_el(lead: &Lead, cx: &App) -> Div {
     let k = theme::colors(cx);
     match lead {
+        // A plain `secondary` symbol, no tile (NATIVE.md §6).
         Lead::Icon(icon) => div()
             .flex_none()
-            .size(px(36.))
-            .rounded(radius::MD)
-            .bg(k.code_bg)
+            .size(px(28.))
             .flex()
             .items_center()
             .justify_center()
-            .child(ui::icon(*icon, theme::icon::ROW, k.text_2)),
+            .child(ui::icon(*icon, px(20.), k.text_3)),
         Lead::Thumb(path) => div()
             .flex_none()
             .w(px(64.))
@@ -143,10 +142,8 @@ pub fn row(
     div()
         .id(id.into())
         .w_full()
-        .rounded(px(10.))
-        .border_1()
-        .border_color(k.border)
-        .bg(k.content)
+        .rounded(crate::ui::native::cards::card::RADIUS)
+        .bg(crate::ui::native::native_colors(cx).fill)
         .flex()
         .flex_col()
         .child(
@@ -179,14 +176,10 @@ pub fn row(
         )
         .when_some(progress, |el, p| {
             el.child(
-                div().px(space::S10).pb(space::S8).child(
-                    div()
-                        .h(px(4.))
-                        .w_full()
-                        .rounded(px(2.))
-                        .bg(k.code_bg)
-                        .child(div().h_full().w(relative(p)).rounded(px(2.)).bg(k.text_1)),
-                ),
+                div()
+                    .px(space::S10)
+                    .pb(space::S8)
+                    .child(crate::ui::native::determinate_bar(p, None, cx)),
             )
         })
 }

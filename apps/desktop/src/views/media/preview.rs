@@ -197,37 +197,15 @@ impl MediaPreview {
         div()
             .w(px(600.))
             .flex_none()
-            .rounded(radius::LG)
-            .border_1()
-            .border_color(k.border)
             .bg(k.content)
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(px(44.))
-                    .px(space::S16)
-                    .flex()
-                    .items_center()
-                    .gap(space::S4)
-                    .border_b_1()
-                    .border_color(k.sep)
-                    .child(
-                        div()
-                            .t_small()
-                            .text_color(k.text_3)
-                            .child(format!("{} /", t.group)),
-                    )
-                    .child(
-                        div()
-                            .t_small()
-                            .semibold()
-                            .text_color(k.text_1)
-                            .child(t.title),
-                    )
-                    .child(div().flex_1())
-                    .child(div().t_meta().text_color(k.text_3).child(t.state)),
-            )
+            // The topic's toolbar title and subtitle (NATIVE.md §2), no
+            // breadcrumb.
+            .child(crate::ui::native::ToolbarRow::new(t.title).subtitle(format!(
+                "{} · {}",
+                t.group, t.state
+            )))
             .child(
                 div()
                     .p(space::S16)
@@ -362,8 +340,7 @@ impl Render for MediaPreview {
                         .h(px(780.))
                         .flex_none()
                         .rounded(radius::LG)
-                        .border_1()
-                        .border_color(k.border)
+                        .shadow(crate::ui::native::native_colors(cx).float())
                         .overflow_hidden()
                         .when_images(images, cx)
                         .child(body)

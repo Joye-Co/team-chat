@@ -12,26 +12,24 @@ use crate::{
     copy::{cards_v2 as c, fill},
     data::cards_v2::{CardActionKind, CardIntent, CardV2Block, CardV2Message},
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, ButtonKind, Sym, Ring},
+    ui::{self, ButtonKind, Sym, Ring, native::NativeType as _},
 };
 
 /// The state overview: the strip, then the title on one line.
 pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
     let waits = matches!(ctx.state, state::CardState::Pending);
+    let inset = ui::native::cards::card::INSET;
     frame(waits, cx)
         .flex()
         .flex_col()
+        .p(inset)
+        .gap(space::S8)
         .children(strip(ctx, cx))
         .child(
             div()
-                .pt(space::S10)
-                .px(space::S16)
-                .pb(space::S12)
-                .text_size(px(14.))
-                .line_height(px(22.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(k.ink)
+                .n_headline()
+                .text_color(n.label)
                 .one_line()
                 .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
                 .child(ctx.card.title.clone()),
@@ -162,9 +160,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                             cx,
                         )
                         .flex_1()
-                        .when(!primary, |b| {
-                            b.bg(k.sunken).border_color(k.sunken).shadow(vec![])
-                        });
+                        ;
                         b.on_click(move |_, window, cx| a.press(&action, window, cx))
                     })),
             )
@@ -243,12 +239,9 @@ pub fn plan_row(
             .gap(space::S10)
             .h(px(36.))
             .px(space::S12)
-            .rounded(theme::radius::FIELD)
-            .border_1()
-            .border_color(k.line)
-            .bg(k.bg)
-            .text_size(px(13.))
-            .line_height(px(20.))
+            .rounded(ui::native::cards::card::RADIUS)
+            .bg(ui::native::native_colors(cx).fill)
+            .n_body()
             .child(
                 ui::MemberAvatar::new(member.as_ref(), m::TILE).ring(working.then_some(Ring::Live)),
             )
@@ -261,9 +254,10 @@ pub fn plan_row(
                     .child(text),
             )
             .child(
-                meta(div())
+                div()
                     .flex_none()
-                    .mono()
+                    .n_subheadline()
+                    .n_figures()
                     .text_color(k.ink_3)
                     .child(meta_text),
             )
@@ -279,8 +273,7 @@ pub fn plan_row(
                     .child(ui::icon(glyph, px(14.), k.ink_3)),
             )
             .when(working, |el| {
-                el.hover(|s| s.bg(k.hover))
-                    .on_click(move |_, window, cx| a.open_live(run.as_deref(), window, cx))
+                el.on_click(move |_, window, cx| a.open_live(run.as_deref(), window, cx))
             })
             .into_any_element(),
     )

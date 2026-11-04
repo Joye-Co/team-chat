@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, IntoElement, ParentElement,
+    Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{Disableable as _, WindowExt as _, button::ButtonVariant};
 
@@ -21,7 +21,7 @@ use crate::{
         CardPress, CardPressError, CardPressPhase, ChatProvider, Message,
         card::{ActionStyle, Card, CardAction},
     },
-    theme::{self, Type as _, size, space},
+    theme::{self, Type as _, space},
     ui,
     views::{time_text, timeline::extras::ExtrasContext},
 };
@@ -158,8 +158,11 @@ fn button(
     let id = ElementId::Name(part_id(message, format_args!("action-{}", action.id)).into());
     let kind = match action.style.unwrap_or_default() {
         ActionStyle::Primary => ui::ButtonKind::Primary,
-        ActionStyle::Default if quiet => ui::ButtonKind::Ghost,
-        ActionStyle::Default => ui::ButtonKind::Quiet,
+        // Every other action is a standard push button (NATIVE.md §5.2).
+        ActionStyle::Default => {
+            let _ = quiet;
+            ui::ButtonKind::Quiet
+        }
         ActionStyle::Danger => ui::ButtonKind::Danger,
     };
     let pressed = sending == Some(action.id.as_str());
@@ -187,9 +190,9 @@ fn button(
     .into_any_element()
 }
 
-/// One answer of an ask card (§7.10): a 40 pt row on `opt-bg`, radius 8, a
-/// 20 pt key letter in `text-3` and the answer in `body`. Hover `opt-hover`;
-/// the chosen answer gets a 1 pt `accent` edge on `choice-bg`.
+/// One answer of an ask card (§7.10): a regular push button with the key
+/// letter in `secondary` before the answer, stacked one under another; the
+/// chosen answer is the default style (NATIVE.md §5.2). A press answers.
 fn option_row(
     ix: usize,
     action: &CardAction,
@@ -199,51 +202,44 @@ fn option_row(
     mine: Option<&str>,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
+    use crate::ui::native as nk;
+    let n = nk::native_colors(cx);
     let id = ElementId::Name(part_id(message, format_args!("option-{}", action.id)).into());
     let chosen = mine == Some(action.id.as_str()) || sending == Some(action.id.as_str());
     let blocked = sending.is_some();
     let letter = char::from(b'A' + ix as u8).to_string();
     let press = press_of(action, message, provider);
+    let b = nk::push_button(
+        id,
+        "",
+        if chosen {
+            nk::PushStyle::Default
+        } else {
+            nk::PushStyle::Standard
+        },
+        nk::PushSize::Regular,
+        cx,
+    )
+    .child(
+        div()
+            .flex()
+            .items_center()
+            .gap(space::S6)
+            .child(
+                div()
+                    .text_color(if chosen { n.on_accent } else { n.secondary })
+                    .child(letter),
+            )
+            .child(action.label.clone()),
+    );
+    let b = nk::disabled_push(b, blocked && !chosen, cx);
     div()
-        .id(id)
-        .h(size::OPTION_ROW)
-        .pl(space::S8)
-        .pr(space::S12)
         .flex()
-        .items_center()
-        .gap(space::S8)
-        .rounded(theme::radius::MD)
-        .bg(if chosen { k.choice_bg } else { k.opt_bg })
-        .when(chosen, |el| el.border_1().border_color(k.accent))
-        .when(!blocked, |el| {
-            el
-                // A tab stop with the row focus ring (§7.1); Enter or Space
-                // answers.
-                .tab_index(0)
-                .focus_visible(|s| s.shadow(crate::ui::rows::focus_ring(k.focus)))
-                .on_click(move |_, window, cx| press.run(window, cx))
+        .child(if blocked {
+            b
+        } else {
+            b.on_click(move |_, window, cx| press.run(window, cx))
         })
-        .child(
-            div()
-                .flex_none()
-                .size(px(20.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .t_meta_medium()
-                .text_color(k.text_3)
-                .child(letter),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .t_ui()
-                .text_color(k.text_1)
-                .one_line()
-                .child(action.label.clone()),
-        )
         .into_any_element()
 }
 

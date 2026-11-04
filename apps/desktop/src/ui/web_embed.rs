@@ -705,9 +705,8 @@ impl RenderOnce for WebEmbed {
             .flex_none()
             .rounded(self.radius)
             .overflow_hidden()
+            // No outline: the page sits in its card's fill (NATIVE.md §9.2).
             .bg(k.raised)
-            .border_1()
-            .border_color(k.border)
             .child(backdrop)
             .child(
                 div()

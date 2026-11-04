@@ -13,8 +13,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     menu::{ContextMenuExt as _, PopupMenuItem},
 };
 
@@ -99,20 +98,20 @@ fn hub_of(cx: &App) -> Option<gpui::Entity<RefsHub>> {
     cx.try_global::<super::HubGlobal>().map(|h| h.0.clone())
 }
 
-/// The ink 问这里 button (Refs.dc.html: ink fill, the quote glyph, 12 pt).
+/// The 问这里 button: a small standard push button with the `text.quote`
+/// symbol (NATIVE.md §5.2), never an ink pill.
 pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
-    let _ = cx;
-    Button::new(id)
-        .primary()
-        .compact()
-        .with_size(gpui_component::Size::XSmall)
-        .icon(ui::icon(
-            Sym::Quote,
-            theme::icon::TAG,
-            theme::colors(cx).bg,
-        ))
-        .label(c::ASK_HERE)
-        .rounded(radius::SM)
+    let n = crate::ui::native::native_colors(cx);
+    crate::ui::native::push_button(
+        id,
+        c::ASK_HERE,
+        crate::ui::native::PushStyle::Standard,
+        crate::ui::native::PushSize::Small,
+        cx,
+    )
+    .bg(n.sheet)
+    .shadow(n.float())
+    .icon(ui::icon(Sym::Quote, px(14.), n.secondary))
 }
 
 /// Starts the 300 ms hover timer of `id`, or clears it.
@@ -198,7 +197,9 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
     };
     let alt = window.modifiers().alt;
     let show_button = shown && !spec.control;
-    let ring = (spec.fill && hovered && (alt || show_button)).then_some(k.line_2);
+    // No hover fill or ring on rows (NATIVE.md §10): the button shows the
+    // part is askable; ⌥ shows the ring.
+    let ring = (spec.fill && hovered && alt).then_some(k.line_2);
     let id = spec.id.clone();
     let click_target = spec.target.clone();
     let menu_target = spec.target.clone();
@@ -207,7 +208,6 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
         .relative()
         .rounded(spec.radius)
         .when(flashing, |el| el.bg(k.sel))
-        .when(!flashing && show_button && spec.fill, |el| el.bg(k.hover))
         .when_some(ring, |el, color| el.border_1().border_color(color))
         .on_hover({
             let id = id.clone();
