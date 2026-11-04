@@ -21,6 +21,7 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
@@ -261,6 +262,17 @@ impl GroupPage {
             Some(n) => format!("{first} · {n}"),
             None => first,
         };
+        // The one state mapping of a 话题 (§2.12, R2 `topic_state`): 在做 n/m
+        // only with a run, 排队 without one, 正在合并 while a PR merges.
+        let state =
+            crate::views::topic_page::topic_state(p.as_ref(), self.services.me().as_deref(), t);
+        let label = if state.short.is_empty() {
+            state.text.clone()
+        } else {
+            state.short.clone()
+        };
+        let unified = crate::ui::native::StatusBadge::new(state.badge, label).into_any_element();
+        let merging = state.badge == crate::ui::native::BadgeState::Merging;
         let (glyph, tint, second, badge): (Sym, gpui::Hsla, String, Option<AnyElement>) = match st {
             Standing::OnMe => {
                 // The same words as the 话题 header: `等你审 PR #61`.
@@ -297,19 +309,7 @@ impl GroupPage {
                 let mut parts = vec![owner_name];
                 parts.extend(step.map(|i| r.plan[i].text.clone()));
                 parts.push(kit::elapsed(p.clock_now(), since));
-                let text = match kit::plan_progress(&r.plan) {
-                    Some((n, m)) => fill(
-                        c::GROUP_PAGE_STATUS_WORKING,
-                        &[("n", &n.to_string()), ("m", &m.to_string())],
-                    ),
-                    None => c::GROUP_PAGE_STATUS_STARTED.to_string(),
-                };
-                (
-                    Sym::Spinner,
-                    k.blue,
-                    parts.join(" · "),
-                    Some(page::status_badge(Status::Working, text, cx)),
-                )
+                (Sym::Spinner, k.blue, parts.join(" · "), Some(unified))
             }
             Standing::OnOthers => {
                 // The badge keeps a short state word; who it waits on goes
@@ -339,14 +339,24 @@ impl GroupPage {
                     Some(page::status_badge(Status::Queued, text, cx)),
                 )
             }
-            Standing::Other => (
-                Sym::Topic,
-                k.label,
+            Standing::Other if !merging => (
+                Sym::Waiting,
+                k.secondary,
                 with_note(fill(
                     c::GROUP_PAGE_ASKED_BY,
                     &[("name", &member_name(&self.services, &t.created_by))],
                 )),
-                None,
+                Some(unified),
+            ),
+            // 正在合并: the merge glyph with the badge.
+            Standing::Other => (
+                Sym::Merge,
+                k.blue,
+                with_note(fill(
+                    c::GROUP_PAGE_ASKED_BY,
+                    &[("name", &member_name(&self.services, &t.created_by))],
+                )),
+                Some(unified),
             ),
         };
         let nav = self.services.nav.clone();
@@ -542,6 +552,7 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-member-{}", m.id)))
+                    .focus_row(false, cx)
                     .h(tsp::S32)
                     .flex()
                     .items_center()
@@ -696,6 +707,7 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-output-{}", a.id)))
+                    .focus_row(false, cx)
                     .py(tsp::S6)
                     .flex()
                     .items_start()
@@ -805,6 +817,7 @@ impl GroupPage {
                     .row(
                         div()
                             .id("group-machine")
+                            .focus_row(false, cx)
                             .py(tsp::S6)
                             .flex()
                             .items_center()

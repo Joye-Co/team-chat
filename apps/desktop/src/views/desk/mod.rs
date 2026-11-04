@@ -29,6 +29,7 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
+use crate::ui::native::FocusRow as _;
 use crate::{
     app::{Changes, NewTopic, Services},
     copy::{desk as c, fill},
@@ -301,6 +302,7 @@ impl DeskPage {
                 fill(c::DESK_SHOW_ALL, &[("n", &total.to_string())])
             };
             page::list_footer(SharedString::from(format!("{id}-more")), text, None, cx)
+                .focus_row(false, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if !this.expanded.remove(id) {

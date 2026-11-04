@@ -6,6 +6,7 @@
 //! Rows have no hover fill and the arrow cursor (§10); a row that is
 //! selected uses the native list selection of `ui::native::CompactRow`.
 
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,
@@ -132,6 +133,9 @@ pub fn mail_row(
     let has_right = title_trailing.is_some() || second_trailing.is_some();
     div()
         .id(id.into())
+        // A Tab stop with the focus ring; the list moves its selection with
+        // ↑ / ↓ itself (the 成员 list).
+        .focus_row_with(ink.fill.is_some(), crate::ui::native::Arrows::Owner, cx)
         .relative()
         .flex_none()
         .h(height)

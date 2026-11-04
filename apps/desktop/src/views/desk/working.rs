@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::{DeskPage, model::Snapshot};
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use crate::ui::{
     native::{borderless_button, page::PageLoad},
@@ -169,6 +170,7 @@ pub fn render(
         queue = queue.row(
             div()
                 .id(SharedString::from(format!("desk-queue-{i}")))
+                .focus_row(false, cx)
                 .h(tsp::S32)
                 .flex()
                 .items_center()
@@ -237,6 +239,7 @@ pub fn render(
         outputs = outputs.row(
             div()
                 .id(SharedString::from(format!("desk-output-{}", a.id)))
+                .focus_row(false, cx)
                 .h(tsp::S32)
                 .flex()
                 .items_center()
@@ -312,6 +315,7 @@ pub fn render(
         where_ = where_.row(
             div()
                 .id(SharedString::from(format!("desk-machine-{i}")))
+                .focus_row(false, cx)
                 .py(tsp::S6)
                 .flex()
                 .items_center()

@@ -330,12 +330,8 @@ pub fn step_bar(id: &str, plan: &[PlanItem], gap: Pixels, cx: &App) -> Div {
 
 /// `n/m` of a plan: steps done (the current one counts) over all.
 pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize)> {
-    if plan.is_empty() {
-        return None;
-    }
-    let done = plan.iter().filter(|p| p.state == PlanState::Done).count();
-    let current = plan.iter().any(|p| p.state == PlanState::Current) as usize;
-    Some(((done + current).min(plan.len()), plan.len()))
+    // One count everywhere (R2): the step the run is on.
+    crate::views::topic_page::plan_progress(plan).map(|(n, m, _)| (n, m))
 }
 
 /// The live terminal of a run as a small dark screen: `实时` with the

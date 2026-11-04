@@ -30,6 +30,7 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 
+use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, Services},
@@ -783,6 +784,7 @@ impl ArtifactPage {
             from = from.row(
                 div()
                     .id("artifact-from-topic")
+                    .focus_row(false, cx)
                     .min_h(tsp::S48)
                     .py(tsp::S6)
                     .flex()
@@ -854,6 +856,7 @@ impl ArtifactPage {
             versions = versions.row(
                 div()
                     .id(SharedString::from(format!("artifact-v{}", v.version)))
+                    .focus_row(v.version == shown, cx)
                     .h(tsp::S32)
                     .mx(-tsp::S8)
                     .px(tsp::S8)
@@ -1031,6 +1034,7 @@ impl ArtifactPage {
             decisions = decisions.row(
                 div()
                     .id(SharedString::from(format!("artifact-decision-{i}")))
+                    .focus_row(false, cx)
                     .py(tsp::S6)
                     .flex()
                     .flex_col()
@@ -1068,6 +1072,7 @@ impl ArtifactPage {
             cited = cited.row(
                 div()
                     .id(SharedString::from(format!("artifact-cited-{i}")))
+                    .focus_row(false, cx)
                     .h(tsp::S32)
                     .flex()
                     .items_center()
@@ -1406,6 +1411,7 @@ impl ArtifactPage {
                         let full = format!("{} · {meta}", a.title);
                         page::card(cx)
                             .id(SharedString::from(format!("artifact-{}", a.id)))
+                            .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                             .min_w_0()
                             .overflow_hidden()
                             .cursor_pointer()
