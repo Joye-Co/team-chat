@@ -278,7 +278,9 @@ pub fn render(
     let author = env
         .provider
         .member(&msg.author_id)
-        .map(|m| crate::copy::isolate(&m.name))
+        // D1-56: the header shows the avatar; a leading emoji in the name
+        // would read as a second one (in the meta too).
+        .map(|m| crate::copy::isolate(crate::ui::avatar::name_beside_avatar(&m.name)))
         .unwrap_or_default();
     let ctx = Ctx {
         env,
