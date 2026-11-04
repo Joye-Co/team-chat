@@ -440,19 +440,20 @@ pub(crate) fn table_with_refs(
                     cx,
                 )))
             })
-            .child(
+            .child(if num {
                 div()
-                    .map(|el| {
-                        if num {
-                            el.flex_none().whitespace_nowrap()
-                        } else {
-                            el.one_line()
-                        }
-                    })
-                    .when(num && !head, |el| el.n_figures())
+                    .flex_none()
+                    .whitespace_nowrap()
+                    .when(!head, |el| el.n_figures())
                     .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
-                    .child(text.to_string()),
-            )
+                    .child(text.to_string())
+                    .into_any_element()
+            } else {
+                // A text cell cuts at the end with the full text in a tooltip (§2.21).
+                ui::truncate::TruncText::new(text.to_string())
+                    .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
+                    .into_any_element()
+            })
     };
     let last = rows.len().saturating_sub(1);
     // The compact table of §2.7 in a frame: radius 10, a 1 px border, a muted
@@ -817,13 +818,13 @@ pub(crate) fn choice_row(
             .size(m::TILE)
             .rounded(theme::radius::ITEM)
             .border_1()
-            .border_color(if picked { n.accent } else { n.separator })
-            .bg(if picked { n.accent } else { n.content })
+            .border_color(if picked { n.primary } else { n.separator })
+            .bg(if picked { n.primary } else { n.content })
             .flex()
             .items_center()
             .justify_center()
             .n_section()
-            .text_color(if picked { n.on_accent } else { n.secondary })
+            .text_color(if picked { n.on_primary } else { n.secondary })
             .child(letter.to_string())
             .into_any_element()
     };
@@ -869,7 +870,7 @@ pub(crate) fn option_title(label: &str, recommended: bool, cx: &App) -> Div {
         .gap(space::S6)
         .n_body()
         .text_color(n.label)
-        .child(div().min_w(px(0.)).one_line().child(label.to_string()))
+        .child(ui::truncate::TruncText::new(label.to_string()))
         .when(recommended, |el| {
             el.child(
                 div()
@@ -1125,7 +1126,9 @@ pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> Button {
 /// The optional one-line field after a decision of three or more options
 /// that the footer draws inline (`补充一句（可选）`): its id and placeholder.
 pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>)> {
-    if super::quick(card) {
+    // A 2.1 card draws its inputs in the body with their labels; the footer
+    // never repeats one as a field with no label (F51).
+    if super::quick(card) || crate::views::cards::v21::is_21(card) {
         return None;
     }
     let blocks = card.all_blocks();
@@ -1145,8 +1148,13 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
             kind: InputKind::Text,
             required,
             placeholder,
+            label,
             ..
-        } if !required.unwrap_or(false) => Some((id.clone(), placeholder.clone())),
+        } if !required.unwrap_or(false) => Some((
+            id.clone(),
+            // Every input is labeled: the placeholder, else its label.
+            placeholder.clone().or_else(|| Some(label.clone())),
+        )),
         _ => None,
     })
 }
@@ -2016,7 +2024,7 @@ pub(crate) fn metrics_with(
                         .when_some(unit.clone().filter(|u| u != "%"), |el, u| {
                             el.child(div().n_body().text_color(k.ink_3).child(u))
                         })
-                        .when(unit.as_deref() == Some("%"), |el| {
+                        .when(unit.as_deref() == Some("%") && d.is_none(), |el| {
                             el.child(div().n_body().text_color(k.ink_3).child("%"))
                         }),
                 )
@@ -2784,14 +2792,21 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         .flex()
                         .flex_col()
                         .child(
-                            small(div())
-                                .one_line()
+                            ui::truncate::TruncText::new(name)
+                                .id(ctx.id(format!("ref-name-{i}")))
+                                .text_size(crate::ui::native::tokens::text::UI.0)
+                                .line_height(px(20.))
                                 .font_weight(theme::MEDIUM_WEIGHT)
-                                .text_color(if gone { k.ink_2 } else { k.ink })
-                                .child(name),
+                                .text_color(if gone { k.ink_2 } else { k.ink }),
                         )
                         .when(!line.is_empty(), |el| {
-                            el.child(meta(div()).one_line().text_color(k.ink_3).child(line))
+                            el.child(
+                                ui::truncate::TruncText::new(line)
+                                    .id(ctx.id(format!("ref-line-{i}")))
+                                    .text_size(crate::ui::native::tokens::text::META.0)
+                                    .line_height(crate::ui::native::tokens::text::META.1)
+                                    .text_color(k.ink_3),
+                            )
                         }),
                 )
                 // The state in one right column as a StatusBadge (§2.12, F30).

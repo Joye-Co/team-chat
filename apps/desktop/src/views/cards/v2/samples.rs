@@ -434,7 +434,7 @@ fn all() -> Vec<Sample> {
                     { "id": "hotpot", "label": "火锅", "detail": "人均 110" },
                     { "id": "museum", "label": "国家博物馆", "detail": "免费" },
                     { "id": "climb", "label": "室内攀岩", "detail": "人均 150" },
-                    { "id": "boat", "label": "后海划船，再去旁边的胡同里找一家能坐下二十个人的小馆子吃晚饭", "detail": "人均 80" },
+                    { "id": "boat", "label": "后海划船，再去旁边的胡同里找一家能坐下二十个人的小馆子吃晚饭，吃完沿着什刹海走回地铁站", "detail": "人均 80" },
                     { "id": "office", "label": "就在公司点外卖" }
                 ]}
             ],

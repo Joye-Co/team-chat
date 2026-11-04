@@ -1245,8 +1245,55 @@ mod tests {
 }
 
 // --- v12/fx-cards ---
+/// The conflicts that already showed their Toast, by client event id.
+#[derive(Default)]
+struct ShownConflicts(std::collections::HashSet<String>);
+
+impl gpui::Global for ShownConflicts {}
+
+/// Shows the conflict Toast once per conflicting event (§2.16, owner decision on F53):
+/// 卡片刚更新了, what happened, and 看新版, which settles the event.
+pub fn conflict_toast(ctx: &Ctx, cx: &mut App) {
+    let events = ctx
+        .env
+        .provider
+        .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    let Some(e) = events.last().filter(|e| {
+        matches!(
+            e.phase,
+            CardEventPhase::Failed {
+                failure: CardEventFailure::Conflict,
+                ..
+            }
+        )
+    }) else {
+        return;
+    };
+    let cid = e.client_event_id.clone();
+    let shown = cx.default_global::<ShownConflicts>();
+    if !shown.0.insert(cid.clone()) {
+        return;
+    }
+    let (provider, g, t, m) = (
+        ctx.env.provider.clone(),
+        ctx.msg.group_id.clone(),
+        ctx.msg.topic_id.clone(),
+        ctx.msg.message_id.clone(),
+    );
+    let toast_id = format!("card-conflict-{m}");
+    cx.defer(move |cx| {
+        crate::ui::overlay::Toast::new(ui::Sym::Refresh, c::CONFLICT_TITLE)
+            .description(c::CONFLICT_DETAIL)
+            .action_button(crate::copy::cards_v2::STRIP_SEE_NEW, move |_, _| {
+                provider.drop_card_event(&g, &t, &m, &cid)
+            })
+            .id(toast_id)
+            .push(cx);
+    });
+}
+
 /// True while my newest event on the card came back as a conflict: the card changed under
-/// me. The card header says so inline (NATIVE.md §7.4: no toast).
+/// me. The header keeps a muted line; the Toast says it once ([`conflict_toast`]).
 pub fn conflicted(ctx: &Ctx) -> bool {
     let events = ctx
         .env

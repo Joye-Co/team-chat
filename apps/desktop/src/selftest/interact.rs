@@ -48,6 +48,7 @@ const STEPS: &[(&str, Steps)] = &[
     // --- t5-cards ---
     ("state-card-option-hover", hover(1011., 290., 400)),
     ("state-card-button-hover", hover(667., 320., 400)),
+    ("state-card-tooltip", hover(900., 530., 1200)),
     // --- end t5-cards ---
 ];
 

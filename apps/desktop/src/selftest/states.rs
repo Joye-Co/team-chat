@@ -55,5 +55,19 @@ pub const SCENES: &[Scene] = &[
             )
         },
     },
+    Scene {
+        name: "state-card-tooltip",
+        about: "Card v2 13: the pointer on the cut label of option G: the full text in a tooltip (§2.21)",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::views::cards::v2::scenes::open_gallery(
+                s,
+                c,
+                crate::views::cards::v2::gallery::Section::Load,
+                cx,
+            )
+        },
+    },
     // --- end t5-cards ---
 ];

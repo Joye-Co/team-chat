@@ -816,12 +816,12 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .flex_1()
             .min_w(px(0.))
             .h(crate::ui::native::tokens::height::SM)
-            // An sm h28 cell with a 1 px border (§1.8): the chosen one in `accent`,
+            // An sm h28 cell with a 1 px border (§1.8): the chosen one in `primary`,
             // hover muted at 50%.
             .rounded(crate::ui::native::tokens::radius::ITEM)
             .border_1()
-            .border_color(if on { nk.accent } else { nk.separator })
-            .bg(if on { nk.accent } else { nk.content })
+            .border_color(if on { nk.primary } else { nk.separator })
+            .bg(if on { nk.primary } else { nk.content })
             .when(live && !on, |el| {
                 let hover = theme::card_v2::alpha(nk.fill, 0.5);
                 el.hover(move |s| s.bg(hover))
@@ -832,7 +832,7 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .justify_center()
             .n_body()
             .n_figures()
-            .text_color(if on { nk.on_accent } else { nk.label })
+            .text_color(if on { nk.on_primary } else { nk.label })
             .when(live, |el| {
                 el.on_click(move |_, _, cx| {
                     form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));

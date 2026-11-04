@@ -1152,16 +1152,14 @@ fn work_progress(f: f32, steps: Option<(usize, usize)>, cx: &App) -> AnyElement 
         .into_any_element()
 }
 
-/// The muted detail after the badge: one line, cut at the end.
+/// The muted detail after the badge: one line, cut at the end, the full
+/// text in a tooltip (§2.21).
 fn detail_text(detail: String, cx: &App) -> AnyElement {
     let n = ui::native::native_colors(cx);
-    div()
+    ui::truncate::TruncText::new(detail)
         .flex_1()
-        .min_w(px(0.))
-        .one_line()
         .n_subheadline()
         .text_color(n.secondary)
-        .child(detail)
         .into_any_element()
 }
 
@@ -1243,11 +1241,14 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .id(ctx.id("path"))
             .pl(ui::native::cards::card::AVATAR + space::S8)
             .min_w(px(0.))
-            .one_line()
-            .n_subheadline()
-            .text_color(n.secondary)
+            .flex()
             .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
-            .child(text)
+            .child(
+                ui::truncate::TruncText::new(text)
+                    .id(ctx.id("path-text"))
+                    .n_subheadline()
+                    .text_color(n.secondary),
+            )
     });
     // Header slots (§2.4): StatusBadge, the muted detail, the action, then
     // one time column at the far right. On the 首页 the time is when the
@@ -1276,13 +1277,12 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                 ui::native::cards::card::AVATAR,
             ))
             .child(
-                div()
-                    .flex_shrink(0.)
+                ui::truncate::TruncText::new(ctx.author.clone())
+                    .id(ctx.id("author"))
+                    .flex_shrink_0()
                     .max_w(m::MAX_WIDTH / 4.)
-                    .one_line()
                     .n_headline()
-                    .text_color(n.label)
-                    .child(ctx.author.clone()),
+                    .text_color(n.label),
             )
         })
         .children(badge)
@@ -1297,8 +1297,8 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                 .text_color(n.secondary)
                 .child(t)
         }));
-    // The card changed while I answered: the header says so in place; the
-    // Toast that offers 看新版 comes from the interact layer.
+    // The card changed while I answered: a muted line in the header stays
+    // while the Toast (once, with 看新版) says what happened.
     let conflict = super::v21::interact::conflicted(ctx).then(|| {
         div()
             .pt(space::S4)
@@ -1387,6 +1387,7 @@ pub(crate) fn one_line_text(text: &str) -> String {
 /// The whole card: header (member, state), title, blocks, footer, in one
 /// `fill` container with 14 pt insets.
 fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
+    super::v21::interact::conflict_toast(ctx, cx);
     let header = header(ctx, cx);
     let has_header = header.is_some();
     // --- inc-integrate: 就这张卡提问 on the header (the whole card, `blockId` `card`) ---
@@ -1518,7 +1519,8 @@ fn note(text: String, lock: bool, cx: &App) -> AnyElement {
         .when(lock, |el| {
             el.child(ui::icon(Sym::Lock, px(14.), n.secondary))
         })
-        .child(div().min_w(px(0.)).one_line().child(text))
+        // A note with an address cuts in the middle, so both ends stay.
+        .child(ui::truncate::TruncText::new(text).middle())
         .into_any_element()
 }
 

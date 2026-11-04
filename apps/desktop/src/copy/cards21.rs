@@ -119,6 +119,8 @@ crate::copy! {
     OFFLINE_ANSWER = "{name} 不在线，回来后会看到",
     BUSY = "{name} 现在接不了，稍后再试",
     CONFLICT_TOAST = "卡片刚更新了，请再看一眼",
+    CONFLICT_TITLE = "卡片刚更新了",
+    CONFLICT_DETAIL = "你答的时候成员改了这张卡，留下了还能用的选择。",
     DRAFT_CHANGED = "内容变了",
     DRAFT_USE_NEW = "用新的",
     ATTRIBUTION_OTHER = "按 {name} 的选择",
