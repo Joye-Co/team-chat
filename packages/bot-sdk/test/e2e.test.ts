@@ -424,6 +424,12 @@ describe("bot sdk e2e", () => {
     await waitFor("artifact.created", () => events.find((e) => e.type === "artifact.created" && e.data.artifact.id === art.artifact.id));
     const v2 = await bot.http.publishHtml({ groupId: generalId, topicId: r.message.topicId, title: "Report", html: "<h1>v2</h1>", artifactId: art.artifact.id });
     expect(v2.version.version).toBe(2);
+    // The media of a version after the upload (PUT .../media).
+    const m = await bot.http.putArtifactMedia(art.artifact.id, 2, { kind: "html", mime: "text/html", bytes: 11, preview: "ready" });
+    expect(m.version.version).toBe(2);
+    expect(m.version.media).toMatchObject({ kind: "html", preview: "ready" });
+    await waitFor("artifact.previewReady", () => events.find((e) => e.type === "artifact.previewReady" && e.data.artifactId === art.artifact.id));
+    await expect(bot.http.putArtifactMedia(art.artifact.id, 2, { kind: "html", mime: "text/html", bytes: 30_000_000, preview: "ready" })).rejects.toMatchObject({ code: "invalid" });
   });
 
   test("reacts to a message and removes the reaction", async () => {

@@ -1279,7 +1279,7 @@ MediaInfo = { kind: "html"|"markdown"|"image"|"imageSet"|"video"|"audio"|"pdf"|"
               focus? { fromLine, toLine }, preview: "ready" | "pending" | "failed" }
 ArtifactVersion += { media? }      FileRef (message attachments) += { media? }
 artifact.previewReady (stored) data: { artifactId, version, media }
-PUT /v1/artifacts/:id/versions/:v/media  { media: MediaInfo } -> { version }   // stores artifact.previewReady
+PUT /v1/artifacts/:id/versions/:v/media  PutArtifactMediaRequest { media: MediaInfo } -> PutArtifactMediaResponse { version }   // stores artifact.previewReady; SDK putArtifactMedia
 ```
 
 The version's creator may set `media` at any time; another group member only while the stored

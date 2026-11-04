@@ -39,4 +39,13 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   ok("entities/block-ref-input-other-group.json", "BlockRefInput", asideRef, "a side chat quotes a cell of a card in the group it is about");
   ok("entities/block-ref-other-group.json", "BlockRef", { ...asideRef, sourceAuthorId: ID.bot, sourceTopicId: ID.topic });
   bad("entities/block-ref-input-bad-group.json", "BlockRefInput", { ...asideRef, sourceGroupId: "" }, "sourceGroupId is an id");
+
+  // PC-4: the media of a version after the upload.
+  const media = { kind: "video", mime: "video/mp4", bytes: 48_000_000, width: 1920, height: 1080, duration: 95.5, posterFileId: "01JC0FIL00000000000POSTER1", preview: "ready" };
+  ok("http/put-artifact-media-request.json", "PutArtifactMediaRequest", { media });
+  bad("http/put-artifact-media-request-too-long.json", "PutArtifactMediaRequest", { media: { ...media, duration: 5 * 3600 } }, "longer than 4 hours");
+  bad("http/put-artifact-media-request-no-preview.json", "PutArtifactMediaRequest", { media: { kind: "video", mime: "video/mp4", bytes: 1 } }, "preview is required");
+  ok("http/put-artifact-media-response.json", "PutArtifactMediaResponse", {
+    version: { artifactId: "01JC0ART00000000000000OCT3", version: 2, entry: "demo.mp4", files: [{ path: "demo.mp4", fileId: "01JC0FIL00000000000000MP4V", size: 48_000_000, mime: "video/mp4" }], createdBy: ID.bot, createdAt: T0, media },
+  });
 }

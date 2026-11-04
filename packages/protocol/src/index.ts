@@ -71,6 +71,8 @@ import {
   ArtifactReplyTransient,
   ArtifactDataResponse,
   PutArtifactDataRequest,
+  PutArtifactMediaRequest,
+  PutArtifactMediaResponse,
 } from "./files.ts";
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
 import { BlockRef, BlockRefInput, editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
@@ -744,6 +746,8 @@ export const schemas = {
   ArtifactDataAck,
   ArtifactDataResponse,
   PutArtifactDataRequest,
+  PutArtifactMediaRequest,
+  PutArtifactMediaResponse,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

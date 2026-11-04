@@ -340,3 +340,13 @@ export const PutArtifactDataRequest = z.object({
   cause: Id.optional(),
 });
 export type PutArtifactDataRequest = z.infer<typeof PutArtifactDataRequest>;
+
+/**
+ * `PUT /v1/artifacts/:id/versions/:v/media` (the version's creator): the media of a version with
+ * its preview, sent after the upload. Stored as `artifact.previewReady`.
+ */
+export const PutArtifactMediaRequest = z.object({ media: MediaInfoInput });
+export type PutArtifactMediaRequest = z.infer<typeof PutArtifactMediaRequest>;
+/** Answer of `PUT /v1/artifacts/:id/versions/:v/media`: the version with the new media. */
+export const PutArtifactMediaResponse = z.object({ version: ArtifactVersion });
+export type PutArtifactMediaResponse = z.infer<typeof PutArtifactMediaResponse>;

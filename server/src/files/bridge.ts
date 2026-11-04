@@ -11,11 +11,11 @@ import {
   type ClientFrameOf,
   type Expect,
   MAX_ARTIFACT_DATA_INLINE_BYTES,
-  MediaInfoInput,
+  PutArtifactMediaRequest,
+  type PutArtifactMediaResponse,
   PutArtifactDataRequest,
   utf8Bytes,
 } from "@chat/protocol";
-import { z } from "zod";
 import type { AuditEntry } from "../core/audit";
 import { auditValue } from "../core/auditvalue";
 import type { AuthContext } from "../core/auth";
@@ -507,8 +507,6 @@ registerRoute({
   },
 });
 
-/** Body of `PUT /v1/artifacts/:id/versions/:v/media`: the version's media with its preview. */
-const PutArtifactMediaRequest = z.object({ media: MediaInfoInput });
 
 registerRoute({
   method: "PUT",
@@ -519,6 +517,8 @@ registerRoute({
     const version = versionParam(params.v);
     const groupId = await artifactGroup(env, params.id, a);
     const req = await body(PutArtifactMediaRequest);
-    return unwrap(await roomStub(env, groupId).rpc(groupId, ARTIFACT_PREVIEW_RPC, actorOf(a), { artifactId: params.id, version, media: req.media }));
+    return unwrap(
+      await roomStub(env, groupId).rpc(groupId, ARTIFACT_PREVIEW_RPC, actorOf(a), { artifactId: params.id, version, media: req.media }),
+    ) as PutArtifactMediaResponse;
   },
 });

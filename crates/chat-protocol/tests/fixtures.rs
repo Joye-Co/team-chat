@@ -61,7 +61,8 @@ check!(
     BlockRefInput,
     BlockRef,
     PutArtifactDataRequest,
-    RecordDecisionRequest
+    RecordDecisionRequest,
+    PutArtifactMediaRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -185,6 +186,11 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("RecordedDecision", plain::<RecordedDecision>),
     ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
     ("RecordDecisionResponse", plain::<RecordDecisionResponse>),
+    (
+        "PutArtifactMediaRequest",
+        validated::<PutArtifactMediaRequest>,
+    ),
+    ("PutArtifactMediaResponse", plain::<PutArtifactMediaResponse>),
 ];
 
 fn fixtures_root() -> PathBuf {

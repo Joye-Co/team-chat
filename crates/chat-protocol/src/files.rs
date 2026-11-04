@@ -850,3 +850,24 @@ impl PutArtifactDataRequest {
             .map_or(Ok(()), |c| check_id("cause", c))
     }
 }
+
+/// `PUT /v1/artifacts/:id/versions/:v/media` (the version's creator): the media of a version
+/// with its preview, sent after the upload. Stored as `artifact.previewReady`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutArtifactMediaRequest {
+    pub media: MediaInfo,
+}
+
+impl PutArtifactMediaRequest {
+    pub fn validate(&self) -> Validation {
+        check_version_extras(Some(&self.media), None)
+    }
+}
+
+/// Answer of `PUT /v1/artifacts/:id/versions/:v/media`: the version with the new media.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutArtifactMediaResponse {
+    pub version: ArtifactVersion,
+}
