@@ -557,6 +557,25 @@ impl CoreProvider {
 }
 
 #[cfg(test)]
+impl CoreProvider {
+    /// Tests: a server list of 群里的决定 for a 群, as if it was fetched now.
+    pub(super) fn seed_group_decisions_for_test(&self, group_id: &str, list: Vec<Decision>) {
+        let generation = self.state().generation;
+        let mut map = self
+            .shared
+            .decisions
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let key = self.local_decisions(group_id).first().map(|d| d.id.clone());
+        let entry = map.of(generation).entry(group_id.to_string()).or_default();
+        entry.list = Some(list);
+        entry.local_key = key;
+        entry.in_flight = false;
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -578,24 +597,5 @@ mod tests {
         assert_eq!(names, ["seen", "pick", "mine-later"]);
         assert!(log.due("A"));
         assert!(!log.due("A"));
-    }
-}
-
-#[cfg(test)]
-impl CoreProvider {
-    /// Tests: a server list of 群里的决定 for a 群, as if it was fetched now.
-    pub(super) fn seed_group_decisions_for_test(&self, group_id: &str, list: Vec<Decision>) {
-        let generation = self.state().generation;
-        let mut map = self
-            .shared
-            .decisions
-            .inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let key = self.local_decisions(group_id).first().map(|d| d.id.clone());
-        let entry = map.of(generation).entry(group_id.to_string()).or_default();
-        entry.list = Some(list);
-        entry.local_key = key;
-        entry.in_flight = false;
     }
 }
