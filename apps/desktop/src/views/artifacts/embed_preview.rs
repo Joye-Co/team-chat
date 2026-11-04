@@ -245,7 +245,11 @@ impl Render for EmbedPreview {
             let at = point(b.origin.x + px(48.), b.origin.y + px(40.));
             let menu = Bounds {
                 origin: at,
-                size: gpui::size(px(220.), px(3. * 32. + 8.)),
+                // Three menu rows inside the menu padding (ui::overlay::menu_surface).
+                size: gpui::size(
+                    px(220.),
+                    theme::size::MENU_ROW * 3. + crate::ui::native::metrics::MENU_PAD * 2.,
+                ),
             };
             PROBE.with(|p| p.borrow_mut().menu = Some(menu));
             root = root.child(
