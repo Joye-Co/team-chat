@@ -698,28 +698,36 @@ export class GroupRoom extends DurableObject<Env> {
   }
 
   /**
-   * Renames the group in its log. `before` is the name in D1, used while the room has no name
-   * of its own yet (no rename since it was made). The same name again appends nothing, so a
-   * retry after a failed D1 write is safe. Returns the new event's seq (null = no change).
+   * Renames the group and/or sets its purpose line in its log. `before` is what D1 holds, used
+   * while the room has no value of its own yet (no change since it was made). Unchanged values
+   * append nothing, so a retry after a failed D1 write is safe. Returns the new event's seq
+   * (null = no change), the room's name and purpose after it, and `updateSeq`, the seq of the
+   * newest `group.updated` event: D1 takes a write only when it is newer than what it holds.
    */
   async groupUpdated(
     groupId: string,
     actorId: string,
-    name: string,
-    before: string,
-  ): Promise<Result<{ seq: number | null; lastSeq: number }>> {
+    patch: { name?: string; purpose?: string },
+    before: { name: string; purpose: string },
+  ): Promise<Result<{ seq: number | null; lastSeq: number; name: string; purpose: string; updateSeq: number }>> {
     return run(async () => {
       await this.ready(groupId);
-      const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'group_name'").toArray()[0];
-      if ((row?.value ?? before) === name) return { seq: null, lastSeq: this.lastSeq };
+      const meta = (key: string) => this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value;
+      const curName = meta("group_name") ?? before.name;
+      const curPurpose = meta("group_purpose") ?? before.purpose;
+      const name = patch.name ?? curName;
+      const purpose = patch.purpose ?? curPurpose;
+      const newest = () =>
+        this.sql.exec<{ s: number | null }>("SELECT max(seq) AS s FROM events WHERE type = 'group.updated'").one().s ?? 0;
+      if (name === curName && purpose === curPurpose) {
+        return { seq: null, lastSeq: this.lastSeq, name, purpose, updateSeq: newest() };
+      }
       const event = this.commit((tx) => {
-        this.sql.exec(
-          "INSERT OR REPLACE INTO meta (key, value) VALUES ('group_name', ?)",
-          name,
-        );
-        return tx.append({ type: "group.updated", actorId, data: { name } });
+        this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('group_name', ?)", name);
+        this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('group_purpose', ?)", purpose);
+        return tx.append({ type: "group.updated", actorId, data: purpose === curPurpose ? { name } : { name, purpose } });
       });
-      return { seq: event.seq, lastSeq: this.lastSeq };
+      return { seq: event.seq, lastSeq: this.lastSeq, name, purpose, updateSeq: event.seq };
     });
   }
 

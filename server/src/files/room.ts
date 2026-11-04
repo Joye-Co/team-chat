@@ -4,6 +4,7 @@
 import {
   type Artifact,
   type ArtifactEventDecl,
+  type ArtifactPreview,
   type ArtifactFile,
   type ArtifactKind,
   type ArtifactVersion,
@@ -162,6 +163,7 @@ export type VersionRow = {
   events?: string | null;
   media?: string | null;
   data_rev?: number;
+  preview?: string | null;
 };
 
 export interface RegisterFileArgs {
@@ -189,6 +191,8 @@ export interface VersionInput {
   media?: MediaInfo;
   /** 1.1: the first data snapshot. */
   data?: unknown;
+  /** 1.1: the author's preview card (GAPS SF-11). */
+  preview?: ArtifactPreview;
 }
 
 export function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
@@ -238,6 +242,7 @@ export function toVersion(r: VersionRow): ArtifactVersion {
   if (r.events) v.events = JSON.parse(r.events) as ArtifactEventDecl[];
   if (r.media) v.media = JSON.parse(r.media) as MediaInfo;
   if (r.data_rev) v.dataRev = r.data_rev;
+  if (r.preview) v.preview = JSON.parse(r.preview) as ArtifactPreview;
   return v;
 }
 
@@ -313,8 +318,8 @@ function insertVersion(
   now: number,
 ): void {
   room.sql.exec(
-    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev, preview)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     artifactId,
     version,
     input.entry,
@@ -326,6 +331,7 @@ function insertVersion(
     input.events && input.events.length > 0 ? JSON.stringify(input.events) : null,
     input.media ? JSON.stringify(input.media) : null,
     input.data !== undefined ? 1 : 0,
+    input.preview ? JSON.stringify(input.preview) : null,
   );
   // A new version starts with the data of its request, or none (INTERACT §5.3).
   if (input.data !== undefined) {
@@ -568,8 +574,8 @@ registerEventImporter((e, sql) => {
     a.updatedAt,
   );
   sql.exec(
-    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, preview)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.artifactId,
     v.version,
     v.entry,
@@ -580,6 +586,7 @@ registerEventImporter((e, sql) => {
     v.runId ?? null,
     v.events && v.events.length > 0 ? JSON.stringify(v.events) : null,
     v.media ? JSON.stringify(v.media) : null,
+    v.preview ? JSON.stringify(v.preview) : null,
   );
 });
 
@@ -701,4 +708,10 @@ registerRoomMigration({
     ALTER TABLE page_events ADD COLUMN payload TEXT;
     CREATE INDEX page_events_artifact ON page_events(artifact_id, at);
   `,
+});
+
+// 1.1: the author's preview card of a version (GAPS SF-11). Old versions have none.
+registerRoomMigration({
+  name: "files-7-preview",
+  up: `ALTER TABLE artifact_versions ADD COLUMN preview TEXT;`,
 });

@@ -165,3 +165,76 @@ describe("SF-2 page log", () => {
     expect((await api(`/v1/artifacts/${id}/events?limit=500`, { token: owner.token })).status).toBe(400);
   });
 });
+
+describe("SF-11 产出 preview", () => {
+  it("store the author's preview card text and figures on a version and in the log", async () => {
+    const owner = await createMember({ level: "owner" });
+    const gid = await createGroup(owner, []);
+    const { c } = await Client.connect(owner.token);
+    const topicId = (await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "报名" })).topic.id;
+    const html = await upload(owner, gid, "index.html", "text/html", new TextEncoder().encode("<h1>x</h1>"));
+    const preview = { title: "报名看板", summary: "这周报名 38 人，B 站最多。", metrics: [{ label: "报名", value: "38 人", delta: "+12" }, { label: "B 站", value: "9" }] };
+    const made = await api("/v1/artifacts", { token: owner.token, body: { groupId: gid, topicId, title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: html }], preview } });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    expect(made.body.version.preview).toEqual(preview);
+    const ev = await c.waitEvent((e) => e.type === "artifact.created");
+    expect(ev.data.version.preview).toEqual(preview);
+    const v2 = await api(`/v1/artifacts/${made.body.artifact.id}/versions`, { token: owner.token, body: { entry: "index.html", files: [{ path: "index.html", fileId: html }] } });
+    expect(v2.status).toBe(200);
+    const got = await api(`/v1/artifacts/${made.body.artifact.id}`, { token: owner.token });
+    expect(got.body.versions.map((v: any) => v.preview)).toEqual([undefined, preview]);
+    const tooMany = { metrics: Array.from({ length: 7 }, (_, i) => ({ label: `m${i}`, value: "1" })) };
+    expect((await api(`/v1/artifacts/${made.body.artifact.id}/versions`, { token: owner.token, body: { entry: "index.html", files: [{ path: "index.html", fileId: html }], preview: tooMany } })).status).toBe(400);
+    c.close();
+  });
+});
+
+describe("SF-8 / SF-9 group purpose and rename order", () => {
+  const patch = (id: string, token: string, body: unknown) => api(`/v1/groups/${id}`, { method: "PATCH", token, body });
+
+  it("set, read and clear a purpose line, alone or with a rename", async () => {
+    const a = await createMember({ level: "owner" });
+    const b = await createMember();
+    const gid = await createGroup(a, [b.id], "开发");
+    const { c: cb } = await Client.connect(b.token);
+    const r = await patch(gid, a.token, { purpose: "  qqbot、夹夹和　TeamChat 的开发 " });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.group).toMatchObject({ name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" });
+    const ev = await cb.waitEvent((e) => e.groupId === gid && e.type === "group.updated");
+    expect(ev.data).toEqual({ name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" });
+    const list = await api("/v1/groups", { token: b.token });
+    expect(list.body.find((s: any) => s.group.id === gid).group.purpose).toBe("qqbot、夹夹和 TeamChat 的开发");
+    // A rename alone keeps the purpose and sends only the name.
+    expect((await patch(gid, a.token, { name: "研发" })).body.group).toMatchObject({ name: "研发", purpose: "qqbot、夹夹和 TeamChat 的开发" });
+    const renamed = await cb.waitEvent((e) => e.groupId === gid && e.type === "group.updated" && e.data.name === "研发");
+    expect(renamed.data).toEqual({ name: "研发" });
+    // Clear it.
+    const cleared = await patch(gid, a.token, { purpose: "" });
+    expect(cleared.body.group.purpose).toBeUndefined();
+    await cb.waitEvent((e) => e.groupId === gid && e.type === "group.updated" && e.data.purpose === "");
+    expect((await patch(gid, a.token, { purpose: "x".repeat(201) })).status).toBe(400);
+    expect((await patch(gid, a.token, {})).status).toBe(400);
+    const audit = await env.DB.prepare("SELECT count(*) AS n FROM audit WHERE action = 'group.purpose' AND target = ?").bind(gid).first<{ n: number }>();
+    expect(audit?.n).toBe(2);
+    cb.close();
+  });
+
+  it("end concurrent renames with D1 equal to the newest event of the room log", async () => {
+    const a = await createMember({ level: "owner" });
+    const gid = await createGroup(a, [], "起点");
+    const names = Array.from({ length: 12 }, (_, i) => `名字 ${i}`);
+    const results = await Promise.all(names.map((name, i) => patch(gid, a.token, i % 3 === 0 ? { name, purpose: `目的 ${i}` } : { name })));
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    const { c } = await Client.connect(a.token);
+    const page = await c.request({ t: "fetch", groupId: gid, afterSeq: 0 });
+    const updates = page.events.filter((e: any) => e.type === "group.updated");
+    const lastName = updates.at(-1).data.name;
+    const lastPurpose = updates.filter((e: any) => e.data.purpose !== undefined).at(-1)?.data.purpose ?? null;
+    const row = await env.DB.prepare("SELECT name, purpose, update_seq FROM groups WHERE id = ?").bind(gid).first<any>();
+    expect(row).toEqual({ name: lastName, purpose: lastPurpose, update_seq: updates.at(-1).seq });
+    // A stale write (older seq) does not overwrite D1.
+    await env.DB.prepare("UPDATE groups SET name = 'stale', update_seq = 0 WHERE id = ?").bind(gid).run();
+    expect((await patch(gid, a.token, { name: lastName })).body.group.name).toBe(lastName);
+    c.close();
+  });
+});

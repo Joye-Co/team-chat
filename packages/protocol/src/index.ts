@@ -160,6 +160,8 @@ export const Group = z.object({
   memberIds: z.array(Id),
   createdBy: Id,
   createdAt: Millis,
+  /** 1.1: the purpose line under the group's name (absent = none). */
+  purpose: z.string().min(1).max(200).optional(),
 });
 export type Group = z.infer<typeof Group>;
 
@@ -281,7 +283,8 @@ export const MessageDeletedEvent = z.object({
 export const GroupUpdatedEvent = z.object({
   ...eventBase,
   type: z.literal("group.updated"),
-  data: z.object({ name: z.string() }),
+  /** `name` is the group's name after the change; 1.1 `purpose` is set when it changed ("" = cleared). */
+  data: z.object({ name: z.string(), purpose: z.string().max(200).optional() }),
 });
 export const GroupMemberAddedEvent = z.object({
   ...eventBase,

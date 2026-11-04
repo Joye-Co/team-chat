@@ -267,6 +267,7 @@ fn edits_and_deletes_keep_rows() {
                 G1,
                 ME,
                 EventData::GroupUpdated(GroupUpdatedData {
+                    purpose: None,
                     name: "renamed".into(),
                 }),
             ),

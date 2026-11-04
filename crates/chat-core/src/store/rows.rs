@@ -336,6 +336,7 @@ pub(crate) fn group_from_row(r: &Row<'_>) -> rusqlite::Result<GroupRow> {
     let notify: Option<String> = r.get(12)?;
     Ok(GroupRow {
         group: Group {
+            purpose: None,
             id: r.get(0)?,
             kind: enum_from(r.get(1)?)?,
             name: r.get(2)?,

@@ -6,7 +6,6 @@ import type { InteractCtx } from "./fixtures-v11-interact.ts";
 export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx) {
   const FILE = "01JC0FIL0000000000000INDEX";
   void ok;
-  void base;
   void message;
 
   // SF-1: files over 100 MB upload in parts.
@@ -32,6 +31,24 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
     hasMore: true,
   }, "newest first; the last one is from before payloads were kept");
   ok("http/artifact-events-response-empty.json", "ArtifactEventsResponse", { events: [], hasMore: false });
+
+  // SF-11: the author's preview card of a 产出 version.
+  const preview = { title: "报名看板", summary: "这周报名 38 人，B 站最多。", metrics: [{ label: "报名", value: "38 人", delta: "+12" }, { label: "B 站", value: "9" }] };
+  ok("entities/artifact-version-preview.json", "ArtifactVersion", {
+    artifactId: ART, version: 3, entry: "index.html", files: [{ path: "index.html", fileId: FILE, size: 12_000, mime: "text/html" }], createdBy: ID.bot, createdAt: T0, preview,
+  });
+  const createHtml = { groupId: ID.general, topicId: ID.topic, title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: FILE }], preview };
+  ok("http/create-artifact-preview.json", "CreateArtifactRequest", createHtml);
+  ok("http/add-artifact-version-preview.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], preview: { summary: "只有一句话" } });
+  bad("http/create-artifact-preview-too-many-metrics.json", "CreateArtifactRequest", { ...createHtml, preview: { metrics: Array.from({ length: 7 }, (_, i) => ({ label: `m${i}`, value: "1" })) } }, "at most 6 figures");
+  bad("http/create-artifact-preview-long-label.json", "CreateArtifactRequest", { ...createHtml, preview: { metrics: [{ label: "x".repeat(41), value: "1" }] } }, "a figure label is at most 40 characters");
+
+  // SF-8: a group's purpose line.
+  ok("entities/group-purpose.json", "Group", { id: ID.general, kind: "group", name: "开发", memberIds: [ID.owner, ID.alice, ID.bot], createdBy: ID.owner, createdAt: T0, purpose: "qqbot、夹夹和 TeamChat 的开发" });
+  ok("http/update-group-request-purpose.json", "UpdateGroupRequest", { purpose: "qqbot、夹夹和 TeamChat 的开发" }, "1.1: purpose only");
+  ok("http/update-group-request-clear-purpose.json", "UpdateGroupRequest", { name: "开发", purpose: "" }, "1.1: rename and clear the purpose");
+  ok("events/group.updated-purpose.json", "Event", { ...base, seq: 70, type: "group.updated", data: { name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" } }, "1.1: the purpose changed");
+  ok("events/group.updated-purpose-cleared.json", "Event", { ...base, seq: 71, type: "group.updated", data: { name: "开发", purpose: "" } });
 
   // SF-7: a table is at most 200 MB.
   const table = { kind: "table", mime: "text/csv", bytes: 120_000, rows: 124, cols: 6, preview: "ready" };

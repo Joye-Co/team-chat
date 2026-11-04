@@ -39,6 +39,7 @@ Group = {
   memberIds: string[]
   createdBy: string
   createdAt: number
+  purpose?: string             // 1.1: the purpose line under the name (1..200; absent = none)
 }
 
 GroupSummary = {
@@ -91,7 +92,7 @@ Event = { seq: number, groupId: string, at: number, actorId: string } & (
   | { type: "message.created",     data: { message: Message } }
   | { type: "message.updated",     data: { messageId: string, body: string, editedAt: number, streaming: boolean } }
   | { type: "message.deleted",     data: { messageId: string, deletedAt: number } }
-  | { type: "group.updated",       data: { name: string } }
+  | { type: "group.updated",       data: { name: string, purpose?: string /* 1.1: set when it changed, "" = cleared */ } }
   | { type: "group.memberAdded",   data: { memberId: string } }
   | { type: "group.memberRemoved", data: { memberId: string } }
 )
@@ -527,7 +528,7 @@ Module: `members.ts` / `members.rs`.
 | --- | --- | --- | --- |
 | `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated?, character?: CharacterId \| null }` | `Member` |
 | `PATCH /v1/groups/:id/prefs` | group member, for self | `UpdateGroupPrefsRequest { muted?, notify? }` | `GroupSummary` |
-| `PATCH /v1/groups/:id` | group member, or an owner | `UpdateGroupRequest { name }` | `GroupSummary` |
+| `PATCH /v1/groups/:id` | group member, or an owner | `UpdateGroupRequest { name?, purpose? }` (at least one) | `GroupSummary` |
 
 ```ts
 NotifyLevel = "all" | "mentions" | "none"
@@ -555,6 +556,16 @@ Rules:
   appends `group.updated { name }` to the group log, so every client's cache and sidebar
   update; the same name again (after normalizing) appends nothing. An owner outside the group
   gets a `GroupSummary` with `readSeq`, `unread` and `mentions` 0.
+- Whitespace is Unicode White_Space (`normalizeGroupText` / `normalize_group_text`: U+0009–000D,
+  U+0020, U+0085, U+00A0, U+1680, U+2000–200A, U+2028, U+2029, U+202F, U+205F, U+3000), the same
+  on both sides.
+- 1.1 purpose line: `purpose` is normalized like a name and may be 0..200 characters; `""`
+  clears it. Same rights as a rename; audited as `group.purpose` (`{chars}`); the event carries
+  `name` and the new `purpose`. A rename alone sends `group.updated { name }`.
+- Order: the room appends the event first; D1 then takes the room's name and purpose only when
+  the seq of the room's newest `group.updated` event is newer than the one D1 holds
+  (`groups.update_seq`). Concurrent changes end with D1 equal to the newest event of the log; a
+  retry after a lost D1 write writes D1 again without a new event.
 - Prefs are per member. The server pushes the new `GroupSummary` to my other connections as a
   `directory` frame.
 
@@ -1053,11 +1064,14 @@ Rules:
 Module: `files.ts` / `files.rs`.
 
 ```ts
-ArtifactVersion += { runId?: string, events?: ArtifactEventDecl[] /* <= 20 */, media?: MediaInfo, dataRev?: number }
+ArtifactVersion += { runId?: string, events?: ArtifactEventDecl[] /* <= 20 */, media?: MediaInfo, dataRev?: number,
+                     preview?: ArtifactPreview }
+ArtifactPreview = { title? /* 1..200 */, summary? /* 1..500 */,
+                    metrics?: { label /* 1..40 */, value /* 1..40 */, delta? /* 1..40 */ }[] /* <= 6 */ }
 ArtifactEventDecl = { name /* 1..128; writes: [a-z][A-Za-z0-9_.-]{0,63}, unique */, label? /* <= 200 */,
                       kind?: "emit" | "ask" /* default emit */, schema?: TcSchema }
-CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */ }
-AddArtifactVersionRequest += { events?, runId?, media?, data? }
+CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */, preview? }
+AddArtifactVersionRequest += { events?, runId?, media?, data?, preview? }
 { t: "artifact.event", rid, groupId, artifactId, version, clientEventId?, name, kind?, payload?: JSON /* <= 16 KiB */ }
    // ack.result (1.1 server) = ArtifactEventAck { eventId, duplicate?, expect: Expect }
 ```
@@ -1081,6 +1095,8 @@ events stored before the page log kept payloads.
 
 Rules:
 
+- `preview` (any author) is the text and figures of the version's preview card. Readers use it
+  first and scrape the HTML only when a version has none.
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
 - `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum

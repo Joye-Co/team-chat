@@ -102,6 +102,13 @@ pub struct Group {
     pub member_ids: Vec<String>,
     pub created_by: String,
     pub created_at: Millis,
+    /// 1.1: the purpose line under the group's name.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub purpose: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

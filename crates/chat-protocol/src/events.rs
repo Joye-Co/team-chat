@@ -253,7 +253,15 @@ pub struct MessageDeletedData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupUpdatedData {
+    /// The group's name after the change.
     pub name: String,
+    /// 1.1: set when the purpose line changed (`""` = cleared).
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub purpose: Option<String>,
 }
 
 /// Data of `group.memberAdded` and `group.memberRemoved`.

@@ -186,6 +186,26 @@ const ArtifactEventsInput = ArtifactEvents.refine((list) => list.every((d) => AR
 const jsonMax = (max: number, what: string) =>
   z.json().refine((v) => utf8Bytes(JSON.stringify(v)) <= max, { message: `${what} exceeds ${max} bytes` });
 
+/** 1.1: one figure of a 产出 preview card (`12 位 · 报名`, `+18%`). */
+export const ArtifactMetric = z.object({
+  label: z.string().min(1).max(40),
+  value: z.string().min(1).max(40),
+  /** A change beside the value, as text (`+18%`, `−2`). */
+  delta: z.string().min(1).max(40).optional(),
+});
+export type ArtifactMetric = z.infer<typeof ArtifactMetric>;
+export const MAX_ARTIFACT_METRICS = 6;
+/**
+ * 1.1: what the author says a version shows, for preview cards (GAPS SF-11). Readers use it
+ * before anything they scrape from the HTML.
+ */
+export const ArtifactPreview = z.object({
+  title: z.string().min(1).max(200).optional(),
+  summary: z.string().min(1).max(500).optional(),
+  metrics: z.array(ArtifactMetric).max(MAX_ARTIFACT_METRICS).optional(),
+});
+export type ArtifactPreview = z.infer<typeof ArtifactPreview>;
+
 export const ArtifactVersion = z.object({
   artifactId: Id,
   version: z.int().positive(),
@@ -203,6 +223,8 @@ export const ArtifactVersion = z.object({
   media: MediaInfo.optional(),
   /** 1.1: rev of the latest data snapshot (0 or absent = none). */
   dataRev: Count.optional(),
+  /** 1.1: the author's preview card text and figures. */
+  preview: ArtifactPreview.optional(),
 });
 export type ArtifactVersion = z.infer<typeof ArtifactVersion>;
 
@@ -224,6 +246,8 @@ const versionInput = {
   data: jsonMax(MAX_ARTIFACT_DATA_BYTES, "data").optional(),
   /** 1.1: the caller bot's active run that made it (checked by the server). */
   runId: Id.optional(),
+  /** 1.1: the preview card text and figures (any author). */
+  preview: ArtifactPreview.optional(),
 };
 
 /** `POST /v1/artifacts`: makes the 产出 and its version 1. */

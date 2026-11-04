@@ -51,13 +51,35 @@ impl HttpClient {
     /// whitespace; a DM answers `forbidden`.
     pub async fn rename_group(&self, group_id: &str, name: &str) -> ApiResult<GroupSummary> {
         let req = UpdateGroupRequest {
-            name: name.to_string(),
+            purpose: None,
+            name: Some(name.to_string()),
         };
+        self.update_group(group_id, &req).await
+    }
+
+    /// 1.1: sets a group's purpose line (`""` clears it). Same rights as a rename.
+    pub async fn set_group_purpose(
+        &self,
+        group_id: &str,
+        purpose: &str,
+    ) -> ApiResult<GroupSummary> {
+        let req = UpdateGroupRequest {
+            purpose: Some(purpose.to_string()),
+            name: None,
+        };
+        self.update_group(group_id, &req).await
+    }
+
+    async fn update_group(
+        &self,
+        group_id: &str,
+        req: &UpdateGroupRequest,
+    ) -> ApiResult<GroupSummary> {
         req.validate().map_err(invalid)?;
         self.call(
             Method::PATCH,
             &format!("/v1/groups/{}", enc(group_id)),
-            Some(&req),
+            Some(req),
             true,
         )
         .await

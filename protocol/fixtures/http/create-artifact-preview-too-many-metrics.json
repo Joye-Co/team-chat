@@ -1,0 +1,50 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": false,
+  "description": "at most 6 figures",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "看板",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "preview": {
+      "metrics": [
+        {
+          "label": "m0",
+          "value": "1"
+        },
+        {
+          "label": "m1",
+          "value": "1"
+        },
+        {
+          "label": "m2",
+          "value": "1"
+        },
+        {
+          "label": "m3",
+          "value": "1"
+        },
+        {
+          "label": "m4",
+          "value": "1"
+        },
+        {
+          "label": "m5",
+          "value": "1"
+        },
+        {
+          "label": "m6",
+          "value": "1"
+        }
+      ]
+    }
+  }
+}

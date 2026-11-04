@@ -228,7 +228,7 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   add("http/update-group-request-extra.json", { kind: "UpdateGroupRequest", valid: true, description: "unknown fields are dropped", value: { name: "全员", memberIds: [ID.alice] }, normalized: { name: "全员" } });
   bad("http/update-group-request-empty-name.json", "UpdateGroupRequest", { name: "" }, "limit: empty name");
   bad("http/update-group-request-name-too-long.json", "UpdateGroupRequest", { name: "群".repeat(65) }, "limit: 65 characters");
-  bad("http/update-group-request-missing-name.json", "UpdateGroupRequest", {}, "missing name");
+  bad("http/update-group-request-missing-name.json", "UpdateGroupRequest", {}, "missing name (1.1: and purpose)");
   bad("http/update-group-prefs-request-bad-notify.json", "UpdateGroupPrefsRequest", { notify: "loud" }, "unknown notify level");
   for (const reason of ["mention", "waiting", "result", "message"]) {
     ok(`server/event-notify-${reason}.json`, "ServerFrame", { t: "event", event: { ...base, type: "message.created", data: { message } }, notify: reason });

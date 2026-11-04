@@ -1,0 +1,32 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": true,
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "看板",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "preview": {
+      "title": "报名看板",
+      "summary": "这周报名 38 人，B 站最多。",
+      "metrics": [
+        {
+          "label": "报名",
+          "value": "38 人",
+          "delta": "+12"
+        },
+        {
+          "label": "B 站",
+          "value": "9"
+        }
+      ]
+    }
+  }
+}

@@ -699,6 +699,7 @@ fn card_state_cause_refs_retracts_and_previews_reach_the_cache() {
         ..Default::default()
     }];
     let version = ArtifactVersion {
+        preview: None,
         artifact_id: "A1".into(),
         version: 1,
         entry: "index.html".into(),
@@ -973,6 +974,7 @@ async fn card_events_page_events_and_interact_transients() {
                         updated_at: 1,
                     },
                     version: ArtifactVersion {
+                        preview: None,
                         artifact_id: "A1".into(),
                         version: 1,
                         entry: "index.html".into(),

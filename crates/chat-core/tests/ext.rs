@@ -77,6 +77,7 @@ fn artifact(id: &str, topic: &str, v: u32) -> Artifact {
 
 fn version(id: &str, v: u32) -> ArtifactVersion {
     ArtifactVersion {
+        preview: None,
         events: None,
         run_id: None,
         media: None,

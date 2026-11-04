@@ -292,6 +292,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 updated_at: 10,
             };
             let v = ArtifactVersion {
+                preview: None,
                 events: None,
                 run_id: None,
                 media: None,
@@ -324,6 +325,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 a.title = t;
             }
             let v = ArtifactVersion {
+                preview: None,
                 events: None,
                 run_id: None,
                 media: None,
@@ -401,7 +403,13 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             if g.group.kind == GroupKind::Dm {
                 return err(StatusCode::FORBIDDEN, "forbidden");
             }
-            g.group.name = r.name.split_whitespace().collect::<Vec<_>>().join(" ");
+            if let Some(n) = &r.name {
+                g.group.name = normalize_group_text(n);
+            }
+            if let Some(p) = &r.purpose {
+                let p = normalize_group_text(p);
+                g.group.purpose = (!p.is_empty()).then_some(p);
+            }
             ok(g.clone())
         }
         (&Method::PATCH, ["v1", "members", id]) => {

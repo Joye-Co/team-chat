@@ -618,6 +618,7 @@ export async function createArtifactAs(env: Env, a: WriterContext, req: CreateAr
     events: req.events,
     runId: req.runId,
     media: req.media,
+    preview: req.preview,
     data: req.data,
   });
   if (!r.ok) {
@@ -650,6 +651,7 @@ export async function addArtifactVersionAs(
       events: req.events,
       runId: req.runId,
       media: req.media,
+      preview: req.preview,
       data: req.data,
     }),
   ) as ArtifactVersionResponse;

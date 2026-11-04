@@ -1,0 +1,16 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "description": "1.1: the purpose changed",
+  "value": {
+    "seq": 70,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "group.updated",
+    "data": {
+      "name": "开发",
+      "purpose": "qqbot、夹夹和 TeamChat 的开发"
+    }
+  }
+}

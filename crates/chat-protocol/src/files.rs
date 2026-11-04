@@ -287,6 +287,13 @@ pub struct ArtifactVersion {
         skip_serializing_if = "Option::is_none"
     )]
     pub data_rev: Option<u64>,
+    /// 1.1: the author's preview card text and figures.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl ArtifactVersion {
@@ -425,6 +432,70 @@ fn check_version_extras(media: Option<&MediaInfo>, data: Option<&Value>) -> Vali
     Ok(())
 }
 
+/// 1.1: one figure of a 产出 preview card (`38 人`, `+12`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactMetric {
+    pub label: String,
+    pub value: String,
+    /// A change beside the value, as text.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub delta: Option<String>,
+}
+
+pub const MAX_ARTIFACT_METRICS: usize = 6;
+
+/// 1.1: what the author says a version shows, for preview cards. Readers use it before
+/// anything they scrape from the HTML.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactPreview {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub title: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub summary: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub metrics: Option<Vec<ArtifactMetric>>,
+}
+
+fn check_preview(p: Option<&ArtifactPreview>) -> Validation {
+    let Some(p) = p else { return Ok(()) };
+    if let Some(t) = &p.title {
+        check_chars("preview.title", t, 1, 200)?;
+    }
+    if let Some(t) = &p.summary {
+        check_chars("preview.summary", t, 1, 500)?;
+    }
+    let metrics = p.metrics.as_deref().unwrap_or_default();
+    if metrics.len() > MAX_ARTIFACT_METRICS {
+        return fail("preview.metrics", "at most 6 figures");
+    }
+    for m in metrics {
+        check_chars("preview.metrics.label", &m.label, 1, 40)?;
+        check_chars("preview.metrics.value", &m.value, 1, 40)?;
+        if let Some(d) = &m.delta {
+            check_chars("preview.metrics.delta", d, 1, 40)?;
+        }
+    }
+    Ok(())
+}
+
 /// A file of a new version: an uploaded (`ready`) file of the same group, at a path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -499,6 +570,13 @@ pub struct CreateArtifactRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub run_id: Option<String>,
+    /// 1.1: the author's preview card text and figures.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl CreateArtifactRequest {
@@ -509,6 +587,7 @@ impl CreateArtifactRequest {
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
         check_events(self.events.as_deref())?;
         check_version_extras(self.media.as_ref(), self.data.as_ref())?;
+        check_preview(self.preview.as_ref())?;
         self.run_id
             .as_deref()
             .map_or(Ok(()), |r| check_id("runId", r))
@@ -559,6 +638,13 @@ pub struct AddArtifactVersionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub run_id: Option<String>,
+    /// 1.1: the author's preview card text and figures.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl AddArtifactVersionRequest {
@@ -566,6 +652,7 @@ impl AddArtifactVersionRequest {
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
         check_events(self.events.as_deref())?;
         check_version_extras(self.media.as_ref(), self.data.as_ref())?;
+        check_preview(self.preview.as_ref())?;
         if let Some(r) = &self.run_id {
             check_id("runId", r)?;
         }
