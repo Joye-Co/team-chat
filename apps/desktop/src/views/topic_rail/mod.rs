@@ -106,7 +106,7 @@ mod native;
 // inspector is 280 pt, the wider panes (单独问, 产出, 改动) are 400 pt. Use the
 // shell's token for the wide pane once it lands.
 /// The width of the wider trailing panes: 单独问, the topic's 产出 and 改动.
-pub const PANE_WIDE: Pixels = gpui::px(400.);
+pub const PANE_WIDE: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
 // --- end v12/fx-topic ---
 
 /// The empty inspector (NATIVE.md §9.4 empty states): centered `secondary`

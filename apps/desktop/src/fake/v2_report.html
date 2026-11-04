@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>10 月数据月报</title>
 <style>
-:root{--bg:#FFFFFF;--sunken:#F3F3F4;--raised:#FAFAFA;--ink:#111113;--ink-2:#52525B;--ink-3:#6E6E76;--line:#EBEBED;--line-2:#DCDCE0;--hover:#F0F0F2;--sel:#E9E9EC;--btn:#111113;--btn-ink:#FFFFFF;--ok-ink:#177245;--c-ledger:#F4DDE3;--tile-ink:#2D3272;--lift:0 1px 2px rgba(17,17,19,.05);--sec-hi:0 1px 1px rgba(17,17,19,.05)}
-@media (prefers-color-scheme:dark){:root{--bg:#111113;--sunken:#1C1C1F;--raised:#151517;--ink:#F1F1F3;--ink-2:#A9A9B2;--ink-3:#8C8C95;--line:#252529;--line-2:#34343A;--hover:#1D1D20;--sel:#26262A;--btn:#F1F1F3;--btn-ink:#111113;--ok-ink:#6AD69C;--c-ledger:#CDB9BE;--tile-ink:#232858;--lift:none;--sec-hi:none}}
+:root{--bg:#FFFFFF;--sunken:#F3F3F4;--raised:#FAFAFA;--ink:#111113;--ink-2:#52525B;--ink-3:#6E6E76;--line:#EBEBED;--line-2:#DCDCE0;--hover:#F0F0F2;--sel:#E9E9EC;--btn:#111113;--btn-ink:#FFFFFF;--ok-ink:#177245;--c-ledger:#F4DDE3;--tile-ink:#2D3272;--lift:0 1px 2px rgba(17,17,19,.05);--sec-hi:0 1px 1px rgba(17,17,19,.05);--well:rgba(0,0,0,.04)}
+@media (prefers-color-scheme:dark){:root{--bg:#111113;--sunken:#1C1C1F;--raised:#151517;--ink:#F1F1F3;--ink-2:#A9A9B2;--ink-3:#8C8C95;--line:#252529;--line-2:#34343A;--hover:#1D1D20;--sel:#26262A;--btn:#F1F1F3;--btn-ink:#111113;--ok-ink:#6AD69C;--c-ledger:#CDB9BE;--tile-ink:#232858;--lift:none;--sec-hi:none;--well:rgba(255,255,255,.06)}}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;font-size:14px;line-height:22px;-webkit-font-smoothing:antialiased}
 .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
@@ -39,14 +39,12 @@ tr:last-child th,tr:last-child td{border-bottom:0}
 .ask .in{padding:14px 16px 16px}
 .who{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;color:var(--ink-3)}
 .tile{flex:none;width:20px;height:20px;border-radius:6px;background:var(--c-ledger);color:var(--tile-ink);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}
-.opts{margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.opt{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px 0 8px;border:1px solid var(--line-2);border-radius:9px;background:var(--bg);box-shadow:var(--sec-hi);font:inherit;font-size:13px;color:var(--ink);text-align:left;cursor:pointer}
-.opt:hover{border-color:var(--ink-3)}
-.opt .k{flex:none;width:20px;height:20px;border-radius:6px;background:var(--sunken);color:var(--ink-2);font-size:11px;line-height:20px;text-align:center}
-.opt.on{border-color:var(--ink);box-shadow:inset 0 0 0 .5px var(--ink)}
-.opt.on .k{background:var(--btn);color:var(--btn-ink)}
-.opt .r{margin-left:auto;font-size:12px;color:var(--ink-3)}
-.opt[disabled]{color:var(--ink-2);cursor:default}
+.opts{margin-top:12px;border-radius:8px;background:var(--well);padding:4px}
+.opt{display:flex;align-items:center;gap:8px;width:100%;height:32px;padding:0 10px;border:0;border-radius:6px;background:transparent;font:inherit;font-size:13px;line-height:18px;color:var(--ink);text-align:left;cursor:default}
+.opt+.opt{box-shadow:0 -1px 0 var(--line)}
+.opt .c{flex:none;width:14px;display:flex;justify-content:center}
+.opt .r{font-size:11px;color:var(--ink-3)}
+.opt[disabled]{color:var(--ink-2)}
 .foot{margin:0;display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);background:var(--raised);font-size:12px;line-height:18px;color:var(--ink-3)}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes line{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
@@ -108,10 +106,10 @@ tr:last-child th,tr:last-child td{border-bottom:0}
 <h3 style="margin:10px 0 0;font-size:16px;line-height:24px;font-weight:600">下个月加预算投哪个渠道？</h3>
 <p style="margin:4px 0 0;font-size:13px;line-height:20px;color:var(--ink-2)">按 10 月算，每个新增群的花费：小红书 <span class="mono">¥41</span>，B 站 <span class="mono">¥58</span>，抖音 <span class="mono">¥96</span>。群内邀请不花钱，但涨不动。</p>
 <div class="opts" id="opts">
-<button type="button" class="opt" data-id="a" data-label="小红书"><span class="k mono">A</span><span>小红书</span><span class="r">Ledger 推荐</span></button>
-<button type="button" class="opt on" data-id="b" data-label="B 站"><span class="k mono">B</span><span>B 站</span><svg class="r ok" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink)"><path d="M20 6 9 17l-5-5"/></svg></button>
-<button type="button" class="opt" data-id="c" data-label="抖音"><span class="k mono">C</span><span>抖音</span></button>
-<button type="button" class="opt" data-id="d" data-label="先不加，维持现状"><span class="k mono">D</span><span>先不加，维持现状</span></button>
+<button type="button" class="opt" data-id="a" data-label="小红书"><span class="c"></span><span>小红书</span><span class="r">Ledger 推荐</span></button>
+<button type="button" class="opt on" data-id="b" data-label="B 站"><span class="c"><svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span>B 站</span></button>
+<button type="button" class="opt" data-id="c" data-label="抖音"><span class="c"></span><span>抖音</span></button>
+<button type="button" class="opt" data-id="d" data-label="先不加，维持现状"><span class="c"></span><span>先不加，维持现状</span></button>
 </div>
 </div>
 <p class="foot" id="foot" data-now="10:21"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 21.5 22 2 2.5 9.5l8 3.5Z"/><path d="M22 2 10.5 13"/></svg><span id="sent">你选了「B 站」· <span class="mono">10:12</span> · 已发给 Ledger</span></p>
@@ -128,9 +126,9 @@ tr:last-child th,tr:last-child td{border-bottom:0}
       var label=b.getAttribute('data-label');
       // The sample's own clock (the artboards' 10:21), not the viewer's.
       var hh=document.getElementById('foot').getAttribute('data-now')||'';
-      // One choice: the ✓ moves to the chosen option.
+      // One choice: the checkmark moves to the chosen option's leading column (a macOS choice list).
       var ok=document.querySelector('#opts .ok');
-      if(ok){ok.parentNode.removeChild(ok);ok.style.marginLeft=b.querySelector('.r')?'8px':'';b.appendChild(ok);}
+      if(ok){ok.parentNode.removeChild(ok);b.querySelector('.c').appendChild(ok);}
       document.getElementById('sent').innerHTML='你选了「'+label+'」· <span class="mono">'+hh+'</span> · 已发给 Ledger';
       if(window.artifact&&window.artifact.emitEvent){window.artifact.emitEvent('choose',{option:b.getAttribute('data-id'),label:label}).catch(function(){});}
     });

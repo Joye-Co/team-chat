@@ -362,15 +362,19 @@ impl Ctx<'_> {
     }
 }
 
-/// One decision with two short options and nothing else to fill in.
+/// One decision with two or three short options and nothing else to fill
+/// in: they show as push buttons and a press answers.
 pub(crate) fn quick(card: &CardV2) -> bool {
     let blocks = card.all_blocks();
     let decisions: Vec<_> = blocks
         .iter()
         .filter_map(|b| match b {
             CardV2Block::Decision {
-                options, multiple, ..
-            } if !multiple.unwrap_or(false) => Some(options),
+                options,
+                multiple,
+                allow_other,
+                ..
+            } if !multiple.unwrap_or(false) && allow_other.is_none() => Some(options),
             _ => None,
         })
         .collect();
@@ -399,7 +403,7 @@ pub(crate) fn quick(card: &CardV2) -> bool {
     decisions.len() == 1
         && !others
         && submits <= 1
-        && decisions[0].len() == 2
+        && (2..=3).contains(&decisions[0].len())
         && decisions[0].iter().all(|o| o.label.chars().count() <= 16)
 }
 
@@ -1192,7 +1196,7 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let p = &ctx.env.provider;
     let parts = strip_parts(ctx, cx);
     let in_topic = ctx.mode == CardMode::Topic;
-    if in_topic && parts.is_none() {
+    if in_topic && parts.is_none() && !super::v21::interact::conflicted(ctx) {
         return None;
     }
     let member = p.member(&ctx.msg.author_id);
@@ -1290,6 +1294,19 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                     .child(crate::views::shell::clock(ctx.msg.created_at)),
             )
         });
+    // The card changed while I answered: an inline state line in the header, in the place
+    // that changed (NATIVE.md §7.4), never a toast.
+    let conflict = super::v21::interact::conflicted(ctx).then(|| {
+        div()
+            .pt(space::S4)
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .n_subheadline()
+            .text_color(n.secondary)
+            .child(Sym::Alert.inline_small().text_color(n.secondary))
+            .child(crate::copy::cards21::CONFLICT_TOAST)
+    });
     Some(
         div()
             .flex()
@@ -1297,6 +1314,7 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .gap(space::S2)
             .child(row)
             .children(path)
+            .children(conflict)
             .when_some(bar, |el, f| {
                 el.child(
                     div()
@@ -1865,8 +1883,10 @@ pub(crate) fn choice_text(
                 _ => vec![],
             };
             for id in ids {
-                if let Some((i, o)) = options.iter().enumerate().find(|(_, o)| o.id == id) {
-                    parts.push(format!("{}：{}", letter(i), o.label));
+                // By label, like an action (`「8 个分格，逐位输入」`): options show no
+                // letters (NATIVE.md rule 4).
+                if let Some(o) = options.iter().find(|o| o.id == id) {
+                    parts.push(format!("「{}」", o.label));
                 }
             }
         }

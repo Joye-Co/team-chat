@@ -66,9 +66,9 @@ impl MediaKind {
 
     pub fn icon(self) -> Sym {
         match self {
-            MediaKind::Html => Sym::OpenWindow,
-            MediaKind::Markdown | MediaKind::Pdf => Sym::Document,
-            MediaKind::Image | MediaKind::ImageSet => Sym::Image,
+            MediaKind::Html | MediaKind::Markdown | MediaKind::Pdf => Sym::Document,
+            MediaKind::Image => Sym::Image,
+            MediaKind::ImageSet => Sym::Images,
             MediaKind::Video => Sym::Video,
             MediaKind::Audio => Sym::Audio,
             MediaKind::Code => Sym::CodeFile,

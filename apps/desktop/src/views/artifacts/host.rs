@@ -152,8 +152,6 @@ pub struct PageHost {
     follow: HashMap<SharedString, bool>,
     /// Self-tests: events sent, as `(artifact, version, name, kind)`.
     sent: Vec<(String, u32, String, PageEventKind)>,
-    /// Self-tests: the 引用提问 toasts pushed to a window.
-    toasts: Vec<&'static str>,
 }
 
 impl Global for PageHost {}
@@ -172,7 +170,6 @@ impl PageHost {
             updated: HashMap::new(),
             follow: HashMap::new(),
             sent: Vec::new(),
-            toasts: Vec::new(),
         }
     }
 }
@@ -921,20 +918,12 @@ fn ask_about(
         value: value.clone().map(refs::value::cap),
         card_rev: None,
     };
-    // The toast goes to the window that asked. A page in the main window asks while that
-    // window is being updated, so it cannot be found and updated again (`files::notify`).
-    use gpui_component::WindowExt as _;
-    let toast = |asked: refs::Asked, w: &mut Window, cx: &mut App| {
-        if let Some(text) = ref_notice(asked) {
-            host(cx).toasts.push(text);
-            let n = gpui_component::notification::Notification::new().message(text.to_string());
-            w.push_notification(n, cx);
-        }
-    };
+    // No toast (NATIVE.md §7.4): the chip in the 话题's composer is the confirmation.
+    // A page in the main window asks while that window is being updated, so it cannot be
+    // found and updated again (`files::notify`).
     match window {
         Some(w) => {
-            let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
-            toast(asked, w, cx);
+            refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
         }
         None => {
             let _ = cx
@@ -942,8 +931,7 @@ fn ask_about(
                 .or_else(|| cx.windows().into_iter().next())
                 .map(|handle| {
                     handle.update(cx, |_, w, cx| {
-                        let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
-                        toast(asked, w, cx);
+                        refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
                     })
                 });
         }
@@ -970,14 +958,6 @@ fn selector_key(selector: &str) -> String {
 /// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
 /// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
 /// 最多引用 5 处 (from [`refs::ask_about_outcome`]); a chip in 单独问 shows in its composer.
-fn ref_notice(asked: refs::Asked) -> Option<&'static str> {
-    match asked.added {
-        crate::data::AddRef::Added if !asked.side_chat => Some(cp::PAGE_REF_ADDED),
-        crate::data::AddRef::Duplicate(_) => Some(crate::copy::refs::CITED_HERE),
-        _ => None,
-    }
-}
-
 // --- the footer band ---------------------------------------------------------------------
 
 /// The band of a version's pages now, in words.
@@ -1421,13 +1401,6 @@ pub fn sent(cx: &App) -> Vec<(String, u32, String, PageEventKind)> {
         .unwrap_or_default()
 }
 
-/// The 引用提问 toasts this host pushed to a window (self-tests).
-pub fn toasts(cx: &App) -> Vec<&'static str> {
-    cx.try_global::<PageHost>()
-        .map(|h| h.toasts.clone())
-        .unwrap_or_default()
-}
-
 /// Sets the latest version this host knows of a 产出 (self-tests start from a known
 /// version, also on the worst-case data).
 pub fn set_latest(artifact_id: &str, version: u32, cx: &mut App) {
@@ -1772,22 +1745,6 @@ mod tests {
         emit_only.runner = true;
         assert_eq!(capability_text(Some(emit_only), "Ledger").run_log, None);
         assert_eq!(capability_text(None, "").line, cp::PAGE_READ_ONLY);
-    }
-
-    #[test]
-    fn the_page_confirms_a_ref_only_when_it_was_added() {
-        use crate::data::AddRef;
-        let at = |added, side_chat| ref_notice(refs::Asked { added, side_chat });
-        assert_eq!(at(AddRef::Added, false), Some(cp::PAGE_REF_ADDED));
-        // In 单独问 the chip shows in that composer; 已放进话题的输入框 would be wrong.
-        assert_eq!(at(AddRef::Added, true), None);
-        assert_eq!(
-            at(AddRef::Duplicate(2), false),
-            Some(crate::copy::refs::CITED_HERE)
-        );
-        // 最多引用 5 处 is shown by refs; no second, contradicting toast.
-        assert_eq!(at(AddRef::Full, false), None);
-        assert_eq!(at(AddRef::Unsupported, false), None);
     }
 
     #[test]

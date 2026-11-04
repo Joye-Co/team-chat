@@ -190,11 +190,11 @@ fn button(
     .into_any_element()
 }
 
-/// One answer of an ask card (§7.10): a regular push button with the key
-/// letter in `secondary` before the answer, stacked one under another; the
-/// chosen answer is the default style (NATIVE.md §5.2). A press answers.
+/// One answer of an ask card (§7.10): a Regular standard push button with
+/// no letter badge, stacked one under another; the chosen answer leads with
+/// a checkmark (NATIVE.md §5.2, rule 4). A press answers.
 fn option_row(
-    ix: usize,
+    _ix: usize,
     action: &CardAction,
     message: &Message,
     provider: &Arc<dyn ChatProvider>,
@@ -207,16 +207,11 @@ fn option_row(
     let id = ElementId::Name(part_id(message, format_args!("option-{}", action.id)).into());
     let chosen = mine == Some(action.id.as_str()) || sending == Some(action.id.as_str());
     let blocked = sending.is_some();
-    let letter = char::from(b'A' + ix as u8).to_string();
     let press = press_of(action, message, provider);
     let b = nk::push_button(
         id,
         "",
-        if chosen {
-            nk::PushStyle::Default
-        } else {
-            nk::PushStyle::Standard
-        },
+        nk::PushStyle::Standard,
         nk::PushSize::Regular,
         cx,
     )
@@ -224,12 +219,10 @@ fn option_row(
         div()
             .flex()
             .items_center()
-            .gap(space::S6)
-            .child(
-                div()
-                    .text_color(if chosen { n.on_accent } else { n.secondary })
-                    .child(letter),
-            )
+            .gap(space::S4)
+            .when(chosen, |el| {
+                el.child(crate::ui::Sym::Check.inline().text_color(n.label))
+            })
             .child(action.label.clone()),
     );
     let b = nk::disabled_push(b, blocked && !chosen, cx);

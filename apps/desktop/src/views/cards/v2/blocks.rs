@@ -5,7 +5,7 @@
 use gpui::{
     AnyElement, App, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window,
-    div, img, prelude::FluentBuilder as _, px, relative,
+    div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, Sizable as _,
@@ -16,7 +16,7 @@ use gpui_component::{
 };
 use serde_json::Value;
 
-use super::{Ctx, choice_text, form::Field, letter, meta, option_label, state::CardState};
+use super::{Ctx, choice_text, form::Field, meta, option_label, state::CardState};
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
@@ -424,20 +424,11 @@ pub(crate) fn table_with_refs(
             .gap(space::S8)
             .when(num, |el| el.justify_end())
             .when_some(pct, |el, p| {
-                el.child(
-                    div()
-                        .w(m::TABLE_PCT_BAR)
-                        .h(px(3.))
-                        .rounded(px(2.))
-                        .bg(k.line_2)
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded(px(2.))
-                                .bg(k.ink_2)
-                                .w(relative((p / 100.).clamp(0., 1.))),
-                        ),
-                )
+                el.child(div().w(m::TABLE_PCT_BAR).child(ui::native::determinate_bar(
+                    (p / 100.).clamp(0., 1.) as f32,
+                    None,
+                    cx,
+                )))
             })
             .child(
                 div()
@@ -608,35 +599,12 @@ fn segments(label: Option<&str>) -> Option<usize> {
     (2..=40).contains(&n).then_some(n)
 }
 
-fn progress_bar(value: f64, label: Option<&str>, count: Option<usize>, cx: &App) -> AnyElement {
+/// Progress (NATIVE.md §5.7): the one determinate bar, 4 pt, radius 2, in `blue` while
+/// it is live work. A counted label (`已重启 9/24`) stays text; no segments.
+fn progress_bar(value: f64, label: Option<&str>, _count: Option<usize>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
     let v = value.clamp(0., 1.) as f32;
-    let bar = match count.or_else(|| segments(label)) {
-        Some(n) => {
-            let lit = (v * n as f32).round() as usize;
-            div()
-                .flex()
-                .gap(px(3.))
-                .children((0..n).map(|i| {
-                    div().flex_1().h(px(4.)).rounded(px(2.)).bg(
-                        if i + 1 < lit || (i < lit && lit == n) {
-                            k.ink_2
-                        } else if i + 1 == lit {
-                            k.live
-                        } else {
-                            k.line_2
-                        },
-                    )
-                }))
-                .into_any_element()
-        }
-        None => div()
-            .h(px(4.))
-            .rounded(px(2.))
-            .bg(k.line_2)
-            .child(div().h_full().rounded(px(2.)).bg(k.live).w(relative(v)))
-            .into_any_element(),
-    };
     div()
         .flex()
         .flex_col()
@@ -644,7 +612,7 @@ fn progress_bar(value: f64, label: Option<&str>, count: Option<usize>, cx: &App)
         .when_some(label, |el, l| {
             el.child(meta(div()).text_color(k.ink_3).child(l.to_string()))
         })
-        .child(bar)
+        .child(ui::native::determinate_bar(v, Some(n.blue), cx))
         .into_any_element()
 }
 
@@ -721,22 +689,6 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
 // ---------------------------------------------------------------------------
 // Decisions and the answer record
 
-pub(crate) fn key_tile(i: usize, cx: &App) -> Div {
-    let k = theme::colors(cx);
-    div()
-        .flex_none()
-        .size(m::TILE)
-        .rounded(theme::radius::SM)
-        .bg(k.sunken)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(11.))
-        .mono()
-        .text_color(k.ink_2)
-        .child(letter(i).to_string())
-}
-
 pub(crate) fn decision(
     ctx: &Ctx,
     id: &str,
@@ -753,37 +705,19 @@ pub(crate) fn decision(
     let a = ctx.answerer();
     let sending = matches!(ctx.state, CardState::Sending { .. });
     let enabled = live && !sending;
-    // Two short options: a row of push buttons, a press answers
-    // (NATIVE.md §5.2). The option letter leads in `secondary` so
-    // `推荐 A` still reads.
+    // Two or three short options: a row of Regular push buttons, a press
+    // answers (NATIVE.md §5.2). No letters: the recommended option is the
+    // Default button, the chosen one leads with a checkmark.
     if quick {
-        let buttons = options.iter().enumerate().map(|(i, o)| {
+        let buttons = options.iter().map(|o| {
             let picked = chosen.contains(&o.id);
             let (a, block, option) = (a.clone(), id.to_string(), o.id.clone());
-            let style = if picked {
-                nk::PushStyle::Default
-            } else {
-                nk::PushStyle::Standard
-            };
-            let ink = if picked { n.on_accent } else { n.secondary };
-            nk::disabled_push(
-                nk::push_button(
-                    ctx.id(format!("opt-{id}-{}", o.id)),
-                    "",
-                    style,
-                    nk::PushSize::Regular,
-                    cx,
-                )
-                .flex_none()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .child(div().text_color(ink).child(letter(i).to_string()))
-                        .child(o.label.clone()),
-                ),
-                !enabled && !picked,
+            option_button(
+                ctx.id(format!("opt-{id}-{}", o.id)),
+                &o.label,
+                recommended.contains(&o.id),
+                picked,
+                enabled || picked,
                 cx,
             )
             .on_click(move |_, _, cx| a.pick(&block, &option, cx))
@@ -795,10 +729,10 @@ pub(crate) fn decision(
             .children(buttons)
             .into_any_element();
     }
-    // Three or more: radio buttons (checkboxes when several may be
-    // chosen), one 24 pt row each; the letter, the label, a `secondary`
-    // detail and `推荐` at the trailing edge (§5.4).
-    let rows = options.iter().enumerate().map(|(i, o)| {
+    // More: radio buttons (checkboxes when several may be chosen), one
+    // 24 pt row each: the label, `推荐` in `secondary` right after it, then
+    // a `secondary` detail (§5.4). No letters, no tiles.
+    let rows = options.iter().map(|o| {
         let picked = chosen.contains(&o.id);
         let rec = recommended.contains(&o.id);
         let choose = {
@@ -830,25 +764,15 @@ pub(crate) fn decision(
                 el.on_click(move |_, window, cx| choose(true, window, cx))
             })
             .child(control)
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(12.))
-                    .text_color(n.secondary)
-                    .child(letter(i).to_string()),
-            )
-            .child(div().min_w(px(0.)).one_line().child(o.label.clone()))
+            .child(option_title(&o.label, rec, cx))
             .when_some(o.detail.clone(), |el, d| {
-                el.child(div().min_w(px(0.)).one_line().text_color(n.secondary).child(d))
-            })
-            .when(rec, |el| {
                 el.child(
                     div()
                         .ml_auto()
-                        .flex_none()
-                        .n_subheadline()
+                        .min_w(px(0.))
+                        .one_line()
                         .text_color(n.secondary)
-                        .child(c::RECOMMENDED),
+                        .child(d),
                 )
             })
     });
@@ -860,8 +784,81 @@ pub(crate) fn decision(
         .into_any_element()
 }
 
+/// The title of an option row: the label, then `推荐` as `secondary` text
+/// right after it, never a capsule (NATIVE.md rule 4).
+pub(crate) fn option_title(label: &str, recommended: bool, cx: &App) -> Div {
+    let n = ui::native::native_colors(cx);
+    div()
+        .min_w(px(0.))
+        .flex()
+        .items_baseline()
+        .gap(space::S6)
+        .n_body()
+        .text_color(n.label)
+        .child(div().min_w(px(0.)).one_line().child(label.to_string()))
+        .when(recommended, |el| {
+            el.child(
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .text_color(n.secondary)
+                    .child(c::RECOMMENDED),
+            )
+        })
+}
+
+/// The mark of a chosen picture or page (Photos): a 20 pt `accent` circle
+/// with an `onAccent` checkmark.
+pub(crate) fn chosen_badge(cx: &App) -> Div {
+    let n = ui::native::native_colors(cx);
+    div()
+        .size(px(20.))
+        .rounded_full()
+        .bg(n.accent)
+        .shadow(n.float())
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(Sym::Check.inline_small().text_color(n.on_accent))
+}
+
+/// A short option as a Regular push button (NATIVE.md §5.2): no letter
+/// badge; the recommended option in the Default style; the chosen one
+/// leads with a 13 pt checkmark. Disabled while the card is not live.
+pub(crate) fn option_button(
+    id: SharedString,
+    label: &str,
+    recommended: bool,
+    picked: bool,
+    enabled: bool,
+    cx: &App,
+) -> Button {
+    use crate::ui::native as nk;
+    let n = nk::native_colors(cx);
+    let style = if recommended {
+        nk::PushStyle::Default
+    } else {
+        nk::PushStyle::Standard
+    };
+    let ink = if recommended { n.on_accent } else { n.label };
+    nk::disabled_push(
+        nk::push_button(id, "", style, nk::PushSize::Regular, cx)
+            .flex_none()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S4)
+                    .when(picked, |el| el.child(Sym::Check.inline().text_color(ink)))
+                    .child(label.to_string()),
+            ),
+        !enabled,
+        cx,
+    )
+}
+
 /// The answer record that replaces the controls once answered: a `sunken`
-/// row with the drawn check, `你选了 B：…` (or `Joye 选了 B：…`), where it
+/// row with the drawn check, `你选了「…」` (or `Joye 选了「…」`), where it
 /// went, the time, and `撤回` while my answer is still on its way or
 /// `展开` for others.
 pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -1021,10 +1018,10 @@ fn answered_fields(
             }
             CardV2Block::Decision { id, options, .. } => {
                 if let Some(Value::String(s)) = inputs.and_then(|i| i.get(id))
-                    && let Some((i, o)) = options.iter().enumerate().find(|(_, o)| &o.id == s)
+                    && let Some(o) = options.iter().find(|o| &o.id == s)
                 {
                     rows.push(CardField {
-                        label: letter(i).to_string(),
+                        label: c::RECORD_CHOICE.to_string(),
                         value: o.label.clone(),
                     });
                 }

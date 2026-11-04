@@ -35,9 +35,9 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
-    ui::{self, ButtonKind, Sym},
+    ui::{self, ButtonKind, Sym, native::NativeType as _},
     views::cards::v2::{
-        Ctx, blocks as b20, button, disabled_button, form::Val, letter, meta, state::CardState,
+        Ctx, blocks as b20, button, disabled_button, form::Val, meta, state::CardState,
     },
 };
 
@@ -198,12 +198,13 @@ fn after_pick(node: &Node, block: &str, cx: &mut App) {
     }
 }
 
-/// An option row (36 pt, radius 9): a letter or a check box, the label, the detail and
-/// 推荐 at the right. Picked: `ink` edge and a `sunken` fill.
+/// An option row (NATIVE.md §5.4): a radio button, or a checkbox when
+/// several may be chosen, the label with `推荐` in `secondary` right after
+/// it, and the detail at the trailing edge. One 24 pt row, no box, no
+/// letter; the row takes the click.
 #[allow(clippy::too_many_arguments)]
 fn option_row(
     id: SharedString,
-    i: usize,
     label: &str,
     detail: Option<&str>,
     recommended: bool,
@@ -214,8 +215,6 @@ fn option_row(
 ) -> gpui::Stateful<Div> {
     use crate::ui::native::{self as nk, NativeType as _};
     let n = nk::native_colors(cx);
-    // A radio button, or a checkbox when several may be chosen (NATIVE.md
-    // §5.4): one 24 pt row, no box around it. The row takes the click.
     let control = if multiple {
         nk::NativeCheckbox::new(SharedString::from(format!("{id}-c")), picked).into_any_element()
     } else {
@@ -232,20 +231,7 @@ fn option_row(
         .n_body()
         .text_color(n.label)
         .child(control)
-        .child(
-            div()
-                .flex_none()
-                .w(px(12.))
-                .text_color(n.secondary)
-                .child(b20_letter(i)),
-        )
-        .child(
-            div()
-                .min_w(px(0.))
-                .flex_1()
-                .one_line()
-                .child(label.to_string()),
-        )
+        .child(b20::option_title(label, recommended, cx).flex_1())
         .when_some(detail, |el, d| {
             el.child(
                 div()
@@ -256,19 +242,6 @@ fn option_row(
                     .child(d.to_string()),
             )
         })
-        .when(recommended, |el| {
-            el.child(
-                div()
-                    .n_subheadline()
-                    .flex_none()
-                    .text_color(n.secondary)
-                    .child(c::RECOMMENDED),
-            )
-        })
-}
-
-fn b20_letter(i: usize) -> String {
-    letter(i).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -296,18 +269,19 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
     let max = max_select.unwrap_or(options.len() as u32) as usize;
     let full = multiple && picked.len() >= max;
     let recommended = default.as_deref().unwrap_or(&[]);
-    // Cards.dc.html 01: two short options sit side by side as one row of buttons; three or
-    // more are stacked. A narrow column of a row keeps them stacked (Interact.dc.html 01).
+    // Two or three short options are one row of Regular push buttons (NATIVE.md §5.2):
+    // the recommended one in the Default style, the chosen one with a checkmark. More,
+    // several at once, 其他 or a narrow column of a row: radio rows (Interact.dc.html 01).
     let side_by_side = !multiple
         && allow_other.is_none()
-        && options.len() == 2
+        && (2..=3).contains(&options.len())
         && options.iter().all(|o| {
             o.label.chars().count() + o.detail.as_deref().map_or(0, |d| d.chars().count())
                 <= SHORT_OPTION
         })
         && !in_row_column(node, id);
     let mut col = div().flex().flex_col().gap(space::S8).min_w(px(0.));
-    let mut pair = div().flex().gap(space::S8).min_w(px(0.));
+    let mut pair = div().flex().flex_wrap().gap(space::S8).min_w(px(0.));
     let mut all: Vec<(String, String, Option<String>, bool)> = options
         .iter()
         .map(|o| {
@@ -322,12 +296,31 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
     if let Some(o) = allow_other {
         all.push((form21::OTHER.into(), o.label.clone(), None, false));
     }
-    for (i, (oid, label, detail, rec)) in all.iter().enumerate() {
+    for (oid, label, detail, rec) in all.iter() {
         let on = live && picked.contains(oid);
         let dimmed = live && full && !on;
+        if side_by_side {
+            let mut button = b20::option_button(
+                eid(node, format!("opt-{id}-{oid}")),
+                label,
+                *rec,
+                on,
+                live,
+                cx,
+            );
+            if live {
+                let (form, block, option) = (ctx.form.clone(), id.clone(), oid.clone());
+                let node_ptr = PickTarget::of(node);
+                button = button.on_click(move |_, _, cx| {
+                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                    node_ptr.after(&block, cx);
+                });
+            }
+            pair = pair.child(button);
+            continue;
+        }
         let mut row = option_row(
             eid(node, format!("opt-{id}-{oid}")),
-            i,
             label,
             detail.as_deref(),
             *rec,
@@ -344,10 +337,6 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
                     form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
                     node_ptr.after(&block, cx);
                 });
-        }
-        if side_by_side {
-            pair = pair.child(div().flex_1().min_w(px(0.)).child(row));
-            continue;
         }
         col = col.child(row);
         if on && oid == form21::OTHER {
@@ -367,7 +356,7 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
             let focused = field.is_focused(window, cx);
             col = col.child(
                 div()
-                    .pl(px(38.))
+                    .pl(px(24.))
                     .flex()
                     .items_center()
                     .gap(space::S10)
@@ -572,7 +561,9 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .track_focus(&handle)
         .flex()
         .flex_col()
-        .gap(space::S6)
+        .p(space::S4)
+        .rounded(px(8.))
+        .bg(crate::ui::native::native_colors(cx).fill)
         .min_w(px(0.));
     if live {
         let (order2, set2, ui) = (order.clone(), set.clone(), ctx.ui.clone());
@@ -636,16 +627,17 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     if can { k.ink_2 } else { k.ink_3 },
                 ))
         };
+        // One list in one well (NATIVE.md rule 5): 32 pt rows split by hairlines, the
+        // focused row on `selection`; no boxed rows.
+        let nk = crate::ui::native::native_colors(cx);
         let mut row = div()
             .id(eid(node, format!("rank-{id}-{item_id}")))
-            .h(t::RANK_ROW)
+            .h(px(32.))
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(m::OPTION_RADIUS)
-            .bg(k.bg)
-            .border_1()
-            .border_color(if is_focus { k.ink_3 } else { k.line_2 })
-            .shadow(if is_focus { k.lift() } else { k.sec_hi() })
+            .rounded(px(6.))
+            .when(is_focus, |el| el.bg(nk.selection))
+            .when(i > 0, |el| el.border_t_1().border_color(nk.separator))
             .flex()
             .items_center()
             .gap(space::S10)
@@ -686,9 +678,8 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 handle.clone(),
             );
             let item2 = item_id.clone();
-            let line = k.ink_3;
+            let line = nk.fill_hover;
             row = row
-                .cursor_grab()
                 .on_click(move |_, window, cx| {
                     window.focus(&handle, cx);
                     ui.update(cx, |u, cx| {
@@ -697,7 +688,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     });
                 })
                 .on_drag(drag, |d, _, _, cx| cx.new(|_| RankGhost(d.label.clone())))
-                .drag_over::<RankDrag>(move |s, _, _, _| s.border_color(line))
+                .drag_over::<RankDrag>(move |s, _, _, _| s.bg(line))
                 .on_drop(move |d: &RankDrag, _, cx| {
                     if d.block != id_of(&o, &d.item, &d.block) {
                         return;
@@ -749,8 +740,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         let mut line = div()
             .flex()
             .items_center()
-            .gap(space::S8)
-            .child(hint(c::RANK_KEYS, cx));
+            .gap(space::S8);
         if changed {
             let (form, block, initial, target) = (
                 ctx.form.clone(),
@@ -879,29 +869,27 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         _ => None,
     };
     let target = PickTarget::of(node);
-    let cells = div().flex().gap(space::S6).children((*min..=*max).map(|n| {
+    let nk = crate::ui::native::native_colors(cx);
+    let cells = div().flex().gap(space::S4).children((*min..=*max).map(|n| {
         let on = value == Some(n);
         let (form, block, target) = (ctx.form.clone(), id.clone(), target.clone());
         div()
             .id(eid(node, format!("scale-{id}-{n}")))
             .flex_1()
             .min_w(px(0.))
-            .h(t::SCALE_CELL)
-            .rounded(theme::radius::MD)
-            .border_1()
-            .border_color(if on { k.ink } else { k.line_2 })
-            .bg(if on { k.sunken } else { k.bg })
-            .when(!on, |el| el.shadow(k.sec_hi()))
+            .h(px(24.))
+            // A segment-like cell (NATIVE.md §5.5): `fill`, the chosen one in `accent`;
+            // no outlines, no hover.
+            .rounded(px(6.))
+            .bg(if on { nk.accent } else { nk.fill })
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(13.))
-            .mono()
-            .text_color(k.ink)
-            .when(on, |el| el.font_weight(FontWeight::SEMIBOLD))
+            .n_body()
+            .n_figures()
+            .text_color(if on { nk.on_accent } else { nk.label })
             .when(live, |el| {
-                el.hover(|s| s.border_color(k.ink_3))
-                    .on_click(move |_, _, cx| {
+                el.on_click(move |_, _, cx| {
                         form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
                         target.after(&block, cx);
                     })
@@ -1059,64 +1047,44 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, &o.file_id);
             let (form, block, option, target) =
                 (ctx.form.clone(), id.clone(), o.id.clone(), target.clone());
+            // Photos-style (NATIVE.md rule 4): the picture, its title with `推荐` after
+            // it; a chosen picture shows a checkmark badge, never an outline.
             div()
                 .id(eid(node, format!("img-{id}-{}", o.id)))
                 .flex_1()
                 .min_w(px(0.))
-                .p(space::S8)
-                .rounded(theme::radius::LG)
-                .bg(k.bg)
-                .border_1()
-                .border_color(if on { k.ink } else { k.line })
-                .when(on, |el| el.border_2())
-                .shadow(k.sec_hi())
                 .flex()
                 .flex_col()
-                .gap(space::S8)
+                .gap(space::S6)
                 .when(live, |el| {
-                    el.hover(|s| s.border_color(k.ink_3))
-                        .on_click(move |_, _, cx| {
-                            form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                            target.after(&block, cx);
-                        })
+                    el.on_click(move |_, _, cx| {
+                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                        target.after(&block, cx);
+                    })
                 })
                 .child(
                     div()
+                        .relative()
                         .w_full()
                         .h(t::IMAGE)
-                        .rounded(theme::radius::MD)
+                        .rounded(px(8.))
                         .overflow_hidden()
                         .bg(k.ph[i % k.ph.len()])
                         .when_some(path, |el, p| {
                             el.child(img(p).size_full().object_fit(ObjectFit::Cover))
+                        })
+                        .when(on, |el| {
+                            el.child(
+                                div()
+                                    .absolute()
+                                    .top(space::S6)
+                                    .right(space::S6)
+                                    .child(b20::chosen_badge(cx)),
+                            )
                         }),
                 )
                 .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .child(if on {
-                            b20::key_tile(i, cx).bg(k.ink).text_color(k.bg)
-                        } else {
-                            b20::key_tile(i, cx)
-                        })
-                        .child(
-                            b20::small(div())
-                                .flex_1()
-                                .min_w(px(0.))
-                                .one_line()
-                                .text_color(k.ink)
-                                .child(o.label.clone()),
-                        )
-                        .when(o.recommended.unwrap_or(false), |el| {
-                            el.child(
-                                meta(div())
-                                    .flex_none()
-                                    .text_color(k.ink_3)
-                                    .child(c::RECOMMENDED),
-                            )
-                        }),
+                    b20::option_title(&o.label, o.recommended.unwrap_or(false), cx),
                 )
         }));
     framed(node, b, grid.into_any_element(), cx)
@@ -1206,13 +1174,11 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         })
                     })
                     .child(
-                        div()
-                            .size(px(16.))
-                            .rounded_full()
-                            .border_1()
-                            .border_color(if on { k.ink } else { k.line_2 })
-                            .when(on, |el| el.border(px(5.)))
-                            .bg(k.bg),
+                        crate::ui::native::NativeRadio::new(
+                            eid(node, format!("matrix-{id}-{}-{}-r", r.id, col.id)),
+                            on,
+                        )
+                        .disabled(!live),
                     ),
             );
         }
@@ -1288,6 +1254,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         }
     }
     times.sort();
+    let nk = crate::ui::native::native_colors(cx);
     let cell = |s: &crate::data::cards_v2::Slot| {
         let on = picked.contains(&s.id);
         let (_, time, _) = weekday(s.start as Millis);
@@ -1313,17 +1280,25 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .min_w(px(0.))
             .h(t::SLOT_CELL)
             .px(space::S10)
-            .rounded(theme::radius::MD)
-            .border_1()
-            .border_color(if on { k.ink } else { k.line_2 })
-            .bg(if on { k.sunken } else { k.bg })
-            .when(!on, |el| el.shadow(k.sec_hi()))
+            // A quiet well; the chosen slot gets `selection` and a checkmark badge,
+            // never an outline (NATIVE.md rule 4).
+            .relative()
+            .rounded(px(8.))
+            .bg(if on { nk.selection } else { nk.fill })
+            .when(on, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top(space::S6)
+                        .right(space::S6)
+                        .child(b20::chosen_badge(cx)),
+                )
+            })
             .flex()
             .flex_col()
             .justify_center()
             .when(live, |el| {
-                el.hover(|s| s.border_color(k.ink_3))
-                    .on_click(move |_, _, cx| {
+                el.on_click(move |_, _, cx| {
                         form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
                         target.after(&block, cx);
                     })
@@ -1400,7 +1375,6 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         return div().into_any_element();
     };
     let ctx = node.ctx;
-    let k = theme::colors(cx);
     let me = ctx.me.clone().unwrap_or_default();
     // Votes: the server's tally, else the stored answers of this rev.
     let mut tally: HashMap<String, Vec<String>> = HashMap::new();
@@ -1440,7 +1414,7 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let can = live(node, b) && (!voted || changeable.unwrap_or(false));
     let target = PickTarget::of(node);
     let mut col = div().flex().flex_col().gap(space::S8);
-    for (i, o) in options.iter().enumerate() {
+    for o in options.iter() {
         let who = tally.get(&o.id).cloned().unwrap_or_default();
         let n = who.len();
         let pct = (n * 100 + total / 2).checked_div(total).unwrap_or(0);
@@ -1460,77 +1434,68 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         } else {
             Vec::new()
         };
+        // A radio row (NATIVE.md §5.4): before a vote a radio button, after it a
+        // checkmark on mine; the votes at the trailing edge and a 4 pt bar under the
+        // label once the results show. No tiles, no letters, no 我投的 capsule.
+        let n_ink = crate::ui::native::native_colors(cx);
+        let lead: AnyElement = if show {
+            div()
+                .flex_none()
+                .w(px(16.))
+                .flex()
+                .justify_center()
+                .when(on, |el| el.child(Sym::Check.inline().text_color(n_ink.label)))
+                .into_any_element()
+        } else {
+            crate::ui::native::NativeRadio::new(
+                eid(node, format!("poll-{id}-{}-c", o.id)),
+                on,
+            )
+            .disabled(!can)
+            .into_any_element()
+        };
         col = col.child(
             div()
                 .id(eid(node, format!("poll-{id}-{}", o.id)))
-                .relative()
-                .h(t::POLL_ROW)
-                .rounded(m::OPTION_RADIUS)
-                .overflow_hidden()
-                .border_1()
-                .border_color(if on { k.ink } else { k.line_2 })
-                .bg(k.bg)
+                .flex()
+                .flex_col()
+                .gap(space::S4)
                 .when(can, |el| {
-                    el.hover(|s| s.border_color(k.ink_3))
-                        .on_click(move |_, _, cx| {
-                            form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
-                            target.after(&block, cx);
-                        })
-                })
-                .when(show && total > 0, |el| {
-                    el.child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .top_0()
-                            .h_full()
-                            .w(relative(n as f32 / total as f32))
-                            .bg(k.sunken),
-                    )
+                    el.on_click(move |_, _, cx| {
+                        form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
+                        target.after(&block, cx);
+                    })
                 })
                 .child(
                     div()
-                        .relative()
-                        .size_full()
-                        .pl(space::S8)
-                        .pr(space::S12)
+                        .min_h(px(24.))
                         .flex()
                         .items_center()
-                        .gap(space::S10)
-                        .child(if on {
-                            b20::key_tile(i, cx).bg(k.ink).text_color(k.bg)
-                        } else {
-                            b20::key_tile(i, cx)
-                        })
-                        .child(
-                            b20::small(div())
-                                .min_w(px(0.))
-                                .one_line()
-                                .text_color(k.ink)
-                                .when(on, |el| el.font_weight(theme::MEDIUM_WEIGHT))
-                                .child(o.label.clone()),
-                        )
-                        .when(on, |el| {
-                            el.child(
-                                meta(div())
-                                    .flex_none()
-                                    .px(space::S6)
-                                    .rounded(px(5.))
-                                    .bg(k.ink)
-                                    .text_color(k.bg)
-                                    .child(c::POLL_MINE),
-                            )
-                        })
-                        .child(div().ml_auto().flex().gap(px(-4.)).children(faces))
+                        .gap(space::S8)
+                        .child(lead)
+                        .child(b20::option_title(&o.label, false, cx).flex_1())
+                        .child(div().flex().gap(px(-4.)).children(faces))
                         .when(show, |el| {
-                            el.child(meta(div()).flex_none().mono().text_color(k.ink_2).child(
-                                fill(
-                                    c::POLL_VOTES,
-                                    &[("n", &n.to_string()), ("pct", &pct.to_string())],
-                                ),
-                            ))
+                            el.child(
+                                div()
+                                    .flex_none()
+                                    .n_subheadline()
+                                    .n_figures()
+                                    .text_color(n_ink.secondary)
+                                    .child(fill(
+                                        c::POLL_VOTES,
+                                        &[("n", &n.to_string()), ("pct", &pct.to_string())],
+                                    )),
+                            )
                         }),
-                ),
+                )
+                .when(show && total > 0, |el| {
+                    el.child(div().pl(px(24.)).child(crate::ui::native::determinate_bar(
+                        n as f32 / total as f32,
+                        None,
+                        cx,
+                    )))
+                }),
         );
     }
     // 还没投：… (the voters who have not voted).
@@ -1580,7 +1545,7 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
     let target = PickTarget::of(node);
     let inner = super::deeper(node);
     let mut cells: Vec<AnyElement> = Vec::new();
-    for (i, o) in options.iter().enumerate() {
+    for o in options.iter() {
         let on = picked.as_deref() == Some(o.id.as_str());
         let preview: Option<AnyElement> = o.preview.as_ref().map(|p| {
             let path = match p {
@@ -1624,37 +1589,25 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
             .collect();
         let (form, block, option, target2) =
             (ctx.form.clone(), id.clone(), o.id.clone(), target.clone());
-        let pick = button(
+        // A Regular push button (NATIVE.md §5.2): the recommended column's is the
+        // Default button; the chosen one says 已选 after a checkmark. No letters.
+        let rec = o.recommended.unwrap_or(false);
+        let pick = b20::option_button(
             eid(node, format!("cmp-{id}-{}", o.id)),
-            fill(
-                if on {
-                    c::COMPARE_PICKED
-                } else {
-                    c::COMPARE_PICK
-                },
-                &[("letter", &letter(i).to_string())],
-            ),
-            if on {
-                ButtonKind::Primary
-            } else {
-                ButtonKind::Secondary
-            },
+            if on { c::COMPARE_CHOSEN } else { c::COMPARE_CHOOSE },
+            rec,
+            on,
+            live,
             cx,
         )
-        .w_full()
-        .disabled(!live)
         .on_click(move |_, _, cx| {
             form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
             target2.after(&block, cx);
         });
         cells.push(
-            div()
+            crate::ui::native::cards::card_well(cx)
                 .flex_1()
                 .min_w(px(0.))
-                .rounded(theme::radius::LG)
-                .border_1()
-                .border_color(if on { k.ink } else { k.line })
-                .bg(k.bg)
                 .overflow_hidden()
                 .flex()
                 .flex_col()
@@ -1665,32 +1618,7 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                         .flex()
                         .flex_col()
                         .gap(space::S6)
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::S8)
-                                .child(b20::key_tile(i, cx))
-                                .child(
-                                    b20::small(div())
-                                        .min_w(px(0.))
-                                        .one_line()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(k.ink)
-                                        .child(o.label.clone()),
-                                )
-                                .when(o.recommended.unwrap_or(false), |el| {
-                                    el.child(
-                                        meta(div())
-                                            .flex_none()
-                                            .px(space::S6)
-                                            .rounded(px(5.))
-                                            .bg(k.sunken)
-                                            .text_color(k.ink_2)
-                                            .child(c::RECOMMENDED),
-                                    )
-                                }),
-                        )
+                        .child(b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD))
                         .children(lines(&o.pros, "+", k.ok_ink))
                         .children(lines(&o.cons, "−", k.ink_3))
                         .children(kids)

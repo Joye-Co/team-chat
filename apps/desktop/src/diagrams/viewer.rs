@@ -219,8 +219,6 @@ impl DiagramViewer {
             .flex()
             .items_center()
             .gap(space::S8)
-            .border_b_1()
-            .border_color(k.line)
             .child(ui::icon(Sym::Diagram, px(16.), k.ink_3))
             .child(
                 div().t_bar_title().text_color(k.ink).child(
@@ -244,9 +242,6 @@ impl DiagramViewer {
                     .flex()
                     .items_center()
                     .h(px(28.))
-                    .rounded(radius::MD)
-                    .border_1()
-                    .border_color(k.line_2)
                     .child(
                         ui::icon_button_sm("dv-out", Sym::Minus)
                             .named(c::ZOOM_OUT)
@@ -277,25 +272,13 @@ impl DiagramViewer {
                     ),
             )
             .child(
-                ui::button(
-                    "dv-fit",
-                    c::FIT,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Sym::Scan, px(14.), k.ink_2))
+                ui::icon_button_sm("dv-fit", Sym::Scan)
+                    .named(c::FIT)
                 .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
-                ui::button(
-                    "dv-src",
-                    c::VIEW_SOURCE,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Sym::Code, px(14.), k.ink_2))
+                ui::icon_button_sm("dv-src", Sym::Code)
+                    .named(c::VIEW_SOURCE)
                 .selected(self.show_source)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.show_source = !this.show_source;
@@ -303,27 +286,15 @@ impl DiagramViewer {
                 })),
             )
             .child(
-                ui::button(
-                    "dv-copy",
-                    c::COPY_SOURCE,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Sym::Copy, px(14.), k.ink_2))
+                ui::icon_button_sm("dv-copy", Sym::Copy)
+                    .named(c::COPY_SOURCE)
                 .on_click(move |_, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
                 }),
             )
             .child(
-                ui::button(
-                    "dv-img",
-                    c::COPY_IMAGE,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Sym::Image, px(14.), k.ink_2))
+                ui::icon_button_sm("dv-img", Sym::Image)
+                    .named(c::COPY_IMAGE)
                 .disabled(image.is_none())
                 .on_click(move |_, _, cx| {
                     if let Some(i) = &image {
@@ -402,19 +373,8 @@ impl DiagramViewer {
                     }),
             );
         }
-        div()
-            .p(px(32.))
-            .flex_none()
-            .child(
-                div()
-                    .p(px(24.))
-                    .rounded(radius::LG)
-                    .border_1()
-                    .border_color(k.line)
-                    .bg(k.raised)
-                    .child(layer),
-            )
-            .into_any_element()
+        // One panel (Quick Look): the drawing sits on the panel itself, no card inside.
+        div().p(px(32.)).flex_none().child(layer).into_any_element()
     }
 }
 
@@ -490,7 +450,6 @@ impl Render for DiagramViewer {
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .bg(k.sunken)
                             .child(measure)
                             .child(
                                 div()

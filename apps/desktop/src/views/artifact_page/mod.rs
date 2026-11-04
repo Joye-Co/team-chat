@@ -453,11 +453,32 @@ impl ArtifactPage {
             .filter(|s| !s.trim().is_empty())
             .collect::<Vec<_>>()
             .join(" · ");
+        // The inspector toggle (NATIVE.md §2): `sidebar.trailing`, toggled while 来龙去脉
+        // shows. The inspector has no heading or button of its own.
+        let inspector = nk::toolbar_item(
+            "artifact-inspector",
+            crate::ui::sf_symbols::Sf::PaneRight,
+            c::ARTIFACT_STORY,
+            if self.aside_open {
+                nk::ToolbarItemKind::Toggled
+            } else {
+                nk::ToolbarItemKind::Plain
+            },
+            active,
+            window,
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.aside_open = !this.aside_open;
+            cx.notify();
+        }));
+        let leading = content_leading(&self.services, cx);
         nk::ToolbarRow::new(a.title.clone())
             .subtitle(subtitle)
-            .leading_inset(px(0.))
+            .leading_inset(leading)
             .group(picker)
             .group(nk::ToolbarGroup::new([share, open_window, side_chat]))
+            .group(nk::ToolbarGroup::new([inspector]))
             .into_any_element()
     }
 
@@ -510,11 +531,11 @@ impl ArtifactPage {
                 )))
                 .child(div().flex_1())
                 .child(
-                    ui::button(
+                    crate::ui::native::push_button(
                         "artifact-back-latest",
                         fill(c::ARTIFACT_BACK_TO, &[("v", &latest.to_string())]),
-                        ui::ButtonKind::Ghost,
-                        ui::ButtonSize::Sm,
+                        crate::ui::native::PushStyle::Standard,
+                        crate::ui::native::PushSize::Small,
                         cx,
                     )
                     .on_click(move |_, _, cx| {
@@ -538,10 +559,9 @@ impl ArtifactPage {
                 cx,
             )
         });
+        // The page fills the content area edge to edge under the toolbar row (no frame).
         let height = window.viewport_size().height
-            - theme::TITLE_BAR
-            - space::S24
-            - px(2.)
+            - crate::ui::native::metrics::TOOLBAR_ROW
             - if old { px(40.) } else { px(0.) }
             - if live { px(35.) } else { px(0.) };
         let body = match folder {
@@ -579,11 +599,11 @@ impl ArtifactPage {
                             .child(c::ARTIFACT_PAGE_SNAPSHOT),
                     )
                     .child(
-                        ui::button(
+                        crate::ui::native::push_button(
                             "artifact-open",
                             c::ARTIFACT_OPEN,
-                            ui::ButtonKind::Primary,
-                            ui::ButtonSize::Md,
+                            crate::ui::native::PushStyle::Default,
+                            crate::ui::native::PushSize::Regular,
                             cx,
                         )
                         .on_click(move |_, _, cx| {
@@ -599,20 +619,16 @@ impl ArtifactPage {
             }
             None => div().size_full().into_any_element(),
         };
-        ui::motion::rise(
-            "artifact-frame",
-            0,
-            ui::card(cx)
-                .flex_1()
-                .min_h(px(0.))
-                .overflow_hidden()
-                .flex()
-                .flex_col()
-                .children(band)
-                .child(div().flex_1().min_h(px(0.)).child(body))
-                .children(footer),
-            cx,
-        )
+        div()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .children(band)
+            .child(div().flex_1().min_h(px(0.)).child(body))
+            .children(footer)
+            .into_any_element()
     }
 
     fn story(&self, detail: &ArtifactDetail, shown: u32, cx: &mut Context<Self>) -> AnyElement {
@@ -982,32 +998,31 @@ impl ArtifactPage {
                     .into_any_element(),
             );
         }
-        let this = cx.entity().downgrade();
-        kit::aside(
-            "artifact-story",
-            c::ARTIFACT_STORY,
-            kit::ASIDE_WIDTH,
-            space::S16,
-            Some(Box::new(move |_, cx| {
-                let _ = this.update(cx, |this, cx| {
-                    this.aside_open = false;
-                    cx.notify();
-                });
-            })),
-            cx,
-        )
-        .child(ui::rail_stack(
-            cards.into_iter().enumerate().map(|(i, el)| {
-                ui::motion::rise(
-                    SharedString::from(format!("artifact-side-{i}")),
-                    i + 1,
-                    div().child(el),
-                    cx,
-                )
-            }),
-            cx,
-        ))
-        .into_any_element()
+        // The inspector (NATIVE.md §2): 280 pt, edge to edge, its content below the 52 pt
+        // toolbar row; no heading (the toolbar's `sidebar.trailing` toggles it).
+        crate::ui::native::inspector_column(cx)
+            .child(
+                div()
+                    .id("artifact-story")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .pt(crate::ui::native::metrics::TOOLBAR_ROW)
+                    .px(space::S16)
+                    .pb(space::S24)
+                    .child(ui::rail_stack(
+                        cards.into_iter().enumerate().map(|(i, el)| {
+                            ui::motion::rise(
+                                SharedString::from(format!("artifact-side-{i}")),
+                                i + 1,
+                                div().child(el),
+                                cx,
+                            )
+                        }),
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     /// Every 产出, newest first (the 产出 destination of the rail).
@@ -1049,32 +1064,40 @@ impl ArtifactPage {
             }),
         }
         let this = cx.entity().downgrade();
-        let segmented = nk::Segmented::new(
-            "artifacts-view",
-            [
-                nk::Segment::Label(c::ARTIFACTS_VIEW_GRID.into()),
-                nk::Segment::Label(c::ARTIFACTS_VIEW_LIST.into()),
-            ],
-        )
-        .selected(if self.grid { 0 } else { 1 })
-        .toolbar()
-        .on_change({
-            let this = this.clone();
-            move |ix, _, cx| {
-                let _ = this.update(cx, |v, cx| {
-                    v.grid = ix == 0;
-                    cx.notify();
-                });
-            }
-        });
-        let sort = nk::popup_button(
+        // Finder's view control (NATIVE.md §9.6, §5.1): `square.grid.2x2` / `list.bullet`
+        // in one toolbar group, the shown view on the toggled pill.
+        let active = nk::emphasized(window);
+        let view_item = |grid: bool, cx: &mut Context<Self>| {
+            let on = self.grid == grid;
+            sym_toolbar_item(
+                if grid { "artifacts-view-grid" } else { "artifacts-view-list" },
+                if grid { Sym::Grid } else { Sym::List },
+                if grid {
+                    c::ARTIFACTS_VIEW_GRID
+                } else {
+                    c::ARTIFACTS_VIEW_LIST
+                },
+                on,
+                active,
+                cx,
+            )
+            .on_click(cx.listener(move |v, _, _, cx| {
+                v.grid = grid;
+                cx.notify();
+            }))
+        };
+        let views = nk::ToolbarGroup::new([view_item(true, cx), view_item(false, cx)]);
+        // The sort pop-up as a toolbar item (`arrow.up.arrow.down`): its menu checks the
+        // order; the tooltip names it.
+        let sort = sym_toolbar_item(
             "artifacts-sort",
+            Sym::Sort,
             self.sort.label(),
-            nk::PushSize::Regular,
-            window,
+            false,
+            active,
             cx,
         )
-        .dropdown_menu({
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, {
             let (this, current) = (this.clone(), self.sort);
             move |mut menu, _, _| {
                 for s in ListSort::ALL {
@@ -1091,13 +1114,28 @@ impl ArtifactPage {
                 menu
             }
         });
+        let leading = content_leading(&self.services, cx);
         let toolbar = nk::ToolbarRow::new(c::ARTIFACTS_TITLE)
             .subtitle(fill(c::ARTIFACTS_COUNT, &[("n", &total.to_string())]))
             .leading_inset(px(0.))
-            .group(segmented)
-            .group(sort)
-            .group(nk::SearchField::new("artifacts-search", &search).width(px(180.)));
-        let leading = space::S20.max(kit::leading(&self.services, cx));
+            .group(views)
+            // The same glass capsule as `ToolbarGroup`, around a menu button.
+            .group(
+                div()
+                    .flex_none()
+                    .h(nk::metrics::TOOLBAR_GROUP)
+                    .rounded(nk::metrics::TOOLBAR_GROUP / 2.)
+                    .bg(n.capsule)
+                    .shadow(n.glass())
+                    .flex()
+                    .items_center()
+                    .child(sort),
+            )
+            .group(
+                nk::SearchField::new("artifacts-search", &search)
+                    .sidebar()
+                    .width(px(200.)),
+            );
         if total == 0 {
             return div()
                 .size_full()
@@ -1144,8 +1182,8 @@ impl ArtifactPage {
                 let opener = open(a.id.clone(), nav);
                 div()
                     .id(SharedString::from(format!("artifact-{}", a.id)))
-                    .w(thumb_w + px(16.))
-                    .p(px(8.))
+                    .w(thumb_w + px(8.))
+                    .p(px(4.))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -1153,22 +1191,7 @@ impl ArtifactPage {
                     // The 160 pt icon well (radius 8): the page's miniature
                     // in it, like a document icon in Finder; selection
                     // fills the well.
-                    .child(
-                        div()
-                            .w(thumb_w)
-                            .h(px(120.))
-                            .rounded(px(8.))
-                            .when(selected, |d| d.bg(n.selection))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                kit::artifact_thumb(&self.services, a, px(112.), px(84.), cx)
-                                    .rounded(px(8.))
-                                    .border_0()
-                                    .shadow(n.float()),
-                            ),
-                    )
+                    .child(thumbnail(&self.services, a, selected, cx))
                     .child(
                         div()
                             .max_w(thumb_w)
@@ -1214,7 +1237,8 @@ impl ArtifactPage {
             div()
                 .flex()
                 .flex_wrap()
-                .gap(px(8.))
+                .gap_x(px(16.))
+                .gap_y(px(12.))
                 .children(cells)
                 .into_any_element()
         } else {
@@ -1284,7 +1308,7 @@ impl ArtifactPage {
                                     .items_center()
                                     .gap(px(6.))
                                     .child(
-                                        Sym::Document
+                                        kind_sym(a.kind)
                                             .inline()
                                             .text_color(ink.map(|i| i.1).unwrap_or(n.secondary)),
                                     )
@@ -1361,19 +1385,6 @@ impl Render for ArtifactPage {
         let header = self.header(&detail, shown, window, cx);
         let frame = self.frame(&detail, shown, window, cx);
         let aside = self.aside_open.then(|| self.story(&detail, shown, cx));
-        let reopen = (!self.aside_open).then(|| {
-            kit::bar_icon(
-                "artifact-aside-open",
-                Sym::Inspector,
-                c::ARTIFACT_EXPAND,
-                false,
-                cx,
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.aside_open = true;
-                cx.notify();
-            }))
-        });
         div()
             .size_full()
             .flex()
@@ -1385,22 +1396,128 @@ impl Render for ArtifactPage {
                     .h_full()
                     .flex()
                     .flex_col()
-                    .pl(space::S24.max(kit::leading(&self.services, cx)))
-                    .pr(space::S24)
-                    .pb(space::S24)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .child(div().flex_1().min_w_0().child(header))
-                            .children(reopen),
-                    )
+                    .child(header)
                     .child(frame),
             )
             .children(aside)
             .into_any_element()
     }
 }
+
+// --- v12/fx-cards: the 产出 list's toolbar items and thumbnails ---
+
+/// Where content starts after the sidebar: the toolbar title, list rows and the page
+/// (NATIVE.md §2: 20 pt), or after the traffic lights when the sidebar is hidden.
+fn content_leading(services: &Services, cx: &App) -> Pixels {
+    crate::ui::native::metrics::TOOLBAR_LEADING.max(kit::leading(services, cx))
+}
+
+/// The symbol of a 产出's kind (NATIVE.md §6).
+fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
+    use crate::data::ArtifactKind as K;
+    match kind {
+        K::Page | K::Decision => Sym::Document,
+        K::File => Sym::File,
+        K::Image => Sym::Image,
+    }
+}
+
+/// A 36 pt toolbar item drawn with a concept symbol (§5.1): `label` (or `secondary` in
+/// an inactive window), on a 28 pt `selection` pill with the symbol in `accent` when
+/// toggled. Like `native::toolbar_item`, for symbols outside its comparison set.
+fn sym_toolbar_item(
+    id: &'static str,
+    sym: Sym,
+    name: &'static str,
+    toggled: bool,
+    active: bool,
+    cx: &App,
+) -> gpui_component::button::Button {
+    use crate::ui::native::{self as nk, metrics};
+    use gpui_component::{Sizable as _, button::ButtonVariants as _};
+    let n = nk::native_colors(cx);
+    let ink = match (toggled, active) {
+        (true, true) => n.accent,
+        (_, true) => n.label,
+        _ => n.secondary,
+    };
+    let glyph = sym.toolbar().text_color(ink);
+    gpui_component::button::Button::new(id)
+        .custom(nk::borderless_variant(cx))
+        .with_size(metrics::TOOLBAR_ITEM)
+        .size(metrics::TOOLBAR_ITEM)
+        .p_0()
+        .rounded(metrics::TOOLBAR_ITEM / 2.)
+        .accessibility_label(name)
+        .tooltip(name)
+        .map(|b| {
+            if toggled {
+                b.child(
+                    div()
+                        .size(metrics::TOOLBAR_PILL)
+                        .rounded_full()
+                        .bg(n.selection)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(glyph),
+                )
+            } else {
+                b.child(glyph)
+            }
+        })
+}
+
+/// A 160 × 120 pt thumbnail, radius 8 (§9.6): the rendered page once it was on screen,
+/// a poster for media, else the kind symbol on a quiet well. Never a miniature table.
+/// Selection draws a `selection` ring outside it, like Finder's icon view.
+fn thumbnail(
+    services: &Services,
+    a: &crate::data::ArtifactSummary,
+    selected: bool,
+    cx: &App,
+) -> gpui::Div {
+    use crate::ui::native as nk;
+    use gpui::StyledImage as _;
+    let n = nk::native_colors(cx);
+    let picture: Option<gpui::ImageSource> = crate::ui::web_embed::page_preview(&a.id)
+        .map(gpui::ImageSource::from)
+        .or_else(|| {
+            services
+                .provider
+                .artifact_poster(&a.id, a.version)
+                .map(gpui::ImageSource::from)
+        });
+    let well = div()
+        .w(px(160.))
+        .h(px(120.))
+        .rounded(px(8.))
+        .overflow_hidden()
+        .bg(n.fill)
+        .border_1()
+        .border_color(n.separator)
+        .flex()
+        .items_center()
+        .justify_center();
+    let well = match picture {
+        Some(src) => well.child(
+            gpui::img(src)
+                .size_full()
+                .object_fit(gpui::ObjectFit::Cover),
+        ),
+        None => well.child(
+            kind_sym(a.kind)
+                .icon(crate::ui::sf_symbols::SymSize::new(32., 40., crate::ui::sf_symbols::Weight::Light))
+                .text_color(n.tertiary),
+        ),
+    };
+    div()
+        .p(px(3.))
+        .rounded(px(11.))
+        .when(selected, |d| d.bg(n.selection))
+        .child(well)
+}
+// --- end v12/fx-cards ---
 
 // --- v12/behavior ---
 /// The context menu of a 产出 row: 打开, 在新窗口打开 and 分享 (it copies

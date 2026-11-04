@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use gpui::{
     AsyncApp, Context, ElementId, InteractiveElement as _, IntoElement, ParentElement,
     PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    WeakEntity, Window, div, prelude::FluentBuilder as _, px, relative,
+    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{Disableable as _, notification::Notification};
 
@@ -176,9 +176,9 @@ impl Render for TopicOutputs {
             .iter()
             .map(|a| {
                 let (kind, glyph) = match a.kind {
-                    ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Sym::CodeFile),
+                    ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Sym::Document),
                     ArtifactKind::Image => (f::KIND_IMAGE, Sym::Image),
-                    _ => (ca::KIND_FILE, Sym::Document),
+                    _ => (ca::KIND_FILE, Sym::File),
                 };
                 // A page shows its version and time (`网页 · v3 · 今天 14:31`);
                 // a first-version image its size (`图片 · 2.4 MB`).
@@ -318,15 +318,11 @@ impl Render for TopicOutputs {
                                         ca::CREATING,
                                         &[("p", &format!("{:.0}", state.percent()))],
                                     )))
-                                    .child(
-                                        div().h(px(3.)).rounded(px(1.5)).bg(k.field).child(
-                                            div()
-                                                .h_full()
-                                                .w(relative((state.percent() / 100.).clamp(0., 1.)))
-                                                .rounded(px(1.5))
-                                                .bg(k.accent),
-                                        ),
-                                    ),
+                                    .child(crate::ui::native::determinate_bar(
+                                        (state.percent() / 100.).clamp(0., 1.) as f32,
+                                        None,
+                                        cx,
+                                    )),
                             ),
                             _ => el,
                         })

@@ -9,13 +9,16 @@ use super::{Folders, embed};
 use crate::{
     app::{RightPane, Services},
     copy::artifact_page as c,
-    theme::{self, space},
-    ui::{self, Sym},
+    theme::space,
+    ui::Sym,
     views::{
         group_page::{kind_label, kit},
         shell::{PaneView, panes::watch, stub_body},
     },
 };
+
+/// The wider trailing panes (单独问, 产出, 实时查看) are all 400 pt; the inspector is 280.
+const PANE_WIDTH: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
 
 pub struct ArtifactPane {
     services: Services,
@@ -35,9 +38,7 @@ impl ArtifactPane {
 
 impl PaneView for ArtifactPane {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        // --- v12/fx-topic: one wide trailing pane width (400 pt) ---
-        crate::views::topic_rail::PANE_WIDE
-        // --- end v12/fx-topic ---
+        PANE_WIDTH
     }
 }
 
@@ -62,7 +63,8 @@ impl Render for ArtifactPane {
         {
             return pane;
         }
-        let height = window.viewport_size().height - theme::TITLE_BAR - space::S12 - px(2.);
+        // The page fills the pane edge to edge under its toolbar row.
+        let height = window.viewport_size().height - crate::ui::native::metrics::TOOLBAR_ROW;
         let body = match self.folders.get(&self.services, &id, shown, cx) {
             Some(Ok(folder)) if folder.is_page => embed(
                 &self.services,
@@ -92,11 +94,11 @@ impl Render for ArtifactPane {
                         cx,
                     ))
                     .child(
-                        ui::button(
+                        crate::ui::native::push_button(
                             "artifact-pane-open",
                             c::ARTIFACT_OPEN,
-                            ui::ButtonKind::Primary,
-                            ui::ButtonSize::Md,
+                            crate::ui::native::PushStyle::Default,
+                            crate::ui::native::PushSize::Regular,
                             cx,
                         )
                         .on_click(move |_, _, cx| {
@@ -119,8 +121,6 @@ impl Render for ArtifactPane {
             .size_full()
             .flex()
             .flex_col()
-            .px(space::S12)
-            .pb(space::S12)
             // The pane's toolbar row (NATIVE.md §5.1): the 产出's name over
             // `类型 · v3`, one glass group.
             .child({
@@ -158,16 +158,10 @@ impl Render for ArtifactPane {
                 });
                 nk::ToolbarRow::new(detail.summary.title.clone())
                     .subtitle(format!("{} · v{shown}", kind_label(detail.summary.kind)))
-                    .leading_inset(space::S4)
+                    .leading_inset(crate::ui::native::metrics::TOOLBAR_LEADING)
                     .group(nk::ToolbarGroup::new([open_window, page]))
             })
-            .child(
-                crate::ui::native::cards::card_frame(cx)
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_hidden()
-                    .child(body),
-            )
+            .child(div().flex_1().min_h(px(0.)).overflow_hidden().child(body))
             .into_any_element()
     }
 }
