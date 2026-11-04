@@ -4,6 +4,7 @@
 //! Icon buttons are the same Button, square (32, sm 28). Toolbar items are
 //! 32 ghost icon buttons (D4). Views build every button from here.
 
+use crate::ui::truncate::TruncText;
 use gpui::{
     AnyElement, App, ElementId, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled,
     Window, div, prelude::FluentBuilder as _, px,
@@ -75,22 +76,22 @@ impl PushSize {
 /// The colors of a variant: rest fill, text, hover fill, pressed fill and
 /// the border (if any).
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Look {
-    fill: Hsla,
-    text: Hsla,
-    hover: Hsla,
-    pressed: Hsla,
-    border: Option<Hsla>,
+pub(super) struct Look {
+    pub fill: Hsla,
+    pub text: Hsla,
+    pub hover: Hsla,
+    pub pressed: Hsla,
+    pub border: Option<Hsla>,
 }
 
-fn look(style: PushStyle, k: &NativeColors) -> Look {
+pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
     let clear = gpui::transparent_black();
     match style {
         PushStyle::Default => Look {
-            fill: k.accent,
-            text: k.on_accent,
-            hover: k.accent.opacity(0.9),
-            pressed: k.accent.opacity(0.8),
+            fill: k.primary,
+            text: k.on_primary,
+            hover: k.primary.opacity(0.9),
+            pressed: k.primary.opacity(0.8),
             border: None,
         },
         PushStyle::Outline => Look {
@@ -114,14 +115,11 @@ fn look(style: PushStyle, k: &NativeColors) -> Look {
             pressed: k.pressed,
             border: None,
         },
-        // shadcn: `bg-destructive text-white`, at 60 % in dark so the white
-        // text keeps its contrast on the lighter dark-mode red.
+        // shadcn: `bg-destructive text-white`. One fill in both modes
+        // (T1-15, COMPLETENESS.md §1.3): #dc2626, white text at 4.8:1. The
+        // dark `destructive` token (#f87171) stays for icons and text.
         PushStyle::Destructive => {
-            let fill = if k.is_dark() {
-                k.red.opacity(0.6)
-            } else {
-                k.red
-            };
+            let fill = k.destructive_fill;
             Look {
                 fill,
                 text: gpui::white(),
@@ -206,6 +204,20 @@ pub fn ghost_button(
 /// primary never looks like Cancel.
 pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
     b.disabled(disabled).when(disabled, |b| b.opacity(0.5))
+}
+
+/// A loading button (§1.8): a 16 spinner in the icon slot, the label and
+/// the width kept, inert while loading. Use it for any button that waits.
+pub fn loading_push(b: Button, loading: bool, size: PushSize) -> Button {
+    if !loading {
+        return b;
+    }
+    b.icon(button_sym(
+        Sym::Spinner,
+        SymSize::for_slot(icon::MD),
+        size.height(),
+    ))
+    .loading(true)
 }
 
 /// What an icon button draws: an app concept or an SF Symbol.
@@ -376,15 +388,7 @@ fn chevron_button(
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(title.into()),
-            )
+            .child(TruncText::new(title).flex_1())
             .child(symbol(
                 chevron,
                 metrics::POPUP_CHEVRON_SLOT,
@@ -492,15 +496,7 @@ pub fn select_button(
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(title.into()),
-            )
+            .child(TruncText::new(title).flex_1())
             .child(crate::ui::icons::icon(Sym::PopUp, icon::MD, k.secondary)),
     )
 }
@@ -682,7 +678,7 @@ pub fn toolbar_item(
     let k = native_colors(cx);
     let name = name.into();
     let (style, ink) = match kind {
-        ToolbarItemKind::Prominent => (PushStyle::Default, k.on_accent),
+        ToolbarItemKind::Prominent => (PushStyle::Default, k.on_primary),
         ToolbarItemKind::Toggled => (PushStyle::Secondary, k.label),
         ToolbarItemKind::Plain if emphasized => (PushStyle::Ghost, k.label),
         ToolbarItemKind::Plain => (PushStyle::Ghost, k.secondary),
@@ -777,7 +773,7 @@ mod tests {
             assert_eq!(outline.fill, k.content);
             assert_eq!(outline.border, Some(k.quaternary));
             let primary = look(PushStyle::Default, &k);
-            assert_eq!(primary.fill, k.accent);
+            assert_eq!(primary.fill, k.primary);
             assert!(primary.border.is_none());
             assert_ne!(primary.fill, outline.fill);
             // Destructive: red fill, white text.

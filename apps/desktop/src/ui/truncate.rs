@@ -84,6 +84,104 @@ pub fn truncating(
         .tooltip(tip_when_cut(vec![layout], move || text_tip(text.clone())))
 }
 
+/// Where [`TruncText`] cuts a line that does not fit (COMPLETENESS.md §2.21).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Cut {
+    /// `…` at the end: names, titles, labels (the default).
+    #[default]
+    End,
+    /// `…` in the middle, so the start and the end stay: file names,
+    /// emails, IDs and paths.
+    Middle,
+}
+
+/// The one truncating label of the kit (T1-02, §2.21): one line, cut with
+/// `…` (at the end, or in the middle for file names, emails, IDs and
+/// paths), and the full text in a tooltip only when the line was cut. Style
+/// it like a `div` (type, color, width); the text inherits the style.
+///
+/// The element id comes from the text unless [`TruncText::id`] sets one;
+/// give two equal labels in one parent their own ids.
+pub struct TruncText {
+    base: gpui::Div,
+    id: ElementId,
+    text: SharedString,
+    tip: Option<SharedString>,
+    cut: Cut,
+}
+
+impl TruncText {
+    pub fn new(text: impl Into<SharedString>) -> Self {
+        let text: SharedString = text.into();
+        let id = ElementId::Name(format!("trunc-{}", hash(&text)).into());
+        Self {
+            base: div(),
+            id,
+            text,
+            tip: None,
+            cut: Cut::End,
+        }
+    }
+
+    /// The element id (two equal labels in one parent need their own).
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Cut in the middle: file names, emails, IDs and paths.
+    pub fn middle(mut self) -> Self {
+        self.cut = Cut::Middle;
+        self
+    }
+
+    pub fn cut(mut self, cut: Cut) -> Self {
+        self.cut = cut;
+        self
+    }
+
+    /// The tooltip text, when it is not the label itself (a role after a
+    /// name, a full path).
+    pub fn tip(mut self, tip: impl Into<SharedString>) -> Self {
+        self.tip = Some(tip.into());
+        self
+    }
+}
+
+fn hash(text: &str) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
+}
+
+impl gpui::Styled for TruncText {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        gpui::Styled::style(&mut self.base)
+    }
+}
+
+impl gpui::IntoElement for TruncText {
+    type Element = gpui::Stateful<gpui::Div>;
+
+    fn into_element(self) -> Self::Element {
+        let (styled, layout) = cut_line(self.text.clone());
+        let tip = self.tip.unwrap_or(self.text);
+        let base = self
+            .base
+            .id(self.id)
+            .min_w_0()
+            .overflow_hidden()
+            .whitespace_nowrap();
+        let base = match self.cut {
+            Cut::End => base.text_ellipsis(),
+            Cut::Middle => base.text_ellipsis_middle(),
+        };
+        base.child(styled)
+            .tooltip(tip_when_cut(vec![layout], move || text_tip(tip.clone())))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Context, IntoElement, Render, TestAppContext, Window, div, px, size};
@@ -187,6 +285,32 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         assert!(!window.update(cx, |row, _, _| any_cut(&row.lines)).unwrap());
+    }
+
+    /// `TruncText` records its cut like `cut_line` (T1-02).
+    struct Label {
+        width: f32,
+        middle: bool,
+    }
+
+    impl Render for Label {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let t = TruncText::new(NAME).w(px(self.width));
+            div().child(if self.middle { t.middle() } else { t })
+        }
+    }
+
+    #[gpui::test]
+    fn trunc_text_draws_in_both_cuts(cx: &mut TestAppContext) {
+        for middle in [false, true] {
+            let window = cx.open_window(size(px(800.), px(100.)), |_, _| Label {
+                width: 120.,
+                middle,
+            });
+            cx.run_until_parked();
+            window.update(cx, |_, _, _| ()).unwrap();
+        }
+        assert_ne!(hash("a"), hash("b"));
     }
 
     #[test]
