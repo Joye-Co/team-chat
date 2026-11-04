@@ -142,8 +142,6 @@ pub struct Proc {
     lines: tokio::io::Lines<BufReader<ChildStdout>>,
     raw: Option<std::fs::File>,
     run_dir: PathBuf,
-    /// The run's id: its tools carry `CHAT_RUN_ID` (see [`proctree::orphans`]).
-    run_id: String,
 }
 
 impl Proc {
@@ -172,7 +170,6 @@ impl Proc {
             lines: BufReader::with_capacity(1 << 16, stdout).lines(),
             raw: Some(raw),
             run_dir: spec.run_dir.clone(),
-            run_id: spec.env_var("CHAT_RUN_ID").unwrap_or_default().to_string(),
         })
     }
 
@@ -226,8 +223,8 @@ impl Proc {
     /// process.
     fn tool_targets(&mut self) -> Vec<proctree::Target> {
         match self.child.try_wait() {
-            Ok(None) => proctree::run_targets(self.pgid, &self.run_id),
-            _ => proctree::orphans(&self.run_id),
+            Ok(None) => proctree::run_targets(self.pgid, &self.run_dir),
+            _ => proctree::orphans(&self.run_dir),
         }
     }
 

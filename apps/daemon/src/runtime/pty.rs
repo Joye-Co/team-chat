@@ -241,8 +241,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     cancelled = true;
                     // Jobs the shell started in groups of their own; only while the shell is
                     // not reaped (its pid is still ours).
-                    let run_id = spec.env_var("CHAT_RUN_ID").unwrap_or_default();
-                    let tools = if exit.is_none() { crate::proctree::run_targets(pgid, run_id) } else { crate::proctree::orphans(run_id) };
+                    let tools = if exit.is_none() { crate::proctree::run_targets(pgid, &spec.run_dir) } else { crate::proctree::orphans(&spec.run_dir) };
                     kill(libc::SIGTERM);
                     crate::proctree::signal(&tools, libc::SIGTERM);
                     crate::proctree::signal(&tools, libc::SIGCONT);

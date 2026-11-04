@@ -5,6 +5,7 @@
 //! the run's tree.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 /// What one signal goes to: a process group whose leader is in the run's tree, or one process
 /// whose group leader is not. Each keeps the start time of its process (the group's leader),
@@ -172,23 +173,28 @@ pub fn targets(root: i32) -> Vec<Target> {
     out
 }
 
-/// The environment entry that marks every process of run `run_id` (the daemon gives the CLI
-/// `CHAT_RUN_ID`, and its tools inherit it).
-fn marker(run_id: &str) -> Vec<u8> {
-    format!("CHAT_RUN_ID={run_id}").into_bytes()
+/// The variable that marks every process of a run: the daemon gives the CLI
+/// `CHAT_RUN_FOLDER=<run folder>` (unique on the machine, unlike the run id across work roots),
+/// and its tools inherit it.
+pub const ENV_FOLDER: &str = "CHAT_RUN_FOLDER";
+
+fn marker(run_dir: &Path) -> Vec<u8> {
+    let mut m = format!("{ENV_FOLDER}=").into_bytes();
+    m.extend_from_slice(run_dir.as_os_str().as_encoded_bytes());
+    m
 }
 
-/// Processes of run `run_id` found by their environment, also the ones that left the CLI's
-/// tree (a tool that daemonized, or whose parent exited, is re-parented to pid 1 or to a
+/// Processes of the run in `run_dir` found by their environment, also the ones that left the
+/// CLI's tree (a tool that daemonized, or whose parent exited, is re-parented to pid 1 or to a
 /// subreaper): processes of the daemon's own user whose environment holds
-/// `CHAT_RUN_ID=<run_id>`. Each is the group it leads, or the process.
+/// `CHAT_RUN_FOLDER=<run_dir>`. Each is the group it leads, or the process.
 /// macOS does not show the environment of its own platform binaries (`/bin/sleep`), so such an
 /// orphan is not found there; tools a CLI starts from other paths (node, python, cargo) are.
-pub fn orphans(run_id: &str) -> Vec<Target> {
-    if run_id.is_empty() {
+pub fn orphans(run_dir: &Path) -> Vec<Target> {
+    if run_dir.as_os_str().is_empty() {
         return vec![];
     }
-    let want = marker(run_id);
+    let want = marker(run_dir);
     // SAFETY: plain syscalls without arguments.
     let (own_group, own_pid) = unsafe { (libc::getpgrp(), libc::getpid()) };
     let mut out = vec![];
@@ -211,9 +217,9 @@ pub fn orphans(run_id: &str) -> Vec<Target> {
 }
 
 /// The tool targets of a run: [`targets`] below the CLI `root` and the run's [`orphans`].
-pub fn run_targets(root: i32, run_id: &str) -> Vec<Target> {
+pub fn run_targets(root: i32, run_dir: &Path) -> Vec<Target> {
     let mut out = targets(root);
-    for t in orphans(run_id) {
+    for t in orphans(run_dir) {
         if !out.contains(&t) {
             out.push(t);
         }
@@ -379,7 +385,7 @@ pub fn signal(targets: &[Target], sig: i32) {
 /// SIGSTOP the CLI's group `root`, then every group below it and the run's orphans. Scans
 /// again until a scan finds nothing new, so a child started during the scan stops too. Adds
 /// what it stopped to `stopped`.
-pub fn stop(root: i32, run_id: &str, stopped: &mut Vec<Target>) {
+pub fn stop(root: i32, run_dir: &Path, stopped: &mut Vec<Target>) {
     if root <= 1 {
         return;
     }
@@ -388,7 +394,7 @@ pub fn stop(root: i32, run_id: &str, stopped: &mut Vec<Target>) {
         libc::kill(-root, libc::SIGSTOP);
     }
     for _ in 0..50 {
-        let new: Vec<Target> = run_targets(root, run_id)
+        let new: Vec<Target> = run_targets(root, run_dir)
             .into_iter()
             .filter(|t| !stopped.contains(t))
             .collect();
@@ -422,7 +428,7 @@ mod tests {
     }
 
     /// A tool that daemonized (its parent exited, so pid 1 is its parent) is found by the run's
-    /// marker in its environment, and only for its own run.
+    /// folder in its environment, and only for its own run.
     #[test]
     fn orphans_are_found_by_the_run_marker() {
         let dir = tempfile::tempdir().unwrap();
@@ -450,7 +456,7 @@ mod tests {
                 sleep.display(),
                 pidfile.display()
             ))
-            .env("CHAT_RUN_ID", "run-orphan-test")
+            .env(ENV_FOLDER, dir.path().join("runs/r1"))
             .status()
             .unwrap();
         assert!(status.success());
@@ -462,7 +468,7 @@ mod tests {
         let _ = std::fs::remove_file(&pidfile);
         let mut found = vec![];
         for _ in 0..100 {
-            found = orphans("run-orphan-test");
+            found = orphans(&dir.path().join("runs/r1"));
             if !found.is_empty() {
                 break;
             }
@@ -470,9 +476,9 @@ mod tests {
         }
         let hit = |t: &Target| matches!(*t, Target::Pid(p, _) | Target::Group(p, _) if p == pid);
         assert!(found.iter().any(hit), "{found:?}");
-        assert!(!orphans("run-orphan-other").iter().any(hit));
+        assert!(!orphans(&dir.path().join("runs/r2")).iter().any(hit));
         assert!(
-            !orphans("run-orphan").iter().any(hit),
+            !orphans(&dir.path().join("runs/r")).iter().any(hit),
             "a prefix is not the run"
         );
         signal(&found, libc::SIGKILL);

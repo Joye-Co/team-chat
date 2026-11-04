@@ -263,7 +263,7 @@ How the 1.1 daemon does each one:
   the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
   each of their groups, scanning again until a scan finds nothing new. A tool that daemonized
   (its parent exited, so pid 1 or a subreaper is its parent and it is no longer below the CLI) is found by
-  `CHAT_RUN_ID=<run id>` in its environment (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ` on
+  `CHAT_RUN_FOLDER=<run folder>` in its environment (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ` on
   Linux; only processes of the daemon's own user) and gets the same signals, also when the run
   ends or is cancelled after the CLI exited. macOS does not show the environment of its own
   platform binaries (`/bin/sleep`), so such an orphan is not found there. It never signals its own
@@ -533,7 +533,8 @@ LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK CODEX_HOME CLAUDE_CONFIG_DIR` from the d
 name in `run.assign.envAllowlist` that the machine's config also lists in `env_passthrough`
 (so the server can choose per bot among the variables the machine owner allowed, never more);
 the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
-`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`; 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
+`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`, `CHAT_RUN_FOLDER` (the run folder: it marks the run's
+processes for pause and cancel); 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
 (Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
 
 Group members read run events, so the daemon redacts every frame before it sends or stores
