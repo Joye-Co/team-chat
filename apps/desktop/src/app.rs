@@ -697,8 +697,15 @@ impl Render for RootView {
                     .nav
                     .update(cx, |nav, cx| nav.toggle_sidebar(cx));
             }))
-            .on_action(cx.listener(|this, _: &NewTopic, _, cx| {
-                this.services.nav.update(cx, |nav, cx| nav.new_topic(cx));
+            .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
+                // v12/overlays: ⌘N opens the 新话题 sheet (NATIVE.md §7.1).
+                let group = this.services.nav.read(cx).current_group();
+                crate::views::nav::new_topic::open_new_topic(
+                    this.services.clone(),
+                    group,
+                    window,
+                    cx,
+                );
             }))
             .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
                 this.composer

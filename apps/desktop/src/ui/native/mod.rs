@@ -63,3 +63,9 @@ pub use toolbar::{ToolbarGroup, ToolbarRow};
 /// The busy spinner (§5.7): for unknown waits, never with "加载中…" text.
 #[allow(unused_imports)]
 pub use crate::ui::motion::spinner;
+
+// --- v12/overlays ---
+/// Overlay parts the kit lacks: the Tahoe alert dialog, the Spotlight panel
+/// (§9.7), the bordered list of a sheet and the app icon.
+pub mod overlays;
+// --- end v12/overlays ---

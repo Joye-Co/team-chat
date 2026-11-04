@@ -20,7 +20,7 @@ use gpui_component::{ActiveTheme as _, Disableable as _};
 
 use crate::{
     app::{Changes, Services},
-    copy::{dev, fill, process as p},
+    copy::{dev, fill, overlays as o, process as p},
     data::{
         AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess,
         RunStatus, TopicId,
@@ -81,11 +81,36 @@ pub fn run_duration(run: &BotRunSummary, now: Millis) -> Option<u64> {
     Some(end.saturating_sub(start).max(0) as u64)
 }
 
-/// Asks the provider to stop a run (`停止`, DESIGN.md §9.2). No confirmation:
-/// a stop loses nothing. The views show `正在停止…` from
-/// `ChatProvider::run_stopping` until the run ends. A run that already ended
-/// answers `Ok`; any other failure shows the standard error toast.
+/// `停止` (NATIVE.md §7.2): asks in a Tahoe alert in the active window
+/// (停止 in red, 取消 the default), then stops the run with [`stop_run_now`].
 pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
+    let Some(window) = cx.active_window() else {
+        stop_run_now(services, run, cx);
+        return;
+    };
+    let name = services
+        .provider
+        .member(&run.bot_id)
+        .map(|m| m.name)
+        .unwrap_or_default();
+    let (s, r) = (services.clone(), run.clone());
+    let _ = window.update(cx, |_, window, cx| {
+        crate::views::nav::dialogs::destructive_alert(
+            "stop-run",
+            fill(o::STOP_TITLE, &[("name", &name)]),
+            fill(o::STOP_MESSAGE, &[("name", &name)]),
+            o::STOP_OK,
+            move |_, cx| stop_run_now(&s, &r, cx),
+            window,
+            cx,
+        )
+    });
+}
+
+/// Asks the provider to stop a run. The views show `正在停止…` from
+/// `ChatProvider::run_stopping` until the run ends. A run that already ended
+/// answers `Ok`; any other failure shows the standard error notice.
+pub fn stop_run_now(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let reply = services
         .provider
         .cancel_run(&run.group_id, &run.topic_id, &run.id);

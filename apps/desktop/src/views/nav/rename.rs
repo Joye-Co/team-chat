@@ -1,4 +1,4 @@
-//! The 重命名群 dialog (DESIGN.md §7.12), from a 群's menu in the sidebar.
+//! The 重命名群 sheet (NATIVE.md §7.1), from a 群's menu in the sidebar.
 //! The same sheet as 重命名话题: one prefilled field with its text
 //! selected, 取消 and 保存; 保存 is off while the name is empty or
 //! unchanged; a refusal shows under the field and the dialog stays open.
@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _,
+    SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -17,10 +17,12 @@ use gpui_component::{
 use super::dialogs::validate_group_name;
 use crate::{
     app::Services,
-    copy::{common, nav},
+    copy::{common, nav, overlays as o},
     data::{AdminError, GroupId},
-    theme::{Type as _, space},
-    ui::{self, ButtonSpec as _, FieldKind},
+    ui::native::{
+        FormRow, GroupedForm, NativeTextField, SheetLayout, SheetWidth, disabled_push,
+        native_sheet, overlays::field_error, sheet_buttons,
+    },
 };
 
 /// Whether 保存 can rename: a valid name that differs from the current one.
@@ -90,36 +92,48 @@ impl RenameGroupForm {
 impl Render for RenameGroupForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ready = !self.busy && can_save(&self.current, &self.name.read(cx).value());
-        div()
-            .flex()
-            .flex_col()
-            .t_ui()
-            .child(ui::field_label(nav::GROUP_NAME_LABEL, cx))
-            .child(
-                ui::TextField::new("rename-group-name", &self.name, FieldKind::Form)
-                    .error(self.error.is_some()),
-            )
-            .when_some(self.error.clone(), |el, e| {
-                el.child(ui::field_help(e, true, cx))
-            })
-            .child(
-                div()
-                    .pt(space::S20)
-                    .flex()
-                    .justify_end()
-                    .gap(space::S8)
-                    .child(
-                        ui::secondary_button("rename-group-cancel", common::CANCEL, cx)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    )
-                    .child(
-                        ui::primary_button("rename-group-save", common::SAVE, cx)
-                            .loading(self.busy)
-                            .disabled_fill(!ready, cx)
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
-                    ),
-            )
+        let [cancel, save] = sheet_buttons("rename-group", common::CANCEL, common::SAVE, cx);
+        rename_sheet(
+            nav::RENAME_GROUP_TITLE,
+            o::RENAME_GROUP_EXPLANATION,
+            o::GROUP_NAME,
+            NativeTextField::new("rename-group-name", &self.name)
+                .width(px(280.))
+                .error(self.error.is_some()),
+            self.error.clone(),
+            cancel.on_click(|_, window, cx| window.close_dialog(cx)),
+            disabled_push(save, !ready, cx)
+                .loading(self.busy)
+                .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+            cx,
+        )
     }
+}
+
+/// The rename sheet (§7.1) of a 群 or a 话题: Title 2, one line that says
+/// who sees the change, one grouped-form row with the field, the error
+/// under it, then 取消 and 保存.
+#[allow(clippy::too_many_arguments)]
+pub fn rename_sheet(
+    title: &'static str,
+    explanation: &'static str,
+    label: &'static str,
+    field: NativeTextField,
+    error: Option<SharedString>,
+    cancel: gpui_component::button::Button,
+    save: gpui_component::button::Button,
+    cx: &App,
+) -> SheetLayout {
+    SheetLayout::new(title)
+        .explanation(explanation)
+        .body(
+            div()
+                .flex()
+                .flex_col()
+                .child(GroupedForm::new().row(FormRow::new(label).control(field)))
+                .children(error.map(|e| field_error(e, cx))),
+        )
+        .buttons([cancel, save])
 }
 
 /// Opens the dialog that renames a 群, its name prefilled and selected.
@@ -173,17 +187,12 @@ pub fn open_with(
     });
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
             let name = form.read(cx).name.clone();
             name.read(cx).focus_handle(cx).focus(window, cx);
             name.update(cx, |state, cx| state.select_all(window, cx));
         }
-        dialog
-            .close_button(false)
-            .p(space::S20)
-            .title(div().t_title().pb(space::S8).child(nav::RENAME_GROUP_TITLE))
-            .child(form.clone())
+        native_sheet(dialog, SheetWidth::Form, cx).child(form.clone())
     });
 }
 
