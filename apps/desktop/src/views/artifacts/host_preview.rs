@@ -387,7 +387,7 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
                 return Err(format!("the footer does not wait: {band:?}"));
             }
             // The inline page stays at its top: the page shows the question right under
-            // its tabs, above the chart, so it reads without scrolling (above the fade).
+            // its tabs, in the chart's place, so it reads without scrolling.
             until(cx, &p3, QA_SHOWN, "ok").await?;
             // Still waiting in the page.
             let state = eval(cx, &p3, "document.body.dataset.ask||'waiting'").await;

@@ -23,6 +23,7 @@ button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--
 #qa{display:none;margin:2px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--sunk)}
 #qa .q{margin-left:auto;width:fit-content;max-width:80%;padding:6px 10px;border-radius:9px;background:var(--line)}
 #qa .a{margin-top:8px;color:var(--ink2)}
+.asking .sum,.asking .bars,.asking .wk{display:none}
 </style></head><body>
 <header><div><h2>10 月新增群 · 按周</h2><p class="sub">夹夹 · Ledger · 截至 10-31<!--v--></p></div>
 <button type="button" id="ask">数据有问题</button></header>
@@ -64,6 +65,8 @@ button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--
   });
   el('ask').addEventListener('click', function(){
     var q = 'B 站 10-06 那周真的是 3 个吗？我记得只有 2 个。';
+    // The exchange takes the chart's place (Interact.dc.html, 在页面里问).
+    document.body.classList.add('asking');
     el('qa').style.display = 'block';
     el('q').textContent = q;
     el('a').textContent = 'Ledger 在查建群记录…';
