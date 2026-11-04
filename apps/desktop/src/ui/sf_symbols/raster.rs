@@ -120,6 +120,22 @@ pub fn draw_ink(
             }
             fit -= 0.25;
         }
+        // Filling a square: ink does not grow exactly linearly, so go up a
+        // quarter point at a time while the ink still fits the limit.
+        if ink.is_some() {
+            for _ in 0..16 {
+                let next = fit + 0.25;
+                let Some(c) = appkit::draw(name, next, weight, scale) else {
+                    break;
+                };
+                let Some((a, b, c1, d)) = c.ink() else { break };
+                if (c1 - a).max(d - b) > limit {
+                    break;
+                }
+                canvas = c;
+                fit = next;
+            }
+        }
         point = fit;
         fitted = true;
     }
