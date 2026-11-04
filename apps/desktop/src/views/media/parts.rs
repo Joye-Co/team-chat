@@ -39,14 +39,12 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
             crate::ui::native::native_colors(cx).secondary,
         ))
         .child(
-            div()
+            crate::ui::native::file_name(title)
                 .t_small()
                 .medium()
                 .text_color(k.text_1)
-                .one_line()
                 .flex_shrink(1.)
-                .min_w(px(0.))
-                .child(title.into()),
+                .min_w(px(0.)),
         )
 }
 
@@ -66,13 +64,11 @@ pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
             crate::ui::native::native_colors(cx).secondary,
         ))
         .child(
-            div()
+            crate::ui::native::file_name(title)
                 .t_card_title()
                 .text_color(k.text_1)
-                .one_line()
                 .flex_shrink(1.)
-                .min_w(px(0.))
-                .child(title.into()),
+                .min_w(px(0.)),
         )
 }
 

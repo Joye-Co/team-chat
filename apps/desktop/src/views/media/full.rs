@@ -15,6 +15,8 @@ use gpui::{
 
 use gpui_component::{Disableable as _, Selectable as _, button::Button};
 
+use crate::ui::native::FocusRow as _;
+
 use super::{
     inline::{code_line, fit, group_digits},
     parts::{self, mono, tool},
@@ -159,13 +161,12 @@ fn head(
         .border_color(n.separator)
         .child(ui::icon(icon, px(16.), n.secondary))
         .child(
-            div()
+            // A file name: cut in the middle, the extension kept (§2.21, F3).
+            ui::native::file_name(title)
                 .flex_shrink(1.)
                 .min_w(px(0.))
                 .t_card_title()
-                .text_color(k.text_1)
-                .one_line()
-                .child(title.into()),
+                .text_color(k.text_1),
         )
         .when_some(h.meta, |d, m| {
             d.child(
@@ -286,13 +287,11 @@ fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
         .border_color(n.separator)
         .child(ui::icon(Sym::Document, px(16.), n.secondary))
         .child(
-            div()
+            ui::native::file_name(title.to_string())
                 .flex_1()
                 .min_w(px(0.))
                 .t_card_title()
-                .text_color(k.text_1)
-                .one_line()
-                .child(title.to_string()),
+                .text_color(k.text_1),
         )
         .child(
             div()
@@ -471,6 +470,7 @@ fn html(
                 .id(ElementId::Name(
                     format!("{}-v{}", spec.id, v.version).into(),
                 ))
+                .focus_row(v.version == shown, cx)
                 .px(space::S8)
                 .py(space::S6)
                 .rounded(radius::MD)
@@ -629,6 +629,7 @@ fn markdown_view(
         toc = toc.child(
             div()
                 .id(ElementId::Name(format!("{}-toc-{i}", spec.id).into()))
+        .focus_row(false, cx)
                 .px(space::S8)
                 .py(space::S4)
                 .rounded(radius::SM)
@@ -787,6 +788,7 @@ fn lightbox(
         strip = strip.child(
             div()
                 .id(ElementId::Name(format!("{}-thumb-{i}", spec.id).into()))
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .w(px(36.))
                 .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::MARK)
@@ -1019,6 +1021,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
             chapters = chapters.child(
                 div()
                     .id(ElementId::Name(format!("{}-ch-{i}", spec.id).into()))
+        .focus_row(false, cx)
                     .h(crate::ui::native::tokens::height::DEFAULT)
                     .px(space::S8)
                     .rounded(radius::MD)
@@ -1054,6 +1057,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
         strip = strip.child(
             div()
                 .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex_1()
                 .h(crate::ui::native::tokens::height::TABLE_ROW)
                 .rounded(radius::SM)
@@ -1350,6 +1354,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         lines = lines.child(
             div()
                 .id(ElementId::Name(format!("{}-cue-{i}", spec.id).into()))
+        .focus_row(false, cx)
                 .min_h(px(32.))
                 .px(space::S8)
                 .py(space::S6)
@@ -1592,6 +1597,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         thumbs = thumbs.child(
             div()
                 .id(ElementId::Name(format!("{}-pt-{i}", spec.id).into()))
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex()
                 .flex_col()
                 .items_center()
@@ -1877,6 +1883,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
             cols,
             div()
                 .id(ElementId::Name(format!("{}-h-{i}", spec.id).into()))
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                 .flex_1()
                 .min_w(px(0.))
                 .h_full()

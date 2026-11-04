@@ -1450,22 +1450,6 @@ pub fn shown_in_pane(artifact_id: &str, cx: &App) -> bool {
     })
 }
 
-thread_local! {
-    /// The focus handle of each reference row, by 产出 (a row keeps its
-    /// focus across renders).
-    static ROW_FOCUS: std::cell::RefCell<std::collections::HashMap<String, gpui::FocusHandle>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
-fn row_focus(artifact_id: &str, cx: &App) -> gpui::FocusHandle {
-    ROW_FOCUS.with(|m| {
-        m.borrow_mut()
-            .entry(artifact_id.to_string())
-            .or_insert_with(|| cx.focus_handle())
-            .clone()
-    })
-}
-
 /// The reference row's action: moves keyboard focus into the page the 产出
 /// pane shows (the thread keeps no live copy of it, so the one live page of
 /// `artifact_id` is the pane's).
@@ -1490,7 +1474,7 @@ pub fn reference_row(
     cx: &App,
 ) -> gpui::AnyElement {
     use crate::ui::{
-        native::{NativeType as _, native_colors, page},
+        native::{FocusRow as _, NativeType as _, native_colors, page},
         sf_symbols::Sym,
     };
     use gpui::{
@@ -1499,23 +1483,12 @@ pub fn reference_row(
     };
     let k = native_colors(cx);
     let target = artifact_id.to_string();
-    let focus = row_focus(artifact_id, cx);
     div()
         .id(id.into())
-        // A button (E3): a Tab stop with the ring, Return and Space act.
-        .track_focus(&focus.tab_stop(true))
-        .on_key_down({
-            let target = target.clone();
-            move |e, _, cx| {
-                if matches!(e.keystroke.key.as_str(), "enter" | "space") {
-                    cx.stop_propagation();
-                    focus_pane(&target, cx);
-                }
-            }
-        })
-        .focus(|st| st.border_color(k.label))
+        // A button (E3): a Tab stop with the focus ring, Return and Space act,
+        // hover muted 50 % (the kit's row recipe).
+        .focus_row(false, cx)
         .cursor_pointer()
-        .hover(|st| st.bg(k.fill.opacity(0.5)))
         .on_click(move |_, _, cx| focus_pane(&target, cx))
         .w_full()
         .h(crate::ui::native::tokens::height::FOOTER_ROW)

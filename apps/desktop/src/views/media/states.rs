@@ -144,12 +144,10 @@ pub fn row(
                         .flex_col()
                         .gap(space::S2)
                         .child(
-                            div()
+                            crate::ui::native::file_name(name)
                                 .t_small()
                                 .medium()
-                                .text_color(n.label)
-                                .one_line()
-                                .child(name.into()),
+                                .text_color(n.label),
                         )
                         .child(
                             div()
