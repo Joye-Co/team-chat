@@ -926,37 +926,20 @@ impl ItemRow {
 impl gpui::RenderOnce for ItemRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         use crate::ui::native::{NativeType as _, metrics, native_colors, tokens};
-        use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+        use gpui::InteractiveElement as _;
         let k = native_colors(cx);
         let two_line = self.description.is_some();
-        let tip = |text: SharedString| {
-            move |window: &mut Window, cx: &mut App| {
-                gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
-            }
-        };
-        let title_id = SharedString::from(format!("{}-title", self.id));
-        let title = div()
-            .id(ElementId::Name(title_id))
-            .min_w(gpui::Pixels::ZERO)
+        // TruncText: one line, "…", the full value in a tooltip only when
+        // the line was cut (2.21).
+        let title = crate::ui::truncate::TruncText::new(self.title.clone())
+            .id(ElementId::Name(format!("{}-title", self.id).into()))
             .n_headline()
-            .text_color(if self.muted { k.secondary } else { k.label })
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis()
-            .tooltip(tip(self.title.clone()))
-            .child(self.title.clone());
+            .text_color(if self.muted { k.secondary } else { k.label });
         let description = self.description.clone().map(|d| {
-            let desc_id = SharedString::from(format!("{}-desc", self.id));
-            div()
-                .id(ElementId::Name(desc_id))
-                .min_w(gpui::Pixels::ZERO)
+            crate::ui::truncate::TruncText::new(d)
+                .id(ElementId::Name(format!("{}-desc", self.id).into()))
                 .n_subheadline()
                 .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .tooltip(tip(d.clone()))
-                .child(d)
         });
         div()
             .id(self.id)

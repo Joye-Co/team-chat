@@ -23,8 +23,7 @@ use super::{
     widgets::{self, Status, answer},
 };
 use crate::views::nav::dialogs::{
-    sheet_error, sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_invalid,
-    sheet_form_row_top,
+    sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_invalid, sheet_form_row_top,
 };
 use crate::{
     app::{Changes, Services},
@@ -1074,7 +1073,6 @@ impl Render for InviteForm {
                         name_err.is_some(),
                         cx,
                     ))
-                    .children(name_err.map(|e| sheet_error(e, cx)))
                     .child(field_row(
                         s::ROLE,
                         "member-role",
@@ -1082,7 +1080,6 @@ impl Render for InviteForm {
                         role_err.is_some(),
                         cx,
                     ))
-                    .children(role_err.map(|e| sheet_error(e, cx)))
                     .child(choice_row(
                         s::INVITE_KIND,
                         "invite-kind",
@@ -1123,6 +1120,9 @@ impl Render for InviteForm {
                     )),
             )
             .when_some(failed, |l, f| l.body(f))
+            .when_some(name_err.clone().or(role_err.clone()), |l, e| {
+                l.status(crate::ui::native::sheet::sheet_status_error(e, cx))
+            })
             .buttons(sheet_actions(
                 "invite",
                 s::INVITE_CREATE,
@@ -1394,7 +1394,6 @@ impl Render for BotForm {
                 name_err.is_some(),
                 cx,
             ))
-            .children(name_err.map(|e| sheet_error(e, cx)))
             .child(field_row(
                 s::ROLE,
                 "member-role",
@@ -1402,7 +1401,6 @@ impl Render for BotForm {
                 role_err.is_some(),
                 cx,
             ))
-            .children(role_err.map(|e| sheet_error(e, cx)))
             .child(choice_row(
                 s::BOT_MODE,
                 "bot-mode",
@@ -1512,6 +1510,9 @@ impl Render for BotForm {
                     .child(form),
             )
             .when_some(failed, |l, f| l.body(f))
+            .when_some(name_err.clone().or(role_err.clone()), |l, e| {
+                l.status(crate::ui::native::sheet::sheet_status_error(e, cx))
+            })
             .buttons(sheet_actions(
                 "bot",
                 s::BOT_CREATE,

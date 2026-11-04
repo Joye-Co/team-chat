@@ -178,16 +178,11 @@ fn form_row(
 /// A dependent row of a [`sheet_form`] (2.8): a 12 muted hint for the row
 /// above it, from the control column.
 pub fn sheet_footnote(text: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
-    dependent_row(text.into(), false, cx)
+    dependent_row(text.into(), cx)
 }
 
-/// A dependent row with a field error: 12 destructive text from the
-/// control column, under the invalid row.
-pub fn sheet_error(text: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
-    dependent_row(text.into(), true, cx)
-}
-
-fn dependent_row(text: gpui::SharedString, error: bool, cx: &App) -> gpui::Div {
+/// Field errors go to the sheet footer's status slot; this row is a hint.
+fn dependent_row(text: gpui::SharedString, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .w_full()
@@ -195,39 +190,8 @@ fn dependent_row(text: gpui::SharedString, error: bool, cx: &App) -> gpui::Div {
         .py(crate::ui::native::tokens::space::S8)
         .pl(metrics::FORM_ROW_INSET + FORM_LABEL + FORM_GAP)
         .n_subheadline()
-        .text_color(if error { k.red } else { k.secondary })
+        .text_color(k.secondary)
         .child(text)
-}
-
-/// `el` with an error line under it (2.8, 2.9): 12 destructive at the
-/// label x, drawn in the 24 gap above the sheet's buttons, so the sheet
-/// keeps its height when the error comes and goes.
-pub fn with_error_below(
-    el: impl IntoElement,
-    error: Option<gpui::SharedString>,
-    cx: &App,
-) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .w_full()
-        .relative()
-        .child(el)
-        .when_some(error, |d, e| {
-            d.child(
-                div()
-                    .absolute()
-                    .left(metrics::FORM_ROW_INSET)
-                    .right_0()
-                    .top(gpui::relative(1.))
-                    .mt(crate::ui::native::tokens::space::S4)
-                    .n_subheadline()
-                    .text_color(k.red)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(e),
-            )
-        })
 }
 
 /// How a [`MemberPicker`] chooses.
@@ -247,7 +211,7 @@ const PICK_VISIBLE: f32 = 7.5;
 /// The one member picker (2.9) of 新建群, 添加成员 and 发起私聊: a search
 /// field across the content column, 12 below it a list box (radius 10,
 /// border) of h40 rows that shows 7.5 rows and a scrollbar, then one 12
-/// line: the count, or an error in destructive.
+/// the sheet footer shows the count or the error (2.9).
 #[derive(IntoElement)]
 pub struct MemberPicker {
     id: &'static str,
@@ -255,7 +219,6 @@ pub struct MemberPicker {
     scroll: gpui::ScrollHandle,
     rows: Vec<gpui::AnyElement>,
     empty: gpui::SharedString,
-    line: Option<(gpui::SharedString, bool)>,
 }
 
 impl MemberPicker {
@@ -272,14 +235,7 @@ impl MemberPicker {
             scroll: scroll.clone(),
             rows,
             empty: empty.into(),
-            line: None,
         }
-    }
-
-    /// The line under the list: `error` draws it in destructive.
-    pub fn line(mut self, text: impl Into<gpui::SharedString>, error: bool) -> Self {
-        self.line = Some((text.into(), error));
-        self
     }
 
     /// One row: the checkbox (many) or the trailing check (one), the 24
@@ -432,20 +388,6 @@ impl gpui::RenderOnce for MemberPicker {
                             .child(gpui_component::scroll::Scrollbar::vertical(&self.scroll)),
                     ),
             )
-            .when_some(self.line, |d, (text, error)| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .h(crate::ui::native::tokens::text::META.1)
-                        .n_subheadline()
-                        .n_figures()
-                        .text_color(if error { k.red } else { k.secondary })
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(text),
-                )
-            })
     }
 }
 
@@ -720,6 +662,7 @@ impl NewGroupForm {
 
 impl Render for NewGroupForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = native_colors(cx);
         let query = self.filter.read(cx).value().trim().to_lowercase();
         let new_group = self.mode == FormMode::NewGroup;
         let typed = self.name.read(cx).value().to_string();
@@ -804,13 +747,25 @@ impl Render for NewGroupForm {
             } else {
                 nav::NO_MEMBERS_MATCH
             },
-        )
-        .line(line, error);
-        let mut layout = SheetLayout::new(title).explanation(if new_group {
-            o::NEW_GROUP_EXPLANATION
+        );
+        // The footer's left slot (2.9): the count, or the error.
+        let status = if error {
+            crate::ui::native::sheet::sheet_status_error(line, cx).into_any_element()
         } else {
-            o::ADD_MEMBERS_EXPLANATION
-        });
+            div()
+                .n_footnote()
+                .n_figures()
+                .text_color(k.secondary)
+                .child(line)
+                .into_any_element()
+        };
+        let mut layout = SheetLayout::new(title)
+            .explanation(if new_group {
+                o::NEW_GROUP_EXPLANATION
+            } else {
+                o::ADD_MEMBERS_EXPLANATION
+            })
+            .status(status);
         if new_group {
             layout = layout.body(
                 sheet_form().child(sheet_form_row_invalid(

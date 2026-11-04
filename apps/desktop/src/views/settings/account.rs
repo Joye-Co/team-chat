@@ -16,7 +16,8 @@ use gpui_component::{
 };
 
 use super::widgets::{self, Status, answer};
-use crate::views::nav::dialogs::{sheet_error, sheet_form, sheet_form_row_invalid};
+use crate::ui::native::sheet::sheet_status_error;
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row_invalid};
 use crate::{
     app::{Changes, Services},
     copy::{common, fill, settings as s},
@@ -549,12 +550,6 @@ impl AccountPage {
                                 avatar_note.unwrap_or_else(|| widgets::quiet(s::AVATAR_HINT, cx)),
                             ),
                     );
-                let error_for = |f: Field| {
-                    shown
-                        .as_ref()
-                        .filter(|(g, _)| *g == f)
-                        .map(|(_, e)| sheet_error(e.clone(), cx))
-                };
                 let fields = sheet_form()
                     .child(sheet_form_row_invalid(
                         s::NAME,
@@ -564,7 +559,6 @@ impl AccountPage {
                         bad(Field::Name),
                         cx,
                     ))
-                    .children(error_for(Field::Name))
                     .child(sheet_form_row_invalid(
                         s::ROLE,
                         NativeTextField::new("profile-role", &page.role)
@@ -572,8 +566,7 @@ impl AccountPage {
                             .error(bad(Field::Role)),
                         bad(Field::Role),
                         cx,
-                    ))
-                    .children(error_for(Field::Role));
+                    ));
                 let failed = match &page.save {
                     Status::Failed(t) => Some(widgets::failed_alert(
                         "profile-failed",
@@ -602,6 +595,11 @@ impl AccountPage {
                             .body(photo)
                             .body(fields)
                             .when_some(failed, |l, f| l.body(f))
+                            // The field error sits in the footer's left
+                            // slot, so the sheet keeps its height (2.8).
+                            .when_some(shown.clone(), |l, (_, e)| {
+                                l.status(sheet_status_error(e, cx))
+                            })
                             .buttons([
                                 push_button(
                                     "profile-cancel",

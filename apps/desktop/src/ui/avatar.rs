@@ -85,7 +85,9 @@ impl MemberAvatar {
         }
     }
 
-    /// Draws the v3 status dot on the avatar (see [`Ring`]).
+    /// Older API: the v3 status dot. It draws nothing now (T1-09, §2.12:
+    /// a colored dot with no text is not a status; the presence dot is the
+    /// only dot on an avatar). Show the state as a StatusBadge in the row.
     pub fn ring(mut self, ring: Option<Ring>) -> Self {
         self.ring = ring;
         self
@@ -162,20 +164,39 @@ impl RenderOnce for MemberAvatar {
                     .map(|(c, _)| c.as_str().to_string())
                     .unwrap_or_else(|| self.id.clone())
             };
-            let art = match &self.character {
-                Some((c, _)) => {
-                    characters::tile::tile_image(*c, status, size, window.scale_factor())
-                        .into_any_element()
-                }
-                None => icon(Sym::AiMember, size * 0.5, k.text_2).into_any_element(),
+            // §1.8, T1-09: an agent with no character art falls back to its
+            // initial on the muted fill with a 1 px border, like a person,
+            // in the agent squircle. No colored status pip or ring: the
+            // row's StatusBadge carries the state (§2.12).
+            let Some((c, _)) = &self.character else {
+                let font = initial_size(size);
+                return div()
+                    .relative()
+                    .flex_none()
+                    .size(size)
+                    .when(self.dimmed, |el| el.opacity(0.5))
+                    .child(
+                        div()
+                            .size(size)
+                            .rounded(theme::radius::bot(size))
+                            .bg(k.avatar_bg)
+                            .text_color(k.avatar_fg)
+                            .border_1()
+                            .border_color(k.border)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(font)
+                            .line_height(size)
+                            .font_weight(theme::MEDIUM_WEIGHT)
+                            .overflow_hidden()
+                            .child(monogram(&self.name, size)),
+                    )
+                    .into_any_element();
             };
-            let pip = match status {
-                CharacterStatus::Working => Some(k.accent),
-                CharacterStatus::NeedsInput => Some(k.you_glyph),
-                CharacterStatus::Error => Some(k.danger),
-                _ => None,
-            }
-            .filter(|_| self.show_status);
+            let art = characters::tile::tile_image(*c, status, size, window.scale_factor())
+                .into_any_element();
+            let _ = (self.show_status, surface, &dot);
             return div()
                 .relative()
                 .flex_none()
@@ -194,21 +215,12 @@ impl RenderOnce for MemberAvatar {
                         .justify_center()
                         .child(art),
                 )
-                .children(pip.map(dot))
-                .children(self.ring.map(|r| ring_element(r, size, surface, cx)))
                 .into_any_element();
         }
 
         // People: a circle.
         let text = monogram(&self.name, size);
-        // §1.8: the initial is 12 at 16-24, 14 at 32-40, 24 at 64.
-        let font = if size <= px(24.) {
-            type_scale::META.0
-        } else if size <= px(40.) {
-            type_scale::UI.0
-        } else {
-            crate::ui::native::tokens::text::HERO.0
-        };
+        let font = initial_size(size);
         let line = size;
         // The provider gives the downloaded file; a remote URL is not drawn (it needs the
         // token), so the monogram shows until the file is on disk.
@@ -241,7 +253,15 @@ impl RenderOnce for MemberAvatar {
                 .line_height(line)
                 .font_weight(theme::MEDIUM_WEIGHT)
                 .overflow_hidden()
-                .child(text)
+                // No name yet (bare data, first sync): a person glyph, never
+                // a blank disc (B-16).
+                .map(|d| {
+                    if text.is_empty() {
+                        d.child(icon(Sym::Person, size * 0.5, k.text_2))
+                    } else {
+                        d.child(text)
+                    }
+                })
                 .into_any_element(),
         };
         div()
@@ -251,8 +271,18 @@ impl RenderOnce for MemberAvatar {
             .when(self.dimmed, |el| el.opacity(0.5))
             .child(face)
             .when(self.online, |el| el.child(dot(k.online)))
-            .children(self.ring.map(|r| ring_element(r, size, surface, cx)))
             .into_any_element()
+    }
+}
+
+/// §1.8: the initial is 12 at 16-24, 14 at 32-40, 24 at 64.
+fn initial_size(size: Pixels) -> Pixels {
+    if size <= px(24.) {
+        type_scale::META.0
+    } else if size <= px(40.) {
+        type_scale::UI.0
+    } else {
+        crate::ui::native::tokens::text::HERO.0
     }
 }
 
@@ -273,34 +303,6 @@ pub fn snap(size: Pixels) -> Pixels {
         }
     }
     best
-}
-
-fn ring_element(ring: Ring, size: Pixels, surface: Hsla, cx: &App) -> gpui::AnyElement {
-    let k = theme::colors(cx);
-    let color = match ring {
-        Ring::Live => k.live,
-        Ring::You => k.you,
-    };
-    let dot = theme::avatar_status_dot(size);
-    let cut = theme::AVATAR_STATUS_CUT;
-    let outer = dot + cut * 2.;
-    // The dot's center sits a little inside the corner of the avatar.
-    let offset = -(outer * 0.3).round();
-    // Static: a 6 to 10 pt dot that breathes reads as a flicker at list
-    // sizes; the row's own text (`在做 3/5`) says the member is working.
-    let fill = div().size(dot).rounded_full().bg(color);
-    div()
-        .absolute()
-        .right(offset)
-        .bottom(offset)
-        .size(outer)
-        .rounded_full()
-        .bg(surface)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(fill)
-        .into_any_element()
 }
 
 /// The glyph slot of a 群 in lists (§7.9): a monochrome `hash` in a 24 pt

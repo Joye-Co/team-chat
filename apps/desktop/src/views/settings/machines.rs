@@ -22,7 +22,8 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{sheet_error, sheet_form, sheet_form_row, sheet_form_row_invalid};
+use crate::ui::native::sheet::sheet_status_error;
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_invalid};
 use crate::{
     app::Services,
     copy::{common, fill, settings as s},
@@ -317,7 +318,7 @@ fn tag_text(label: &str) -> String {
 }
 
 /// The symbol of a computer by its OS and kind (2.19): a Linux or other
-/// server gets the server glyph (`Sym::Terminal` until the kit has
+/// server gets the server glyph (`Sym::Server` until the kit has
 /// `Sym::Server`), a notebook `laptopcomputer`, a Mac mini `macmini`,
 /// any other Mac `desktopcomputer`. The cloud glyph is only for 云端.
 fn machine_glyph(m: &MachineInfo) -> Sym {
@@ -338,7 +339,7 @@ fn machine_glyph(m: &MachineInfo) -> Sym {
         "vps",
         "windows",
     ]) {
-        Sym::Terminal
+        Sym::Server
     } else {
         Sym::Computer
     }
@@ -527,7 +528,6 @@ impl Render for MachineForm {
                         problem.is_some(),
                         cx,
                     ))
-                    .children(problem.map(|p| sheet_error(p, cx)))
                     .child(sheet_form_row(
                         s::MACHINE_LABELS,
                         NativeTextField::new("machine-labels", &self.labels).full_width(),
@@ -535,6 +535,7 @@ impl Render for MachineForm {
                     )),
             )
             .when_some(failed, |l, f| l.body(f))
+            .when_some(problem, |l, p| l.status(sheet_status_error(p, cx)))
             .buttons([
                 push_button(
                     "machine-cancel",
@@ -632,11 +633,8 @@ mod tests {
             machine_glyph(&machine("joye-macbook-pro-m4-max", &[])),
             Sym::Laptop
         );
-        assert_eq!(
-            machine_glyph(&machine("build-01", &["linux"])),
-            Sym::Terminal
-        );
-        assert_eq!(machine_glyph(&machine("构建服务器", &[])), Sym::Terminal);
+        assert_eq!(machine_glyph(&machine("build-01", &["linux"])), Sym::Server);
+        assert_eq!(machine_glyph(&machine("构建服务器", &[])), Sym::Server);
     }
 
     #[test]

@@ -9,16 +9,14 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
-    SharedString, Styled as _, Subscription, Window, px,
+    SharedString, Styled as _, Subscription, Window, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     WindowExt as _,
     input::{InputEvent, InputState},
 };
 
-use super::dialogs::{
-    error_alert, sheet_form, sheet_form_row_invalid, validate_group_name, with_error_below,
-};
+use super::dialogs::{error_alert, sheet_form, sheet_form_row_invalid, validate_group_name};
 use crate::{
     app::Services,
     copy::{common, nav, overlays as o},
@@ -142,8 +140,8 @@ impl Render for RenameGroupForm {
 /// The rename sheet (2.9) of a 群 or a 话题: the title, one line that says
 /// who sees the change, the labelled field in a group box, then 取消 and
 /// 保存. A `footnote` is a field error: the field and its label turn
-/// destructive and the text sits under the group, in the gap above the
-/// buttons, so the sheet keeps its height.
+/// destructive and the text sits in the footer's left slot, so the sheet
+/// keeps its height.
 #[allow(clippy::too_many_arguments)]
 pub fn rename_sheet(
     title: &'static str,
@@ -158,16 +156,16 @@ pub fn rename_sheet(
     let invalid = footnote.is_some();
     SheetLayout::new(title)
         .explanation(explanation)
-        .body(with_error_below(
-            sheet_form().child(sheet_form_row_invalid(
-                label,
-                field.full_width().error(invalid),
-                invalid,
-                cx,
-            )),
-            footnote,
+        .body(sheet_form().child(sheet_form_row_invalid(
+            label,
+            field.full_width().error(invalid),
+            invalid,
             cx,
-        ))
+        )))
+        // The error sits in the footer's left slot (2.8, 2.9).
+        .when_some(footnote, |l, e| {
+            l.status(crate::ui::native::sheet::sheet_status_error(e, cx))
+        })
         .buttons([cancel, save])
 }
 

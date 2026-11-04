@@ -92,6 +92,8 @@ concepts! {
     Laptop = "laptopcomputer";
     /// Mac mini, and the 机器 settings tab.
     MacMini = "macmini";
+    /// A Linux server (COMPLETENESS.md §2.19 machine rows).
+    Server = "server.rack";
     /// Cloud runner.
     Cloud = "cloud";
     Offline = "wifi.slash";
@@ -395,7 +397,7 @@ lucide! {
     Hourglass => Hourglass,
     Monitor => Computer,
     Laptop => Laptop,
-    Server => MacMini,
+    Server => Server,
     WifiOff => Offline,
     Settings => General,
     Bell => Bell,
