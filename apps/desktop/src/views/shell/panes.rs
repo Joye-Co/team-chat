@@ -150,8 +150,9 @@ mod tests {
 
     #[test]
     fn every_pane_kind_has_one_of_two_widths() {
-        assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(280.));
-        assert_eq!(pane_width(&RightPane::Changes), gpui::px(280.));
+        // D13: the inspector is 320 wide.
+        assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(320.));
+        assert_eq!(pane_width(&RightPane::Changes), gpui::px(320.));
         assert_eq!(pane_width(&RightPane::None), gpui::px(0.));
         assert!(header_less(&RightPane::TopicRail));
     }

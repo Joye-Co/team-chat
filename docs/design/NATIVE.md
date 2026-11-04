@@ -1,5 +1,9 @@
 # Native client rules (binding)
 
+> The finish spec [COMPLETENESS.md](COMPLETENESS.md) is binding and wins over this file where they
+> differ (scale, colors, controls, anatomy, states). This file still owns the Mac structure: window,
+> toolbar, inset sidebar, sheets, the Settings window and behavior.
+
 TeamChat is a Mac app. It must look and behave like a well-made macOS 26 (Tahoe) app, not like a
 web page in a window. This file overrides `docs/DESIGN.md` §1–§8 and §12–§13 where they differ.
 DESIGN.md still owns Card v2 semantics (§7.10, §7.13–§7.17), member status words (§9), content
