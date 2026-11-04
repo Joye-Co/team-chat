@@ -294,6 +294,10 @@ const FADE: &str = "(function(){var d=document.getElementById('__tc_fade');if(!d
 var e=document.scrollingElement||document.documentElement;\
 var more=e.scrollHeight-(window.scrollY+window.innerHeight)>1;\
 return d.style.opacity===(more?'1':'0')?'ok':'opacity '+d.style.opacity+', more '+more;})()";
+/// The in-page question and its waiting answer lie above the fade at the cut edge.
+const QA_SHOWN: &str = "(function(){var r=document.getElementById('qa').getBoundingClientRect();\
+var f=document.getElementById('__tc_fade'),h=f?f.getBoundingClientRect().height:0;\
+return r.height>0&&r.bottom<=window.innerHeight-h?'ok':'qa '+r.top+'..'+r.bottom+' of '+window.innerHeight;})()";
 const ASK_AT: &str = "(function(){var r=document.getElementById('ask').getBoundingClientRect();\
 return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()";
 
@@ -382,8 +386,9 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
             if !matches!(band, Some(host::BandView::Waiting(_))) {
                 return Err(format!("the footer does not wait: {band:?}"));
             }
-            // The inline page stays at its top: the question below the chart is under the
-            // fade at the cut edge, and 展开 shows it.
+            // The inline page stays at its top: the page shows the question right under
+            // its tabs, above the chart, so it reads without scrolling (above the fade).
+            until(cx, &p3, QA_SHOWN, "ok").await?;
             // Still waiting in the page.
             let state = eval(cx, &p3, "document.body.dataset.ask||'waiting'").await;
             if state != "waiting" {

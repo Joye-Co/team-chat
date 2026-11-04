@@ -20,16 +20,16 @@ button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--
 .col em{font-style:normal;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink2);margin-bottom:4px}
 .dim .col i{background:var(--dim)}
 .wk{display:flex;justify-content:space-around;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink3);margin-top:4px}
-#qa{display:none;margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--sunk)}
+#qa{display:none;margin:2px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--sunk)}
 #qa .q{margin-left:auto;width:fit-content;max-width:80%;padding:6px 10px;border-radius:9px;background:var(--line)}
 #qa .a{margin-top:8px;color:var(--ink2)}
 </style></head><body>
 <header><div><h2>10 月新增群 · 按周</h2><p class="sub">夹夹 · Ledger · 截至 10-31<!--v--></p></div>
 <button type="button" id="ask">数据有问题</button></header>
 <div class="seg" id="seg"><button class="on" data-ch="全部">全部</button><button data-ch="小红书">小红书</button><button data-ch="群内邀请">群内邀请</button><button data-ch="B 站">B 站</button><button data-ch="抖音">抖音</button><!--ch--></div>
+<div id="qa"><div class="q" id="q"></div><div class="a" id="a"></div></div>
 <div class="sum"><b id="ttl">全部 · 每周新增群</b><span id="tot"></span><span id="state"></span></div>
 <div class="bars" id="bars"></div><div class="wk" id="wk"></div>
-<div id="qa"><div class="q" id="q"></div><div class="a" id="a"></div></div>
 <script>
 (function(){
   var tc = window.teamchat, rev = 0;
