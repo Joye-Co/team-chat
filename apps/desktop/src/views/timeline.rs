@@ -148,6 +148,9 @@ pub struct TimelineView {
     focus: focus::FocusState,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
+    /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
+    /// shows (the same toolbar as under the pointer).
+    key_focus: gpui::FocusHandle,
     /// The emoji picker is open for this message row: from the hover
     /// toolbar (`false`) or from the add pill under the reactions (`true`).
     reacting: Option<(String, bool)>,
@@ -180,6 +183,11 @@ pub struct TimelineView {
     card_visible: bool,
     /// A card row was drawn since the last render (set by `render_row`).
     card_seen: bool,
+    /// The message ids of the card rows painted last frame, and those drawn
+    /// since the last render: the pinned banner gives way while the card it
+    /// points at is on screen (R2-09).
+    cards_shown: std::collections::BTreeSet<String>,
+    cards_drawn: std::collections::BTreeSet<String>,
     /// The new-messages divider row was drawn since the last render: it is
     /// on screen, so the jump pill must not show (§8.1, U14).
     divider_painted: bool,
@@ -286,6 +294,7 @@ impl TimelineView {
             activation: None,
             focus: focus::FocusState::default(),
             hovered: None,
+            key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             reacting: None,
             runs: Vec::new(),
             live_shown: Vec::new(),
@@ -300,6 +309,8 @@ impl TimelineView {
             ticking: false,
             card_visible: false,
             card_seen: false,
+            cards_shown: Default::default(),
+            cards_drawn: Default::default(),
             divider_painted: false,
             _subscriptions: subscriptions,
         };
@@ -474,7 +485,11 @@ impl TimelineView {
         let grew_at_top =
             old_first.is_some() && messages.first().map(model::key) != old_first.as_deref();
         self.messages = messages;
-        if self.has_older != has_older && !self.messages.is_empty() {
+        // Row 0 draws the start block, or the older-messages skeleton while
+        // they load: measure it again when either changes.
+        if (self.has_older != has_older || was_loading != self.provider_loading)
+            && !self.messages.is_empty()
+        {
             self.list.remeasure_items(0..1);
         }
         self.has_older = has_older;
@@ -661,6 +676,44 @@ impl TimelineView {
     }
 }
 
+/// The key context of the thread.
+const KEY_CONTEXT: &str = "Timeline";
+
+/// ↑↓ in a focused thread (call once at start-up).
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("up", crate::views::rail::SelectPrevious, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("down", crate::views::rail::SelectNext, Some(KEY_CONTEXT)),
+    ]);
+}
+
+impl TimelineView {
+    /// Moves the keyboard row `step` rows (from the newest when none is
+    /// set): it gets the hover band and the message toolbar, whose buttons
+    /// Tab then reaches.
+    fn move_keyboard_row(&mut self, step: isize, cx: &mut Context<Self>) {
+        let Some(last) = self.messages.len().checked_sub(1) else {
+            return;
+        };
+        let current = self
+            .hovered
+            .as_deref()
+            .and_then(|k| self.messages.iter().position(|m| model::key(m) == k));
+        let ix = match current {
+            Some(i) => i.saturating_add_signed(step).min(last),
+            None => last,
+        };
+        self.hovered = Some(model::key(&self.messages[ix]).to_string());
+        self.list.scroll_to_reveal_item(ix);
+        cx.notify();
+    }
+
+    /// The card of message `id` was on screen in the last frame.
+    pub fn shows_card(&self, id: &str) -> bool {
+        self.cards_shown.contains(id)
+    }
+}
+
 impl Render for TimelineView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.activation.is_none() {
@@ -698,6 +751,11 @@ impl Render for TimelineView {
         // messages are seen, and the jump pill goes (or never shows).
         if std::mem::take(&mut self.divider_painted) && !self.unread_seen {
             self.unread_seen = true;
+            cx.defer_in(window, |_, _, cx| cx.notify());
+        }
+        let shown = std::mem::take(&mut self.cards_drawn);
+        if shown != self.cards_shown {
+            self.cards_shown = shown;
             cx.defer_in(window, |_, _, cx| cx.notify());
         }
         let card_visible = std::mem::take(&mut self.card_seen);
@@ -761,19 +819,47 @@ impl Render for TimelineView {
                 )
         });
         // §2.14: older messages loading show 2 message skeleton rows in the
-        // flow above the first message, never a line of text over a row.
-        let loading = (self.provider_loading && self.has_older).then(|| {
-            div()
-                .flex_none()
-                .pl(v2::LEADING)
-                .pr(v2::SIDE)
-                .pt(space::S24)
-                .pb(space::S8)
-                .child(ui::native::skeleton_rows(
-                    ui::native::SkeletonKind::Message,
-                    2,
-                ))
-        });
+        // flow above the first message: row 0 draws them, so they scroll
+        // with the messages and never clip the first one (`row.rs`).
+        // §2.17, R2-01: a 话题 with no messages still opens with its start
+        // block and a compact "no messages" line, never a blank column.
+        let empty = (self.v2 && self.messages.is_empty() && !self.has_older)
+            .then(|| self.render_empty_thread(&topic, cx));
+        // R2-15: once the thread scrolls (or opens at its end, cut at the
+        // top), the day of the first row on screen stays as the thread's
+        // date divider in a 32 band under the header line (content scrolls
+        // under it), so a date label is never left cut under the header.
+        let sticky_date = (self.v2 && jump_unread.is_none())
+            .then(|| self.list.logical_scroll_top())
+            .filter(|top| top.item_ix > 0 || top.offset_in_item > px(0.))
+            .and_then(|top| self.messages.get(top.item_ix))
+            .map(|m| {
+                use crate::ui::native::{NativeType as _, native_colors};
+                let n = native_colors(cx);
+                let rule = || div().flex_1().h(px(1.)).bg(n.separator);
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(space::S32)
+                    .pl(v2::LEADING)
+                    .pr(v2::SIDE)
+                    .bg(colors.content)
+                    .flex()
+                    .items_center()
+                    .child(rule())
+                    .child(
+                        div()
+                            .flex_none()
+                            .px(space::S8)
+                            .n_section()
+                            .n_figures()
+                            .text_color(n.secondary)
+                            .child(v2::date_label(m.created_at)),
+                    )
+                    .child(rule())
+            });
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge
         // fades over 24 so its last row is never a hard mid-glyph cut.
@@ -793,6 +879,18 @@ impl Render for TimelineView {
 
         div()
             .id("timeline")
+            .track_focus(&self.key_focus)
+            .key_context(KEY_CONTEXT)
+            .on_action(
+                cx.listener(|this, _: &crate::views::rail::SelectPrevious, _, cx| {
+                    this.move_keyboard_row(-1, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::views::rail::SelectNext, _, cx| {
+                    this.move_keyboard_row(1, cx)
+                }),
+            )
             .size_full()
             .flex()
             .flex_col()
@@ -802,16 +900,17 @@ impl Render for TimelineView {
                     .then(|| self.render_header(&topic, window, cx)),
             )
             .children(search_bar)
-            .children(loading)
-            .child(
-                div()
+            .child(match empty {
+                Some(empty) => div().flex_1().min_h(px(0.)).child(empty),
+                None => div()
                     .relative()
                     .flex_1()
                     .min_h(px(0.))
                     .child(timeline)
                     .children(bottom_edge)
+                    .children(sticky_date)
                     .children(jump_unread),
-            )
+            })
             .children(jump)
             // The 话题 page shows a member at work as the plan card at the
             // foot of the list (`timeline/plan.rs`), not the pending row.
@@ -935,4 +1034,65 @@ fn jump_pill(id: &'static str, label: String, glyph: Sym, cx: &App) -> gpui::Sta
         .active(|el| el.bg(colors.pressed))
         .child(label)
         .child(ui::icon(glyph, theme::icon::CHIP, colors.text_2))
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        data::ChatProvider,
+        fake::v2::{DEV, T_RECONNECT, V2Samples},
+    };
+
+    /// R2-12: with the thread focused, ↑ picks the newest message (its
+    /// toolbar shows, as under the pointer) and walks back; ↓ comes forward.
+    #[gpui::test]
+    fn arrow_keys_move_the_keyboard_row(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let keys = |view: &Entity<TimelineView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, _| {
+                let all: Vec<String> = this
+                    .messages
+                    .iter()
+                    .map(|m| model::key(m).to_string())
+                    .collect();
+                (all, this.hovered.clone())
+            })
+        };
+        let (all, none) = keys(&view, cx);
+        assert!(all.len() >= 2, "the sample 话题 has messages");
+        assert!(none.is_none());
+        view.update_in(cx, |this, window, cx| window.focus(&this.key_focus, cx));
+        cx.simulate_keystrokes("up");
+        cx.run_until_parked();
+        assert_eq!(
+            keys(&view, cx).1.as_ref(),
+            all.last(),
+            "↑ starts at the newest"
+        );
+        cx.simulate_keystrokes("up");
+        cx.run_until_parked();
+        assert_eq!(
+            keys(&view, cx).1.as_ref(),
+            all.get(all.len() - 2),
+            "↑ walks back"
+        );
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        assert_eq!(keys(&view, cx).1.as_ref(), all.last(), "↓ comes forward");
+    }
 }

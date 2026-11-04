@@ -33,6 +33,7 @@ enum Pinned {
         number: u32,
         files: u32,
         merger: String,
+        message_id: Option<String>,
     },
     /// Another ask: its card in the thread holds the buttons.
     Ask { ask: AskItem },
@@ -105,6 +106,7 @@ impl TopicPage {
                 number: ch.number,
                 files: ch.files,
                 merger,
+                message_id: ask.message_id.clone(),
             });
         }
         // My press on the ask's card is the record.
@@ -128,6 +130,31 @@ impl TopicPage {
             }
         }
         Some(Pinned::Ask { ask })
+    }
+
+    /// The card of message `id` holds the ask's answer controls (a question
+    /// or actions), so it can stand in for the banner while it is on screen.
+    /// A review needs the card's own 批准合并; another ask, its question or
+    /// any action.
+    fn card_answers_here(&self, g: &str, id: &str, review: bool) -> bool {
+        let p = &self.services.provider;
+        let approve = |label: &str| label == c::APPROVE_MERGE;
+        if let Some(card) = p.card_v2(g, id) {
+            let actions = card.card.actions.clone().unwrap_or_default();
+            return if review {
+                actions.iter().any(|a| approve(&a.label))
+            } else {
+                card.card.ask.is_some() || !actions.is_empty()
+            };
+        }
+        p.card(g, id).is_some_and(|card| {
+            let actions = card.actions.clone().unwrap_or_default();
+            if review {
+                actions.iter().any(|a| approve(&a.label))
+            } else {
+                !actions.is_empty()
+            }
+        })
     }
 
     fn approve(&mut self, g: String, t: String, cx: &mut Context<Self>) {
@@ -180,6 +207,19 @@ impl TopicPage {
     ) -> Option<AnyElement> {
         let k = native_colors(cx);
         let state = self.pinned_state(g, t)?;
+        // R2-09, A5: while the ask's card is on screen it is the one surface
+        // of its question and actions; the banner shows again once the card
+        // scrolls away.
+        let card_id = match &state {
+            Pinned::Review { message_id, .. } => message_id.clone().map(|id| (id, true)),
+            Pinned::Ask { ask } => ask.message_id.clone().map(|id| (id, false)),
+            Pinned::Record { .. } => None,
+        };
+        if card_id.is_some_and(|(id, review)| {
+            self.card_answers_here(g, &id, review) && self.timeline.read(cx).shows_card(&id)
+        }) {
+            return None;
+        }
         let (g, t) = (g.to_string(), t.to_string());
         let sm = |id: &str, label: &str, style: PushStyle, cx: &mut Context<Self>| {
             push_button(
@@ -220,6 +260,7 @@ impl TopicPage {
                 number,
                 files,
                 merger,
+                ..
             } => Alert::new(
                 Sym::NeedsYou,
                 fill(c::REVIEW_TITLE, &[("n", &number.to_string())]),
@@ -269,9 +310,36 @@ impl TopicPage {
                     Some(at) => format!("{from} · {at}"),
                     None => from,
                 };
-                let mut alert = Alert::new(Sym::NeedsYou, ask.title.clone())
+                // The title is the card's question, so banner and card never
+                // disagree; the ask's own title only when there is no card.
+                let title = ask
+                    .message_id
+                    .as_deref()
+                    .and_then(|id| {
+                        let p = &self.services.provider;
+                        p.card_v2(&g, id)
+                            .map(|c| c.card.title.clone())
+                            .or_else(|| p.card(&g, id).map(|c| c.title.clone()))
+                    })
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or_else(|| ask.title.clone());
+                let mut alert = Alert::new(Sym::NeedsYou, title)
                     .tone(AlertTone::Warning)
                     .description(line);
+                if ask.message_id.is_none() {
+                    // No card to open: 回答 starts the reply to the asker.
+                    let from = member_name(&self.services, &ask.from);
+                    alert = alert.action(
+                        sm("pinned-answer", c::ANSWER, PushStyle::Outline, cx).on_click(
+                            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                let text = format!("@{from} ");
+                                this.composer.update(cx, |composer, cx| {
+                                    composer.insert_text(&text, window, cx)
+                                });
+                            }),
+                        ),
+                    );
+                }
                 if let Some(id) = ask.message_id.clone() {
                     let (g, t) = (g.clone(), t.clone());
                     alert = alert.action(

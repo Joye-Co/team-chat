@@ -59,7 +59,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | muted (fill) | #f5f5f5 | #262626 | Hover, selected row, skeleton, header fill of a table, icon box |
 | accent | #f5f5f5 | #262626 | Same value as muted. Menu and palette highlight |
 | muted-foreground | #737373 | #a1a1a1 | **All** secondary text, placeholders, meta, timestamps |
-| border | #e5e5e5 | rgb(255 255 255 / 10%) | **All** 1 px lines: toolbar border, pane borders, separators, frames |
+| border | #e5e5e5 | white, raised until ≥ 1.5:1 (owner decision v15) | **All** 1 px lines: toolbar border, pane borders, separators, frames |
 | input | #e5e5e5 | rgb(255 255 255 / 15%) | Input and outline button border, switch OFF track |
 | ring | #a1a1a1 | #737373 | Focus ring, 3 px at 50% |
 | primary | #171717 | #e5e5e5 | Primary button, switch ON track, Progress value, selected chart bar |
@@ -69,13 +69,14 @@ Rules:
 - Exactly one muted-foreground and one border value. Today light muted text uses 6 grays (L 114-139, contrast 3.18-4.48) plus a bluish gray (111,111,119). They all become #737373 (4.7:1 on white, 4.5:1 on #fafafa).
 - Placeholder = muted-foreground. Today placeholder contrast is 2.8 in both modes.
 - No lighter muted variant on filled surfaces (today captions at 3.7:1 on #f2f2f2 cards).
+- Dark border (owner decision v15): white at the lowest alpha that measures at least 1.5:1 on the background (#0a0a0a) **and** on the card fill (#171717). 10 % measured 1.3:1 and is retired; the value lives in `tokens.rs`.
 - Dark values in this table come from the shadcn v4 neutral theme. I did not find the theme block in `shadcn-bar/reg/`; confirm `accent` dark (#262626) against `ui.shadcn.com/r/themes` before merge.
 
 ### 1.3 State colors (only for state)
 
 | State | Light | Dark | Allowed on |
 |---|---|---|---|
-| destructive / failed | #dc2626 | #f87171 | Badge icon, destructive button fill, error text, invalid field border |
+| destructive / failed | #dc2626 | #f87171 | Badge icon, destructive button fill, error icon (field and sheet error text stays foreground, v15), invalid field border |
 | warning / needs you | #d97706 | #fbbf24 | Badge icon, Alert icon |
 | success / done / online | #16a34a | #4ade80 | Badge icon, presence dot |
 | info / in progress / unread / link | #2563eb | #60a5fa | Badge icon, unread dot (8 px), link text |
@@ -83,6 +84,7 @@ Rules:
 - A state color is never the only carrier of a state. It always sits next to text (badge, alert, labeled dot).
 - Destructive button fill (decided in v14): #dc2626 in both modes, white label 4.8:1. The dark token #f87171 is for icons and text only (white on #f87171 is 2.8:1). Token: `tokens::DESTRUCTIVE_FILL`.
 - Text selection is neutral: foreground at 15 %, never a state color.
+- Diff lines (owner decision v15) may keep a 10 % green / red line tint (code convention). No other surface carries a state tint.
 - No state color for provenance or decoration: the blue fill (226,240,255) for "Ledger 刚加的" blocks, the orange accent and orange progress bar in web-embed, and blue progress bars all go.
 
 ### 1.4 Type scale
@@ -218,7 +220,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - **Sidebar** (x 0-264): inset panel x 8-256, y 8-892, radius 18, fill sidebar, 1 px border. From top to bottom:
   1. y 8-52: traffic lights band (Mac). Nothing else.
   2. Search field h32, mx 8.
-  3. Groups. Each group: GroupLabel (h32, px8, 12 medium muted), then items h32 (p8, radius 8, gap 8, icon or avatar 16 at one x, 14 text that truncates with an ellipsis before the right column, right column right-aligned at x 238 for count pills, times or one badge). Every group has a label, the agent group included. Inside one group either every item has a 16 media or none has. A collapsed tail ("空闲 · 3", "不在 · 2") is one "More" item at 70% opacity with a chevron.
+  3. Groups. Each group: GroupLabel (h32, px8, 12 medium muted), then items h32 (p8, radius 8, gap 8, icon or avatar 16 at one x, 14 text that truncates with an ellipsis before the right column, right column right-aligned at x 238 for count pills, times or one badge). Hover (owner decision v15): muted at 50 % on rows that are not selected, drawn at once (no transition); every sidebar and list row uses it. One right-column kind per group: a member group shows a StatusBadge on every busy member ("等你 2", else "在做 3"); an open member keeps its badge. Every group has a label, the agent group included. Inside one group either every item has a 16 media or none has. A collapsed tail ("空闲 · 3", "不在 · 2") is one "More" item at 70% opacity with a chevron.
   4. `mt-auto` secondary items (Settings, Help) h32.
   5. Footer, pinned: user row h48, p8: avatar 32 (radius 8 for workspace logo, circle for the person), name 14 medium over 12 muted second line (workspace or role), chevrons-up-down 16 at the right. It opens account and Settings. The offline state replaces the second line and adds an Alert row above the footer (2.15). Groups scroll above the footer.
 - **Message column** (x 264-1120, or 264-1440 when the right pane is closed): gutter 24, so content x 288-1096. Two left edges only: **gutter** x 288 (toolbar title, avatars, date-divider rule start, banners, composer frame, page rows) and **text column** x 332 (= 288 + 32 + 12: names, message bodies, in-thread cards, attachment items).
@@ -249,16 +251,17 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - **Compact card** (in a thread, 640 max, dense data): gap 16, p 16, header title 14 semibold. Same slots.
 - **In-thread card**: width = min(640, text column width), x = text column (332). Every card, attachment item, reference block and embed in one thread has this one width. Galleries use the same width or exact halves (2 columns, gap 16).
 - **Card header slots** (every card kind: Card v2, in-thread, interact, web artifact): StatusBadge + title; meta 12 muted line; time 12 muted, right-aligned in one column; action top right. The author row stays outside the card in a thread and inside it on Home and in notifications, in the same slot.
-- **Working card**: header = avatar 24 + "正在做：<current step>" 14 medium + StatusBadge (spinner, "在做 3/5") at the right; content = Progress h4 + "3/5" 12 muted tabular; footer = elapsed and start time 12 muted + ghost sm actions (查看, 停止).
+- **Working card** (one component, `views/timeline/plan.rs` `WorkingCard`, used by the thread and Card v2): header = avatar 24 + "<member> 正在做：<current step>" 14 medium (no plan: "<member> 在做") + StatusBadge (spinner, "在做 3/5") at the right; content = Progress h4 + "3/5" 12 muted tabular (only with a plan), then the steps; footer = elapsed and start time 12 muted + ghost sm 查看 and **outline** sm 停止… (owner decision v15). In a thread the card sits on the text column (x 332) and its header avatar names the member; the gutter stays empty.
 - **KPI card**: description = label 14 muted; title = number 30 semibold tabular (24 when narrower than 250); action = trend Badge (outline, 12 icon); footer 2 lines (14 medium + icon 16, then 14 muted), gap 6. KPI cards sit in an equal grid, gap 16, shadow-xs.
 
 ### 2.5 Right pane (inspector, rail, side chat)
 
-- Header per 2.2. Body scrolls by itself, px 16, sections gap 24. Footer pinned, border-t, p 16, full-width buttons stacked (primary first, gap 8), only when the pane has an action.
+- Header per 2.2. Body scrolls by itself, px 16, sections gap 24. Footer pinned, border-t, p 16, full-width buttons stacked (primary first, gap 8), only when the pane has an action. Exception (owner decision v15): the live pane (实时查看) footer puts 停止… and 接管 side by side as equal outline buttons.
+- Panels inside a pane (live acceptance, plan, held banner, compact empties) are bordered containers (radius 10, 1 px border, px 16), never a fill step. A pane section with no data shows its compact empty (2.13) in its place.
 - Section: GroupLabel (12 medium muted, h32) with an optional 28 ghost action at the right; then a DescriptionList: label 14 muted in a 112 column at x 1136, value 14 foreground from x 1256, left-aligned, one line, truncate with tooltip; a person value = avatar 16 + name (the name keeps priority; the role truncates first).
-- **Topic inspector**: the same fixed sections in every topic, in this order (template: refs-card-step and topic-v2): 状态 (StatusBadge, Progress), 负责 / 提出 (people), 计划 (steps), 改动, 产出 (artifact rows), 决定, 在哪干活 (machine), 时间和花费. A section with no data shows one 14 muted line ("还没有计划") plus an optional ghost sm action ("指派"), and never disappears. Footer: "标记完成" / "交给…" full width.
+- **Topic inspector**: the same fixed sections in every topic, in this order (template: refs-card-step and topic-v2): 状态 (StatusBadge, Progress), 负责 / 提出 (people), 计划 (steps), 改动, 产出 (artifact rows), 决定, 在哪干活 (machine), 时间和花费. A section with no data shows one 16 icon + 14 muted line ("还没有计划"), and never disappears; its action ("指派" for an empty 负责) is the section header's ghost action. 计划 shows one block per member at work, each led by the member. Footer from the state: "标记完成" (primary) only while nothing waits on a review, an answer or a merge; "交给…" (outline) always, full width.
 - **Home rail**: only data the main pane does not show (排队 schedule, this week KPIs as DescriptionList, machines). Never the same items as the main list.
-- **Side chat**: header title "单独问 <name>", description "只有你能看到" 12 muted, member select h28 and close 32 in the header. Body: the same message rows as the main thread (no bubbles). Empty: an Empty state (2.13) centered in the body with 2-3 suggested questions as outline sm buttons. Composer docked at the bottom.
+- **Side chat**: header title "单独问 <name>", description "只有你能看到" 12 muted (once the member has read the 话题: "只有你能看到 · 读过 10:20 之前的话题", never a line in the body), member select h28 and close 32 in the header. Body: the same message rows as the main thread (no bubbles). Empty: an Empty state (2.13) centered in the body with 2-3 suggested questions as outline sm buttons. Composer docked at the bottom.
 
 ### 2.6 List row
 
@@ -268,7 +271,8 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Rows in one list are separated by 1 px border, inset to the title x, none after the last row. Hover bg muted at 50%. Selected bg muted + 500.
 - A list sits in one frame (radius 10, border) or in a Card. Never loose rows on the background.
 - A list longer than its region ends with a footer row h40: "看全部 23 个话题 →" 14 muted, or the count "共 12 个" left and pagination right.
-- **Mail-style item** (topic list in a group): radius 8, p 12, gap 4: row 1 title 14 semibold + unread dot 8 + time 12 muted right; row 2 summary 14 muted line-clamp 2; row 3 badges.
+- The topic list of a group uses the ListRow above (owner decision v15; the earlier mail-style item is retired).
+- Hover is muted at 50 %, drawn at once (owner decision v15).
 - Media column carries information: a topic row shows a topic-status icon box, not the same owner avatar on every row (group-v2 shows 7 identical Forge avatars).
 
 ### 2.7 Table
@@ -290,7 +294,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Inline field in a row: the standard Input (h32 or sm h28), border, shadow-xs. No extra fill box or 2 px ring box around it.
 - Number field: width 112, right-aligned tabular, prefix ("¥") inside the field at x + 12, thousands separators.
 - Textarea: a full-width row in the same group, label in the same column x, min 3 lines, focus ring inside the group bounds.
-- Error: field border destructive + 3 px ring destructive 20%; the label turns destructive; the message 12 destructive appears in the sheet footer's left slot (2.9) or as a dependent row inside the group. The sheet height does not change.
+- Error: field border destructive + 3 px ring destructive 20%; the message (owner decision v15: foreground text with a 16 destructive icon, never red text) appears in the sheet footer's left slot (2.9) or as a dependent row inside the group. The sheet height does not change. Login uses the same recipe.
 - Navigation row: label + value 14 muted + chevron-right 16 muted ("按群设置 · 8 个群 ›").
 
 ### 2.9 Sheet (Mac sheet, dialog anatomy)
@@ -298,10 +302,10 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Width 460 (form) or 560 (picker list). Padding 24 on all 4 sides. Surface card, 1 px border, shadow lg, chrome radius 22. Scrim unchanged.
 - Header gap 8: title 18 semibold, description 14 muted (one sentence). Every sheet has both, update-download included.
 - Body: 16 below the header. One content column: every block (group box, list box, search, textarea including its focus ring) shares the same left x and right x (0 px deviation).
-- Footer: 24 below the body. Left slot: count ("已选 2 位") or error text 12. Right: outline Cancel then primary, h32, gap 8; the right edge of the primary equals the content right edge (today 4-5 px overhang).
+- Footer: 24 below the body. Left slot: count ("已选 2 位") or the error (2.8: foreground text, red icon). Right: outline Cancel then primary, h32, gap 8; the right edge of the primary equals the content right edge (today 4-5 px overhang).
 - Primary is disabled (primary at 50%) until the required fields are valid.
 - Long content scrolls inside the body; header and footer stay.
-- **Member picker** (new-group, add-members, start-dm: one component): search field h32 full width; 12 below it a list box (radius 10, border) showing 7.5 rows so the cut row signals scroll, plus a scrollbar; rows h40: avatar 24 (presence dot green only), name 14 medium, role 14 muted, truncate. Multi-select: checkbox 16 at the left. Single-select: check icon 16 at the right on a muted row. Footer left "已选 N 位". Empty: "没有匹配的成员" Empty (compact, 2.13).
+- **Member picker** (new-group, add-members, start-dm: one component): search field h32 full width; 12 below it a list box (radius 10, border) showing 7.5 rows so the cut row signals scroll, plus a scrollbar; rows h40: avatar 24 (presence dot green only), name 14 medium, role 14 muted, truncate. Multi-select: checkbox 16 at the left. Single-select: check icon 16 at the right on a muted row. Footer left "已选 N 位". Empty: "没有匹配的成员" Empty (compact, 2.13). Keys (owner decision v15): ↓ from the search field moves into the list, ↑↓ move the highlight, Space toggles the highlighted member (multi-select), ↩ / ⌘↩ submit.
 - Avatar grid (add-bot): a column count that divides the set (for example 26 avatars + 1 random cell = 3 x 9), cells 40, gap 8.
 
 ### 2.10 Alert (Mac confirm)
@@ -315,7 +319,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 - **Menu**: float surface, radius 8, p 4, border, shadow md, opaque, min-w 128. Item h32, px 8, radius 6, 14 text, icon 16, gap 8, shortcut 12 muted at the right. GroupLabel 12 medium muted h28 px 8. Separator 1 px, mx -4, my 4. If any item in a menu is checkable, every item reserves the 16 + 8 check column; otherwise none does. Highlight = accent fill.
 - **Mention popup**: a menu anchored to the caret (left edge = caret x - 8, above the composer), w 320, max 8 rows, GroupLabel per group, selected = accent fill.
-- **Command palette** (search, switcher, ask): w 600, radius 10, float surface, shadow md. Input row h48, search icon 16, 16 text, border-b. List p 4: GroupLabel 12 medium muted h32; rows h32, radius 6: leading 16 icon or 16 avatar for the kind (topic, group, DM), title 14, meta 14 muted, StatusBadge at the right if any, time 12 muted tabular right-aligned at one x in every row, then a reserved 20 column for the ↩ hint (shown only on the selected row). Selected row = accent fill. Footer h40, border-t, 12 muted Kbd hints: "↑↓ 选择 · ↩ 打开 · esc 关闭". Max 8.5 visible rows, so a half row signals scroll; the panel height is header + rows + footer, never a row cut by the panel edge.
+- **Command palette** (search, switcher, ask): w 600, radius 10, float surface, shadow md. Input row h48, search icon 16, 16 text, border-b. List p 4: GroupLabel 12 medium muted h32; rows h32, radius 6: leading 16 icon or 16 avatar for the kind (topic, group, DM), title 14, meta 14 muted, StatusBadge at the right if any, time 12 muted tabular right-aligned at one x in every row, then a reserved 20 column for the ↩ hint (shown only on the selected row). Selected row = accent fill. Footer h40, border-t, 12 muted Kbd hints: "↑↓ 选择 · ↩ 打开 · esc 关闭"; when no row can be chosen (no match, failed, loading) only "esc 关闭". Max 8.5 visible rows, so a half row signals scroll; the panel height is header + rows + footer, never a row cut by the panel edge.
 - Palette states: empty query = recent list; no match = compact Empty ("没有找到“X”", one action); loading = 3 skeleton rows h32; error = Alert row with Retry.
 - Scope and target chips: max 200, truncate at the end with "…", full value in a tooltip.
 
@@ -339,6 +343,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | offline / idle / away | 离线 / 空闲 / 不在 | dot 8 outline | muted |
 | deactivated | 已停用 | ban | muted |
 
+- One mapping (owner decision v15, `topic_page::topic_state`): **在做** only while a member's run works (or waits on other members), with "n/m" when it has a plan, where n is the step it is on (the steps done when none is on); two or more members at work read "2 个成员在做". A 话题 marked in progress with no run is **排队** (clock, muted). Merging is **正在合并**; 进行中, 合并中 and 排队中 are not used. The sidebar right column, title bar, inspector 状态, run log and Card v2 use these words.
 - No free colored dot, colored "!" circle or colored text as the only status carrier. The only free dot allowed: unread dot 8 (info) next to a title, and the presence dot on an avatar.
 - In the sidebar the state goes to the right column as a count pill or a StatusBadge; the icon column keeps one kind per group.
 
@@ -352,11 +357,14 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 ### 2.14 Loading
 
 - Skeleton (muted fill, radius 8, pulse) in the region that will hold the data, with the final shapes: message row = circle 32 + lines h14 at 40% and 70% width; sidebar item = 16 square + h14 bar at 50-90% width, pitch 32; list row = 32 box + lines h14 / h12; table = rows at the real row height; card = 640 x 120 radius 14; inspector section = GroupLabel bar + 3 DescriptionList rows. 3-6 skeleton rows.
-- No centered spinner and no "正在加载…" text in an empty region. Older messages loading at the top of a thread: 2 message skeleton rows above the first message.
+- No centered spinner and no "正在加载…" text in an empty region. Older messages loading at the top of a thread: 2 message skeleton rows above the first message, in the list (they scroll with it and never clip it).
+- First sync (no 群 yet while it connects): the sidebar skeleton, the 首页 page skeleton (KPI cards and list rows), no create buttons and no 首页 count; the sidebar footer's second line reads "正在连接…".
 
 ### 2.15 Error, offline, failed
 
 - Alert in place of the failed content: radius 10, border, px 16, py 12, icon 16, gap-x 12, title 14 medium, description 14 muted, action at the right (outline sm "重试"). Destructive variant: icon and border tint destructive; the title stays foreground (owner decision v14: state color only on icons and badges).
+- Page failed state (owner decision v15): the Alert (icon, neutral title, cause, 重试) takes the place of the content, never drawn over pulsing skeletons and never next to them; the page toolbar keeps its place and layout (it never moves or jumps).
+- Run log failure: the same Alert in the pane, in place of the end step: the cause once (the time is the 用时 fact), 重试 (primary sm) and 查看日志 (outline sm).
 - Run failure in a thread: an Alert in place of the run card: title states the cause ("打包失败：找不到证书"), description, actions "重试" (primary sm) and "查看日志" (outline sm). The inspector 状态 row shows StatusBadge "失败".
 - Failed message: below the body, x = text column: destructive icon 16 + "没有发出" 12 destructive + ghost sm "重试" (rotate-ccw icon) + ghost sm "⋯" (删除, 复制). Retry is the same button in every place (members detail, files, messages).
 - Offline: a warning Alert docked above the composer (title "连接已断开", description "8 秒后重连", outline sm "立即重连"); the composer shows "消息会在连上后发出" 12 muted; the sidebar footer second line shows "离线" with a muted dot badge.
@@ -369,13 +377,16 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.17 Thread (message column)
 
-- **Thread-start block** at the top of every thread: 40 icon box, title 18 medium (the topic title), 14 muted line "<creator> 在 <group> 发起 · <date>", then one row of up to 3 outline sm suggested actions for this thread (for example 添加成员, 交代给成员, 附件). 24 below the header. Short threads stay anchored under it at the top, not at the bottom (owner decision, v14): the actions in the start block, not a filler, give the short thread its content. Check: first ink is at most 24 + 16 below y 52 in every topic scene.
+- **Thread-start block** at the top of every thread: 40 icon box, title 18 medium (the topic title), 14 muted line "<creator> 在 <group> 发起 · <date>", then one row of up to 3 outline sm suggested actions for this thread (for example 添加成员, 交代给成员, 附件). 24 below the header. Short threads stay anchored under it at the top, not at the bottom (owner decision, v14): the actions in the start block, not a filler, give the short thread its content. Check: first ink is at most 24 + 16 below y 52 in every topic scene. A thread with no messages shows the start block and a compact empty line ("还没有消息，说点什么开始吧"; 3 message skeleton rows while the first page loads), never a blank column.
+- **Sticky date**: once the thread scrolls or opens cut at the top, the day of the first row on screen shows as a pill (h24, float surface) 2 under the header line, so no date label is left cut under it.
 - **Message row**: avatar 32 at x 288; name 14 medium, role 12 muted, time 12 muted on one line at x 332; body 14/22 at x 332, max width 640. Group gap 16, consecutive messages 4. One message style in every thread (no gray bubbles in side chat).
 - **Date divider**: 1 px border rule across the text column with a centered label 12 medium muted on the background (px 8). 24 above, 16 below.
 - **Composer**: docked at the bottom, x 288-1096, 16 above the window bottom. Frame radius 10, border, shadow-xs, p 8: textarea 14/20 (1-8 lines), then a row: ghost 28 icon buttons (attach, mention) left, Send button sm (primary, icon arrow-up) right. Reference chips max 2 rows, then "+N". Suggested actions = outline sm buttons in one row, 8 above the composer.
 - **Search hit**: the hit message gets a muted band (radius 8) that fades after 2 s; matched words in 500 + underline; a search bar h40 under the header (border-b): query chip, "2 / 7" 12 muted tabular, previous / next icon buttons 28, close 28.
 - **Choice options**: a RadioGroup of full-width rows h40, border, radius 8, letter in a 20 box, selected = foreground border + muted fill.
 - **Code block**: horizontal scroll inside the card, never a hard clip.
+- **File item** (every attachment): a bordered container (radius 10, 1 px border) h60, px 12, gap 12: 32 media box (radius 6, border, muted fill, 16 icon; play for video and audio), name 14 medium cut in the middle so the extension stays (tooltip), meta 12 muted, Progress h4 inside while it transfers. Images: one image at 640, more in 2 columns of 312, gap 16.
+- **Pinned banner**: it gives way while the ask's card (the one that holds its question or 批准合并) is on screen; its title is the card's question; an ask with no card offers 回答.
 - **Embeds**: when the artifact pane is open, the in-thread embed collapses to one reference row (icon 16, title, "v3" badge, "在右侧打开" 12 muted).
 
 ### 2.18 Page recipes (main window)
@@ -383,7 +394,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - **Home (desk)**: toolbar title. Content: KPI row 4-up (等你 4, 在做 3, 今天完成 2, 排队 2), cards w (808 - 48) / 4 = 190, number 24. Then one section per queue (SectionHeader with count pill) holding one framed list (2.6) with fixed columns and a footer row. The "Jojo" summary goes in an Alert (info) above the KPI row or in the first card. Rail per 2.5 without duplicate items.
 - **Artifacts**: table view by default (名称 = icon 16 + title 14 medium truncate; 类型 outline badge; 话题; 做的人 avatar 16 + name; 版本; 更新 right-aligned tabular; "⋯"), table footer "3 个产出". Icon view: equal cards in a grid gap 16, a group header per day (今天, 昨天), title + "v3 · 话题" under each tile, tooltip with the full title.
 - **Member detail**: full pane width, px 24. Header block: avatar 64, name 24 semibold, 14 muted description, actions right-aligned (primary sm "交代", outline sm "单独问", outline sm "暂停"; no trailing "…" in labels). Separator 24. Then cards in a 2-column grid at widths >= 720 (现在在做 | 这周 KPIs; 最近交付 as a table; 问题 as Alert with Retry). Every section in every state (compact empty when no data). 24 bottom padding.
-- **Group**: toolbar title + primary sm "新话题" at the right (no top composer capsule). Topic list = mail-style items, paginated, footer "看全部 23 个话题". Inspector per 2.5 with sections 群里的决定, 成员, 机器, each with a compact empty.
+- **Group**: toolbar title + primary sm "新话题" at the right (no top composer capsule). Topic list = ListRows (2.6, owner decision v15), paginated, footer "看全部 23 个话题". Inspector per 2.5 with sections 群里的决定, 成员, 机器, each with a compact empty.
 
 ### 2.19 Settings window (640 wide)
 
@@ -398,7 +409,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.20 Login (full window)
 
-- Centered card 400 wide, radius 14, border, shadow-sm, p 24, gap 16: logo 48; title 24 semibold; description 14 muted; FormRow-less stacked field: label 14 medium "邀请码", 8, Input h36 full width; error 12 destructive under the field; primary lg h36 full width (loading: spinner + "正在验证…"); a 14 muted link row "使用其他服务器". No control at the window corners.
+- Centered card 400 wide, radius 14, border, shadow-sm, p 24, gap 16: logo 48; title 24 semibold; description 14 muted; FormRow-less stacked field: label 14 medium "邀请码", 8, Input h36 full width; error under the field (2.8: foreground text with a destructive icon); primary lg h36 full width (loading: spinner + "正在验证…"); a 14 muted link row "使用其他服务器". No control at the window corners.
 - Server step: same card width, title "连接服务器", one-sentence description, same field width.
 
 ### 2.21 Density and fill rules
@@ -411,7 +422,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.22 Dark parity
 
-- Every line, track, separator and frame that exists in light exists in dark at >= 1.5:1 against its surface (check: the transition count on one scan line is equal in light and dark).
+- Every line, track, separator and frame that exists in light exists in dark at >= 1.5:1 against its surface (the dark border token is raised to meet this on the background and on the card fill, 1.2) (check: the transition count on one scan line is equal in light and dark).
 - A value fill is higher-contrast than its track in both themes (Progress and chart bars use primary on primary 20%).
 - Switch ON in dark: track #e5e5e5, knob #171717 (today #ffffff on #f7f7fa, 1.03:1).
 - Avatar fallback in dark: muted fill #262626 + border white 10% (today #2c2c30 on #2b2b2b, 1.0:1).

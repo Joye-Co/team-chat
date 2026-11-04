@@ -14,6 +14,8 @@ crate::copy! {
     RAIL_DMS = "私聊",
     RAIL_NEEDS_YOU = "需要你",
     RAIL_WORKING = "在做",
+    RAIL_WORKING_N = "在做 {n}",
+    RAIL_ANSWERED = "已回答",
     RAIL_WAITING = "等别人",
     RAIL_DONE_TODAY = "做完了 · 今天",
     EMPTY_NO_GROUPS_TITLE = "还没有加入群",

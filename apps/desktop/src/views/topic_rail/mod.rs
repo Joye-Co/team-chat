@@ -37,6 +37,9 @@ struct Data {
     /// The run the rail shows (`rail_run`): the owner's newest, else the newest.
     run: Option<BotRunSummary>,
     step_times: Vec<Millis>,
+    /// The other members' runs at work with a plan, and their step times:
+    /// 计划 shows one block per run (A2-11).
+    others: Vec<(BotRunSummary, Vec<Millis>)>,
     changes: Option<TopicChanges>,
     artifacts: Vec<ArtifactSummary>,
     /// The preview of the newest 产出.
@@ -52,16 +55,23 @@ impl Data {
     fn read(services: &Services, g: &str, t: &str) -> Self {
         let p = &services.provider;
         let topic = p.topic(g, t);
+        let all_runs = p.runs(g, t);
         let run = rail_run(
-            p.runs(g, t),
+            all_runs.clone(),
             topic.as_ref().and_then(|t| t.owner_id.as_deref()),
         );
+        let others: Vec<(BotRunSummary, Vec<Millis>)> =
+            crate::views::topic_page::working_runs(&all_runs)
+                .into_iter()
+                .filter(|r| !r.plan.is_empty() && run.as_ref().is_none_or(|x| x.id != r.id))
+                .map(|r| (r.clone(), p.run_step_times(&r.id)))
+                .collect();
         let artifacts = p.artifacts(g, t);
         let preview = artifacts
             .first()
             .and_then(|a| p.artifact_preview(&a.id, a.version));
         let decisions = p.topic_decisions(g, t);
-        let mut ids: Vec<&str> = Vec::new();
+        let mut ids: Vec<&str> = others.iter().map(|(r, _)| r.bot_id.as_str()).collect();
         if let Some(t) = &topic {
             ids.extend(t.owner_id.as_deref());
             ids.push(&t.created_by);
@@ -86,6 +96,7 @@ impl Data {
                 .map(|r| p.run_step_times(&r.id))
                 .unwrap_or_default(),
             changes: p.topic_changes(g, t),
+            others,
             cost: p.topic_cost(g, t),
             recording: topic_recording(services, g, t),
             topic,
@@ -177,12 +188,61 @@ impl TopicRail {
 impl TopicRail {
     /// The pinned footer of the inspector (§2.5): 标记完成 (primary) over
     /// 交给… (outline, a menu of the 群's members), full width, gap 8.
-    fn footer(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
-        use crate::ui::native::{PushSize, PushStyle, push_button};
+    /// The members of the 群 to hand the 话题 to, as a dropdown on `button`.
+    fn assign_menu(&self, topic: &Topic, button: gpui_component::button::Button) -> AnyElement {
         use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+        let (g, t) = (topic.group_id.clone(), topic.id.clone());
+        let members = crate::views::topic_menu::group_members(&self.services, &g);
+        let owner = topic.owner_id.clone();
+        let services = self.services.clone();
+        button
+            .dropdown_menu(move |mut menu, _, _| {
+                for m in &members {
+                    let (s, g, t, id) = (services.clone(), g.clone(), t.clone(), m.id.clone());
+                    menu = menu.item(
+                        PopupMenuItem::new(m.name.clone())
+                            .checked(owner.as_deref() == Some(m.id.as_str()))
+                            .on_click(move |_, _, _| {
+                                s.provider.set_topic_owner(&g, &t, Some(id.clone()))
+                            }),
+                    );
+                }
+                menu
+            })
+            .into_any_element()
+    }
+
+    /// 指派: the ghost sm action of an empty 负责 (§2.13 compact).
+    fn assign_button(&self, topic: &Topic, cx: &App) -> AnyElement {
+        use crate::ui::native::{PushSize, PushStyle, push_button};
+        self.assign_menu(
+            topic,
+            push_button(
+                "rail-assign",
+                c::ASSIGN,
+                PushStyle::Ghost,
+                PushSize::Small,
+                cx,
+            ),
+        )
+    }
+
+    fn footer(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::native::{BadgeState, PushSize, PushStyle, push_button};
         let k = ui::native::native_colors(cx);
         let (g, t) = (topic.group_id.clone(), topic.id.clone());
-        let done = {
+        // R2-17, §2.5: the footer follows the state. While the 话题 waits on
+        // a review, an answer or a merge, 标记完成 is not the next step; 交给…
+        // stays.
+        let waits = matches!(
+            topic.status,
+            crate::data::TopicStatus::WaitingReview | crate::data::TopicStatus::WaitingAnswer
+        ) || self
+            .data
+            .as_ref()
+            .and_then(|d| d.state.as_ref())
+            .is_some_and(|s| matches!(s.badge, BadgeState::NeedsYou | BadgeState::Merging));
+        let done = (!waits).then(|| {
             let (s, g, t) = (self.services.clone(), g.clone(), t.clone());
             push_button(
                 "rail-mark-done",
@@ -196,31 +256,18 @@ impl TopicRail {
                 s.provider
                     .set_topic_status(&g, &t, crate::data::TopicStatus::Done, Vec::new())
             })
-        };
-        let members = crate::views::topic_menu::group_members(&self.services, &g);
-        let owner = topic.owner_id.clone();
-        let services = self.services.clone();
-        let hand = push_button(
-            "rail-hand-to",
-            c::HAND_TO,
-            PushStyle::Outline,
-            PushSize::Regular,
-            cx,
-        )
-        .w_full()
-        .dropdown_menu(move |mut menu, _, _| {
-            for m in &members {
-                let (s, g, t, id) = (services.clone(), g.clone(), t.clone(), m.id.clone());
-                menu = menu.item(
-                    PopupMenuItem::new(m.name.clone())
-                        .checked(owner.as_deref() == Some(m.id.as_str()))
-                        .on_click(move |_, _, _| {
-                            s.provider.set_topic_owner(&g, &t, Some(id.clone()))
-                        }),
-                );
-            }
-            menu
         });
+        let hand = self.assign_menu(
+            topic,
+            push_button(
+                "rail-hand-to",
+                c::HAND_TO,
+                PushStyle::Outline,
+                PushSize::Regular,
+                cx,
+            )
+            .w_full(),
+        );
         div()
             .flex_none()
             .w_full()
@@ -230,7 +277,7 @@ impl TopicRail {
             .flex()
             .flex_col()
             .gap(space::S8)
-            .child(done)
+            .children(done)
             .child(hand)
             .into_any_element()
     }
@@ -448,6 +495,13 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
 /// The run of a 话题 the rail shows (runs come newest first): the owner's newest run, so
 /// the 负责 card and the 计划 card belong to the same member; else the newest run.
 fn rail_run(runs: Vec<BotRunSummary>, owner: Option<&str>) -> Option<BotRunSummary> {
+    // R2-04: while a member works, the rail shows the run the title bar and
+    // the working card name (`topic_page::lead_run`), never an older one.
+    if let Some(lead) = crate::views::topic_page::lead_run(&runs, owner)
+        .filter(|r| owner == Some(r.bot_id.as_str()))
+    {
+        return Some(lead.clone());
+    }
     let own = owner.and_then(|o| runs.iter().position(|r| r.bot_id == o));
     let mut runs = runs;
     match own {

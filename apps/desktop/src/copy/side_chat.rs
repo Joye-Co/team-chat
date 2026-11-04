@@ -12,7 +12,7 @@ crate::copy! {
     SIDE_CHAT_ASK_NEXT = "接下来要做什么？",
     SIDE_CHAT_PLACEHOLDER = "单独问 {name}…",
     SIDE_CHAT_POSTED = "已发到话题",
-    SIDE_CHAT_READ_UPTO = "{name} 读过话题里 {time} 之前的内容",
+    SIDE_CHAT_HEADER_READ = "只有你能看到 · 读过 {time} 之前的话题",
     SIDE_CHAT_WILL_READ = "{name} 会读话题里 {time} 之前的内容",
     SIDE_CHAT_SUGGEST_HINT = "按下才会发到话题",
     SIDE_CHAT_CHANGE_MEMBER = "换一个成员，现在是 {name}",
