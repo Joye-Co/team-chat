@@ -1369,7 +1369,7 @@ async fn interaction_envelope_and_chat_run() {
     assert_eq!(done(&frames).status, "succeeded");
     assert!(!socket.exists(), "socket left after the run");
 
-    // 2. No run.output.result: chat-run gives up after 15 s with "server too old".
+    // 2. No run.output.result: chat-run gives up after 15 s with "unconfirmed" (retry is safe).
     send(&mut ws, &assign("c2", "fake", "chatrun", None)).await;
     let fr = collect(&mut ws, "c2", true, |f| matches!(f, Up::RunDone(_))).await;
     assert!(
@@ -1380,12 +1380,12 @@ async fn interaction_envelope_and_chat_run() {
     let r = chat_run_report(&tmp.path().join("work/runs/c2/work"), 1).await;
     assert_eq!(r["code"], 1, "{r}");
     let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
-    assert_eq!(err["error"]["reason"], "server.too_old");
+    assert_eq!(err["error"]["reason"], "output.unconfirmed");
     assert!(
         err["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("server too old")
+            .contains("may have been applied")
     );
 
     stop_tx.send(()).unwrap();
@@ -1472,7 +1472,7 @@ async fn codex_chat_run_uses_the_request_folder() {
 }
 
 /// `chat-run` while the daemon's link to the server is down: the output never reaches the
-/// server, so after 15 s `chat-run` says "not connected", not "server too old".
+/// server, so after 15 s `chat-run` says "not connected", not "unconfirmed".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chat_run_without_a_link_is_not_connected() {
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));

@@ -99,9 +99,19 @@ pub struct Outputs {
     next: AtomicU64,
     /// What the daemon needs for the ops it answers itself (files and 产出).
     local: OnceLock<Arc<crate::chat_run_files::Local>>,
+    /// The run id: part of each output's idempotency key.
+    run: String,
 }
 
 impl Outputs {
+    /// The outputs of run `run_id`.
+    pub fn new(run_id: &str) -> Outputs {
+        Outputs {
+            run: run_id.to_string(),
+            ..Outputs::default()
+        }
+    }
+
     /// Lets the run's `chat-run` upload files and make 产出 (see [`crate::chat_run_files`]).
     pub fn set_local(&self, local: crate::chat_run_files::Local) {
         let _ = self.local.set(Arc::new(local));
@@ -489,6 +499,7 @@ pub async fn handle(
         );
         return answer;
     }
+    let body = with_key(&outputs.run, op, body);
     let (output_id, rx) = outputs.add();
     emit(RunEvent::Output {
         output_id: output_id.clone(),
@@ -514,30 +525,77 @@ pub async fn handle(
                 }
             );
             if delivered {
-                // The server got the output and did not answer: it does not know `output`.
+                // The server got the output and its result did not come: the result can be
+                // lost with the link after the server applied it, or the server is too old to
+                // know `output`. The idempotency key makes a retry of the same command safe.
                 error(
                     "timeout",
-                    Some("server.too_old"),
+                    Some("output.unconfirmed"),
                     format!(
-                        "server too old: no answer in {secs} s (the server may not support \
-chat-run); the result is unknown"
+                        "unconfirmed: the server got this but its result did not come in {secs} \
+s; it may have been applied. Retrying the same command is safe: the server applies it once"
                     ),
                 )
             } else {
                 // No ack is not proof that the server never got it: the ack can be lost with
-                // the link. The result is unknown.
+                // the link. The result is unknown; the idempotency key makes a retry safe.
                 error(
                     "unavailable",
                     Some("server.not_connected"),
                     format!(
                         "not connected: the server did not confirm this in {secs} s (the \
-daemon's link to the server is down); the result is unknown: it may have been done, so check \
-before you try again"
+daemon's link to the server is down); the result is unknown: it may have been done. Retrying \
+the same command is safe: the server applies it once"
                     ),
                 )
             }
         }
     }
+}
+
+/// The body field that holds the idempotency key of `op` (the client key of the matching
+/// frame), or None for an op the server dedups by its event id.
+fn key_field(op: &str) -> Option<&'static str> {
+    match op {
+        output_op::CARD_POST => Some("clientMsgId"),
+        output_op::CARD_PATCH => Some("clientPatchId"),
+        output_op::ARTIFACT_DATA => Some("clientPushId"),
+        _ => None,
+    }
+}
+
+/// The idempotency key of one output: `k` + 40 hex of SHA-256 over the run id, the op and the
+/// body. The same command in the same run gets the same key, so a retry after a lost result is
+/// applied once; another run never gets it.
+pub fn idempotency_key(run_id: &str, op: &str, body: &Value) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    h.update(run_id.as_bytes());
+    h.update([0]);
+    h.update(op.as_bytes());
+    h.update([0]);
+    h.update(serde_json::to_vec(body).unwrap_or_default());
+    let hex: String = h
+        .finalize()
+        .iter()
+        .take(20)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("k{hex}")
+}
+
+/// `body` with the idempotency key of `op`, unless the CLI gave its own key.
+fn with_key(run_id: &str, op: &str, mut body: Value) -> Value {
+    if let Some(field) = key_field(op)
+        && body
+            .get(field)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+    {
+        let key = idempotency_key(run_id, op, &body);
+        body[field] = json!(key);
+    }
+    body
 }
 
 /// The daemon log names the op and the outcome only, never the body or the result.
@@ -1116,8 +1174,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn no_result_in_15_s_after_the_server_got_it_is_server_too_old() {
-        let outputs = Outputs::default();
+    async fn no_result_in_15_s_after_the_server_got_it_is_output_unconfirmed() {
+        let outputs = Outputs::new("r1");
         let sent = Arc::new(Mutex::new(vec![]));
         let s2 = sent.clone();
         let emit = move |e: RunEvent| s2.lock().unwrap().push(e);
@@ -1144,13 +1202,10 @@ mod tests {
         assert!(start.elapsed() >= Duration::from_secs(15));
         assert_eq!(v["ok"], false);
         assert_eq!(v["error"]["code"], "timeout");
-        assert_eq!(v["error"]["reason"], "server.too_old");
-        assert!(
-            v["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("server too old")
-        );
+        assert_eq!(v["error"]["reason"], "output.unconfirmed");
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("may have been applied"), "{msg}");
+        assert!(msg.contains("retry") || msg.contains("Retrying"), "{msg}");
         assert!(matches!(&sent.lock().unwrap()[..],
             [RunEvent::Output { output_id, op, .. }] if output_id == "o1" && op == "interaction.resolve"));
         // A late result finds nothing waiting.
@@ -1191,6 +1246,78 @@ mod tests {
         assert!(msg.contains("may have been done"), "{msg}");
         assert!(!msg.contains("nothing was done"), "{msg}");
         assert!(!msg.contains("too old"), "{msg}");
+        assert!(msg.contains("Retrying the same command is safe"), "{msg}");
+    }
+
+    #[test]
+    fn a_retry_of_the_same_command_carries_the_same_idempotency_key() {
+        let post = json!({ "cardV2": { "v": 2, "title": "t", "blocks": [] } });
+        let a = with_key("r1", "card.post", post.clone());
+        let b = with_key("r1", "card.post", post.clone());
+        let key = a["clientMsgId"].as_str().unwrap();
+        assert_eq!(key.len(), 41);
+        assert!(key.len() <= 64);
+        assert_eq!(a, b);
+        // Another run or another card is another output.
+        assert_ne!(
+            with_key("r2", "card.post", post.clone())["clientMsgId"],
+            key
+        );
+        assert_ne!(
+            with_key(
+                "r1",
+                "card.post",
+                json!({ "cardV2": { "v": 2, "title": "u" } })
+            )["clientMsgId"],
+            key
+        );
+        let patch = with_key(
+            "r1",
+            "card.patch",
+            json!({ "messageId": "M", "baseRev": 1, "ops": [] }),
+        );
+        assert!(patch["clientPatchId"].as_str().unwrap().starts_with('k'));
+        let data = with_key(
+            "r1",
+            "artifact.data",
+            json!({ "artifactId": "A", "version": 1, "data": {} }),
+        );
+        assert!(data["clientPushId"].as_str().is_some());
+        // The CLI's own key stays; ops that the server dedups by event id get none.
+        let own = with_key(
+            "r1",
+            "card.patch",
+            json!({ "messageId": "M", "clientPatchId": "mine" }),
+        );
+        assert_eq!(own["clientPatchId"], "mine");
+        let res = with_key(
+            "r1",
+            "interaction.resolve",
+            json!({ "eventId": "E", "result": "ignored" }),
+        );
+        assert_eq!(res, json!({ "eventId": "E", "result": "ignored" }));
+    }
+
+    #[tokio::test]
+    async fn the_output_event_carries_the_key() {
+        let outputs = Outputs::new("r1");
+        let sent = Arc::new(Mutex::new(vec![]));
+        let s2 = sent.clone();
+        let emit = move |e: RunEvent| s2.lock().unwrap().push(e);
+        let line = br#"{"op":"card.post","body":{"cardV2":{"v":2,"title":"t","blocks":[]}}}"#;
+        let _ = handle(line, &outputs, &emit, Duration::from_millis(1)).await;
+        let _ = handle(line, &outputs, &emit, Duration::from_millis(1)).await;
+        let sent = sent.lock().unwrap();
+        let keys: Vec<Value> = sent
+            .iter()
+            .map(|e| match e {
+                RunEvent::Output { body, .. } => body["clientMsgId"].clone(),
+                _ => Value::Null,
+            })
+            .collect();
+        assert_eq!(keys.len(), 2);
+        assert!(keys[0].is_string());
+        assert_eq!(keys[0], keys[1]);
     }
 
     #[tokio::test]

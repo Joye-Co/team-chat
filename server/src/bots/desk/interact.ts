@@ -383,7 +383,9 @@ export abstract class DeskInteract extends DeskTakeover {
         t,
         ...base,
         topicId: r.topic_id,
-        clientMsgId: `run:${r.id}:out:${outputId}`.slice(0, 128),
+        // The daemon's idempotency key (one per command in the run), so a retry after a lost
+        // result posts once; without it the output id, which is new on each retry.
+        clientMsgId: typeof b.clientMsgId === "string" && b.clientMsgId ? b.clientMsgId.slice(0, 64) : `run:${r.id}:out:${outputId}`.slice(0, 64),
         body: typeof b.body === "string" ? b.body : "",
         cardV2: card,
       };

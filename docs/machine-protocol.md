@@ -333,7 +333,7 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `card.post` | `{ cardV2, body?, causeEventId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
+| `card.post` | `{ cardV2, body?, causeEventId?, clientMsgId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
 | `card.patch` | `{ messageId, baseRev, ops, cause? }` | `chat-run card patch --message M --base-rev N --ops ops.json [--cause ev]` |
 | `interaction.resolve` | `{ eventId, result: "ignored" \| "failed", note? }` | `chat-run resolve --event ev --result ignored\|failed [--note …]` |
 | `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
@@ -344,11 +344,19 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 (`aside`) get no `chat-run`. One request is one JSON document `{ op, body }`; the daemon sends the
 `output` run event (redacted like every frame) and answers one JSON document `{ ok, result? ,
 error? }` when `run.output.result` comes. With no result in 15 s it answers `{ ok: false, error:
-{ code: "timeout", reason: "server.too_old" } }` ("server too old") when the server acked the
-`output` event (it got it and did not understand it), else `{ ok: false, error: { code:
-"unavailable", reason: "server.not_connected" } }` ("not connected": the daemon's link to the
-server was down; the result is unknown, because a lost ack does not show that the server never
-got the output, and the server refuses the output as `output.expired` if it comes later). A
+{ code: "timeout", reason: "output.unconfirmed" } }` ("unconfirmed") when the server acked the
+`output` event (it got it, and the result was lost with the link after it applied the output, or
+the server is too old to know `output`), else `{ ok: false, error: { code: "unavailable", reason:
+"server.not_connected" } }` ("not connected": the daemon's link to the server was down; the result
+is unknown, because a lost ack does not show that the server never got the output, and the server
+refuses the output as `output.expired` if it comes later). Both messages say that a retry of the
+same command is safe: the daemon puts an idempotency key in the body of `card.post`
+(`clientMsgId`), `card.patch` (`clientPatchId`) and `artifact.data` (`clientPushId`) unless the
+CLI gave one: `k` + 40 hex of SHA-256 over the run id, the op and the body. The same command in the
+same run gets the same key, so the server applies it once and answers a retry with the first
+result (`duplicate`); another run never gets the same key. `interaction.resolve` and
+`artifact.reply` are keyed by their event id. (Daemons before this rule answered
+`server.too_old` for the acked case.) A
 daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
 "daemon.no_answer" }`. The transport depends on the runtime:
 
@@ -396,8 +404,10 @@ Server rules (BotDesk):
   (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
   `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,
   `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
-  payload? | error?}` or `{eventId, decline: "…"}`. Without `clientPatchId` / `clientPushId` in
-  the body, the key is `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
+  payload? | error?}` or `{eventId, decline: "…"}`. `card.post` takes an optional `clientMsgId`
+  (1-64 characters, the daemon's idempotency key) as the `send` key. Without `clientMsgId` /
+  `clientPatchId` / `clientPushId` in the body, the key is `run:{runId}:out:{outputId}` (posts) or
+  `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
   `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). The server measures an
   `output`'s age on its own clock: the frame's `at` moved by the clock offset of the last
   `heartbeat` (or the arrival time before the first heartbeat), never later than the arrival. An

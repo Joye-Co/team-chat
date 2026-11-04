@@ -565,6 +565,13 @@ describe("BotDesk delivery", () => {
     expect(posted).toMatchObject({ runId, ok: true, result: { messageId: expect.any(String) } });
     const msg = await c.waitEvent((e) => e.type === "message.created" && e.data.message.id === posted.result.messageId);
     expect(msg.data.message).toMatchObject({ authorId: w.bot.id, topicId, cardV2: { title: "10 月数据月报" } });
+    // A retry with the same idempotency key (a lost result) posts once and gets the same message.
+    d.event(runId, { type: "output", outputId: "o1a", op: "card.post", body: { card: card(), clientMsgId: "k1" } });
+    const first = await result("o1a");
+    d.event(runId, { type: "output", outputId: "o1b", op: "card.post", body: { card: card(), clientMsgId: "k1" } });
+    const again = await result("o1b");
+    expect(first).toMatchObject({ ok: true });
+    expect(again).toMatchObject({ ok: true, result: { messageId: first.result.messageId } });
     // An invalid card is refused with the reason of the frame rules.
     d.event(runId, { type: "output", outputId: "o2", op: "card.post", body: { card: { ...card(), intent: "vote" } } });
     expect(await result("o2")).toMatchObject({ ok: false, error: { code: "invalid" } });

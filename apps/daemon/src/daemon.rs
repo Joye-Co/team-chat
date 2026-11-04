@@ -683,7 +683,7 @@ impl Daemon {
             Some(_) => return self.reject(&id, "invalid", "unknown run kind"),
         }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
-        let outputs: Arc<crate::chat_run::Outputs> = Arc::default();
+        let outputs = Arc::new(crate::chat_run::Outputs::new(&id));
         self.runs.insert(
             id.clone(),
             RunEntry {
