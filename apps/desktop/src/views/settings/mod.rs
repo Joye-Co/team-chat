@@ -175,7 +175,7 @@ impl SettingsView {
         let members = cx.new(|cx| MembersPage::new(services.clone(), window, cx));
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
-        let shortcuts = cx.new(|_| ShortcutsPage::new());
+        let shortcuts = cx.new(|cx| ShortcutsPage::new(window, cx));
         let mut this = Self {
             page,
             general,

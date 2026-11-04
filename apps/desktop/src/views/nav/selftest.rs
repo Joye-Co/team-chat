@@ -384,6 +384,18 @@ pub mod scenes {
         over_main(services, content, cx, super::super::dialogs::open_new_group)
     }
 
+    /// The new-group sheet with a name that is too long: the field error.
+    pub fn new_group_error(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let name = "产品设计与前端体验改进讨论组".repeat(5);
+            super::super::dialogs::open_new_group_with(services, &name, None, window, cx)
+        })
+    }
+
     /// The sheet that adds members to the first 群.
     /// Opens the 群 with the fewest members and its newest 话题, so the
     /// add-members sheet over it has people to add.
@@ -556,7 +568,7 @@ pub mod scenes {
     }
 
     /// The 重命名群 dialog after the server refused: a new name typed and
-    /// the refusal in an alert over it.
+    /// the refusal under the field.
     pub fn rename_group_error(
         services: Services,
         content: Size<Pixels>,
@@ -569,7 +581,7 @@ pub mod scenes {
                     services,
                     g.id,
                     g.name,
-                    Some((typed, crate::data::AdminError::Forbidden)),
+                    Some((typed, crate::data::AdminError::Offline)),
                     window,
                     cx,
                 );

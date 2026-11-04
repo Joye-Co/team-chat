@@ -1,5 +1,5 @@
-//! The update sheet of the main window (NATIVE.md §7.1): only for
-//! 重启安装, once a downloaded update is ready (稍后, default 重启安装); it
+//! The update alert of the main window (2.10): only for 重启安装, once a
+//! downloaded update is ready (default 重启安装, then 稍后); it
 //! follows the install and says what to do when it cannot finish. The
 //! download itself shows in Settings › 通用 and the app menu, never in a
 //! sheet or a banner. It renders [`Updater`] state and calls its commands;
@@ -9,15 +9,16 @@ use std::collections::HashSet;
 
 use gpui::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Subscription, Window, div, px,
+    Subscription, Window, div,
 };
 use gpui_component::{Sizable as _, WindowExt as _};
 
 use super::{Failure, Phase, Updater, version};
 use crate::copy::{fill, overlays as o, update as u};
 use crate::ui::native::{
-    PushSize, PushStyle, SheetLayout, SheetWidth, metrics, native_colors, native_sheet,
-    push_button, spinner,
+    AlertLayout, PushStyle, alert_button, metrics, native_colors,
+    overlays::{app_icon, native_alert},
+    spinner,
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -94,9 +95,11 @@ impl Render for UpdateSheet {
             return div().into_any_element();
         };
         let v = info.version.as_str();
+        let product = env!("PRODUCT_NAME");
         let updater = self.updater.clone();
+        // 2.10: the default on top, outline 取消 / 稍后 under it, all h32.
         let button = |id: &'static str, label: &'static str, style: PushStyle, cx: &App| {
-            push_button(id, label, style, PushSize::Large, cx)
+            alert_button(id, label, style, false, cx)
         };
         let hide = |cx: &App| {
             button("update-hide", o::UPDATE_HIDE, PushStyle::Outline, cx)
@@ -104,32 +107,53 @@ impl Render for UpdateSheet {
         };
         let u1 = updater.clone();
         let u2 = updater.clone();
+        let alert = |title: String| AlertLayout::new(title).icon(app_icon(metrics::ALERT_ICON));
         let layout = match &phase {
-            Phase::Ready { .. } => SheetLayout::new(fill(o::UPDATE_READY_TITLE, &[("version", v)]))
-                .explanation(o::UPDATE_READY_EXPLANATION)
-                .buttons([
-                    button("update-later", u::LATER, PushStyle::Outline, cx).on_click(
-                        move |_, window, cx| {
-                            u1.update(cx, |up, cx| up.postpone(cx));
-                            window.close_dialog(cx);
-                        },
-                    ),
-                    button("update-restart", o::UPDATE_RESTART, PushStyle::Default, cx)
-                        .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.install_now(cx))),
-                ]),
+            Phase::Ready { .. } => alert(fill(
+                u::READY_TITLE,
+                &[("product", product), ("version", v)],
+            ))
+            .message(fill(
+                u::READY_BODY,
+                &[("current", version::CURRENT), ("version", v)],
+            ))
+            .buttons([
+                button("update-restart", o::UPDATE_RESTART, PushStyle::Default, cx)
+                    .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.install_now(cx))),
+                button("update-later", u::LATER, PushStyle::Outline, cx).on_click(
+                    move |_, window, cx| {
+                        u1.update(cx, |up, cx| up.postpone(cx));
+                        window.close_dialog(cx);
+                    },
+                ),
+            ]),
             Phase::WaitingForSends(_) | Phase::Installing(_) => {
                 let waiting = matches!(phase, Phase::WaitingForSends(_));
-                SheetLayout::new(fill(o::UPDATE_INSTALLING_TITLE, &[("version", v)]))
-                    .explanation(if waiting {
+                alert(fill(o::UPDATE_INSTALLING_TITLE, &[("version", v)]))
+                    .message(if waiting {
                         u::WAITING_SENDS
                     } else {
                         u::INSTALLING
                     })
-                    .body(div().child(spinner().with_size(metrics::SPINNER).color(k.secondary)))
+                    .checkbox(
+                        div()
+                            .w_full()
+                            .flex()
+                            .justify_center()
+                            .child(spinner().with_size(metrics::SPINNER).color(k.secondary)),
+                    )
                     .buttons([hide(cx)])
             }
-            Phase::Manual(_) => SheetLayout::new(fill(o::UPDATE_MANUAL_TITLE, &[("version", v)]))
-                .explanation(fill(u::MANUAL, &[("product", env!("PRODUCT_NAME"))]))
+            Phase::Manual(_) => alert(fill(o::UPDATE_MANUAL_TITLE, &[("version", v)]))
+                .message(
+                    [
+                        u::MANUAL_STEPS.to_string(),
+                        fill(u::MANUAL_STEP_1, &[("product", product)]),
+                        fill(u::MANUAL_STEP_2, &[("product", product)]),
+                        fill(u::MANUAL_STEP_3, &[("product", product)]),
+                    ]
+                    .join("\n"),
+                )
                 .buttons([
                     button("update-ok", u::DISMISS, PushStyle::Default, cx).on_click(
                         move |_, window, cx| {
@@ -138,20 +162,18 @@ impl Render for UpdateSheet {
                         },
                     ),
                 ]),
-            Phase::Failed { .. } => {
-                SheetLayout::new(fill(o::UPDATE_FAILED_TITLE, &[("version", v)]))
-                    .explanation(banner_text(&phase).unwrap_or_default())
-                    .buttons([
-                        button("update-later", u::LATER, PushStyle::Outline, cx).on_click(
-                            move |_, window, cx| {
-                                u1.update(cx, |up, cx| up.postpone(cx));
-                                window.close_dialog(cx);
-                            },
-                        ),
-                        button("update-retry", u::RETRY, PushStyle::Default, cx)
-                            .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.start_update(cx))),
-                    ])
-            }
+            Phase::Failed { .. } => alert(fill(o::UPDATE_FAILED_TITLE, &[("version", v)]))
+                .message(banner_text(&phase).unwrap_or_default())
+                .buttons([
+                    button("update-retry", u::RETRY, PushStyle::Default, cx)
+                        .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.start_update(cx))),
+                    button("update-later", u::LATER, PushStyle::Outline, cx).on_click(
+                        move |_, window, cx| {
+                            u1.update(cx, |up, cx| up.postpone(cx));
+                            window.close_dialog(cx);
+                        },
+                    ),
+                ]),
             _ => return div().into_any_element(),
         };
         div().w_full().child(layout).into_any_element()
@@ -197,8 +219,7 @@ impl UpdateBanner {
             window.open_dialog(cx, move |dialog, _, cx| {
                 let this = this.clone();
                 let updater = updater.clone();
-                native_sheet(dialog, SheetWidth::Form, cx)
-                    .px(px(0.))
+                native_alert(dialog, cx)
                     .on_close(move |_, _, cx| {
                         let key = sheet_key(updater.read(cx).phase());
                         let _ = this.update(cx, |b, cx| {

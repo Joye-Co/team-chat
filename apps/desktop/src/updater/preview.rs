@@ -27,7 +27,7 @@ fn next_version() -> String {
 fn sample() -> UpdateInfo {
     UpdateInfo {
         version: next_version(),
-        notes: String::new(),
+        notes: crate::copy::update::PREVIEW_NOTES.to_string(),
         size: 48_000_000,
         sha256: "0".repeat(64),
         published_at: 0,
@@ -74,6 +74,7 @@ fn set_phase(phase: Phase, cx: &mut App) {
         found: None,
         last_attempt: None,
         postponed: None,
+        download: None,
     });
     cx.set_global(UpdaterGlobal(updater));
 }
@@ -128,6 +129,24 @@ pub fn open_manual(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     open_settings_with(Phase::Manual(sample()), services, cx)
+}
+
+/// Settings › 通用 with 已是最新版本, scrolled to its end: the 开发者
+/// section (the `settings-about-dev` scene).
+pub fn open_up_to_date_end(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    set_phase(Phase::UpToDate, cx);
+    crate::views::settings::prefs::stop_saving();
+    let result = crate::views::settings::selftest::open_end(
+        services,
+        crate::views::settings::Page::General,
+        cx,
+    );
+    cx.remove_global::<UpdaterGlobal>();
+    result
 }
 
 /// Settings › 通用 after 检查更新: 已是最新版本.
