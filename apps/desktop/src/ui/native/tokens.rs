@@ -107,13 +107,13 @@ impl Palette {
             0x262626FF, // muted
             0x262626FF, // accent
             0xA1A1A1FF, // muted_foreground
-            0xFFFFFF1A, // border: white 10 %
-            0xFFFFFF26, // input: white 15 %
+            0xFFFFFF29, // border: white 16 % (>= 1.5:1 on background and card, §2.22)
+            0xFFFFFF33, // input: white 20 %
             0x737373FF, // ring
             0xE5E5E5FF, // primary
             0x171717FF, // primary_foreground
             0x404040FF, // pressed
-            0xFFFFFF33, // border_strong: white 20 %
+            0xFFFFFF40, // border_strong: white 25 %
             0x00000066, // scrim
             0xF87171FF, // destructive
             0xFBBF24FF, // warning
@@ -1186,6 +1186,17 @@ mod tests {
             for s in [p.destructive, p.warning, p.success, p.info] {
                 assert!(contrast(s, p.background) >= 3.);
             }
+        }
+    }
+
+    #[test]
+    fn dark_lines_hold_one_and_a_half_to_one() {
+        // §2.22 (R1-16): every dark line measures >= 1.5:1 on the window
+        // background and on the card fill; the input line is not weaker.
+        let d = Palette::dark();
+        for surface in [d.background, d.card, d.sidebar] {
+            assert!(contrast(d.border, surface) >= 1.5);
+            assert!(contrast(d.input, surface) >= contrast(d.border, surface));
         }
     }
 
