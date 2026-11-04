@@ -170,8 +170,10 @@ pub fn live_pane_width(window_w: Pixels) -> Pixels {
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-/// Traffic light origin: their center lands on y 26, the title row center.
-pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(20.));
+/// Traffic light origin (v12/shell, NATIVE.md §2): the 14 pt lights sit in
+/// the floating sidebar, the red one centred 25, 26 pt from the window
+/// corner, on the centre line of the 52 pt toolbar row.
+pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
 /// Leading inset of a toolbar band that holds the traffic lights.
 pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
 /// Timeline and topic row avatar size.
@@ -676,6 +678,20 @@ fn apply(t: &mut Theme, dark: bool) {
     t.background = n.content;
     t.window_border = n.separator;
     // --- end v12/kit ---
+    // --- v12/shell: the app accent and the soft focus halo (NATIVE.md §4) ---
+    let accent = app_accent(dark);
+    let on_accent = accent_ink(dark);
+    t.button_primary = accent;
+    t.button_primary_hover = accent;
+    t.button_primary_active = accent.opacity(0.82);
+    t.button_primary_foreground = on_accent;
+    t.primary = accent;
+    t.primary_hover = accent;
+    t.primary_active = accent.opacity(0.82);
+    t.primary_foreground = on_accent;
+    t.sidebar_accent_foreground = accent;
+    t.ring = focus_ring_color(accent, n.content);
+    // --- end v12/shell ---
 }
 
 // ---------------------------------------------------------------------------
@@ -1978,9 +1994,194 @@ pub mod card_v2 {
 
 // --- end cards v2 track ---
 
+// ---------------------------------------------------------------------------
+// --- v12/shell: the app accent (NATIVE.md §4) ---
+//
+// The accent is ink (`#1D1D1F` / `#F5F5F7`) while the system accent is
+// multicolor (`AppleAccentColor` unset). When the person picked an accent
+// color in System Settings, the app uses `NSColor.controlAccentColor`, read
+// again when the system colors change. Self-tests never read it: they draw
+// the ink accent.
+
+/// The system accent as `0xRRGGBBAA`, or 0 for multicolor (ink).
+static SYSTEM_ACCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The accent the person picked in System Settings; `None` for multicolor.
+pub fn system_accent() -> Option<Hsla> {
+    match SYSTEM_ACCENT.load(Ordering::Relaxed) {
+        0 => None,
+        v => Some(rgba(v).into()),
+    }
+}
+
+/// Sets the system accent (`None`: multicolor). True when it changed.
+pub fn set_system_accent(accent: Option<Hsla>) -> bool {
+    let v = accent.map_or(0, |a| {
+        let c = gpui::Rgba::from(a);
+        let byte = |x: f32| (x.clamp(0., 1.) * 255.).round() as u32;
+        // 0 means multicolor: an opaque color never packs to 0.
+        (byte(c.r) << 24) | (byte(c.g) << 16) | (byte(c.b) << 8) | 0xFF
+    });
+    SYSTEM_ACCENT.swap(v, Ordering::Relaxed) != v
+}
+
+/// The app accent of a mode: ink, or the system accent.
+pub fn app_accent(dark: bool) -> Hsla {
+    system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).accent)
+}
+
+/// Text and symbols on the app accent: the ink's opposite, or white on a
+/// system accent color.
+pub fn accent_ink(dark: bool) -> Hsla {
+    match system_accent() {
+        Some(_) => c(0xFFFFFFFF),
+        None => crate::ui::native::NativeColors::for_mode(dark).on_accent,
+    }
+}
+
+/// The share of the accent in the focus halo.
+pub const FOCUS_HALO: f32 = 0.35;
+
+/// gpui-component's `ring` for a soft 3 pt halo of the accent at 35 %:
+/// gpui-component paints its outer band in `ring` at 50 %, so the ring is
+/// the accent blended toward `under` until half of it is 35 % accent.
+pub fn focus_ring_color(accent: Hsla, under: Hsla) -> Hsla {
+    let (a, b) = (gpui::Rgba::from(accent), gpui::Rgba::from(under));
+    let t = (FOCUS_HALO * 2.).min(1.);
+    let mix = |x: f32, y: f32| x * t + y * (1. - t);
+    gpui::Rgba {
+        r: mix(a.r, b.r),
+        g: mix(a.g, b.g),
+        b: mix(a.b, b.b),
+        a: 1.,
+    }
+    .into()
+}
+
+/// The focus halo drawn by our own controls: 3 pt of the accent at 35 %.
+pub fn focus_halo(dark: bool) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: app_accent(dark).opacity(FOCUS_HALO),
+        offset: point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: crate::ui::native::metrics::FOCUS_RING,
+        inset: false,
+    }]
+}
+
+/// Reads the system accent now: `None` while `AppleAccentColor` is unset
+/// (multicolor).
+#[cfg(target_os = "macos")]
+fn read_system_accent() -> Option<Hsla> {
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    use objc2_foundation::{NSString, NSUserDefaults};
+
+    let defaults = NSUserDefaults::standardUserDefaults();
+    defaults.objectForKey(&NSString::from_str("AppleAccentColor"))?;
+    let color = NSColor::controlAccentColor();
+    let srgb = color.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
+    let (mut r, mut g, mut b, mut a) = (0., 0., 0., 0.);
+    // SAFETY: the four pointers are valid for writes for the whole call.
+    unsafe { srgb.getRed_green_blue_alpha(&mut r, &mut g, &mut b, &mut a) };
+    Some(
+        gpui::Rgba {
+            r: r as f32,
+            g: g as f32,
+            b: b as f32,
+            a: 1.,
+        }
+        .into(),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_system_accent() -> Option<Hsla> {
+    None
+}
+
+/// Reads the system accent and repaints when it changed.
+fn sync_system_accent(cx: &mut App) {
+    if set_system_accent(read_system_accent()) {
+        let dark = is_dark(cx);
+        Theme::update(cx, |theme| apply(theme, dark));
+        cx.refresh_windows();
+    }
+}
+
+/// Follows the accent color of System Settings while the app runs: read at
+/// start and again on `NSSystemColorsDidChangeNotification` and when the
+/// color preferences change. Call once on the main thread (the app only).
+#[cfg(target_os = "macos")]
+pub fn watch_system_accent(cx: &mut App) {
+    use std::ptr::NonNull;
+
+    use block2::RcBlock;
+    use futures::StreamExt as _;
+    use objc2_app_kit::NSSystemColorsDidChangeNotification;
+    use objc2_foundation::{
+        NSDistributedNotificationCenter, NSNotification, NSNotificationCenter, NSString,
+    };
+
+    sync_system_accent(cx);
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+    let block = RcBlock::new(move |_n: NonNull<NSNotification>| {
+        let _ = tx.unbounded_send(());
+    });
+    // SAFETY: valid notification names; the block only sends on a channel.
+    let observers = unsafe {
+        let local = NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(NSSystemColorsDidChangeNotification),
+            None,
+            None,
+            &block,
+        );
+        let distributed = NSDistributedNotificationCenter::defaultCenter()
+            .addObserverForName_object_queue_usingBlock(
+                Some(&NSString::from_str("AppleColorPreferencesChangedNotification")),
+                None,
+                None,
+                &block,
+            );
+        (local, distributed)
+    };
+    // Observe for the life of the process.
+    std::mem::forget(observers);
+    std::mem::forget(block);
+    cx.spawn(async move |cx| {
+        while rx.next().await.is_some() {
+            cx.update(sync_system_accent);
+        }
+    })
+    .detach();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn watch_system_accent(_cx: &mut App) {}
+// --- end v12/shell ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- v12/shell ---
+    #[test]
+    fn the_accent_is_ink_until_a_system_accent_is_set() {
+        set_system_accent(None);
+        let ink = crate::ui::native::NativeColors::dark();
+        assert_eq!(app_accent(true), ink.accent);
+        assert_eq!(accent_ink(true), ink.on_accent);
+        let blue: Hsla = rgba(0x007AFFFF).into();
+        assert!(set_system_accent(Some(blue)));
+        assert!(!set_system_accent(Some(blue)), "the same accent is no change");
+        let back = gpui::Rgba::from(app_accent(false));
+        assert!((back.b - 1.).abs() < 0.01 && back.r < 0.01);
+        assert_eq!(accent_ink(false), rgba(0xFFFFFFFF).into());
+        set_system_accent(None);
+        // The halo: half of the ring over `under` is 35 % accent.
+        let ring = gpui::Rgba::from(focus_ring_color(rgba(0x000000FF).into(), rgba(0xFFFFFFFF).into()));
+        assert!((ring.r - 0.3).abs() < 0.01 && ring.a == 1.);
+    }
+    // --- end v12/shell ---
 
     #[test]
     fn the_side_panel_fits_every_window_width() {

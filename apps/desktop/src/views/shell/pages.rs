@@ -3,13 +3,12 @@
 
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Entity, IntoElement, ParentElement, Pixels, Styled,
-    div, prelude::FluentBuilder as _, px,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::{PageView, TitleBarSpec, title_bar};
 use crate::{
     app::{Page, RightPane, Services},
-    theme,
     views::{
         artifact_page::ArtifactPage, composer::ComposerView, desk::DeskPage, group_page::GroupPage,
         members_page::MembersPage, timeline::TimelineView, topic_page::TopicPage,
@@ -54,16 +53,22 @@ impl Pages {
         }
     }
 
-    /// The page column: the title bar over the body, on `bg`.
+    /// The page column (NATIVE.md §2): the 52 pt toolbar row over the
+    /// body, on `content`. Content that scrolls up fades out under the
+    /// toolbar (the scroll edge); there is no hairline. `leading` is where
+    /// the title starts; `active` is false in an inactive window.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         page: Page,
         open: &RightPane,
         leading: Pixels,
+        active: bool,
         services: &Services,
+        window: &mut Window,
         cx: &App,
     ) -> AnyElement {
-        let k = theme::colors(cx);
+        let k = super::chrome::colors(cx);
         let (spec, body) = self.parts(page, cx);
         // pages track: a page with its own title bars gets none from here.
         let own_header = match page {
@@ -72,19 +77,35 @@ impl Pages {
             Page::Artifacts | Page::Artifact => self.artifact.read(cx).draws_own_header(cx),
             Page::Desk | Page::Topic => false,
         };
+        let toolbar = !own_header && spec != TitleBarSpec::default();
+        // The toolbar row paints after the body, so the shadows of its
+        // glass groups fall over the scroll edge.
         div()
             .flex_1()
             .min_w(px(0.))
             .h_full()
+            .relative()
             .flex()
             .flex_col()
-            .bg(k.bg)
-            // A page that draws its own header (首页 with an empty spec, or the
-            // 群, 成员 and 产出 pages) gets no title bar from here.
-            .when(!own_header && spec != TitleBarSpec::default(), |el| {
-                el.child(title_bar::render(&spec, open, leading, services, cx))
+            .bg(k.content)
+            .when(toolbar, |el| {
+                el.child(div().flex_none().h(crate::ui::native::metrics::TOOLBAR_ROW))
             })
-            .child(div().flex_1().min_h(px(0.)).child(body))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .relative()
+                    .child(div().size_full().child(body))
+                    .when(toolbar, |el| el.child(super::chrome::scroll_edge(cx))),
+            )
+            // A page that draws its own header (首页 with an empty spec, or the
+            // 群, 成员 and 产出 pages) gets no toolbar row from here.
+            .when(toolbar, |el| {
+                el.child(div().absolute().top_0().left_0().right_0().child(
+                    title_bar::render(&spec, open, leading, active, services, window, cx),
+                ))
+            })
             .into_any_element()
     }
 }

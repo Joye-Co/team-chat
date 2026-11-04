@@ -474,25 +474,24 @@ pub mod scenes {
             })
         })
         .map_err(|e| e.to_string())?;
-        let sidebar = root.read(cx).sidebar().clone();
+        // v12/shell: the 群 headers live in the rail now.
+        let _ = group;
+        let rail = root.read(cx).rail().clone();
         handle
-            .update(cx, |_, window, _| {
-                right_click_when_drawn(sidebar, group.id, 0, window)
-            })
+            .update(cx, |_, window, _| right_click_when_drawn(rail, 0, window))
             .map_err(|e| e.to_string())?;
         Ok(handle)
     }
 
     fn right_click_when_drawn(
-        sidebar: gpui::Entity<crate::views::sidebar::Sidebar>,
-        group_id: String,
+        rail: gpui::Entity<crate::views::rail::RailView>,
         tries: u32,
         window: &mut Window,
     ) {
         window.on_next_frame(move |window, cx| {
-            let Some(bounds) = sidebar.read(cx).group_row_bounds(&group_id) else {
+            let Some(bounds) = rail.read(cx).first_row_bounds(true) else {
                 if tries < 10 {
-                    right_click_when_drawn(sidebar, group_id, tries + 1, window);
+                    right_click_when_drawn(rail, tries + 1, window);
                 }
                 return;
             };

@@ -1,16 +1,19 @@
-//! The left rail of the v2 shell (RAIL2.html, RailOptions.dc.html): title
-//! row with 新话题, 搜索或交代 ⌘K, destinations 首页 / 产出 / 成员, then the
-//! work in the user's rail mode (设置 → 外观 → 侧栏样式, or the menu of the
-//! list header), the team strip and me.
+//! The sidebar of the main window (NATIVE.md §9.1), inside the floating
+//! panel the shell draws: the traffic-light row with the filter pull-down
+//! (`line.3.horizontal.decrease`) and 新话题 (`square.and.pencil`) at its
+//! trailing edge, the 30 pt `搜索` capsule (it opens ⌘K; the shortcut lives
+//! in the menu bar), the destinations 首页 / 产出 / 成员 as 32 pt rows, then
+//! the work in the user's sidebar style (设置 → 外观 → 侧栏样式, or the
+//! filter pull-down). Nothing sits at the bottom: no avatar strip, no
+//! account row; 设置 is ⌘, and the App menu.
 //!
-//! - A 以工作为中心: 话题 by 群 (then 私聊), each row with its state slot
-//!   and meta; the header filter 我参与的 / 全部话题.
-//! - B 以「需要我」为中心: the `话题` header with the options menu (the
-//!   群 filter and the rail style), 群 chips, then 需要你 / 在做 / 等别人 /
-//!   做完了 · 今天 (collapsed).
-//! - C 以成员为中心: members that are busy first, each expandable to its
+//! - A 以工作为中心: one section per 群, then 私聊; the pull-down and 显示 ›
+//!   我参与的 switch between 我参与的 and 全部话题.
+//! - B 以「需要我」为中心: 需要你 / 在做 / 等别人 / 做完了 · 今天 (folded);
+//!   the pull-down picks the 群.
+//! - C 以成员为中心: members that are busy first, each opening to its
 //!   话题; idle members in one row; 同事 below. 话题 replaces 成员 among the
-//!   destinations and the team strip is left out.
+//!   destinations.
 
 // --- v12/behavior ---
 mod menus;
@@ -23,12 +26,14 @@ pub mod scenes;
 use std::{collections::HashSet, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Context, InteractiveElement as _, IntoElement, ListAlignment, ListState,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    WeakEntity, Window, div, list, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ListAlignment, ListState, ParentElement, Render, SharedString,
+    Styled, Subscription, WeakEntity, Window, div, list, px,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants as _},
+    Sizable as _,
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    input::InputState,
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
 
@@ -36,10 +41,13 @@ pub use model::RowState;
 
 use crate::{
     app::{Changes, NewTopic, Page, Place, RailMode, Services},
-    copy::{fill, rail as c},
-    data::{GroupId, Member, MemberId, Topic},
-    theme::{self, Type as _, space},
-    ui::{self, Sym, MemberAvatar, NamedButton as _, Ring, RowSurface},
+    copy::{common, rail as c},
+    data::{GroupId, MemberId, Topic},
+    ui::{
+        self, Sym,
+        native::{SearchField, metrics},
+        sf_symbols::Sf,
+    },
     views::{nav::QuickSwitch, shell::layout},
 };
 
@@ -57,32 +65,15 @@ struct Cache {
     entries: Rc<Vec<Entry>>,
     /// My ask count on 首页.
     asks: usize,
-    /// The team strip: who is shown, and how many more.
-    strip: (Vec<(Member, bool)>, usize),
-    me: Option<Member>,
-    /// B: the 群 chips.
+    /// B: the 群 of the filter pull-down.
     groups: Vec<(GroupId, String)>,
 }
 
-/// The team strip shows at most this many members.
-const STRIP_MAX: usize = 5;
-/// Team strip tiles.
-const STRIP_AVATAR: gpui::Pixels = px(20.);
-/// Member tiles in mode C.
-const MEMBER_AVATAR: gpui::Pixels = px(18.);
-/// The me circle in the footer.
-const ME_AVATAR: gpui::Pixels = px(22.);
-/// The search field.
-const SEARCH_HEIGHT: gpui::Pixels = px(34.);
-const SEARCH_RADIUS: gpui::Pixels = px(9.);
-/// The list header (`话题 · 我参与的 ⌄`) and the B chips.
-const LIST_HEADER: gpui::Pixels = px(28.);
-const CHIP_HEIGHT: gpui::Pixels = px(24.);
-/// The widest a 群 chip gets; a longer name ends with an ellipsis.
-const CHIP_MAX: gpui::Pixels = px(120.);
-/// A chip name longer than this many characters may be cut: it gets a
-/// tooltip with the whole name.
-const CHIP_TOOLTIP_CHARS: usize = 6;
+/// The traffic-light row at the top of the sidebar panel: the lights are
+/// centred on it (18 pt into the panel, 26 pt from the window top).
+const LIGHTS_ROW: gpui::Pixels = px(36.);
+/// The sidebar tools in that row (filter, 新话题): 28 pt circles.
+const TOOL: gpui::Pixels = px(28.);
 
 pub struct RailView {
     services: Services,
@@ -106,11 +97,16 @@ pub struct RailView {
     /// The rail's key focus: ↑/↓ move the selection, Return opens it.
     focus: gpui::FocusHandle,
     // --- end v12/behavior ---
+    /// The `搜索` capsule (a click opens ⌘K).
+    search: Entity<InputState>,
+    /// Draw the inactive-window look (the `window-inactive` scene).
+    show_inactive: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl RailView {
-    pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+    pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(common::SEARCH_PLACEHOLDER));
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, _: &Changes, cx| {
                 this.cache = None;
@@ -124,6 +120,8 @@ impl RailView {
             cache: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus: cx.focus_handle(),
+            search,
+            show_inactive: false,
             show_all: false,
             folded_groups: HashSet::new(),
             chip: None,
@@ -189,11 +187,8 @@ impl RailView {
             }
             _ => self.list.reset(entries.len()),
         }
-        let me = inputs.me.clone();
         self.cache = Some(Cache {
             asks: p.asks_for_me().len(),
-            strip: model::team_strip(p.as_ref(), me.as_deref(), STRIP_MAX, &side),
-            me: me.as_deref().and_then(|m| p.member(m)),
             groups: model::groups(p.as_ref()),
             entries: Rc::new(entries),
             inputs,
@@ -315,50 +310,41 @@ impl RailView {
         menu
     }
 
-    /// The header menu button: `我参与的 ⌄` with a label, else the options
-    /// icon (B).
-    fn menu_button(
-        &self,
-        id: &'static str,
-        label: Option<&'static str>,
-        mode: RailMode,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let k = theme::colors(cx);
+    /// A 28 pt sidebar tool in the traffic-light row (§9.1): a borderless
+    /// circle with a 16 pt toolbar symbol, `fillHover` on hover. Named: the
+    /// name is its tooltip and what VoiceOver reads.
+    fn tool(&self, id: &'static str, sym: Sym, name: &'static str, cx: &App) -> Button {
+        let k = crate::views::shell::chrome::colors(cx);
+        let active = !self.show_inactive;
+        Button::new(id)
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .color(gpui::transparent_black())
+                    .foreground(k.label)
+                    .hover(k.fill_hover)
+                    .active(k.quaternary),
+            )
+            .with_size(TOOL)
+            .size(TOOL)
+            .p_0()
+            .rounded(TOOL / 2.)
+            .accessibility_label(name)
+            .tooltip(name)
+            .child(ui::sym(
+                sym,
+                ui::SymSize::TOOLBAR,
+                if active { k.label } else { k.secondary },
+            ))
+    }
+
+    /// The filter pull-down (`line.3.horizontal.decrease`): what the list
+    /// shows (我参与的 / 全部话题, the 群, the member order) and the sidebar
+    /// style.
+    fn filter_button(&self, mode: RailMode, cx: &mut Context<Self>) -> AnyElement {
         let this = cx.entity().downgrade();
         let services = self.services.clone();
-        let button = Button::new(id)
-            .ghost()
-            .h(px(22.))
-            .rounded(px(6.))
-            .when(label.is_some(), |b| b.pl(space::S6).pr(space::S4))
-            .when(label.is_none(), |b| b.w(px(24.)))
-            .text_color(k.ink_3)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S2)
-                    .t_meta()
-                    .text_color(k.ink_3)
-                    .children(label)
-                    .child(ui::icon(
-                        if label.is_some() {
-                            Sym::ChevronDown
-                        } else {
-                            Sym::Options
-                        },
-                        if label.is_some() {
-                            px(12.)
-                        } else {
-                            theme::icon::TAG
-                        },
-                        k.ink_3,
-                    )),
-            )
-            .when(label.is_none(), |b| b.named(c::RAIL_OPTIONS));
-        button
-            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, cx| {
+        self.tool("rail-filter", Sym::Filter, c::RAIL_OPTIONS, cx)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopLeft, move |menu, _, cx| {
                 let Some(view) = this.upgrade() else {
                     return menu;
                 };
@@ -373,152 +359,32 @@ impl RailView {
     fn destination(
         &self,
         id: &'static str,
-        icon: Sym,
+        sf: Sf,
         label: &'static str,
         selected: bool,
         count: Option<usize>,
         go: fn(&mut crate::app::Navigation, &mut Context<crate::app::Navigation>),
-        cx: &App,
     ) -> AnyElement {
-        let k = theme::colors(cx);
         let nav = self.services.nav.clone();
-        ui::list_row(id, RowSurface::Rail, selected, cx)
-            .h(theme::RAIL_ROW)
-            .px(space::S10)
-            .gap(space::S10)
-            .child(ui::sym(
-                icon,
-                ui::SymSize::SIDEBAR,
-                if selected { k.ink } else { k.ink_2 },
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .t_small()
-                    .text_color(if selected { k.ink } else { k.ink_2 })
-                    .when(selected, |el| el.medium())
-                    .child(label),
-            )
-            .children(
-                count
-                    .filter(|n| *n > 0)
-                    .map(|n| div().t_mono().text_color(k.you_ink).child(n.to_string())),
-            )
+        self.row(id, label)
+            .symbol(sf)
+            .selected(selected)
+            .count(count.unwrap_or(0) as u32)
             .on_click(move |_, _, cx| nav.update(cx, go))
             .into_any_element()
     }
 
-    /// The team strip (A and B): who waits on me, who works, then `+n`.
-    fn team_strip(&self, cx: &App) -> Option<AnyElement> {
-        let k = theme::colors(cx);
-        let (shown, rest) = self.cache.as_ref()?.strip.clone();
-        if shown.is_empty() {
-            return None;
+    /// Draws the inactive-window look (gray selection, `secondary` tools).
+    pub fn set_show_inactive(&mut self, inactive: bool, cx: &mut Context<Self>) {
+        if self.show_inactive != inactive {
+            self.show_inactive = inactive;
+            cx.notify();
         }
-        let nav = self.services.nav.clone();
-        let total = shown.len() + rest;
-        Some(
-            ui::list_row("rail-team-strip", RowSurface::Rail, false, cx)
-                .mt(space::S8)
-                .h(px(36.))
-                .px(space::S10)
-                .gap(space::S4)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .children(shown.iter().map(|(m, you)| {
-                            MemberAvatar::new(Some(m), STRIP_AVATAR)
-                                .ring(Some(if *you { Ring::You } else { Ring::Live }))
-                                .on(k.rail)
-                        })),
-                )
-                .when(rest > 0, |el| {
-                    el.child(
-                        div()
-                            .ml(space::S6)
-                            .t_mono()
-                            .text_color(k.ink_3)
-                            .child(fill(c::RAIL_MORE_MEMBERS, &[("n", &rest.to_string())])),
-                    )
-                })
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(fill(
-                        c::RAIL_TEAM_STRIP,
-                        &[
-                            ("busy", &(total - rest).to_string()),
-                            ("n", &total.to_string()),
-                        ],
-                    ))
-                    .build(window, cx)
-                })
-                .on_click(move |_, _, cx| nav.update(cx, |nav, cx| nav.open_members(None, cx)))
-                .into_any_element(),
-        )
-    }
-
-    /// Me: the ink circle with my initial (or photo), my name, 设置.
-    fn me_row(&self, cx: &App) -> AnyElement {
-        let k = theme::colors(cx);
-        let me = self.cache.as_ref().and_then(|c| c.me.clone());
-        let photo = me
-            .as_ref()
-            .and_then(|m| m.avatar_url.as_deref())
-            .is_some_and(|p| p.strip_prefix("file://").unwrap_or(p).starts_with('/'));
-        let face: AnyElement = if photo {
-            MemberAvatar::new(me.as_ref(), ME_AVATAR).into_any_element()
-        } else {
-            div()
-                .flex_none()
-                .size(ME_AVATAR)
-                .rounded_full()
-                .bg(k.btn)
-                .text_color(k.btn_ink)
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(11.))
-                .semibold()
-                .children(
-                    me.as_ref()
-                        .map(|m| crate::ui::avatar::monogram(&m.name, px(16.))),
-                )
-                .into_any_element()
-        };
-        div()
-            .flex_none()
-            .h(px(40.))
-            .pl(space::S10)
-            .pr(space::S6)
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .child(face)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .one_line()
-                    .t_small()
-                    .medium()
-                    .text_color(k.ink)
-                    .children(me.map(|m| m.name)),
-            )
-            .child(
-                ui::icon_button_sm("rail-settings", Sym::Options)
-                    .named(c::RAIL_SETTINGS)
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
-                    }),
-            )
-            .into_any_element()
     }
 }
 
 impl Render for RailView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
         self.refresh(cx);
         let nav = self.services.nav.read(cx);
         let page = nav.page();
@@ -534,150 +400,114 @@ impl Render for RailView {
             RailMode::Member => vec![
                 self.destination(
                     "rail-desk",
-                    Sym::Home,
+                    Sf::Desk,
                     c::RAIL_DESK,
                     page == Page::Desk,
                     Some(asks),
                     |n, cx| n.open_desk(cx),
-                    cx,
                 ),
                 self.destination(
                     "rail-topics",
-                    Sym::AlignLeft,
+                    Sf::Group,
                     c::RAIL_TOPICS,
                     matches!(page, Page::Topic | Page::Group),
                     None,
                     choose_topics,
-                    cx,
                 ),
                 self.destination(
                     "rail-artifacts",
-                    Sym::Outputs,
+                    Sf::Outputs,
                     c::RAIL_ARTIFACTS,
                     matches!(page, Page::Artifacts | Page::Artifact),
                     None,
                     |n, cx| n.open_artifacts(cx),
-                    cx,
                 ),
             ],
             _ => vec![
                 self.destination(
                     "rail-desk",
-                    Sym::Home,
+                    Sf::Desk,
                     c::RAIL_DESK,
                     page == Page::Desk,
                     Some(asks),
                     |n, cx| n.open_desk(cx),
-                    cx,
                 ),
                 self.destination(
                     "rail-artifacts",
-                    Sym::Outputs,
+                    Sf::Outputs,
                     c::RAIL_ARTIFACTS,
                     matches!(page, Page::Artifacts | Page::Artifact),
                     None,
                     |n, cx| n.open_artifacts(cx),
-                    cx,
                 ),
                 self.destination(
                     "rail-members",
-                    Sym::Members,
+                    Sf::Members,
                     c::RAIL_MEMBERS,
                     page == Page::Members,
                     None,
                     |n, cx| n.open_members(None, cx),
-                    cx,
                 ),
             ],
         };
-        let header: AnyElement = match mode {
-            RailMode::Work => self.list_header(
-                c::RAIL_TOPICS,
-                self.menu_button(
-                    "rail-filter",
-                    Some(if self.show_all {
-                        c::RAIL_FILTER_ALL
-                    } else {
-                        c::RAIL_FILTER_MINE
-                    }),
-                    mode,
-                    cx,
-                ),
-                cx,
-            ),
-            RailMode::Attention => div()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .child(self.list_header(
-                    c::RAIL_TOPICS,
-                    self.menu_button("rail-options", None, mode, cx),
-                    cx,
-                ))
-                .child(self.chips(cx))
-                .into_any_element(),
-            RailMode::Member => self.list_header(
-                c::RAIL_MEMBERS,
-                self.menu_button(
-                    "rail-sort",
-                    Some(match self.member_sort {
-                        MemberSort::Busy => c::RAIL_SORT_BUSY,
-                        MemberSort::Roster => c::RAIL_SORT_ROSTER,
-                    }),
-                    mode,
-                    cx,
-                ),
-                cx,
-            ),
-        };
-        let strip = (mode != RailMode::Member)
-            .then(|| self.team_strip(cx))
-            .flatten();
+        let new_topic = self
+            .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx)
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx));
+        let filter = self.filter_button(mode, cx);
         div()
             .id("rail")
             .size_full()
             .flex()
             .flex_col()
-            .bg(k.rail)
             .track_focus(&self.focus)
             .key_context(KEY_CONTEXT)
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.move_selection(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &OpenSelected, _, cx| this.move_selection(0, cx)))
-            .px(space::S10)
-            .pb(space::S10)
-            // Title row: the traffic lights, then 新话题.
+            // The traffic-light row: the lights at its start (drawn by the
+            // system), the filter and 新话题 at its end. Dragging it moves
+            // the window, as a title bar does.
             .child(
                 div()
+                    .id("rail-lights-row")
                     .flex_none()
-                    .h(theme::TITLE_BAR)
+                    .h(LIGHTS_ROW)
+                    .pr(px(10.))
                     .flex()
                     .items_center()
                     .justify_end()
+                    .gap(px(2.))
+                    .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                        if event.click_count >= 2 {
+                            window.titlebar_double_click();
+                        } else {
+                            window.start_window_move();
+                        }
+                    })
                     .child(
-                        ui::icon_button_sm("rail-new-topic", Sym::Compose)
-                            .named(c::RAIL_NEW_TOPIC)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(NewTopic), cx)
-                            }),
+                        div()
+                            .flex()
+                            .gap(px(2.))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .child(filter)
+                            .child(new_topic),
                     ),
             )
-            .child(self.search_field(cx))
+            .child(self.search_field())
             .child(
                 div()
                     .flex_none()
-                    .mt(space::S10)
+                    .mt(px(10.))
                     .flex()
                     .flex_col()
-                    .gap(px(1.))
                     .children(destinations),
             )
-            .child(header)
             .child(
                 div()
                     .flex_1()
                     .min_h(px(0.))
-                    .when(mode == RailMode::Attention, |el| el.mt(space::S8))
                     // A click in the list makes it take the arrow keys (§10).
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -685,10 +515,8 @@ impl Render for RailView {
                     )
                     .child(rows),
             )
-            // App banners (connection, update) sit above the footer.
+            // App banners (connection, update) sit at the end of the list.
             .children(crate::views::banners::slot(cx))
-            .children(strip)
-            .child(self.me_row(cx))
     }
 }
 
@@ -799,74 +627,29 @@ fn choose_topics(nav: &mut crate::app::Navigation, cx: &mut Context<crate::app::
 }
 
 impl RailView {
-    /// 搜索或交代 ⌘K.
-    fn search_field(&self, cx: &App) -> AnyElement {
-        let k = theme::colors(cx);
+    /// The `搜索` capsule (§5.6): 30 pt, under the traffic-light row. A
+    /// click opens ⌘K 搜索或交代; the shortcut lives in the menu bar.
+    fn search_field(&self) -> AnyElement {
         div()
-            .id("rail-search")
             .flex_none()
-            .h(SEARCH_HEIGHT)
-            .pl(space::S10)
-            .pr(space::S8)
-            .rounded(SEARCH_RADIUS)
-            .bg(k.bg)
-            .border_1()
-            .border_color(k.line)
-            .shadow(k.sec_hi())
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .hover(|s| s.border_color(k.line_2))
-            .child(ui::sym(Sym::Search, ui::SymSize::INLINE, k.ink_3))
+            .px(metrics::SIDEBAR_ROW_INSET)
+            .relative()
+            .child(SearchField::new("rail-search", &self.search).sidebar())
             .child(
                 div()
-                    .flex_1()
-                    .t_small()
-                    .text_color(k.ink_3)
-                    .child(c::RAIL_SEARCH),
+                    .id("rail-search-hit")
+                    .absolute()
+                    .inset_0()
+                    .on_mouse_down(gpui::MouseButton::Left, |_, window, cx| {
+                        cx.stop_propagation();
+                        window.dispatch_action(Box::new(QuickSwitch), cx);
+                    }),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(18.))
-                    .px(px(5.))
-                    .rounded(px(5.))
-                    .bg(k.sunken)
-                    .flex()
-                    .items_center()
-                    .t_mono()
-                    .text_size(px(11.))
-                    .text_color(k.ink_3)
-                    .child("⌘K"),
-            )
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(QuickSwitch), cx))
             .into_any_element()
     }
 
-    /// `话题 … 我参与的 ⌄`.
-    fn list_header(&self, label: &'static str, trailing: AnyElement, cx: &App) -> AnyElement {
-        let k = theme::colors(cx);
-        div()
-            .flex_none()
-            .mt(space::S16)
-            .h(LIST_HEADER)
-            .pl(space::S10)
-            .pr(space::S6)
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .flex_1()
-                    .t_meta_medium()
-                    .text_color(k.ink_3)
-                    .child(label),
-            )
-            .child(trailing)
-            .into_any_element()
-    }
-
-    /// B's 群 filter, as the chips and the header menu show it: 全部
-    /// (`None`), then each 群.
+    /// B's 群 filter, as the pull-down shows it: 全部 (`None`), then each
+    /// 群.
     fn group_choices(&self) -> Vec<(Option<GroupId>, String)> {
         let groups = self
             .cache
@@ -876,63 +659,6 @@ impl RailView {
         std::iter::once((None, c::RAIL_FILTER_ALL_GROUPS.to_string()))
             .chain(groups.into_iter().map(|(id, name)| (Some(id), name)))
             .collect()
-    }
-
-    /// B: 全部 and one chip per 群, under the list header whose menu holds
-    /// the same filter and the rail style. The chips wrap, so every 群
-    /// stays readable and reachable; a long name ends with an ellipsis and
-    /// shows whole in a tooltip.
-    fn chips(&self, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
-        let mut chips: Vec<AnyElement> = Vec::new();
-        for (i, (id, name)) in self.group_choices().into_iter().enumerate() {
-            let on = self.chip == id;
-            let this = cx.entity().downgrade();
-            let long = name.chars().count() > CHIP_TOOLTIP_CHARS;
-            let full = SharedString::from(name.clone());
-            chips.push(
-                div()
-                    .id(("rail-chip", i))
-                    .flex_none()
-                    .max_w(CHIP_MAX)
-                    .h(CHIP_HEIGHT)
-                    .px(space::S8)
-                    .rounded(px(6.))
-                    .flex()
-                    .items_center()
-                    .t_meta()
-                    .when(on, |el| el.bg(k.sel).text_color(k.ink).medium())
-                    .when(!on, |el| {
-                        el.text_color(k.ink_2)
-                            .hover(|s| s.bg(k.hover))
-                            .active(|s| s.bg(k.pressed))
-                    })
-                    .child(div().min_w_0().one_line().child(name))
-                    .when(long, |el| {
-                        el.tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
-                        })
-                    })
-                    .on_click(move |_, _, cx| {
-                        let id = id.clone();
-                        let _ = this.update(cx, |this, cx| {
-                            this.chip = id;
-                            cx.notify();
-                        });
-                    })
-                    .into_any_element(),
-            );
-        }
-        div()
-            .id("rail-chips")
-            .flex_none()
-            .mt(space::S4)
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(space::S2)
-            .children(chips)
-            .into_any_element()
     }
 }
 
@@ -947,15 +673,15 @@ mod tests {
         fake::v2::V2Samples,
     };
 
-    /// B's header menu offers the same 群 filter as the chips: 全部 first,
-    /// then every 群 of the rail.
+    /// B's pull-down offers the 群 filter: 全部 first, then every 群 of the
+    /// rail.
     #[gpui::test]
-    fn the_b_menu_offers_the_group_filter_of_the_chips(cx: &mut gpui::TestAppContext) {
+    fn the_b_menu_offers_the_group_filter(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
         let provider: Arc<dyn ChatProvider> = V2Samples::new();
-        let (view, cx) = cx.add_window_view(move |_, cx| {
+        let (view, cx) = cx.add_window_view(move |window, cx| {
             let services = Services::new(provider, cx);
-            RailView::new(services, cx)
+            RailView::new(services, window, cx)
         });
         cx.run_until_parked();
         let (choices, groups) = view.update(cx, |this, _| {
@@ -977,9 +703,9 @@ mod tests {
     fn the_rail_reads_the_provider_once_per_change(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
         let provider: Arc<dyn ChatProvider> = V2Samples::new();
-        let (view, cx) = cx.add_window_view(move |_, cx| {
+        let (view, cx) = cx.add_window_view(move |window, cx| {
             let services = Services::new(provider, cx);
-            RailView::new(services, cx)
+            RailView::new(services, window, cx)
         });
         cx.run_until_parked();
         let entries = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
@@ -1018,9 +744,9 @@ mod tests {
             bind_keys(cx);
         });
         let provider: Arc<dyn ChatProvider> = V2Samples::new();
-        let (view, cx) = cx.add_window_view(move |_, cx| {
+        let (view, cx) = cx.add_window_view(move |window, cx| {
             let services = Services::new(provider, cx);
-            RailView::new(services, cx)
+            RailView::new(services, window, cx)
         });
         cx.run_until_parked();
         let rows = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {

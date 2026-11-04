@@ -1,36 +1,50 @@
-//! The 52 pt title bar of every page (CONCEPT2 §2): breadcrumb `群 /` in
-//! `ink-3`, the title (17/600 on 首页, 产出, 成员 and 群; 15/600 on 话题),
-//! the state sentence (amber only when it waits on me), and at the right a
-//! group of 28 pt icon buttons: 单独问 (⌘;), 产出, 电脑, 改动 and the rail
-//! toggle. The button of the open pane has the grey `sel` fill.
+//! The toolbar row of every page (NATIVE.md §2, §5.1, §9.2), drawn by the
+//! shell from the page's [`TitleBarSpec`]: no breadcrumb and no pill.
+//!
+//! - Leading, 20 pt after the sidebar: the title (Title 3, 15 pt semibold)
+//!   over the subtitle (Subheadline, 11 pt `secondary`). A 话题's 群 folds
+//!   into the subtitle (`开发 · Forge 在做 3/5 · 跑压测`); its state is an SF
+//!   Symbol plus the state words in the state color, never a capsule.
+//! - Trailing, 12 pt from the edge: the pane buttons as glass capsule
+//!   groups (`ToolbarGroup`, 36 pt items), at most three groups. The item of
+//!   the open pane shows the toggled pill. Every item is also a 显示 command.
+//! - The row is transparent over the content and has no hairline; dragging
+//!   it moves the window and a double click zooms it. An inactive window
+//!   draws the title and the symbols in `secondary`.
 
-use std::{cell::RefCell, rc::Rc};
+use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, AppContext as _, AvailableSpace, Bounds, Element, ElementId, GlobalElementId,
-    InspectorElementId, InteractiveElement as _, IntoElement, LayoutId, ParentElement, Pixels,
-    SharedString, StatefulInteractiveElement as _, Style, Styled, TextLayout, Window, div, point,
-    prelude::FluentBuilder as _, px, relative, size,
+    AnyElement, App, HighlightStyle, Hsla, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText,
+    TextLayout, Window, div, px,
 };
 
 use crate::{
     app::{RightPane, Services},
     copy::topic_rail as c,
-    theme::{self, StateTone, Type as _, space},
-    ui::{self, Sym},
+    theme::StateTone,
+    ui::{
+        self, Sym,
+        native::{
+            NativeColors, NativeType as _, ToolbarGroup, ToolbarItemKind, metrics, toolbar_item,
+        },
+        sf_symbols::Sf,
+    },
 };
 
-/// The title size: pages or a 话题.
+/// The title style of a page. Both draw Title 3 in the toolbar now; a 话题
+/// also folds its 群 into the subtitle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TitleStyle {
-    /// 17/600: 首页, 产出, 成员, 群.
+    /// 首页, 产出, 成员, 群.
     #[default]
     Page,
-    /// 15/600 after a `群 /` breadcrumb.
+    /// A 话题: the 群 leads the subtitle.
     Topic,
 }
 
-/// Which title bar button.
+/// Which toolbar item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TitleButtonKind {
     SideChat,
@@ -38,17 +52,19 @@ pub enum TitleButtonKind {
     /// Only when a member's computer is active.
     Machine,
     Changes,
+    /// The inspector toggle (`sidebar.trailing`).
     Rail,
 }
 
 impl TitleButtonKind {
-    fn icon(self) -> Sym {
+    /// The SF Symbol of the item (NATIVE.md §6).
+    fn symbol(self) -> Sf {
         match self {
-            TitleButtonKind::SideChat => Sym::AskAside,
-            TitleButtonKind::Outputs => Sym::Outputs,
-            TitleButtonKind::Machine => Sym::Computer,
-            TitleButtonKind::Changes => Sym::PullRequest,
-            TitleButtonKind::Rail => Sym::Inspector,
+            TitleButtonKind::SideChat => Sf::SideChat,
+            TitleButtonKind::Outputs => Sf::Outputs,
+            TitleButtonKind::Machine => Sf::Computer,
+            TitleButtonKind::Changes => Sf::Changes,
+            TitleButtonKind::Rail => Sf::PaneRight,
         }
     }
 
@@ -71,9 +87,18 @@ impl TitleButtonKind {
             TitleButtonKind::Rail => "rail",
         }
     }
+
+    /// The capsule group of the item: the panes of the 话题 share one, the
+    /// inspector toggle has its own at the trailing edge.
+    fn group(self) -> usize {
+        match self {
+            TitleButtonKind::Rail => 1,
+            _ => 0,
+        }
+    }
 }
 
-/// A title bar button and the pane it toggles.
+/// A toolbar item and the pane it toggles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TitleButton {
     pub kind: TitleButtonKind,
@@ -86,23 +111,23 @@ impl TitleButton {
     }
 }
 
-/// What a page's title bar shows.
+/// What a page's toolbar row shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TitleBarSpec {
-    /// `群 /` before the title (话题 pages).
+    /// The 群 of a 话题: it leads the subtitle (`开发 · …`).
     pub breadcrumb: Option<String>,
     pub title: String,
     pub style: TitleStyle,
-    /// A quiet line after the title (首页: the date; 群: the purpose).
+    /// A quiet line (首页: the date; 群: the purpose): the subtitle, or its
+    /// end after the state.
     pub subtitle: Option<String>,
-    /// The state sentence and its tone (amber only for "you").
+    /// The state words and their tone.
     pub state: Option<(String, StateTone)>,
-    /// A quieter tail after the state sentence (`· 跑一万条消息的压测`).
+    /// A quieter tail after the state (`跑一万条消息的压测`).
     pub state_detail: Option<String>,
-    /// The state is a paused run: a pause mark in place of the dot.
+    /// The state is a paused run: a `pause` symbol in place of the state's.
     pub state_paused: bool,
-    /// The member's name that leads the state sentence: it is cut with `…`
-    /// while the rest (`在做 3/5`) stays whole.
+    /// The member's name that leads the state words.
     pub state_name: Option<String>,
     pub buttons: Vec<TitleButton>,
 }
@@ -116,552 +141,362 @@ impl TitleBarSpec {
     }
 }
 
-/// What a title bar leaves out when it is narrow, most first: the step
-/// goes whole, then the title is cut with `…`, then the member's name goes
-/// whole. The title keeps more room than the step; `在做 3/5` (or `已暂停`)
-/// never goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Plan {
-    /// The step after the state (`· 跑一万条消息的压测`).
-    pub step: Step,
-    /// The title may be cut with `…`.
-    pub title_cut: bool,
-    /// The member's name leads the state sentence.
-    pub name: bool,
+/// The parts of the subtitle line: one text run, the range of the state
+/// words with their color, and the state symbol before the line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Subtitle {
+    pub text: String,
+    pub state: Option<(Range<usize>, Hsla)>,
+    pub symbol: Option<(Sym, Hsla)>,
 }
 
-/// How much of the step shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Step {
-    /// All of it.
-    Whole,
-    /// At least [`STEP_MIN`], cut with `…`.
-    Cut,
-    Hidden,
-}
+/// The separator between the parts of a subtitle.
+const DOT: &str = " · ";
 
-impl Plan {
-    /// The plans to try, the fullest first; the last always shows.
-    const ORDER: [Plan; 5] = [
-        Plan {
-            step: Step::Whole,
-            title_cut: false,
-            name: true,
-        },
-        Plan {
-            step: Step::Cut,
-            title_cut: false,
-            name: true,
-        },
-        Plan {
-            step: Step::Hidden,
-            title_cut: false,
-            name: true,
-        },
-        Plan {
-            step: Step::Hidden,
-            title_cut: true,
-            name: true,
-        },
-        Plan {
-            step: Step::Hidden,
-            title_cut: true,
-            name: false,
-        },
-    ];
-}
-
-/// What the last frame of a title bar showed (for its tests).
-#[derive(Clone, Default)]
-pub struct Shown {
-    pub plan: Option<Plan>,
-    pub title: Option<TextLayout>,
-    pub step: Option<TextLayout>,
-    /// The member's name as drawn, when it shows.
-    pub name: Option<String>,
-}
-
-/// The narrowest a cut step gets: `· ` and about six CJK characters.
-const STEP_MIN: Pixels = px(13. * 7.6);
-/// The narrowest a cut 话题 title gets before the member's name goes:
-/// about six characters at 15 pt.
-const TITLE_MIN: Pixels = px(15. * 6.6);
-/// The narrowest a cut `群 /` breadcrumb gets.
-const CRUMB_MIN: Pixels = px(48.);
-/// A member's name longer than this (CJK and emoji count two) is cut at a
-/// grapheme boundary with `…`; it then shows or goes as one piece.
-const NAME_MAX: usize = 24;
-
-/// `name`, cut to [`NAME_MAX`] at a grapheme boundary: an emoji with
-/// skin tone and ZWJ parts (`👩🏽‍💻`) stays one piece.
-fn short_name(name: &str) -> String {
-    use unicode_segmentation::UnicodeSegmentation as _;
-    let weight = |g: &str| if g.is_ascii() { 1 } else { 2 };
-    let total: usize = name.graphemes(true).map(weight).sum();
-    if total <= NAME_MAX {
-        return name.to_string();
+/// The state color of a tone (§4): amber, blue, red, green; quiet words
+/// stay `secondary`.
+fn tone_color(tone: StateTone, k: &NativeColors) -> Option<Hsla> {
+    match tone {
+        StateTone::You => Some(k.amber),
+        StateTone::Live => Some(k.blue),
+        StateTone::Problem => Some(k.red),
+        StateTone::Done => Some(k.green),
+        StateTone::Quiet => None,
     }
-    let mut out = String::new();
-    let mut used = 0;
-    for g in name.graphemes(true) {
-        if used + weight(g) > NAME_MAX - 1 {
-            break;
+}
+
+/// The SF Symbol of a state (§6), drawn before the subtitle.
+fn tone_symbol(tone: StateTone, paused: bool) -> Option<Sym> {
+    if paused {
+        return Some(Sym::Pause);
+    }
+    match tone {
+        StateTone::You => Some(Sym::NeedsYou),
+        StateTone::Live => Some(Sym::Live),
+        StateTone::Problem => Some(Sym::Problem),
+        StateTone::Done => Some(Sym::Done),
+        StateTone::Quiet => None,
+    }
+}
+
+/// The subtitle of `spec`: `群 · state words · detail · subtitle`, the
+/// parts that are there, in that order. The end goes first when the line
+/// is cut, so the step is cut before the state words.
+pub fn subtitle(spec: &TitleBarSpec, k: &NativeColors) -> Option<Subtitle> {
+    let mut text = String::new();
+    let mut state = None;
+    let mut symbol = None;
+    let push = |part: &str, text: &mut String| -> Range<usize> {
+        if !text.is_empty() {
+            text.push_str(DOT);
         }
-        used += weight(g);
-        out.push_str(g);
+        let start = text.len();
+        text.push_str(part);
+        start..text.len()
+    };
+    if let Some(crumb) = spec.breadcrumb.as_deref().filter(|c| !c.is_empty()) {
+        push(crumb, &mut text);
     }
-    format!("{}…", out.trim_end())
+    if let Some((words, tone)) = spec.state.as_ref().filter(|(w, _)| !w.is_empty()) {
+        let range = push(words, &mut text);
+        // A paused run is quiet: its symbol says so.
+        let color = (!spec.state_paused).then(|| tone_color(*tone, k)).flatten();
+        state = color.map(|c| (range, c));
+        symbol = tone_symbol(*tone, spec.state_paused).map(|s| (s, color.unwrap_or(k.secondary)));
+    }
+    if let Some(detail) = spec.state_detail.as_deref().filter(|d| !d.is_empty()) {
+        push(detail, &mut text);
+    }
+    if let Some(sub) = spec.subtitle.as_deref().filter(|s| !s.is_empty()) {
+        push(sub, &mut text);
+    }
+    (!text.is_empty()).then_some(Subtitle {
+        text,
+        state,
+        symbol,
+    })
 }
 
-/// The parts of the state sentence: the member's name (cut by
-/// [`short_name`]), the rest (`在做 3/5`) and the whole sentence.
-struct Sentence {
-    name: Option<String>,
-    rest: String,
-    full: SharedString,
+/// The kinds of `spec`'s items in their capsule groups, in order (at most
+/// three groups, §2).
+pub fn groups(spec: &TitleBarSpec) -> Vec<Vec<TitleButtonKind>> {
+    let mut out: Vec<Vec<TitleButtonKind>> = vec![Vec::new(), Vec::new()];
+    for b in &spec.buttons {
+        out[b.kind.group()].push(b.kind);
+    }
+    out.retain(|g| !g.is_empty());
+    out.truncate(3);
+    out
 }
 
-fn sentence(spec: &TitleBarSpec) -> Option<Sentence> {
-    let (text, _) = spec.state.as_ref()?;
-    let is_sentence = spec.state_detail.is_some() || spec.state_paused;
-    let (name, rest) = match spec.state_name.as_deref() {
-        Some(n) if is_sentence && !n.is_empty() && text.starts_with(n) => (
-            Some(short_name(n)),
-            text[n.len()..].trim_start().to_string(),
-        ),
-        _ => (None, text.clone()),
-    };
-    let full = match &spec.state_detail {
-        Some(d) => format!("{text} · {d}").into(),
-        None => text.clone().into(),
-    };
-    Some(Sentence { name, rest, full })
-}
-
-/// The state of the bar: a short state stays whole; a member's run reads as
-/// a sentence (Live.dc.html), `ink-2` text, the step in `ink-3`, a live dot
-/// or, while paused, a pause mark. `plan` says what shows; when it leaves
-/// something out, or the step is cut, the full sentence shows in a tooltip
-/// (§15). `measure` draws the narrowest form of `plan`, without hover.
-fn state(
-    spec: &TitleBarSpec,
-    plan: Plan,
-    measure: bool,
-    shown: &mut Shown,
-    cx: &App,
-) -> Option<AnyElement> {
-    let (_, tone) = spec.state.as_ref()?;
-    let parts = sentence(spec)?;
-    let k = theme::colors(cx);
-    let (mark, ink) = k.state(*tone);
-    let you = *tone == StateTone::You;
-    let is_sentence = spec.state_detail.is_some() || spec.state_paused;
-    let glyph = if spec.state_paused {
-        div()
-            .flex_none()
-            .child(ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3))
-            .into_any_element()
-    } else {
-        div()
-            .flex_none()
-            .size(px(6.))
-            .rounded_full()
-            .bg(mark)
-            .into_any_element()
-    };
-    let name = parts.name.clone().filter(|_| plan.name);
-    shown.name = name.clone();
-    let step = spec
-        .state_detail
-        .as_ref()
-        .filter(|_| plan.step != Step::Hidden)
-        .map(|d| ui::cut_line(format!("· {d}")));
-    shown.step = step.as_ref().map(|(_, l)| l.clone());
-    let left_out = (parts.name.is_some() && !plan.name)
-        || (spec.state_detail.is_some() && plan.step == Step::Hidden);
-    let cut: Vec<TextLayout> = shown.step.iter().cloned().collect();
-    let full = parts.full.clone();
-    let words = match name {
-        Some(n) => format!("{n} {}", parts.rest),
-        None => parts.rest.clone(),
-    };
-    let el = div()
-        .id("title-state")
-        .flex_none()
-        .when(plan.step == Step::Cut, |el| el.flex_shrink(1.).min_w_0())
-        .flex()
-        .items_center()
-        .gap(space::S6)
-        .h(px(22.))
-        .px(space::S8)
-        .rounded(theme::radius::SM)
-        .when(you, |el| el.bg(k.you_bg))
-        .map(|el| {
-            if is_sentence && !you {
-                el.t_small().text_color(k.ink_2)
-            } else {
-                el.t_meta_medium().text_color(ink)
-            }
-        })
-        .child(glyph)
-        .child(div().flex_none().whitespace_nowrap().child(words))
-        .children(step.map(|(styled, _)| {
-            div()
-                .flex_shrink(1.)
-                .min_w_0()
-                .when(measure && plan.step == Step::Cut, |el| el.max_w(STEP_MIN))
-                .one_line()
-                .text_color(k.ink_3)
-                .child(styled)
-        }))
-        .when(is_sentence && !measure, |el| {
-            el.tooltip(move |window, cx| {
-                if left_out || ui::truncate::any_cut(&cut) {
-                    ui::truncate::text_tip(full.clone()).build(window, cx)
-                } else {
-                    cx.new(|_| gpui::Empty).into()
-                }
-            })
-        })
-        .into_any_element();
-    Some(el)
-}
-
-/// The left part of the bar: `群 /`, the title, the subtitle and the state.
-/// `title_min` is the narrowest the title gets while the name still shows;
-/// `crumb_max` the widest the breadcrumb gets. `width` is the room it
-/// is drawn in (none while it is measured).
+/// The title over the subtitle. `title` and `subtitle` receive the text
+/// layouts of the last frame (the title's tooltip and the tests read them).
 fn heading(
     spec: &TitleBarSpec,
-    plan: Plan,
-    width: Option<Pixels>,
-    title_min: Pixels,
-    crumb_max: Pixels,
+    active: bool,
+    window: &mut Window,
     cx: &App,
-) -> (AnyElement, Shown) {
-    let measure = width.is_none();
-    let k = theme::colors(cx);
-    let mut shown = Shown {
-        plan: Some(plan),
-        ..Shown::default()
-    };
+) -> (AnyElement, TextLayout, Option<TextLayout>) {
+    let k = crate::views::shell::chrome::colors(cx);
     let (title_text, title_layout) = ui::cut_line(spec.title.clone());
-    shown.title = Some(title_layout.clone());
     let full_title: SharedString = spec.title.clone().into();
     let title = div()
-        .id("title-text")
-        .flex_none()
-        .when(plan.title_cut, |el| {
-            el.flex_shrink(1.)
-                .min_w(if plan.name { title_min } else { px(0.) })
-        })
-        .when(measure && plan.title_cut, |el| el.max_w(title_min))
-        .one_line()
-        .text_color(k.ink)
-        .map(|el| match spec.style {
-            TitleStyle::Page => el.t_page_title(),
-            TitleStyle::Topic => el.t_bar_title(),
-        })
+        .id("toolbar-title")
+        .min_w(px(0.))
+        .n_title3()
+        .text_color(if active { k.label } else { k.secondary })
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
         .child(title_text)
-        .when(!measure, |el| {
-            el.tooltip(ui::tip_when_cut(vec![title_layout], move || {
-                ui::truncate::text_tip(full_title.clone())
-            }))
-        });
-    let crumb = spec.breadcrumb.as_ref().map(|b| {
-        div()
-            .flex_shrink(1.)
-            .min_w(CRUMB_MIN)
-            .max_w(if measure && plan.title_cut {
-                CRUMB_MIN
-            } else {
-                crumb_max
+        .tooltip(ui::tip_when_cut(vec![title_layout.clone()], move || {
+            ui::truncate::text_tip(full_title.clone())
+        }));
+    let sub = subtitle(spec, &k).map(|s| {
+        let highlights: Vec<(Range<usize>, HighlightStyle)> = s
+            .state
+            .iter()
+            .map(|(range, color)| {
+                (
+                    range.clone(),
+                    HighlightStyle {
+                        color: Some(*color),
+                        ..HighlightStyle::default()
+                    },
+                )
             })
+            .collect();
+        let full: SharedString = s.text.clone().into();
+        let styled = StyledText::new(s.text.clone()).with_highlights(highlights);
+        let layout = styled.layout().clone();
+        let line = div()
+            .id("toolbar-subtitle")
+            .min_w(px(0.))
             .flex()
             .items_center()
-            .gap(space::S6)
-            .t_bar_title()
-            .font_weight(gpui::FontWeight::NORMAL)
-            .text_color(k.ink_3)
-            .child(div().min_w_0().one_line().child(b.clone()))
-            .child(div().flex_none().child("/"))
+            .gap(px(4.))
+            .children(s.symbol.map(|(sym, color)| {
+                div()
+                    .flex_none()
+                    .child(ui::sym(sym, ui::SymSize::INLINE_SMALL, color))
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(styled),
+            )
+            .tooltip(ui::tip_when_cut(vec![layout.clone()], move || {
+                ui::truncate::text_tip(full.clone())
+            }));
+        (line, layout)
     });
-    let state = state(spec, plan, measure, &mut shown, cx);
+    let _ = window;
+    let (sub_el, sub_layout) = match sub {
+        Some((el, layout)) => (Some(el), Some(layout)),
+        None => (None, None),
+    };
     let el = div()
-        .when_some(width, |el, w| el.w(w))
+        .flex_1()
+        .min_w(px(0.))
         .flex()
-        .items_center()
-        .gap(space::S8)
-        .children(crumb)
+        .flex_col()
         .child(title)
-        .children(spec.subtitle.as_ref().map(|s| {
-            div()
-                .flex_none()
-                .one_line()
-                .t_small()
-                .text_color(k.ink_3)
-                .child(s.clone())
-        }))
-        .children(state)
+        .children(sub_el)
         .into_any_element();
-    (el, shown)
+    (el, title_layout, sub_layout)
 }
 
-/// Lays out the left part of the bar in the room the buttons leave: it
-/// tries each [`Plan`] in [`Plan::ORDER`] at its narrowest and draws the
-/// first that fits, so a part is shown well or not at all.
-pub struct Heading {
-    spec: TitleBarSpec,
-    shown: Rc<RefCell<Shown>>,
-}
-
-impl Heading {
-    pub fn new(spec: TitleBarSpec) -> Self {
-        Self {
-            spec,
-            shown: Rc::default(),
-        }
-    }
-
-    /// What the last frame showed.
-    pub fn shown(&self) -> Rc<RefCell<Shown>> {
-        self.shown.clone()
-    }
-
-    /// The plans that differ for this spec.
-    fn plans(&self) -> impl Iterator<Item = Plan> + '_ {
-        let has_step = self.spec.state_detail.is_some();
-        let has_name = sentence(&self.spec).is_some_and(|s| s.name.is_some());
-        Plan::ORDER
-            .into_iter()
-            .filter(move |p| has_step || p.step == Step::Hidden)
-            .filter(move |p| has_name || p.name)
-    }
-}
-
-impl IntoElement for Heading {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl Element for Heading {
-    type RequestLayoutState = ();
-    type PrepaintState = Option<AnyElement>;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, ()) {
-        let mut style = Style {
-            flex_grow: 1.,
-            flex_shrink: 1.,
-            flex_basis: px(0.).into(),
-            ..Style::default()
-        };
-        style.min_size.width = px(0.).into();
-        style.size.height = relative(1.).into();
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Option<AnyElement> {
-        let room = bounds.size.width;
-        let free = size(AvailableSpace::MaxContent, AvailableSpace::MaxContent);
-        let crumb_max = (room * 0.25).max(CRUMB_MIN);
-        // The title alone, to keep a short title whole while the name shows.
-        let full_title = Plan::ORDER[2];
-        let mut title_only = TitleBarSpec {
-            state: None,
-            breadcrumb: None,
-            subtitle: None,
-            ..self.spec.clone()
-        };
-        title_only.buttons.clear();
-        let title_w = heading(&title_only, full_title, None, TITLE_MIN, crumb_max, cx)
-            .0
-            .layout_as_root(free, window, cx)
-            .width;
-        let title_min = title_w.min(TITLE_MIN);
-        let plans: Vec<Plan> = self.plans().collect();
-        let last = plans.len() - 1;
-        let plan = plans
-            .iter()
-            .enumerate()
-            .find(|(i, p)| {
-                *i == last
-                    || heading(&self.spec, **p, None, title_min, crumb_max, cx)
-                        .0
-                        .layout_as_root(free, window, cx)
-                        .width
-                        <= room
-            })
-            .map(|(_, p)| *p)
-            .unwrap_or(plans[last]);
-        let (mut el, shown) = heading(&self.spec, plan, Some(room), title_min, crumb_max, cx);
-        *self.shown.borrow_mut() = shown;
-        let space = size(
-            AvailableSpace::Definite(room),
-            AvailableSpace::Definite(bounds.size.height),
-        );
-        let h = el.layout_as_root(space, window, cx).height;
-        let origin = point(
-            bounds.origin.x,
-            bounds.origin.y + (bounds.size.height - h) / 2.,
-        );
-        el.prepaint_as_root(origin, space, window, cx);
-        Some(el)
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut (),
-        el: &mut Option<AnyElement>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        if let Some(el) = el {
-            el.paint(window, cx);
-        }
-    }
-}
-
-/// Draws a title bar. `open` is the pane that shows now; `leading` is the
-/// inset at the start (the traffic lights when the rail is hidden).
+/// Draws a toolbar row. `open` is the pane that shows now; `leading` is
+/// the inset at the start (20 pt after the sidebar, or past the traffic
+/// lights when the sidebar is hidden); `active` is false in an inactive
+/// window.
 pub fn render(
     spec: &TitleBarSpec,
     open: &RightPane,
     leading: Pixels,
+    active: bool,
     services: &Services,
+    window: &mut Window,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
-    let buttons = spec.buttons.iter().map(|b| {
-        let active = open.same_kind(&b.pane) && *open != RightPane::None;
-        let pane = b.pane.clone();
-        let nav = services.nav.clone();
-        div()
-            .id(SharedString::from(format!("title-{}", b.kind.slug())))
-            .size(theme::TITLE_BUTTON)
-            .rounded(px(7.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(active, |el| el.bg(k.sel))
-            .when(!active, |el| el.hover(|s| s.bg(k.hover)))
-            .child(ui::sym(
-                b.kind.icon(),
-                ui::SymSize::TOOLBAR,
-                if active { k.ink } else { k.ink_2 },
-            ))
-            .tooltip({
-                let name = b.kind.name();
-                move |window, cx| gpui_component::tooltip::Tooltip::new(name).build(window, cx)
-            })
-            .on_click(move |_, _, cx| {
-                let pane = pane.clone();
-                nav.update(cx, |nav, cx| nav.toggle_pane(pane, cx));
-            })
-    });
-    div()
+    let (heading, _, _) = heading(spec, active, window, cx);
+    let mut row = div()
+        .id("toolbar-row")
         .flex_none()
-        .h(theme::TITLE_BAR)
         .w_full()
-        .pl(leading.max(space::S24))
-        .pr(space::S12)
+        .h(metrics::TOOLBAR_ROW)
+        .pl(leading)
+        .pr(metrics::TOOLBAR_TRAILING)
         .flex()
         .items_center()
-        .gap(space::S8)
-        .child(Heading::new(spec.clone()))
-        .child(
+        .gap(metrics::TOOLBAR_GROUP_GAP)
+        .on_mouse_down(MouseButton::Left, |event, window, _| {
+            if event.click_count >= 2 {
+                window.titlebar_double_click();
+            } else {
+                window.start_window_move();
+            }
+        })
+        .child(heading);
+    for group in groups(spec) {
+        let items: Vec<gpui_component::button::Button> = group
+            .into_iter()
+            .filter_map(|kind| spec.buttons.iter().find(|b| b.kind == kind))
+            .map(|b| {
+                let shown = open.same_kind(&b.pane) && *open != RightPane::None;
+                let pane = b.pane.clone();
+                let nav = services.nav.clone();
+                toolbar_item(
+                    gpui::SharedString::from(format!("toolbar-{}", b.kind.slug())),
+                    b.kind.symbol(),
+                    b.kind.name(),
+                    if shown {
+                        ToolbarItemKind::Toggled
+                    } else {
+                        ToolbarItemKind::Plain
+                    },
+                    active,
+                    window,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let pane = pane.clone();
+                    nav.update(cx, |nav, cx| nav.toggle_pane(pane, cx));
+                })
+            })
+            .collect();
+        row = row.child(
             div()
                 .flex_none()
-                .flex()
-                .items_center()
-                .gap(space::S4)
-                .children(buttons),
-        )
-        .into_any_element()
+                // A press on an item is not a window drag.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(ToolbarGroup::new(items)),
+        );
+    }
+    row.into_any_element()
 }
 
 #[cfg(test)]
 mod tests {
     use gpui::{Context, Render, TestAppContext, Window, size};
-    use unicode_segmentation::UnicodeSegmentation as _;
 
     use super::*;
 
-    const PRIYA: &str = "👩🏽‍💻 Priya";
-
-    fn live(name: &str) -> TitleBarSpec {
+    fn live() -> TitleBarSpec {
         TitleBarSpec {
             breadcrumb: Some("开发".into()),
             title: "话题列表虚拟滚动和消息分页的重写".into(),
             style: TitleStyle::Topic,
-            state: Some((format!("{name} 在做 3/5"), StateTone::Live)),
-            state_detail: Some("跑一万条消息的压测，再看内存和滚动锚点".into()),
-            state_name: Some(name.into()),
+            state: Some(("Forge 在做 3/5".into(), StateTone::Live)),
+            state_detail: Some("跑一万条消息的压测".into()),
+            state_name: Some("Forge".into()),
             ..TitleBarSpec::default()
         }
     }
 
-    /// The left part of a bar `width` wide.
+    #[test]
+    fn the_group_leads_the_subtitle_and_the_state_has_its_color() {
+        let k = NativeColors::dark();
+        let s = subtitle(&live(), &k).expect("a subtitle");
+        assert_eq!(s.text, "开发 · Forge 在做 3/5 · 跑一万条消息的压测");
+        let (range, color) = s.state.clone().expect("state words");
+        assert_eq!(&s.text[range], "Forge 在做 3/5");
+        assert_eq!(color, k.blue);
+        assert_eq!(s.symbol, Some((Sym::Live, k.blue)));
+        // Needs you: the amber symbol and amber words; no breadcrumb slash.
+        let you = TitleBarSpec {
+            state: Some(("等你审 PR #61".into(), StateTone::You)),
+            state_detail: None,
+            ..live()
+        };
+        let s = subtitle(&you, &k).unwrap();
+        assert_eq!(s.text, "开发 · 等你审 PR #61");
+        assert_eq!(s.symbol, Some((Sym::NeedsYou, k.amber)));
+        // Quiet words stay `secondary`, with no symbol.
+        let quiet = TitleBarSpec {
+            state: Some(("等李雪".into(), StateTone::Quiet)),
+            ..live()
+        };
+        let s = subtitle(&quiet, &k).unwrap();
+        assert!(s.state.is_none() && s.symbol.is_none());
+        // A page with a date only.
+        let desk = TitleBarSpec {
+            subtitle: Some("11 月 3 日 周二".into()),
+            ..TitleBarSpec::page("首页")
+        };
+        assert_eq!(subtitle(&desk, &k).unwrap().text, "11 月 3 日 周二");
+        assert!(subtitle(&TitleBarSpec::page("成员"), &k).is_none());
+    }
+
+    #[test]
+    fn a_paused_run_shows_the_pause_symbol_in_secondary() {
+        let k = NativeColors::light();
+        let paused = TitleBarSpec {
+            state_paused: true,
+            ..live()
+        };
+        let s = subtitle(&paused, &k).unwrap();
+        assert_eq!(s.symbol, Some((Sym::Pause, k.secondary)));
+        assert!(s.state.is_none());
+    }
+
+    #[test]
+    fn the_panes_share_a_capsule_and_the_inspector_has_its_own() {
+        let b = |kind| TitleButton::new(kind, RightPane::TopicRail);
+        let spec = TitleBarSpec {
+            buttons: vec![
+                b(TitleButtonKind::SideChat),
+                b(TitleButtonKind::Outputs),
+                b(TitleButtonKind::Machine),
+                b(TitleButtonKind::Changes),
+                b(TitleButtonKind::Rail),
+            ],
+            ..live()
+        };
+        let g = groups(&spec);
+        assert!(g.len() <= 3);
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[1], vec![TitleButtonKind::Rail]);
+        assert_eq!(g[0].len(), 4);
+        assert!(groups(&TitleBarSpec::page("成员")).is_empty());
+    }
+
+    /// The heading in a bar `width` wide.
     struct Bar {
         width: f32,
         spec: TitleBarSpec,
-        shown: Option<Rc<RefCell<Shown>>>,
+        layouts: Option<(TextLayout, Option<TextLayout>)>,
     }
 
     impl Render for Bar {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let heading = Heading::new(self.spec.clone());
-            self.shown = Some(heading.shown());
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let (el, title, sub) = heading(&self.spec, true, window, cx);
+            self.layouts = Some((title, sub));
             div()
                 .w(px(self.width))
-                .h(theme::TITLE_BAR)
+                .h(metrics::TOOLBAR_ROW)
                 .flex()
                 .items_center()
-                .child(heading)
+                .child(el)
         }
     }
 
-    /// (plan, title cut, step cut, name drawn) for each width.
-    fn sweep(
-        cx: &mut TestAppContext,
-        spec: TitleBarSpec,
-        widths: impl Iterator<Item = f32>,
-    ) -> Vec<(f32, Plan, bool, bool, Option<String>)> {
+    #[gpui::test]
+    fn a_narrow_bar_cuts_the_subtitle_end_before_the_title(cx: &mut TestAppContext) {
         cx.update(gpui_component::init);
-        let window = cx.open_window(size(px(1600.), px(60.)), |_, _| Bar {
-            width: 1500.,
-            spec,
-            shown: None,
+        let window = cx.open_window(size(px(1200.), px(60.)), |_, _| Bar {
+            width: 1100.,
+            spec: live(),
+            layouts: None,
         });
-        let mut out = Vec::new();
-        for w in widths {
+        let cut = |w: f32, cx: &mut TestAppContext| {
             window
                 .update(cx, |bar, _, cx| {
                     bar.width = w;
@@ -669,90 +504,28 @@ mod tests {
                 })
                 .unwrap();
             cx.run_until_parked();
-            let row = window
+            window
                 .update(cx, |bar, _, _| {
-                    let s = bar.shown.as_ref().expect("drawn").borrow().clone();
-                    (
-                        w,
-                        s.plan.expect("a plan"),
-                        s.title.as_ref().is_some_and(TextLayout::truncated),
-                        s.step.as_ref().is_some_and(TextLayout::truncated),
-                        s.name.clone(),
-                    )
+                    let (title, sub) = bar.layouts.clone().expect("drawn");
+                    (title.truncated(), sub.expect("a subtitle").truncated())
                 })
-                .unwrap();
-            out.push(row);
-        }
-        out
-    }
-
-    fn rank(p: Plan) -> usize {
-        Plan::ORDER
-            .iter()
-            .position(|x| *x == p)
-            .expect("a known plan")
-    }
-
-    #[gpui::test]
-    fn the_title_wins_over_the_step_and_the_name_goes_last(cx: &mut TestAppContext) {
-        let rows = sweep(cx, live("Forge"), (0..=275).map(|i| 1200. - i as f32 * 4.));
-        // Wide: all. Medium: no step, the whole title. Narrow: the title
-        // is cut. Very narrow: no name. Each shows at some width.
-        for want in Plan::ORDER {
-            assert!(
-                rows.iter().any(|r| r.1 == want),
-                "{want:?} never shows: {:?}",
-                rows.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>()
-            );
-        }
-        let wide = &rows[0];
-        assert_eq!(wide.1.step, Step::Whole);
-        assert!(!wide.2 && !wide.3, "a wide bar cuts nothing");
-        let mut last = 0;
-        for (w, plan, title_cut, step_cut, name) in &rows {
-            assert!(rank(*plan) >= last, "a narrower bar shows more at {w}");
-            last = rank(*plan);
-            if plan.step != Step::Hidden {
-                assert!(!title_cut, "the step shows while the title is cut at {w}");
+                .unwrap()
+        };
+        assert_eq!(cut(1100., cx), (false, false), "a wide bar cuts nothing");
+        // Narrowing: the subtitle (the long step at its end) is cut first,
+        // the title later.
+        let (mut sub_at, mut title_at) = (None, None);
+        for i in 0..=105 {
+            let w = 1100. - i as f32 * 10.;
+            let (title, sub) = cut(w, cx);
+            if sub && sub_at.is_none() {
+                sub_at = Some(w);
             }
-            if *step_cut {
-                assert_eq!(plan.step, Step::Cut, "the whole step is cut at {w}");
-            }
-            if !plan.title_cut {
-                assert!(!title_cut, "the title is cut before its turn at {w}");
-            }
-            assert_eq!(name.is_some(), plan.name, "at {w}");
-            if let Some(n) = name {
-                assert_eq!(n, "Forge", "the name shows whole at {w}");
+            if title && title_at.is_none() {
+                title_at = Some(w);
             }
         }
-    }
-
-    #[gpui::test]
-    fn a_zwj_name_shows_or_goes_whole(cx: &mut TestAppContext) {
-        let rows = sweep(cx, live(PRIYA), (0..=225).map(|i| 1000. - i as f32 * 4.));
-        assert!(rows.iter().any(|r| r.4.is_some()) && rows.iter().any(|r| r.4.is_none()));
-        for (w, _, _, _, name) in &rows {
-            if let Some(n) = name {
-                assert_eq!(n, PRIYA, "the name is split at {w}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_long_name_is_cut_between_graphemes() {
-        assert_eq!(short_name(PRIYA), PRIYA);
-        assert_eq!(short_name("Forge"), "Forge");
-        let long = format!("{PRIYA} 👩🏽‍💻👩🏽‍💻👩🏽‍💻👩🏽‍💻👩🏽‍💻👩🏽‍💻👩🏽‍💻👩🏽‍💻 Kowalczyk-Montgomery");
-        let cut = short_name(&long);
-        let kept = cut.strip_suffix('…').expect("cut with …");
-        let whole: Vec<&str> = long.graphemes(true).collect();
-        let part: Vec<&str> = kept.graphemes(true).collect();
-        assert!(!part.is_empty() && part.len() < whole.len());
-        assert_eq!(&whole[..part.len()], part.as_slice(), "an emoji is split");
-        assert!(
-            part.iter().all(|g| whole.contains(g)),
-            "a grapheme was made that is not in the name"
-        );
+        let (sub_at, title_at) = (sub_at.expect("the subtitle is cut"), title_at.expect("the title is cut"));
+        assert!(sub_at > title_at, "subtitle cut at {sub_at}, title at {title_at}");
     }
 }

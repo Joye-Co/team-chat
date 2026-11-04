@@ -363,9 +363,9 @@ mod tests {
         }
         cx.update(gpui_component::init);
         let provider: Arc<dyn ChatProvider> = V2Samples::new();
-        let (root, cx) = cx.add_window_view(move |_, cx| {
+        let (root, cx) = cx.add_window_view(move |window, cx| {
             let services = Services::new(provider, cx);
-            let rail = cx.new(|cx| RailView::new(services.clone(), cx));
+            let rail = cx.new(|cx| RailView::new(services.clone(), window, cx));
             Root {
                 services,
                 rail,

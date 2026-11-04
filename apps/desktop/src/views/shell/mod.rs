@@ -21,6 +21,9 @@
 //! `app::Navigation`; the title bar of every page is drawn here from the
 //! page's [`TitleBarSpec`].
 
+// --- v12/shell ---
+pub mod chrome;
+// --- end v12/shell ---
 pub mod layout;
 pub mod pages;
 pub mod panes;

@@ -89,8 +89,9 @@ impl Panes {
         }
     }
 
-    /// The pane in its column, `width` wide: a hairline at its start, the
-    /// entrance, and a float over the page (level 2) when the window has no
+    /// The pane in its column, `width` wide (NATIVE.md §2 inspector): edge
+    /// to edge with the `sidebar` fill and a 1 px `separator` on its leading
+    /// edge, the entrance, and a float over the page when the window has no
     /// room for it.
     pub fn render(
         &self,
@@ -100,7 +101,6 @@ impl Panes {
         cx: &App,
     ) -> Option<AnyElement> {
         let view = self.view(pane)?;
-        let k = theme::colors(cx);
         let kind = match pane {
             RightPane::None => "none",
             RightPane::TopicRail => "rail",
@@ -114,21 +114,13 @@ impl Panes {
             div().size_full().child(view),
             cx,
         );
-        let column = div()
-            .w(width)
-            .h_full()
-            .flex_none()
-            .bg(k.rail)
-            .relative()
-            .overflow_hidden()
-            .child(body)
-            .child(ui::column_start_edge(cx));
+        let column = super::chrome::inspector_frame(width, cx).child(body);
         Some(if floats {
             column
                 .absolute()
                 .top_0()
                 .right_0()
-                .shadow(k.shadow(theme::Elevation::Overlay))
+                .shadow(super::chrome::colors(cx).float())
                 .into_any_element()
         } else {
             column.into_any_element()
