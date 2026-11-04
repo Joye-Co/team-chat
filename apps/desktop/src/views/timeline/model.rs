@@ -6,8 +6,11 @@ use std::ops::Range;
 
 use crate::data::{Message, Millis};
 
-/// Consecutive messages of one author within this gap share one header.
-pub const GROUP_GAP_MS: Millis = 5 * 60 * 1000;
+/// Consecutive messages of one author within this gap share one header
+/// (avatar, name, time); a continuation shows its time on hover. 20 minutes
+/// keeps a member's short run of updates (`收到…` then a question 16 minutes
+/// later) under one header, the way Slack and Linear read.
+pub const GROUP_GAP_MS: Millis = 20 * 60 * 1000;
 
 /// The stable identity of a message row. `client_msg_id` survives the ack
 /// (the server id is empty while pending); messages without one fall back to

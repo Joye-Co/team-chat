@@ -412,8 +412,9 @@ or irreversible actions open a confirm step (§7.10 批准).
 | Part | Value |
 | --- | --- |
 | Row | Gap 12 between gutter and text; author groups 16 pt apart; a continuation 4 pt below |
-| Gutter | 28 pt avatar (person circle or member tile with its state ring) |
-| Meta line | 20 pt: name `ui` 500 · 岗位 `meta` `ink-3` for people, the 岗位 tag for members (§7.9) · time mono `ink-3` |
+| Grouping | Consecutive messages of one author within 20 minutes, with nothing between them, share one header (avatar, name, time); a continuation shows its time in the gutter on hover. A row that carries its own header (event line, decision record, result card) never joins or continues a group |
+| Gutter | 28 pt avatar (person circle or member tile) |
+| Meta line | 20 pt: name `ui` 14 / 600 `ink` (level 1, §3) · 岗位 `meta` `ink-3` for people, the 岗位 tag for members (§7.9) · time in figures `ink-3` |
 | Body | `body` 14/22, 4 pt under the meta line; paragraph gap 8 |
 | Event line | 20 pt, inset to the text column: 16 pt tile or glyph + `meta` `ink-3` (`Jojo 转给了 Forge`, `Forge 开始用 Mac mini`) + mono time |
 | Decision record | A full-width 40 pt row on `sunken`, radius 10: `check` 13 `ok` + `Joye 选了「改成指数退避，放进同一个 PR」` `ui` + mono time + text action `看问题` |

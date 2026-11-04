@@ -51,8 +51,16 @@ impl TimelineView {
         let start = ix == 0 && !self.has_older;
         let new_day = model::starts_day(prev, &message) && !start;
         let divider = self.divider_key.as_deref() == Some(key.as_str()) && ix > 0;
-        let grouped =
-            !divider && !new_day && prev.is_some_and(|prev| model::continues_group(prev, &message));
+        // A v2 row that replaces its message (a routing line, a decision
+        // record, a result card) has its own header: it never joins a group,
+        // and the next message starts a new one.
+        let grouped = !divider
+            && !new_day
+            && prev.is_some_and(|prev| {
+                model::continues_group(prev, &message)
+                    && !(self.v2
+                        && (self.v2_special(prev).is_some() || self.v2_special(&message).is_some()))
+            });
         let last = ix + 1 == self.messages.len();
 
         let v2 = self.v2;
