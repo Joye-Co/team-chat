@@ -275,16 +275,25 @@ fn report_rev1() -> Value {
     )
 }
 
-// Interact.dc.html 02: the bars read as rows with no title; the hint asks for a click.
-fn bars_block() -> Value {
-    json!({ "id": "bars", "type": "chart", "kind": "bar",
+// Interact.dc.html 02 draws the drill-down bars as rows with no title; the pending and
+// notes cards keep the chart label `新增群 · 按渠道`.
+fn bars_block(labeled: bool) -> Value {
+    let mut v = json!({ "id": "bars", "type": "chart", "kind": "bar",
             "x": ["小红书", "群内邀请", "B 站", "抖音"],
             "series": [ { "id": "groups", "name": "新增群", "values": [14, 10, 9, 5] } ],
             "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
-            "events": ["chart.select", "chart.clear"], "emitBy": "members" })
+            "events": ["chart.select", "chart.clear"], "emitBy": "members" });
+    if labeled {
+        v["label"] = json!("新增群 · 按渠道");
+    }
+    v
 }
 
 fn bars_rev1() -> Value {
+    bars_rev1_with(true)
+}
+
+fn bars_rev1_with(labeled: bool) -> Value {
     with(
         base(
             "新增群从哪来",
@@ -293,7 +302,7 @@ fn bars_rev1() -> Value {
         ),
         json!({
             "blocks": [
-                bars_block(),
+                bars_block(labeled),
                 { "id": "hint", "type": "text", "text": "点一个渠道，Ledger 会拆开给你看。" }
             ]
         }),
@@ -313,7 +322,7 @@ fn bars_rev2() -> Value {
             "rev": 2,
             "ask": { "id": "follow", "from": [ME] },
             "blocks": [
-                bars_block(),
+                bars_block(false),
                 { "id": "detail", "type": "group", "title": "B 站 · 按来源", "collapsible": false, "children": ["d_posts"] },
                 { "id": "d_posts", "type": "table", "columns": ["来源", "新增群", "比 9 月"],
                   "rows": [ ["夹夹教程视频", "5", "+1"], ["UP 主合作", "3", "−1"], ["直播间", "1", "−1"], ["合计", "9", "−1"] ] },
@@ -824,7 +833,7 @@ pub fn all() -> Vec<Sample21> {
         block_id: Some("bars".into()),
         action_id: None,
     });
-    drill.prev = Some(Arc::new(card(bars_rev1())));
+    drill.prev = Some(Arc::new(card(bars_rev1_with(false))));
     // My click on B 站 that caused rev 2 (its value names the bar).
     let mut click = acked(
         DRILL,

@@ -306,62 +306,61 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         && !series.is_empty()
         && *kind != ChartKind::Spark;
     // The chosen point: mine now, else the one my waiting event names (optimistic).
-    let point = node
-        .ui
-        .block(id)
-        .point
-        .clone()
-        .or_else(|| {
-            let events = ctx
-                .env
-                .provider
-                .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
-            let now = ctx.env.now();
-            events.iter().rev().find_map(|e| {
-                (e.request.block_id.as_deref() == Some(id.as_str())
-                    && e.request.event == "chart.select"
-                    && super::interact::stage_of(e, now).is_some()
-                    && !super::interact::undone(e, now))
-                .then(|| {
-                    let v = e.request.value.as_ref()?;
-                    Some((
-                        v.get("series")?.as_str()?.to_string(),
-                        v.get("index")?.as_u64()? as usize,
-                    ))
-                })
-                .flatten()
+    let point = node.ui.block(id).point.clone().or_else(|| {
+        let events = ctx
+            .env
+            .provider
+            .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+        let now = ctx.env.now();
+        events.iter().rev().find_map(|e| {
+            (e.request.block_id.as_deref() == Some(id.as_str())
+                && e.request.event == "chart.select"
+                && super::interact::stage_of(e, now).is_some()
+                && !super::interact::undone(e, now))
+            .then(|| {
+                let v = e.request.value.as_ref()?;
+                Some((
+                    v.get("series")?.as_str()?.to_string(),
+                    v.get("index")?.as_u64()? as usize,
+                ))
             })
+            .flatten()
         })
-        .or_else(|| {
-            // My pick that caused this rev stays marked in it (Interact.dc.html 02 step 3), until
-            // I clear it.
-            let cause = ctx.msg.cause.as_ref()?;
-            if node.ui.block(id).cleared
-                || Some(cause.actor_id.as_str()) != ctx.me.as_deref()
-                || cause.block_id.as_deref() != Some(id.as_str())
-                || cause.event != "chart.select"
-            {
-                return None;
-            }
-            let events = ctx
-                .env
-                .provider
-                .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
-            let e = events.iter().rev().find(|e| {
-                e.event_id() == Some(cause.event_id.as_str())
-                    || (e.request.block_id.as_deref() == Some(id.as_str())
-                        && e.request.event == "chart.select")
-            })?;
-            let v = e.request.value.as_ref()?;
-            Some((
-                v.get("series")?.as_str()?.to_string(),
-                v.get("index")?.as_u64()? as usize,
-            ))
-        });
+    });
+    // The update band already names a pick that caused this rev; the chart does not say it
+    // twice.
+    let from_cause = point.is_none();
+    let point = point.or_else(|| {
+        // My pick that caused this rev stays marked in it (Interact.dc.html 02 step 3), until
+        // I clear it.
+        let cause = ctx.msg.cause.as_ref()?;
+        if node.ui.block(id).cleared
+            || Some(cause.actor_id.as_str()) != ctx.me.as_deref()
+            || cause.block_id.as_deref() != Some(id.as_str())
+            || cause.event != "chart.select"
+        {
+            return None;
+        }
+        let events = ctx
+            .env
+            .provider
+            .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+        let e = events.iter().rev().find(|e| {
+            e.event_id() == Some(cause.event_id.as_str())
+                || (e.request.block_id.as_deref() == Some(id.as_str())
+                    && e.request.event == "chart.select")
+        })?;
+        let v = e.request.value.as_ref()?;
+        Some((
+            v.get("series")?.as_str()?.to_string(),
+            v.get("index")?.as_u64()? as usize,
+        ))
+    });
     // A single-series bar chart the viewer can pick from reads as a list of bars, one row
     // per x (Interact.dc.html 02: 各渠道新增群，点一个看明细).
     if selectable && *kind == ChartKind::Bar && series.len() == 1 {
-        return bar_rows(node, b, point, parts, window, cx);
+        let tip = point.is_some() && !from_cause;
+        return bar_rows(node, b, point, tip, parts, window, cx);
     }
     let mut out = div()
         .relative()
@@ -570,6 +569,7 @@ fn bar_rows(
     node: &Node,
     b: &CardV2Block,
     point: Option<(String, usize)>,
+    tip: bool,
     parts: Option<crate::views::refs::cards::BlockParts>,
     window: &gpui::Window,
     cx: &mut App,
@@ -580,6 +580,7 @@ fn bar_rows(
         unit,
         x,
         series,
+        summary,
         ..
     } = b
     else {
@@ -760,6 +761,39 @@ fn bar_rows(
             )
         })
         .child(list)
+        // The picked bar, as the column chart says it (`● B 站 · 9`).
+        .when_some(
+            picked.filter(|_| tip).and_then(|i| {
+                let v = values.get(i).copied().flatten()?;
+                let shown = match unit {
+                    Some(u) => format!("{} {u}", b20::fmt_number(v)),
+                    None => b20::fmt_number(v),
+                };
+                Some(fill(
+                    c::CHART_POINT,
+                    &[
+                        ("x", xs.get(i).map(String::as_str).unwrap_or("")),
+                        ("value", &shown),
+                    ],
+                ))
+            }),
+            |el, t| {
+                el.child(
+                    meta(div())
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .text_color(k.ink)
+                        .font_weight(theme::MEDIUM_WEIGHT)
+                        .child(div().size(px(6.)).rounded_full().bg(k.ink))
+                        .child(t),
+                )
+            },
+        )
+        // The text alternative of the chart.
+        .when_some(summary.clone(), |el, s| {
+            el.child(meta(div()).text_color(k.ink_3).child(s))
+        })
         .into_any_element()
 }
 
