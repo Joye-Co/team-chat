@@ -23,6 +23,39 @@ describe("PATCH /v1/members/:id", () => {
     expect((await api(`/v1/members/${m.id}`, { method: "PATCH", body: { name: "x" } })).status).toBe(401);
   });
 
+  it("let an owner set who a member reports to and its weekly limit, audited and pushed (1.1)", async () => {
+    const owner = await createMember({ level: "owner" });
+    const bot = await createMember({ kind: "bot", name: "Forge" });
+    const lead = await createMember({ name: "Tata" });
+    await createGroup(owner, [bot.id, lead.id]);
+    const { c } = await Client.connect(lead.token);
+    const patch = (token: string, id: string, body: unknown) => api(`/v1/members/${id}`, { method: "PATCH", token, body });
+    const set = await patch(owner.token, bot.id, { reportsTo: lead.id, weeklyBudgetCents: 5000 });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    expect(set.body).toMatchObject({ id: bot.id, reportsTo: lead.id, weeklyBudgetCents: 5000 });
+    await c.next((f) => f.t === "directory" && f.members?.some((x: any) => x.id === bot.id && x.reportsTo === lead.id && x.weeklyBudgetCents === 5000));
+    const listed = (await api("/v1/members", { token: lead.token })).body.find((x: any) => x.id === bot.id);
+    expect(listed).toMatchObject({ reportsTo: lead.id, weeklyBudgetCents: 5000 });
+    const audit = await env.DB.prepare("SELECT details FROM audit WHERE action = 'member.update' AND target = ? ORDER BY id DESC LIMIT 1").bind(bot.id).first<{ details: string }>();
+    expect(JSON.parse(audit!.details)).toEqual({ reportsTo: [null, lead.id], weeklyBudgetCents: [null, 5000] });
+    // Only an owner, only a member that exists and is not the member itself, only whole cents in range.
+    expect((await patch(lead.token, lead.id, { reportsTo: owner.id })).status).toBe(403);
+    expect((await patch(lead.token, lead.id, { weeklyBudgetCents: 1 })).status).toBe(403);
+    expect((await patch(owner.token, bot.id, { reportsTo: bot.id })).status).toBe(400);
+    expect((await patch(owner.token, bot.id, { reportsTo: "01NOPE" })).status).toBe(400);
+    expect((await patch(owner.token, bot.id, { weeklyBudgetCents: -1 })).status).toBe(400);
+    expect((await patch(owner.token, bot.id, { weeklyBudgetCents: 1.5 })).status).toBe(400);
+    expect((await patch(owner.token, bot.id, { weeklyBudgetCents: 100_000_001 })).status).toBe(400);
+    // Other changes keep both; a limit of 0 stays; null clears.
+    expect((await patch(owner.token, bot.id, { role: "开发" })).body).toMatchObject({ reportsTo: lead.id, weeklyBudgetCents: 5000 });
+    expect((await patch(owner.token, bot.id, { weeklyBudgetCents: 0 })).body.weeklyBudgetCents).toBe(0);
+    const cleared = await patch(owner.token, bot.id, { reportsTo: null, weeklyBudgetCents: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.reportsTo).toBeUndefined();
+    expect(cleared.body.weeklyBudgetCents).toBeUndefined();
+    c.close();
+  });
+
   it("let an owner change level, keep one active owner and push directory frames", async () => {
     const owner = await createMember({ level: "owner" });
     const m = await createMember();

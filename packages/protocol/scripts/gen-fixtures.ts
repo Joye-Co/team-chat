@@ -10,6 +10,7 @@ import { addV11Fixtures } from "./fixtures-v11.ts";
 import { addInteractFixtures } from "./fixtures-v11-interact.ts";
 import { addGapFixtures } from "./fixtures-v11-gaps.ts";
 import { addFilesFixtures } from "./fixtures-v11-files.ts";
+import { addMemberFixtures } from "./fixtures-members.ts";
 
 type Fixture = {
   kind: string;
@@ -351,6 +352,7 @@ addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic });
 addInteractFixtures({ ok, bad, T0, ID, base, message });
 addGapFixtures({ ok, bad, T0, ID, base, message });
 addFilesFixtures({ ok, bad, T0, ID, base, message });
+addMemberFixtures({ ok, bad, T0, ID, base, message });
 
 // ---------------------------------------------------------------------------
 

@@ -81,7 +81,7 @@ import {
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
 import { BlockRef, BlockRefInput, editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
 import { Card } from "./card.ts";
-import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, UpdateGroupRequest, UpdateMemberRequest } from "./members.ts";
+import { eventFrameFields, groupSummaryPrefFields, MAX_WEEKLY_BUDGET_CENTS, UpdateGroupPrefsRequest, UpdateGroupRequest, UpdateMemberRequest } from "./members.ts";
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
@@ -150,6 +150,10 @@ export const Member = z.object({
   deactivated: z.boolean().optional(),
   /** jojo-friends character id; absent or null = no character (initial avatar). */
   character: CharacterId.nullable().optional(),
+  /** 1.1: who the member reports to (汇报给), set by an owner; absent = nobody. */
+  reportsTo: Id.optional(),
+  /** 1.1: the member's weekly spending limit in US cents (限额), set by an owner; absent = none. */
+  weeklyBudgetCents: z.int().nonnegative().max(MAX_WEEKLY_BUDGET_CENTS).optional(),
 });
 export type Member = z.infer<typeof Member>;
 

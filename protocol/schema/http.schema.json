@@ -80,6 +80,15 @@
               "type": "null"
             }
           ]
+        },
+        "reportsTo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weeklyBudgetCents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000000
         }
       },
       "required": [
@@ -19430,6 +19439,15 @@
                   "type": "null"
                 }
               ]
+            },
+            "reportsTo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "weeklyBudgetCents": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
             }
           },
           "required": [
@@ -19596,6 +19614,15 @@
                   "type": "null"
                 }
               ]
+            },
+            "reportsTo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "weeklyBudgetCents": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
             }
           },
           "required": [
@@ -19689,6 +19716,15 @@
               "type": "null"
             }
           ]
+        },
+        "reportsTo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weeklyBudgetCents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000000
         }
       },
       "required": [
@@ -19778,6 +19814,15 @@
                 "type": "null"
               }
             ]
+          },
+          "reportsTo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "weeklyBudgetCents": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000000
           }
         },
         "required": [
@@ -19969,6 +20014,15 @@
                   "type": "null"
                 }
               ]
+            },
+            "reportsTo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "weeklyBudgetCents": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
             }
           },
           "required": [
@@ -24261,6 +24315,29 @@
               "type": "null"
             }
           ]
+        },
+        "reportsTo": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "weeklyBudgetCents": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -24342,6 +24419,15 @@
               "type": "null"
             }
           ]
+        },
+        "reportsTo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weeklyBudgetCents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000000
         }
       },
       "required": [
