@@ -58,7 +58,7 @@ pub use feedback::{
     skeleton, skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
-pub use fields::{FieldSize, NativeTextField, SearchField};
+pub use fields::{FieldSize, NativeTextField, SearchField, field_edge, field_edge_inset};
 #[allow(unused_imports)]
 pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_state};
 #[allow(unused_imports)]
@@ -72,8 +72,8 @@ pub use menu::{MenuRow, menu_label, menu_separator, menu_surface, popover_surfac
 pub use segmented::{Segment, Segmented};
 #[allow(unused_imports)]
 pub use sheet::{
-    AlertLayout, SheetLayout, SheetWidth, alert_button, alert_surface, native_sheet, sheet_buttons,
-    sheet_status_error, sheet_surface,
+    AlertLayout, SheetLayout, SheetWidth, alert_button, alert_surface, native_sheet,
+    native_sheet_keyboard, sheet_buttons, sheet_status_error, sheet_surface,
 };
 #[allow(unused_imports)]
 pub use sidebar::{
