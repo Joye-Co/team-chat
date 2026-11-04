@@ -799,13 +799,21 @@ const CORE_SCENES: &[Scene] = &[
     },
 ];
 
+/// The name the provider gives the seeded member Forge (a worst-case name with `--worst-case`).
+fn forge_name(s: &Services) -> String {
+    s.provider
+        .member(crate::provider::seeded::FORGE)
+        .map_or_else(|| "Forge".into(), |m| m.name)
+}
+
 /// The checks of the seeded-cache scenes: each page drew what the real provider read.
 fn core_checks(name: &str) -> Option<Checks> {
     use crate::selftest::drawn::{check, ids};
-    fn one(kind: &'static str, want: &[&str]) -> Vec<Result<String, String>> {
+    fn one<W: AsRef<str>>(kind: &'static str, want: &[W]) -> Vec<Result<String, String>> {
         let got = ids(kind);
         want.iter()
             .map(|w| {
+                let w = w.as_ref();
                 check(
                     got.iter().any(|g| g.contains(w)),
                     format!("{kind} drew {w:?} ({got:?})"),
@@ -821,9 +829,20 @@ fn core_checks(name: &str) -> Option<Checks> {
                 &[crate::provider::seeded::GROUP, "active=2", "on_me=1"],
             )
         },
-        "core-members" => |_, _| one("members-page", &["entries=3", "detail=Forge"]),
-        "core-live" => |_, _| one("live", &["Forge", crate::provider::seeded::RUN_WEEKLY]),
-        "core-side-chat" => |_, _| one("side-chat", &["Forge messages=0"]),
+        // The member name comes from the provider: `--worst-case` renames Forge.
+        "core-members" => |s, _| {
+            one(
+                "members-page",
+                &["entries=3".into(), format!("detail={}", forge_name(s))],
+            )
+        },
+        "core-live" => |s, _| {
+            one(
+                "live",
+                &[forge_name(s), crate::provider::seeded::RUN_WEEKLY.into()],
+            )
+        },
+        "core-side-chat" => |s, _| one("side-chat", &[format!("{} messages=0", forge_name(s))]),
         "core-artifact" => |_, _| one("artifact-page", &["重连测试报告 v2"]),
         _ => return None,
     })
