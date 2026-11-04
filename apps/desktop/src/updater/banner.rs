@@ -7,10 +7,10 @@ use std::collections::HashSet;
 
 use gpui::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement as _, Styled, Subscription, Window, div, img,
+    Render, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Sizable as _, WindowExt as _, button::Button};
+use gpui_component::{Sizable as _, WindowExt as _};
 
 use super::{Failure, Phase, Updater, version};
 use crate::ui::{
@@ -22,8 +22,8 @@ use crate::ui::{
 };
 use crate::{
     copy::{fill, overlays as o, update as u},
-    theme::{self, Type as _, space},
-    ui::{self, Sym},
+    theme::Type as _,
+    ui::Sym,
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -325,143 +325,6 @@ impl Render for UpdateBanner {
                     this.open_sheet(u, window, cx);
                 }
             }))
-            .into_any_element()
-    }
-}
-
-/// The 关于 row of settings: version, update state and 检查更新.
-pub struct AboutUpdate {
-    updater: Option<Entity<Updater>>,
-    _subscriptions: Vec<Subscription>,
-}
-
-impl AboutUpdate {
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        let updater = super::global(cx);
-        let subscriptions = updater
-            .iter()
-            .map(|u| cx.observe(u, |_, _, cx| cx.notify()))
-            .collect();
-        Self {
-            updater,
-            _subscriptions: subscriptions,
-        }
-    }
-}
-
-impl Render for AboutUpdate {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
-        let version_line = fill(u::VERSION, &[("version", version::CURRENT)]);
-        let phase = self.updater.as_ref().map(|u| u.read(cx).phase().clone());
-        let status = match &phase {
-            None | Some(Phase::Idle) => None,
-            Some(Phase::Checking) => Some(u::CHECKING.to_string()),
-            Some(Phase::UpToDate) => Some(u::UP_TO_DATE.to_string()),
-            Some(other) => banner_text(other),
-        };
-        let failed = matches!(phase, Some(Phase::Failed { .. }));
-        let busy = matches!(
-            phase,
-            Some(
-                Phase::Checking
-                    | Phase::Downloading { .. }
-                    | Phase::Installing(_)
-                    | Phase::WaitingForSends(_)
-            )
-        );
-        let mut buttons: Vec<Button> = Vec::new();
-        if let (Some(updater), Some(phase)) = (self.updater.clone(), &phase) {
-            match phase {
-                Phase::Available(i) | Phase::Failed { info: Some(i), .. } => {
-                    let up = updater.clone();
-                    buttons.push(
-                        ui::primary_button(
-                            "about-update",
-                            fill(u::UPDATE_TO, &[("version", &i.version)]),
-                            cx,
-                        )
-                        .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
-                    );
-                }
-                Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. } => {
-                    let up = updater.clone();
-                    buttons.push(
-                        ui::secondary_button("about-check", u::CHECK, cx)
-                            .on_click(move |_, _, cx| up.update(cx, |u, cx| u.check_now(cx))),
-                    );
-                }
-                _ => {}
-            }
-        }
-        let dark = theme::is_dark(cx);
-        // The first row of the 关于 table: the app icon, the product and
-        // version, the update state and its button.
-        div()
-            .w_full()
-            .min_h(px(72.))
-            .pl(space::S16)
-            .pr(space::S12)
-            .py(space::S12)
-            .flex()
-            .items_center()
-            .gap(space::S12)
-            .child(
-                img(if dark {
-                    crate::ui::icons::APP_ICON_DARK_72
-                } else {
-                    crate::ui::icons::APP_ICON_72
-                })
-                .flex_none()
-                .size(px(44.)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .t_ui()
-                            .semibold()
-                            .text_color(colors.text_1)
-                            .one_line()
-                            .child(env!("PRODUCT_NAME")),
-                    )
-                    .child(
-                        div()
-                            .t_small()
-                            .tnum()
-                            .text_color(colors.text_2)
-                            .one_line()
-                            .child(version_line),
-                    )
-                    .when_some(status, |el, s| {
-                        el.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::S6)
-                                .t_meta()
-                                .tnum()
-                                .text_color(if failed {
-                                    colors.danger_text
-                                } else {
-                                    colors.text_3
-                                })
-                                .when(busy, |el| {
-                                    el.child(
-                                        crate::ui::spinner()
-                                            .with_size(theme::icon::CHIP)
-                                            .color(colors.text_3),
-                                    )
-                                })
-                                .child(div().min_w(px(0.)).child(s)),
-                        )
-                    }),
-            )
-            .children(buttons.into_iter().map(|b| div().flex_none().child(b)))
             .into_any_element()
     }
 }

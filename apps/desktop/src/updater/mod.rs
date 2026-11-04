@@ -7,8 +7,8 @@
 //!   thread ([`install::install`]) and relaunches.
 //! - When the running bundle cannot be replaced (not writable, or no bundle under
 //!   `cargo run`), it opens the DMG in Finder and the banner explains what to do.
-//! - [`banner::UpdateBanner`] (main window) and [`banner::AboutUpdate`] (settings, 关于)
-//!   render the state. They read only this entity; the network and the cache stay here.
+//! - [`banner::UpdateBanner`] (main window; the settings 通用 pane draws its own version row)
+//!   renders the state. It reads only this entity; the network and the cache stay here.
 //! - On start, [`install::finish_on_launch`] removes the old bundle of the previous update.
 
 pub mod banner;
