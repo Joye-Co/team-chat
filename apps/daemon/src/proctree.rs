@@ -178,9 +178,10 @@ fn marker(run_id: &str) -> Vec<u8> {
     format!("CHAT_RUN_ID={run_id}").into_bytes()
 }
 
-/// Orphans of run `run_id`: processes of the daemon's own user whose parent is pid 1 (a tool
-/// that daemonized, or whose parent exited, so they are no longer below the CLI) and whose
-/// environment holds `CHAT_RUN_ID=<run_id>`. Each is the group it leads, or the process.
+/// Processes of run `run_id` found by their environment, also the ones that left the CLI's
+/// tree (a tool that daemonized, or whose parent exited, is re-parented to pid 1 or to a
+/// subreaper): processes of the daemon's own user whose environment holds
+/// `CHAT_RUN_ID=<run_id>`. Each is the group it leads, or the process.
 /// macOS does not show the environment of its own platform binaries (`/bin/sleep`), so such an
 /// orphan is not found there; tools a CLI starts from other paths (node, python, cargo) are.
 pub fn orphans(run_id: &str) -> Vec<Target> {
@@ -191,7 +192,7 @@ pub fn orphans(run_id: &str) -> Vec<Target> {
     // SAFETY: plain syscalls without arguments.
     let (own_group, own_pid) = unsafe { (libc::getpgrp(), libc::getpid()) };
     let mut out = vec![];
-    for pid in orphan_pids() {
+    for pid in own_pids() {
         if pid <= 1 || pid == own_pid || !environ(pid).iter().any(|e| *e == want) {
             continue;
         }
@@ -220,9 +221,9 @@ pub fn run_targets(root: i32, run_id: &str) -> Vec<Target> {
     out
 }
 
-/// Pids of the daemon's own user whose parent is pid 1.
+/// Pids of the daemon's own user.
 #[cfg(target_os = "macos")]
-fn orphan_pids() -> Vec<i32> {
+fn own_pids() -> Vec<i32> {
     let mut buf = vec![0i32; 4096];
     let pids = loop {
         let bytes = (buf.len() * std::mem::size_of::<i32>()) as libc::c_int;
@@ -256,30 +257,30 @@ fn orphan_pids() -> Vec<i32> {
                     size,
                 )
             };
-            n == size && info.pbi_ppid == 1 && info.pbi_uid == me
+            n == size && info.pbi_uid == me
         })
         .collect()
 }
 
-/// Pids of the daemon's own user whose parent is pid 1, from `/proc`.
+/// Pids of the daemon's own user, from `/proc`.
 #[cfg(target_os = "linux")]
-fn orphan_pids() -> Vec<i32> {
+fn own_pids() -> Vec<i32> {
     use std::os::unix::fs::MetadataExt;
     // SAFETY: plain syscall without arguments.
     let me = unsafe { libc::geteuid() };
-    parents()
-        .into_iter()
-        .filter(|&(pid, ppid)| {
-            pid > 1
-                && ppid == 1
-                && std::fs::metadata(format!("/proc/{pid}")).is_ok_and(|m| m.uid() == me)
+    let Ok(dir) = std::fs::read_dir("/proc") else {
+        return vec![];
+    };
+    dir.flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|&pid| {
+            pid > 1 && std::fs::metadata(format!("/proc/{pid}")).is_ok_and(|m| m.uid() == me)
         })
-        .map(|(pid, _)| pid)
         .collect()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn orphan_pids() -> Vec<i32> {
+fn own_pids() -> Vec<i32> {
     vec![]
 }
 

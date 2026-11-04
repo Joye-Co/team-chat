@@ -262,7 +262,7 @@ How the 1.1 daemon does each one:
   commands in process groups or sessions of their own (Claude Code's Bash tool, Codex exec), so
   the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
   each of their groups, scanning again until a scan finds nothing new. A tool that daemonized
-  (its parent exited, so its parent is pid 1 and it is no longer below the CLI) is found by
+  (its parent exited, so pid 1 or a subreaper is its parent and it is no longer below the CLI) is found by
   `CHAT_RUN_ID=<run id>` in its environment (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ` on
   Linux; only processes of the daemon's own user) and gets the same signals, also when the run
   ends or is cancelled after the CLI exited. macOS does not show the environment of its own
