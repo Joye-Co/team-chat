@@ -72,4 +72,19 @@ crate::copy! {
     MEMBERS_MONEY = "¥{v}",
     MEMBERS_WORKPLACE_EMPTY = "还没有工作环境",
     MEMBERS_WORKPLACE_EMPTY_LINE = "电脑、工具和决定会显示在这里",
+    // --- pages track (v12 native) ---
+    MEMBERS_COUNT = "{n} 位",
+    MEMBERS_INVITE_MORE = "邀请同事…",
+    MEMBERS_ADD_BOT_MORE = "添加成员…",
+    MEMBERS_FILTER_EMPTY = "没有成员在这个筛选里",
+    MEMBERS_YOU_WORD = "你",
+    MEMBERS_HAND_OVER_MORE = "交代…",
+    MEMBERS_NOW_DOING = "现在在做",
+    MEMBERS_DONE_VALUE = "{n} · 平均 {m} 分钟",
+    MEMBERS_OUTPUTS_VALUE = "{n} · {kinds}",
+    MEMBERS_COST_OF = "{cost} / 上限 {limit}",
+    MEMBERS_WAITS_REVIEW_WORD = "等你审",
+    MEMBERS_WHERE = "在哪干活",
+    MEMBERS_EDIT_MORE = "修改…",
+    // --- end pages track ---
 }

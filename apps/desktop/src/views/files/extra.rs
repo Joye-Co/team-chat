@@ -27,7 +27,11 @@ use crate::{
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
     provider::files::THUMB_SOURCE_MAX_BYTES,
     theme::{self, Type as _, space},
-    ui::{self, Sym},
+    ui::{
+        self, Sym,
+        native::{NativeType as _, metrics as n_metrics, native_colors},
+        sf_symbols::{SymSize, Weight},
+    },
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -151,12 +155,12 @@ fn image_preview(
         (Some(path), _) => img(path.clone())
             .size_full()
             .object_fit(ObjectFit::Cover)
-            .rounded(theme::radius::MD - px(1.))
+            .rounded(theme::radius::MD)
             .into_any_element(),
         (None, Some(TransferState::Failed(e))) => skeleton(
             div()
                 .t_meta()
-                .text_color(k.danger_text)
+                .text_color(native_colors(cx).red)
                 .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
                 .into_any_element(),
         ),
@@ -176,9 +180,7 @@ fn image_preview(
         .flex_none()
         .rounded(theme::radius::MD)
         .overflow_hidden()
-        .border_1()
-        .border_color(k.border)
-        .bg(k.field)
+        .bg(native_colors(cx).fill)
         .flex()
         .items_center()
         .justify_center()
@@ -211,35 +213,35 @@ fn kind_word(file: &FileAttachment) -> &'static str {
     }
 }
 
-/// The inset progress track of a file row (§7.11): left 12, right 12,
-/// bottom 6, 3 pt tall, radius 1.5, `field` track and `accent` fill, so the
-/// bar never crosses the row's rounded corners or border.
+/// The progress of a file row (NATIVE.md §5.7): a 4 pt determinate bar,
+/// radius 2, `quaternary` track and `label` fill, inset 12 pt from the
+/// row's sides and 6 pt from its bottom so it never crosses the corners.
 fn track(percent: f32, cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
+    let n = native_colors(cx);
     div()
         .absolute()
         .left(space::S12)
         .right(space::S12)
         .bottom(space::S6)
-        .h(px(3.))
-        .rounded(px(1.5))
-        .bg(k.field)
+        .h(n_metrics::BAR)
+        .rounded(n_metrics::BAR_RADIUS)
+        .bg(n.quaternary)
         .overflow_hidden()
         .child(
             div()
                 .h_full()
                 .w(relative((percent / 100.).clamp(0., 1.)))
-                .rounded(px(1.5))
-                .bg(k.accent),
+                .rounded(n_metrics::BAR_RADIUS)
+                .bg(n.label),
         )
 }
 
-/// The frame of a file row (§7.11). In the timeline: 12 pt padding (8 at the
-/// right), radius 12, 1 pt `border`, a 40 pt `accent-soft` tile with the type
-/// glyph, the name 14/500 cut in the middle, the meta line 12/16 `text-2`, and
-/// 32 pt icon buttons that show on hover (always while `pin_actions`). In the
-/// side panel (`compact`): a 48 pt row with a 32 pt tile, no border, a hover
-/// fill.
+/// The frame of a file row (NATIVE.md §9.2 attachments, like a Card v2
+/// surface): in the timeline a 52 pt row on `fill`, radius 12, no border
+/// and no shadow, the type symbol in `secondary` (no colored tile), the name
+/// in Body cut in the middle, the meta line in Subheadline `secondary`, and
+/// borderless buttons that show on hover (always while `pin_actions`). In
+/// the side panel (`compact`): a 48 pt row without a fill.
 #[allow(clippy::too_many_arguments)]
 fn row_frame(
     group: SharedString,
@@ -251,20 +253,14 @@ fn row_frame(
     pin_actions: bool,
     cx: &App,
 ) -> gpui::Div {
-    let k = theme::colors(cx);
-    let tile = if compact { px(32.) } else { px(40.) };
-    let glyph = if compact {
-        theme::icon::ROW
-    } else {
-        theme::icon::EMPTY
-    };
+    let n = native_colors(cx);
     let row = div()
         .group(group.clone())
         .relative()
         .flex_none()
         .flex()
         .items_center()
-        .gap(space::S12)
+        .gap(space::S10)
         .overflow_hidden();
     let row = if compact {
         row.h(super::PANEL_ROW_H)
@@ -277,21 +273,21 @@ fn row_frame(
             .h(FILE_ROW_H)
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(theme::radius::LG)
-            .border_1()
-            .border_color(k.border)
-            .bg(k.content)
+            .rounded(px(12.))
+            .bg(n.fill)
     };
     row.child(
         div()
             .flex_none()
-            .size(tile)
-            .rounded(theme::radius::MD)
-            .bg(k.accent_soft)
+            .size(px(28.))
             .flex()
             .items_center()
             .justify_center()
-            .child(ui::icon(file_icon(file), glyph, k.accent_text)),
+            .child(ui::icons::sym(
+                file_icon(file),
+                SymSize::new(22., 28., Weight::Regular),
+                n.secondary,
+            )),
     )
     .child(
         div()
@@ -299,20 +295,25 @@ fn row_frame(
             .min_w(px(0.))
             .flex()
             .flex_col()
-            .when(!compact, |el| el.gap(space::S2))
             .child(
                 // Middle cut on the measured width: the last 12 characters
                 // and the extension stay (§15).
                 div()
-                    .t_ui()
-                    .medium()
-                    .text_color(k.text_1)
+                    .n_body()
+                    .text_color(n.label)
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis_middle()
                     .child(file.name.clone()),
             )
-            .child(div().t_meta().text_color(k.text_2).one_line().child(meta)),
+            .child(
+                div()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .one_line()
+                    .child(meta),
+            ),
     )
     .child(
         div()
@@ -328,9 +329,9 @@ fn row_frame(
         // In the side panel the track runs under the text column, 2 pt
         // from the row's bottom, so it never covers the meta line.
         el.child(if compact {
-            track(p, cx).left(px(52.)).right(space::S8).bottom(px(1.))
+            track(p, cx).left(px(46.)).right(space::S8).bottom(px(1.))
         } else {
-            track(p, cx)
+            track(p, cx).bottom(px(4.))
         })
     })
 }
@@ -341,11 +342,10 @@ fn upload_row(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
     let (meta, progress) = match state {
         TransferState::Failed(e) => (
             div()
-                .text_color(k.danger_text)
+                .text_color(native_colors(cx).red)
                 .child(fill(f::UPLOAD_FAILED, &[("reason", error_text(e))]))
                 .into_any_element(),
             None,
@@ -396,7 +396,6 @@ pub fn file_row_in(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
     let state = provider.file_transfer(&download_key(file));
     let plain = fill(
         f::META,
@@ -416,7 +415,7 @@ pub fn file_row_in(
         ),
         Some(TransferState::Failed(e)) => (
             div()
-                .text_color(k.danger_text)
+                .text_color(native_colors(cx).red)
                 .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
                 .into_any_element(),
             None,
