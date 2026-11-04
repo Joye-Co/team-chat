@@ -13,11 +13,6 @@ crate::copy! {
     MEMBER_KIND_HUMAN = "human",
     PROVIDER = "provider: {name}",
     MEMBER_ID = "member id: {id}",
-    STATE_OFFLINE = "offline",
-    STATE_TOKEN_UNREADABLE = "keychain read failed",
-    STATE_CONNECTING = "connecting",
-    STATE_ONLINE = "online",
-    STATE_RECONNECTING = "reconnecting (attempt {attempt}, retry in {ms} ms)",
     // process view (bot runs)
     RUN_PANEL_TITLE = "Run details",
     RUN_PANEL_COPY = "Copy run details",

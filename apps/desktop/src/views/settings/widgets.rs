@@ -635,13 +635,81 @@ pub fn quiet(text: impl Into<SharedString>, cx: &App) -> Div {
         .child(text.into())
 }
 
-/// A field error under a standalone field: `red` Subheadline.
-pub fn field_error(text: impl Into<SharedString>, cx: &App) -> Div {
-    use crate::ui::native::{NativeType as _, native_colors};
+/// A text field that, at rest, ends a value too long for it with "…" and
+/// shows the whole value in a tooltip (2.21, F3): over the unfocused input
+/// it lays the same line cut by [`crate::ui::truncate::TruncText`]; a click
+/// focuses the input under it. While it is focused the input shows alone.
+pub fn field_at_rest(
+    id: &'static str,
+    field: impl IntoElement,
+    state: &gpui::Entity<gpui_component::input::InputState>,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    rest_cover(id, field, state, false, window, cx)
+}
+
+/// A number field at rest (2.8): the value right-aligned in tabular
+/// figures. While it is focused the input shows alone. Pass a disabled
+/// field as it is: it draws at half opacity, which a cover cannot match.
+pub fn number_at_rest(
+    id: &'static str,
+    field: impl IntoElement,
+    state: &gpui::Entity<gpui_component::input::InputState>,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    rest_cover(id, field, state, true, window, cx)
+}
+
+fn rest_cover(
+    id: &'static str,
+    field: impl IntoElement,
+    state: &gpui::Entity<gpui_component::input::InputState>,
+    number: bool,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    use gpui::{Focusable as _, InteractiveElement as _, StatefulInteractiveElement as _};
+
+    use crate::ui::native::{NativeType as _, metrics, native_colors, tokens::layout};
+    let input = state.read(cx);
+    let focus = input.focus_handle(cx);
+    let value = input.value().to_string();
+    if focus.is_focused(window) || value.is_empty() {
+        return field.into_any_element();
+    }
+    let k = native_colors(cx);
+    let inset = metrics::FIELD_PAD + layout::BORDER;
     div()
-        .n_subheadline()
-        .text_color(native_colors(cx).red)
-        .child(text.into())
+        .id(id)
+        .relative()
+        .when(!number, |d| d.w_full())
+        .child(field)
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-cover")))
+                .absolute()
+                .top(layout::BORDER)
+                .bottom(layout::BORDER)
+                .left(inset)
+                .right(inset)
+                .bg(k.content)
+                .flex()
+                .items_center()
+                .when(number, |d| d.justify_end())
+                .cursor_text()
+                .on_click(move |_, window, cx| focus.focus(window, cx))
+                .child(
+                    crate::ui::truncate::TruncText::new(value)
+                        .id(SharedString::from(format!("{id}-rest")))
+                        .when(!number, |t| t.flex_1())
+                        .when(number, |t| t.n_figures())
+                        .n_body()
+                        .text_color(k.label),
+                ),
+        )
+        .into_any_element()
 }
 
 /// A state dot and its text (§1 rule 4: a dot, never a pill).
@@ -732,40 +800,13 @@ pub fn popup_fixed(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
     width: Pixels,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> Button {
-    use crate::ui::{
-        native::{PushSize, PushStyle, metrics, native_colors, push_button},
-        sf_symbols::{Sf, Weight, symbol},
-    };
-    let k = native_colors(cx);
-    push_button(id, "", PushStyle::Outline, PushSize::Regular, cx)
-        .w(width)
-        .pl(metrics::BUTTON_REGULAR_PAD)
-        .pr(metrics::FIELD_PAD)
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(crate::ui::native::tokens::space::S6)
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .child(title.into()),
-                )
-                .child(symbol(
-                    Sf::Popup,
-                    metrics::POPUP_CHEVRON_SLOT,
-                    Weight::Semibold,
-                    k.secondary,
-                    window,
-                )),
-        )
+    // The kit's select (1.8): the label from the leading 12, truncating,
+    // the chevron pinned at the trailing edge, so every select in a column
+    // lines up (C1-06).
+    crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx).w(width)
 }
 
 /// A row under a list group: the `+`/`−` buttons, then a quiet line.
@@ -789,7 +830,7 @@ pub fn time_popup(
     cx: &App,
 ) -> impl IntoElement {
     use crate::data::ClockTime;
-    use crate::ui::native::{PushSize, disabled_push, popup_button};
+    use crate::ui::native::disabled_push;
     use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
     let pick = std::rc::Rc::new(pick);
     let mut times: Vec<ClockTime> = (0..24).map(|h| ClockTime::new(h, 0)).collect();
@@ -797,8 +838,15 @@ pub fn time_popup(
         times.push(current);
         times.sort();
     }
+    // The one select width of Settings (2.8), so 时间, 从 and 到 line up.
     disabled_push(
-        popup_button(id, current.wire(), PushSize::Regular, window, cx),
+        popup_fixed(
+            id,
+            current.wire(),
+            crate::ui::native::tokens::size::SELECT_WIDTH,
+            window,
+            cx,
+        ),
         disabled,
         cx,
     )
@@ -1010,8 +1058,8 @@ pub fn retry_button(id: impl Into<ElementId>, cx: &App) -> Button {
 /// A list's loading state (2.19): skeleton rows at the row height, in the
 /// group the list will fill.
 pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElement {
+    use crate::ui::native::Bone;
     use crate::ui::native::{metrics, native_colors, tokens};
-    use gpui_component::skeleton::Skeleton;
     let k = native_colors(cx);
     let widths = [0.46, 0.62, 0.38];
     let mut group = div().w_full().flex().flex_col();
@@ -1038,7 +1086,8 @@ pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElem
                 .items_center()
                 .gap(tokens::space::S12)
                 .child(
-                    Skeleton::new()
+                    Bone::new()
+                        .on_fill(true)
                         .size(tokens::height::SM)
                         .rounded(tokens::radius::ITEM),
                 )
@@ -1048,10 +1097,16 @@ pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElem
                         .flex()
                         .flex_col()
                         .gap(tokens::space::S6)
-                        .child(Skeleton::new().h(tokens::text::UI.0).w(gpui::relative(w)))
+                        .child(
+                            Bone::new()
+                                .on_fill(true)
+                                .h(tokens::text::UI.0)
+                                .w(gpui::relative(w)),
+                        )
                         .when(two_line, |d| {
                             d.child(
-                                Skeleton::new()
+                                Bone::new()
+                                    .on_fill(true)
                                     .h(tokens::text::META.0)
                                     .w(gpui::relative(w * 0.7)),
                             )
@@ -1123,6 +1178,46 @@ pub fn item_rows(rows: Vec<AnyElement>, media: Pixels, cx: &App) -> Div {
         list = list.child(row);
     }
     list
+}
+
+/// The cap of a scrolling list of `row`-high rows with hairlines between
+/// them: `whole` rows and half of the next, so the cut row says the list
+/// scrolls (2.9).
+pub fn half_row_cap(row: Pixels, whole: usize) -> Pixels {
+    (row + crate::ui::native::tokens::layout::HAIRLINE) * whole as f32 + row * 0.5
+}
+
+/// A list capped at `max_h` that scrolls inside its group, with the
+/// scrollbar shown at rest while it overflows (2.9).
+pub fn capped_list(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+) -> Div {
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    div()
+        .relative()
+        .w_full()
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .max_h(max_h)
+                .overflow_y_scroll()
+                .track_scroll(scroll)
+                .child(content),
+        )
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .bottom_0()
+                .w(crate::ui::native::tokens::space::S12)
+                .child(Scrollbar::vertical(scroll).mode(ScrollbarMode::Always)),
+        )
 }
 
 /// A whole number with thousands separators (2.21): 1000000 → 1,000,000.

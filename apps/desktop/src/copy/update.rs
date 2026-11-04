@@ -28,7 +28,8 @@ crate::copy! {
     BANNER_MANUAL_DETAIL = "安装盘已在访达中打开",
     // --- v14/t4 update ---
     VERSION_TITLE = "版本 {version}",
-    FROM_TO = "当前 {current} → 新版本 {version}",
+    // The detail under 版本 {current}: the title already names the current one.
+    NEW_VERSION = "新版本 {version} 可以更新",
     DOWNLOAD_PROGRESS = "{percent}% · {done} / {total} MB",
     CANCEL_DOWNLOAD = "取消下载",
     NOTES = "查看更新内容",
