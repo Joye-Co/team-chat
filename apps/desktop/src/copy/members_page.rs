@@ -87,4 +87,26 @@ crate::copy! {
     MEMBERS_WHERE = "在哪干活",
     MEMBERS_EDIT_MORE = "修改…",
     // --- end pages track ---
+    // --- v13/ux-pages: the member detail recipe (COMPLETENESS.md §2.18) ---
+    MEMBERS_HAND_OVER_SHORT = "交代",
+    MEMBERS_MESSAGE = "私聊",
+    MEMBERS_NOW_EMPTY = "现在没在做事",
+    MEMBERS_WORKING_N = "在做 {n}/{m}",
+    MEMBERS_WORKING = "在做",
+    MEMBERS_AVG_MINUTES = "平均 {m} 分钟",
+    MEMBERS_NO_LIMIT = "没有上限",
+    MEMBERS_COL_NAME = "名称",
+    MEMBERS_COL_WHERE = "在哪",
+    MEMBERS_COL_TIME = "时间",
+    MEMBERS_COL_STATE = "状态",
+    MEMBERS_DELIVERED = "已交付",
+    MEMBERS_DELIVERIES_EMPTY = "这周还没有交付",
+    MEMBERS_PROBLEMS_EMPTY = "最近没有问题",
+    MEMBERS_WHERE_EMPTY = "还没有分配电脑",
+    MEMBERS_APPROVALS_EMPTY = "没有要先批准的事",
+    MEMBERS_TOOLS_EMPTY = "还没有接入工具",
+    MEMBERS_DECISIONS_EMPTY = "还没有用到群里的决定",
+    MEMBERS_PICK_BODY = "左边的列表写着每位成员在做什么、在等谁。",
+    MEMBERS_FILTER_EMPTY_BODY = "换一个筛选，或者看全部成员。",
+    // --- end v13/ux-pages ---
 }
