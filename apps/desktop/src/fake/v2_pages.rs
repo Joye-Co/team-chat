@@ -238,8 +238,10 @@ pub fn member_extras(p: &V2Samples, member_id: &str) -> MemberExtras {
             LEDGER => line("空闲 · 09:40 交了 10 月数据月报"),
             POCKET => line("空闲 · 明早 08:00 发晨报"),
             SCOUT => line("空闲 · 09:12 巡检 staging，24 项都通过"),
-            XIAOWANG => line("在线 · 在试断线重连的修复"),
-            LIXUE => line("在线 · 跟进夹夹 3.0 宣传"),
+            // People have no run: their line says what they did last, so it
+            // agrees with 现在没在做事 in their detail (A5).
+            XIAOWANG => line("在线 · 10:12 看过断线重连的修复"),
+            LIXUE => line("在线 · 09:30 发了夹夹 3.0 的文案"),
             ALEX => line("离开 · 08:50 后没回来"),
             CHENCHEN => line("离线 · 周三回来"),
             _ => None,

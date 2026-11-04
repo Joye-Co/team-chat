@@ -74,6 +74,8 @@ pub fn fit(lead: &str, part: &str, max: f32) -> (String, String) {
             out.push(c);
             w += cw;
         }
+        // No separator right before the "…" (`数 ·…`).
+        let mut out = out.trim_end_matches([' ', '·']).to_string();
         out.push('…');
         return (out, part.to_string());
     }

@@ -1571,6 +1571,36 @@ impl ChatProvider for FakeProvider {
         rx
     }
 
+    /// This week of a member from the same data as 首页's 今天完成 and
+    /// 最近的产出: 话题 it owns that are done, and 产出 it made, in the last
+    /// 7 days (fixtures agree, A5).
+    fn member_stats(&self, member_id: &str) -> Option<crate::data::v2::MemberStats> {
+        let week_ago = crate::selftest::clock::local_now().timestamp_millis() - 7 * 24 * 3_600_000;
+        let mut stats = crate::data::v2::MemberStats::default();
+        for g in self.groups() {
+            for t in self.topics(&g.id) {
+                for r in self.runs(&g.id, &t.id) {
+                    if r.bot_id == member_id && r.status.is_active() {
+                        stats.active.push((g.id.clone(), t.id.clone()));
+                    }
+                }
+                let owner = t.owner_id.as_deref() == Some(member_id);
+                if owner && t.last_activity_at >= week_ago {
+                    stats.topics_this_week += 1;
+                    if t.status == TopicStatus::Done {
+                        stats.done_this_week += 1;
+                    }
+                }
+                stats.artifacts_this_week += self
+                    .artifacts(&g.id, &t.id)
+                    .iter()
+                    .filter(|a| a.created_by == member_id && a.updated_at >= week_ago)
+                    .count() as u32;
+            }
+        }
+        Some(stats)
+    }
+
     fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
         let (now, stopped) = self.with(|s| (s.now, s.stopped_runs.clone()));
         crate::fake_extra::sample_runs(now)

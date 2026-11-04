@@ -1,9 +1,9 @@
 //! Search and bot runs for [`crate::fake::FakeProvider`]: a substring search
-//! over the sample messages and two sample runs with their process steps.
+//! over the sample messages and three sample runs with their process steps.
 
 use crate::data::{
-    BotRunSummary, FileChangeKind, FileChangeView, Message, Millis, ProcessStep, RawRunEntry,
-    RunProcess, RunStatus, SearchHit, Topic,
+    BotRunSummary, FileChangeKind, FileChangeView, Message, Millis, PlanItem, PlanState,
+    ProcessStep, RawRunEntry, RunProcess, RunStatus, SearchHit, Topic,
 };
 
 /// Characters of context on each side of a match in a snippet.
@@ -148,6 +148,27 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             updated_at: now - 2 * 24 * 60 * MIN + 7 * MIN,
             summary: Some("打包失败：找不到签名证书。".into()),
             plan: Vec::new(),
+        },
+        // The finished run of the 私聊 话题 `t-dm-2` (完成): its plan and its
+        // time, so the inspector agrees with the 完成 badge.
+        BotRunSummary {
+            id: "run-dm-cache-1".into(),
+            bot_id: "m-coder".into(),
+            group_id: "d-coder".into(),
+            topic_id: "t-dm-2".into(),
+            machine_id: Some("mac-mini-1".into()),
+            machine_name: Some("Mac mini（办公室）".into()),
+            status: RunStatus::Done,
+            requested_by: Some("m-joye".into()),
+            created_at: now - 8 * 60 * MIN,
+            started_at: Some(now - 8 * 60 * MIN + MIN),
+            ended_at: Some(now - 7 * 60 * MIN),
+            updated_at: now - 7 * 60 * MIN,
+            summary: Some("完成，释放了 42 GB。".into()),
+            plan: vec![
+                PlanItem::new("找出超过 7 天的构建缓存", PlanState::Done),
+                PlanItem::new("删除并统计释放的空间", PlanState::Done),
+            ],
         },
     ]
 }
