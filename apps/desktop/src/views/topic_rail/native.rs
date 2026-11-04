@@ -30,6 +30,7 @@ use crate::{
 };
 
 /// The sections, for their collapsed state.
+pub(super) const STATUS: &str = "status";
 pub(super) const OWNER: &str = "owner";
 pub(super) const PLAN: &str = "plan";
 pub(super) const CHANGES: &str = "changes";
@@ -108,6 +109,49 @@ impl TopicRail {
             .on_click(
                 cx.listener(move |this, _: &ClickEvent, _, cx| this.open_pane(pane.clone(), cx)),
             )
+            .into_any_element()
+    }
+
+    /// 状态: the 话题's state as a status badge (the run's while a member
+    /// works or its run failed or stops). Always shown, first.
+    pub(super) fn native_status(&self, d: &Data, cx: &mut Context<Self>) -> AnyElement {
+        use crate::{copy::common as cm, data::TopicStatus, ui::native::StatusKind};
+        let run = d.run.as_ref();
+        let stopping = run.is_some_and(|r| self.services.provider.run_stopping(&r.id));
+        let badge: AnyElement = match (run, d.topic.as_ref().map(|t| t.status)) {
+            (Some(r), _) if r.status.is_active() || r.status == RunStatus::Failed => {
+                crate::views::process::run_badge(r, stopping, cx)
+            }
+            (_, Some(status)) => {
+                let (kind, text) = match status {
+                    TopicStatus::Open => (StatusKind::Pending, cm::STATUS_OPEN),
+                    TopicStatus::InProgress => (StatusKind::Working, cm::STATUS_IN_PROGRESS),
+                    TopicStatus::WaitingAnswer => (StatusKind::NeedsYou, cm::STATUS_WAITING_ANSWER),
+                    TopicStatus::WaitingReview => (StatusKind::NeedsYou, cm::STATUS_WAITING_REVIEW),
+                    TopicStatus::Blocked => (StatusKind::Failed, cm::STATUS_BLOCKED),
+                    TopicStatus::Done => (StatusKind::Done, cm::STATUS_DONE),
+                };
+                ui::native::status_badge(kind, text, cx).into_any_element()
+            }
+            _ => ui::native::status_badge(StatusKind::Pending, cm::STATUS_OPEN, cx)
+                .into_any_element(),
+        };
+        self.section(STATUS, c::INSPECTOR_STATE, cx)
+            .row(row(cx).child(badge))
+            .into_any_element()
+    }
+
+    /// A section with no data: its header and one quiet line, so every
+    /// 话题 shows the same sections in the same order.
+    pub(super) fn native_empty(
+        &self,
+        key: &'static str,
+        title: &'static str,
+        line: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.section(key, title, cx)
+            .row(row(cx).child(detail(line, cx)))
             .into_any_element()
     }
 
