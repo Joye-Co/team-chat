@@ -224,7 +224,8 @@ pub fn breathe<E: IntoElement + Styled + 'static>(
     cx: &App,
 ) -> AnyElement {
     use gpui::AnimationExt as _;
-    if cx.reduce_motion() {
+    // T1-16: a breath with no swing is no loop (no frames spent).
+    if cx.reduce_motion() || motion::BREATHE_LOW >= motion::BREATHE_HIGH {
         return element.opacity(motion::BREATHE_HIGH).into_any_element();
     }
     element
@@ -744,6 +745,21 @@ mod tests {
         assert_eq!(delayed_progress(0.25, d, r), 0.);
         assert!(delayed_progress(0.5, d, r) > 0.5);
         assert!((delayed_progress(1., d, r) - 1.).abs() < 1e-4);
+    }
+
+    #[test]
+    fn one_shot_motion_stays_under_300_ms() {
+        // T1-17, review-animations 4: UI motion under 300 ms.
+        let limit = Duration::from_millis(300);
+        assert!(motion::RISE_IN <= Duration::from_millis(200));
+        assert!(motion::RISE_IN + stagger_delay(100) <= limit);
+        assert!(motion::BAR_GROW <= limit);
+        assert!(motion::LIVE_TRACK_FILL <= limit);
+        assert!(motion::LINE_DRAW + motion::SERIES_STAGGER * 2 <= limit);
+        let flash = crate::ui::native::tokens::card_v21::CHANGE_FLASH;
+        assert!(flash >= Duration::from_millis(600) && flash <= Duration::from_millis(800));
+        // T1-16: a breathing mark never fades below full strength.
+        assert!(motion::BREATHE_LOW >= 1.0);
     }
 
     #[test]

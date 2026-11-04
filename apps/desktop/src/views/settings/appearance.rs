@@ -138,7 +138,7 @@ impl Render for AppearancePage {
                         div()
                             .p(RING)
                             .rounded(TILE_RADIUS + RING)
-                            .when(on, |d| d.bg(k.accent))
+                            .when(on, |d| d.bg(k.primary))
                             .child(
                                 div()
                                     .w(TILE.0)

@@ -3,6 +3,7 @@
 //! key cap. A state color only ever colors the 12 icon of a StatusBadge;
 //! the text stays foreground.
 
+use crate::ui::truncate::TruncText;
 use gpui::{
     AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window,
     div, prelude::FluentBuilder as _, px,
@@ -88,10 +89,10 @@ impl Badge {
 pub fn badge_colors(variant: BadgeVariant, k: &NativeColors) -> (Hsla, Hsla, Hsla) {
     let clear = gpui::transparent_black();
     match variant {
-        BadgeVariant::Default => (k.accent, clear, k.on_accent),
+        BadgeVariant::Default => (k.primary, clear, k.on_primary),
         BadgeVariant::Secondary => (k.fill, clear, k.label),
         BadgeVariant::Outline => (clear, k.separator, k.label),
-        BadgeVariant::Destructive => (k.red, clear, gpui::white()),
+        BadgeVariant::Destructive => (k.destructive_fill, clear, gpui::white()),
     }
 }
 
@@ -114,14 +115,7 @@ impl RenderOnce for Badge {
             .text_color(text)
             .when_some(self.max_w, |d, w| d.max_w(w))
             .children(self.lead.map(|l| div().flex_none().child(l)))
-            .child(
-                div()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(self.label),
-            )
+            .child(TruncText::new(self.label))
     }
 }
 
@@ -148,7 +142,12 @@ pub enum BadgeState {
     Offline,
     /// 已停用: ban, muted.
     Deactivated,
-    /// No state icon (a quiet word such as 等李雪).
+    /// 已暂停: pause, muted.
+    Paused,
+    /// 正在合并: a spinning loader, info.
+    Merging,
+    /// A quiet waiting word (等李雪回答, 等审): clock, muted. Every badge has
+    /// an icon (§2.12); this state never draws a bare word.
     Quiet,
 }
 
@@ -157,13 +156,14 @@ impl BadgeState {
     pub fn color(self, k: &NativeColors) -> Hsla {
         match self {
             BadgeState::NeedsYou => k.amber,
-            BadgeState::Working => k.blue,
+            BadgeState::Working | BadgeState::Merging => k.blue,
             BadgeState::Done | BadgeState::Online => k.green,
             BadgeState::Failed | BadgeState::Abnormal => k.red,
             BadgeState::Stopping
             | BadgeState::Queued
             | BadgeState::Offline
             | BadgeState::Deactivated
+            | BadgeState::Paused
             | BadgeState::Quiet => k.secondary,
         }
     }
@@ -174,8 +174,9 @@ impl BadgeState {
             BadgeState::Done => Sym::Done,
             BadgeState::Failed => Sym::Failed,
             BadgeState::Abnormal => Sym::Problem,
-            BadgeState::Queued => Sym::Waiting,
+            BadgeState::Queued | BadgeState::Quiet => Sym::Waiting,
             BadgeState::Deactivated => Sym::Stopped,
+            BadgeState::Paused => Sym::Pause,
             _ => return None,
         })
     }
@@ -196,7 +197,7 @@ impl BadgeState {
 pub fn state_mark(state: BadgeState, k: &NativeColors) -> Option<AnyElement> {
     let color = state.color(k);
     match state {
-        BadgeState::Working | BadgeState::Stopping => Some(
+        BadgeState::Working | BadgeState::Stopping | BadgeState::Merging => Some(
             div()
                 .size(icon::SM)
                 .flex()
@@ -232,7 +233,6 @@ pub fn state_mark(state: BadgeState, k: &NativeColors) -> Option<AnyElement> {
                 )
                 .into_any_element(),
         ),
-        BadgeState::Quiet => None,
         s => s
             .symbol()
             .map(|sym| sym_icon(sym, icon::SM, color).into_any_element()),
@@ -423,10 +423,15 @@ mod tests {
             BadgeState::Online,
             BadgeState::Offline,
             BadgeState::Deactivated,
+            BadgeState::Paused,
+            BadgeState::Merging,
+            BadgeState::Quiet,
         ] {
             assert!(state_mark(s, &k).is_some(), "{s:?} has no mark");
         }
-        assert!(state_mark(BadgeState::Quiet, &k).is_none());
+        // T1-03: paused is muted, merging is info.
+        assert_eq!(BadgeState::Paused.color(&k), k.secondary);
+        assert_eq!(BadgeState::Merging.color(&k), k.blue);
         // The outline badge text is foreground, never the state color.
         let (_, edge, text) = badge_colors(BadgeVariant::Outline, &k);
         assert_eq!(text, k.label);
@@ -442,6 +447,8 @@ pub enum StatusKind {
     NeedsYou,
     Working,
     Stopping,
+    Paused,
+    Merging,
     Queued,
     Done,
     Failed,
@@ -455,6 +462,8 @@ impl StatusKind {
             StatusKind::NeedsYou => BadgeState::NeedsYou,
             StatusKind::Working => BadgeState::Working,
             StatusKind::Stopping => BadgeState::Stopping,
+            StatusKind::Paused => BadgeState::Paused,
+            StatusKind::Merging => BadgeState::Merging,
             StatusKind::Queued | StatusKind::Pending => BadgeState::Queued,
             StatusKind::Done => BadgeState::Done,
             StatusKind::Failed => BadgeState::Failed,

@@ -52,6 +52,20 @@ fn ring(color: Hsla) -> BoxShadow {
     }
 }
 
+/// The (border, shadows) of a field that fills its column: the same ring
+/// drawn inside the field edge, so it never leaves the content column of a
+/// sheet or group (T1-12, §2.9).
+pub fn field_edge_inset(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
+    let (edge, mut shadows) = field_edge(k, focused, error);
+    if focused || error {
+        for s in &mut shadows {
+            s.inset = true;
+            s.spread_radius = metrics::FOCUS_RING - metrics::HAIRLINE;
+        }
+    }
+    (edge, shadows)
+}
+
 /// The (border, shadows) of a field in its state (§1.8).
 pub fn field_edge(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
     let red = k.red;
@@ -135,7 +149,12 @@ impl RenderOnce for NativeTextField {
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
             && !self.disabled;
-        let (edge, shadows) = field_edge(&k, focused, self.error);
+        // A field that fills its column draws its ring inside (T1-12).
+        let (edge, shadows) = if self.width.is_none() {
+            field_edge_inset(&k, focused, self.error)
+        } else {
+            field_edge(&k, focused, self.error)
+        };
         div()
             .id(self.id)
             .flex_none()
@@ -156,18 +175,24 @@ impl RenderOnce for NativeTextField {
             .gap(space::S8)
             .cursor_text()
             .child(
-                div().flex_1().min_w(px(0.)).child(placeholder_input(
-                    Input::new(&self.state)
-                        .appearance(false)
-                        .disabled(self.disabled)
-                        .with_size(gpui_component::Size::Small)
-                        .px_0()
-                        .py_0()
-                        .n_body()
-                        .text_color(k.label),
-                    window,
-                    cx,
-                )),
+                // The text clips at the 12 px padding, never mid-glyph at
+                // the border (T1-12).
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .child(placeholder_input(
+                        Input::new(&self.state)
+                            .appearance(false)
+                            .disabled(self.disabled)
+                            .with_size(gpui_component::Size::Small)
+                            .px_0()
+                            .py_0()
+                            .n_body()
+                            .text_color(k.label),
+                        window,
+                        cx,
+                    )),
             )
             .children(self.trailing)
     }
@@ -217,7 +242,11 @@ impl RenderOnce for SearchField {
         let focused = self
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
-        let (edge, shadows) = field_edge(&k, focused, false);
+        let (edge, shadows) = if self.width.is_none() {
+            field_edge_inset(&k, focused, false)
+        } else {
+            field_edge(&k, focused, false)
+        };
         let shadows = if self.sidebar && !focused {
             Vec::new()
         } else {
@@ -250,17 +279,21 @@ impl RenderOnce for SearchField {
                 window,
             ))
             .child(
-                div().flex_1().min_w(px(0.)).child(placeholder_input(
-                    Input::new(&self.state)
-                        .appearance(false)
-                        .with_size(gpui_component::Size::Small)
-                        .px_0()
-                        .py_0()
-                        .n_body()
-                        .text_color(k.label),
-                    window,
-                    cx,
-                )),
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .child(placeholder_input(
+                        Input::new(&self.state)
+                            .appearance(false)
+                            .with_size(gpui_component::Size::Small)
+                            .px_0()
+                            .py_0()
+                            .n_body()
+                            .text_color(k.label),
+                        window,
+                        cx,
+                    )),
             )
     }
 }
@@ -289,6 +322,9 @@ mod tests {
             assert_eq!(s[0].spread_radius, metrics::FOCUS_RING);
             let (_, s) = field_edge(&k, true, false);
             assert_eq!(s[0].color, k.focus);
+            // T1-12: a full-width field keeps its ring inside its edge.
+            let (_, s) = field_edge_inset(&k, true, false);
+            assert!(s.iter().all(|s| s.inset));
         }
     }
 }

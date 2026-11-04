@@ -2,6 +2,7 @@
 //! label/value rows separated by inset hairlines, a header above and a
 //! footer below; the inline value field that edits a value in place.
 
+use crate::ui::truncate::TruncText;
 use gpui::{
     AnyElement, App, AppContext as _, ElementId, Entity, Focusable as _, InteractiveElement as _,
     IntoElement, KeyDownEvent, ParentElement, RenderOnce, SharedString, Styled, TextAlign, Window,
@@ -157,14 +158,10 @@ impl FormRow {
     pub fn value(mut self, text: impl Into<SharedString>, cx: &App) -> Self {
         let k = native_colors(cx);
         self.value = Some(
-            div()
+            TruncText::new(text)
                 .n_body()
                 .n_figures()
                 .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(text.into())
                 .into_any_element(),
         );
         self
@@ -194,25 +191,9 @@ impl RenderOnce for FormRow {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .n_body()
-                            .text_color(k.label)
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(self.label),
-                    )
+                    .child(TruncText::new(self.label).n_body().text_color(k.label))
                     .when_some(self.detail, |d, t| {
-                        d.child(
-                            div()
-                                .n_subheadline()
-                                .text_color(k.secondary)
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .child(t),
-                        )
+                        d.child(TruncText::new(t).n_subheadline().text_color(k.secondary))
                     }),
             )
             .when_some(self.value, |d, v| {
