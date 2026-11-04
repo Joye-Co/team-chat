@@ -26,4 +26,21 @@ crate::copy! {
     BANNER_PERCENT = "{percent}%",
     BANNER_MANUAL = "需要手动安装新版本",
     BANNER_MANUAL_DETAIL = "安装盘已在访达中打开",
+    // --- v14/t4 update ---
+    VERSION_TITLE = "版本 {version}",
+    FROM_TO = "当前 {current} → 新版本 {version}",
+    DOWNLOAD_PROGRESS = "{percent}% · {done} / {total} MB",
+    CANCEL_DOWNLOAD = "取消下载",
+    NOTES = "查看更新内容",
+    NOTES_TITLE = "{version} 更新内容",
+    NOTES_DESCRIPTION = "这个版本改了什么。",
+    NOTES_OK = "好",
+    MANUAL_STEPS = "安装盘已在访达中打开：",
+    MANUAL_STEP_1 = "1. 退出 {product}",
+    MANUAL_STEP_2 = "2. 把安装盘里的 {product} 拖到“应用程序”",
+    MANUAL_STEP_3 = "3. 替换旧版本后再打开",
+    READY_TITLE = "{product} {version} 已经下载好了",
+    READY_BODY = "当前 {current} → {version}，安装时会重启。",
+    PREVIEW_NOTES = "· 消息列表滚动更顺\n· 登录后不再偶尔漏掉新消息\n· 产出页可以按话题筛选",
+    // --- end v14/t4 update ---
 }
