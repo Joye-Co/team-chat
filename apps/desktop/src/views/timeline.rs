@@ -693,6 +693,7 @@ impl Render for TimelineView {
                 .into_any_element();
         };
         self.after_scroll(window, cx);
+        self.place_revealed(cx);
         self.keep_ticking(cx);
         // The list lays out after the header: when what it painted changes
         // whether a card is on screen, draw the header again.
@@ -724,11 +725,11 @@ impl Render for TimelineView {
             } else {
                 t::JUMP_LATEST.to_string()
             };
+            // Its own strip under the list, so it never covers a row.
             div()
-                .absolute()
-                .bottom(space::S12)
-                .left_0()
-                .right_0()
+                .flex_none()
+                .pt(space::S8)
+                .pb(space::S4)
                 .flex()
                 .justify_center()
                 .child(
@@ -740,6 +741,7 @@ impl Render for TimelineView {
                     )),
                 )
         });
+        let search_bar = self.render_search_bar(cx);
         let jump_unread = self.first_unread_above().then(|| {
             div()
                 .absolute()
@@ -809,6 +811,7 @@ impl Render for TimelineView {
                 self.show_header
                     .then(|| self.render_header(&topic, window, cx)),
             )
+            .children(search_bar)
             .child(
                 div()
                     .relative()
@@ -817,9 +820,9 @@ impl Render for TimelineView {
                     .child(timeline)
                     .child(fade)
                     .children(loading)
-                    .children(jump_unread)
-                    .children(jump),
+                    .children(jump_unread),
             )
+            .children(jump)
             // The 话题 page shows a member at work as the plan card at the
             // foot of the list (`timeline/plan.rs`), not the pending row.
             .children((!self.v2).then(|| self.render_live(window, cx)).flatten())
@@ -829,6 +832,111 @@ impl Render for TimelineView {
             )
             .children(self.probe_element())
             .into_any_element()
+    }
+}
+
+impl TimelineView {
+    /// The search bar of a 话题 opened at a search hit (COMPLETENESS §2.17):
+    /// 40 pt under the toolbar, the query, `2 / 7`, the previous and next
+    /// hit, and close (back to the newest message).
+    fn render_search_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::{
+            copy::search as sc,
+            ui::native::{NativeType as _, borderless_variant, metrics, native_colors},
+        };
+        use gpui_component::{
+            Disableable as _, Sizable as _,
+            button::{Button, ButtonVariants as _},
+        };
+        let search = self.focus.search.as_ref()?;
+        let n = native_colors(cx);
+        let total = search.hits.len();
+        let button = |id: &'static str, sym: Sym, name: &'static str, enabled: bool| {
+            Button::new(id)
+                .custom(borderless_variant(cx))
+                .with_size(metrics::BUTTON_REGULAR)
+                .size(metrics::BUTTON_REGULAR)
+                .p_0()
+                .rounded(metrics::BUTTON_REGULAR_RADIUS)
+                .accessibility_label(name)
+                .tooltip(name)
+                .disabled(!enabled)
+                .child(sym.icon(ui::SymSize::INLINE).text_color(if enabled {
+                    n.label
+                } else {
+                    n.tertiary
+                }))
+        };
+        let leading = if self.v2 {
+            v2::LEADING
+        } else {
+            theme::CONTENT_GUTTER
+        };
+        Some(
+            div()
+                .flex_none()
+                .h(px(40.))
+                .pl(leading)
+                .pr(v2::SIDE)
+                .border_b_1()
+                .border_color(n.separator)
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(ui::sym(Sym::Search, ui::SymSize::INLINE, n.secondary))
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .max_w(px(240.))
+                        .h(theme::size::CHIP)
+                        .px(space::S8)
+                        .rounded(theme::radius::SM)
+                        .bg(n.fill)
+                        .flex()
+                        .items_center()
+                        .n_body()
+                        .text_color(n.label)
+                        .child(div().min_w(px(0.)).one_line().child(search.query.clone())),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .flex_none()
+                        .t_meta()
+                        .tnum()
+                        .text_color(n.secondary)
+                        .child(fill(
+                            sc::BAR_POSITION,
+                            &[
+                                ("n", &(search.index + 1).to_string()),
+                                ("total", &total.to_string()),
+                            ],
+                        )),
+                )
+                .child(
+                    button(
+                        "search-older",
+                        Sym::ChevronUp,
+                        sc::BAR_OLDER,
+                        search.index + 1 < total,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.step_search(true, cx))),
+                )
+                .child(
+                    button(
+                        "search-newer",
+                        Sym::ChevronDown,
+                        sc::BAR_NEWER,
+                        search.index > 0,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.step_search(false, cx))),
+                )
+                .child(
+                    button("search-close", Sym::Close, sc::BAR_CLOSE, true)
+                        .on_click(cx.listener(|this, _, _, cx| this.close_search(cx))),
+                )
+                .into_any_element(),
+        )
     }
 }
 

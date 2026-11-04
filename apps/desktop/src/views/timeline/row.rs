@@ -507,7 +507,8 @@ impl TimelineView {
             .gap(space::S12)
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {
-                el.bg(colors.me_bg.opacity(self.highlight_alpha(key)))
+                let band = crate::ui::native::native_colors(cx).fill;
+                el.bg(band.opacity(self.highlight_alpha(key)))
             })
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let key = hover_key.to_string();
