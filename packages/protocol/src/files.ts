@@ -279,7 +279,12 @@ export type ArtifactDataFrame = z.infer<typeof ArtifactDataFrame>;
 export const ArtifactDataAck = z.object({ dataRev: z.int().positive() });
 export type ArtifactDataAck = z.infer<typeof ArtifactDataAck>;
 
-export const ArtifactReplyError = z.object({ code: z.enum(["declined", "failed"]), message: z.string().max(200) });
+export const ArtifactReplyError = z.object({
+  code: z.enum(["declined", "failed"]),
+  message: z.string().max(200),
+  /** 1.1: why, as a short id (`run.ended`: no run of the member answers the page). */
+  reason: z.string().min(1).max(64).optional(),
+});
 /** `{ t: "artifact.reply" }` (1.1): the bot answers a page `ask` (private to the asker). */
 export const ArtifactReplyFrame = z
   .object({

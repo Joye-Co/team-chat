@@ -1271,13 +1271,17 @@ page event of one of its 产出 versions (`Cause.event` is the page event's name
 
 ```ts
 { t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result { dataRev }
-{ t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message } }
+{ t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message, reason? } }
 transient artifact.event: { groupId, topicId, artifactId, version, eventId, name, kind, payload?, actorId, at }   // to the version's creator
 transient artifact.data:  { groupId, artifactId, version, dataRev, data? /* inline when <= 64 KiB */, cause? }    // to every member
 transient artifact.reply: { groupId, eventId, ok, payload?, error? }                                               // to the asker only
 GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
 PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
 ```
+
+A page `ask` that no run of the version's runner member will answer (the run ended and none is
+open in the topic) gets `artifact.reply` from that member at once: `ok: false`, `error { code:
+"declined", reason: "run.ended" }`, so the page's promise settles.
 
 Audit actions: `card.event`, `artifact.event` (payload: first 1 KiB, redacted), `artifact.data`
 (`{version, dataRev, bytes}`, no content).

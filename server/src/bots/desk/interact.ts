@@ -6,7 +6,8 @@
 // WebSocket frames and answered with `run.output.result`.
 import { ClientFrame, type ExpectMode, type RunInteractionFrame } from "@chat/protocol";
 import { isGroupMember } from "../../core/db";
-import { ApiError, type Result, schemaReason, toErrorBody } from "../../core/errors";
+import { roomStub } from "../../core/env";
+import { ApiError, type Result, schemaReason, toErrorBody, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { type FrameContext, frameHandlers, frameValidators } from "../../core/registry";
 import { answerBlocks, cardEventText, pageEventText } from "../answers";
@@ -28,6 +29,8 @@ export const OUTPUT_TIMEOUT_MS = 15_000;
 export const OUTPUT_DEADLINE_MS = OUTPUT_TIMEOUT_MS - 3000;
 
 const HOUR_MS = 3600_000;
+/** Room RPC of the 产出 bridge (files/bridge.ts): the receiver of a page `ask` answers it. */
+const ARTIFACT_REPLY_RPC = "artifacts.reply";
 
 /** What the client is told: who responds and how soon. */
 export interface DeskExpect {
@@ -96,6 +99,11 @@ export abstract class DeskInteract extends DeskTakeover {
         await this.queueInteraction(target, x, actor);
         return this.runExpect(target);
       }
+      // A page `ask` with no run to answer it is declined at once, so the page's promise settles.
+      if (x.source.kind === "artifact" && x.source.ask) {
+        await this.declinePageAsk(x);
+        return { mode: "none" };
+      }
       if (target) return { mode: "none" };
       // cards2 (F5): a retract never starts a run (no run has the answer).
       if (x.event === "answer.retract") return { mode: "none" };
@@ -122,6 +130,22 @@ export abstract class DeskInteract extends DeskTakeover {
       if (started.ended_at !== null) return { mode: "none" };
       return { mode: "starting", etaMs: ETA_MS.starting };
     });
+  }
+
+  /** Answers a page `ask` that no run of this member answers: declined, reason `run.ended`. */
+  protected async declinePageAsk(x: InteractionIn): Promise<void> {
+    if (x.source.kind !== "artifact") return;
+    try {
+      unwrap(
+        await roomStub(this.env, x.groupId).rpc(x.groupId, ARTIFACT_REPLY_RPC, this.actor(), {
+          eventId: x.source.eventId,
+          ok: false,
+          error: { code: "declined", message: "no run of this member is open", reason: "run.ended" },
+        }),
+      );
+    } catch (err) {
+      this.log.warn("page ask decline failed", { groupId: x.groupId, err });
+    }
   }
 
   /** The text form (with the envelope) for an older daemon or a run prompt. */

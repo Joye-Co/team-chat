@@ -266,10 +266,14 @@ export abstract class DeskEvents extends DeskRuns {
    * the room closes its retract window (INTERACT §3.6, "the member starts acting"). A room
    * without the RPC lets the answer stand.
    */
-  protected async answerStands(groupId: string, seq: number, close: boolean): Promise<boolean> {
+  protected async answerStands(groupId: string, seq: number, close: boolean, liveAsk = false): Promise<boolean> {
     try {
-      const res = unwrap(await this.room({ group_id: groupId }).rpc(groupId, CARD_ANSWER_TAKEN_RPC, this.actor(), { seq, close })) as { retracted?: boolean };
-      return res?.retracted !== true;
+      const res = unwrap(await this.room({ group_id: groupId }).rpc(groupId, CARD_ANSWER_TAKEN_RPC, this.actor(), { seq, close, liveAsk })) as {
+        retracted?: boolean;
+        askOpen?: boolean;
+      };
+      // With `liveAsk`, an answer whose ask was closed, expired or superseded starts no run.
+      return res?.retracted !== true && !(liveAsk && res?.askOpen === false);
     } catch (err) {
       this.log.warn("answer check failed", { groupId, seq, err });
       return true;

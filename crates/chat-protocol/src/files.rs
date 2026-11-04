@@ -691,6 +691,13 @@ pub enum ArtifactReplyCode {
 pub struct ArtifactReplyError {
     pub code: ArtifactReplyCode,
     pub message: String,
+    /// 1.1: why, as a short id (`run.ended`: no run of the member answers the page).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reason: Option<String>,
 }
 
 /// `{ t: "artifact.reply" }` (1.1): the bot answers a page `ask` (private to the asker).
@@ -734,6 +741,9 @@ impl ArtifactReplyFrame {
                 return fail("error.code", "declined or failed");
             }
             check_chars("error.message", &e.message, 0, 200)?;
+            if let Some(r) = &e.reason {
+                check_chars("error.reason", r, 1, 64)?;
+            }
         }
         if self
             .payload

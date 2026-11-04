@@ -640,6 +640,13 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   ok("transient/artifact.data-ref.json", "TransientEvent", { type: "artifact.data", groupId: G, artifactId: ART, version: 1, dataRev: 3 }, "over 64 KiB: GET the data");
   ok("transient/artifact.reply.json", "TransientEvent", { type: "artifact.reply", groupId: G, eventId: EV(20), ok: true, payload: { series: [1, 1, 1, 2] } });
   ok("transient/artifact.reply-failed.json", "TransientEvent", { type: "artifact.reply", groupId: G, eventId: EV(22), ok: false, error: { code: "failed", message: "没算出来" } });
+  ok("transient/artifact.reply-run-ended.json", "TransientEvent", {
+    type: "artifact.reply",
+    groupId: G,
+    eventId: EV(23),
+    ok: false,
+    error: { code: "declined", message: "no run of this member is open", reason: "run.ended" },
+  });
 
   // -------------------------------------------------------------------------
   // HTTP: 产出 data and versions
