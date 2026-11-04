@@ -173,6 +173,9 @@ fn worst_artifact(mut a: ArtifactSummary, i: usize) -> ArtifactSummary {
     a
 }
 
+/// A long self-hosted server URL.
+const WORST_SERVER_URL: &str = "https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2";
+
 fn now_ms() -> Millis {
     crate::selftest::clock::now_ms()
 }
@@ -221,11 +224,12 @@ impl WorstCase {
 impl ChatProvider for WorstCase {
     fn session(&self) -> SessionState {
         match self.inner.session() {
-            SessionState::SignedIn { me, server_url } => {
+            SessionState::SignedIn { me, .. } => {
                 let i = self.member_index(&me.id);
                 SessionState::SignedIn {
                     me: member(me, i),
-                    server_url,
+                    // A 120-character self-hosted server (Settings, developer view).
+                    server_url: WORST_SERVER_URL.to_string(),
                 }
             }
             other => other,
