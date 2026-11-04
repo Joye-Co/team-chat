@@ -28,6 +28,8 @@ import {
   frameHandlers,
   frameValidators,
   gatewayMigrations,
+  gatewayAlarmHandlers,
+  gatewayFrameFilters,
   gatewayRpcHandlers,
 } from "./registry";
 
@@ -659,7 +661,54 @@ export class MemberGateway extends DurableObject<Env> {
    * transient types go only to sockets that sent `hello.features` with `interact/1`.
    */
   async deliver(frames: unknown[]): Promise<number> {
-    return this.sendFrames(frames);
+    return this.sendFrames(gatewayFrameFilters.length === 0 ? frames : frames.map((f) => this.filterFrame(f)));
+  }
+
+  private filterFrame(frame: unknown): unknown {
+    if (!frame || typeof frame !== "object") return frame;
+    let out = frame as Record<string, unknown>;
+    const c = this.gatewayContext();
+    for (const filter of gatewayFrameFilters) {
+      try {
+        out = filter(c, out);
+      } catch (err) {
+        this.log.error("gateway frame filter failed", { err });
+      }
+    }
+    return out;
+  }
+
+  private gatewayContext(): GatewayContext {
+    return {
+      env: this.env,
+      sql: this.sql,
+      log: this.log,
+      broadcast: (f) => this.broadcastFrame(f),
+      online: () => this.openSockets().length > 0,
+      memberId: this.memberId,
+      wakeAt: (at) => this.wakeAt(at),
+    };
+  }
+
+  /** Sets the alarm to `at` unless it is already set earlier. */
+  private wakeAt(at: number): void {
+    this.ctx.waitUntil(
+      (async () => {
+        const current = await this.ctx.storage.getAlarm();
+        if (current === null || current > at) await this.ctx.storage.setAlarm(at);
+      })().catch((err) => this.log.error("set alarm failed", { err })),
+    );
+  }
+
+  async alarm(): Promise<void> {
+    const c = this.gatewayContext();
+    for (const h of gatewayAlarmHandlers) {
+      try {
+        await h(c);
+      } catch (err) {
+        this.log.error("gateway alarm handler failed", { err });
+      }
+    }
   }
 
   /** True when a ready socket of this member sent `hello.features` with this feature. */
@@ -724,13 +773,6 @@ export class MemberGateway extends DurableObject<Env> {
   async rpc(name: string, args: unknown): Promise<unknown> {
     const h = gatewayRpcHandlers.get(name);
     if (!h) throw new Error(`unknown gateway rpc ${name}`);
-    const c: GatewayContext = {
-      env: this.env,
-      sql: this.sql,
-      log: this.log,
-      broadcast: (f) => this.broadcastFrame(f),
-      online: () => this.openSockets().length > 0,
-    };
-    return h(c, args);
+    return h(this.gatewayContext(), args);
   }
 }

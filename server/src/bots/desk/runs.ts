@@ -5,6 +5,8 @@ import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, cut, hasFeature, pickMachine } from "../dispatch";
+import { effectivePolicy } from "../../settings/approvals";
+import { policyPrompt } from "../../settings/rules";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
@@ -104,6 +106,8 @@ export abstract class DeskRuns extends DeskCore {
       request: { authorId: m.authorId, body: m.body },
       followUps,
       refs,
+      // settings: who must approve what (merge to main, publish, spend over the limit).
+      rules: policyPrompt(await effectivePolicy(this.env.DB)),
     });
   }
 

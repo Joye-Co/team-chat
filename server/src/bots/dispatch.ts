@@ -181,12 +181,15 @@ export function buildPrompt(opts: {
    * question without the server's quote lines.
    */
   refs?: string;
+  /** Settings: the team's approval rules for this bot (settings/rules.ts `policyPrompt`). */
+  rules?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
     `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
     "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
     ...(opts.refs ? [REFS_RULE] : []),
+    ...(opts.rules ? [opts.rules] : []),
     "",
     "Recent messages of the topic, oldest first:",
     ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`),

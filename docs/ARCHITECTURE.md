@@ -48,7 +48,7 @@ work needs. The wire contract is [protocol.md](protocol.md).
   `ctx.waitUntil` and Durable Object alarms instead.
 
 Server code layout: `server/src/core/` (router, auth, gateway, rooms), and one folder per
-feature: `files/`, `search/`, `bots/`, `integrations/`, `ops/`, `notify/`.
+feature: `files/`, `search/`, `bots/`, `integrations/`, `ops/`, `notify/`, `settings/`.
 
 ## Environments
 

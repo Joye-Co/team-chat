@@ -4,6 +4,8 @@
 // messages, approvals, stop), takeover (pause, resume, acceptance) and the BotDesk class itself
 // (external runs and reads).
 import { DurableObject } from "cloudflare:workers";
+import type { Approver } from "@chat/protocol";
+import { effectivePolicy } from "../../settings/approvals";
 import {
   AcceptanceItem,
   type BotRun,
@@ -403,6 +405,28 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
    */
   protected requester(r: Pick<RunRow, "requested_by">): string[] {
     return r.requested_by === ANONYMOUS_ID ? [] : [r.requested_by];
+  }
+
+  /** settings: who answers this bot's approvals (谁可以批准): the team policy's approver. */
+  protected async approver(): Promise<Approver> {
+    return (await effectivePolicy(this.env.DB)).approver;
+  }
+
+  /**
+   * settings: the people to mention and wait on for an approval: the requester, or the active
+   * human owners in the run's group when the policy says owners approve (mentions must be group
+   * members; owners outside the group can still answer).
+   */
+  protected async approvers(r: Pick<RunRow, "requested_by" | "group_id">): Promise<string[]> {
+    if ((await this.approver()) !== "owners") return this.requester(r);
+    const owners = await this.env.DB.prepare(
+      `SELECT m.id FROM members m JOIN group_members g ON g.member_id = m.id AND g.group_id = ?
+       WHERE m.level = 'owner' AND m.kind = 'human' AND m.deactivated = 0 ORDER BY m.id LIMIT 20`,
+    )
+      .bind(r.group_id)
+      .all<{ id: string }>()
+      .catch(() => ({ results: [] as { id: string }[] }));
+    return owners.results.map((x) => x.id);
   }
 
   protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {

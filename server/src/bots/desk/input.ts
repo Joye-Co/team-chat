@@ -1,6 +1,6 @@
 // BotDesk input: topic messages for the bot (new runs, follow-up input, text approvals), card
 // presses on approval cards, and stopping runs (cancel by a member, a deactivated bot).
-import type { BotRun } from "@chat/protocol";
+import type { Approver, BotRun } from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
@@ -52,9 +52,20 @@ export abstract class DeskInput extends DeskStall {
   }
 
 
-  /** Only a human who is the run's requester, or an owner, may answer its approval. */
-  protected mayApprove(r: RunRow, actorId: string, kind: string | null | undefined, level: string | null | undefined): boolean {
-    return kind === "human" && (actorId === r.requested_by || level === "owner");
+  /**
+   * Only a human who is the run's requester, or an owner, may answer its approval. settings:
+   * with approver "owners" (谁可以批准 = 管理员) only owners may.
+   */
+  protected mayApprove(
+    r: RunRow,
+    actorId: string,
+    kind: string | null | undefined,
+    level: string | null | undefined,
+    approver: Approver = "requester",
+  ): boolean {
+    if (kind !== "human") return false;
+    if (level === "owner") return true;
+    return approver !== "owners" && actorId === r.requested_by;
   }
 
   protected async auditApproval(r: RunRow, actorId: string, decision: string, via: "card" | "text"): Promise<void> {
@@ -80,7 +91,7 @@ export abstract class DeskInput extends DeskStall {
     const link = r.machine_id ? linkStub(this.env, r.machine_id) : null;
     const decision = r.approval_id ? approvalDecision(m.body) : null;
     // The room hook sends only human messages; other members' 同意 stays plain input.
-    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel)) {
+    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approver())) {
       await this.auditApproval(r, m.authorId, decision, "text");
       // Recorded as an input so a retried call does not answer twice.
       this.sql.exec(
@@ -132,7 +143,7 @@ export abstract class DeskInput extends DeskStall {
     if (!r?.machine_id || !r.approval_id) return;
     const decision = a.actionId.startsWith("approve:") ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
     if (!decision) return;
-    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel)) {
+    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approver())) {
       this.log.info("approval press ignored", { runId: r.id, actorId: a.actorId, kind: a.actorKind });
       return;
     }
