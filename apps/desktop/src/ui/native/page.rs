@@ -61,6 +61,8 @@ pub mod m {
     pub const FOOTER_ROW: Pixels = px(40.);
     /// The footer under a table: the count and the pagination (§2.7).
     pub const TABLE_FOOTER: Pixels = px(48.);
+    /// The rows-per-page select of a table footer (§2.7).
+    pub const PER_PAGE_SELECT: Pixels = px(80.);
     /// A count pill.
     pub const PILL: Pixels = px(20.);
     /// A badge.
@@ -375,11 +377,18 @@ pub fn list_footer(
 
 /// Where a table is in its pages, and how to move: `go(page)` with a
 /// 1-based page. With one page every direction is disabled at 50 %.
+/// `per_page` is the rows-per-page the footer's select shows;
+/// `set_per_page` picks another (`None`: the select is disabled at 50 %).
 pub struct Pager {
     pub page: usize,
     pub pages: usize,
     pub go: Option<std::rc::Rc<dyn Fn(usize, &mut gpui::Window, &mut App)>>,
+    pub per_page: usize,
+    pub set_per_page: Option<std::rc::Rc<dyn Fn(usize, &mut gpui::Window, &mut App)>>,
 }
+
+/// The rows-per-page choices of a table footer.
+pub const PER_PAGE_CHOICES: [usize; 4] = [10, 20, 50, 100];
 
 impl Pager {
     /// One page, nothing to move to.
@@ -388,19 +397,67 @@ impl Pager {
             page: 1,
             pages: 1,
             go: None,
+            per_page: PER_PAGE_CHOICES[0],
+            set_per_page: None,
         }
     }
 }
 
 /// The footer under a table (§2.7): px 16, h48, border-t; the count (`共 68
-/// 个`, or `已选 0 / 68 行`) 14 muted at the left; at the right `第 1 / 7
-/// 页` 14 medium and the first, previous, next and last outline icon buttons
+/// 个`, or `已选 0 / 68 行`) 14 muted at the left; at the right, gap 32:
+/// `每页` 14 medium with the rows-per-page select (h28, w80), `第 1 / 7 页`
+/// 14 medium and the first, previous, next and last outline icon buttons
 /// 28, gap 8. A direction that is not available is disabled at 50 %, never
 /// hidden.
 pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: &App) -> gpui::Div {
-    use super::buttons::{IconSize, disabled_push, icon_button_outline};
+    use super::buttons::{IconSize, PushSize, disabled_push, icon_button_outline, select_button};
+    use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
     let k = native_colors(cx);
-    let Pager { page, pages, go } = pager;
+    let Pager {
+        page,
+        pages,
+        go,
+        per_page,
+        set_per_page,
+    } = pager;
+    let per_page_select = {
+        let select = select_button(
+            SharedString::from(format!("{id}-per-page")),
+            per_page.to_string(),
+            PushSize::Small,
+            cx,
+        )
+        .w(m::PER_PAGE_SELECT);
+        match set_per_page {
+            Some(set) => select
+                .dropdown_menu(move |menu, _, _| {
+                    PER_PAGE_CHOICES.into_iter().fold(menu, |menu, n| {
+                        let set = set.clone();
+                        menu.item(
+                            PopupMenuItem::new(n.to_string())
+                                .checked(n == per_page)
+                                .on_click(move |_, window, cx| set(n, window, cx)),
+                        )
+                    })
+                })
+                .into_any_element(),
+            None => disabled_push(select, true, cx).into_any_element(),
+        }
+    };
+    let per_page_group = div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .child(
+            div()
+                .n_body()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.label)
+                .whitespace_nowrap()
+                .child(crate::copy::kit::TABLE_PER_PAGE),
+        )
+        .child(per_page_select);
     let pages = pages.max(1);
     let page = page.clamp(1, pages);
     let label = crate::copy::fill(
@@ -448,6 +505,7 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
                 .flex()
                 .items_center()
                 .gap(px(32.))
+                .child(per_page_group)
                 .child(
                     div()
                         .n_body()

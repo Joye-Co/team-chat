@@ -998,6 +998,8 @@ impl NativeKit {
                             page: 2,
                             pages: 3,
                             go: Some(std::rc::Rc::new(|_, _, _| {})),
+                            per_page: 10,
+                            set_per_page: Some(std::rc::Rc::new(|_, _, _| {})),
                         },
                         cx,
                     )),

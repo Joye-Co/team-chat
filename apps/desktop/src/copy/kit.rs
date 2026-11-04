@@ -2,6 +2,7 @@
 //! table footer.
 
 crate::copy! {
+    TABLE_PER_PAGE = "每页",
     TABLE_PAGE = "第 {page} / {pages} 页",
     TABLE_FIRST = "第一页",
     TABLE_PREVIOUS = "上一页",
