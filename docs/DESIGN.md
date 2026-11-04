@@ -548,7 +548,7 @@ choice forms and a status band. The member picks the blocks, their order and whi
 by side; TeamChat owns every size, color and motion. Members cannot send style keys (`color`,
 `padding`, `width` and the rest are refused by the server).
 
-**Status band** (every card except intent `info`): 32 pt, padding 0 16, `meta` 12/18, 1 pt bottom
+**Status band** (every card except intent `info`): 34 pt (`card_v2::STRIP`), padding 0 16, `meta` 12/18, 1 pt bottom
 rule; a mark (8 pt dot or glyph) + the word `meta` 600 + one detail (deadline, `1/3`, reason), cut
 with `…`. The band says the state once; the body never says it again.
 
