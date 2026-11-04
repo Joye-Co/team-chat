@@ -75,3 +75,8 @@ pub mod cards;
 /// (§9.7), the bordered list of a sheet and the app icon.
 pub mod overlays;
 // --- end v12/overlays ---
+// --- v13/ux-pages ---
+/// Page parts (COMPLETENESS.md §2.3–§2.18): section headers, framed lists,
+/// KPI cards, StatusBadge, Alert, Empty and skeleton states.
+pub mod page;
+// --- end v13/ux-pages ---
