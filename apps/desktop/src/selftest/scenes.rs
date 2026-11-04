@@ -679,7 +679,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "diagram-viewer",
-        about: "The diagram viewer zoomed to 250 %",
+        about: "The diagram viewer as it opens, at fit",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Viewer, cx),
@@ -1023,6 +1023,9 @@ fn diagram_ready(name: &str) -> Option<fn(&App) -> bool> {
         "diagram-inline" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Inline, cx)),
         "diagram-error" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Error, cx)),
         "diagram-viewer" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx)),
+        // --- t5-media ---
+        "diagram-loading" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Loading, cx)),
+        // --- end t5-media ---
         _ => None,
     }
 }
@@ -1065,6 +1068,38 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-states" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-states").expect("sample"), cx)
         }),
+        // --- t5-media ---
+        "media-inline-docs" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-docs").expect("sample"),
+                cx,
+            )
+        }),
+        "media-inline-data" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-data").expect("sample"),
+                cx,
+            )
+        }),
+        "media-inline-av" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-av").expect("sample"),
+                cx,
+            )
+        }),
+        "media-viewer-loading" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-viewer-loading").expect("sample"),
+                cx,
+            )
+        }),
+        "media-viewer-failed" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-viewer-failed").expect("sample"),
+                cx,
+            )
+        }),
+        // --- end t5-media ---
         _ => None,
     }
 }

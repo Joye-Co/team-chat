@@ -7,7 +7,7 @@ use gpui::{
     App, ClipboardEntry, ClipboardItem, Div, ElementId, Hsla, ImageFormat, IntoElement,
     ParentElement, SharedString, Styled, div, px,
 };
-use gpui_component::{button::Button, notification::Notification};
+use gpui_component::button::Button;
 
 use super::{Screen, state::Target};
 use crate::{
@@ -17,8 +17,8 @@ use crate::{
     ui::{self, NamedButton as _, Sym},
 };
 
-/// The frame of an inline preview (NATIVE.md §9.2): the card container,
-/// radius 12, `fill`, no border, no shadow.
+/// The frame of an inline preview (COMPLETENESS.md §2.4): the card container, radius 14,
+/// a 1 px border, shadow sm, 640 wide in a thread.
 pub fn card(cx: &App) -> Div {
     crate::ui::native::cards::card_frame(cx).flex().flex_col()
 }
@@ -29,7 +29,7 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     div()
         .flex_none()
         .h(crate::ui::native::tokens::height::LG)
-        .px(space::S14)
+        .px(space::S16)
         .flex()
         .items_center()
         .gap(space::S8)
@@ -109,7 +109,7 @@ pub fn footer(cx: &App) -> Div {
     div()
         .flex_none()
         .min_h(px(32.))
-        .px(space::S14)
+        .px(space::S16)
         .flex()
         .items_center()
         .gap(space::S8)
@@ -135,8 +135,12 @@ pub fn screen_tool(
 
 // --- actions ------------------------------------------------------------------------
 
+/// A done action (copied, saved, sent) as the kit Toast (§2.16): a success icon and the
+/// words.
 fn toast(text: &str, cx: &mut App) {
-    crate::views::files::notify(Notification::new().message(text.to_string()), cx);
+    crate::ui::overlay::Toast::new(Sym::Check, text.to_string())
+        .tone(crate::ui::overlay::Tone::Success)
+        .push(cx);
 }
 
 /// Copies an image file to the clipboard.

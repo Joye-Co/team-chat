@@ -6,15 +6,16 @@ use std::{rc::Rc, sync::Arc};
 use chat_core::proto::BlockRef;
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    RenderOnce, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Sizable as _, tooltip::Tooltip};
+use gpui_component::tooltip::Tooltip;
 
 use super::{address_of, label};
 use crate::{
     copy::refs as c,
     data::{ChatProvider, DraftRef, Message},
-    theme::{self, Type as _, radius, space},
+    theme::{self, Type as _, space},
     ui::{self, NamedButton as _, Sym},
     views::timeline::extras::{ExtrasContext, MessageExtra, Placement},
 };
@@ -133,11 +134,14 @@ pub fn composer_chip(
         .items_center()
         .gap(space::S6)
         .max_w(px(320.))
-        // Quiet inline text with a symbol (NATIVE.md rule 4): no chip box;
-        // a flash marks it with the selection fill only.
-        .h(px(22.))
-        .px(space::S4)
-        .rounded(radius::SM)
+        // §2.17 chip: h28, a 1 px border, radius 6; the × is a 28 ghost button at the
+        // chip's right edge. A flash marks it with the selection fill.
+        .h(crate::ui::native::tokens::height::SM)
+        .pl(space::S8)
+        .rounded(crate::ui::native::tokens::radius::ITEM)
+        .border_1()
+        .border_color(crate::ui::native::native_colors(cx).separator)
+        .bg(crate::ui::native::native_colors(cx).content)
         .when(flashing, |d| d.bg(k.sel))
         .text_size(crate::ui::native::tokens::text::UI.0)
         .line_height(px(18.))
@@ -157,12 +161,22 @@ pub fn composer_chip(
                 .gap(space::S4)
                 .one_line()
                 .when(!lead.trim().is_empty(), |d| {
+                    // The lead gives way to the part; its own ellipsis marks the cut, so
+                    // no second "…" leaves a gap before the part.
                     d.child(
                         div()
                             .min_w_0()
                             .flex_shrink(1.)
-                            .one_line()
-                            .child(lead.trim_end().trim_end_matches('·').trim_end().to_string()),
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(
+                                lead.trim_end()
+                                    .trim_end_matches('…')
+                                    .trim_end_matches('·')
+                                    .trim_end()
+                                    .to_string(),
+                            ),
                     )
                 })
                 // The part stays whole (`fit` already cut it); the lead gives way.
@@ -175,11 +189,9 @@ pub fn composer_chip(
             ui::native::icon_button_bare(
                 ElementId::Name(format!("{id:?}-x").into()),
                 Sym::Close,
-                ui::native::IconSize::Regular,
+                ui::native::IconSize::Small,
             )
-            .with_size(px(18.))
-            .rounded(px(9.))
-            .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
+            .rounded(crate::ui::native::tokens::radius::ITEM)
             .named(c::REMOVE)
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
@@ -411,14 +423,72 @@ pub fn shown_body<'a>(message: &'a Message, provider: &Arc<dyn ChatProvider>) ->
     super::strip_prefix(&message.body, &refs).unwrap_or(&message.body)
 }
 
-/// A chip row (the composer of a 话题 or of 单独问).
+/// Chips shown before the rest folds into "+N": with chips at most 320 wide, 3 chips and
+/// the "+N" chip stay within 2 rows of a composer (§2.17).
+pub const SHOWN_CHIPS: usize = 3;
+
+/// The chips of a composer with the rest folded into one "+N" chip (§2.17: at most 2
+/// rows). `labels` are the chips' full labels, in order; the "+N" tooltip lists the
+/// folded ones.
+pub fn capped(chips: Vec<AnyElement>, labels: &[String]) -> Vec<AnyElement> {
+    if chips.len() <= SHOWN_CHIPS + 1 {
+        return chips;
+    }
+    let rest = chips.len() - SHOWN_CHIPS;
+    let folded = labels
+        .iter()
+        .skip(SHOWN_CHIPS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut out: Vec<AnyElement> = chips.into_iter().take(SHOWN_CHIPS).collect();
+    out.push(MoreChip { rest, folded }.into_any_element());
+    out
+}
+
+/// The "+N" chip: the chip frame with the count of folded chips.
+#[derive(IntoElement)]
+struct MoreChip {
+    rest: usize,
+    folded: String,
+}
+
+impl RenderOnce for MoreChip {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let n = crate::ui::native::native_colors(cx);
+        let folded = self.folded;
+        div()
+            .id("ref-chips-more")
+            .flex_none()
+            .h(crate::ui::native::tokens::height::SM)
+            .px(space::S8)
+            .rounded(crate::ui::native::tokens::radius::ITEM)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.content)
+            .flex()
+            .items_center()
+            .t_small()
+            .tnum()
+            .text_color(n.secondary)
+            .child(crate::copy::fill(
+                c::MORE_CHIPS,
+                &[("n", &self.rest.to_string())],
+            ))
+            .when(!folded.is_empty(), |d| {
+                d.tooltip(move |window, cx| Tooltip::new(folded.clone()).build(window, cx))
+            })
+    }
+}
+
+/// A chip row (the composer of a 话题 or of 单独问): gap 8, at most 2 rows (the rest
+/// folds into "+N").
 pub fn row(chips: Vec<AnyElement>) -> AnyElement {
     div()
         .flex()
         .flex_wrap()
-        .gap_x(space::S12)
-        .gap_y(space::S2)
-        .children(chips)
+        .gap(space::S8)
+        .children(capped(chips, &[]))
         .into_any_element()
 }
 
