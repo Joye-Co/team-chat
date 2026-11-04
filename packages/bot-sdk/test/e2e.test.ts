@@ -453,6 +453,21 @@ describe("bot sdk e2e", () => {
     await expect(bot.http.putArtifactMedia(art.artifact.id, 2, { kind: "html", mime: "text/html", bytes: 30_000_000, preview: "ready" })).rejects.toMatchObject({ code: "invalid" });
   });
 
+  test("sets, keeps and clears its desk note; people see it in the group log and the list", async () => {
+    const set = await bot.http.setDeskNote(generalId, "  今天先把 1.1 发出去  ");
+    expect(set.seq).toBeGreaterThan(0);
+    const noted = await waitFor("desk.noted", () => events.find((e) => e.type === "desk.noted" && e.seq === set.seq));
+    expect(noted.actorId).toBe(botId);
+    expect((noted.data as { text: string }).text).toBe("今天先把 1.1 发出去");
+    expect((await bot.http.setDeskNote(generalId, "今天先把 1.1 发出去")).seq).toBeNull();
+    const list = await human.http.deskNotes(generalId);
+    expect(list.notes.find((n) => n.memberId === botId)).toMatchObject({ text: "今天先把 1.1 发出去", seq: set.seq });
+    await expect(human.http.setDeskNote(generalId, "人不能设")).rejects.toMatchObject({ code: "forbidden" });
+    await expect(bot.http.setDeskNote(generalId, "长".repeat(141))).rejects.toMatchObject({ code: "invalid" });
+    expect((await bot.http.setDeskNote(generalId, "")).seq).toBeGreaterThan(set.seq as number);
+    expect((await human.http.deskNotes(generalId)).notes.some((n) => n.memberId === botId)).toBe(false);
+  });
+
   test("reacts to a message and removes the reaction", async () => {
     const r = await human.startTopic(generalId, { body: "react to me" });
     expect(await bot.react(generalId, r.message.id, "👍")).toBe(true);
