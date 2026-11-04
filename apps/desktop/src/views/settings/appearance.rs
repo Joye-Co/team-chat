@@ -86,8 +86,11 @@ impl AppearancePage {
         let half = |(content, sidebar, line): (gpui::Rgba, gpui::Rgba, gpui::Rgba),
                     left: bool,
                     right: bool| {
+            // Equal halves: the bars must not size them (min width 0).
             div()
                 .flex_1()
+                .min_w_0()
+                .overflow_hidden()
                 .h_full()
                 .bg(content)
                 .when(left, |d| d.rounded_l(inner))
@@ -109,6 +112,7 @@ impl AppearancePage {
                 .child(
                     div()
                         .flex_1()
+                        .min_w_0()
                         .p(px(5.))
                         .flex()
                         .flex_col()

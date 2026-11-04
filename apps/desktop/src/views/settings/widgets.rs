@@ -800,40 +800,13 @@ pub fn popup_fixed(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
     width: Pixels,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> Button {
-    use crate::ui::{
-        native::{PushSize, PushStyle, metrics, native_colors, push_button},
-        sf_symbols::{Sf, Weight, symbol},
-    };
-    let k = native_colors(cx);
-    push_button(id, "", PushStyle::Outline, PushSize::Regular, cx)
-        .w(width)
-        .pl(metrics::BUTTON_REGULAR_PAD)
-        .pr(metrics::FIELD_PAD)
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(crate::ui::native::tokens::space::S6)
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .child(title.into()),
-                )
-                .child(symbol(
-                    Sf::Popup,
-                    metrics::POPUP_CHEVRON_SLOT,
-                    Weight::Semibold,
-                    k.secondary,
-                    window,
-                )),
-        )
+    // The kit's select (1.8): the label from the leading 12, truncating,
+    // the chevron pinned at the trailing edge, so every select in a column
+    // lines up (C1-06).
+    crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx).w(width)
 }
 
 /// A row under a list group: the `+`/`−` buttons, then a quiet line.
