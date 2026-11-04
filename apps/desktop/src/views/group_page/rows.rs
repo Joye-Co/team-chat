@@ -6,6 +6,7 @@
 //! Rows have no hover fill and the arrow cursor (§10); a row that is
 //! selected uses the native list selection of `ui::native::CompactRow`.
 
+use crate::ui::native::tokens::space as tsp;
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,
     SharedString, Stateful, Styled, div, prelude::FluentBuilder as _, px,
@@ -22,21 +23,21 @@ use crate::{
 
 /// A Mail-like row (§9.4): 56 pt.
 pub const ROW: Pixels = px(56.);
-/// A 成员 list row (§9.5): 52 pt.
-pub const MEMBER_ROW: Pixels = px(52.);
+/// A 成员 list row (COMPLETENESS.md §2.6 ListRow): 56.
+pub const MEMBER_ROW: Pixels = px(56.);
 /// The avatar of a list row.
-pub const AVATAR: Pixels = px(32.);
-/// The gap between a row's avatar and its text.
-pub const ROW_GAP: Pixels = px(10.);
+pub const AVATAR: Pixels = tsp::S32;
+/// The gap between a row's avatar and its text (§2.6: 12).
+pub const ROW_GAP: Pixels = tsp::S12;
 /// The padding inside a row, around its selection fill.
-pub const ROW_PAD: Pixels = px(8.);
+pub const ROW_PAD: Pixels = tsp::S8;
 /// The one leading content inset (§2): the toolbar title starts 20 pt after
 /// the sidebar, and section headers, row avatars and detail titles start
 /// on that same edge. It follows the toolbar leading token, so a change of
 /// the shell's inset moves every page with it.
 pub const LEADING: Pixels = metrics::TOOLBAR_LEADING;
 /// The gap between the two buttons of a row.
-pub const BUTTON_GAP: Pixels = px(6.);
+pub const BUTTON_GAP: Pixels = tsp::S6;
 
 /// Where a page's toolbar title starts: 20 pt after the sidebar, or after
 /// the traffic lights when the sidebar is hidden (§2).
@@ -60,11 +61,11 @@ pub fn section_header(
     div()
         .flex_none()
         .h(px(28.))
-        .mt(px(12.))
+        .mt(tsp::S12)
         .px(LEADING)
         .flex()
         .items_center()
-        .gap(px(6.))
+        .gap(tsp::S6)
         .child(div().n_headline().text_color(k.label).child(label.into()))
         .children(count.map(|n| div().n_body().n_figures().text_color(k.secondary).child(n)))
 }
@@ -74,14 +75,10 @@ pub fn sym(sym: Sym, size: SymSize, color: Hsla) -> AnyElement {
     icons::sym(sym, size, color).into_any_element()
 }
 
-/// One line of text cut with `…`.
-pub fn line(text: impl Into<SharedString>) -> gpui::Div {
-    div()
-        .min_w(px(0.))
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_ellipsis()
-        .child(text.into())
+/// One line of text cut with `…`, with the full text in a tooltip when it
+/// was cut (the kit's [`TruncText`](crate::ui::truncate::TruncText), §2.21).
+pub fn line(text: impl Into<SharedString>) -> crate::ui::truncate::TruncText {
+    crate::ui::truncate::TruncText::new(text)
 }
 
 /// The ink of a row: (title, secondary, fill) for its selection state.
@@ -95,13 +92,8 @@ pub struct RowInk {
 impl RowInk {
     pub fn new(selection: Option<(Hsla, Hsla)>, cx: &App) -> Self {
         let k = native_colors(cx);
+        // D10: a selected row is the muted fill with the normal ink.
         match selection {
-            // On `accent` the secondary text is `onAccent`, a little quieter.
-            Some((fill, text)) if fill == k.accent => Self {
-                title: text,
-                secondary: text.opacity(0.78),
-                fill: Some(fill),
-            },
             Some((fill, _)) => Self {
                 title: k.label,
                 secondary: k.secondary,
@@ -116,13 +108,13 @@ impl RowInk {
     }
 }
 
-/// A Mail-like list row (§9.4): `leading` (an avatar 32) on the shared
-/// leading edge, the title (Headline) with one trailing slot on its line
-/// (the time, or the progress of a run), and one `secondary` line under it
-/// with an optional trailing slot (small push buttons, a progress). Rows
-/// have no other trailing column, so every time sits at the trailing edge.
-/// `separator` draws the hairline under the row, inset to the text column.
-/// The caller adds `on_click` and `context_menu`.
+/// A list row (COMPLETENESS.md §2.6): `leading` (an avatar 32) on the
+/// shared leading edge, the title (14 medium) over one 12 muted line, then
+/// the right cluster (`title_trailing`, a StatusBadge, then
+/// `second_trailing`) centered on the row center. Text truncates with `…`;
+/// the caller adds a tooltip with the full text, `on_click` and
+/// `context_menu`. `separator` draws the hairline under the row, inset to
+/// the text column.
 #[allow(clippy::too_many_arguments)]
 pub fn mail_row(
     id: impl Into<ElementId>,
@@ -137,6 +129,7 @@ pub fn mail_row(
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let k = native_colors(cx);
+    let has_right = title_trailing.is_some() || second_trailing.is_some();
     div()
         .id(id.into())
         .relative()
@@ -146,6 +139,9 @@ pub fn mail_row(
         .px(ROW_PAD)
         .rounded(metrics::LIST_ROW_RADIUS)
         .when_some(ink.fill, |d, f| d.bg(f))
+        .when(ink.fill.is_none(), |d| {
+            d.hover(|s| s.bg(k.fill.opacity(0.5)))
+        })
         .flex()
         .items_center()
         .gap(ROW_GAP)
@@ -153,43 +149,39 @@ pub fn mail_row(
         .child(
             div()
                 .flex_1()
-                .min_w(px(0.))
+                .min_w_0()
                 .flex()
                 .flex_col()
-                .gap(px(2.))
+                .gap(tsp::S2)
                 .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(line(title).flex_1().n_headline().text_color(ink.title))
-                        .children(
-                            title_trailing
-                                .map(|t| div().flex_none().flex().items_center().child(t)),
-                        ),
+                    line(title)
+                        .n_body()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(ink.title),
                 )
                 .child(
-                    // 20 pt, the height of a small push button, so rows with
-                    // and without buttons keep one rhythm.
                     div()
-                        .h(metrics::BUTTON_SMALL)
-                        .min_w(px(0.))
+                        .min_w_0()
+                        .h(tsp::S16)
                         .flex()
                         .items_center()
-                        .gap(px(8.))
-                        .n_subheadline()
+                        .overflow_hidden()
+                        .n_callout()
                         .text_color(ink.secondary)
-                        .child(div().flex_1().min_w(px(0.)).child(second))
-                        .children(second_trailing.map(|t| {
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(BUTTON_GAP)
-                                .child(t)
-                        })),
+                        .child(second),
                 ),
         )
+        .when(has_right, |d| {
+            d.child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(tsp::S8)
+                    .children(title_trailing)
+                    .children(second_trailing),
+            )
+        })
         .when(separator && ink.fill.is_none(), |d| {
             d.child(
                 div()
@@ -219,7 +211,7 @@ pub fn progress_slot(n: usize, m: usize, dot: Hsla, text: Hsla) -> AnyElement {
     div()
         .flex()
         .items_center()
-        .gap(px(4.))
+        .gap(tsp::S4)
         .child(sym(Sym::Live, SymSize::INLINE_SMALL, dot))
         .child(
             div()
@@ -275,8 +267,8 @@ pub fn state_line(
     div()
         .flex()
         .items_center()
-        .gap(px(4.))
-        .min_w(px(0.))
+        .gap(tsp::S4)
+        .min_w_0()
         .children(state.map(|(s, color, text)| {
             div()
                 .flex_none()
@@ -298,4 +290,46 @@ pub fn state_line(
 /// `Button` (a pull-down toolbar item): the look of `ToolbarGroup`.
 pub fn toolbar_capsule(item: impl IntoElement, _cx: &App) -> gpui::Div {
     crate::ui::native::toolbar_slot(item)
+}
+
+/// The h16 vertical separator a page toolbar puts before its right-pane
+/// toggle (§2.2: a separator h16, mx 8 by the toolbar's group gap).
+pub fn toolbar_separator(cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    div().flex_none().w(px(1.)).h(tsp::S16).bg(k.separator)
+}
+
+/// The region of a page whose first load failed (§2.15, §2.13): it takes
+/// the place of the content (no skeletons pulse under it), in a frame that
+/// hugs it, and says why, with `重试`, which reconnects now.
+pub fn failed_region(id: &str, services: &Services, cx: &App) -> AnyElement {
+    use crate::{
+        copy::common as cc,
+        ui::native::{PushSize, PushStyle, page, push_button},
+    };
+    let k = native_colors(cx);
+    let services = services.clone();
+    let retry = push_button(
+        SharedString::from(format!("{id}-retry")),
+        cc::PAGE_RETRY,
+        PushStyle::Outline,
+        PushSize::Small,
+        cx,
+    )
+    .on_click(move |_, _, _| services.provider.reconnect_now());
+    div()
+        .id(SharedString::from(format!("{id}-failed")))
+        .flex_none()
+        .flex()
+        .rounded(page::m::FRAME_RADIUS)
+        .border_1()
+        .border_color(k.separator)
+        .child(page::page_empty(
+            Sym::Warning,
+            cc::PAGE_LOAD_FAILED,
+            cc::PAGE_LOAD_FAILED_LINE,
+            vec![retry.into_any_element()],
+            cx,
+        ))
+        .into_any_element()
 }

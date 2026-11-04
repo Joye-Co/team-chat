@@ -42,27 +42,18 @@ use crate::{
     },
 };
 
-/// The columns of 需要你拍板: StatusBadge, time, and room for `看看` and
-/// one answer such as `发布到生产…`.
-pub const ASK_COLUMNS: Columns = Columns {
-    status: Some(gpui::px(80.)),
+/// The one column set of every 首页 list (§2.6, F27): StatusBadge, time,
+/// and room for `看看` and one answer. Rows with no action keep the column
+/// empty, so badges and times sit at one x in every section.
+pub const DESK_COLUMNS: Columns = Columns {
+    status: Some(gpui::px(96.)),
     time: Some(m::TIME_COLUMN),
     actions: Some(gpui::px(200.)),
 };
-/// The columns of 正在做: StatusBadge (`在做 3/5`) and the start time.
-pub const RUN_COLUMNS: Columns = Columns {
-    status: Some(gpui::px(96.)),
-    time: Some(m::TIME_COLUMN),
-    actions: None,
-};
-/// The columns of 做完了: the time.
-pub const DONE_COLUMNS: Columns = Columns {
-    status: None,
-    time: Some(m::TIME_COLUMN),
-    actions: None,
-};
 
-/// The label of a quick answer: `发布到生产…` when it asks first (§5.2).
+/// The label of a quick answer in a menu: `发布到生产…` when it asks first
+/// (a Mac menu item that opens a dialog ends with `…`). A button shows the
+/// plain label (§2.18: no trailing `…` in button labels).
 pub fn quick_label(quick: &QuickAnswer) -> String {
     if quick.confirm.is_some() {
         fill(c::DESK_ACTION_MORE, &[("label", &quick.label)])
@@ -139,9 +130,14 @@ pub fn ask_row(
         .local_answer(&key)
         .map(|l| (l.record.clone(), l.at, l.undoable))
         .or_else(|| a.answered.as_ref().map(|r| (r.record.clone(), r.at, false)));
+    // Each name in a bidi isolate, so a right-to-left name keeps the
+    // order of the line.
     let from = fill(
         c::DESK_ASK_FROM,
-        &[("name", &snap.name(&a.item.from)), ("topic", &topic)],
+        &[
+            ("name", &isolate(&snap.name(&a.item.from))),
+            ("topic", &isolate(&topic)),
+        ],
     );
     let (time, second, status, actions): (String, AnyElement, AnyElement, Option<AnyElement>) =
         match &done {
@@ -195,15 +191,15 @@ pub fn ask_row(
                         open_topic(&services, &g, &t, cx);
                     })
                 };
-                // Standard, not Default: a list holds many asks, and a view
-                // has at most one Default button (§5.2).
+                // §2.6: the answer is the primary sm button at the right
+                // edge; `看看` (outline) sits to its left.
                 let approve = quick_answer(a).map(|quick| {
                     let page = cx.entity();
                     let ask = a.clone();
                     push_button(
                         SharedString::from(format!("desk-approve-{key}")),
-                        quick_label(&quick),
-                        PushStyle::Outline,
+                        quick.label.clone(),
+                        PushStyle::Default,
                         PushSize::Small,
                         cx,
                     )
@@ -221,10 +217,8 @@ pub fn ask_row(
                             .flex()
                             .items_center()
                             .gap(gpui::px(8.))
-                            // `看看` keeps the trailing edge, so it lines up
-                            // in every row; the answer sits to its left.
-                            .children(approve)
                             .child(look)
+                            .children(approve)
                             .into_any_element(),
                     ),
                 )
@@ -247,7 +241,7 @@ pub fn ask_row(
     }
     .render(
         ElementId::Name(format!("desk-ask-{key}").into()),
-        ASK_COLUMNS,
+        DESK_COLUMNS,
         cx,
     )
     .on_click(move |_, _, cx| open_topic(&nav, &g, &t, cx))
@@ -316,7 +310,7 @@ pub fn run_row(
     }
     .render(
         ElementId::Name(format!("desk-run-row-{i}").into()),
-        RUN_COLUMNS,
+        DESK_COLUMNS,
         cx,
     )
     .on_click(move |_, _, cx| {
@@ -353,13 +347,14 @@ pub fn done_row(
     PageRow {
         media: Some(rows::avatar(member.as_ref(), AVATAR, cx)),
         second: Some(line(rest.join(" · ")).into_any_element()),
+        status: Some(page::status_badge(Status::Done, c::DESK_STATUS_DONE, cx)),
         time: Some(clock(d.at).into()),
         separator: !last,
         ..PageRow::new(d.title.clone())
     }
     .render(
         ElementId::Name(format!("desk-done-{i}").into()),
-        DONE_COLUMNS,
+        DESK_COLUMNS,
         cx,
     )
     .on_click(move |_, _, cx| open_topic(&s1, &g, &t, cx))
@@ -371,6 +366,11 @@ pub fn done_row(
         )
     })
     .into_any_element()
+}
+
+/// `text` in a first-strong bidi isolate (FSI … PDI).
+pub fn isolate(text: &str) -> String {
+    format!("\u{2068}{text}\u{2069}")
 }
 
 /// Jojo's priority as an Alert above the KPI row (§2.18): `Jojo 的提醒`,

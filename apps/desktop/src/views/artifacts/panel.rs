@@ -2,6 +2,7 @@
 //! click; 上传产出 picks an HTML file or a folder and uploads it as a new
 //! 产出, and each 产出 can get a new version the same way.
 
+use crate::ui::native::tokens::space as tsp;
 use std::path::PathBuf;
 
 use gpui::{
@@ -9,7 +10,7 @@ use gpui::{
     PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
     WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Disableable as _, notification::Notification};
+use gpui_component::Disableable as _;
 
 use super::window;
 use crate::ui::NamedButton as _;
@@ -23,7 +24,7 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{self, Sym},
     views::{
-        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify, notify_error, size_text},
+        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify_error, size_text},
         time_text,
     },
 };
@@ -124,16 +125,19 @@ impl TopicOutputs {
             });
             let result = rx.await.unwrap_or(Err(FileError::Other));
             cx.update(|cx| match result {
-                Ok(created) => notify(
-                    Notification::success(fill(
+                // The kit Toast (§2.16), bottom-right.
+                Ok(created) => crate::ui::overlay::Toast::new(
+                    crate::ui::Sym::Done,
+                    fill(
                         ca::CREATED,
                         &[
                             ("title", &created.title),
                             ("n", &created.version.to_string()),
                         ],
-                    )),
-                    cx,
-                ),
+                    ),
+                )
+                .tone(crate::ui::overlay::Tone::Success)
+                .push(cx),
                 Err(e) => notify_error(fill(ca::CREATE_FAILED, &[("reason", error_text(e))]), cx),
             })
         })
@@ -157,7 +161,7 @@ impl Render for TopicOutputs {
             .mb(space::S4)
             .flex()
             .items_center()
-            .child(div().flex_1().min_w(px(0.)).child(ui::panel_label(
+            .child(div().flex_1().min_w_0().child(ui::panel_label(
                 p::ARTIFACTS,
                 Some(self.artifacts.len() as u32),
                 cx,
@@ -218,7 +222,7 @@ impl Render for TopicOutputs {
                     .child(
                         div()
                             .flex_none()
-                            .size(px(32.))
+                            .size(tsp::S32)
                             .rounded(theme::radius::MD)
                             .bg(k.accent_soft)
                             .flex()
@@ -229,7 +233,7 @@ impl Render for TopicOutputs {
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(0.))
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .child(

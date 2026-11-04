@@ -51,4 +51,32 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     // --- end v13/ux-pages ---
+    // --- v14/t3-pages ---
+    Scene {
+        name: "members-plan",
+        about: "成员: Forge's 汇报和限额 sheet open (the shared sheet form)",
+        start: Start::V2,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_members(Some(d::FORGE.into()), cx))
+        },
+        open: |services, content, cx| {
+            let handle = open_main(services.clone(), content, cx)?;
+            handle
+                .update(cx, |_, window, cx| {
+                    let Some(member) = services.provider.member(d::FORGE) else {
+                        return;
+                    };
+                    let stats = services.provider.member_stats(d::FORGE).unwrap_or_default();
+                    let current = crate::data::pages::MemberPlan {
+                        reports_to: stats.reports_to,
+                        weekly_budget_cents: Some(30_000),
+                    };
+                    super::plan::open_plan_sheet(services, member, current, window, cx)
+                })
+                .map_err(|e| e.to_string())?;
+            Ok(handle)
+        },
+    },
+    // --- end v14/t3-pages ---
 ];

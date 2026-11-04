@@ -104,6 +104,45 @@ pub struct Snapshot {
     pub members: HashMap<MemberId, Member>,
     /// The 群 name and 话题 title of each ask, by ask key.
     pub places: HashMap<String, (String, String)>,
+    /// 这周 across the AI members (the rail's KPIs).
+    pub week: Week,
+}
+
+/// This week across the AI members: 话题 done, 产出 and what it cost.
+#[derive(Clone, Debug, Default)]
+pub struct Week {
+    pub done: u32,
+    pub outputs: u32,
+    /// Cents per currency, in the order first seen (never converted).
+    pub cost: Vec<(crate::data::v2::Currency, u64)>,
+}
+
+impl Week {
+    fn read(p: &dyn crate::data::ChatProvider) -> Self {
+        let mut week = Week::default();
+        for m in p
+            .members()
+            .into_iter()
+            .filter(|m| m.is_bot() && !m.deactivated)
+        {
+            let Some(s) = p.member_stats(&m.id) else {
+                continue;
+            };
+            week.done += s.done_this_week;
+            week.outputs += s.artifacts_this_week;
+            if let Some(c) = s.cost_cents_this_week {
+                match week
+                    .cost
+                    .iter_mut()
+                    .find(|(cur, _)| *cur == s.cost_currency)
+                {
+                    Some((_, v)) => *v += c,
+                    None => week.cost.push((s.cost_currency, c)),
+                }
+            }
+        }
+        week
+    }
 }
 
 impl Snapshot {
@@ -235,6 +274,7 @@ impl Snapshot {
             artifact_kinds,
             members,
             places,
+            week: Week::read(p.as_ref()),
         }
     }
 }

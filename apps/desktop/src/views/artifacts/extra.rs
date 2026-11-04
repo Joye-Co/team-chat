@@ -120,7 +120,7 @@ impl MessageExtra for ArtifactRefsExtra {
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(0.))
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .gap(space::S2)

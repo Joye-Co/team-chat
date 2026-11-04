@@ -223,7 +223,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
   5. Footer, pinned: user row h48, p8: avatar 32 (radius 8 for workspace logo, circle for the person), name 14 medium over 12 muted second line (workspace or role), chevrons-up-down 16 at the right. It opens account and Settings. The offline state replaces the second line and adds an Alert row above the footer (2.15). Groups scroll above the footer.
 - **Message column** (x 264-1120, or 264-1440 when the right pane is closed): gutter 24, so content x 288-1096. Two left edges only: **gutter** x 288 (toolbar title, avatars, date-divider rule start, banners, composer frame, page rows) and **text column** x 332 (= 288 + 32 + 12: names, message bodies, in-thread cards, attachment items).
 - **Right pane** (x 1120-1440, 320 wide; x 1040-1440, 400 wide for the live and artifact panes, D13): border-l, fill background. One anatomy for inspector, Home rail and side chat (2.5).
-- Every pane runs to the bottom of the window. No blank band taller than 24% of the pane height (216 at 900) unless it holds a designed Empty state.
+- Every pane runs to the bottom of the window. No blank band taller than 24% of the pane height (216 at 900) unless it holds a designed Empty state. On pages (首页, 群, 成员, 产出), space below the last frame is allowed: frames hug their rows and footer row and never stretch to the window bottom (A1).
 
 ### 2.2 Toolbar and pane headers
 
@@ -403,7 +403,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.21 Density and fill rules
 
-- No region taller than 24% of its pane is blank unless it is a designed Empty state, or it is the space under a top-anchored short thread whose start block shows its suggested actions (2.17, A1).
+- No region taller than 24% of its pane is blank unless it is a designed Empty state, or it is the space under a top-anchored short thread whose start block shows its suggested actions (2.17, A1). On pages, space below the last frame does not count (A1); a frame never stretches to fill the pane.
 - Scroll content ends with 24 bottom padding above any pinned footer; nothing is cut by the window edge or a footer.
 - No duplicate data on one screen (desk 正在做 in main and rail; artifact embed and artifact pane).
 - Truncation: every single-line label truncates at the end with "…" and shows the full value in a tooltip; pop-up buttons keep the chevron; lower-priority text truncates first (role, then meta, then name). Never clip at the start or mid-glyph; never wrap a value mid-phrase in a DescriptionList.
@@ -596,7 +596,7 @@ fixCount: 11 foundation + 68 screen and polish fixes = **79**.
 Run every check on the light, dark and worst-case 1x PNG of a scene before the scene is called done. Scripts: `audit-pages/m2.py` (ink runs against a sampled background), `main-window/m*.py` (pane voids, edges), `overlays/diff.py` (state differs from base), `settings/ink.py` (ink box), with `shadcn-bar/venv/bin/python -I`. Record each value in the PR. A check marked [visual] is a reviewer check.
 
 ### A. Fill
-- A1. Per pane, the largest blank vertical band is < 24% of the pane height (216 at 900), or it holds a designed Empty state. Exception (owner decision, v14): a short thread stays top-anchored, so the band between its last message and the composer may be taller when the thread-start block (2.17) shows its suggested actions.
+- A1. Per pane, the largest blank vertical band is < 24% of the pane height (216 at 900), or it holds a designed Empty state. Exception (owner decision, v14): a short thread stays top-anchored, so the band between its last message and the composer may be taller when the thread-start block (2.17) shows its suggested actions. On pages (首页, 群, 成员, 产出) a void is only a gap inside a frame or between the header and the content; space below the last frame is allowed, and frames hug their content (rows + footer row) instead of stretching to the window bottom (owner decision, v14).
 - A2. Topic scenes: first ink below the header is at most 40 px below y 52.
 - A3. Sidebar: the footer user row is present; last ink >= y 840.
 - A4. Scroll content ends with >= 24 px before any pinned footer or the window edge; no block is cut.

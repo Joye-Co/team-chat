@@ -50,4 +50,42 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     // --- end v13/ux-pages ---
+    // --- v14/t3-pages ---
+    Scene {
+        name: "group-record",
+        about: "群 page with the 记一条群里的决定 sheet open (the shared sheet form)",
+        start: Start::V2,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group(d::DEV.into(), cx))
+        },
+        open: |services, content, cx| {
+            let handle = open_main(services.clone(), content, cx)?;
+            handle
+                .update(cx, |_, window, cx| {
+                    super::open_record_sheet(services, d::DEV.into(), window, cx)
+                })
+                .map_err(|e| e.to_string())?;
+            Ok(handle)
+        },
+    },
+    Scene {
+        name: "group-purpose",
+        about: "群 page with the 群说明 sheet open (the shared sheet form)",
+        start: Start::V2,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group(d::DEV.into(), cx))
+        },
+        open: |services, content, cx| {
+            let handle = open_main(services.clone(), content, cx)?;
+            handle
+                .update(cx, |_, window, cx| {
+                    super::open_purpose_sheet(services, d::DEV.into(), window, cx)
+                })
+                .map_err(|e| e.to_string())?;
+            Ok(handle)
+        },
+    },
+    // --- end v14/t3-pages ---
 ];

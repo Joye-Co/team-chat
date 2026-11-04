@@ -16,7 +16,8 @@ mod sheets;
 
 use gpui::{
     AnyElement, App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
@@ -154,10 +155,10 @@ impl GroupPage {
     /// The toolbar row: the 群's name over its purpose; 产出 and 群设置, the
     /// primary `新话题`, then the right-pane toggle.
     fn toolbar(&self, g: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let k = native_colors(cx);
         let p = &self.services.provider;
         let group = p.groups().into_iter().find(|x| x.id == g);
-        let n = group.as_ref().map(|x| x.member_ids.len()).unwrap_or(0);
+        // The same members the inspector lists, so the count matches it.
+        let n = self.listed_members(g).len();
         let subtitle = match p.group_purpose(g) {
             Some(purpose) => format!(
                 "{} · {purpose}",
@@ -181,18 +182,18 @@ impl GroupPage {
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             group_menu(menu, &services, &group_id)
         });
+        // §2.2: every toolbar control is h32 on one center line.
         let new_topic = push_button(
             "group-new-topic",
             c::GROUP_PAGE_NEW_TOPIC,
             PushStyle::Default,
-            PushSize::Small,
+            PushSize::Regular,
             cx,
         )
         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::NewTopic), cx));
+        // ToolbarRow draws the one 1 px line at y 52 (§2.2).
         div()
             .flex_none()
-            .border_b_1()
-            .border_color(k.separator)
             .child(
                 ToolbarRow::new(group.map(|x| x.name).unwrap_or_default())
                     .subtitle(subtitle)
@@ -211,6 +212,7 @@ impl GroupPage {
                     })]))
                     .group(rows::toolbar_capsule(more, cx))
                     .group(new_topic)
+                    .group(rows::toolbar_separator(cx))
                     .group(ToolbarGroup::new([toolbar_item(
                         "group-inspector",
                         Sf::PaneRight,
@@ -259,25 +261,28 @@ impl GroupPage {
             Some(n) => format!("{first} · {n}"),
             None => first,
         };
-        let (glyph, second, badge): (Sym, String, Option<AnyElement>) = match st {
+        let (glyph, tint, second, badge): (Sym, gpui::Hsla, String, Option<AnyElement>) = match st {
             Standing::OnMe => {
+                // The same words as the 话题 header: `等你审 PR #61`.
                 let (label, pr) = match t.status {
                     TopicStatus::WaitingReview => (
-                        c::GROUP_PAGE_STATUS_REVIEW,
-                        p.topic_changes(&t.group_id, &t.id).map(|ch| {
-                            fill(
-                                crate::copy::desk::DESK_PROOF_PR,
+                        match p.topic_changes(&t.group_id, &t.id) {
+                            Some(ch) => fill(
+                                crate::copy::topic_rail::STATE_REVIEW,
                                 &[("n", &ch.number.to_string())],
-                            )
-                        }),
+                            ),
+                            None => c::GROUP_PAGE_STATUS_REVIEW.to_string(),
+                        },
+                        None::<String>,
                     ),
-                    TopicStatus::WaitingAnswer => (c::GROUP_PAGE_STATUS_DECIDE, None),
-                    _ => (c::GROUP_PAGE_STATUS_ANSWER, None),
+                    TopicStatus::WaitingAnswer => (c::GROUP_PAGE_STATUS_DECIDE.to_string(), None),
+                    _ => (c::GROUP_PAGE_STATUS_ANSWER.to_string(), None),
                 };
                 let mut parts: Vec<String> = pr.into_iter().collect();
                 parts.push(with_note(owner_name));
                 (
                     Sym::NeedsYou,
+                    k.amber,
                     parts.join(" · "),
                     Some(page::status_badge(Status::NeedsYou, label, cx)),
                 )
@@ -301,29 +306,42 @@ impl GroupPage {
                 };
                 (
                     Sym::Spinner,
+                    k.blue,
                     parts.join(" · "),
                     Some(page::status_badge(Status::Working, text, cx)),
                 )
             }
             Standing::OnOthers => {
-                let text = match t.waiting_on.as_slice() {
-                    [one] => fill(
-                        c::GROUP_PAGE_STATUS_WAITING,
-                        &[("name", &member_name(&self.services, one))],
+                // The badge keeps a short state word; who it waits on goes
+                // to the meta line, so data never widens the status column.
+                let (text, who) = match t.waiting_on.as_slice() {
+                    [one] => (
+                        c::GROUP_PAGE_STATUS_WAITING_OTHER.to_string(),
+                        fill(
+                            c::GROUP_PAGE_STATUS_WAITING,
+                            &[("name", &member_name(&self.services, one))],
+                        ),
                     ),
-                    many => fill(
-                        c::GROUP_PAGE_STATUS_WAITING_MANY,
-                        &[("n", &many.len().to_string())],
-                    ),
+                    many => {
+                        let n = fill(
+                            c::GROUP_PAGE_STATUS_WAITING_MANY,
+                            &[("n", &many.len().to_string())],
+                        );
+                        (n.clone(), n)
+                    }
                 };
+                let mut parts = vec![who];
+                parts.extend(glance.state_note.clone());
                 (
                     Sym::Waiting,
-                    glance.state_note.clone().unwrap_or(owner_name),
+                    k.secondary,
+                    parts.join(" · "),
                     Some(page::status_badge(Status::Queued, text, cx)),
                 )
             }
             Standing::Other => (
                 Sym::Topic,
+                k.label,
                 with_note(fill(
                     c::GROUP_PAGE_ASKED_BY,
                     &[("name", &member_name(&self.services, &t.created_by))],
@@ -340,7 +358,9 @@ impl GroupPage {
         let (mg, mt) = (gid.clone(), tid.clone());
         let title = t.title.clone();
         page::PageRow {
-            media: Some(page::icon_box(glyph, Some(k.label), cx)),
+            // The media box shows the badge's own icon and color (§2.12: one
+            // look per state).
+            media: Some(page::icon_box(glyph, Some(tint), cx)),
             second: Some(line(second).into_any_element()),
             status: badge,
             time: Some(clock(t.last_activity_at).into()),
@@ -376,32 +396,66 @@ impl GroupPage {
         .into_any_element()
     }
 
-    fn done_rows(&self, g: &str, cx: &App) -> Vec<AnyElement> {
+    /// The 最近完成 rows (at most 5) and how many there are. A 话题 that is
+    /// open again (in `active`) is not listed twice (§2.21: no duplicates).
+    fn done_rows(&self, g: &str, active: &[String], cx: &App) -> (Vec<AnyElement>, usize) {
         let k = native_colors(cx);
         let p = &self.services.provider;
-        let done: Vec<_> = p.group_recent_done(g).into_iter().take(5).collect();
+        let all: Vec<_> = p
+            .group_recent_done(g)
+            .into_iter()
+            .filter(|d| !active.contains(&d.topic_id))
+            .collect();
+        let total = all.len();
+        let done: Vec<_> = all.into_iter().take(5).collect();
         let n = done.len();
-        done.into_iter()
+        let rows = done
+            .into_iter()
             .enumerate()
             .map(|(i, d)| {
                 let nav = self.services.nav.clone();
                 let (gid, tid) = (d.group_id.clone(), d.topic_id.clone());
                 let mut rest = vec![member_name(&self.services, &d.member_id)];
                 rest.extend(d.note.clone());
+                let title = d.title.clone();
                 page::PageRow {
-                    media: Some(page::icon_box(Sym::Done, Some(k.label), cx)),
+                    media: Some(page::icon_box(Sym::Done, Some(k.green), cx)),
                     second: Some(line(rest.join(" · ")).into_any_element()),
+                    status: Some(page::status_badge(
+                        Status::Done,
+                        c::GROUP_PAGE_STATUS_DONE,
+                        cx,
+                    )),
                     time: Some(kit::month_day(d.at).into()),
                     separator: i + 1 < n,
                     ..page::PageRow::new(d.title.clone())
                 }
                 .render(SharedString::from(format!("group-done-{i}")), COLUMNS, cx)
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
+                })
                 .on_click(move |_, _, cx| {
                     let (gid, tid) = (gid.clone(), tid.clone());
                     nav.update(cx, |nav, cx| nav.open_topic(gid, tid, cx))
                 })
                 .into_any_element()
             })
+            .collect();
+        (rows, total)
+    }
+
+    /// The members the inspector lists (and the subtitle counts): known,
+    /// not deactivated.
+    fn listed_members(&self, g: &str) -> Vec<crate::data::Member> {
+        let p = &self.services.provider;
+        p.groups()
+            .into_iter()
+            .find(|x| x.id == g)
+            .map(|x| x.member_ids)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|id| p.member(id))
+            .filter(|m| !m.deactivated)
             .collect()
     }
 
@@ -442,7 +496,7 @@ impl GroupPage {
         let mut col = div()
             .id("group-inspector")
             .flex_1()
-            .min_h(px(0.))
+            .min_h_0()
             .overflow_y_scroll()
             .pt(tsp::S4)
             .pb(tsp::S24)
@@ -451,17 +505,7 @@ impl GroupPage {
 
         // 成员: the name keeps its room; the 岗位 truncates first, and both
         // show in full in the tooltip.
-        let ids = p
-            .groups()
-            .into_iter()
-            .find(|x| x.id == g)
-            .map(|x| x.member_ids)
-            .unwrap_or_default();
-        let members: Vec<_> = ids
-            .iter()
-            .filter_map(|id| p.member(id))
-            .filter(|m| !m.deactivated)
-            .collect();
+        let members = self.listed_members(g);
         let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE);
         if loading {
             sec = sec.row(page::skeleton_rows(
@@ -494,15 +538,18 @@ impl GroupPage {
                     .gap(tsp::S8)
                     .n_body()
                     .child(rows::avatar(Some(&m), tsp::S16, cx))
+                    // §2.21: the role truncates first; the name keeps its
+                    // room (up to most of the row) and both are in the tip.
                     .child(
                         line(m.name.clone())
                             .flex_none()
-                            .max_w(px(160.))
+                            .max_w(gpui::relative(0.72))
                             .text_color(k.label),
                     )
                     .child(
                         line(m.role.clone().unwrap_or_default())
                             .flex_1()
+                            .min_w_0()
                             .text_color(k.secondary),
                     )
                     .tooltip(move |window, cx| {
@@ -549,10 +596,20 @@ impl GroupPage {
                 cx,
             ));
         } else if decisions.is_empty() {
+            // A neutral icon: a check would read as a done item.
+            let record = p.can_record_decision(g).then(|| {
+                let services = self.services.clone();
+                let group = g.to_string();
+                crate::ui::native::borderless_text("group-record-empty", c::GROUP_PAGE_RECORD, cx)
+                    .on_click(move |_, window, cx| {
+                        open_record_sheet(services.clone(), group.clone(), window, cx)
+                    })
+                    .into_any_element()
+            });
             sec = sec.row(page::compact_empty(
-                Sym::Check,
-                c::GROUP_PAGE_DECISIONS_NOTE,
-                None,
+                Sym::List,
+                c::GROUP_PAGE_DECISIONS_EMPTY,
+                record,
                 cx,
             ));
         }
@@ -570,7 +627,13 @@ impl GroupPage {
                     .flex()
                     .flex_col()
                     .gap(tsp::S2)
-                    .child(div().n_body().text_color(k.label).child(d.text.clone()))
+                    .child(
+                        div()
+                            .n_body()
+                            .text_color(k.label)
+                            .line_clamp(2)
+                            .child(d.text.clone()),
+                    )
                     .child(
                         div()
                             .n_subheadline()
@@ -627,7 +690,7 @@ impl GroupPage {
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(0.))
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .child(line(a.title.clone()).n_body().text_color(k.label))
@@ -737,7 +800,7 @@ impl GroupPage {
                             .child(
                                 div()
                                     .flex_1()
-                                    .min_w(px(0.))
+                                    .min_w_0()
                                     .flex()
                                     .flex_col()
                                     .child(line(name).n_body().text_color(k.label))
@@ -787,7 +850,8 @@ impl Render for GroupPage {
         let on_me = active.iter().filter(|(s, ..)| *s == Standing::OnMe).count();
         crate::selftest::drawn::mark("group-page", format!("{g} active={n} on_me={on_me}"));
         let toolbar = self.toolbar(&g, window, cx);
-        let done = self.done_rows(&g, cx);
+        let active_ids: Vec<String> = active.iter().map(|(_, t, _)| t.id.clone()).collect();
+        let (done, done_total) = self.done_rows(&g, &active_ids, cx);
         let load = PageLoad::of(
             &self.services,
             n > 0 || !done.is_empty() || !p.topics(&g).is_empty(),
@@ -799,26 +863,30 @@ impl Render for GroupPage {
             .enumerate()
             .map(|(i, (st, t, run))| self.topic_row(t, *st, run.as_ref(), i + 1 == shown, cx))
             .collect();
+        // Frames hug their rows and footer row; space below the last frame
+        // is allowed (A1).
         let mut content = div()
+            .min_h_full()
             .px(page::m::EDGE)
             .pt(page::m::GUTTER)
             .pb(page::m::GUTTER)
             .flex()
             .flex_col()
             .gap(page::m::GUTTER);
-        let section = |header: gpui::Div, body: gpui::Div| {
+        let section = |header: gpui::Div, body: gpui::Div, grow: bool| {
             div()
                 .flex()
                 .flex_col()
+                .when(grow, |d| d.flex_1())
                 .gap(page::m::HEADER_GAP)
                 .child(header)
                 .child(body)
         };
         match load {
-            PageLoad::Loading | PageLoad::Failed => {
-                if load == PageLoad::Failed {
-                    content = content.child(page::load_failed("group", &self.services, cx));
-                }
+            PageLoad::Failed => {
+                content = content.child(rows::failed_region("group", &self.services, cx));
+            }
+            PageLoad::Loading => {
                 content = content.child(section(
                     page::section_header(c::GROUP_PAGE_ACTIVE, None, None, None, cx),
                     div().child(page::skeleton_rows(
@@ -827,12 +895,23 @@ impl Render for GroupPage {
                         4,
                         cx,
                     )),
+                    false,
+                ));
+                content = content.child(section(
+                    page::section_header(c::GROUP_PAGE_RECENT_DONE, None, None, None, cx),
+                    div().child(page::skeleton_rows(
+                        "group-sk-done",
+                        page::SkeletonKind::Row,
+                        4,
+                        cx,
+                    )),
+                    false,
                 ));
             }
             PageLoad::Ready if n == 0 && done.is_empty() => {
                 content = content.child(
                     div()
-                        .min_h(px(360.))
+                        .flex_none()
                         .flex()
                         .rounded(page::m::FRAME_RADIUS)
                         .border_1()
@@ -859,50 +938,85 @@ impl Render for GroupPage {
                 );
             }
             PageLoad::Ready => {
-                if n > 0 {
-                    let footer = (n > ACTIVE_ROWS).then(|| {
-                        let text = if self.show_all {
-                            c::GROUP_PAGE_SHOW_LESS.to_string()
-                        } else {
-                            fill(c::GROUP_PAGE_SHOW_ALL, &[("n", &n.to_string())])
-                        };
-                        page::list_footer("group-more-topics", text, None, cx)
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.show_all = !this.show_all;
-                                cx.notify();
-                            }))
-                    });
-                    let waiting = (on_me > 0).then(|| {
-                        page::status_badge(
-                            Status::NeedsYou,
-                            fill(c::GROUP_PAGE_WAITING_YOU, &[("n", &on_me.to_string())]),
-                            cx,
-                        )
-                    });
-                    content = content.child(section(
-                        page::section_header(c::GROUP_PAGE_ACTIVE, Some(n), None, waiting, cx),
-                        page::frame(cx).children(topic_rows).children(footer),
-                    ));
-                }
-                if !done.is_empty() {
-                    content = content.child(section(
-                        page::section_header(
-                            c::GROUP_PAGE_RECENT_DONE,
-                            Some(done.len()),
-                            None,
-                            None,
-                            cx,
-                        ),
-                        page::frame(cx).children(done),
-                    ));
-                }
+                // 进行中: a footer row in every case (§2.6): `看全部 N 个话题`
+                // when the list is cut, else the count.
+                let footer = if n > ACTIVE_ROWS {
+                    let text = if self.show_all {
+                        c::GROUP_PAGE_SHOW_LESS.to_string()
+                    } else {
+                        fill(c::GROUP_PAGE_SHOW_ALL, &[("n", &n.to_string())])
+                    };
+                    page::list_footer("group-more-topics", text, None, cx)
+                        .cursor_pointer()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_all = !this.show_all;
+                            cx.notify();
+                        }))
+                } else {
+                    page::list_footer(
+                        "group-count-topics",
+                        fill(c::GROUP_PAGE_COUNT, &[("n", &n.to_string())]),
+                        None,
+                        cx,
+                    )
+                };
+                let waiting = (on_me > 0).then(|| {
+                    page::status_badge(
+                        Status::NeedsYou,
+                        fill(c::GROUP_PAGE_WAITING_YOU, &[("n", &on_me.to_string())]),
+                        cx,
+                    )
+                });
+                let active_body = if n > 0 {
+                    page::frame(cx).children(topic_rows).child(footer)
+                } else {
+                    page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
+                        Sym::Topic,
+                        c::GROUP_PAGE_ACTIVE_EMPTY,
+                        None,
+                        cx,
+                    )))
+                };
+                content = content.child(section(
+                    page::section_header(c::GROUP_PAGE_ACTIVE, Some(n), None, waiting, cx),
+                    active_body,
+                    false,
+                ));
+                // 最近完成 always shows (an Empty when nothing is done); its
+                // frame hugs its rows and footer.
+                let done_body = if done.is_empty() {
+                    page::frame(cx).child(page::page_empty(
+                        Sym::Done,
+                        c::GROUP_PAGE_DONE_EMPTY,
+                        c::GROUP_PAGE_DONE_EMPTY_BODY,
+                        Vec::new(),
+                        cx,
+                    ))
+                } else {
+                    page::frame(cx).children(done).child(page::list_footer(
+                        "group-count-done",
+                        fill(c::GROUP_PAGE_COUNT, &[("n", &done_total.to_string())]),
+                        None,
+                        cx,
+                    ))
+                };
+                content = content.child(section(
+                    page::section_header(
+                        c::GROUP_PAGE_RECENT_DONE,
+                        Some(done_total),
+                        None,
+                        None,
+                        cx,
+                    ),
+                    done_body,
+                    false,
+                ));
             }
         }
         let list = div()
             .id("group-main")
             .flex_1()
-            .min_h(px(0.))
+            .min_h_0()
             .overflow_y_scroll()
             .child(content);
         let inspector = self
@@ -915,7 +1029,7 @@ impl Render for GroupPage {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
@@ -986,8 +1100,14 @@ fn group_menu(
         }),
     )
     .separator()
+    // A destructive item reads in the destructive color (§2.11, T4-14).
     .item(
-        PopupMenuItem::new(nav_copy::LEAVE_GROUP).on_click(move |_, window, cx| {
+        PopupMenuItem::element(|_, cx: &mut App| {
+            div()
+                .text_color(crate::ui::native::native_colors(cx).red)
+                .child(nav_copy::LEAVE_GROUP)
+        })
+        .on_click(move |_, window, cx| {
             nav_views::dialogs::confirm_leave(
                 leave.clone(),
                 g3.id.clone(),

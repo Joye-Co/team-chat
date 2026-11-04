@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, AsyncApp, Context, Entity, IntoElement, ParentElement,
-    Render, SharedString, Styled, Window, WindowBounds, div, px,
+    Render, SharedString, Styled, Window, WindowBounds, div,
 };
 
 use super::host;
@@ -131,7 +131,7 @@ impl Render for HostPreview {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(space::S2)

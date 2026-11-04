@@ -26,7 +26,7 @@ use std::{collections::HashMap, rc::Rc, time::Duration};
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _,
 };
 
 use crate::{
@@ -216,6 +216,12 @@ impl DeskPage {
     pub fn services(&self) -> &Services {
         &self.services
     }
+
+    /// The rail's close button.
+    pub fn hide_side(&mut self, cx: &mut Context<Self>) {
+        self.side_hidden = true;
+        cx.notify();
+    }
 }
 
 /// `11 月 3 日 周一`.
@@ -403,9 +409,11 @@ impl Render for DeskPage {
         let load = PageLoad::of(&self.services, has_data);
         let show_side = !self.side_hidden;
 
+        // The subtitle slot stays in every state, so the title never moves.
         let subtitle = match load {
             PageLoad::Ready => fill(c::DESK_SUBTITLE_ASKS, &[("n", &waiting.to_string())]),
-            _ => today_line(),
+            PageLoad::Loading => c::DESK_SUBTITLE_SYNCING.to_string(),
+            PageLoad::Failed => c::DESK_SUBTITLE_OFFLINE.to_string(),
         };
         let mut toolbar = ToolbarRow::new(c::DESK_TITLE)
             .subtitle(subtitle)
@@ -436,7 +444,10 @@ impl Render for DeskPage {
             }))]));
         }
 
+        // The content fills the pane's height, so a short page ends in a
+        // frame that runs to the bottom, never in a blank band (§2.21).
         let mut content = div()
+            .min_h_full()
             .px(m::EDGE)
             .pt(m::GUTTER)
             .pb(m::GUTTER)
@@ -444,12 +455,12 @@ impl Render for DeskPage {
             .flex_col()
             .gap(m::GUTTER);
         match load {
-            PageLoad::Failed | PageLoad::Loading => {
-                // Failed: the Alert, then the shapes the page fills once the
-                // retry gets through.
-                if load == PageLoad::Failed {
-                    content = content.child(page::load_failed("desk", &self.services, cx));
-                }
+            PageLoad::Failed => {
+                // The failure takes the place of the content (§2.15): no
+                // skeletons pulse under it.
+                content = content.child(rows::failed_region("desk", &self.services, cx));
+            }
+            PageLoad::Loading => {
                 content = content
                     .child(page::skeleton_cards(4, cx))
                     .child(section(
@@ -459,25 +470,36 @@ impl Render for DeskPage {
                     .child(section(
                         page::section_header(c::DESK_WORKING, None, None, None, cx),
                         page::skeleton_rows("desk-sk-runs", SkeletonKind::Row, 2, cx),
+                    ))
+                    .child(section(
+                        page::section_header(c::DESK_DONE_TODAY, None, None, None, cx),
+                        page::skeleton_rows("desk-sk-done", SkeletonKind::Row, 2, cx),
                     ));
             }
             PageLoad::Ready => {
                 content = content
                     .children(list::note_alert(&snap, cx))
                     .child(self.kpis(&snap, waiting, cx));
-                if !snap.asks.is_empty() {
-                    let n = snap.asks.len();
-                    let rows: Vec<AnyElement> = snap
-                        .asks
-                        .iter()
+                // 需要你拍板 holds what still waits; my answers of this
+                // session move to 刚处理, so the count matches the rows.
+                let (open, handled): (Vec<&AskCard>, Vec<&AskCard>) =
+                    snap.asks.iter().partition(|a| !list::is_answered(a, self));
+                for (id, title, asks) in [
+                    ("desk-asks", c::DESK_NEEDS_YOU, open),
+                    ("desk-handled", c::DESK_JUST_HANDLED, handled),
+                ] {
+                    if asks.is_empty() {
+                        continue;
+                    }
+                    let n = asks.len();
+                    let rows: Vec<AnyElement> = asks
+                        .into_iter()
                         .enumerate()
-                        .map(|(i, a)| {
-                            list::ask_row(a, self.last_shown("desk-asks", i, n), self, &snap, cx)
-                        })
+                        .map(|(i, a)| list::ask_row(a, self.last_shown(id, i, n), self, &snap, cx))
                         .collect();
                     content = content.child(section(
-                        page::section_header(c::DESK_NEEDS_YOU, Some(waiting), None, None, cx),
-                        self.list("desk-asks", rows, cx),
+                        page::section_header(title, Some(n), None, None, cx),
+                        self.list(id, rows, cx),
                     ));
                 }
                 if !snap.runs.is_empty() {
@@ -542,9 +564,11 @@ impl Render for DeskPage {
                         cx,
                     )
                     .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx)));
+                    // The Empty in a frame that hugs it (A1: space below the
+                    // last frame is allowed).
                     content = content.child(
                         div()
-                            .min_h(px(360.))
+                            .flex_none()
                             .flex()
                             .rounded(m::FRAME_RADIUS)
                             .border_1()
@@ -564,7 +588,7 @@ impl Render for DeskPage {
         let body = div()
             .id("desk-list")
             .flex_1()
-            .min_h(px(0.))
+            .min_h_0()
             .overflow_y_scroll()
             .child(content);
 
@@ -575,26 +599,16 @@ impl Render for DeskPage {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .flex_none()
-                            .border_b_1()
-                            .border_color(k.separator)
-                            .child(toolbar),
-                    )
+                    // ToolbarRow draws the one 1 px line at y 52 (§2.2).
+                    .child(div().flex_none().child(toolbar))
                     .child(body),
             )
             .when(show_side, |el| {
-                el.child(working::render(
-                    &snap,
-                    load != PageLoad::Ready,
-                    &self.services,
-                    cx,
-                ))
+                el.child(working::render(&snap, load, &self.services, window, cx))
             })
     }
 }
