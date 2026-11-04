@@ -379,7 +379,9 @@ impl RailView {
         // §2.1: the second line is the role, never a server address.
         let role = me.role.clone().filter(|r| !r.trim().is_empty());
         let footer = match self.services.provider.connection() {
-            ConnectionState::Online | ConnectionState::Connecting => match role {
+            // R2-02, §2.15: while it connects, the second line says so.
+            ConnectionState::Connecting => footer.detail(crate::copy::connection::CONNECTING, cx),
+            ConnectionState::Online => match role {
                 Some(role) => footer.detail(role, cx),
                 None => footer,
             },
@@ -407,6 +409,12 @@ impl Render for RailView {
         let page = nav.page();
         let mode = nav.rail_mode;
         let asks = self.cache.as_ref().map_or(0, |c| c.asks);
+        // R2-02: no count on 首页 until the first sync has rows.
+        let syncing = self.cache.as_ref().is_none_or(|c| c.entries.is_empty())
+            && matches!(
+                self.services.provider.connection(),
+                crate::data::ConnectionState::Connecting
+            );
         let view = cx.entity();
         let rows = list(self.list.clone(), move |ix, _, cx| {
             view.update(cx, |this, cx| this.entry(ix, cx))
@@ -419,7 +427,7 @@ impl Render for RailView {
                 Sf::Desk,
                 c::RAIL_DESK,
                 page == Page::Desk,
-                Some(asks),
+                (!syncing).then_some(asks),
                 |n, cx| n.open_desk(cx),
             ),
             self.destination(

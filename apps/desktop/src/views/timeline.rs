@@ -180,6 +180,11 @@ pub struct TimelineView {
     card_visible: bool,
     /// A card row was drawn since the last render (set by `render_row`).
     card_seen: bool,
+    /// The message ids of the card rows painted last frame, and those drawn
+    /// since the last render: the pinned banner gives way while the card it
+    /// points at is on screen (R2-09).
+    cards_shown: std::collections::BTreeSet<String>,
+    cards_drawn: std::collections::BTreeSet<String>,
     /// The new-messages divider row was drawn since the last render: it is
     /// on screen, so the jump pill must not show (§8.1, U14).
     divider_painted: bool,
@@ -300,6 +305,8 @@ impl TimelineView {
             ticking: false,
             card_visible: false,
             card_seen: false,
+            cards_shown: Default::default(),
+            cards_drawn: Default::default(),
             divider_painted: false,
             _subscriptions: subscriptions,
         };
@@ -474,7 +481,11 @@ impl TimelineView {
         let grew_at_top =
             old_first.is_some() && messages.first().map(model::key) != old_first.as_deref();
         self.messages = messages;
-        if self.has_older != has_older && !self.messages.is_empty() {
+        // Row 0 draws the start block, or the older-messages skeleton while
+        // they load: measure it again when either changes.
+        if (self.has_older != has_older || was_loading != self.provider_loading)
+            && !self.messages.is_empty()
+        {
             self.list.remeasure_items(0..1);
         }
         self.has_older = has_older;
@@ -661,6 +672,13 @@ impl TimelineView {
     }
 }
 
+impl TimelineView {
+    /// The card of message `id` was on screen in the last frame.
+    pub fn shows_card(&self, id: &str) -> bool {
+        self.cards_shown.contains(id)
+    }
+}
+
 impl Render for TimelineView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.activation.is_none() {
@@ -698,6 +716,11 @@ impl Render for TimelineView {
         // messages are seen, and the jump pill goes (or never shows).
         if std::mem::take(&mut self.divider_painted) && !self.unread_seen {
             self.unread_seen = true;
+            cx.defer_in(window, |_, _, cx| cx.notify());
+        }
+        let shown = std::mem::take(&mut self.cards_drawn);
+        if shown != self.cards_shown {
+            self.cards_shown = shown;
             cx.defer_in(window, |_, _, cx| cx.notify());
         }
         let card_visible = std::mem::take(&mut self.card_seen);
@@ -761,19 +784,12 @@ impl Render for TimelineView {
                 )
         });
         // §2.14: older messages loading show 2 message skeleton rows in the
-        // flow above the first message, never a line of text over a row.
-        let loading = (self.provider_loading && self.has_older).then(|| {
-            div()
-                .flex_none()
-                .pl(v2::LEADING)
-                .pr(v2::SIDE)
-                .pt(space::S24)
-                .pb(space::S8)
-                .child(ui::native::skeleton_rows(
-                    ui::native::SkeletonKind::Message,
-                    2,
-                ))
-        });
+        // flow above the first message: row 0 draws them, so they scroll
+        // with the messages and never clip the first one (`row.rs`).
+        // §2.17, R2-01: a 话题 with no messages still opens with its start
+        // block and a compact "no messages" line, never a blank column.
+        let empty = (self.v2 && self.messages.is_empty() && !self.has_older)
+            .then(|| self.render_empty_thread(&topic, cx));
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge
         // fades over 24 so its last row is never a hard mid-glyph cut.
@@ -802,16 +818,16 @@ impl Render for TimelineView {
                     .then(|| self.render_header(&topic, window, cx)),
             )
             .children(search_bar)
-            .children(loading)
-            .child(
-                div()
+            .child(match empty {
+                Some(empty) => div().flex_1().min_h(px(0.)).child(empty),
+                None => div()
                     .relative()
                     .flex_1()
                     .min_h(px(0.))
                     .child(timeline)
                     .children(bottom_edge)
                     .children(jump_unread),
-            )
+            })
             .children(jump)
             // The 话题 page shows a member at work as the plan card at the
             // foot of the list (`timeline/plan.rs`), not the pending row.

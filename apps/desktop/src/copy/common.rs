@@ -14,7 +14,11 @@ crate::copy! {
     CONNECTING = "正在连接…",
     RECONNECTING = "连接已断开，正在重连…",
     CONNECTION_OFFLINE = "未连接",
-    STATUS_IN_PROGRESS = "进行中",
+    // §2.12, A5: one word per state, everywhere. A 话题 in progress reads
+    // 在做 (with `n/m` when a member works on a plan), never 进行中.
+    STATUS_IN_PROGRESS = "在做",
+    // Nobody works on it now: the clock, muted.
+    STATUS_QUEUED = "排队",
     STATUS_WAITING_ANSWER_ME = "等你回答",
     STATUS_WAITING_ANSWER_NAMED = "等{name}回答",
     STATUS_WAITING_ANSWER = "等回答",

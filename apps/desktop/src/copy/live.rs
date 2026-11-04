@@ -50,6 +50,10 @@ crate::copy! {
     LIVE_PLAN_FOR = "已 {n} 分钟",
     LIVE_PLAN_HELD = "你在操作电脑，{name} 停在这一步",
     LIVE_EMPTY = "现在没有成员在用电脑",
+    // R2-06: the compact empties of the live pane's sections.
+    LIVE_REPLAY_EMPTY = "还没有可以回放的步骤",
+    LIVE_ACCEPTANCE_EMPTY = "这次工作没有验收标准",
+    LIVE_PLAN_EMPTY = "还没有计划",
     // trust fixes (v11/dfix-trust): ask before the screen sharing address opens.
     LIVE_SHARE_ASK_TITLE = "打开屏幕共享？",
     LIVE_SHARE_ASK_DETAIL = "{name} 的电脑给了这个屏幕共享地址：\n{url}",

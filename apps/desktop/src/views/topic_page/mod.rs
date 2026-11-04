@@ -46,8 +46,11 @@ impl TopicPage {
             t.set_v2(true, cx);
         });
         composer.update(cx, |c, cx| c.set_v2(true, cx));
+        let mut subscriptions = watch(&services, cx);
+        // R2-09: the pinned banner gives way while its card is on screen.
+        subscriptions.push(cx.observe(&timeline, |_, _, cx| cx.notify()));
         Self {
-            _subscriptions: watch(&services, cx),
+            _subscriptions: subscriptions,
             services,
             timeline,
             composer,
@@ -198,7 +201,10 @@ pub fn run_state(
             ),
             tone: StateTone::Live,
             badge: BadgeState::Working,
-            short: format!("{n}/{total}"),
+            short: fill(
+                c::OWNER_WORKING,
+                &[("n", &n.to_string()), ("total", &total.to_string())],
+            ),
             detail: step,
             paused: false,
             name: Some(name.to_string()),
@@ -271,7 +277,16 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
             return line;
         }
         let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
-        return run_state(run, &who, paused_by.as_deref(), me, name);
+        let mut line = run_state(run, &who, paused_by.as_deref(), me, name);
+        // A2-11: two members at work are one state, `2 个成员在做`; the
+        // sidebar keeps the lead run's `3/5`.
+        let at_work = working_runs(&runs).len();
+        if at_work > 1 && !line.paused {
+            line.text = fill(c::STATE_MANY_WORKING, &[("n", &at_work.to_string())]);
+            line.name = None;
+            line.detail = None;
+        }
+        return line;
     }
     // The newest run failed and the 话题 is not done: say it, the same word
     // as the run log and the inspector.
@@ -286,17 +301,19 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         )
         .short(crate::copy::process::STATUS_FAILED);
     }
+    // §2.12: 在做 and its spinner only while a member works on a run (above).
+    // A 话题 marked in progress with no run is queued: 排队, the clock, muted.
+    if topic.status == TopicStatus::InProgress {
+        return StateLine::plain(cm::STATUS_QUEUED.to_string(), BadgeState::Queued);
+    }
     let members = p.members();
     let text = crate::views::status_chip_text(topic, me, &members)
         .unwrap_or_else(|| cm::STATUS_OPEN.to_string());
     let badge = match topic.status {
         TopicStatus::Blocked => BadgeState::Failed,
         TopicStatus::Done => BadgeState::Done,
-        TopicStatus::InProgress => BadgeState::Working,
         // Waiting on someone else, or not started: the clock, muted.
-        TopicStatus::WaitingAnswer | TopicStatus::WaitingReview | TopicStatus::Open => {
-            BadgeState::Queued
-        }
+        _ => BadgeState::Queued,
     };
     let short = match topic.status {
         TopicStatus::Blocked => text.clone(),
@@ -359,7 +376,13 @@ impl PageView for TopicPage {
             return TitleBarSpec::default();
         };
         let p = &self.services.provider;
-        let group = p.groups().into_iter().find(|x| x.id == g).map(|x| x.name);
+        let group = p.groups().into_iter().find(|x| x.id == g);
+        let peer = group
+            .as_ref()
+            .and_then(|x| x.dm_peer.as_deref())
+            .and_then(|id| p.member(id))
+            .map(crate::views::shell::title_bar::Peer);
+        let group = group.map(|x| x.name);
         let title = p
             .topic(&g, &t)
             .map(|x| crate::views::sidebar::topic_display_title(&x.title).0)
@@ -378,6 +401,7 @@ impl PageView for TopicPage {
             state: state.as_ref().map(|s| (s.text.clone(), s.badge)),
             state_detail: state.as_ref().and_then(|s| s.detail.clone()),
             state_name: state.as_ref().and_then(|s| s.name.clone()),
+            peer,
             buttons: toolbar_buttons(pane_buttons(&self.services, &g, &t)),
         }
     }

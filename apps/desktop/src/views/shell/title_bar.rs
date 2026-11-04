@@ -125,8 +125,17 @@ pub struct TitleBarSpec {
     pub state_detail: Option<String>,
     /// The member's name that leads the state words.
     pub state_name: Option<String>,
+    /// The peer of a 私聊: its 16 avatar leads the subtitle's name (§2.2,
+    /// R2-13).
+    pub peer: Option<Peer>,
     pub buttons: Vec<TitleButton>,
 }
+
+/// A 私聊 peer in the title bar.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Peer(pub crate::data::Member);
+
+impl Eq for Peer {}
 
 impl TitleBarSpec {
     pub fn page(title: impl Into<String>) -> Self {
@@ -268,6 +277,8 @@ fn heading_with(
         .tooltip(ui::tip_when_cut(vec![title_layout.clone()], move || {
             ui::truncate::text_tip(full_title.clone())
         }));
+    // The connection line replaces the subtitle, and the peer with it.
+    let peer = over.is_none().then(|| spec.peer.clone()).flatten();
     let sub = over.or_else(|| subtitle(spec, &k)).map(|s| {
         let full: SharedString = s.text.clone().into();
         let styled = StyledText::new(s.text.clone());
@@ -287,6 +298,12 @@ fn heading_with(
                 div()
                     .flex_none()
                     .child(StatusBadge::new(state, words).max_w(BADGE_MAX))
+            }))
+            .children(peer.clone().map(|Peer(m)| {
+                div().flex_none().child(ui::MemberAvatar::new(
+                    Some(&m),
+                    crate::ui::native::tokens::avatar::XS,
+                ))
             }))
             .child(
                 div()

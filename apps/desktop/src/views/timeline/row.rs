@@ -70,13 +70,27 @@ impl TimelineView {
             .flex()
             .flex_col()
             .when(last, |el| el.pb(space::S8));
+        let older_loading = ix == 0 && self.has_older && self.provider_loading;
         if ix == 0 {
             // §2.17: the thread-start block sits 24 under the header.
-            item = item.pt(if start {
+            item = item.pt(if start || (v2 && older_loading) {
                 if v2 { space::S24 } else { space::S16 }
             } else {
                 space::S10
             });
+        }
+        if older_loading {
+            // §2.14: 2 message skeleton rows in the flow above the first
+            // message; they scroll with it and never clip it.
+            item = item.child(
+                div()
+                    .px(ROW_INSET)
+                    .pb(space::S16)
+                    .child(ui::native::skeleton_rows(
+                        ui::native::SkeletonKind::Message,
+                        2,
+                    )),
+            );
         }
         if v2 {
             // The thread-start block opens a 话题 whose first message is
@@ -236,6 +250,12 @@ impl TimelineView {
         {
             self.card_seen = true;
         }
+        // The card is drawn as a card (a special row such as a result
+        // record draws no actions): the pinned banner may give way to it.
+        if !message.id.is_empty() && (self.card_seen_v2(message) || self.card_seen_v1(message)) {
+            self.cards_drawn.insert(message.id.clone());
+        }
+
         let steps = (!v2 && !deleted && author.as_ref().is_some_and(Member::is_bot))
             .then(|| self.render_steps(message, cx))
             .flatten();
@@ -871,6 +891,61 @@ impl TimelineView {
     /// The thread-start block of the v2 page (COMPLETENESS §2.17): a 40 pt
     /// symbol box, the 话题 title and `Joye 在 开发 发起 · 今天 09:12`. It
     /// sits at the top of the list, so a short 话题 reads from the top.
+    fn card_seen_v1(&self, message: &Message) -> bool {
+        self.services
+            .provider
+            .card(&message.group_id, &message.id)
+            .is_some()
+    }
+
+    fn card_seen_v2(&self, message: &Message) -> bool {
+        self.services
+            .provider
+            .card_v2(&message.group_id, &message.id)
+            .is_some()
+    }
+
+    /// A 话题 with no messages (§2.17, R2-01): the start block 24 under the
+    /// header, then a compact empty line (§2.13), or 3 message skeleton rows
+    /// while the first page loads, then the cards of members at work.
+    pub(super) fn render_empty_thread(
+        &mut self,
+        topic: &Topic,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let start = self.render_start_v2(topic, cx);
+        let body: AnyElement = if self.provider_loading {
+            div()
+                .px(ROW_INSET)
+                .child(ui::native::skeleton_rows(
+                    ui::native::SkeletonKind::Message,
+                    3,
+                ))
+                .into_any_element()
+        } else {
+            div()
+                .px(ROW_INSET)
+                .child(ui::native::EmptyLine::new(t::THREAD_EMPTY).icon(Sym::AskAside))
+                .into_any_element()
+        };
+        let plans = self.render_plans(cx);
+        div()
+            .id("timeline-empty")
+            .size_full()
+            .overflow_y_scroll()
+            .pt(space::S24)
+            .pb(space::S24)
+            .pl(super::v2::LEADING - ROW_INSET)
+            .pr(super::v2::SIDE - ROW_INSET)
+            .flex()
+            .flex_col()
+            .gap(space::S16)
+            .child(start)
+            .child(body)
+            .children(plans)
+            .into_any_element()
+    }
+
     fn render_start_v2(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{NativeType as _, native_colors};
         let n = native_colors(cx);

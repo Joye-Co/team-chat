@@ -159,3 +159,49 @@ pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App)
         .into_any_element()
 }
 // --- end v12/fx-shell ---
+
+/// The window while the first sync runs and no 群 has arrived yet (§2.14,
+/// R2-02): the toolbar title 首页 and the 首页 skeleton in its final shapes
+/// (4 KPI cards, then framed list rows). No create buttons: the member may
+/// already have 群 that are still on their way.
+pub fn first_sync_page(leading: Pixels, active: bool, cx: &App) -> AnyElement {
+    use crate::{
+        copy::rail,
+        ui::native::{
+            ToolbarRow,
+            page::{self, SkeletonKind, m},
+        },
+    };
+    let k = super::chrome::colors(cx);
+    div()
+        .flex_1()
+        .min_w(px(0.))
+        .h_full()
+        .flex()
+        .flex_col()
+        .bg(k.content)
+        .child(
+            ToolbarRow::new(rail::RAIL_DESK)
+                .leading_inset(leading)
+                .inactive(!active),
+        )
+        .child(
+            div()
+                .id("first-sync")
+                .flex_1()
+                .min_h(px(0.))
+                .px(m::EDGE)
+                .pt(m::GUTTER)
+                .flex()
+                .flex_col()
+                .gap(m::GUTTER)
+                .child(page::skeleton_cards(4, cx))
+                .child(page::skeleton_rows(
+                    "first-sync-rows",
+                    SkeletonKind::Row,
+                    4,
+                    cx,
+                )),
+        )
+        .into_any_element()
+}

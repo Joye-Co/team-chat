@@ -774,9 +774,18 @@ impl Render for RootView {
             } else {
                 theme::TRAFFIC_LIGHTS_INSET
             };
-            return root.flex().flex_row().children(rail).child(
-                crate::views::shell::pages::empty_page(leading, active, window, cx),
+            // R2-02: while the first sync runs, the 群 may still arrive: the
+            // 首页 skeleton, never "还没有加入群" and its create buttons.
+            let syncing = matches!(
+                self.services.provider.connection(),
+                crate::data::ConnectionState::Connecting
             );
+            let page = if syncing {
+                crate::views::shell::pages::first_sync_page(leading, active, cx)
+            } else {
+                crate::views::shell::pages::empty_page(leading, active, window, cx)
+            };
+            return root.flex().flex_row().children(rail).child(page);
         }
         let page = nav.page();
         let pane = nav.visible_pane();
