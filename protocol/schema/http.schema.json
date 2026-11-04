@@ -35211,7 +35211,8 @@
                 "card.patch",
                 "interaction.resolve",
                 "artifact.data",
-                "artifact.reply"
+                "artifact.reply",
+                "desk.note"
               ]
             },
             "body": {
@@ -35805,7 +35806,8 @@
                         "card.patch",
                         "interaction.resolve",
                         "artifact.data",
-                        "artifact.reply"
+                        "artifact.reply",
+                        "desk.note"
                       ]
                     },
                     "body": {
@@ -36792,7 +36794,8 @@
                               "card.patch",
                               "interaction.resolve",
                               "artifact.data",
-                              "artifact.reply"
+                              "artifact.reply",
+                              "desk.note"
                             ]
                           },
                           "body": {
@@ -38736,7 +38739,8 @@
                         "card.patch",
                         "interaction.resolve",
                         "artifact.data",
-                        "artifact.reply"
+                        "artifact.reply",
+                        "desk.note"
                       ]
                     },
                     "body": {

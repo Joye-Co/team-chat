@@ -1056,7 +1056,8 @@ GET /v1/groups/:id/desk-notes -> DeskNotesResponse { notes: { memberId, text, at
 ```
 
 Rules: only a bot member of the group sets its own note (`forbidden` for people, `not_found`
-outside the group). The text is normalized like a group name. Readers keep the newest
+outside the group). A runner-backed bot sets it from its run with `chat-run desk note --text …`
+(the `desk.note` output op, machine-protocol.md), in the run's group. The text is normalized like a group name. Readers keep the newest
 `desk.noted` per bot and group; `""` removes it. 1.0.x clients skip the event.
 
 ## Run fields, pause and resume

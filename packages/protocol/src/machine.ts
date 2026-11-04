@@ -111,7 +111,8 @@ export type AcceptanceItem = z.infer<typeof AcceptanceItem>;
 
 const item = { itemId: z.string().min(1), turnId: z.string().optional() };
 /** What a `chat-run` output asks for; each one has the rules of the matching WebSocket frame. */
-export const RunOutputOp = z.enum(["card.post", "card.patch", "interaction.resolve", "artifact.data", "artifact.reply"]);
+/** `desk.note` (1.1): the bot's desk note in the run's group, body `{ text }` (as `PUT /v1/desk-note`). */
+export const RunOutputOp = z.enum(["card.post", "card.patch", "interaction.resolve", "artifact.data", "artifact.reply", "desk.note"]);
 export type RunOutputOp = z.infer<typeof RunOutputOp>;
 
 export const RunEvent = z.discriminatedUnion("type", [

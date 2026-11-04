@@ -289,6 +289,8 @@ pub mod output_op {
     pub const INTERACTION_RESOLVE: &str = "interaction.resolve";
     pub const ARTIFACT_DATA: &str = "artifact.data";
     pub const ARTIFACT_REPLY: &str = "artifact.reply";
+    /// 1.1: the bot's desk note in the run's group, body `{ text }` (as `PUT /v1/desk-note`).
+    pub const DESK_NOTE: &str = "desk.note";
 }
 
 /// An event from an interactive 产出 page given to a run (`run.input.artifactEvent`).
