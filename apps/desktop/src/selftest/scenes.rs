@@ -679,7 +679,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 16] = [
+    let slices: [&'static [Scene]; 17] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -706,6 +706,9 @@ pub fn all() -> Vec<&'static Scene> {
         // --- inc-refs ---
         crate::views::refs::scenes::SCENES,
         // --- end inc-refs ---
+        // --- v11/pl-sf-symbols ---
+        crate::ui::sf_symbols::scene::SCENES,
+        // --- end v11/pl-sf-symbols ---
     ];
     slices.into_iter().flatten().collect()
 }
@@ -822,6 +825,11 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         return Some(check);
     }
     // --- end inc-refs ---
+    // --- v11/pl-sf-symbols ---
+    if name == "sf-symbols" {
+        return Some(crate::ui::sf_symbols::scene::ready);
+    }
+    // --- end v11/pl-sf-symbols ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -854,6 +862,11 @@ pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Resu
         return Some(check);
     }
     // --- end v11/media ---
+    // --- v11/pl-sf-symbols ---
+    if name == "sf-symbols" {
+        return Some(crate::ui::sf_symbols::scene::verify);
+    }
+    // --- end v11/pl-sf-symbols ---
     match name {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),

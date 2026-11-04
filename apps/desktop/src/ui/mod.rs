@@ -32,6 +32,9 @@ pub mod overlay;
 pub mod parts;
 pub mod rows;
 pub mod sheet;
+// --- v11/pl-sf-symbols: SF Symbols spike (POLISH-SPEC §10.2) ---
+pub mod sf_symbols;
+// --- end v11/pl-sf-symbols ---
 pub mod truncate;
 pub mod web_embed;
 

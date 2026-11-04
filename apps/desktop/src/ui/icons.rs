@@ -119,6 +119,11 @@ gpui_kit::assets::icon_assets!(
         // --- inc-refs: 引用提问 chips ---
         FileDiff,
         // --- end inc-refs ---
+        // --- v11/pl-sf-symbols: the Lucide side of the SF Symbols spike ---
+        Palette,
+        Keyboard,
+        Hand,
+        // --- end v11/pl-sf-symbols ---
     ]
 );
 
