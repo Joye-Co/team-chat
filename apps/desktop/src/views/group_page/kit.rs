@@ -2,6 +2,7 @@
 //! title bars, the side column with its header and cards, the live
 //! terminal thumbnail, plan step bars, 产出 thumbnails and time words.
 
+use crate::ui::native::tokens::space as tsp;
 use gpui::{
     AnyElement, App, Div, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, SharedString, Stateful, StatefulInteractiveElement as _, Styled, div,
@@ -85,7 +86,7 @@ pub fn bar_icon(
 /// The 1 × 16 divider between title bar groups.
 pub fn bar_divider(cx: &App) -> Div {
     let k = theme::colors(cx);
-    div().flex_none().w(px(1.)).h(px(16.)).bg(k.line_2)
+    div().flex_none().w(px(1.)).h(tsp::S16).bg(k.line_2)
 }
 
 /// What a collapse press does.
@@ -154,7 +155,7 @@ pub fn card_label(label: &str, count: Option<usize>, cx: &App) -> Div {
         .flex()
         .items_center()
         .gap(space::S6)
-        .h(px(24.))
+        .h(tsp::S24)
         .type_role(META)
         .medium()
         .text_color(k.ink_3)
@@ -173,9 +174,9 @@ pub fn text_link(id: impl Into<ElementId>, label: &str, cx: &App) -> Stateful<Di
     div()
         .id(id.into())
         .flex_none()
-        .h(px(24.))
+        .h(tsp::S24)
         .px(space::S6)
-        .rounded(px(6.))
+        .rounded(tsp::S6)
         .flex()
         .items_center()
         .type_role(META)
@@ -191,7 +192,7 @@ pub fn section_head(label: &str, count: Option<usize>, cx: &App) -> Div {
         .flex()
         .items_center()
         .gap(space::S8)
-        .h(px(24.))
+        .h(tsp::S24)
         .child(
             div()
                 .t_small()
@@ -235,7 +236,7 @@ pub fn line_counts(additions: u32, deletions: u32, cx: &App) -> Div {
     div()
         .flex_none()
         .flex()
-        .gap(px(4.))
+        .gap(tsp::S4)
         .mono()
         .child(div().text_color(k.ok_ink).child(format!("+{additions}")))
         .child(div().text_color(k.bad_ink).child(format!("−{deletions}")))
@@ -315,7 +316,7 @@ pub fn step_bar(id: &str, plan: &[PlanItem], gap: Pixels, cx: &App) -> Div {
         .flex()
         .gap(gap)
         .children(plan.iter().enumerate().map(|(i, p)| {
-            let seg = div().flex_1().h(px(3.)).rounded(px(2.));
+            let seg = div().flex_1().h(px(3.)).rounded(tsp::S2);
             match p.state {
                 PlanState::Done => seg.bg(k.ink_3).into_any_element(),
                 PlanState::Current => ui::motion::breathe(
@@ -365,9 +366,9 @@ pub fn mini_screen(
         .flex()
         .items_center()
         .gap(px(5.))
-        .h(px(16.))
-        .px(px(6.))
-        .rounded(px(4.))
+        .h(tsp::S16)
+        .px(tsp::S6)
+        .rounded(tsp::S4)
         .bg(k.screen_ink.opacity(0.1))
         .text_size(px(10.))
         .text_color(k.screen_ink)
@@ -393,12 +394,12 @@ pub fn mini_screen(
             .pt(space::S8)
             .flex()
             .flex_col()
-            .gap(px(6.))
+            .gap(tsp::S6)
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(tsp::S6)
                     .children(lights)
                     .child(chip)
                     .children(screen.machine_name.map(|m| {
@@ -409,7 +410,7 @@ pub fn mini_screen(
                             .one_line()
                             .code_font()
                             .text_size(px(10.))
-                            .line_height(px(12.))
+                            .line_height(tsp::S12)
                             .text_color(k.screen_dim)
                             .child(m)
                     })),
@@ -418,10 +419,10 @@ pub fn mini_screen(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(4.))
+                    .gap(tsp::S4)
                     .code_font()
                     .text_size(px(10.))
-                    .line_height(px(12.))
+                    .line_height(tsp::S12)
                     .children(lines.into_iter().map(|l| {
                         let (color, text) = match l.kind {
                             ScreenLineKind::Command => (k.screen_dim, format!("$ {}", l.text)),
@@ -449,7 +450,7 @@ pub fn artifact_thumb(
         .flex_none()
         .w(w)
         .h(h)
-        .rounded(px(6.))
+        .rounded(tsp::S6)
         .border_1()
         .border_color(k.line)
         .bg(k.raised)

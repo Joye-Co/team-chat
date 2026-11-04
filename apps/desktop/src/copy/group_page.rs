@@ -46,7 +46,7 @@ crate::copy! {
     GROUP_PAGE_KIND_IMAGE = "图片",
     GROUP_PAGE_KIND_DECISION = "决定",
     GROUP_PAGE_MATCHES = "{n} 条",
-    GROUP_PAGE_DECISION_FROM = "{question}：{choice}",
+    GROUP_PAGE_DECISION_FROM = "{question} → {choice}",
     // dfix-topic: the hint beside the send button of the 群 page composer.
     GROUP_PAGE_COMPOSER_HINT = "{name} 会先看一眼，再交给合适的成员",
     // --- pages track (v12 native) ---
@@ -85,4 +85,13 @@ crate::copy! {
     GROUP_PAGE_RECORD_REFUSED = "没能记下这条决定",
     GROUP_PAGE_RECORD_TOO_LONG = "最多 1000 个字",
     // --- end v13/wire ---
+    // --- v14/t3-pages ---
+    GROUP_PAGE_STATUS_DONE = "完成",
+    GROUP_PAGE_STATUS_WAITING_OTHER = "等人",
+    GROUP_PAGE_COUNT = "共 {n} 个话题",
+    GROUP_PAGE_DONE_EMPTY = "这周还没有做完的话题",
+    GROUP_PAGE_DONE_EMPTY_BODY = "成员做完一个话题后，会列在这里，带上结果和用到的产出。",
+    GROUP_PAGE_ACTIVE_EMPTY = "现在没有进行中的话题",
+    GROUP_PAGE_DECISIONS_EMPTY = "还没有记下的决定",
+    // --- end v14/t3-pages ---
 }
