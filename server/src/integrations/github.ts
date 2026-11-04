@@ -64,19 +64,6 @@ const WorkflowRunEvent = z.object({
   }),
   repository: Repo,
 });
-const CheckRunEvent = z.object({
-  action: z.string(),
-  check_run: z.object({
-    name: z.string().min(1),
-    head_sha: z.string(),
-    status: z.string().nullable().optional(),
-    conclusion: z.string().nullable().optional(),
-    html_url: z.string().nullable().optional(),
-    check_suite: z.object({ head_branch: z.string().nullable().optional() }).nullable().optional(),
-    pull_requests: z.array(PrRef).optional(),
-  }),
-  repository: Repo,
-});
 const IssuesEvent = z.object({
   action: z.string(),
   issue: z.object({
@@ -256,24 +243,10 @@ export function normalize(eventName: string, payload: unknown): GhEvent | null {
         prNumbers: (w.pull_requests ?? []).map((p) => p.number),
       };
     }
-    case "check_run": {
-      // A check that starts shows as pending (进行中) until its result comes.
-      if (action !== "created" && action !== "rerequested" && action !== "completed") return null;
-      const e = parse(CheckRunEvent, payload);
-      const r = e.check_run;
-      const done = action === "completed" || r.status === "completed";
-      return {
-        type: "ci",
-        repo: e.repository.full_name,
-        repoUrl: e.repository.html_url ?? `https://github.com/${e.repository.full_name}`,
-        name: r.name,
-        sha: r.head_sha,
-        branch: r.check_suite?.head_branch ?? null,
-        conclusion: done ? (r.conclusion ?? "neutral") : "pending",
-        url: r.html_url ?? null,
-        prNumbers: (r.pull_requests ?? []).map((p) => p.number),
-      };
-    }
+    // check_run is not a source (docs/integrations.md): the hook is not subscribed to it, and
+    // its checks are already in check_suite and workflow_run, so a delivery adds no rows.
+    case "check_run":
+      return null;
     case "issues": {
       if (action !== "opened" && action !== "closed" && action !== "reopened" && action !== "edited") return null;
       const e = parse(IssuesEvent, payload);
