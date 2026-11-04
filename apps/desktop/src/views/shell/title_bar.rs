@@ -237,6 +237,54 @@ fn heading(
     window: &mut Window,
     cx: &App,
 ) -> (AnyElement, TextLayout, Option<TextLayout>) {
+    heading_with(spec, None, active, window, cx)
+}
+
+// --- v12/fx-shell: the connection state in the subtitle ---
+/// The subtitle while the connection is not up (coordinator decision: no
+/// row at the sidebar bottom): `wifi.slash` and `连接已断开 · 8 秒后重连`, in
+/// `secondary`. `None` while online. 立即重连 is a 显示 menu command.
+pub fn connection_subtitle(
+    state: crate::data::ConnectionState,
+    k: &NativeColors,
+) -> Option<Subtitle> {
+    use crate::{copy::connection as cc, data::ConnectionState as S};
+    let (text, symbol) = match state {
+        S::Online => return None,
+        // Starting up is not a problem: no symbol.
+        S::Connecting => (cc::CONNECTING.to_string(), None),
+        S::Reconnecting { retry_in_ms, .. } if retry_in_ms >= 1000 => {
+            let s = retry_in_ms.div_ceil(1000).to_string();
+            (
+                format!(
+                    "{}{DOT}{}",
+                    cc::BANNER_DISCONNECTED,
+                    crate::copy::fill(cc::BANNER_RETRY_IN, &[("s", &s)])
+                ),
+                Some(Sym::Offline),
+            )
+        }
+        S::Reconnecting { .. } => (cc::RECONNECTING_NOW.to_string(), Some(Sym::Offline)),
+        S::Offline => (cc::OFFLINE.to_string(), Some(Sym::Offline)),
+        S::TokenUnreadable => (cc::TOKEN_UNREADABLE.to_string(), Some(Sym::Offline)),
+    };
+    Some(Subtitle {
+        text,
+        state: None,
+        symbol: symbol.map(|s| (s, k.secondary)),
+    })
+}
+// --- end v12/fx-shell ---
+
+/// [`heading`] with a subtitle that replaces the spec's (the connection
+/// state).
+fn heading_with(
+    spec: &TitleBarSpec,
+    over: Option<Subtitle>,
+    active: bool,
+    window: &mut Window,
+    cx: &App,
+) -> (AnyElement, TextLayout, Option<TextLayout>) {
     let k = crate::views::shell::chrome::colors(cx);
     let (title_text, title_layout) = ui::cut_line(spec.title.clone());
     let full_title: SharedString = spec.title.clone().into();
@@ -252,7 +300,7 @@ fn heading(
         .tooltip(ui::tip_when_cut(vec![title_layout.clone()], move || {
             ui::truncate::text_tip(full_title.clone())
         }));
-    let sub = subtitle(spec, &k).map(|s| {
+    let sub = over.or_else(|| subtitle(spec, &k)).map(|s| {
         let highlights: Vec<(Range<usize>, HighlightStyle)> = s
             .state
             .iter()
@@ -325,7 +373,15 @@ pub fn render(
     window: &mut Window,
     cx: &App,
 ) -> AnyElement {
-    let (heading, _, _) = heading(spec, active, window, cx);
+    let k = crate::views::shell::chrome::colors(cx);
+    let signed_in = matches!(
+        services.provider.session(),
+        crate::data::SessionState::SignedIn { .. }
+    );
+    let over = signed_in
+        .then(|| connection_subtitle(services.provider.connection(), &k))
+        .flatten();
+    let (heading, _, _) = heading_with(spec, over, active, window, cx);
     let mut row = div()
         .id("toolbar-row")
         .flex_none()
@@ -433,6 +489,23 @@ mod tests {
         };
         assert_eq!(subtitle(&desk, &k).unwrap().text, "11 月 3 日 周二");
         assert!(subtitle(&TitleBarSpec::page("成员"), &k).is_none());
+    }
+
+    #[test]
+    fn a_dropped_connection_takes_the_subtitle_with_wifi_slash() {
+        use crate::data::ConnectionState;
+        let k = NativeColors::dark();
+        assert!(connection_subtitle(ConnectionState::Online, &k).is_none());
+        let s = connection_subtitle(
+            ConnectionState::Reconnecting {
+                attempt: 2,
+                retry_in_ms: 7_200,
+            },
+            &k,
+        )
+        .expect("a subtitle");
+        assert_eq!(s.text, "连接已断开 · 8 秒后重连");
+        assert_eq!(s.symbol, Some((Sym::Offline, k.secondary)));
     }
 
     #[test]
