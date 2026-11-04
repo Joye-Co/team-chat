@@ -201,7 +201,7 @@ impl TimelineView {
         };
         let viewport = self.list.viewport_bounds();
         match self.list.bounds_for_item(ix) {
-            Some(row) if viewport.size.height > px(0.) => {
+            Some(row) if viewport.size.height > gpui::Pixels::ZERO => {
                 let delta = row.top() - (viewport.top() + PLACE_GAP);
                 self.list.scroll_by(delta);
                 cx.notify();
@@ -212,6 +212,13 @@ impl TimelineView {
             }
             _ => {}
         }
+    }
+
+    /// The query of the search bar when `message_id` is the hit it shows.
+    pub(super) fn search_query_for(&self, message_id: &str) -> Option<String> {
+        let search = self.focus.search.as_ref()?;
+        let (hit, _) = search.hits.get(search.index)?;
+        (hit == message_id && !message_id.is_empty()).then(|| search.query.clone())
     }
 
     /// Steps to another hit of the search (`older`: further up).

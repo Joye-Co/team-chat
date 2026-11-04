@@ -875,7 +875,7 @@ impl TimelineView {
         Some(
             div()
                 .flex_none()
-                .h(px(40.))
+                .h(crate::ui::native::tokens::height::FOOTER_ROW)
                 .pl(leading)
                 .pr(v2::SIDE)
                 .border_b_1()
@@ -886,7 +886,7 @@ impl TimelineView {
                 .child(ui::sym(Sym::Search, ui::SymSize::INLINE, n.secondary))
                 .child(
                     div()
-                        .min_w(px(0.))
+                        .min_w_0()
                         .max_w(px(240.))
                         .h(theme::size::CHIP)
                         .px(space::S8)
@@ -896,7 +896,7 @@ impl TimelineView {
                         .items_center()
                         .n_body()
                         .text_color(n.label)
-                        .child(div().min_w(px(0.)).one_line().child(search.query.clone())),
+                        .child(div().min_w_0().one_line().child(search.query.clone())),
                 )
                 .child(div().flex_1())
                 .child(

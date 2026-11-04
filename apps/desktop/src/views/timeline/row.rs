@@ -294,9 +294,15 @@ impl TimelineView {
                     block_offset: usize::from(shown_body.len() != message.body.len()),
                 }
             });
+            // The message a search opened at: its matched words in bold
+            // and underlined while the search bar shows (§2.17).
+            let body_source = match self.search_query_for(&message.id) {
+                Some(query) => markdown::mark_query(shown_body, &query),
+                None => shown_body.to_string(),
+            };
             let (view, inline) = markdown::message_body_refs(
                 ElementId::Name(format!("body-{key}").into()),
-                shown_body.to_string(),
+                body_source,
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
                 edited,
                 Some(&markdown::DiagramContext {
@@ -848,7 +854,7 @@ impl TimelineView {
             .gap(space::S12)
             .child(
                 div()
-                    .size(px(40.))
+                    .size(crate::ui::native::tokens::avatar::LG)
                     .rounded(theme::radius::FIELD)
                     .bg(n.fill)
                     .flex()
@@ -870,11 +876,11 @@ impl TimelineView {
                     )
                     .child(
                         div()
-                            .min_w(px(0.))
+                            .min_w_0()
                             .flex()
                             .n_body()
                             .text_color(n.secondary)
-                            .child(div().min_w(px(0.)).one_line().child(who))
+                            .child(div().min_w_0().one_line().child(who))
                             .children(
                                 when.map(|w| {
                                     div().flex_none().n_figures().child(format!(" · {w}"))
