@@ -53,8 +53,6 @@ pub const LEADING: Pixels = px(12.);
 // --- end v12/fx-topic ---
 /// The widest message text and card (NATIVE.md §9.2).
 pub const TEXT_MAX: Pixels = px(680.);
-/// Rows drawn this soon after a 话题 opens rise in (first paint).
-pub const FIRST_PAINT: std::time::Duration = std::time::Duration::from_millis(600);
 
 /// The date divider label: `11 月 3 日 周一`.
 pub fn date_label(at: crate::data::Millis) -> String {

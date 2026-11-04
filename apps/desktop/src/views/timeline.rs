@@ -105,8 +105,6 @@ pub struct TimelineView {
     show_header: bool,
     /// The v2 style of the 话题 page (`timeline/v2.rs`).
     v2: bool,
-    /// When the open 话题 opened: rows rise in during the first paint.
-    opened_at: Option<Instant>,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
     members: Vec<Member>,
@@ -250,7 +248,6 @@ impl TimelineView {
             services,
             show_header: true,
             v2: false,
-            opened_at: None,
             open: None,
             topic: None,
             members: Vec::new(),
@@ -316,7 +313,6 @@ impl TimelineView {
             .as_ref()
             .and_then(|(g, t)| self.services.provider.topic(g, t))
             .map_or(0, |t| t.unread);
-        self.opened_at = open.as_ref().map(|_| Instant::now());
         self.open = open;
         self.messages.clear();
         self.list.reset(0);

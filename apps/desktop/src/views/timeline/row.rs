@@ -107,12 +107,12 @@ impl TimelineView {
         if self
             .arrived
             .get(&key)
-            .is_some_and(|at| at.elapsed() < theme::motion::FAST)
+            .is_some_and(|at| at.elapsed() < theme::motion::SLOW)
         {
-            // Opacity only, so it stays with reduce motion (§12).
-            message_row = ui::motion::fade_in(
+            // A message that arrives while the 话题 is open rises in once
+            // (200 ms, out curve); with Reduce motion it only fades (§12).
+            message_row = ui::motion::arrive(
                 ElementId::Name(format!("arrive-{key}").into()),
-                theme::motion::FAST,
                 div().child(message_row),
                 cx,
             );
@@ -129,22 +129,9 @@ impl TimelineView {
             .child(message_row)
             .children(plans);
         if v2 {
-            // First paint: the rows of a 话题 that just opened rise in, 40 ms
-            // apart from the top (CONCEPT2 §5); later rows only fade.
-            let first_paint = self
-                .opened_at
-                .is_some_and(|at| at.elapsed() < super::v2::FIRST_PAINT);
-            let item: AnyElement = if first_paint {
-                let from_top = ix.saturating_sub(self.messages.len().saturating_sub(10));
-                ui::motion::rise(
-                    ElementId::Name(format!("v2-rise-{key}").into()),
-                    from_top,
-                    item.w_full(),
-                    cx,
-                )
-            } else {
-                item.into_any_element()
-            };
+            // Opening a 话题 paints its rows at rest (§12: switching topics
+            // is never animated); only a message that arrives rises in.
+            let item: AnyElement = item.into_any_element();
             // NATIVE.md §9.2: the transcript takes the full content width;
             // avatars start on the shared leading inset, the trailing inset
             // is 24 pt; message text stops at 680 pt.
