@@ -240,4 +240,8 @@ crate::copy! {
     I_NOTES_BUSY = "成员接不了",
     I_NOTES_DRAFT = "你在写的时候卡片变了",
     I_NOTES_REPLY = "成员回在了下面",
+    // --- v12/fx-cards ---
+    COMPARE_CHOOSE = "选这个",
+    COMPARE_CHOSEN = "已选",
+    // --- end v12/fx-cards ---
 }

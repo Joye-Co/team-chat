@@ -125,8 +125,6 @@ pub struct CardUi {
     /// The last rev drawn (for the block diff).
     pub seen: Option<Arc<CardV2>>,
     pub diff: Option<RevDiff>,
-    /// Conflicts already toasted, by `clientEventId`.
-    pub toasted: HashSet<String>,
     /// The next pending threshold a redraw is scheduled for.
     pub wake_at: Option<Instant>,
     /// Width of the card body at the last paint; set in prepaint.
@@ -158,7 +156,6 @@ impl CardUi {
             blocks: HashMap::new(),
             seen: prev,
             diff: None,
-            toasted: HashSet::new(),
             wake_at: None,
             width: Rc::new(Cell::new(0.)),
             unfolded: false,
@@ -361,7 +358,6 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         blocks: ui.blocks.clone(),
         seen: ui.seen.clone(),
         diff: ui.diff.clone(),
-        toasted: HashSet::new(),
         wake_at: None,
         width: width.clone(),
         unfolded,

@@ -197,7 +197,7 @@ fn questionnaire() -> Value {
                     { "id": "same", "label": "和其他实习生一样：能看所有群，只在自己的话题里交代", "recommended": true },
                     { "id": "staging", "label": "再加 staging 只读，方便她看数据看板" },
                     { "id": "growth", "label": "先只开「夹夹增长」一个群" } ],
-                  "help": "Pocket 推荐 A：李雪入职时也是这样，两周后再按需要加。" },
+                  "help": "Pocket 推荐和其他实习生一样：李雪入职时也是这样，两周后再按需要加。" },
                 { "id": "groups", "type": "input", "kind": "chips", "label": "要进的群", "required": true,
                   "options": [ { "id": "all", "label": "全员" }, { "id": "growth", "label": "夹夹增长" },
                                { "id": "dev", "label": "开发" }, { "id": "ops", "label": "运维" } ],
@@ -461,7 +461,7 @@ pub fn all() -> Vec<Sample21> {
                                    { "id": "wang", "label": "小王" },
                                    { "id": "ops", "label": "在「运维」群里提醒所有人" } ],
                       "allowOther": { "label": "其他", "placeholder": "写一个人或一个办法" },
-                      "help": "Scout 推荐 A：Watch 能马上回滚，别人要等它。" }
+                      "help": "Scout 推荐 Watch：它能马上回滚，别人要等它。" }
                 ],
                 "actions": [ { "id": "send", "label": "提交", "style": "primary", "kind": "submit", "inputs": ["who"] } ]
             }),
@@ -565,7 +565,7 @@ pub fn all() -> Vec<Sample21> {
                       "options": [ { "id": "A", "label": "合照拼图", "fileId": "f-cover-a" },
                                    { "id": "B", "label": "大字标题", "fileId": "f-cover-b", "recommended": true },
                                    { "id": "C", "label": "手机截图", "fileId": "f-cover-c" } ],
-                      "help": "Taro 推荐 B：上一条大字封面的点击率高了 40%。" }
+                      "help": "Taro 推荐大字标题：上一条大字封面的点击率高了 40%。" }
                 ],
                 "actions": [ { "id": "use", "label": "用这张", "style": "primary", "kind": "submit", "inputs": ["cover"] } ]
             }),

@@ -178,6 +178,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             id.clone(),
             super::leaves::PickTarget::of(node),
         );
+        let mark_id = eid(node, format!("tr-{id}-{key}-mark"));
         div()
             .id(eid(node, format!("tr-{id}-{key}")))
             .flex()
@@ -209,23 +210,13 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                 })
             })
             .when(can_pick, |el| {
-                el.child(
-                    div()
-                        .flex_none()
-                        .size(px(16.))
-                        .when(multiple, |el| el.rounded(px(4.)))
-                        .when(!multiple, |el| el.rounded_full())
-                        .border_1()
-                        .border_color(if on { k.ink } else { k.line_2 })
-                        .when(on && multiple, |el| {
-                            el.bg(k.ink)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(ui::icon(Sym::Check, px(12.), k.bg))
-                        })
-                        .when(on && !multiple, |el| el.border(px(5.))),
-                )
+                // The native check box or radio button (NATIVE.md §5.4).
+                let mark_id = mark_id.clone();
+                el.child(if multiple {
+                    crate::ui::native::NativeCheckbox::new(mark_id, on).into_any_element()
+                } else {
+                    crate::ui::native::NativeRadio::new(mark_id, on).into_any_element()
+                })
             })
             .children((0..columns.len()).map(|ci| {
                 let text = r.get(ci).cloned().unwrap_or_default();

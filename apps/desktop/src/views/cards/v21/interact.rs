@@ -409,8 +409,7 @@ pub fn stage_words(stage: Stage, name: &str) -> String {
     fill(t, &[("name", name)])
 }
 
-/// Runs after the body each frame: flushes a waiting event whose block is free, toasts a
-/// conflict once, and schedules a redraw at the next pending stage.
+/// Runs after the body each frame: flushes a waiting event whose block is free and schedules a redraw at the next pending stage.
 pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
     let events = ctx
         .env
@@ -450,37 +449,6 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
         });
     }
     settle_or_revert(ctx, &events, now, cx);
-    // A conflict: toast once.
-    let conflicts: Vec<String> = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.phase,
-                CardEventPhase::Failed {
-                    failure: CardEventFailure::Conflict,
-                    ..
-                }
-            )
-        })
-        .map(|e| e.client_event_id.clone())
-        .filter(|id| !ui.read(cx).toasted.contains(id))
-        .collect();
-    if !conflicts.is_empty() {
-        let u2 = ui.clone();
-        cx.defer(move |cx| {
-            u2.update(cx, |u, cx| {
-                u.toasted.extend(conflicts.iter().cloned());
-                cx.notify();
-            });
-            if !conflicts.is_empty() {
-                crate::views::files::notify(
-                    gpui_component::notification::Notification::new()
-                        .message(c::CONFLICT_TOAST.to_string()),
-                    cx,
-                );
-            }
-        });
-    }
     // A redraw at the next stage.
     let reply_due = events
         .iter()
@@ -1225,3 +1193,23 @@ mod tests {
         assert!(!sends(&card, b("t"), "table.sort"), "local sort only");
     }
 }
+
+// --- v12/fx-cards ---
+/// True while my newest event on the card came back as a conflict: the card changed under
+/// me. The card header says so inline (NATIVE.md §7.4: no toast).
+pub fn conflicted(ctx: &Ctx) -> bool {
+    let events = ctx
+        .env
+        .provider
+        .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    events.last().is_some_and(|e| {
+        matches!(
+            e.phase,
+            CardEventPhase::Failed {
+                failure: CardEventFailure::Conflict,
+                ..
+            }
+        )
+    })
+}
+// --- end v12/fx-cards ---
