@@ -387,7 +387,7 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
     let mut removed = 0;
     for (at, path) in finished {
         let low_disk = crate::health::disk(&cfg.work_root).0 < min_free;
-        if at < cutoff || low_disk {
+        if at <= cutoff || low_disk {
             remove_run(&path).await;
             removed += 1;
         }
