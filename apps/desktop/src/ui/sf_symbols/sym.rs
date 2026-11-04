@@ -234,6 +234,9 @@ pub struct SymSize {
     /// The square the symbol is centered in.
     pub slot: f32,
     pub weight: Weight,
+    /// The larger side of the ink box in points, or 0 for the size AppKit
+    /// draws at `point`. Set by [`Self::fill`].
+    pub ink: f32,
 }
 
 impl SymSize {
@@ -245,8 +248,9 @@ impl SymSize {
     pub const INLINE: Self = Self::new(13., 16., Weight::Regular);
     /// Inline with 11 pt text.
     pub const INLINE_SMALL: Self = Self::new(11., 14., Weight::Regular);
-    /// Settings toolbar tabs: 18 pt.
-    pub const TAB: Self = Self::new(18., 24., Weight::Regular);
+    /// Settings toolbar tabs: every symbol's ink fills the same 18 square
+    /// (§2.19), whatever its proportions (review 3 K-06).
+    pub const TAB: Self = Self::new(18., 24., Weight::Regular).fill(18.);
     /// The pop-up and pull-down mark (§5.3): 9 pt.
     pub const POPUP: Self = Self::new(9., 12., Weight::Semibold);
     /// The contexts the app draws at, prewarmed at launch.
@@ -264,7 +268,15 @@ impl SymSize {
             point,
             slot,
             weight,
+            ink: 0.,
         }
+    }
+
+    /// The point size is chosen per symbol so that the larger side of its
+    /// ink box is `ink` points: one square for a row of unlike symbols.
+    pub const fn fill(mut self, ink: f32) -> Self {
+        self.ink = ink;
+        self
     }
 
     /// The §6 context for an icon slot of the older Lucide sizes: 18 is a
@@ -277,7 +289,7 @@ impl SymSize {
             40 => Self::TOOLBAR,
             32 => Self::INLINE,
             28 => Self::INLINE_SMALL,
-            48 => Self::TAB,
+            48 => Self::new(18., 24., Weight::Regular),
             _ => Self::new((s * 13. / 16. * 4.).round() / 4., s, Weight::Regular),
         }
     }

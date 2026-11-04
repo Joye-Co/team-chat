@@ -83,21 +83,38 @@ pub fn ink_box(alpha: &[u8], w: u32, h: u32) -> Option<(u32, u32, u32, u32)> {
 /// `scale`. When the ink is larger than the slot it is drawn again at the
 /// point size that fits.
 pub fn draw(name: &str, point: f32, weight: Weight, slot: f32, scale: f32) -> Option<Mask> {
+    draw_ink(name, point, weight, slot, scale, None)
+}
+
+/// [`draw`], and with `ink` (points) the point size is chosen so that the
+/// larger side of the ink box is `ink`, whatever the symbol's own
+/// proportions: one per-symbol scale, so a row of symbols (the Settings
+/// tabs, §2.19) all fill the same square (review 3 K-06).
+pub fn draw_ink(
+    name: &str,
+    point: f32,
+    weight: Weight,
+    slot: f32,
+    scale: f32,
+    ink: Option<f32>,
+) -> Option<Mask> {
     let side = (slot * scale).round() as u32;
+    let limit = ink.map_or(side, |i| ((i * scale).round() as u32).min(side));
     let mut point = point;
     let mut fitted = false;
     let mut canvas = appkit::draw(name, point, weight, scale)?;
     let (x0, y0, x1, y1) = canvas.ink()?;
     let big = (x1 - x0).max(y1 - y0);
-    if big > side {
-        // Ink grows linearly with the point size; a quarter point lower
-        // until it fits.
-        let mut fit = point * side as f32 / big as f32;
+    if big > limit || (ink.is_some() && big != limit) {
+        // Ink grows linearly with the point size: start from the size that
+        // scales the ink to the limit, then a quarter point lower until it
+        // fits.
+        let mut fit = point * limit as f32 / big as f32;
         fit = (fit * 4.).floor() / 4.;
         loop {
             let c = appkit::draw(name, fit, weight, scale)?;
             let (a, b, c1, d) = c.ink()?;
-            if (c1 - a).max(d - b) <= side || fit <= 4. {
+            if (c1 - a).max(d - b) <= limit || fit <= 4. {
                 canvas = c;
                 break;
             }
