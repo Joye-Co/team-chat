@@ -402,6 +402,7 @@ impl MembersPage {
                 }));
             }
         }
+        parts.retain(|p| !p.trim().is_empty());
         // The state as a symbol at the trailing edge (§1 rule 4: no pills).
         let mark = match e.bucket {
             Bucket::Working => Some(rows::sym(
