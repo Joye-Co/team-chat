@@ -266,7 +266,7 @@ impl RenderOnce for InlineValueField {
             .rounded(px(4.))
             .flex()
             .items_center()
-            .when(focused, |d| d.bg(k.content).shadow(k.focus_ring()))
+            .when(focused, |d| d.bg(k.control).shadow(k.focus_ring()))
             .cursor_text()
             .on_key_down(move |e: &KeyDownEvent, window, cx| {
                 if e.keystroke.key == "escape" {
