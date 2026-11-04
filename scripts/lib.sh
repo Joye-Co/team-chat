@@ -103,3 +103,32 @@ rcodesign_sign() {
 designated_requirement() {
   codesign -d -r- "$1" 2>/dev/null | sed -n 's/^\(# \)\{0,1\}designated => //p' | head -n 1
 }
+
+# env_base <env>: the API base URL of a deployed env. CHAT_API_BASE overrides it.
+env_base() {
+  local base="${CHAT_API_BASE:-}"
+  if [ -z "$base" ]; then
+    base="$(jq -r --arg e "$1" '.servers[$e] // empty' "$ROOT/product.json")"
+  fi
+  if [ -z "$base" ]; then
+    case "$1" in
+      e2e) base="https://chat-api-e2e.huangdeshiou.workers.dev" ;;
+      staging) base="https://chat-api-staging.huangdeshiou.workers.dev" ;;
+      production) base="https://chat-api-prod.huangdeshiou.workers.dev" ;;
+      *) die "no API base URL for env '$1'" ;;
+    esac
+  fi
+  printf '%s' "${base%/}"
+}
+
+# health_version <base>: the version that GET <base>/v1/health reports (empty when unreachable).
+health_version() {
+  curl -sS -m 15 "$1/v1/health" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true
+}
+
+# placeholder_version <v>: true for the static VERSION values in server/wrangler.jsonc
+# (0.0.0, 0.0.0-dev, 0.0.0-staging...): a Worker that reports one was not deployed by
+# scripts/deploy-server.sh.
+placeholder_version() {
+  [[ "$1" == 0.0.0 || "$1" == 0.0.0-* ]]
+}
