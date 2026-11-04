@@ -121,27 +121,10 @@ impl TimelineView {
             .iter()
             .position(|s| matches!(s.state, PlanState::Current | PlanState::Waiting));
 
-        // The tile, with a live ring while the member works.
-        let ring = div()
-            .absolute()
-            .top(px(-3.))
-            .left(px(-3.))
-            .size(GUTTER + px(6.))
-            .rounded(px(11.))
-            .border(px(1.5))
-            .border_color(k.live);
-        let tile = div()
-            .flex_none()
-            .relative()
-            .size(GUTTER)
-            .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER))
-            .when(!held, |el| {
-                el.child(ui::motion::breathe(
-                    SharedString::from(format!("plan-ring-{}", run.id)),
-                    ring,
-                    cx,
-                ))
-            });
+        // The tile, with its live status dot while the member works (§7.9).
+        let tile = div().flex_none().child(
+            ui::MemberAvatar::new(bot.as_ref(), GUTTER).ring((!held).then_some(ui::Ring::Live)),
+        );
 
         let toggle = (!run.plan.is_empty()).then(|| {
             let id = run.id.clone();
@@ -373,7 +356,6 @@ impl TimelineView {
                 .gap(space::S6)
                 .border_t_1()
                 .border_color(k.line)
-                .bg(k.raised)
                 .t_meta()
                 .text_color(k.ink_3)
                 .child(div().flex_none().child(span_text(USED, now - at)))

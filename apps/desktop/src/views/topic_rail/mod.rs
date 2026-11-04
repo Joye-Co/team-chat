@@ -1015,7 +1015,7 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
         .overflow_hidden()
         .children(preview.eyebrow.clone().map(|e| {
             tiny(8., 10.)
-                .font_family(theme::MONO_FONT_FAMILY)
+                .figures()
                 .text_color(k.ink_3)
                 .one_line()
                 .child(e)
@@ -1039,7 +1039,7 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
                         // `6/6 场景` for a count, `最长重连 1.8 秒` for a value.
                         let count = m.unit.as_deref().is_some_and(|u| u.starts_with('/'));
                         let value = div()
-                            .font_family(theme::MONO_FONT_FAMILY)
+                            .figures()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(k.ink);
                         if count {
@@ -1087,7 +1087,7 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
                                 .w(px(16.))
                                 .flex()
                                 .justify_end()
-                                .font_family(theme::MONO_FONT_FAMILY)
+                                .figures()
                                 .child(r.value.clone()),
                         )
                 })),
@@ -1151,26 +1151,29 @@ impl Render for TopicRail {
         }
         // One id per place, not per 话题: the rail rises on its first paint
         // only, never again on a 话题 switch (§12).
-        let cards = cards.into_iter().enumerate().map(|(i, el)| {
-            ui::motion::rise(
-                SharedString::from(format!("topic-rail-{i}")),
-                i + 1,
-                ui::card(cx).flex_none().p(space::S12).child(el),
-                cx,
-            )
-        });
+        let cards: Vec<AnyElement> = cards
+            .into_iter()
+            .enumerate()
+            .map(|(i, el)| {
+                ui::motion::rise(
+                    SharedString::from(format!("topic-rail-{i}")),
+                    i + 1,
+                    ui::rail_section(cx).flex_none().child(el),
+                    cx,
+                )
+            })
+            .collect();
         div()
             .id("topic-rail")
             .size_full()
             .overflow_y_scroll()
             .bg(k.rail)
-            .pt(space::S8)
+            .pt(space::S4)
             .px(space::S16)
             .pb(space::S16)
             .flex()
             .flex_col()
-            .gap(space::S10)
-            .children(cards)
+            .child(ui::rail_stack(cards, cx))
             .into_any_element()
     }
 }

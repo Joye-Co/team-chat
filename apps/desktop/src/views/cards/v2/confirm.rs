@@ -165,7 +165,7 @@ pub(crate) fn sheet(
                                     .rounded(px(5.))
                                     .bg(k.sunken)
                                     .text_size(px(12.))
-                                    .mono()
+                                    .code_font()
                                     .child(code),
                             )
                             .child(fill(c::CONFIRM_TYPE_AFTER, &[("verb", &verb)])),
@@ -202,7 +202,7 @@ pub(crate) fn field_box(child: AnyElement, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .text_size(px(13.))
-        .mono()
+        .code_font()
         .text_color(k.ink)
         .child(child)
         .into_any_element()

@@ -477,7 +477,11 @@ impl MembersPage {
             .cursor_pointer()
             .when(is_selected, |el| el.bg(k.sel))
             .when(!is_selected, |el| el.hover(|s| s.bg(k.hover)))
-            .child(MemberAvatar::new(Some(m), px(28.)).ring(ring))
+            .child(
+                MemberAvatar::new(Some(m), px(28.))
+                    .ring(ring)
+                    .on(if is_selected { k.sel } else { k.bg }),
+            )
             .child(
                 div()
                     .flex_1()
@@ -1628,20 +1632,17 @@ impl MembersPage {
                 ),
             )
         })
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S10)
-                .children(cards.into_iter().enumerate().map(|(i, el)| {
-                    ui::motion::rise(
-                        SharedString::from(format!("member-side-{i}")),
-                        i + 2,
-                        div().child(el),
-                        cx,
-                    )
-                })),
-        )
+        .child(ui::rail_stack(
+            cards.into_iter().enumerate().map(|(i, el)| {
+                ui::motion::rise(
+                    SharedString::from(format!("member-side-{i}")),
+                    i + 2,
+                    div().child(el),
+                    cx,
+                )
+            }),
+            cx,
+        ))
         .into_any_element()
     }
 }

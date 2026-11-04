@@ -2389,20 +2389,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         return None;
     }
     let k = theme::colors(cx);
-    let bar = |items: Vec<AnyElement>| {
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .px(space::S16)
-            .py(space::S10)
-            .border_t_1()
-            .border_color(k.line)
-            .bg(k.raised)
-            .children(items)
-            .into_any_element()
-    };
+    let bar = |items: Vec<AnyElement>| ui::card_footer(cx).children(items).into_any_element();
     let note = |t: String| {
         meta(div())
             .ml_auto()

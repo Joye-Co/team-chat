@@ -78,17 +78,17 @@ pub struct MemberAvatar {
     character: Option<(characters::CharacterId, Member)>,
     /// A fixed status instead of the live one (previews, the self-test).
     status_override: Option<CharacterStatus>,
-    /// v3 ring around the avatar: breathing blue while the member works,
-    /// static amber while it waits on me.
+    /// v3 status dot on the avatar: blue while the member works, amber
+    /// while it waits on me.
     ring: Option<Ring>,
 }
 
-/// The ring of an avatar (v3): 1.5 pt, 3 pt out from the tile or circle.
+/// The status of an avatar (v3), drawn as a small dot on its corner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ring {
-    /// `--live`, breathing (static with reduce motion).
+    /// `--live`: the member works.
     Live,
-    /// `--you`, static.
+    /// `--you`: the member waits on me.
     You,
 }
 
@@ -111,7 +111,7 @@ impl MemberAvatar {
         }
     }
 
-    /// Draws a v3 ring around the avatar (see [`Ring`]).
+    /// Draws the v3 status dot on the avatar (see [`Ring`]).
     pub fn ring(mut self, ring: Option<Ring>) -> Self {
         self.ring = ring;
         self
@@ -145,7 +145,7 @@ impl MemberAvatar {
 }
 
 impl RenderOnce for MemberAvatar {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
         let size = self.size;
         let surface = self.surface.unwrap_or(k.content);
@@ -188,7 +188,10 @@ impl RenderOnce for MemberAvatar {
                     .unwrap_or_else(|| self.id.clone())
             };
             let art = match &self.character {
-                Some((c, _)) => characters::tile::tile_image(*c, status, size).into_any_element(),
+                Some((c, _)) => {
+                    characters::tile::tile_image(*c, status, size, window.scale_factor())
+                        .into_any_element()
+                }
                 None => icon(Lucide::Bot, size * 0.5, k.text_2).into_any_element(),
             };
             let pip = match status {
@@ -217,11 +220,7 @@ impl RenderOnce for MemberAvatar {
                         .child(art),
                 )
                 .children(pip.map(dot))
-                .children(
-                    self.ring.map(|r| {
-                        ring_element(&self.id, r, size, Some(theme::radius::bot(size)), cx)
-                    }),
-                )
+                .children(self.ring.map(|r| ring_element(r, size, surface, cx)))
                 .into_any_element();
         }
 
@@ -278,41 +277,40 @@ impl RenderOnce for MemberAvatar {
             .when(self.dimmed, |el| el.opacity(0.5))
             .child(face)
             .when(self.online, |el| el.child(dot(k.online)))
-            .children(self.ring.map(|r| ring_element(&self.id, r, size, None, cx)))
+            .children(self.ring.map(|r| ring_element(r, size, surface, cx)))
             .into_any_element()
     }
 }
 
-/// The ring element: absolute, around a box of `size` with `radius` (`None`
-/// for a circle). Live rings breathe unless reduce motion is on.
-fn ring_element(
-    id: &str,
-    ring: Ring,
-    size: Pixels,
-    radius: Option<Pixels>,
-    cx: &App,
-) -> gpui::AnyElement {
+/// The status dot of an avatar (was a ring around it): a small `live` or
+/// `you` dot on the bottom-right corner, cut out of the avatar by a ring in
+/// the surface color, the way macOS draws presence.
+fn ring_element(ring: Ring, size: Pixels, surface: Hsla, cx: &App) -> gpui::AnyElement {
     let k = theme::colors(cx);
-    let gap = theme::RING_GAP;
     let color = match ring {
         Ring::Live => k.live,
         Ring::You => k.you,
     };
-    let el = div()
+    let dot = theme::avatar_status_dot(size);
+    let cut = theme::AVATAR_STATUS_CUT;
+    let outer = dot + cut * 2.;
+    // The dot's center sits a little inside the corner of the avatar.
+    let offset = -(outer * 0.3).round();
+    // Static: a 6 to 10 pt dot that breathes reads as a flicker at list
+    // sizes; the row's own text (`在做 3/5`) says the member is working.
+    let fill = div().size(dot).rounded_full().bg(color);
+    div()
         .absolute()
-        .left(-gap)
-        .top(-gap)
-        .size(size + gap * 2.)
-        .border(theme::RING_WIDTH)
-        .border_color(color)
-        .map(|el| match radius {
-            Some(r) => el.rounded(r + gap),
-            None => el.rounded_full(),
-        });
-    match ring {
-        Ring::You => el.into_any_element(),
-        Ring::Live => crate::ui::motion::breathe(format!("ring-{id}"), el, cx),
-    }
+        .right(offset)
+        .bottom(offset)
+        .size(outer)
+        .rounded_full()
+        .bg(surface)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(fill)
+        .into_any_element()
 }
 
 /// The glyph slot of a 群 in lists (§7.9): a monochrome `hash` in a 24 pt

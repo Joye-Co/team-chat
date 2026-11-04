@@ -1260,7 +1260,7 @@ impl Render for GroupPage {
                     })),
                     cx,
                 )
-                .child(div().flex().flex_col().gap(space::S10).children(cards))
+                .child(ui::rail_stack(cards, cx))
                 .into_any_element(),
             )
         } else {

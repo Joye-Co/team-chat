@@ -92,7 +92,7 @@ pub fn check_len(text: &str, max: usize) -> Result<(), String> {
     }
 }
 
-/// The column every page sits in (DESIGN.md §8.4): at most 704 pt including
+/// The column every page sits in (DESIGN.md §8.10): at most 664 pt including
 /// 32 pt side padding, centered in the content area; the page title
 /// (`display` 22/30) 36 pt from the top with the page actions at its right,
 /// then the page body 20 pt under it.
@@ -140,9 +140,9 @@ pub fn page(
     )
 }
 
-/// The content column of the settings window: 640 pt of content plus 32 pt
+/// The content column of the settings window: 600 pt of content plus 32 pt
 /// on each side.
-pub const COLUMN_MAX: Pixels = px(704.);
+pub const COLUMN_MAX: Pixels = theme::size::SETTINGS_COLUMN;
 
 /// Column widths of the settings tables (§8.4).
 pub const STATUS_COL: Pixels = px(152.);
@@ -212,6 +212,63 @@ pub fn table_of(header: Option<Div>, rows: Vec<Div>, cx: &App) -> Div {
                 r.border_b(theme::HAIRLINE).border_color(k.sep)
             })
         }))
+}
+
+/// A settings list row (§8.10, macOS System Settings): the label at the
+/// left (`ui` 14/20 `text-1`) with an optional second line under it, the
+/// control at the right. At least 52 pt, padding 8 12 8 16. Put the rows in
+/// one [`table_of`] group, which draws the hairlines between them.
+pub fn list_row(
+    label: impl Into<SharedString>,
+    detail: Option<AnyElement>,
+    control: Option<AnyElement>,
+    cx: &App,
+) -> Div {
+    let k = theme::colors(cx);
+    div()
+        .flex_none()
+        .w_full()
+        .min_h(theme::size::SETTINGS_LIST_ROW)
+        .pl(space::S16)
+        .pr(space::S12)
+        .py(space::S8)
+        .flex()
+        .items_center()
+        .gap(space::S16)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(div().t_ui().text_color(k.text_1).child(label.into()))
+                .children(detail),
+        )
+        .children(control.map(|c| div().flex_none().flex().items_center().child(c)))
+}
+
+/// The second line of a [`list_row`]: `small` 13/20 `text-2`.
+pub fn row_detail(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    let k = theme::colors(cx);
+    div()
+        .t_small()
+        .text_color(k.text_2)
+        .child(text.into())
+        .into_any_element()
+}
+
+/// A read-only value at the right of a [`list_row`]: `ui` `text-2`, one
+/// line, at most 320 pt.
+pub fn row_value(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    let k = theme::colors(cx);
+    div()
+        .max_w(theme::size::SETTINGS_VALUE_MAX)
+        .t_ui()
+        .text_color(k.text_2)
+        .one_line()
+        .child(text.into())
+        .into_any_element()
 }
 
 /// A table with one quiet line: 13/20 `text-3`, centered, 60 pt.

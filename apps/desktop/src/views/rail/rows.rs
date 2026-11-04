@@ -16,8 +16,8 @@ use crate::{
 /// A row's click handler.
 pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
-/// The state dot: 7 pt.
-const DOT: gpui::Pixels = px(7.);
+/// The state dot, filled or hollow: one size for every state (§7.3).
+const DOT: gpui::Pixels = theme::RAIL_STATE_DOT;
 /// The widest a row's meta gets.
 const META_MAX: gpui::Pixels = px(96.);
 /// Indent of a 话题 under a member (mode C).
@@ -37,13 +37,14 @@ impl RailView {
     /// member.
     pub(super) fn slot(
         &self,
-        id: &str,
         state: &RowState,
         tile: Option<&Member>,
         style: SlotStyle,
+        selected: bool,
         cx: &App,
     ) -> AnyElement {
         let k = theme::colors(cx);
+        let surface = if selected { k.rail_sel } else { k.rail };
         let center = |el: AnyElement| {
             div()
                 .flex_none()
@@ -62,19 +63,21 @@ impl RailView {
             RowState::Working(_) if style == SlotStyle::Tile => center(
                 MemberAvatar::new(tile, theme::RAIL_SLOT)
                     .ring(Some(Ring::Live))
+                    .on(surface)
                     .into_any_element(),
             ),
-            RowState::Working(_) => center(ui::motion::breathe(
-                SharedString::from(format!("rail-dot-{id}")),
-                div().size(DOT).rounded_full().bg(k.live),
-                cx,
-            )),
-            RowState::Done => center(ui::icon(Lucide::Check, px(14.), k.ok).into_any_element()),
+            RowState::Working(_) => {
+                center(div().size(DOT).rounded_full().bg(k.live).into_any_element())
+            }
+            // Done is quiet: an `ink-3` check, not a green one (§7.3).
+            RowState::Done => {
+                center(ui::icon(Lucide::Check, theme::RAIL_STATE_CHECK, k.ink_3).into_any_element())
+            }
             RowState::Waiting => center(
                 div()
                     .size(DOT)
                     .rounded_full()
-                    .border(px(1.5))
+                    .border(theme::RAIL_STATE_STROKE)
                     .border_color(k.ink_3)
                     .into_any_element(),
             ),
@@ -114,13 +117,7 @@ impl RailView {
         .pl(indent)
         .pr(space::S10)
         .gap(space::S8)
-        .child(self.slot(
-            &format!("{key}-{}", topic.id),
-            state,
-            tile.as_ref(),
-            style,
-            cx,
-        ))
+        .child(self.slot(state, tile.as_ref(), style, selected, cx))
         .child(
             div()
                 .flex_1()

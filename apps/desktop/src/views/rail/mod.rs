@@ -64,7 +64,7 @@ struct Cache {
 /// The team strip shows at most this many members.
 const STRIP_MAX: usize = 5;
 /// Team strip tiles.
-const STRIP_AVATAR: gpui::Pixels = px(18.);
+const STRIP_AVATAR: gpui::Pixels = px(20.);
 /// Member tiles in mode C.
 const MEMBER_AVATAR: gpui::Pixels = px(18.);
 /// The me circle in the footer.
@@ -421,11 +421,9 @@ impl RailView {
                         .items_center()
                         .gap(space::S6)
                         .children(shown.iter().map(|(m, you)| {
-                            MemberAvatar::new(Some(m), STRIP_AVATAR).ring(Some(if *you {
-                                Ring::You
-                            } else {
-                                Ring::Live
-                            }))
+                            MemberAvatar::new(Some(m), STRIP_AVATAR)
+                                .ring(Some(if *you { Ring::You } else { Ring::Live }))
+                                .on(k.rail)
                         })),
                 )
                 .when(rest > 0, |el| {

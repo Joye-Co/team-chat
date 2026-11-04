@@ -50,7 +50,7 @@ pub fn list_row(
         RowSurface::Sidebar => (k.sidebar_hover, k.sidebar_selected, theme::radius::MD),
         RowSurface::Content => (k.hover, k.selected, theme::radius::MD),
         RowSurface::Overlay => (k.hover, k.selected, theme::radius::SM),
-        RowSurface::Rail => (k.hover, k.sel, theme::radius::MD),
+        RowSurface::Rail => (k.rail_hover, k.rail_sel, theme::radius::MD),
     };
     div()
         .id(id)

@@ -80,14 +80,7 @@ pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) 
         .flex()
         .flex_col()
         .child(header)
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S10)
-                .children(cards)
-                .children(queue.map(|q| div().mt(space::S6).child(q))),
-        )
+        .child(ui::rail_stack(cards.chain(queue), cx))
         .into_any_element()
 }
 
@@ -135,7 +128,6 @@ fn run_card(
     let body = div()
         .flex()
         .gap(space::S10)
-        .p(space::S12)
         .child(
             div()
                 .flex_none()
@@ -200,14 +192,25 @@ fn run_card(
         r.run.id.clone(),
     );
     let live = r.screen.is_some();
-    ui::card(cx)
+    // A rail section that is one click target: its hover fill reaches 8 pt
+    // past the text on each side, so the text stays on the rail's column.
+    div()
         .id(SharedString::from(format!("desk-run-{}", r.run.id)))
-        .overflow_hidden()
+        .mx(-space::S8)
+        .px(space::S8 + theme::RAIL_SECTION_PAD_X)
+        .py(space::S12)
+        .rounded(theme::radius::MD)
         .cursor_pointer()
         .when(!live, |el| el.hover(|s| s.bg(k.hover)))
         .flex()
         .flex_col()
-        .children(r.screen.as_ref().map(|_| screen(r, cx)))
+        .gap(space::S10)
+        .children(r.screen.as_ref().map(|_| {
+            div()
+                .rounded(theme::radius::MD)
+                .overflow_hidden()
+                .child(screen(r, cx))
+        }))
         .child(body)
         .on_click(move |_, _, cx| {
             let (g, t, run_id) = (g.clone(), t.clone(), run_id.clone());
@@ -249,7 +252,7 @@ fn screen(r: &RunCard, cx: &App) -> AnyElement {
             .flex_col()
             .gap(desk_screen::LINE_GAP)
             .pb(desk_screen::LINE_GAP)
-            .mono()
+            .code_font()
             .text_size(desk_screen::LINE.0)
             .line_height(desk_screen::LINE.1)
             .text_color(k.screen_ink)
@@ -324,7 +327,7 @@ fn screen(r: &RunCard, cx: &App) -> AnyElement {
                     div()
                         .max_w(px(120.))
                         .one_line()
-                        .mono()
+                        .code_font()
                         .text_size(desk_screen::LINE.0)
                         .line_height(desk_screen::LINE.1)
                         .text_color(k.screen_dim)
@@ -346,10 +349,7 @@ fn screen(r: &RunCard, cx: &App) -> AnyElement {
 
 fn queue_card(queue: &[QueuedItem], snap: &Snapshot, cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
-    ui::card(cx)
-        .p(space::S12)
-        .flex()
-        .flex_col()
+    ui::rail_section(cx)
         .gap(space::S10)
         .child(
             div()

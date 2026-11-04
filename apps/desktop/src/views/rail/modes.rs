@@ -560,7 +560,11 @@ impl RailView {
                 k.ink_3,
             ))
         }))
-        .child(MemberAvatar::new(Some(&r.member), MEMBER_AVATAR).ring(ring))
+        .child(
+            MemberAvatar::new(Some(&r.member), MEMBER_AVATAR)
+                .ring(ring)
+                .on(k.rail),
+        )
         .child(
             div()
                 .flex_shrink(1.)

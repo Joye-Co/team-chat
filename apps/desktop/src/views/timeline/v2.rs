@@ -111,17 +111,31 @@ pub fn result_parts(body: &str) -> Option<(String, String)> {
     (!title.is_empty()).then(|| (title.to_string(), rest.trim().to_string()))
 }
 
+/// A v2 row that replaces a whole message: it carries its own header, so it
+/// never joins or continues an author group (§7.6).
+pub(super) enum Special {
+    /// `Jojo 转给了 Forge`.
+    Routed(String),
+    /// `Joye 选了「…」`.
+    Decision(String),
+    /// A member's result with its proof.
+    Done {
+        title: String,
+        rest: String,
+        proof: Vec<Proof>,
+    },
+}
+
 fn chip(cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     div()
         .flex()
         .items_center()
         .gap(space::S6)
-        .h(px(26.))
-        .px(px(9.))
-        .rounded(px(7.))
-        .border_1()
-        .border_color(k.line)
+        .h(theme::card_v2::PROOF)
+        .px(space::S8)
+        .rounded(theme::card_v2::CHIP_RADIUS)
+        .bg(k.sunken)
         .t_meta()
         .text_color(k.ink_2)
 }
@@ -167,9 +181,10 @@ impl TimelineView {
         self.members.iter().find(|m| m.id == id)
     }
 
-    /// The meta line of a v2 message: name 13/500, the 岗位 (a tag for a
-    /// member that works for the team, plain `ink-3` text for a person),
-    /// and the mono time.
+    /// The meta line of a v2 message: name 14/600 `ink` (the lead of the
+    /// group, a step above the 14/400 body), the 岗位 (a tag for a member
+    /// that works for the team, plain `ink-3` text for a person) and the
+    /// time in tabular figures `ink-3` (§7.6).
     pub(super) fn v2_meta(
         &self,
         author: Option<&Member>,
@@ -194,8 +209,8 @@ impl TimelineView {
                 )
                 .flex_shrink(1.)
                 .max_w(px(160.))
-                .t_small()
-                .medium()
+                .t_ui()
+                .semibold()
                 .text_color(k.ink),
             )
             .when_some(role, |el, role| {
@@ -224,19 +239,14 @@ impl TimelineView {
             .into_any_element()
     }
 
-    /// A row that replaces the whole message in the v2 style, or `None` for
-    /// a normal message.
-    pub(super) fn v2_special_row(
-        &mut self,
-        message: &Message,
-        key: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// What replaces `message` in the v2 style, or `None` for a normal
+    /// message.
+    pub(super) fn v2_special(&self, message: &Message) -> Option<Special> {
         if message.deleted_at.is_some() || message.id.is_empty() {
             return None;
         }
-        let author = self.v2_member(&message.author_id).cloned();
-        let bot = author.as_ref().is_some_and(Member::is_bot);
+        let author = self.v2_member(&message.author_id);
+        let bot = author.is_some_and(Member::is_bot);
         let has_card = self
             .services
             .provider
@@ -246,7 +256,7 @@ impl TimelineView {
             return None;
         }
         if bot && let Some(to) = routed_to(message, &self.members) {
-            return Some(self.v2_routing_row(message, author.as_ref(), &to.name.clone(), cx));
+            return Some(Special::Routed(to.name.clone()));
         }
         if !bot
             && let Some(d) = self
@@ -256,7 +266,7 @@ impl TimelineView {
                 .into_iter()
                 .find(|d| d.by == message.author_id && (d.at - message.created_at).abs() < 60_000)
         {
-            return Some(self.v2_decision_row(message, author.as_ref(), &d.text, cx));
+            return Some(Special::Decision(d.text));
         }
         if bot && let Some((title, rest)) = result_parts(&message.body) {
             let proof = self
@@ -270,18 +280,29 @@ impl TimelineView {
                         .is_some_and(|end| (end - message.created_at).abs() <= 10 * 60_000)
             });
             if !proof.is_empty() || finished_run {
-                return Some(self.v2_done_card(
-                    message,
-                    key,
-                    author.as_ref(),
-                    title,
-                    rest,
-                    proof,
-                    cx,
-                ));
+                return Some(Special::Done { title, rest, proof });
             }
         }
         None
+    }
+
+    /// A row that replaces the whole message in the v2 style, or `None` for
+    /// a normal message.
+    pub(super) fn v2_special_row(
+        &mut self,
+        message: &Message,
+        key: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let special = self.v2_special(message)?;
+        let author = self.v2_member(&message.author_id).cloned();
+        Some(match special {
+            Special::Routed(to) => self.v2_routing_row(message, author.as_ref(), &to, cx),
+            Special::Decision(text) => self.v2_decision_row(message, author.as_ref(), &text, cx),
+            Special::Done { title, rest, proof } => {
+                self.v2_done_card(message, key, author.as_ref(), title, rest, proof, cx)
+            }
+        })
     }
 
     fn v2_routing_row(
@@ -580,7 +601,6 @@ impl TimelineView {
                     ElementId::Name(format!("v2-out-{key}-{artifact_id}").into()),
                     cx,
                 )
-                .when(!links.is_empty(), |el| el.border_t_1().border_color(k.line))
                 .child(ui::icon(Lucide::FileText, px(15.), k.ink_3))
                 .child(
                     div()
@@ -682,14 +702,11 @@ impl TimelineView {
                     )
                 })
                 .when(!links.is_empty(), |el| {
+                    // No box of its own inside the card (one container level).
                     el.child(
-                        div()
-                            .mt(space::S12)
-                            .rounded(theme::radius::FIELD)
-                            .border_1()
-                            .border_color(k.line)
-                            .overflow_hidden()
-                            .children(links),
+                        ui::divided(links, theme::LIST_ROW_BLEED, cx)
+                            .mt(space::S8)
+                            .mx(-theme::LIST_ROW_BLEED),
                     )
                 }),
         );
@@ -847,11 +864,9 @@ impl TimelineView {
 /// A 38 pt link row inside a done card.
 fn link_row(id: ElementId, cx: &App) -> gpui::Stateful<gpui::Div> {
     let k = theme::colors(cx);
-    div()
-        .id(id)
+    ui::inset_row(div().id(id))
         .w_full()
         .h(px(38.))
-        .px(space::S12)
         .flex()
         .items_center()
         .gap(space::S10)
