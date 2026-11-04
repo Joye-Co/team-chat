@@ -154,6 +154,13 @@ pub struct LoginView {
 }
 
 impl LoginView {
+    /// One of the login fields has the keyboard focus (it took it when the
+    /// view was made, drawn or not).
+    pub fn has_focus(&self, window: &Window, cx: &gpui::App) -> bool {
+        self.code.read(cx).focus_handle(cx).is_focused(window)
+            || self.server.read(cx).focus_handle(cx).is_focused(window)
+    }
+
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let server = cx.new(|cx| {
             InputState::new(window, cx)

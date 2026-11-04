@@ -699,11 +699,6 @@ impl Render for RootView {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
-        // Nothing has the focus (a fresh window, or the focused view went
-        // away): the app root takes it, so Tab and the app's keys reach it.
-        if window.focused(cx).is_none() {
-            window.focus(&self.focus, cx);
-        }
         let k = theme::colors(cx);
         let root = div()
             .id("root")
@@ -771,6 +766,12 @@ impl Render for RootView {
             SessionState::SignedIn { .. }
         ) {
             return root.child(self.login.clone());
+        }
+        // Signed in, nothing drawn has the focus: none at all, or the login
+        // field that took it when the window was made (it is not drawn now).
+        // The app root takes it, so the first Tab reaches the first control.
+        if window.focused(cx).is_none() || self.login.read(cx).has_focus(window, cx) {
+            window.focus(&self.focus, cx);
         }
         // v12/shell: the main window of NATIVE.md §2: the floating sidebar
         // (traffic lights inside it), the content running under its 8 pt
@@ -964,4 +965,54 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     theme::watch_system_accent(cx);
     // --- end v12/shell ---
     crate::ui::motion::watch_reduce_motion(cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    /// The first Tab in a fresh signed-in window reaches a control: the
+    /// login field that took the focus when the window was made is not
+    /// drawn, so the app root takes it back (v15 tail, R1 report).
+    #[gpui::test]
+    fn the_first_tab_reaches_a_control(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_view_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = crate::fake::FakeProvider::new();
+        let root = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let keep = root.clone();
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                cx.open_window(Default::default(), move |window, cx| {
+                    let view = cx.new(|cx| RootView::new(services, None, window, cx));
+                    *keep.borrow_mut() = Some(view.clone());
+                    cx.new(|cx| gpui_base::Root::new(view, window, cx))
+                })
+            })
+            .expect("the window opens");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        let view = root.borrow().clone().expect("the root view");
+        let (app_focus, login) = view.read_with(cx, |v, _| (v.focus.clone(), v.login.clone()));
+        cx.update(|window, _| {
+            assert!(app_focus.is_focused(window), "the app root holds the focus");
+        });
+        cx.simulate_keystrokes("tab");
+        cx.update(|window, cx| {
+            assert!(window.focused(cx).is_some(), "Tab focused something");
+            assert!(!app_focus.is_focused(window), "Tab left the app root");
+            assert!(
+                !login.read(cx).has_focus(window, cx),
+                "not the hidden login field"
+            );
+        });
+    }
 }
