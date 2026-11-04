@@ -7,7 +7,8 @@
 // stops it through the client API (the chat-core `cancel_run` example), and the run must end as
 // cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
 // Between them, an answer in the first topic after its CLI exited starts a run that resumes the
-// first run's CLI session (`--resume`).
+// first run's CLI session (`--resume`), and a second bot on the fake Codex app-server uses
+// `chat-run` through the file transport (local runs only).
 // The first run also uses `chat-run` (the fake CLI's word "chatcard"): it reads `chat-run card
 // schema`, posts a card built from it, posts it again (a retry: the idempotency key must give the
 // same message, and the topic must hold the card once), and patches the posted card at its rev
@@ -180,6 +181,8 @@ async function runDaemonCheck(
   }
   const fake = join(ROOT, "apps/daemon/tests/fake/fake_claude.py");
   chmodSync(fake, 0o755);
+  const fakeCodex = join(ROOT, "apps/daemon/tests/fake/fake_codex.py");
+  chmodSync(fakeCodex, 0o755);
   const work = join(TMP, "work");
   const claudeHome = join(TMP, "claude-home");
   mkdirSync(claudeHome, { recursive: true });
@@ -199,6 +202,12 @@ async function runDaemonCheck(
       'kind = "claude"',
       `command = "${fake}"`,
       `env = { CLAUDE_CONFIG_DIR = "${claudeHome}" }`,
+      "",
+      "[runtimes.codex]",
+      'kind = "codex"',
+      `command = "${fakeCodex}"`,
+      'sandbox = "workspace-write"',
+      'approval_policy = "never"',
       "",
     ].join("\n"),
   );
@@ -278,6 +287,7 @@ async function runDaemonCheck(
     return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;
   });
   report.resume = await resumeCheck(groupId, topicId, runId, bot, work, events, ws);
+  if (!REMOTE) report.codex = await codexCheck(owner, groupId, work, events, ws);
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
   ws.close();
   report.cancel = stop;
@@ -323,6 +333,35 @@ async function resumeCheck(groupId: string, topicId: string, firstRunId: string,
   if (i < 0 || argv[i + 1] !== s1 || argv.includes("--session-id")) throw new Error(`run 2 did not resume ${s1}: ${JSON.stringify(argv)}`);
   step(`answer after the CLI exited: run ${second.id} resumed session ${s1}`);
   return { firstRunId, secondRunId: second.id, sessionId: s1 };
+}
+
+/**
+ * The Codex file transport: a second bot runs the fake Codex app-server (sandbox
+ * workspace-write), whose `chat-run` uses the request folder `<work>/.chat-run-<run id>`
+ * instead of the socket. It posts a card from `chat-run card schema` (and its retry, deduped) and
+ * patches it; the folder is gone after the run and the topic is done.
+ */
+async function codexCheck(owner: string, groupId: string, work: string, events: any[], ws: WebSocket) {
+  const cx = await call("POST", "/v1/bots", { token: owner, body: { name: "cx", role: "开发" } });
+  await call("PUT", `/v1/bots/${cx.member.id}/runner`, { token: owner, body: { runtime: "codex", labels: [LABEL] } });
+  ws.send(JSON.stringify({ t: "send", rid: "r-codex", groupId, clientMsgId: crypto.randomUUID(), body: "@cx chatcard", mentions: [cx.member.id] }));
+  const ack = await until("send ack (codex)", () => events.find((e) => e.frame?.rid === "r-codex"));
+  if (!ack.frame.ok) throw new Error(`send failed: ${JSON.stringify(ack.frame.error)}`);
+  const topicId = ack.frame.result.message.topicId as string;
+  const run = await until("codex run done", () => events.find((e) => e.type === "run.updated" && e.data.run.topicId === topicId && ["done", "failed"].includes(e.data.run.status))?.data.run, 60_000);
+  if (run.status !== "done") throw new Error(`codex run ${run.status}`);
+  const runWork = join(work, "runs", run.id, "work");
+  const r = JSON.parse(readFileSync(join(runWork, "chatcard.json"), "utf8"));
+  if (r.socket || !r.dir?.endsWith(`.chat-run-${run.id}`)) throw new Error(`codex chat-run used no request folder: ${JSON.stringify({ dir: r.dir, socket: r.socket })}`);
+  if (existsSync(r.dir)) throw new Error("the request folder is left after the run");
+  const posted = r.post.out;
+  if (r.post.code !== 0 || !posted?.messageId) throw new Error(`codex chat-run card post failed: ${JSON.stringify(r.post)}`);
+  if (r.again.out?.messageId !== posted.messageId) throw new Error("the codex retry posted another card");
+  if (r.patch.code !== 0 || r.patch.out?.rev !== posted.message.cardV2.rev + 1) throw new Error(`codex chat-run card patch failed: ${JSON.stringify(r.patch)}`);
+  const cards = events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.cardV2?.title === "chat-run codex card");
+  if (cards.length !== 1) throw new Error(`the topic holds the codex card ${cards.length} times`);
+  step(`codex: chat-run through the request folder posted once (retry deduped) and patched to rev ${r.patch.out.rev}; folder removed`);
+  return { runId: run.id, topicId, patchedRev: r.patch.out.rev };
 }
 
 /** The first file named `name` under `dir`, at any depth. */

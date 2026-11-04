@@ -5,7 +5,8 @@ appended to the reply; a command approval is asked when the prompt says "approve
 prompt says "late", the turn waits for a steer and then completes before it answers the steer
 with an error (a steer that arrives as the turn ends). When the prompt says "chatrun", the turn
 runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DIR`,
-`CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json. `thread/resume` knows only
+`CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json; "chatcard" posts a card from
+`chat-run card schema` twice and patches it, with the answers in chatcard.json. `thread/resume` knows only
 the thread "th-old" (any other id is an error, like a thread Codex no longer has); each thread
 call goes to threads.json."""
 import json, os, subprocess, sys, threading, time
@@ -36,6 +37,28 @@ def run_turn(tid, text):
         files = sorted(os.listdir(d)) if d and os.path.isdir(d) else []
         open("chatrun.json", "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr, "dir": d,
             "socket": os.environ.get("CHAT_RUN_SOCKET"), "mode": mode, "files": files}))
+    if "chatcard" in text:
+        # As the fake Claude CLI: a card from `chat-run card schema`, posted twice (a retry) and
+        # patched at its rev, through the request folder; the answers go to chatcard.json.
+        def run(*a):
+            r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
+            try:
+                v = json.loads(r.stdout)
+            except ValueError:
+                v = None
+            return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
+        schema = run("card", "schema")["out"] or {}
+        kinds = [b["properties"]["type"]["const"] for b in schema.get("properties", {}).get("blocks", {}).get("items", {}).get("oneOf", [])]
+        card = {"v": 2, "rev": 1, "title": "chat-run codex card", "fallback": "chat-run codex card", "intent": "working", "blocks": [{"type": kinds[0], "id": "note", "text": "working"}]}
+        open("card.json", "w").write(json.dumps(card))
+        post = run("card", "post", "--file", "card.json")
+        again = run("card", "post", "--file", "card.json")
+        msg = (post["out"] or {}).get("message") or {}
+        open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "done"}}]))
+        patch = run("card", "patch", "--message", msg.get("id", "none"), "--base-rev", str((msg.get("cardV2") or {}).get("rev", 1)), "--ops", "ops.json")
+        d = os.environ.get("CHAT_RUN_DIR", "")
+        open("chatcard.json", "w").write(json.dumps({"kinds": kinds, "post": post, "again": again, "patch": patch, "dir": d,
+            "socket": os.environ.get("CHAT_RUN_SOCKET")}))
     mid = "m-" + tid
     reply = "codex: " + text
     late = "late" in text
