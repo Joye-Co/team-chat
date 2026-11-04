@@ -247,7 +247,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Settings (generic gear) | `gearshape` |
 | AI member without a face | `sparkles` |
 | Check / close | `checkmark` / `xmark` |
-| Chevrons | `chevron.down`, `chevron.up`, `chevron.left`, `chevron.right`; pop-up `chevron.up.chevron.down` |
+| Chevrons | `chevron.down`, `chevron.up`, `chevron.left`, `chevron.right`; pop-up `chevron.up.chevron.down`; first / last page `chevron.left.2` / `chevron.right.2` |
 | Open elsewhere | `arrow.up.forward` |
 | Alert in a row (quiet) | `exclamationmark.circle` in `secondary`; outlined warning `exclamationmark.triangle` |
 | Failed | `xmark.circle.fill` in `red` |

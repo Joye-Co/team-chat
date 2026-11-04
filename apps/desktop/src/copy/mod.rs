@@ -60,6 +60,9 @@ pub mod native_kit;
 // --- v12/overlays ---
 pub mod overlays;
 // --- end v12/overlays ---
+// --- r1-kit ---
+pub mod kit;
+// --- end r1-kit ---
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
@@ -276,6 +279,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end v12/overlays ---
+    // --- r1-kit ---
+    Section {
+        name: "kit",
+        entries: kit::ENTRIES,
+        developer: false,
+    },
+    // --- end r1-kit ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.

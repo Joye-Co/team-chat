@@ -10,14 +10,14 @@
 
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, IntoElement, ParentElement,
-    Pixels, Render, Size, Styled, Window, WindowBounds, div, prelude::FluentBuilder as _, px,
+    Pixels, Render, Size, Styled, Window, WindowBounds, div, px,
 };
 use gpui_component::input::InputState;
 
 use super::{
     buttons::{
-        PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text, disabled_push,
-        popup_button, pull_down, push_button, toolbar_item,
+        PushSize, PushStyle, borderless_button, borderless_text, disabled_push, popup_button,
+        pull_down, push_button,
     },
     fields::{FieldSize, NativeTextField, SearchField},
     form::{FormRow, GroupedForm, InlineValueField},
@@ -28,21 +28,16 @@ use super::{
         AlertLayout, SheetLayout, SheetWidth, alert_button, alert_surface, sheet_buttons,
         sheet_surface,
     },
-    sidebar::{
-        RightColumn, SidebarGroup, SidebarMedia, SidebarRow, SidebarSection, floating_sidebar,
-    },
+    sidebar::SidebarRow,
     toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize},
     tokens::{NativeColors, NativeType as _, metrics, native_colors},
-    toolbar::{ToolbarGroup, ToolbarRow},
+    toolbar::ToolbarRow,
 };
 use crate::{
     app::{Services, main_window_options},
     copy::native_kit as t,
     selftest::scenes::{Scene, Start, capture_bounds},
-    ui::{
-        MemberAvatar,
-        sf_symbols::{Sf, Weight, symbol},
-    },
+    ui::sf_symbols::{Sf, Weight, symbol},
 };
 
 /// The scenes' slice of the self-test (`selftest::scenes::all`).
@@ -175,153 +170,6 @@ fn hstack() -> gpui::Div {
 }
 
 impl NativeKit {
-    fn sidebar(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let avatar = |cx: &App| MemberAvatar::new(None, px(16.)).on(native_colors(cx).sidebar);
-        floating_sidebar(cx)
-            .h(px(452.))
-            .child(
-                // The traffic lights row: the compose item at its trailing edge.
-                div()
-                    .h(metrics::TOOLBAR_ROW)
-                    .pl(px(16.))
-                    .pr(px(8.))
-                    .flex()
-                    .items_center()
-                    .child(div().flex_1())
-                    .child(toolbar_item(
-                        "kit-compose",
-                        Sf::NewTopic,
-                        t::NEW_TOPIC,
-                        ToolbarItemKind::Plain,
-                        true,
-                        window,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .px(metrics::SIDEBAR_ROW_INSET)
-                    .pb(px(8.))
-                    .child(SearchField::new("kit-sb-search", &self.search).sidebar()),
-            )
-            .child(
-                SidebarRow::new("kit-home", t::HOME)
-                    .symbol(Sf::Desk)
-                    .selected(true),
-            )
-            .child(SidebarRow::new("kit-outputs", t::OUTPUTS).symbol(Sf::Outputs))
-            .child(SidebarRow::new("kit-members", t::MEMBERS).symbol(Sf::Members))
-            // One media kind per group; state in the right column (§2.1).
-            .child(
-                SidebarGroup::new(
-                    SidebarSection::new("kit-sec-dev", t::GROUP_DEV).show_chevron(true),
-                    SidebarMedia::None,
-                )
-                .row(SidebarRow::new("kit-t-a", t::TOPIC_A).unread(true).right(
-                    RightColumn::Status(
-                        crate::ui::native::BadgeState::NeedsYou,
-                        t::ST_NEEDS_YOU.into(),
-                    ),
-                ))
-                .row(
-                    SidebarRow::new("kit-t-b", t::TOPIC_B)
-                        .unread(true)
-                        .right(RightColumn::Count(3)),
-                )
-                .row(
-                    SidebarRow::new("kit-t-c", t::TOPIC_C)
-                        .right(RightColumn::Time(t::TIME_B.into())),
-                ),
-            )
-            .child(
-                SidebarGroup::new(
-                    SidebarSection::new("kit-sec-dm", t::GROUP_DM),
-                    SidebarMedia::Avatar,
-                )
-                .row(SidebarRow::new("kit-dm-a", t::INS_MEMBER_VALUE).leading(avatar(cx))),
-            )
-            .into_any_element()
-    }
-
-    fn toolbar(&self, inactive: bool, window: &mut Window, cx: &mut App) -> AnyElement {
-        let k = native_colors(cx);
-        let active = !inactive;
-        let item = |id: &'static str, sf, name, kind, window: &mut Window, cx: &mut App| {
-            toolbar_item(id, sf, name, kind, active, window, cx)
-        };
-        let mut row = ToolbarRow::new(t::TOOLBAR_TITLE)
-            .subtitle(t::TOOLBAR_SUBTITLE)
-            .state(Sf::Alert, k.amber)
-            .inactive(inactive)
-            .group(ToolbarGroup::new([
-                item(
-                    "kit-tb-ask",
-                    Sf::SideChat,
-                    t::ASK_ALONE,
-                    ToolbarItemKind::Plain,
-                    window,
-                    cx,
-                ),
-                // Hovered, as the pointer would show it.
-                item(
-                    "kit-tb-out",
-                    Sf::Outputs,
-                    t::OUTPUTS,
-                    ToolbarItemKind::Plain,
-                    window,
-                    cx,
-                )
-                .when(!inactive, |b| b.bg(k.fill_hover)),
-                item(
-                    "kit-tb-pr",
-                    Sf::Changes,
-                    t::PR,
-                    ToolbarItemKind::Plain,
-                    window,
-                    cx,
-                ),
-            ]))
-            .group(ToolbarGroup::new([item(
-                "kit-tb-insp",
-                Sf::PaneRight,
-                t::INSPECTOR,
-                ToolbarItemKind::Toggled,
-                window,
-                cx,
-            )]));
-        if !inactive {
-            row = row.group(
-                ToolbarGroup::new([item(
-                    "kit-tb-new",
-                    Sf::NewTopic,
-                    t::NEW_TOPIC,
-                    ToolbarItemKind::Prominent,
-                    window,
-                    cx,
-                )])
-                .bare(),
-            );
-        }
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(4.))
-            .child(
-                caption(
-                    if inactive {
-                        t::STATE_INACTIVE
-                    } else {
-                        t::STATE_REST
-                    },
-                    &k,
-                )
-                .pl(px(20.)),
-            )
-            .child(row)
-            .into_any_element()
-    }
-
     fn buttons(&self, window: &mut Window, cx: &mut App) -> AnyElement {
         let k = native_colors(cx);
         let reg = PushSize::Regular;
@@ -624,21 +472,21 @@ impl NativeKit {
 
     fn page0(&self, window: &mut Window, cx: &mut App) -> AnyElement {
         let k = native_colors(cx);
+        // The controls on their own: the window anatomy (sidebar, toolbar)
+        // is the real main window's, so the kit no longer draws an older
+        // copy of it (review 2 R1-14).
         div()
             .size_full()
             .bg(k.content)
             .flex()
-            .child(self.sidebar(window, cx))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    // v12/shell: the first caption clears the window's top edge.
-                    .pt(px(12.))
-                    .child(self.toolbar(false, window, cx))
-                    .child(self.toolbar(true, window, cx))
+                    // The first caption clears the traffic lights.
+                    .pt(px(40.))
                     .child(
                         div()
                             .px(px(20.))
@@ -735,12 +583,12 @@ impl NativeKit {
                         .action(borderless_button("ki-open", Sf::Open, t::OPEN, window, cx))
                         .row(label_value(
                             t::INS_COMPUTER,
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(6.))
-                                .child(div().size(px(6.)).rounded_full().bg(k.green))
-                                .child(t::INS_COMPUTER_VALUE),
+                            // Online is a StatusBadge, never a loose dot
+                            // (§2.12, R1-14).
+                            super::StatusBadge::new(
+                                super::BadgeState::Online,
+                                t::INS_COMPUTER_VALUE,
+                            ),
                             cx,
                         )),
                 )
@@ -762,9 +610,16 @@ impl NativeKit {
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(caption(t::STATE_FOCUSED, &k).pl(px(16.)))
+                .child(caption(t::STATE_SELECTED, &k).pl(px(16.)))
                 .child(row("kl-1", t::TOPIC_A, cx).selected(true))
-                .child(row("kl-2", t::TOPIC_B, cx))
+                .child(caption(t::STATE_FOCUSED, &k).pl(px(16.)).pt(px(6.)))
+                // Keyboard focus is the ring, never the selected fill
+                // (E3, R1-01); the scene draws it without a key press.
+                .child(
+                    row("kl-2", t::TOPIC_B, cx)
+                        .on_click(|_, _, _| {})
+                        .show_focus(true),
+                )
                 .child(caption(t::STATE_SELECTED, &k).pl(px(16.)).pt(px(6.)))
                 .child(
                     row("kl-3", t::TOPIC_C, cx)
@@ -1103,6 +958,51 @@ impl NativeKit {
                         )),
                 ),
         );
+        // A page table with its footer: the count, 第 2 / 3 页 and the four
+        // page buttons (§2.7).
+        let page_table = section(t::SEC_TABLE, &k).child({
+            use super::page::{Col, Pager, frame, table_footer};
+            let page_cols = || {
+                vec![
+                    Col {
+                        header: t::COL_NAME.into(),
+                        width: None,
+                        right: false,
+                    },
+                    Col {
+                        header: t::COL_VERSION.into(),
+                        width: Some(px(64.)),
+                        right: true,
+                    },
+                    Col {
+                        header: t::COL_UPDATED.into(),
+                        width: Some(px(80.)),
+                        right: true,
+                    },
+                ]
+            };
+            let page_rows = vec![(
+                vec![cell(t::TOPIC_A), cell(t::VERSION_3), cell(t::TIME_A)],
+                Some(
+                    Box::new(|_: &gpui::ClickEvent, _: &mut Window, _: &mut App| {})
+                        as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>,
+                ),
+            )];
+            div().flex().flex_col().gap(space::S16).child(
+                frame(cx)
+                    .child(super::page::table("k3-page", &page_cols(), page_rows, cx))
+                    .child(table_footer(
+                        "k3-page-footer",
+                        t::TABLE_COUNT,
+                        Pager {
+                            page: 2,
+                            pages: 3,
+                            go: Some(std::rc::Rc::new(|_, _, _| {})),
+                        },
+                        cx,
+                    )),
+            )
+        });
         let empty = section(t::SEC_EMPTY, &k).child(
             div().w_full().flex().flex_col().gap(space::S16).child(
                 div().h(px(260.)).child(
@@ -1181,51 +1081,54 @@ impl NativeKit {
         // The state matrix of the current kit (T1-18, §1.8): rest, hover,
         // pressed, focus (3 px ring), loading and disabled, for the
         // default and the outline button.
-        let matrix_row = |style: PushStyle, label: &'static str, id: &'static str| {
-            let base = |n: &str| {
-                push_button(format!("{id}-{n}"), label, style, PushSize::Small, cx).w(px(64.))
-            };
-            let look = super::buttons::look(style, &k);
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .child(base("rest"))
-                .child(base("hover").bg(look.hover))
-                .child(base("pressed").bg(look.pressed))
-                .child(
-                    div()
-                        .rounded(super::tokens::radius::CONTROL)
-                        .shadow(k.focus_ring())
-                        .child(base("focus")),
-                )
-                .child(super::loading_push(base("loading"), true, PushSize::Small))
-                .child(super::disabled_push(base("disabled"), true, cx))
+        // One line per state (§1.8): its name, then the default and the
+        // outline button in it. The buttons are wide enough for the spinner
+        // beside the label: the width stays while loading (R1-14).
+        let button = |style: PushStyle, label: &'static str, id: String| {
+            push_button(id, label, style, PushSize::Small, cx).w(px(88.))
         };
-        let state_labels = [
-            t::STATE_REST,
-            t::STATE_HOVER,
-            t::STATE_PRESSED,
-            t::STATE_FOCUSED,
-            t::STATE_LOADING,
-            t::STATE_DISABLED,
+        let state = |n: &'static str, style: PushStyle, label: &'static str| {
+            let look = super::buttons::look(style, &k);
+            let b = button(style, label, format!("k3-m-{n}-{label}"));
+            match n {
+                "hover" => b.bg(look.hover).into_any_element(),
+                "pressed" => b.bg(look.pressed).into_any_element(),
+                "focus" => div()
+                    .rounded(super::tokens::radius::CONTROL)
+                    .shadow(k.focus_ring())
+                    .child(b)
+                    .into_any_element(),
+                "loading" => super::loading_push(b, true, PushSize::Small).into_any_element(),
+                "disabled" => super::disabled_push(b, true, cx).into_any_element(),
+                _ => b.into_any_element(),
+            }
+        };
+        let states = [
+            ("rest", t::STATE_REST),
+            ("hover", t::STATE_HOVER),
+            ("pressed", t::STATE_PRESSED),
+            ("focus", t::STATE_FOCUSED),
+            ("loading", t::STATE_LOADING),
+            ("disabled", t::STATE_DISABLED),
         ];
-        let matrix = section(t::SEC_STATES, &k).child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S8)
-                .child(
+        let matrix =
+            section(t::SEC_STATES, &k).child(div().flex().flex_col().gap(space::S8).children(
+                states.map(|(n, name)| {
                     div()
                         .flex()
-                        .gap(space::S8)
-                        .n_footnote()
-                        .text_color(k.secondary)
-                        .children(state_labels.map(|l| div().w(px(64.)).child(l))),
-                )
-                .child(matrix_row(PushStyle::Default, t::CONTINUE, "k3-m1"))
-                .child(matrix_row(PushStyle::Outline, t::CANCEL, "k3-m2")),
-        );
+                        .items_center()
+                        .gap(space::S12)
+                        .child(
+                            div()
+                                .w(px(48.))
+                                .n_footnote()
+                                .text_color(k.secondary)
+                                .child(name),
+                        )
+                        .child(state(n, PushStyle::Default, t::CONTINUE))
+                        .child(state(n, PushStyle::Outline, t::CANCEL))
+                }),
+            ));
         let col = || div().w(px(440.)).flex().flex_col().gap(space::S24);
         div()
             .size_full()
@@ -1236,8 +1139,15 @@ impl NativeKit {
             .pt(metrics::TOOLBAR_ROW)
             .flex()
             .gap(space::S24)
-            .child(col().child(badges).child(status).child(buttons).child(card))
-            .child(col().child(list).child(tables).child(matrix))
+            .child(
+                col()
+                    .child(badges)
+                    .child(status)
+                    .child(buttons)
+                    .child(card)
+                    .child(matrix),
+            )
+            .child(col().child(list).child(tables).child(page_table))
             .child(col().child(feedback).child(empty).child(loading))
             .into_any_element()
     }
