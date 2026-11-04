@@ -12,6 +12,12 @@ export type RunPlanState = z.infer<typeof RunPlanState>;
 export const RunPlanItem = z.object({
   text: z.string().min(1).max(MAX_PLAN_TEXT_CHARS),
   state: RunPlanState,
+  /** 1.1: when the item became `current` (ms). */
+  startedAt: z.int().nonnegative().optional(),
+  /** 1.1: when the item became `done` (ms). */
+  endedAt: z.int().nonnegative().optional(),
+  /** 1.1: how long the bot expects the item to take (ms). */
+  estimateMs: z.int().nonnegative().optional(),
 });
 export type RunPlanItem = z.infer<typeof RunPlanItem>;
 /** The bot's to-do list for a run, in order. An update replaces the whole list; `[]` clears it. */

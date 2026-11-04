@@ -76,6 +76,60 @@ ALTER TABLE card_answers ADD COLUMN block_id TEXT;
 ALTER TABLE card_answers ADD COLUMN value TEXT;
 "#;
 
+/// 1.1 server-files gaps: group purpose lines and desk notes (首页), synced from the log.
+pub(super) const MIGRATION_SQL_4: &str = r#"
+ALTER TABLE groups ADD COLUMN purpose TEXT;
+CREATE TABLE desk_notes (
+  group_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  PRIMARY KEY (group_id, member_id)
+);
+"#;
+
+/// A bot member's desk note in one group (`desk.noted`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeskNoteRow {
+    pub group_id: String,
+    pub member_id: String,
+    pub text: String,
+    pub at: u64,
+    pub seq: u64,
+}
+
+/// Applies `desk.noted`: the newest note of the bot in the group; `""` removes it.
+pub(super) fn apply_desk_note(
+    tx: &Transaction<'_>,
+    gid: &str,
+    member_id: &str,
+    text: &str,
+    at: u64,
+    seq: u64,
+) -> rusqlite::Result<()> {
+    if text.is_empty() {
+        tx.execute(
+            "DELETE FROM desk_notes WHERE group_id = ?1 AND member_id = ?2 AND seq <= ?3",
+            params![gid, member_id, seq],
+        )?;
+    } else {
+        tx.execute(
+            "INSERT INTO desk_notes (group_id, member_id, text, at, seq) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(group_id, member_id) DO UPDATE SET text = excluded.text, at = excluded.at, seq = excluded.seq
+             WHERE excluded.seq > desk_notes.seq",
+            params![gid, member_id, text, at, seq],
+        )?;
+    }
+    Ok(())
+}
+
+/// 1.1 step `asks-1`: the card messages that ask someone, newest first (需要你拍板 reads
+/// every open ask, not only the newest messages of a waiting topic).
+pub(super) const MIGRATION_SQL_ASKS: &str = r#"
+CREATE INDEX messages_asks ON messages(created_at) WHERE json_extract(raw, '$.cardV2.ask') IS NOT NULL;
+"#;
+
 /// One answer to a v2 card (`card.answered`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardAnswerRow {
@@ -435,6 +489,21 @@ impl Store {
         })
     }
 
+    /// Card v2 messages with an `ask` of every group, newest first, at most `limit`, not
+    /// deleted. Whether an ask is open for a member is the caller's check.
+    pub fn ask_messages(&self, limit: usize) -> StoreResult<Vec<Message>> {
+        self.with_reader(|c| {
+            let mut st = c.prepare_cached(&format!(
+                "SELECT {} FROM messages INDEXED BY messages_asks
+                 WHERE json_extract(raw, '$.cardV2.ask') IS NOT NULL AND deleted_at IS NULL
+                 ORDER BY created_at DESC LIMIT ?1",
+                rows::MESSAGE_COLS
+            ))?;
+            st.query_map([limit as u64], rows::message_from_row)?
+                .collect()
+        })
+    }
+
     /// Active runs (created, running, waiting, blocked) of every group, newest change first.
     pub fn active_runs(&self) -> StoreResult<Vec<BotRun>> {
         self.with_reader(|c| {
@@ -452,6 +521,25 @@ impl Store {
                 "SELECT raw FROM runs WHERE created_at >= ?1 ORDER BY created_at DESC, id DESC",
             )?;
             st.query_map([since], run_from_raw)?.collect()
+        })
+    }
+
+    /// Desk notes of every group (首页), newest first.
+    pub fn desk_notes(&self) -> StoreResult<Vec<DeskNoteRow>> {
+        self.with_reader(|c| {
+            let mut st = c.prepare_cached(
+                "SELECT group_id, member_id, text, at, seq FROM desk_notes ORDER BY at DESC, seq DESC",
+            )?;
+            st.query_map([], |r| {
+                Ok(DeskNoteRow {
+                    group_id: r.get(0)?,
+                    member_id: r.get(1)?,
+                    text: r.get(2)?,
+                    at: r.get(3)?,
+                    seq: r.get(4)?,
+                })
+            })?
+            .collect()
         })
     }
 

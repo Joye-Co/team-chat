@@ -291,6 +291,8 @@ pub struct SendRequest {
     pub cause_event_id: Option<String>,
     /// 1.1: refs to parts (引用提问), at most 5; the server writes their quote lines.
     pub block_refs: Option<Vec<crate::proto::BlockRefInput>>,
+    /// 1.1: the side chat answer this send posts to its source topic (`send.fromAside`).
+    pub from_aside: Option<crate::proto::AsideOrigin>,
 }
 
 /// An edit of my message. `None` fields keep their value.
@@ -694,6 +696,7 @@ impl Client {
                 context: req.context,
                 cause_event_id: req.cause_event_id,
                 block_refs: req.block_refs,
+                from_aside: req.from_aside,
                 after_root,
             },
         )

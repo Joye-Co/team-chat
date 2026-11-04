@@ -546,6 +546,7 @@ impl Answerer {
         self.form
             .update(cx, |f, cx| f.choose(block, option, false, cx));
         let action = submit_action(&self.card).cloned().unwrap_or(CardV2Action {
+            role: None,
             id: "submit".into(),
             label: String::new(),
             style: None,
@@ -1001,12 +1002,23 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let a = ctx.answerer();
     match ctx.state {
         CardState::SendFailed { action_id, .. } => {
+            crate::selftest::drawn::mark("card-band-retry", ctx.msg.message_id.clone());
             let action = ctx
                 .card
                 .actions()
                 .iter()
-                .find(|x| &x.id == action_id)?
-                .clone();
+                .find(|x| &x.id == action_id)
+                .cloned();
+            let Some(action) = action else {
+                // A 2.1 answer of a block (an immediate commit): the band's 重试 sends the
+                // same answer again (CARD21 §2).
+                let resend = super::v21::leaves::resend_answer(ctx);
+                return Some(
+                    quiet(ctx.id("retry"), c::STRIP_RETRY)
+                        .on_click(move |_, _, _| resend())
+                        .into_any_element(),
+                );
+            };
             Some(
                 quiet(ctx.id("retry"), c::STRIP_RETRY)
                     .on_click(move |_, window, cx| a.press(&action, window, cx))
@@ -1180,7 +1192,11 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                     .children(p.action),
             )
             .when_some(p.bar, |el, f| {
-                el.child(ui::native::determinate_bar(f.clamp(0.02, 1.), Some(n.blue), cx))
+                el.child(ui::native::determinate_bar(
+                    f.clamp(0.02, 1.),
+                    Some(n.blue),
+                    cx,
+                ))
             })
             .into_any_element(),
     )
@@ -1316,11 +1332,11 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .children(path)
             .children(conflict)
             .when_some(bar, |el, f| {
-                el.child(
-                    div()
-                        .pt(space::S8)
-                        .child(ui::native::determinate_bar(f.clamp(0.02, 1.), Some(n.blue), cx)),
-                )
+                el.child(div().pt(space::S8).child(ui::native::determinate_bar(
+                    f.clamp(0.02, 1.),
+                    Some(n.blue),
+                    cx,
+                )))
             })
             .into_any_element(),
     )
@@ -1572,7 +1588,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
                     .into_any_element()
                 } else {
-                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx).into_any_element()
+                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx)
+                        .into_any_element()
                 });
                 for x in answers
                     .iter()
@@ -1711,7 +1728,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
                     .into_any_element()
                 } else {
-                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx).into_any_element()
+                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx)
+                        .into_any_element()
                 });
                 link_buttons(&mut items, cx);
                 // --- inc-cards21: the ask's promise at the right ---
@@ -1965,14 +1983,21 @@ pub(crate) fn state_name(s: &CardState) -> &'static str {
 /// decides.
 fn shown_label(card: &CardV2, action: &CardV2Action) -> String {
     let kind = action.kind();
-    let irreversible = card.ask.as_ref().and_then(|a| a.irreversible.as_ref()).is_some();
+    let irreversible = card
+        .ask
+        .as_ref()
+        .and_then(|a| a.irreversible.as_ref())
+        .is_some();
     let guarded = kind == CardActionKind::Submit
         && action.style.unwrap_or_default() != CardV2ActionStyle::Default
         || submit_action(card).is_some_and(|s| s.id == action.id);
     let asks_first = matches!(kind, CardActionKind::Submit | CardActionKind::Reject)
         && (kind == CardActionKind::Submit && guarded && irreversible || action.confirm.is_some());
     if asks_first {
-        crate::copy::fill(crate::copy::desk::DESK_ACTION_MORE, &[("label", &action.label)])
+        crate::copy::fill(
+            crate::copy::desk::DESK_ACTION_MORE,
+            &[("label", &action.label)],
+        )
     } else {
         action.label.clone()
     }

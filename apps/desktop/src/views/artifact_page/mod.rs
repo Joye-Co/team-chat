@@ -36,7 +36,7 @@ use crate::{
     data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
-        self, Sym, MemberAvatar, Ring,
+        self, MemberAvatar, Ring, Sym,
         native::page,
         web_embed::{WebEmbed, WebEmbedSpec},
     },
@@ -52,7 +52,10 @@ use crate::{
 
 /// The version folders a view has asked for, by `(产出, version)`.
 #[derive(Clone, Default)]
-pub struct Folders(Rc<RefCell<HashMap<(String, u32), Option<Result<ArtifactFolder, FileError>>>>>);
+pub struct Folders(Rc<RefCell<HashMap<(String, u32), FolderAsk>>>);
+
+/// One asked folder: `None` while it loads.
+type FolderAsk = Option<Result<ArtifactFolder, FileError>>;
 
 impl Folders {
     /// The folder of a version, asking the provider once; the view is
@@ -97,6 +100,9 @@ use crate::views::artifacts::host::{self, PageRef};
 /// A waiting emit: its page and payload, and the page's request when it waits.
 type PendingEvent = (PageRef, serde_json::Value, Option<serde_json::Value>);
 
+/// The page and request id of an emit that waits.
+type QueuedRequest = (PageRef, serde_json::Value);
+
 thread_local! {
     /// Page events by `(产出, version)`, paced for every page of the app.
     static PAGE_EVENTS: RefCell<EventLimiter<(String, u32), PendingEvent>> =
@@ -104,7 +110,7 @@ thread_local! {
     /// When the next send of waiting page events runs.
     static FLUSH_AT: Cell<Option<Instant>> = const { Cell::new(None) };
     /// The page request of the emit that waits per `(产出, version, name)`.
-    static QUEUED: RefCell<HashMap<(String, u32, String), (PageRef, serde_json::Value)>> =
+    static QUEUED: RefCell<HashMap<(String, u32, String), QueuedRequest>> =
         RefCell::new(HashMap::new());
 }
 
@@ -796,56 +802,55 @@ impl ArtifactPage {
                     nav.update(cx, |n, cx| n.open_artifact(id, Some(shown - 1), cx))
                 })
             });
-            let rows =
-                detail.versions.iter().map(|v| {
-                    let on = v.version == shown;
-                    let nav = self.services.nav.clone();
-                    let (id, ver) = (id.clone(), v.version);
-                    let latest = detail.summary.version;
-                    div()
-                        .id(SharedString::from(format!("artifact-v{}", v.version)))
-                        .flex()
-                        .items_center()
-                        .gap(space::S10)
-                        .h(px(36.))
-                        .px(space::S6)
-                        .rounded(theme::radius::MD)
-                        .t_small()
-                        .text_color(if on { k.ink } else { k.ink_2 })
-                        .when(on, |el| el.bg(k.sel))
-                        .child(
-                            div()
-                                .flex_none()
-                                .w(px(24.))
-                                .mono()
-                                .type_role(META)
-                                .when(on, |el| el.semibold().text_color(k.ink))
-                                .when(!on, |el| el.text_color(k.ink_3))
-                                .child(format!("v{}", v.version)),
-                        )
-                        .child({
-                            // A version without a note says so (F37).
-                            let note = version_note(&self.services, detail, v.version);
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .one_line()
-                                .when(note.is_none(), |d| d.text_color(k.ink_3))
-                                .child(note.unwrap_or_else(|| c::ARTIFACT_NO_NOTE.to_string()))
-                        })
-                        .child(
-                            div()
-                                .flex_none()
-                                .type_role(META)
-                                .text_color(k.ink_3)
-                                .child(version_time(now, v.created_at)),
-                        )
-                        .on_click(move |_, _, cx| {
-                            let id = id.clone();
-                            let ver = (ver != latest).then_some(ver);
-                            nav.update(cx, |n, cx| n.open_artifact(id, ver, cx))
-                        })
-                });
+            let rows = detail.versions.iter().map(|v| {
+                let on = v.version == shown;
+                let nav = self.services.nav.clone();
+                let (id, ver) = (id.clone(), v.version);
+                let latest = detail.summary.version;
+                div()
+                    .id(SharedString::from(format!("artifact-v{}", v.version)))
+                    .flex()
+                    .items_center()
+                    .gap(space::S10)
+                    .h(px(36.))
+                    .px(space::S6)
+                    .rounded(theme::radius::MD)
+                    .t_small()
+                    .text_color(if on { k.ink } else { k.ink_2 })
+                    .when(on, |el| el.bg(k.sel))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(24.))
+                            .mono()
+                            .type_role(META)
+                            .when(on, |el| el.semibold().text_color(k.ink))
+                            .when(!on, |el| el.text_color(k.ink_3))
+                            .child(format!("v{}", v.version)),
+                    )
+                    .child({
+                        // A version without a note says so (F37).
+                        let note = version_note(&self.services, detail, v.version);
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .one_line()
+                            .when(note.is_none(), |d| d.text_color(k.ink_3))
+                            .child(note.unwrap_or_else(|| c::ARTIFACT_NO_NOTE.to_string()))
+                    })
+                    .child(
+                        div()
+                            .flex_none()
+                            .type_role(META)
+                            .text_color(k.ink_3)
+                            .child(version_time(now, v.created_at)),
+                    )
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        let ver = (ver != latest).then_some(ver);
+                        nav.update(cx, |n, cx| n.open_artifact(id, ver, cx))
+                    })
+            });
             cards.push(
                 kit::side_card(cx)
                     .child(
@@ -1102,7 +1107,11 @@ impl ArtifactPage {
         let view_item = |grid: bool, cx: &mut Context<Self>| {
             let on = self.grid == grid;
             sym_toolbar_item(
-                if grid { "artifacts-view-grid" } else { "artifacts-view-list" },
+                if grid {
+                    "artifacts-view-grid"
+                } else {
+                    "artifacts-view-list"
+                },
                 if grid { Sym::Grid } else { Sym::List },
                 if grid {
                     c::ARTIFACTS_VIEW_GRID
@@ -1134,14 +1143,16 @@ impl ArtifactPage {
             move |mut menu, _, _| {
                 for s in ListSort::ALL {
                     let this = this.clone();
-                    menu = menu.item(PopupMenuItem::new(s.label()).checked(s == current).on_click(
-                        move |_, _, cx| {
-                            let _ = this.update(cx, |v, cx| {
-                                v.sort = s;
-                                cx.notify();
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new(s.label())
+                            .checked(s == current)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |v, cx| {
+                                    v.sort = s;
+                                    cx.notify();
+                                });
+                            }),
+                    );
                 }
                 menu
             }
@@ -1321,7 +1332,10 @@ impl ArtifactPage {
                         let opener = open(a.id.clone(), self.services.nav.clone());
                         let meta = fill(
                             c::ARTIFACTS_TILE_META,
-                            &[("v", &a.version.to_string()), ("topic", &topic_name(g, &a.topic_id))],
+                            &[
+                                ("v", &a.version.to_string()),
+                                ("topic", &topic_name(g, &a.topic_id)),
+                            ],
                         );
                         let full = a.title.clone();
                         page::card(cx)
@@ -1357,7 +1371,8 @@ impl ArtifactPage {
                                     ),
                             )
                             .tooltip(move |window, cx| {
-                                gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                                gpui_component::tooltip::Tooltip::new(full.clone())
+                                    .build(window, cx)
                             })
                             .on_click(opener)
                             .context_menu({
@@ -1371,7 +1386,13 @@ impl ArtifactPage {
                         .flex_col()
                         .gap(page::m::HEADER_GAP)
                         .child(page::section_header(day, Some(count), None, None, cx))
-                        .child(div().flex().flex_wrap().gap(page::m::GRID_GAP).children(tiles))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .gap(page::m::GRID_GAP)
+                                .children(tiles),
+                        )
                 }))
                 .child(div().n_body().text_color(n.secondary).child(footer_text))
                 .into_any_element()
@@ -1426,7 +1447,11 @@ impl ArtifactPage {
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(div().flex_none().child(page::row_icon(kind_sym(a.kind), n.secondary)))
+                        .child(
+                            div()
+                                .flex_none()
+                                .child(page::row_icon(kind_sym(a.kind), n.secondary)),
+                        )
                         .child(
                             div()
                                 .min_w(px(0.))
@@ -1443,12 +1468,20 @@ impl ArtifactPage {
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(div().flex_none().child(crate::views::group_page::rows::avatar(
-                            by.as_ref(),
-                            px(16.),
+                        .child(
+                            div()
+                                .flex_none()
+                                .child(crate::views::group_page::rows::avatar(
+                                    by.as_ref(),
+                                    px(16.),
+                                    cx,
+                                )),
+                        )
+                        .child(page::cell_text(
+                            member_name(&self.services, &a.created_by),
+                            false,
                             cx,
-                        )))
-                        .child(page::cell_text(member_name(&self.services, &a.created_by), false, cx))
+                        ))
                         .into_any_element();
                     let menu = {
                         let (services, art) = (self.services.clone(), a.clone());
@@ -1533,6 +1566,10 @@ impl Render for ArtifactPage {
         let shown = version
             .filter(|v| detail.versions.iter().any(|x| x.version == *v))
             .unwrap_or(detail.summary.version);
+        crate::selftest::drawn::mark(
+            "artifact-page",
+            format!("{} v{shown}", detail.summary.title),
+        );
         let header = self.header(&detail, shown, window, cx);
         let frame = self.frame(&detail, shown, window, cx);
         let aside = self.aside_open.then(|| self.story(&detail, shown, cx));

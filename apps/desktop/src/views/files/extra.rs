@@ -332,7 +332,10 @@ fn row_frame(
             track(p, cx).left(px(46.)).right(space::S8).bottom(px(1.))
         } else {
             // Under the name and meta: the symbol slot, then the gap.
-            track(p, cx).left(space::S12 + px(28.) + space::S10).right(px(44.)).bottom(px(5.))
+            track(p, cx)
+                .left(space::S12 + px(28.) + space::S10)
+                .right(px(44.))
+                .bottom(px(5.))
         })
     })
 }
@@ -450,12 +453,7 @@ pub fn file_row_in(
             .into_any_element()
     };
     let actions = if failed {
-        vec![action(
-            "retry",
-            f::RETRY,
-            OpenAction::Open,
-            Sym::Refresh,
-        )]
+        vec![action("retry", f::RETRY, OpenAction::Open, Sym::Refresh)]
     } else if running {
         // Downloading: cancel `x` (§7.11).
         let provider = provider.clone();
@@ -472,12 +470,7 @@ pub fn file_row_in(
     } else {
         vec![
             action("open", f::OPEN, OpenAction::Open, Sym::OpenExternal),
-            action(
-                "reveal",
-                f::REVEAL,
-                OpenAction::RevealInFinder,
-                Sym::Folder,
-            ),
+            action("reveal", f::REVEAL, OpenAction::RevealInFinder, Sym::Folder),
         ]
     };
     let group = group_name(&id);

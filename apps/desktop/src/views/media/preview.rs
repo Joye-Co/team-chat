@@ -27,7 +27,7 @@ use crate::{
     selftest::scenes::capture_bounds,
     theme::{self, Type as _, radius, space},
     ui::{
-        self, Sym, MemberAvatar,
+        self, MemberAvatar, Sym,
         web_embed::{Phase, live},
     },
 };
@@ -202,10 +202,10 @@ impl MediaPreview {
             .flex_col()
             // The topic's toolbar title and subtitle (NATIVE.md §2), no
             // breadcrumb.
-            .child(crate::ui::native::ToolbarRow::new(t.title).subtitle(format!(
-                "{} · {}",
-                t.group, t.state
-            )))
+            .child(
+                crate::ui::native::ToolbarRow::new(t.title)
+                    .subtitle(format!("{} · {}", t.group, t.state)),
+            )
             .child(
                 div()
                     .p(space::S16)

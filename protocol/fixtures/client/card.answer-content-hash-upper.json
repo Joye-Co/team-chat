@@ -1,0 +1,14 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "contentHash is 64 lowercase hex digits",
+  "value": {
+    "t": "card.answer",
+    "rid": "r202",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 2,
+    "actionId": "send",
+    "contentHash": "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08"
+  }
+}

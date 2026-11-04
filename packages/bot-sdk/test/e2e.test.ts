@@ -5,6 +5,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BlockRefInput, Card, CardV2, Event, Message, TransientEvent } from "@chat/protocol";
 import {
+  ANONYMOUS_ACTOR,
   approvalCard,
   type AsideContext,
   blocks,
@@ -121,6 +122,14 @@ async function waitFor<T>(what: string, fn: () => T | undefined | null | false, 
     if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 20));
   }
+}
+
+/** A message as `history` stores it (with the derived v1 card). */
+async function storedMessage(groupId: string, topicId: string, id: string): Promise<Message> {
+  const page = await human.history(groupId, topicId, { limit: 100 });
+  const m = page.messages.find((x) => x.id === id);
+  if (!m) throw new Error(`message ${id} not in history`);
+  return m;
 }
 
 function botMessages(topicId: string): Message[] {
@@ -314,6 +323,18 @@ describe("bot sdk e2e", () => {
     await waitFor("delete event", () => events.find((e) => e.type === "message.deleted" && e.data.messageId === r.message.id));
   });
 
+  test("paces a burst of 50 sends so all of them land (GAPS SF-10)", async () => {
+    const t = await bot.startTopic(generalId, { title: "burst", body: "start" });
+    const target = { groupId: generalId, topicId: t.topic!.id };
+    const started = Date.now();
+    const sent = await Promise.all(Array.from({ length: 50 }, (_, i) => bot.send(target, { body: `burst ${i}` })));
+    expect(sent.map((r) => r.message.body)).toEqual(Array.from({ length: 50 }, (_, i) => `burst ${i}`));
+    // 18 at once, then 18 per second: about 1.8 s, never a rate_limited failure.
+    expect(Date.now() - started).toBeGreaterThan(1000);
+    const seqs = sent.map((r) => r.message.createdSeq);
+    expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
+  });
+
   test("validates frames before sending", async () => {
     const err = await bot.send({ groupId: generalId }, { body: "x".repeat(40_000) }).catch((e) => e);
     expect(err).toBeInstanceOf(ChatError);
@@ -424,6 +445,12 @@ describe("bot sdk e2e", () => {
     await waitFor("artifact.created", () => events.find((e) => e.type === "artifact.created" && e.data.artifact.id === art.artifact.id));
     const v2 = await bot.http.publishHtml({ groupId: generalId, topicId: r.message.topicId, title: "Report", html: "<h1>v2</h1>", artifactId: art.artifact.id });
     expect(v2.version.version).toBe(2);
+    // The media of a version after the upload (PUT .../media).
+    const m = await bot.http.putArtifactMedia(art.artifact.id, 2, { kind: "html", mime: "text/html", bytes: 11, preview: "ready" });
+    expect(m.version.version).toBe(2);
+    expect(m.version.media).toMatchObject({ kind: "html", preview: "ready" });
+    await waitFor("artifact.previewReady", () => events.find((e) => e.type === "artifact.previewReady" && e.data.artifactId === art.artifact.id));
+    await expect(bot.http.putArtifactMedia(art.artifact.id, 2, { kind: "html", mime: "text/html", bytes: 30_000_000, preview: "ready" })).rejects.toMatchObject({ code: "invalid" });
   });
 
   test("reacts to a message and removes the reaction", async () => {
@@ -514,6 +541,48 @@ describe("1.1 cards, side chats and page events", () => {
       .answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "submit", inputs: { choice: "o1" } })
       .then(() => null, (e) => e as ChatError);
     expect(again?.code).toBe("not_found");
+  });
+
+  test("an anonymous questionnaire: the answer reaches onCardAnswer as anonymous, with no member id", async () => {
+    const got: CardAnswerContext[] = [];
+    bot.onCardAnswer((ctx) => {
+      if (ctx.card?.title === "匿名反馈") got.push(ctx);
+    });
+    const card = composeCard({
+      intent: "ask",
+      title: "匿名反馈",
+      fallback: "两道题，匿名提交。",
+      ask: { from: [ownerId()] },
+      blocks: [
+        blocks.questionnaire({
+          id: "qs",
+          anonymous: true,
+          children: [
+            blocks.rating({ id: "q1", label: "带教清楚吗？", fallbackText: "1 到 5 分" }),
+            blocks.input({ id: "q2", kind: "textarea", label: "还想说什么" }),
+          ],
+        }),
+      ],
+    });
+    const r = await bot.postCardV2({ groupId: generalId }, card);
+    await waitFor("human sees the card", () => events.find((e) => e.type === "message.created" && e.data.message.id === r.message.id));
+    // The desktop sends a questionnaire's submit as action.press of the block.
+    await (human as unknown as { request(f: Record<string, unknown>): Promise<unknown> }).request({
+      t: "card.event",
+      groupId: generalId,
+      messageId: r.message.id,
+      rev: 1,
+      clientEventId: "01JC0CEVANON0000000000000001",
+      blockId: "qs",
+      event: "action.press",
+      inputs: { q1: { value: 4 }, q2: { value: "很好" } },
+    });
+    await waitFor("anonymous answer", () => got.length === 1);
+    const a = got[0] as CardAnswerContext;
+    expect(a.anonymous).toBe(true);
+    expect(a.actorId).toBe(ANONYMOUS_ACTOR);
+    expect(a.actorId).not.toBe(ownerId());
+    expect(a.number("q1")).toBe(4);
   });
 
   test("an approval pressed by an old v1 client arrives as an answer", async () => {
@@ -640,7 +709,9 @@ describe("1.1 cards, side chats and page events", () => {
     );
     const done = await waitFor("done card", () => botMessages(r.message.topicId).find((m) => m.cardV2?.intent === "done"));
     expect(done.cardV2?.blocks.map((b) => b.type)).toEqual(["text", "evidence", "ref"]);
-    expect(done.card?.tone).toBe("success");
+    // A socket that reads tc.card/2.x gets no v1 fallback live; history keeps it for every reader.
+    expect(done.card).toBeUndefined();
+    expect((await storedMessage(r.message.groupId, r.message.topicId, done.id)).card?.tone).toBe("success");
     expect(botMessages(r.message.topicId).filter((m) => !m.cardV2)).toHaveLength(0);
     const ended = await waitFor("run done", () =>
       events.find(
@@ -655,8 +726,9 @@ describe("1.1 cards, side chats and page events", () => {
     const r = await mention("fail now");
     const done = await waitFor("failed done card", () => botMessages(r.message.topicId).find((m) => m.cardV2?.intent === "done"));
     expect(done.cardV2?.blocks[1]).toEqual({ type: "evidence", id: "failed", label: "没有完成", state: "fail" });
-    expect(done.card?.tone).toBe("danger");
-    expect(done.card?.blocks).toContainEqual({ type: "list", items: [{ text: "没有完成", status: "failed" }] });
+    const stored = await storedMessage(r.message.groupId, r.message.topicId, done.id);
+    expect(stored.card?.tone).toBe("danger");
+    expect(stored.card?.blocks).toContainEqual({ type: "list", items: [{ text: "没有完成", status: "failed" }] });
     await waitFor("run failed", () =>
       events.find((e) => e.type === "run.updated" && e.data.run.topicId === r.message.topicId && e.data.run.status === "failed"),
     );
@@ -696,6 +768,50 @@ describe("1.1 cards, side chats and page events", () => {
     // Nothing reached the source topic.
     expect(botMessages(t.message.topicId)).toHaveLength(0);
   });
+
+  test("a side chat opened before the bot's first start reaches onAside, and again after a restart", async () => {
+    const late = await post("/v1/bots", { name: "Late" }, { authorization: `Bearer ${ownerToken}` });
+    const lateId: string = late.member.id;
+    const lateState = join(server.dir, "late.state.json");
+    const t = await human.startTopic(generalId, { title: "晚到的单独问", body: "源话题第一条" });
+    const dm = await new HttpClient({ url: server.url, token: ownerToken }).dm(lateId);
+    const ask = await human.send(
+      { groupId: dm.group.id },
+      { body: "先问一句", context: { groupId: generalId, topicId: t.message.topicId, uptoSeq: t.message.createdSeq } },
+    );
+    const asideTopic = ask.message.topicId;
+    const run = async (body: string) => {
+      const seen: AsideContext[] = [];
+      const other: string[] = [];
+      const b = new Bot({ url: server.url, token: late.token, stateFile: lateState, logLevel: "warn" });
+      b.onAside((ctx) => {
+        seen.push(ctx);
+      });
+      b.onMessage((ctx) => {
+        other.push(ctx.message.body);
+      });
+      await b.start();
+      try {
+        await human.send({ groupId: dm.group.id, topicId: asideTopic }, body);
+        await waitFor(`aside "${body}"`, () => seen.find((c) => c.message.body === body), 20_000);
+        const c = seen.find((x) => x.message.body === body) as AsideContext;
+        expect(c.aside.topicId).toBe(t.message.topicId);
+        expect(c.aside.groupId).toBe(generalId);
+        expect(other).not.toContain(body);
+      } finally {
+        await b.stop();
+      }
+    };
+    // First start: no state, so the bot skips the DM's history, where the side chat was opened.
+    await run("还有呢？");
+    expect(JSON.parse(readFileSync(lateState, "utf8")).asides[asideTopic]?.topicId).toBe(t.message.topicId);
+    // State of an older SDK (no side chats remembered, no scan): the scan finds it again.
+    const saved = JSON.parse(readFileSync(lateState, "utf8"));
+    delete saved.asides;
+    delete saved.asideScan;
+    writeFileSync(lateState, JSON.stringify(saved));
+    await run("重启以后呢？");
+  }, 60_000);
 
   test.skipIf(!hasFiles)("a page event from my 产出 reaches onArtifactEvent", async () => {
     const got: { name: string; payload: unknown; actorId: string; topicId?: string }[] = [];
@@ -749,7 +865,9 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
   /** The 7.1 report (rev 1), asked of the human. */
   function report(): CardV2 {
     const card = JSON.parse(readFileSync(join(import.meta.dir, "../../../protocol/fixtures/entities/card-v2-report-compose.json"), "utf8")).value as CardV2;
-    return { ...card, ask: { ...(card.ask as NonNullable<CardV2["ask"]>), from: [ownerId()] } };
+    // The fixture links a 产出 of the fixture group; a card names only 产出 of its own group.
+    const blocks = card.blocks.filter((b) => !(b.type === "ref" && b.target.kind === "artifact"));
+    return { ...card, blocks, ask: { ...(card.ask as NonNullable<CardV2["ask"]>), from: [ownerId()] } };
   }
   /** The human's side: a raw 1.1 frame (the desktop sends these). */
   function frame(f: Record<string, unknown> & { t: string }): Promise<any> {

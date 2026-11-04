@@ -1,5 +1,5 @@
 // V1 extension fixtures. Called by gen-fixtures.ts with its helpers and sample data.
-import { MAX_ATTACHMENTS, MAX_CARD_ACTIONS, MAX_FILE_BYTES, MAX_SEARCH_LIMIT, MAX_WAITING_ON } from "../src/index.ts";
+import { MAX_ATTACHMENTS, MAX_CARD_ACTIONS, MAX_FILE_BYTES, MAX_SEARCH_LIMIT, MAX_UPLOAD_BYTES, MAX_WAITING_ON } from "../src/index.ts";
 
 type Fixture = { kind: string; valid: boolean; description?: string; value: unknown; normalized?: unknown };
 type Obj = Record<string, unknown>;
@@ -172,7 +172,7 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   bad("entities/file-meta-bad-status.json", "FileMeta", { ...fileMeta, status: "deleted" }, "unknown file status");
   ok("http/create-file-request.json", "CreateFileRequest", { groupId: ID.general, topicId: ID.topic, name: fileRefImage.name, size: fileRefImage.size, mime: "image/png", sha256: SHA_A, width: 1920, height: 1080 });
   ok("http/create-file-request-minimal.json", "CreateFileRequest", { groupId: ID.general, name: "notes.txt", size: 12, mime: "text/plain", sha256: SHA_B });
-  bad("http/create-file-request-too-big.json", "CreateFileRequest", { groupId: ID.general, name: "big.bin", size: MAX_FILE_BYTES + 1, mime: "application/octet-stream", sha256: SHA_B }, "limit: size over 100 MB");
+  bad("http/create-file-request-too-big.json", "CreateFileRequest", { groupId: ID.general, name: "big.bin", size: MAX_UPLOAD_BYTES + 1, mime: "application/octet-stream", sha256: SHA_B }, "limit: size over 2 GB (1.1; was 100 MB)");
   bad("http/create-file-request-bad-sha.json", "CreateFileRequest", { groupId: ID.general, name: "a", size: 1, mime: "text/plain", sha256: "A".repeat(64) }, "uppercase hex digest");
   bad("http/create-file-request-bad-mime.json", "CreateFileRequest", { groupId: ID.general, name: "a", size: 1, mime: "text", sha256: SHA_B }, "mime without subtype");
   bad("http/create-file-request-empty-name.json", "CreateFileRequest", { groupId: ID.general, name: "", size: 1, mime: "text/plain", sha256: SHA_B }, "empty name");
@@ -228,7 +228,7 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   add("http/update-group-request-extra.json", { kind: "UpdateGroupRequest", valid: true, description: "unknown fields are dropped", value: { name: "全员", memberIds: [ID.alice] }, normalized: { name: "全员" } });
   bad("http/update-group-request-empty-name.json", "UpdateGroupRequest", { name: "" }, "limit: empty name");
   bad("http/update-group-request-name-too-long.json", "UpdateGroupRequest", { name: "群".repeat(65) }, "limit: 65 characters");
-  bad("http/update-group-request-missing-name.json", "UpdateGroupRequest", {}, "missing name");
+  bad("http/update-group-request-missing-name.json", "UpdateGroupRequest", {}, "missing name (1.1: and purpose)");
   bad("http/update-group-prefs-request-bad-notify.json", "UpdateGroupPrefsRequest", { notify: "loud" }, "unknown notify level");
   for (const reason of ["mention", "waiting", "result", "message"]) {
     ok(`server/event-notify-${reason}.json`, "ServerFrame", { t: "event", event: { ...base, type: "message.created", data: { message } }, notify: reason });

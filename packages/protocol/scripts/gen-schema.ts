@@ -3,6 +3,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { CardV2Shape } from "../src/card2.ts";
 import { schemas } from "../src/index.ts";
 
 const out = join(import.meta.dir, "../../../protocol/schema");
@@ -18,6 +19,11 @@ for (const [name, schema] of Object.entries(files)) {
   const json = z.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
   writeFileSync(join(out, `${name}.schema.json`), `${JSON.stringify({ title: name, ...json }, null, 2)}\n`);
 }
+
+// The Card v2 catalog that `chat-run card schema` prints (the daemon embeds this file). The
+// shape only: the write rules (ids, limits, one decision surface) are checked by the server.
+const card = z.toJSONSchema(CardV2Shape, { io: "input", unrepresentable: "any" });
+writeFileSync(join(out, "CardV2.schema.json"), `${JSON.stringify({ title: "CardV2", ...card }, null, 2)}\n`);
 
 // HTTP bodies and entities, one file with a definition per schema name.
 const defs: Record<string, unknown> = {};

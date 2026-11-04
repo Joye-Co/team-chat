@@ -83,9 +83,19 @@ pub fn render(
     // 排队.
     let mut queue = InspectorSection::new("desk-ins-queue", c::DESK_QUEUE);
     if loading {
-        queue = queue.row(page::skeleton_rows("desk-q-sk", SkeletonKind::Compact, 3, cx));
+        queue = queue.row(page::skeleton_rows(
+            "desk-q-sk",
+            SkeletonKind::Compact,
+            3,
+            cx,
+        ));
     } else if snap.queue.is_empty() {
-        queue = queue.row(page::compact_empty(Sym::Waiting, c::DESK_QUEUE_EMPTY, None, cx));
+        queue = queue.row(page::compact_empty(
+            Sym::Waiting,
+            c::DESK_QUEUE_EMPTY,
+            None,
+            cx,
+        ));
     }
     for (i, q) in snap.queue.iter().enumerate() {
         let member = snap.member(&q.member_id);
@@ -141,9 +151,19 @@ pub fn render(
     }
     let mut where_ = InspectorSection::new("desk-ins-where", c::DESK_WHERE);
     if loading {
-        where_ = where_.row(page::skeleton_rows("desk-m-sk", SkeletonKind::Compact, 2, cx));
+        where_ = where_.row(page::skeleton_rows(
+            "desk-m-sk",
+            SkeletonKind::Compact,
+            2,
+            cx,
+        ));
     } else if machines.is_empty() {
-        where_ = where_.row(page::compact_empty(Sym::Computer, c::DESK_WHERE_EMPTY, None, cx));
+        where_ = where_.row(page::compact_empty(
+            Sym::Computer,
+            c::DESK_WHERE_EMPTY,
+            None,
+            cx,
+        ));
     }
     for (i, (name, names, (g, t, run))) in machines.into_iter().enumerate() {
         let glyph = if name.to_lowercase().contains("mini") {

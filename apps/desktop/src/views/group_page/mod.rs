@@ -57,7 +57,11 @@ pub struct GroupPage {
 impl GroupPage {
     /// `_composer`: the shared composer, which this page no longer shows
     /// (topics start in the 新话题 sheet); the shell still passes it.
-    pub fn new(services: Services, _composer: Entity<ComposerView>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        services: Services,
+        _composer: Entity<ComposerView>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             _subscriptions: watch(&services, cx),
             services,
@@ -80,7 +84,8 @@ pub fn open_record_sheet(services: Services, group: String, window: &mut Window,
     if window.has_active_dialog(cx) {
         return;
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder(c::GROUP_PAGE_RECORD_PLACEHOLDER));
+    let input =
+        cx.new(|cx| InputState::new(window, cx).placeholder(c::GROUP_PAGE_RECORD_PLACEHOLDER));
     let save = {
         let (services, group, input) = (services.clone(), group.clone(), input.clone());
         move |window: &mut Window, cx: &mut App| {
@@ -104,12 +109,7 @@ pub fn open_record_sheet(services: Services, group: String, window: &mut Window,
         if first.replace(false) {
             input.update(cx, |s, cx| s.focus(window, cx));
         }
-        let [cancel, ok] = sheet_buttons(
-            "group-record",
-            common::CANCEL,
-            c::GROUP_PAGE_SAVE,
-            cx,
-        );
+        let [cancel, ok] = sheet_buttons("group-record", common::CANCEL, c::GROUP_PAGE_SAVE, cx);
         let save = save.clone();
         native_sheet(dialog, SheetWidth::Form, cx).child(
             SheetLayout::new(c::GROUP_PAGE_RECORD_TITLE)
@@ -191,7 +191,6 @@ pub fn short_time(now: crate::data::Millis, at: crate::data::Millis) -> String {
     }
 }
 
-
 /// The 进行中 rows shown before `看全部`.
 const ACTIVE_ROWS: usize = 8;
 /// The columns of the 群's lists: StatusBadge and time.
@@ -257,7 +256,9 @@ impl GroupPage {
                         window,
                         cx,
                     )
-                    .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx)))]))
+                    .on_click(move |_, _, cx| {
+                        nav.update(cx, |n, cx| n.open_artifacts(cx))
+                    })]))
                     .group(rows::toolbar_capsule(more, cx))
                     .group(new_topic)
                     .group(ToolbarGroup::new([toolbar_item(
@@ -288,7 +289,14 @@ impl GroupPage {
     /// One 进行中 row (§2.6): a topic-status icon box (not the owner's
     /// avatar, which repeats), the title over the owner and the step or
     /// note, then the StatusBadge and the time at fixed columns.
-    fn topic_row(&self, t: &Topic, st: Standing, run: Option<&BotRunSummary>, last: bool, cx: &App) -> AnyElement {
+    fn topic_row(
+        &self,
+        t: &Topic,
+        st: Standing,
+        run: Option<&BotRunSummary>,
+        last: bool,
+        cx: &App,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let p = &self.services.provider;
         let owner_id = run
@@ -307,7 +315,10 @@ impl GroupPage {
                     TopicStatus::WaitingReview => (
                         c::GROUP_PAGE_STATUS_REVIEW,
                         p.topic_changes(&t.group_id, &t.id).map(|ch| {
-                            fill(crate::copy::desk::DESK_PROOF_PR, &[("n", &ch.number.to_string())])
+                            fill(
+                                crate::copy::desk::DESK_PROOF_PR,
+                                &[("n", &ch.number.to_string())],
+                            )
                         }),
                     ),
                     TopicStatus::WaitingAnswer => (c::GROUP_PAGE_STATUS_DECIDE, None),
@@ -386,7 +397,11 @@ impl GroupPage {
             separator: !last,
             ..page::PageRow::new(t.title.clone())
         }
-        .render(SharedString::from(format!("group-topic-{}", t.id)), COLUMNS, cx)
+        .render(
+            SharedString::from(format!("group-topic-{}", t.id)),
+            COLUMNS,
+            cx,
+        )
         .tooltip(move |window, cx| {
             gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
         })
@@ -401,10 +416,12 @@ impl GroupPage {
         })
         .context_menu(move |menu, _, _| {
             let (nav, g, t) = (menu_nav.clone(), mg.clone(), mt.clone());
-            menu.item(PopupMenuItem::new(c::GROUP_PAGE_OPEN_TOPIC).on_click(move |_, _, cx| {
-                let (g, t) = (g.clone(), t.clone());
-                nav.update(cx, |n, cx| n.open_topic(g, t, cx))
-            }))
+            menu.item(
+                PopupMenuItem::new(c::GROUP_PAGE_OPEN_TOPIC).on_click(move |_, _, cx| {
+                    let (g, t) = (g.clone(), t.clone());
+                    nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                }),
+            )
         })
         .into_any_element()
     }
@@ -441,7 +458,13 @@ impl GroupPage {
     /// The right pane (§2.5): the header band `群资料`, then 成员, 群里的决定,
     /// 最近的产出 and 在哪干活, each with a compact empty when it has nothing.
     /// `loading` draws skeleton rows instead.
-    fn inspector(&self, g: &str, loading: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn inspector(
+        &self,
+        g: &str,
+        loading: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let p = self.services.provider.clone();
         let header = div()
@@ -491,9 +514,19 @@ impl GroupPage {
             .collect();
         let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE);
         if loading {
-            sec = sec.row(page::skeleton_rows("group-sk-m", page::SkeletonKind::Compact, 4, cx));
+            sec = sec.row(page::skeleton_rows(
+                "group-sk-m",
+                page::SkeletonKind::Compact,
+                4,
+                cx,
+            ));
         } else if members.is_empty() {
-            sec = sec.row(page::compact_empty(Sym::Members, c::GROUP_PAGE_MEMBERS_EMPTY, None, cx));
+            sec = sec.row(page::compact_empty(
+                Sym::Members,
+                c::GROUP_PAGE_MEMBERS_EMPTY,
+                None,
+                cx,
+            ));
         }
         for m in members.into_iter().filter(|_| !loading) {
             let nav = self.services.nav.clone();
@@ -534,7 +567,11 @@ impl GroupPage {
         col = col.child(sec);
 
         // 群里的决定.
-        let decisions = if loading { Vec::new() } else { p.group_decisions(g) };
+        let decisions = if loading {
+            Vec::new()
+        } else {
+            p.group_decisions(g)
+        };
         let now = p.clock_now();
         let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS);
         if p.can_record_decision(g) && !loading {
@@ -555,9 +592,19 @@ impl GroupPage {
             );
         }
         if loading {
-            sec = sec.row(page::skeleton_rows("group-sk-d", page::SkeletonKind::Compact, 2, cx));
+            sec = sec.row(page::skeleton_rows(
+                "group-sk-d",
+                page::SkeletonKind::Compact,
+                2,
+                cx,
+            ));
         } else if decisions.is_empty() {
-            sec = sec.row(page::compact_empty(Sym::Check, c::GROUP_PAGE_DECISIONS_NOTE, None, cx));
+            sec = sec.row(page::compact_empty(
+                Sym::Check,
+                c::GROUP_PAGE_DECISIONS_NOTE,
+                None,
+                cx,
+            ));
         }
         for (i, d) in decisions.into_iter().enumerate() {
             let who = p.member(&d.by);
@@ -596,9 +643,19 @@ impl GroupPage {
         };
         let mut sec = InspectorSection::new("group-ins-outputs", c::GROUP_PAGE_RECENT_OUTPUTS);
         if loading {
-            sec = sec.row(page::skeleton_rows("group-sk-o", page::SkeletonKind::Compact, 2, cx));
+            sec = sec.row(page::skeleton_rows(
+                "group-sk-o",
+                page::SkeletonKind::Compact,
+                2,
+                cx,
+            ));
         } else if outputs.is_empty() {
-            sec = sec.row(page::compact_empty(Sym::Document, c::GROUP_PAGE_OUTPUTS_EMPTY, None, cx));
+            sec = sec.row(page::compact_empty(
+                Sym::Document,
+                c::GROUP_PAGE_OUTPUTS_EMPTY,
+                None,
+                cx,
+            ));
         }
         for a in outputs {
             let nav = self.services.nav.clone();
@@ -669,10 +726,20 @@ impl GroupPage {
         let mut sec = InspectorSection::new("group-ins-where", c::GROUP_PAGE_WHERE);
         match run {
             None if loading => {
-                sec = sec.row(page::skeleton_rows("group-sk-w", page::SkeletonKind::Compact, 1, cx));
+                sec = sec.row(page::skeleton_rows(
+                    "group-sk-w",
+                    page::SkeletonKind::Compact,
+                    1,
+                    cx,
+                ));
             }
             None => {
-                sec = sec.row(page::compact_empty(Sym::Computer, c::GROUP_PAGE_WHERE_EMPTY, None, cx));
+                sec = sec.row(page::compact_empty(
+                    Sym::Computer,
+                    c::GROUP_PAGE_WHERE_EMPTY,
+                    None,
+                    cx,
+                ));
             }
             Some(run) => {
                 let who = member_name(&self.services, &run.bot_id);
@@ -726,7 +793,11 @@ impl GroupPage {
                                     .child(line(name).n_body().text_color(k.label))
                                     .child(line(step).n_subheadline().text_color(k.secondary)),
                             )
-                            .child(page::status_badge(Status::Working, c::GROUP_PAGE_IN_USE, cx))
+                            .child(page::status_badge(
+                                Status::Working,
+                                c::GROUP_PAGE_IN_USE,
+                                cx,
+                            ))
                             .tooltip(move |window, cx| {
                                 gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                             }),
@@ -734,7 +805,10 @@ impl GroupPage {
             }
         }
         col = col.child(sec);
-        inspector_column(cx).child(header).child(col).into_any_element()
+        inspector_column(cx)
+            .child(header)
+            .child(col)
+            .into_any_element()
     }
 }
 
@@ -761,9 +835,13 @@ impl Render for GroupPage {
         });
         let n = active.len();
         let on_me = active.iter().filter(|(s, ..)| *s == Standing::OnMe).count();
+        crate::selftest::drawn::mark("group-page", format!("{g} active={n} on_me={on_me}"));
         let toolbar = self.toolbar(&g, window, cx);
         let done = self.done_rows(&g, cx);
-        let load = PageLoad::of(&self.services, n > 0 || !done.is_empty() || !p.topics(&g).is_empty());
+        let load = PageLoad::of(
+            &self.services,
+            n > 0 || !done.is_empty() || !p.topics(&g).is_empty(),
+        );
         let shown = if self.show_all { n } else { n.min(ACTIVE_ROWS) };
         let topic_rows: Vec<AnyElement> = active
             .iter()
@@ -793,7 +871,12 @@ impl Render for GroupPage {
                 }
                 content = content.child(section(
                     page::section_header(c::GROUP_PAGE_ACTIVE, None, None, None, cx),
-                    div().child(page::skeleton_rows("group-sk", page::SkeletonKind::Row, 4, cx)),
+                    div().child(page::skeleton_rows(
+                        "group-sk",
+                        page::SkeletonKind::Row,
+                        4,
+                        cx,
+                    )),
                 ));
             }
             PageLoad::Ready if n == 0 && done.is_empty() => {
@@ -911,8 +994,12 @@ fn group_menu(
     let muted = p.group_muted(&g.id);
     let (s, id) = (services.clone(), g.id.clone());
     let menu = menu.item(
-        PopupMenuItem::new(if muted { nav_copy::UNMUTE } else { nav_copy::MUTE })
-            .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
+        PopupMenuItem::new(if muted {
+            nav_copy::UNMUTE
+        } else {
+            nav_copy::MUTE
+        })
+        .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
     );
     if g.kind != crate::data::GroupKind::Group {
         return menu;

@@ -16,8 +16,7 @@
 
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,
-    SharedString, Stateful, Styled, div,
-    prelude::FluentBuilder as _, px,
+    SharedString, Stateful, Styled, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{skeleton::Skeleton, tag::Tag};
 
@@ -249,7 +248,12 @@ impl PageRow {
     pub fn render(self, id: impl Into<ElementId>, cols: Columns, cx: &App) -> Stateful<gpui::Div> {
         let k = native_colors(cx);
         let has_media = self.media.is_some();
-        let title_x = m::ROW_PAD + if has_media { m::MEDIA + px(12.) } else { px(0.) };
+        let title_x = m::ROW_PAD
+            + if has_media {
+                m::MEDIA + px(12.)
+            } else {
+                px(0.)
+            };
         let mut row = div()
             .id(id.into())
             .relative()
@@ -474,7 +478,9 @@ pub fn status_badge(status: Status, text: impl Into<SharedString>, cx: &App) -> 
             .size(px(8.))
             .rounded_full()
             .when(status == Status::Online, |d| d.bg(color))
-            .when(status != Status::Online, |d| d.border_1().border_color(color))
+            .when(status != Status::Online, |d| {
+                d.border_1().border_color(color)
+            })
             .into_any_element(),
     };
     Tag::custom(gpui::transparent_black(), k.label, k.separator)
@@ -548,7 +554,11 @@ pub fn page_alert(
         .py(px(12.))
         .rounded(m::FRAME_RADIUS)
         .border_1()
-        .border_color(if error { k.red.opacity(0.5) } else { k.separator })
+        .border_color(if error {
+            k.red.opacity(0.5)
+        } else {
+            k.separator
+        })
         .bg(k.content)
         .flex()
         .items_center()
@@ -701,7 +711,12 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
                         .flex()
                         .flex_col()
                         .gap(px(6.))
-                        .child(Skeleton::new().h(px(14.)).w(gpui::relative(w)).rounded(px(8.)))
+                        .child(
+                            Skeleton::new()
+                                .h(px(14.))
+                                .w(gpui::relative(w))
+                                .rounded(px(8.)),
+                        )
                         .child(
                             Skeleton::new()
                                 .h(px(12.))
@@ -729,7 +744,12 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
                 .items_center()
                 .gap(px(8.))
                 .child(Skeleton::new().size(px(16.)).rounded(px(4.)))
-                .child(Skeleton::new().h(px(14.)).w(gpui::relative(w)).rounded(px(8.)))
+                .child(
+                    Skeleton::new()
+                        .h(px(14.))
+                        .w(gpui::relative(w))
+                        .rounded(px(8.)),
+                )
                 .into_any_element(),
         }
     });
@@ -749,9 +769,19 @@ pub fn skeleton_cards(n: usize, cx: &App) -> AnyElement {
                 .flex_1()
                 .p(px(16.))
                 .gap(px(8.))
-                .child(Skeleton::new().h(px(14.)).w(gpui::relative(0.5)).rounded(px(8.)))
+                .child(
+                    Skeleton::new()
+                        .h(px(14.))
+                        .w(gpui::relative(0.5))
+                        .rounded(px(8.)),
+                )
                 .child(Skeleton::new().h(px(28.)).w(px(48.)).rounded(px(8.)))
-                .child(Skeleton::new().h(px(12.)).w(gpui::relative(0.7)).rounded(px(8.)))
+                .child(
+                    Skeleton::new()
+                        .h(px(12.))
+                        .w(gpui::relative(0.7))
+                        .rounded(px(8.)),
+                )
         }))
         .into_any_element()
 }
@@ -776,9 +806,7 @@ impl PageLoad {
         }
         match services.provider.connection() {
             ConnectionState::Connecting => Self::Loading,
-            ConnectionState::Reconnecting { .. } | ConnectionState::TokenUnreadable => {
-                Self::Failed
-            }
+            ConnectionState::Reconnecting { .. } | ConnectionState::TokenUnreadable => Self::Failed,
             ConnectionState::Online | ConnectionState::Offline => Self::Ready,
         }
     }
@@ -853,9 +881,9 @@ pub fn titled_card(
                         .flex_col()
                         .gap(px(4.))
                         .child(div().n_title3().text_color(k.label).child(title.into()))
-                        .children(description.map(|d| {
-                            div().n_body().text_color(k.secondary).child(d)
-                        })),
+                        .children(
+                            description.map(|d| div().n_body().text_color(k.secondary).child(d)),
+                        ),
                 )
                 .children(action.map(|a| div().flex_none().child(a))),
         )
@@ -976,7 +1004,12 @@ pub fn stat(
         .flex()
         .flex_col()
         .gap(px(4.))
-        .child(div().n_callout().text_color(k.secondary).child(label.into()))
+        .child(
+            div()
+                .n_callout()
+                .text_color(k.secondary)
+                .child(label.into()),
+        )
         .child(
             div()
                 .n_style(KPI_NUMBER)
@@ -1005,7 +1038,10 @@ pub struct Col {
 pub fn table(
     id: &str,
     cols: &[Col],
-    rows: Vec<(Vec<AnyElement>, Option<Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App)>>)>,
+    rows: Vec<(
+        Vec<AnyElement>,
+        Option<Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App)>>,
+    )>,
     cx: &App,
 ) -> gpui::Div {
     use gpui::StatefulInteractiveElement as _;

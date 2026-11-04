@@ -247,10 +247,11 @@ pub fn open_file(
 /// close it). When the window already shows a sheet or an alert, the error
 /// goes to the log instead of stacking a second one.
 pub fn notify_error(message: String, cx: &mut App) {
-    use gpui::ParentElement as _;
     use crate::ui::native::{
-        AlertLayout, PushStyle, alert_button, metrics, overlays::{app_icon, native_alert},
+        AlertLayout, PushStyle, alert_button, metrics,
+        overlays::{app_icon, native_alert},
     };
+    use gpui::ParentElement as _;
     let target = cx
         .active_window()
         .or_else(|| cx.windows().into_iter().next());

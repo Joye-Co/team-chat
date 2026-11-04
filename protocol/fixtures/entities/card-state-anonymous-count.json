@@ -1,0 +1,18 @@
+{
+  "kind": "CardState",
+  "valid": true,
+  "description": "an anonymous questionnaire as another member sees it: the count only",
+  "value": {
+    "ask": {
+      "id": "a1",
+      "status": "open",
+      "from": [
+        "01JBX0OWNER0000000000000AA",
+        "01JBX0ALICE0000000000000AB"
+      ],
+      "blocking": false
+    },
+    "answers": [],
+    "answerCount": 1
+  }
+}

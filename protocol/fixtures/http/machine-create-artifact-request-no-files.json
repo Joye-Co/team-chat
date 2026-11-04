@@ -1,0 +1,70 @@
+{
+  "kind": "MachineCreateArtifactRequest",
+  "valid": false,
+  "description": "at least one file",
+  "value": {
+    "title": "10 月数据看板",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [],
+    "note": "按渠道筛选；发现数不对可以直接告诉 Ledger。",
+    "events": [
+      {
+        "name": "breakdown",
+        "kind": "ask",
+        "label": "按渠道筛选",
+        "schema": {
+          "type": "object",
+          "required": [
+            "channel"
+          ],
+          "properties": {
+            "channel": {
+              "enum": [
+                "all",
+                "xhs",
+                "invite",
+                "bili",
+                "douyin"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "report.problem",
+        "kind": "emit",
+        "label": "数据有问题",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 300
+            }
+          }
+        }
+      }
+    ],
+    "media": {
+      "kind": "html",
+      "mime": "text/html",
+      "bytes": 12000,
+      "preview": "pending"
+    },
+    "data": {
+      "asOf": "2026-10-31",
+      "channels": {
+        "all": 38,
+        "xhs": 14,
+        "invite": 10,
+        "bili": 9,
+        "douyin": 5
+      }
+    }
+  }
+}

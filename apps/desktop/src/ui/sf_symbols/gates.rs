@@ -57,8 +57,14 @@ pub fn cold() -> &'static Cold {
             let t = Instant::now();
             let _ = std::thread::spawn(|| {
                 raster::lookup(Sf::Bell.name());
-                raster::draw(Sf::Bell.name(), point_for_slot(16.), Weight::Regular, 16., 2.)
-                    .is_some()
+                raster::draw(
+                    Sf::Bell.name(),
+                    point_for_slot(16.),
+                    Weight::Regular,
+                    16.,
+                    2.,
+                )
+                .is_some()
             })
             .join();
             prewarm_ms = ms(t);
@@ -174,7 +180,10 @@ fn crispness(masks: &[Vec<u8>]) -> (f32, f32) {
         }
     }
     let inked = inked.max(1);
-    (solid as f32 / inked as f32, sum as f32 / inked as f32 / 255.)
+    (
+        solid as f32 / inked as f32,
+        sum as f32 / inked as f32 / 255.,
+    )
 }
 
 /// Lucide at 16 device pixels, as GPUI's `svg()` draws it on a 1x screen.
@@ -192,8 +201,15 @@ fn lucide_masks(side: u32, cx: &App) -> Vec<Vec<u8>> {
             renderer
                 .parse_svg(&bytes)
                 .ok()
-                .and_then(|svg| renderer.render_parsed(&svg, SvgSize::ExactSize(size(px, px))).ok())
-                .and_then(|img| img.as_bytes(0).map(|b| b.chunks_exact(4).map(|p| p[3]).collect()))
+                .and_then(|svg| {
+                    renderer
+                        .render_parsed(&svg, SvgSize::ExactSize(size(px, px)))
+                        .ok()
+                })
+                .and_then(|img| {
+                    img.as_bytes(0)
+                        .map(|b| b.chunks_exact(4).map(|p| p[3]).collect())
+                })
                 .unwrap_or_else(|| vec![0; (side * side) as usize])
         })
         .collect()
@@ -263,7 +279,12 @@ pub fn write(png: &Path, cx: &mut App) -> Result<(), String> {
         })
         .collect();
     write_sheet(&sf2, 32, 4, &dir.join("sf-2x-sheet.png"))?;
-    write_sheet(&lucide_masks(32, cx), 32, 4, &dir.join("lucide-2x-sheet.png"))?;
+    write_sheet(
+        &lucide_masks(32, cx),
+        32,
+        4,
+        &dir.join("lucide-2x-sheet.png"),
+    )?;
     let (sf_solid, sf_mean) = crispness(&sf1);
     let (sfm_solid, sfm_mean) = crispness(&sf1m);
     let (lu_solid, lu_mean) = crispness(&lu1);

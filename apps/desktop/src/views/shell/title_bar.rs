@@ -598,7 +598,13 @@ mod tests {
                 title_at = Some(w);
             }
         }
-        let (sub_at, title_at) = (sub_at.expect("the subtitle is cut"), title_at.expect("the title is cut"));
-        assert!(sub_at > title_at, "subtitle cut at {sub_at}, title at {title_at}");
+        let (sub_at, title_at) = (
+            sub_at.expect("the subtitle is cut"),
+            title_at.expect("the title is cut"),
+        );
+        assert!(
+            sub_at > title_at,
+            "subtitle cut at {sub_at}, title at {title_at}"
+        );
     }
 }

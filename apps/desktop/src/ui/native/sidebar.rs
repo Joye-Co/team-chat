@@ -286,7 +286,11 @@ impl RenderOnce for SidebarRow {
         // (or nothing), with the chevron fading in on hover.
         let chevron = |open: bool| {
             symbol(
-                if open { Sf::ChevronDown } else { Sf::ChevronRight },
+                if open {
+                    Sf::ChevronDown
+                } else {
+                    Sf::ChevronRight
+                },
                 px(11.),
                 Weight::Semibold,
                 k.secondary,

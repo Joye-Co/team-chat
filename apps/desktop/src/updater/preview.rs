@@ -144,6 +144,9 @@ mod tests {
     #[test]
     fn the_preview_offers_a_newer_version() {
         let next = super::next_version();
-        assert!(super::super::version::is_newer(&next, env!("CARGO_PKG_VERSION")));
+        assert!(super::super::version::is_newer(
+            &next,
+            env!("CARGO_PKG_VERSION")
+        ));
     }
 }

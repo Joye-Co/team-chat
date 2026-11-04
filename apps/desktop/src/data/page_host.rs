@@ -135,6 +135,9 @@ pub enum PageSignal {
         data: Option<Value>,
         cause: Option<String>,
     },
+    /// The member finished my page event without a reply or data
+    /// (`interaction.resolved`, INTERACT §4.4): it stops waiting.
+    Resolved { event_id: String },
 }
 
 /// The ack of a page event.

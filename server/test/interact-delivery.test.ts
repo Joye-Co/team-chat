@@ -565,6 +565,13 @@ describe("BotDesk delivery", () => {
     expect(posted).toMatchObject({ runId, ok: true, result: { messageId: expect.any(String) } });
     const msg = await c.waitEvent((e) => e.type === "message.created" && e.data.message.id === posted.result.messageId);
     expect(msg.data.message).toMatchObject({ authorId: w.bot.id, topicId, cardV2: { title: "10 月数据月报" } });
+    // A retry with the same idempotency key (a lost result) posts once and gets the same message.
+    d.event(runId, { type: "output", outputId: "o1a", op: "card.post", body: { card: card(), clientMsgId: "k1" } });
+    const first = await result("o1a");
+    d.event(runId, { type: "output", outputId: "o1b", op: "card.post", body: { card: card(), clientMsgId: "k1" } });
+    const again = await result("o1b");
+    expect(first).toMatchObject({ ok: true });
+    expect(again).toMatchObject({ ok: true, result: { messageId: first.result.messageId } });
     // An invalid card is refused with the reason of the frame rules.
     d.event(runId, { type: "output", outputId: "o2", op: "card.post", body: { card: { ...card(), intent: "vote" } } });
     expect(await result("o2")).toMatchObject({ ok: false, error: { code: "invalid" } });
@@ -597,6 +604,87 @@ describe("BotDesk delivery", () => {
     expect(await result("o7")).toMatchObject({ ok: true });
     const no = await c.next((f) => f.t === "transient" && f.event.type === "artifact.reply" && f.event.eventId === ask2.eventId);
     expect(no.event).toMatchObject({ ok: false, error: { code: "declined", message: "没有 9 月的数" } });
+    for (const x of [c, d]) x.close();
+  });
+});
+
+describe("ended runs", () => {
+  const askCard = (): CardV2 => ({
+    v: 2,
+    catalog: "tc.card/2.1",
+    rev: 1,
+    intent: "done",
+    title: "10 月数据月报",
+    fallback: "10 月数据",
+    ask: { id: "verify", from: ["requester"], blocking: false },
+    blocks: [{ type: "decision", id: "check", label: "这个数据对不对？", options: [{ id: "ok", label: "对" }, { id: "wrong", label: "有问题" }] }],
+    actions: [{ id: "send", label: "发给 dev", style: "primary", inputs: ["check"] }],
+  });
+  const openRuns = (botId: string) =>
+    runInDurableObject(deskOf(botId), async (_o, state) => state.storage.sql.exec("SELECT id FROM runs WHERE ended_at IS NULL").toArray().length);
+  const runCount = (botId: string) =>
+    runInDurableObject(deskOf(botId), async (_o, state) => state.storage.sql.exec("SELECT id FROM runs").toArray().length);
+
+  it("decline a page ask at once with reason run.ended when no run will answer it", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const made = await api("/v1/artifacts", {
+      token: w.bot.token,
+      body: { groupId: w.gid, topicId, title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: await upload(w.bot, w.gid) }], events: EVENTS, runId },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const artifactId = made.body.artifact.id as string;
+    const seq = d.done(runId, { status: "succeeded", resultText: "好了" });
+    await d.acked(runId, seq);
+    await waitUntil(async () => ((await openRuns(w.bot.id)) === 0 ? true : undefined), 5000, "run end");
+    const before = await runCount(w.bot.id);
+    const ask = await c.ok({ t: "artifact.event", groupId: w.gid, artifactId, version: 1, name: "ask.total", kind: "ask", payload: { month: "2026-10" } });
+    expect(ask.expect).toMatchObject({ by: w.bot.id, mode: "none" });
+    const reply = await c.next((f) => f.t === "transient" && f.event.type === "artifact.reply" && f.event.eventId === ask.eventId);
+    expect(reply.event).toMatchObject({ ok: false, error: { code: "declined", reason: "run.ended" } });
+    await sleep(300);
+    expect(await runCount(w.bot.id)).toBe(before);
+    for (const x of [c, d]) x.close();
+  });
+
+  it("start no run from an answer whose ask was closed before it reached the bot", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact", "output"] });
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: askCard() } });
+    const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === "p1");
+    expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+    const messageId = posted.result.messageId as string;
+    const seq = d.done(runId, { status: "succeeded", resultText: "好了" });
+    await d.acked(runId, seq);
+    await waitUntil(async () => ((await openRuns(w.bot.id)) === 0 ? true : undefined), 5000, "run end");
+    const before = await runCount(w.bot.id);
+    // Hold the topic's hand-offs back (an earlier one waits for a retry), as after a failed delivery.
+    await runInDurableObject(roomOf(w.gid), async (_o, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO bot_outbox (kind, topic_id, payload, next_at, created_at) VALUES ('artifact', ?, '{}', ?, ?)",
+        topicId,
+        Date.now() + 3600_000,
+        Date.now(),
+      );
+    });
+    const ans = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), actionId: "send", event: "action.press", inputs: { check: { value: "wrong" } } });
+    expect(ans).toMatchObject({ stored: true });
+    // The ask is closed (a newer card replaced it) before the answer reaches the bot.
+    await runInDurableObject(roomOf(w.gid), async (_o, state) => {
+      const sql = state.storage.sql;
+      sql.exec("UPDATE messages SET ext = json_set(ext, '$.cardState.ask.status', 'closed') WHERE id = ?", messageId);
+      sql.exec("DELETE FROM bot_outbox WHERE kind = 'artifact'");
+      expect(sql.exec("SELECT count(*) AS n FROM bot_outbox WHERE kind = 'answer'").one().n).toBe(1);
+      await state.storage.setAlarm(Date.now());
+    });
+    await waitUntil(
+      async () => ((await runInDurableObject(roomOf(w.gid), async (_o, state) => state.storage.sql.exec("SELECT count(*) AS n FROM bot_outbox").one().n)) === 0 ? true : undefined),
+      10_000,
+      "outbox drained",
+    );
+    await sleep(300);
+    expect(await runCount(w.bot.id)).toBe(before);
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     for (const x of [c, d]) x.close();
   });
 });

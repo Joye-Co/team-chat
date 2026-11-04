@@ -1,0 +1,17 @@
+{
+  "kind": "BotRun",
+  "valid": true,
+  "description": "1.1: created, no machine, waiting for a free one",
+  "value": {
+    "id": "01JC0RUN00000000000000QUE2",
+    "botId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "status": "created",
+    "requestedBy": "01JBX0ALICE0000000000000AB",
+    "createdAt": 1762128000000,
+    "updatedAt": 1762128000000,
+    "queuedAt": 1762128000000,
+    "queuePosition": 1
+  }
+}

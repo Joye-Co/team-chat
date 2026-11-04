@@ -330,6 +330,25 @@ pub fn find_session_file(config_dir: &Path, cwd: &Path, session_id: &str) -> Opt
     })
 }
 
+/// Readies `--resume <session_id>`: Claude Code looks for the session in the project folder of
+/// its working directory, and a follow-up run has a new one, so the earlier run's session file
+/// (found under any project of `config_dir`) is copied there. False when the file is gone: the
+/// run then starts a new session.
+pub fn prepare_resume(config_dir: &Path, cwd: &Path, session_id: &str) -> bool {
+    if !super::valid_session_id(session_id) {
+        return false;
+    }
+    let Some(found) = find_session_file(config_dir, cwd, session_id) else {
+        return false;
+    };
+    let dir = config_dir.join("projects").join(project_dir_name(cwd));
+    let target = dir.join(format!("{session_id}.jsonl"));
+    if found == target {
+        return true;
+    }
+    std::fs::create_dir_all(&dir).is_ok() && std::fs::copy(&found, &target).is_ok()
+}
+
 /// The only tools a side chat run has: built-in tools that read files.
 pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
 
@@ -338,13 +357,73 @@ pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
 pub const ASIDE_DISALLOWED_TOOLS: &str =
     "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*";
 
+/// The file name (in the run folder) of a side chat run's settings: see [`aside_settings`].
+pub const ASIDE_SETTINGS: &str = ".aside-settings.json";
+
+/// The CLI's config folder: `CLAUDE_CONFIG_DIR`, else `$HOME/.claude`.
+pub fn config_dir(spec: &RunSpec) -> PathBuf {
+    spec.env_var("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".claude"))
+}
+
+/// The settings a side chat run keeps from the user's `settings.json`: only `env`,
+/// `apiKeyHelper` and `model` (its auth and model). Hooks, permissions, plugins, status line and
+/// the rest stay out, as do the project and local settings files. None when the file has none
+/// of them.
+pub fn aside_settings(config_dir: &Path) -> Option<Value> {
+    let text = std::fs::read_to_string(config_dir.join("settings.json")).ok()?;
+    let user: Value = serde_json::from_str(&text).ok()?;
+    let mut out = serde_json::Map::new();
+    if let Some(env) = user["env"].as_object() {
+        let env: serde_json::Map<String, Value> = env
+            .iter()
+            .filter(|(_, v)| v.is_string())
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if !env.is_empty() {
+            out.insert("env".into(), Value::Object(env));
+        }
+    }
+    for k in ["apiKeyHelper", "model"] {
+        if let Some(v) = user[k].as_str().filter(|v| !v.is_empty()) {
+            out.insert(k.into(), json!(v));
+        }
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+/// Writes [`aside_settings`] to `<run folder>/.aside-settings.json` (mode 0600: the env can
+/// hold auth values, which must not go on the command line) and returns its path.
+fn write_aside_settings(spec: &RunSpec) -> Option<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let settings = aside_settings(&config_dir(spec))?;
+    let path = spec.run_dir.join(ASIDE_SETTINGS);
+    let _ = std::fs::remove_file(&path);
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
+    match written {
+        Ok(()) => Some(path),
+        Err(e) => {
+            eprintln!("aside settings not written: {e}");
+            let _ = std::fs::remove_file(&path);
+            None
+        }
+    }
+}
+
 /// Permission flags and the configured extra args. A side chat run (`spec.aside`) is
 /// read-only whatever `daemon.toml` or the CLI's own settings say: permission mode `plan`, only
 /// [`ASIDE_TOOLS`], [`ASIDE_DISALLOWED_TOOLS`] denied, no MCP servers, and neither
-/// `allowed_tools` nor the configured args (which could widen permissions). Only the user's own
-/// settings file loads (its env, `apiKeyHelper` and model give the run its auth and model); the
-/// project and local settings come from the repo and stay out. The tool set keeps the run
-/// read-only also when a user allow rule names a command or edit tool.
+/// `allowed_tools` nor the configured args (which could widen permissions). No settings file
+/// loads (`--setting-sources ""`): the user's hooks could run commands and the project and local
+/// settings come from the repo. The run keeps its auth and model through `--settings` with only
+/// the user's `env`, `apiKeyHelper` and `model` ([`aside_settings`]), added in `run`.
 pub fn permission_args(spec: &RunSpec) -> Vec<String> {
     let mut args = vec!["--permission-mode".to_string()];
     if spec.aside {
@@ -359,7 +438,7 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
                 "--mcp-config",
                 r#"{"mcpServers":{}}"#,
                 "--setting-sources",
-                "user",
+                "",
             ]
             .map(String::from),
         );
@@ -379,6 +458,15 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
     args
 }
 
+/// Removes a file when dropped.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 fn user_line(text: &str) -> Value {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } })
 }
@@ -395,7 +483,11 @@ impl Runtime for ClaudeRuntime {
 }
 
 async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
-    let session_id = uuid_v4();
+    let config_dir = config_dir(&spec);
+    let resume = spec
+        .resume_session_id
+        .clone()
+        .filter(|s| prepare_resume(&config_dir, &spec.cwd, s));
     let mut args: Vec<String> = [
         "-p",
         "--input-format",
@@ -404,13 +496,33 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         "stream-json",
         "--verbose",
         "--include-partial-messages",
-        "--session-id",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
-    args.push(session_id.clone());
+    let session_id = match resume {
+        Some(sid) => {
+            args.push("--resume".into());
+            args.push(sid.clone());
+            sid
+        }
+        None => {
+            let sid = uuid_v4();
+            args.push("--session-id".into());
+            args.push(sid.clone());
+            sid
+        }
+    };
     args.extend(permission_args(&spec));
+    let aside_settings = if spec.aside {
+        write_aside_settings(&spec)
+    } else {
+        None
+    };
+    if let Some(p) = &aside_settings {
+        args.push("--settings".into());
+        args.push(p.display().to_string());
+    }
     if let Some(n) = &spec.note {
         args.push("--append-system-prompt".into());
         args.push(n.clone());
@@ -420,10 +532,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         args.push(m);
     }
     let program = spec.cfg.command();
-    let config_dir = spec
-        .env_var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".claude"));
+    // The settings file holds auth values: it goes when the run ends, however it ends.
+    let _settings = aside_settings.map(RemoveOnDrop);
 
     let mut p = match Proc::spawn(&spec, &program, &args) {
         Ok(p) => p,

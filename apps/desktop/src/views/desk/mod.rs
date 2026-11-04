@@ -277,12 +277,7 @@ impl DeskPage {
 
     /// A framed list of `rows`; past [`SECTION_ROWS`] it shows the first
     /// ones and a footer `看全部 N 件` that opens the rest (and `收起`).
-    fn list(
-        &self,
-        id: &'static str,
-        rows: Vec<AnyElement>,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    fn list(&self, id: &'static str, rows: Vec<AnyElement>, cx: &mut Context<Self>) -> gpui::Div {
         let total = rows.len();
         let open = self.expanded.contains(id);
         let long = total > SECTION_ROWS;
@@ -297,19 +292,14 @@ impl DeskPage {
             } else {
                 fill(c::DESK_SHOW_ALL, &[("n", &total.to_string())])
             };
-            page::list_footer(
-                SharedString::from(format!("{id}-more")),
-                text,
-                None,
-                cx,
-            )
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.expanded.remove(id) {
-                    this.expanded.insert(id);
-                }
-                cx.notify();
-            }))
+            page::list_footer(SharedString::from(format!("{id}-more")), text, None, cx)
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.expanded.remove(id) {
+                        this.expanded.insert(id);
+                    }
+                    cx.notify();
+                }))
         });
         page::frame(cx).children(shown).children(footer)
     }
@@ -355,7 +345,10 @@ impl DeskPage {
                 if workers.is_empty() {
                     c::DESK_KPI_WORKING_NONE.to_string()
                 } else {
-                    fill(c::DESK_KPI_WORKING_FOOT, &[("n", &workers.len().to_string())])
+                    fill(
+                        c::DESK_KPI_WORKING_FOOT,
+                        &[("n", &workers.len().to_string())],
+                    )
                 },
                 Some((Sym::Spinner, k.secondary)),
                 cx,
@@ -364,7 +357,11 @@ impl DeskPage {
                 "desk-kpi-done",
                 c::DESK_KPI_DONE,
                 snap.done.len().to_string(),
-                foot(latest.map(clock), c::DESK_KPI_DONE_FOOT, c::DESK_KPI_DONE_NONE),
+                foot(
+                    latest.map(clock),
+                    c::DESK_KPI_DONE_FOOT,
+                    c::DESK_KPI_DONE_NONE,
+                ),
                 Some((Sym::Done, k.secondary)),
                 cx,
             ))
@@ -372,7 +369,11 @@ impl DeskPage {
                 "desk-kpi-queue",
                 c::DESK_KPI_QUEUE,
                 snap.queue.len().to_string(),
-                foot(next.map(clock), c::DESK_KPI_QUEUE_FOOT, c::DESK_KPI_QUEUE_NONE),
+                foot(
+                    next.map(clock),
+                    c::DESK_KPI_QUEUE_FOOT,
+                    c::DESK_KPI_QUEUE_NONE,
+                ),
                 Some((Sym::Waiting, k.secondary)),
                 cx,
             ))
@@ -385,8 +386,20 @@ impl Render for DeskPage {
         let snap = self.snapshot();
         // One needs-you query for this subtitle and the sidebar count.
         let waiting = model::waiting_on_me(&self.services, cx);
-        let quiet = snap.asks.is_empty() && snap.done.is_empty() && snap.runs.is_empty();
-        let has_data = !quiet || snap.note.is_some() || !snap.queue.is_empty();
+        crate::selftest::drawn::mark(
+            "desk",
+            format!(
+                "asks={} done={} runs={}",
+                snap.asks.len(),
+                snap.done.len(),
+                snap.runs.len()
+            ),
+        );
+        // Nothing waits on me and nothing was done today: the Empty state
+        // (running work still shows in 正在做).
+        let quiet = snap.asks.is_empty() && snap.done.is_empty();
+        let has_data =
+            !quiet || !snap.runs.is_empty() || snap.note.is_some() || !snap.queue.is_empty();
         let load = PageLoad::of(&self.services, has_data);
         let show_side = !self.side_hidden;
 
@@ -474,7 +487,14 @@ impl Render for DeskPage {
                         .iter()
                         .enumerate()
                         .map(|(i, r)| {
-                            list::run_row(i, r, self.last_shown("desk-runs", i, n), &snap, &self.services, cx)
+                            list::run_row(
+                                i,
+                                r,
+                                self.last_shown("desk-runs", i, n),
+                                &snap,
+                                &self.services,
+                                cx,
+                            )
                         })
                         .collect();
                     content = content.child(section(
@@ -489,7 +509,14 @@ impl Render for DeskPage {
                         .iter()
                         .enumerate()
                         .map(|(i, d)| {
-                            list::done_row(i, d, self.last_shown("desk-done", i, n), &snap, &self.services, cx)
+                            list::done_row(
+                                i,
+                                d,
+                                self.last_shown("desk-done", i, n),
+                                &snap,
+                                &self.services,
+                                cx,
+                            )
                         })
                         .collect();
                     content = content.child(section(

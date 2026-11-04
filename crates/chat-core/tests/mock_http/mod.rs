@@ -44,7 +44,14 @@ pub struct HttpState {
     pub requests: Vec<(String, String)>,
     /// Content-Length header of every upload PUT.
     pub upload_lengths: Vec<Option<u64>>,
+    /// Parts of multipart uploads (file id, part number).
+    pub parts: BTreeMap<(String, u32), Vec<u8>>,
+    /// Fail this many part PUTs with 503 before taking them.
+    pub fail_parts: u32,
 }
+
+/// Part size of the mock's multipart uploads.
+pub const MOCK_PART_BYTES: u64 = 60_000_000;
 
 impl HttpState {
     fn id(&mut self, p: &str) -> String {
@@ -201,7 +208,45 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             };
             s.files.insert(id.clone(), (meta.clone(), Vec::new()));
             let url = format!("{}/v1/files/{id}/content", s.base);
+            if meta.size > MAX_FILE_BYTES {
+                let parts = meta.size.div_ceil(MOCK_PART_BYTES);
+                let mp = json!({
+                    "partBytes": MOCK_PART_BYTES,
+                    "parts": parts,
+                    "partUrl": format!("{}/v1/files/{id}/parts", s.base),
+                    "completeUrl": format!("{}/v1/files/{id}/complete", s.base),
+                });
+                return ok(json!({"file": meta, "uploadUrl": url, "multipart": mp}));
+            }
             ok(json!({"file": meta, "uploadUrl": url}))
+        }
+        (&Method::PUT, ["v1", "files", id, "parts", n]) => {
+            if s.fail_parts > 0 {
+                s.fail_parts -= 1;
+                return err(StatusCode::SERVICE_UNAVAILABLE, "internal");
+            }
+            let n: u32 = n.parse().unwrap();
+            let len = body.len() as u64;
+            s.parts.insert((id.to_string(), n), body);
+            ok(json!({"part": n, "size": len}))
+        }
+        (&Method::POST, ["v1", "files", id, "complete"]) => {
+            let id = id.to_string();
+            let mut all = Vec::new();
+            let mut n = 1;
+            while let Some(p) = s.parts.get(&(id.clone(), n)) {
+                all.extend_from_slice(p);
+                n += 1;
+            }
+            let Some((meta, data)) = s.files.get_mut(&id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if all.len() as u64 != meta.size || sha(&all) != meta.sha256 {
+                return err(StatusCode::BAD_REQUEST, "invalid");
+            }
+            meta.status = FileStatus::Ready;
+            *data = all;
+            ok(meta.clone())
         }
         (&Method::PUT, ["v1", "files", id, "content"]) => {
             s.upload_lengths.push(content_length);
@@ -254,6 +299,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 updated_at: 10,
             };
             let v = ArtifactVersion {
+                preview: None,
                 events: None,
                 run_id: None,
                 media: None,
@@ -286,6 +332,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 a.title = t;
             }
             let v = ArtifactVersion {
+                preview: None,
                 events: None,
                 run_id: None,
                 media: None,
@@ -363,7 +410,13 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             if g.group.kind == GroupKind::Dm {
                 return err(StatusCode::FORBIDDEN, "forbidden");
             }
-            g.group.name = r.name.split_whitespace().collect::<Vec<_>>().join(" ");
+            if let Some(n) = &r.name {
+                g.group.name = normalize_group_text(n);
+            }
+            if let Some(p) = &r.purpose {
+                let p = normalize_group_text(p);
+                g.group.purpose = (!p.is_empty()).then_some(p);
+            }
             ok(g.clone())
         }
         (&Method::PATCH, ["v1", "members", id]) => {

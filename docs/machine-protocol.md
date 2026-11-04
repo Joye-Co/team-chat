@@ -90,7 +90,8 @@ KnownRun = { runId, ackedSeq: number }
   leaseMs: number,                 // e.g. 600000
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
   sessionUpload?: { url: string, headers?: Record<string, string> },
-  kind?: "aside" }                 // 1.1, feature "aside": a read-only side chat run
+  kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
+  resumeSessionId?: string }       // 1.1, feature "resume": continue this CLI session (<= 128)
 { t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
 { t: "run.approval", runId, approvalId, decision: "approve" | "deny" }
@@ -127,7 +128,7 @@ RunEvent =
   | { type: "approval.request", approvalId, itemId?, title, detail? }   // answer with run.approval
   | { type: "approval.resolved", approvalId, decision: "approve" | "deny" }
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
-  | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md)
+  | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md); the daemon sets startedAt / endedAt when a step becomes current / done
   | { type: "status",           state: "preparing" | "running" | "retrying" | "stalled" | "error", message? }
   | { type: "acceptance",       items: AcceptanceItem[] }               // 1.1: replaces BotRun.acceptance
   | { type: "paused",           paused: boolean, by? }                  // 1.1: after run.pause / run.resume
@@ -240,14 +241,32 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
 | `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
+| `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
 
 How the 1.1 daemon does each one:
+
+- **resume**: BotDesk keeps each run's session id (`run.done.sessionId`, else the `session`
+  run event) and its runtime. A new run in a topic whose last ended run (same kind, same bot)
+  has a session goes to that run's machine when the machine can take it, and then carries
+  `resumeSessionId` when the machine reports `resume` and the runtime is the same; on another
+  machine the run starts a new session as before. The daemon passes only ids of 1-128
+  `[A-Za-z0-9_-]`. Claude Code: the session file
+  `$CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl` is copied into the project folder of the new
+  working directory and the CLI starts with `--resume <id>` instead of `--session-id`; with no
+  such file the run starts a new session. Codex: `thread/resume { threadId, ...the thread/start
+  params }`; an error answer falls back to `thread/start`. The prompt is the same as without
+  resume, and `run.done.sessionId` names the session the run used.
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
   every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. CLIs start tool
   commands in process groups or sessions of their own (Claude Code's Bash tool, Codex exec), so
   the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
-  each of their groups, scanning again until a scan finds nothing new. It never signals its own
+  each of their groups, scanning again until a scan finds nothing new. A tool that daemonized
+  (its parent exited, so pid 1 or a subreaper is its parent and it is no longer below the CLI) is found by
+  `CHAT_RUN_FOLDER=<run folder>` in its environment (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ` on
+  Linux; only processes of the daemon's own user) and gets the same signals, also when the run
+  ends or is cancelled after the CLI exited. macOS does not show the environment of its own
+  platform binaries (`/bin/sleep`), so such an orphan is not found there. It never signals its own
   group, pid 1, or a process outside the run's tree. Resume and cancel send `SIGCONT` to the
   same groups. The daemon keeps each target's start time (libproc, or the `starttime` field of
   `/proc/<pid>/stat`) and checks it before each later signal, so a pid that now belongs to
@@ -265,15 +284,21 @@ How the 1.1 daemon does each one:
   close it. It is the CLI's next turn in the same session (Claude Code: one more stream-json user
   line; Codex: `turn/steer`, or the next `turn/start`). When the CLI has already ended, the input
   is not taken (see "Follow-up input"), and BotDesk starts a new run.
-- **aside**: `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
+- **aside**: the run's checkout (worktree or scratch folder) is made read-only (`a-w`, without
+  following symlinks) before the CLI starts, so a write fails with `EACCES` whatever the CLI's
+  own modes allow; the owner gets write access back when the run ends, and cleanup does that
+  first for a run that a crash left read-only. `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
   `codex`; others are rejected with `runtime_unavailable` (ACP agents and the PTY have no
   read-only mode the daemon can force). A `kind` this daemon does not know is rejected with
   `invalid`. Claude Code gets `--permission-mode plan --tools Read,Grep,Glob --disallowedTools
   "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*" --strict-mcp-config
-  --mcp-config '{"mcpServers":{}}' --setting-sources user`: no MCP servers, and only the
-  user's own settings file (its env, `apiKeyHelper` and model keep the run's auth and model);
-  the project and local settings come from the repo and stay out. The tool set keeps a user
-  allow rule for a command or edit tool from widening the run. Codex gets
+  --mcp-config '{"mcpServers":{}}' --setting-sources "" --settings <run folder>/.aside-settings.json`:
+  no MCP servers and no settings files (the user's hooks could run commands; the project and
+  local settings come from the repo). The settings file holds only `env` (string values),
+  `apiKeyHelper` and `model` of the user's `settings.json` (`$CLAUDE_CONFIG_DIR`, default
+  `~/.claude`), so the run keeps its auth and model; it is mode 0600, never on the command line,
+  left out when there is nothing to keep, and removed when the run ends. The tool set keeps a
+  user allow rule for a command or edit tool from widening the run. Codex gets
   `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
   and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
   each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
@@ -291,7 +316,8 @@ How the 1.1 daemon does each one:
   cuts texts to the limits (text 500, evidence text 1000 characters, at most 20 items), reads
   `passed`/`met`/`done` as `pass` and `failed`/`unmet` as `fail`, drops unknown states and
   malformed evidence, and sends the `acceptance` event only when the list changed. The message
-  itself is sent unchanged.
+  itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
+  says how to write the block (format, states and limits); side chat prompts do not.
 
 `takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://mac-mini.tailnet`).
 It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
@@ -305,7 +331,8 @@ no credentials pass through chat. The server shows the address to owners and run
 ```ts
 // server -> daemon (feature "interact"; an old daemon gets run.input with the text envelope instead)
 { t: "run.answer", runId, inputId, source: { kind: "card", messageId, askId, answerId, rev },
-  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */ }
+  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */,
+  tally? /* counts-only poll: votes per option now */ }
 { t: "run.interaction", runId, inputId,
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
   event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
@@ -318,6 +345,9 @@ run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 
 On a private card (a non-public poll, an anonymous questionnaire; protocol.md "Private
 answers"), `actor` is `{ id: "anonymous", name: "anonymous" }`, and `run.input.authorId` too.
+The voter's id is not in the room's hand-off to the run either. A vote of a poll that shows
+counts only carries no `value`, `inputs` or `editedValues`: it has `tally` (votes per option
+id now) instead, in the envelope too.
 
 The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn: a
 `<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`
@@ -328,7 +358,7 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `card.post` | `{ cardV2, body?, causeEventId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
+| `card.post` | `{ cardV2, body?, causeEventId?, clientMsgId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
 | `card.patch` | `{ messageId, baseRev, ops, cause? }` | `chat-run card patch --message M --base-rev N --ops ops.json [--cause ev]` |
 | `interaction.resolve` | `{ eventId, result: "ignored" \| "failed", note? }` | `chat-run resolve --event ev --result ignored\|failed [--note …]` |
 | `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
@@ -339,11 +369,19 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 (`aside`) get no `chat-run`. One request is one JSON document `{ op, body }`; the daemon sends the
 `output` run event (redacted like every frame) and answers one JSON document `{ ok, result? ,
 error? }` when `run.output.result` comes. With no result in 15 s it answers `{ ok: false, error:
-{ code: "timeout", reason: "server.too_old" } }` ("server too old") when the server acked the
-`output` event (it got it and did not understand it), else `{ ok: false, error: { code:
-"unavailable", reason: "server.not_connected" } }` ("not connected": the daemon's link to the
-server was down; the result is unknown, because a lost ack does not show that the server never
-got the output, and the server refuses the output as `output.expired` if it comes later). A
+{ code: "timeout", reason: "output.unconfirmed" } }` ("unconfirmed") when the server acked the
+`output` event (it got it, and the result was lost with the link after it applied the output, or
+the server is too old to know `output`), else `{ ok: false, error: { code: "unavailable", reason:
+"server.not_connected" } }` ("not connected": the daemon's link to the server was down; the result
+is unknown, because a lost ack does not show that the server never got the output, and the server
+refuses the output as `output.expired` if it comes later). Both messages say that a retry of the
+same command is safe: the daemon puts an idempotency key in the body of `card.post`
+(`clientMsgId`), `card.patch` (`clientPatchId`) and `artifact.data` (`clientPushId`) unless the
+CLI gave one: `k` + 40 hex of SHA-256 over the run id, the op and the body. The same command in the
+same run gets the same key, so the server applies it once and answers a retry with the first
+result (`duplicate`); another run never gets the same key. `interaction.resolve` and
+`artifact.reply` are keyed by their event id. (Daemons before this rule answered
+`server.too_old` for the acked case.) A
 daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
 "daemon.no_answer" }`. The transport depends on the runtime:
 
@@ -361,12 +399,18 @@ daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
   the same way; `chat-run` reads and removes it, waiting at most 20 s. A request nobody takes
   is removed and reported as `unavailable`. When the run ends the daemon removes only the
   transport's own files (`.gitignore`, `<id>.req`, `<id>.res` and their temp files), then the
-  folder if it is empty. Codex runs
+  folder if it is empty. A daemon that crashed cannot do this, so at start (and every 30 minutes
+  for runs whose CLI is not running) it does the same for each `runs/<id>/work/.chat-run-<id>`. Codex runs
   in the `read-only` sandbox cannot write the folder and get no note.
 
 A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:
 "sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
-`reason` (exit 1). The CLI learns about `chat-run` from a short note: Claude Code
+`reason` (exit 1). `chat-run card schema` prints the JSON Schema of a Card v2 document
+(`protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
+`bun run gen:schema` and built into the daemon) without asking the daemon; it holds the shape,
+and the server checks the write rules too. The CLI learns about `chat-run` from a short note
+that names the commands, the card fields, every block type of that schema and
+`chat-run card schema`: Claude Code
 `--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
 first prompt; the PTY gets none.
 
@@ -391,14 +435,54 @@ Server rules (BotDesk):
   (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
   `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,
   `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
-  payload? | error?}` or `{eventId, decline: "…"}`. Without `clientPatchId` / `clientPushId` in
-  the body, the key is `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
+  payload? | error?}` or `{eventId, decline: "…"}`. `card.post` takes an optional `clientMsgId`
+  (1-64 characters, the daemon's idempotency key) as the `send` key. Without `clientMsgId` /
+  `clientPatchId` / `clientPushId` in the body, the key is `run:{runId}:out:{outputId}` (posts) or
+  `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
   `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). The server measures an
   `output`'s age on its own clock: the frame's `at` moved by the clock offset of the last
   `heartbeat` (or the arrival time before the first heartbeat), never later than the arrival. An
   `output` older than 12 s when it is applied is not performed; it gets `ok: false` with code
   `conflict` and reason `output.expired`, so an output that `chat-run` reported as timed out (15 s)
   is never done later, and a machine clock behind the server drops nothing.
+
+### Files and 产出 (`chat-run`, daemon over HTTP)
+
+A run delivers pages and files as 产出 of its runner member. These `chat-run` ops are answered by
+the daemon itself, not sent as `output` run events (files can be larger than a frame): it reads
+the files, redacts text files like run events, and calls the server with the machine token as
+the run's member. The server gives the run's group, topic and `runId`, so the done card lists the
+产出 as proof. `chat-run` waits up to 5 minutes for them.
+
+| `op` | `body` | `chat-run` command |
+| --- | --- | --- |
+| `file.upload` | `{ path, name?, mime? }` | `chat-run file upload --file <path> [--name N] [--mime T]` → `{ file: FileMeta }` |
+| `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--events e.json] [--media m.json] [--data d.json]` → `ArtifactVersionResponse` |
+| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, events?, media?, data? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [...]` → `ArtifactVersionResponse` |
+
+- Paths are made absolute by `chat-run` and must be inside the run's working folder after
+  symbolic links are resolved; anything else gets `forbidden` with reason
+  `file.outside_workspace`. `--dir` sends every regular file below the folder that is not
+  hidden (a name starting with `.`), at most 500, with `/` paths relative to it. The entry is
+  `--entry`, else `index.html` when the folder has one, else the only file. `kind` defaults to
+  `html` for an `.html`/`.htm` entry and `file` otherwise. The type of each file comes from its
+  extension.
+
+```ts
+PUT  /v1/machine/runs/:id/files      // machine token; body = the file's bytes
+     headers: Content-Length, Content-Type (the file's type), X-File-Name (URI-encoded UTF-8), X-File-Sha256
+     -> FileMeta (ready, createdBy = the run's member, in the run's group and topic)
+POST /v1/machine/runs/:id/artifacts  MachineCreateArtifactRequest -> ArtifactVersionResponse   // version.runId = the run
+POST /v1/machine/runs/:id/artifacts/:artifactId/versions  AddArtifactVersionRequest -> ArtifactVersionResponse
+MachineCreateArtifactRequest = CreateArtifactRequest without { groupId, topicId, runId }
+```
+
+The run must be on the calling machine (`not_found` otherwise), active (`conflict`, reason
+`run.ended`) and not a side chat (`forbidden`, `output.read_only`); its member must still be in
+the group. A version is added only to a 产出 of the run's group, and its `runId` is always the
+run. The member's file limits and quota apply. The audit log has `file.create`, `file.upload`,
+`artifact.create` and `artifact.version.add` with the member as the actor and
+`machine:{machineId}` as the credential.
 
 ## Raw session upload
 
@@ -449,7 +533,8 @@ LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK CODEX_HOME CLAUDE_CONFIG_DIR` from the d
 name in `run.assign.envAllowlist` that the machine's config also lists in `env_passthrough`
 (so the server can choose per bot among the variables the machine owner allowed, never more);
 the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
-`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`; 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
+`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`, `CHAT_RUN_FOLDER` (the run folder: it marks the run's
+processes for pause and cancel); 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
 (Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
 
 Group members read run events, so the daemon redacts every frame before it sends or stores

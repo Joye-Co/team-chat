@@ -1,0 +1,16 @@
+{
+  "kind": "AddArtifactVersionRequest",
+  "valid": true,
+  "value": {
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "preview": {
+      "summary": "只有一句话"
+    }
+  }
+}

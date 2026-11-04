@@ -8,8 +8,7 @@
 
 use gpui::{
     AnyElement, App, Context, ElementId, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement as _, Styled, Window,
-    div, prelude::FluentBuilder as _,
+    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
     WindowExt as _,
@@ -139,11 +138,7 @@ pub fn ask_row(
     let done = page
         .local_answer(&key)
         .map(|l| (l.record.clone(), l.at, l.undoable))
-        .or_else(|| {
-            a.answered
-                .as_ref()
-                .map(|r| (r.record.clone(), r.at, false))
-        });
+        .or_else(|| a.answered.as_ref().map(|r| (r.record.clone(), r.at, false)));
     let from = fill(
         c::DESK_ASK_FROM,
         &[("name", &snap.name(&a.item.from)), ("topic", &topic)],
@@ -258,7 +253,10 @@ pub fn ask_row(
     .on_click(move |_, _, cx| open_topic(&nav, &g, &t, cx))
     .context_menu(move |menu, _, _| {
         let services = menu_services.clone();
-        let (g, t) = (menu_ask.item.group_id.clone(), menu_ask.item.topic_id.clone());
+        let (g, t) = (
+            menu_ask.item.group_id.clone(),
+            menu_ask.item.topic_id.clone(),
+        );
         let menu = menu.item(
             PopupMenuItem::new(c::DESK_OPEN_TOPIC)
                 .on_click(move |_, _, cx| open_topic(&services, &g, &t, cx)),
@@ -266,9 +264,11 @@ pub fn ask_row(
         match menu_quick.clone() {
             Some(quick) => {
                 let (page, ask) = (menu_page.clone(), menu_ask.clone());
-                menu.item(PopupMenuItem::new(quick_label(&quick)).on_click(
-                    move |_, window, cx| press(page.clone(), ask.clone(), quick.clone(), window, cx),
-                ))
+                menu.item(
+                    PopupMenuItem::new(quick_label(&quick)).on_click(move |_, window, cx| {
+                        press(page.clone(), ask.clone(), quick.clone(), window, cx)
+                    }),
+                )
             }
             None => menu,
         }
@@ -379,10 +379,7 @@ pub fn note_alert(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
     let n = snap.note.as_ref()?;
     let id = n.member_id.clone();
     let open = n.member_id.clone();
-    let title = fill(
-        c::DESK_NOTE_TITLE,
-        &[("name", &snap.name(&n.member_id))],
-    );
+    let title = fill(c::DESK_NOTE_TITLE, &[("name", &snap.name(&n.member_id))]);
     let reply = push_button(
         "desk-note-reply",
         c::DESK_NOTE_REPLY,

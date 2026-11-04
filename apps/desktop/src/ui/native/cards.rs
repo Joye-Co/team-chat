@@ -100,8 +100,14 @@ pub fn fact_run(facts: impl IntoIterator<Item = AnyElement>) -> gpui::Div {
 pub fn pr_facts(number: &str, added: Option<&str>, removed: Option<&str>, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     let mut parts: Vec<AnyElement> = vec![
-        fact(Some(Sym::PullRequest), number.to_string(), None, Some(k.label), cx)
-            .into_any_element(),
+        fact(
+            Some(Sym::PullRequest),
+            number.to_string(),
+            None,
+            Some(k.label),
+            cx,
+        )
+        .into_any_element(),
     ];
     if let Some(a) = added {
         parts.push(fact(None, a.to_string(), None, Some(k.green), cx).into_any_element());
@@ -156,7 +162,9 @@ pub fn state_words(
 
 /// A 13 pt state symbol in its color.
 pub fn state_symbol(sym: Sym, color: Hsla) -> AnyElement {
-    sym.icon(SymSize::INLINE).text_color(color).into_any_element()
+    sym.icon(SymSize::INLINE)
+        .text_color(color)
+        .into_any_element()
 }
 
 /// Quiet inline reference text (a quote or a reference in the composer or

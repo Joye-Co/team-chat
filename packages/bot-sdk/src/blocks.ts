@@ -135,7 +135,8 @@ export const blocks = {
   ): CardV2Block => {
     const all: Child[] = o.options.flatMap((x) => x.children ?? []);
     const options = o.options.map((x) => (x.children ? { ...x, children: ids(x.children) } : { ...x }));
-    return nest({ ...o, type: "compare", options } as CardV2Block, all);
+    const text = o.question ?? o.options.map((x) => x.label).join(" / ");
+    return nest({ ...o, fallbackText: o.fallbackText ?? cut(text || "比较", 300), type: "compare", options } as CardV2Block, all);
   },
   tabs: (o: Omit<Input<"tabs">, "tabs"> & { tabs: { id: string; label: string; children: Child[] }[] }): CardV2Block => {
     const all: Child[] = o.tabs.flatMap((t) => t.children);
@@ -143,7 +144,10 @@ export const blocks = {
   },
   /** 2–5 numbered questions with one submit. */
   questionnaire: (o: Omit<Input<"questionnaire">, "children"> & { children: Child[] }): CardV2Block =>
-    nest({ ...o, type: "questionnaire", children: ids(o.children) }, o.children),
+    nest(
+      { ...o, fallbackText: o.fallbackText ?? `问卷（${o.children.length} 题）`, type: "questionnaire", children: ids(o.children) },
+      o.children,
+    ),
 };
 /** CARD21's name for the `decision` block. */
 export const choice = blocks.decision;

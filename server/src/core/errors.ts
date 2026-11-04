@@ -7,11 +7,15 @@ export class ApiError extends Error {
     message: string,
     /** 1.1: the specific rule (`ErrorBody.reason`), e.g. `card.already_answered`. */
     readonly reason?: string,
+    /** 1.1, `rate_limited`: `ErrorBody.retryAfterMs`. */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
   toBody(): ErrorBody {
-    return this.reason ? { code: this.code, message: this.message, reason: this.reason } : { code: this.code, message: this.message };
+    const body: ErrorBody = this.reason ? { code: this.code, message: this.message, reason: this.reason } : { code: this.code, message: this.message };
+    if (this.retryAfterMs !== undefined) body.retryAfterMs = Math.max(0, Math.ceil(this.retryAfterMs));
+    return body;
   }
 }
 
@@ -41,7 +45,7 @@ export function unwrap<T>(r: Result<T>): T {
 }
 
 /** The `reason` of a frame that failed its schema: a named card rule, or a deferred secret input. */
-export function schemaReason(raw: Record<string, unknown>, message: string | undefined): string | undefined {
+export function schemaReason(raw: Record<string, unknown>, message: string | undefined, path?: readonly PropertyKey[]): string | undefined {
   const named = issueReason(message);
   if (named) return named;
   const blocks: unknown[] = [];
@@ -54,5 +58,9 @@ export function schemaReason(raw: Record<string, unknown>, message: string | und
     if (x.type === "input" && x.kind === "secret") return true;
     return Array.isArray(x.blocks) && x.blocks.some(secret);
   };
-  return blocks.some(secret) ? "card.secret_deferred" : undefined;
+  if (blocks.some(secret)) return "card.secret_deferred";
+  // Any other shape problem of a card or of patch ops is `card.limits`, as the Rust pre-check
+  // (`CardV2::problem`) names it.
+  if (path && path.length > 0 && (path[0] === "cardV2" || (path[0] === "ops" && Array.isArray(raw.ops)))) return "card.limits";
+  return undefined;
 }

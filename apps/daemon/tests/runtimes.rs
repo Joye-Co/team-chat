@@ -38,6 +38,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         ],
         aside: false,
         note: None,
+        resume_session_id: None,
     }
 }
 
@@ -399,9 +400,9 @@ fn aside_runs_ignore_widening_config() {
     }
     assert!(args.iter().any(|a| a == "--strict-mcp-config"));
     assert_eq!(value("--mcp-config"), r#"{"mcpServers":{}}"#);
-    // Only the user's settings (auth env, apiKeyHelper, model); project and local settings
-    // come from the repo. The tool set above keeps a user allow rule from widening the run.
-    assert_eq!(value("--setting-sources"), "user");
+    // No settings files: the user's hooks could run commands, project and local settings come
+    // from the repo. The auth env, apiKeyHelper and model come through --settings (run()).
+    assert_eq!(value("--setting-sources"), "");
     for widening in [
         "bypassPermissions",
         "--dangerously-skip-permissions",
@@ -688,4 +689,81 @@ fn codex_gets_the_chat_run_note_only_when_it_can_work() {
             "sandbox_workspace_write.network_access=false"
         ]
     );
+}
+
+/// A side chat run keeps only the auth env, `apiKeyHelper` and model of the user's
+/// `settings.json`; hooks, permissions and plugins stay out.
+#[test]
+fn claude_aside_settings_keep_only_auth_and_model() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(runtime::claude::aside_settings(dir.path()).is_none());
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"env":{"ANTHROPIC_BASE_URL":"https://x.example","N":1},"apiKeyHelper":"~/bin/key",
+            "model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"rm -rf ~"}]}]},
+            "permissions":{"allow":["Bash(*)"]},"enabledPlugins":{"p":true},"statusLine":{}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        runtime::claude::aside_settings(dir.path()).unwrap(),
+        serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": "https://x.example" }, "apiKeyHelper": "~/bin/key", "model": "opus" })
+    );
+    std::fs::write(dir.path().join("settings.json"), r#"{"hooks":{}}"#).unwrap();
+    assert!(runtime::claude::aside_settings(dir.path()).is_none());
+}
+
+/// `run.assign.resumeSessionId` for Codex: `thread/resume` with the thread; a thread Codex no
+/// longer has falls back to a new thread.
+#[tokio::test]
+async fn codex_resumes_the_thread_or_starts_a_new_one() {
+    for (tid, want, calls) in [
+        (
+            "th-old",
+            "th-old",
+            serde_json::json!([["thread/resume", "th-old"]]),
+        ),
+        (
+            "th-gone",
+            "th-1",
+            serde_json::json!([["thread/resume", "th-gone"], ["thread/start", null]]),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = spec(dir.path(), "codex", &fake("fake_codex.py"), &[], "hello");
+        s.resume_session_id = Some(tid.into());
+        let (o, evs) = drive(s, |_| None).await;
+        assert_eq!(o.status, Status::Succeeded, "{:?}", o.error);
+        assert_eq!(o.session_id.as_deref(), Some(want));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == want))
+        );
+        let seen: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("work/threads.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(seen, calls);
+    }
+}
+
+/// `run.assign.resumeSessionId` for Claude Code: the earlier run's session file is copied into
+/// the project folder of this run's working directory and the CLI gets `--resume`; a session
+/// that is gone, or an id that is not a plain id, starts a new session.
+#[test]
+fn claude_resume_copies_the_session_into_this_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("claude");
+    let old = cfg.join("projects/-old-run-work");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("s1.jsonl"), "{}\n").unwrap();
+    let cwd = dir.path().join("work");
+    std::fs::create_dir_all(&cwd).unwrap();
+    assert!(runtime::claude::prepare_resume(&cfg, &cwd, "s1"));
+    let copied = cfg
+        .join("projects")
+        .join(runtime::claude::project_dir_name(&cwd))
+        .join("s1.jsonl");
+    assert_eq!(std::fs::read_to_string(copied).unwrap(), "{}\n");
+    assert!(!runtime::claude::prepare_resume(&cfg, &cwd, "s2"));
+    assert!(!runtime::claude::prepare_resume(&cfg, &cwd, "../s1"));
 }

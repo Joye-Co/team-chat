@@ -1,0 +1,19 @@
+{
+  "kind": "DecisionsResponse",
+  "valid": true,
+  "description": "decisions with the ones recorded by hand",
+  "value": {
+    "decisions": [],
+    "hasMore": false,
+    "recorded": [
+      {
+        "id": "01JC0DEC000000000000000001",
+        "seq": 412,
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "text": "周五停止合并，下周一发版。",
+        "recordedBy": "01JBX0OWNER0000000000000AA",
+        "recordedAt": 1762128000000
+      }
+    ]
+  }
+}

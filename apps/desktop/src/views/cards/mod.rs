@@ -205,7 +205,6 @@ pub fn render_card(
     let k = theme::colors(cx);
     let tone = card.tone.unwrap_or_default();
 
-
     // NATIVE.md §9.2: the state is a symbol and its word in the state
     // color over the title, never a pill or a colored bar.
     let n = ui::native::native_colors(cx);
@@ -217,7 +216,11 @@ pub fn render_card(
             CardTone::Warning => (Sym::NeedsYou, n.amber),
             CardTone::Danger => (Sym::Problem, n.red),
         };
-        let ink = if tone == CardTone::Neutral { n.label } else { color };
+        let ink = if tone == CardTone::Neutral {
+            n.label
+        } else {
+            color
+        };
         ui::native::cards::state_words(
             ui::native::cards::state_symbol(sym, color),
             s.label.clone(),
@@ -227,17 +230,13 @@ pub fn render_card(
         )
         .mb(space::S8)
     });
-    let header = div()
-        .flex()
-        .flex_col()
-        .children(state)
-        .child(
-            div()
-                .min_w(px(0.))
-                .n_title3()
-                .text_color(n.label)
-                .child(card.title.clone()),
-        );
+    let header = div().flex().flex_col().children(state).child(
+        div()
+            .min_w(px(0.))
+            .n_title3()
+            .text_color(n.label)
+            .child(card.title.clone()),
+    );
 
     let shown: Vec<(usize, &CardBlock)> = card
         .blocks

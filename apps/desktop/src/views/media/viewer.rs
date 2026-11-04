@@ -227,20 +227,22 @@ impl Render for MediaViewer {
             .flex_col()
             .bg(k.content)
             .text_color(k.text_1)
-            .when(!own_title_row, |d| d.child(
-                toolbar_band("media-viewer-bar")
-                    .pl(theme::TRAFFIC_LIGHTS_INSET)
-                    .pr(space::S16)
-                    .child(
-                        div()
-                            .t_ui()
-                            .medium()
-                            .text_color(k.text_2)
-                            .one_line()
-                            .child(self.title.clone()),
-                    ),
-            )
-            .child(ui::hairline(cx)))
+            .when(!own_title_row, |d| {
+                d.child(
+                    toolbar_band("media-viewer-bar")
+                        .pl(theme::TRAFFIC_LIGHTS_INSET)
+                        .pr(space::S16)
+                        .child(
+                            div()
+                                .t_ui()
+                                .medium()
+                                .text_color(k.text_2)
+                                .one_line()
+                                .child(self.title.clone()),
+                        ),
+                )
+                .child(ui::hairline(cx))
+            })
             .child(div().flex_1().min_h(px(0.)).child(body))
     }
 }

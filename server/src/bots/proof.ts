@@ -15,7 +15,7 @@ export const PROOF_TEXT = {
 } as const;
 
 /** The emoji a bot puts on the message that started a run, instead of a text acknowledgement. */
-export const ACK_EMOJI = "👀";
+export { ACK_EMOJI } from "@chat/protocol";
 
 /** Longest result text in the card's text block (v1 text blocks hold 8000 UTF-16 units). */
 const CARD_TEXT_UNITS = 7000;
@@ -49,6 +49,7 @@ export interface ArtifactProof {
 export interface TestCounts {
   passed: number;
   failed: number;
+  skipped?: number;
 }
 
 /** GitHub pull request links in `text`, first seen first, at most 5. */
@@ -72,16 +73,20 @@ export function prRefs(text: string): PrRef[] {
 export function testCounts(text: string): TestCounts | null {
   let passed = 0;
   let failed = 0;
+  let skipped = 0;
   let found = false;
   for (const line of text.split(/\r?\n/)) {
     const p = line.match(/\b(\d{1,7})\s+(?:tests?\s+)?(?:passed|pass(?:ing)?)\b/i);
     const f = line.match(/\b(\d{1,7})\s+(?:tests?\s+)?(?:failed|fail(?:ing|ures?)?)\b/i);
+    const k = line.match(/\b(\d{1,7})\s+(?:tests?\s+)?(?:skipped|skip|ignored|pending|todo)\b/i);
     if (!p && !f) continue;
     found = true;
     if (p) passed += Number(p[1]);
     if (f) failed += Number(f[1]);
+    if (k) skipped += Number(k[1]);
   }
-  return found ? { passed, failed } : null;
+  if (!found) return null;
+  return skipped > 0 ? { passed, failed, skipped } : { passed, failed };
 }
 
 /** The done card of a run, or null when it would not be a valid Card v2. */
@@ -102,6 +107,8 @@ export function doneCard(opts: {
       id: "tests",
       label: PROOF_TEXT.tests(tests.passed, tests.failed),
       state: tests.failed > 0 ? "fail" : "pass",
+      // Readers take the counts from here, not from the label.
+      tests,
     });
   }
   opts.acceptance.slice(0, 20).forEach((a, i) => {

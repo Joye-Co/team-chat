@@ -53,9 +53,32 @@ pub struct PrLink {
         skip_serializing_if = "Option::is_none"
     )]
     pub changed_files: Option<u64>,
+    /// 1.1: the pull request waits to merge (merge queue or auto-merge); absent = not queued.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub merge: Option<PrMerge>,
+}
+
+/// 1.1: a queued merge of a pull request, from GitHub (`enqueued`, `auto_merge_enabled`,
+/// `dequeued`, `auto_merge_disabled`). `error` is set when the merge stopped without merging.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrMerge {
+    pub queued_at: crate::entities::Millis,
+    /// Plain text from GitHub, e.g. "merge conflict", "checks failed".
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub error: Option<String>,
 }
 
 /// A link of a topic. A link with the same kind and `url` replaces the older one.
+#[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum TopicLink {
@@ -91,6 +114,9 @@ impl TopicLink {
                 for c in &p.checks {
                     check_chars("link.checks.name", &c.name, 1, 200)?;
                     check_chars("link.checks.conclusion", &c.conclusion, 1, 32)?;
+                }
+                if let Some(e) = p.merge.as_ref().and_then(|m| m.error.as_deref()) {
+                    check_chars("link.merge.error", e, 1, 200)?;
                 }
                 Ok(())
             }

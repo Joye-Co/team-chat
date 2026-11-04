@@ -315,7 +315,7 @@ registerRoomMigration({
 type TopicWait = { status: TopicStatus; waitingOn: string[] };
 
 /** The people the open blocking asks of the topic wait on; undefined when none is open. */
-function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
+export function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
   const rows = sql
     .exec<{ from_ids: string }>(
       `SELECT json_extract(ext, '$.cardState.ask.from') AS from_ids FROM messages
@@ -330,12 +330,12 @@ function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
   return [...ids];
 }
 
-function baseOf(sql: SqlStorage, topicId: string): TopicWait | undefined {
+export function baseOf(sql: SqlStorage, topicId: string): TopicWait | undefined {
   const r = sql.exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM card_topic_base WHERE topic_id = ?", topicId).toArray()[0];
   return r ? { status: r.status as TopicStatus, waitingOn: JSON.parse(r.waiting_on) as string[] } : undefined;
 }
 
-function saveBase(sql: SqlStorage, topicId: string, base: TopicWait): void {
+export function saveBase(sql: SqlStorage, topicId: string, base: TopicWait): void {
   sql.exec("INSERT OR REPLACE INTO card_topic_base (topic_id, status, waiting_on) VALUES (?, ?, ?)", topicId, base.status, JSON.stringify(base.waitingOn));
 }
 
@@ -394,9 +394,86 @@ export function refreshTopicWaiting(room: RoomContext, tx: RoomTx, topicId: stri
   });
 }
 
+/** File ids and 产出 versions a block names (images, choices, previews, evidence, refs). */
+export function namedFiles(b: Block): { files: string[]; artifacts: { artifactId: string; version?: number }[] } {
+  const files: string[] = [];
+  const artifacts: { artifactId: string; version?: number }[] = [];
+  switch (b.type) {
+    case "image":
+      files.push(b.fileId);
+      break;
+    case "imageChoice":
+      for (const o of b.options) files.push(o.fileId);
+      break;
+    case "compare":
+      for (const o of b.options) {
+        const p = o.preview;
+        if (p && "fileId" in p) files.push(p.fileId);
+        else if (p) artifacts.push({ artifactId: p.artifactId, version: p.version });
+      }
+      break;
+    case "evidence": {
+      if (b.fileId) files.push(b.fileId);
+      if (b.recording) {
+        files.push(b.recording.fileId);
+        if (b.recording.posterFileId) files.push(b.recording.posterFileId);
+      }
+      if (b.artifact) artifacts.push(b.artifact);
+      break;
+    }
+    case "embed":
+      artifacts.push({ artifactId: b.artifactId, version: b.version });
+      break;
+    case "ref":
+    case "link":
+      if (b.target.kind === "artifact") artifacts.push({ artifactId: b.target.artifactId, version: b.target.version });
+      break;
+    case "group":
+      for (const c of b.blocks ?? []) {
+        const n = namedFiles(c as Block);
+        files.push(...n.files);
+        artifacts.push(...n.artifacts);
+      }
+      break;
+  }
+  return { files, artifacts };
+}
+
+/**
+ * Every file a card names is a file of this group, and every 产出 (version) one of this group
+ * (CARD21 §3-4, MEDIA §5). Else `invalid`, `card.limits`.
+ */
+export function checkFiles(sql: SqlStorage, card: CardV2): void {
+  const hasFiles = sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'file_records'").toArray().length > 0;
+  for (const b of card.blocks) {
+    const { files, artifacts } = namedFiles(b);
+    for (const id of files) {
+      const ok = hasFiles && sql.exec("SELECT 1 FROM file_records WHERE id = ?", id).toArray().length > 0;
+      if (!ok) throw new ApiError("invalid", `${b.id}: file not in group`, "card.limits");
+    }
+    for (const a of artifacts) {
+      const ok =
+        a.version === undefined
+          ? sql.exec("SELECT 1 FROM artifacts WHERE id = ?", a.artifactId).toArray().length > 0
+          : sql.exec("SELECT 1 FROM artifact_versions WHERE artifact_id = ? AND version = ?", a.artifactId, a.version).toArray().length > 0;
+      if (!ok) throw new ApiError("invalid", `${b.id}: 产出 not in group`, "card.limits");
+    }
+  }
+  for (const a of card.actions ?? []) {
+    const t = a.target;
+    if (t?.kind !== "artifact") continue;
+    const ok =
+      t.version === undefined
+        ? sql.exec("SELECT 1 FROM artifacts WHERE id = ?", t.artifactId).toArray().length > 0
+        : sql.exec("SELECT 1 FROM artifact_versions WHERE artifact_id = ? AND version = ?", t.artifactId, t.version).toArray().length > 0;
+    if (!ok) throw new ApiError("invalid", `action ${a.id}: 产出 not in group`, "card.limits");
+  }
+}
+
 /**
  * Checks of a card against the room: an `embed` names a 产出 version of this group, and its
- * `events` are page events that version declares (V11-INC R5).
+ * `events` are page events that version declares (V11-INC R5); every file and 产出 it names
+ * is one of this group (`checkFiles`).
  */
 export function checkEmbeds(sql: SqlStorage, card: CardV2): void {
   for (const b of card.blocks) {
@@ -410,6 +487,7 @@ export function checkEmbeds(sql: SqlStorage, card: CardV2): void {
       if (!declared.has(name)) throw new ApiError("invalid", `embed ${b.id}: the page does not declare ${name}`, "card.undeclared_event");
     }
   }
+  checkFiles(sql, card);
 }
 
 // ---------------------------------------------------------------------------

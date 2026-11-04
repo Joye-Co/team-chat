@@ -142,9 +142,7 @@ pub fn steps_summary(steps: &[ProcessStep]) -> (String, usize) {
 /// One line per step for the opened steps row.
 fn step_line(step: &ProcessStep) -> Option<(Sym, String, bool)> {
     Some(match step {
-        ProcessStep::Tool { title, ok, .. } => {
-            (Sym::Terminal, title.clone(), *ok == Some(false))
-        }
+        ProcessStep::Tool { title, ok, .. } => (Sym::Terminal, title.clone(), *ok == Some(false)),
         ProcessStep::Files { changes } => (
             Sym::Document,
             changes

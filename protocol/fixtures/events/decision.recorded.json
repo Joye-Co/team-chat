@@ -1,0 +1,21 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 412,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128000000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "decision.recorded",
+    "data": {
+      "decision": {
+        "id": "01JC0DEC000000000000000001",
+        "seq": 412,
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "text": "周五停止合并，下周一发版。",
+        "recordedBy": "01JBX0OWNER0000000000000AA",
+        "recordedAt": 1762128000000
+      }
+    }
+  }
+}

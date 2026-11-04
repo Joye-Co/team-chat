@@ -169,8 +169,14 @@ impl Render for MachinesPage {
             (None, Status::Failed(t)) => vec![
                 FormRow::new(t.clone())
                     .control(
-                        push_button("machines-retry", s::RETRY, PushStyle::Standard, PushSize::Small, cx)
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                        push_button(
+                            "machines-retry",
+                            s::RETRY,
+                            PushStyle::Standard,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
                     )
                     .into_any_element(),
             ],
@@ -386,8 +392,14 @@ impl Render for MachineForm {
                     s::MACHINE_CREDENTIAL,
                     created.credential.expose(),
                 ))
-                .buttons([push_button("machine-done", s::DONE, PushStyle::Default, PushSize::Large, cx)
-                    .on_click(|_, window, cx| window.close_dialog(cx))])
+                .buttons([push_button(
+                    "machine-done",
+                    s::DONE,
+                    PushStyle::Default,
+                    PushSize::Large,
+                    cx,
+                )
+                .on_click(|_, window, cx| window.close_dialog(cx))])
                 .into_any_element();
         }
         let busy = self.status.busy();
@@ -396,19 +408,29 @@ impl Render for MachineForm {
             .explanation(s::COMPUTER_ADD_HINT)
             .body(
                 GroupedForm::new()
-                    .row(FormRow::new(s::MACHINE_NAME).control(
-                        NativeTextField::new("machine-name", &self.name)
-                            .width(metrics::FIELD_NAME_WIDTH),
-                    ))
-                    .row(FormRow::new(s::MACHINE_LABELS).control(
-                        NativeTextField::new("machine-labels", &self.labels)
-                            .width(metrics::FIELD_NAME_WIDTH),
-                    )),
+                    .row(
+                        FormRow::new(s::MACHINE_NAME).control(
+                            NativeTextField::new("machine-name", &self.name)
+                                .width(metrics::FIELD_NAME_WIDTH),
+                        ),
+                    )
+                    .row(
+                        FormRow::new(s::MACHINE_LABELS).control(
+                            NativeTextField::new("machine-labels", &self.labels)
+                                .width(metrics::FIELD_NAME_WIDTH),
+                        ),
+                    ),
             )
             .when_some(widgets::native_status(&self.status, cx), |l, st| l.body(st))
             .buttons([
-                push_button("machine-cancel", common::CANCEL, PushStyle::Standard, PushSize::Large, cx)
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                push_button(
+                    "machine-cancel",
+                    common::CANCEL,
+                    PushStyle::Standard,
+                    PushSize::Large,
+                    cx,
+                )
+                .on_click(|_, window, cx| window.close_dialog(cx)),
                 disabled_push(
                     push_button(
                         "machine-submit",
@@ -434,18 +456,29 @@ pub fn open_add_machine(
     let form = cx.new(|cx| MachineForm::new(services, window, cx));
     let shown = form.clone();
     let first = std::cell::Cell::new(true);
-    widgets::open_sheet(window, cx, SheetWidth::Form, px(460.), move |dialog, window, cx| {
-        if first.replace(false) {
-            shown.read(cx).name.read(cx).focus_handle(cx).focus(window, cx);
-        }
-        let ok = shown.clone();
-        dialog
-            .on_ok(move |_, _, cx| {
-                ok.update(cx, |f, cx| f.submit(cx));
-                false
-            })
-            .child(shown.clone())
-    });
+    widgets::open_sheet(
+        window,
+        cx,
+        SheetWidth::Form,
+        px(460.),
+        move |dialog, window, cx| {
+            if first.replace(false) {
+                shown
+                    .read(cx)
+                    .name
+                    .read(cx)
+                    .focus_handle(cx)
+                    .focus(window, cx);
+            }
+            let ok = shown.clone();
+            dialog
+                .on_ok(move |_, _, cx| {
+                    ok.update(cx, |f, cx| f.submit(cx));
+                    false
+                })
+                .child(shown.clone())
+        },
+    );
     form
 }
 
@@ -480,18 +513,12 @@ mod tests {
             machine_glyph(&machine("设计组 iMac", &["mac"])),
             Sym::Computer
         );
-        assert_eq!(
-            machine_glyph(&machine("旧笔记本", &["mac"])),
-            Sym::Laptop
-        );
+        assert_eq!(machine_glyph(&machine("旧笔记本", &["mac"])), Sym::Laptop);
         assert_eq!(
             machine_glyph(&machine("joye-macbook-pro-m4-max", &[])),
             Sym::Laptop
         );
-        assert_eq!(
-            machine_glyph(&machine("build-01", &["linux"])),
-            Sym::Cloud
-        );
+        assert_eq!(machine_glyph(&machine("build-01", &["linux"])), Sym::Cloud);
     }
 
     #[test]

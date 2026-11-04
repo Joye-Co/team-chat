@@ -22,6 +22,7 @@ use crate::serde_util::{any_value, non_null, nullable};
 use crate::topic::TopicContext;
 use crate::topic::{TopicFollowFrame, check_waiting_on};
 
+#[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t")]
 pub enum ClientFrame {
@@ -181,6 +182,9 @@ impl ClientFrame {
                     check_id("causeEventId", c)?;
                 }
                 check_block_refs(f.block_refs.as_deref())?;
+                f.from_aside
+                    .as_ref()
+                    .map_or(Ok(()), crate::topic::AsideOrigin::validate)?;
                 f.context.as_ref().map_or(Ok(()), TopicContext::validate)
             }
             Self::Edit(f) => {
@@ -391,6 +395,13 @@ pub struct SendFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub block_refs: Option<Vec<BlockRefInput>>,
+    /// 1.1: this send posts a side chat answer to the side chat's source topic.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub from_aside: Option<crate::topic::AsideOrigin>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

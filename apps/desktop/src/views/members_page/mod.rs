@@ -27,7 +27,7 @@ use crate::{
     data::{
         BotRunSummary, GroupKind, Member, PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
-        v2::MemberStats,
+        v2::{Currency, MemberStats},
     },
     ui::{
         native::{
@@ -163,8 +163,9 @@ fn count_word(n: usize) -> String {
         .unwrap_or_else(|| n.to_string())
 }
 
-fn money(cents: u64) -> String {
-    fill(c::MEMBERS_MONEY, &[("v", &(cents / 100).to_string())])
+/// Cents in the currency the data has, never converted (`$0.85`, `¥6.20`).
+fn money(cents: u64, currency: Currency) -> String {
+    crate::views::topic_rail::money_text(cents, currency)
 }
 
 /// The list pane (§9.5): its own toolbar row with the segmented filter.
@@ -321,7 +322,15 @@ impl MembersPage {
             );
             let n = group.len();
             for (i, e) in group.into_iter().enumerate() {
-                list = list.child(self.row(e, selected, me.as_deref(), focused, active, i + 1 == n, cx));
+                list = list.child(self.row(
+                    e,
+                    selected,
+                    me.as_deref(),
+                    focused,
+                    active,
+                    i + 1 == n,
+                    cx,
+                ));
             }
         }
         if load != PageLoad::Ready {
@@ -330,7 +339,12 @@ impl MembersPage {
                 .flex_1()
                 .min_h(px(0.))
                 .p(px(8.))
-                .child(page::skeleton_rows("members-sk", page::SkeletonKind::Row, 6, cx));
+                .child(page::skeleton_rows(
+                    "members-sk",
+                    page::SkeletonKind::Row,
+                    6,
+                    cx,
+                ));
         } else if !any {
             let this = cx.entity().downgrade();
             list = list.child(page::page_empty(
@@ -572,9 +586,10 @@ impl MembersPage {
                     )
                     .on_click(move |_, _, _| {
                         if let Some(r) = &run {
-                            let _ = services
-                                .provider
-                                .take_over_run(&r.group_id, &r.topic_id, &r.id);
+                            let _ =
+                                services
+                                    .provider
+                                    .take_over_run(&r.group_id, &r.topic_id, &r.id);
                         }
                     }),
                     e.run.is_none(),
@@ -636,7 +651,11 @@ impl MembersPage {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .child(rows::line(m.name.clone()).n_large_title().text_color(k.label))
+                    .child(
+                        rows::line(m.name.clone())
+                            .n_large_title()
+                            .text_color(k.label),
+                    )
                     .when(!parts.is_empty(), |el| {
                         el.child(
                             rows::line(parts.join(" · "))
@@ -645,7 +664,14 @@ impl MembersPage {
                         )
                     }),
             )
-            .child(div().flex_none().flex().items_center().gap(px(8.)).children(actions))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .children(actions),
+            )
             .into_any_element()
     }
 
@@ -677,7 +703,10 @@ impl MembersPage {
                 .unwrap_or(r.created_at);
             let (badge, value) = match kit::plan_progress(&r.plan) {
                 Some((n, m)) => (
-                    fill(c::MEMBERS_WORKING_N, &[("n", &n.to_string()), ("m", &m.to_string())]),
+                    fill(
+                        c::MEMBERS_WORKING_N,
+                        &[("n", &n.to_string()), ("m", &m.to_string())],
+                    ),
                     if m == 0 { 0. } else { n as f32 / m as f32 },
                 ),
                 None => (c::MEMBERS_WORKING.to_string(), 0.),
@@ -689,9 +718,7 @@ impl MembersPage {
                     "member-now-topic",
                     None,
                     topic.map(|t| t.title).unwrap_or_default(),
-                    Some(
-                        fill(c::MEMBERS_TOPIC_META, &[("group", &group), ("name", &by)]).into(),
-                    ),
+                    Some(fill(c::MEMBERS_TOPIC_META, &[("group", &group), ("name", &by)]).into()),
                     Some(page::status_badge(Status::Working, badge, cx)),
                     true,
                     cx,
@@ -702,7 +729,11 @@ impl MembersPage {
                     nav.update(cx, |n, cx| n.open_topic(g, t, cx))
                 }),
             );
-            body = body.child(div().pb(px(8.)).child(page::progress("member-now-progress", value, cx)));
+            body = body.child(div().pb(px(8.)).child(page::progress(
+                "member-now-progress",
+                value,
+                cx,
+            )));
             rows_n += 1;
             if let Some(i) = current {
                 body = body.child(page::card_row(
@@ -737,10 +768,23 @@ impl MembersPage {
             ));
         }
         if rows_n == 0 {
-            body = body.child(page::compact_empty(Sym::Circle, c::MEMBERS_NOW_EMPTY, None, cx));
+            body = body.child(page::compact_empty(
+                Sym::Circle,
+                c::MEMBERS_NOW_EMPTY,
+                None,
+                cx,
+            ));
         }
-        page::titled_card("member-now", c::MEMBERS_NOW_DOING, None, None, body, None, cx)
-            .into_any_element()
+        page::titled_card(
+            "member-now",
+            c::MEMBERS_NOW_DOING,
+            None,
+            None,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
     /// 这周 (card): three stats (完成的话题, 产出, 成本) and the 成本 Progress
@@ -764,13 +808,20 @@ impl MembersPage {
                 ("pages", &e.extras.pages_this_week.to_string()),
             ],
         );
-        let cost = e.stats.cost_cents_this_week.unwrap_or(0);
+        // No run reported a cost: `–`, never a wrong ¥0.
+        let currency = e.stats.cost_currency;
+        let cost = e.stats.cost_cents_this_week;
         let budget = e.extras.budget_cents.filter(|b| *b > 0);
-        let pct = budget.map(|b| (cost as f32 / b as f32).clamp(0., 1.));
-        let limit_note = match (budget, pct) {
-            (Some(b), Some(_)) => fill(c::MEMBERS_LIMIT, &[("v", &money(b))]),
-            _ => c::MEMBERS_NO_LIMIT.to_string(),
+        let pct = cost
+            .zip(budget)
+            .map(|(c, b)| (c as f32 / b as f32).clamp(0., 1.));
+        let limit_note = match budget {
+            Some(b) => fill(c::MEMBERS_LIMIT, &[("v", &money(b, currency))]),
+            None => c::MEMBERS_NO_LIMIT.to_string(),
         };
+        let cost_text = cost
+            .map(|c| money(c, currency))
+            .unwrap_or_else(|| c::MEMBERS_NO_COST.to_string());
         let strip = div()
             .flex()
             .gap(px(16.))
@@ -781,17 +832,35 @@ impl MembersPage {
                 cx,
             ))
             .child(div().flex_none().w(px(1.)).bg(k.separator))
-            .child(page::stat(c::MEMBERS_OUTPUTS, outputs.to_string(), Some(kinds.into()), cx))
+            .child(page::stat(
+                c::MEMBERS_OUTPUTS,
+                outputs.to_string(),
+                Some(kinds.into()),
+                cx,
+            ))
             .child(div().flex_none().w(px(1.)).bg(k.separator))
-            .child(page::stat(c::MEMBERS_COST, money(cost), Some(limit_note.into()), cx));
+            .child(page::stat(
+                c::MEMBERS_COST,
+                cost_text,
+                Some(limit_note.into()),
+                cx,
+            ));
         let body = div()
             .flex()
             .flex_col()
             .gap(px(16.))
             .child(strip)
             .children(pct.map(|p| page::progress("member-cost", p, cx)));
-        page::titled_card("member-week", c::MEMBERS_THIS_WEEK, None, None, body, None, cx)
-            .into_any_element()
+        page::titled_card(
+            "member-week",
+            c::MEMBERS_THIS_WEEK,
+            None,
+            None,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
     /// 最近交付 (card with a table): 名称, 在哪, 时间, 状态.
@@ -862,7 +931,9 @@ impl MembersPage {
                                     c::MEMBERS_ARTIFACT,
                                     &[("title", &d.title), ("v", &version.to_string())],
                                 ),
-                                group.map(|g| format!("{g} · {kind}")).unwrap_or(kind.to_string()),
+                                group
+                                    .map(|g| format!("{g} · {kind}"))
+                                    .unwrap_or(kind.to_string()),
                             )
                         }
                     };
@@ -938,7 +1009,12 @@ impl MembersPage {
         let name = e.member.name.clone();
         let mut body = div().flex().flex_col().gap(px(8.));
         if e.stats.problems.is_empty() {
-            body = body.child(page::compact_empty(Sym::Done, c::MEMBERS_PROBLEMS_EMPTY, None, cx));
+            body = body.child(page::compact_empty(
+                Sym::Done,
+                c::MEMBERS_PROBLEMS_EMPTY,
+                None,
+                cx,
+            ));
         }
         for (i, pr) in e.stats.problems.iter().enumerate() {
             let retried = pr.run_id.as_ref().is_some_and(|r| self.retried.contains(r));
@@ -1149,8 +1225,7 @@ impl MembersPage {
         let now = p.clock_now();
         let n = e.extras.decisions.len();
         let body: AnyElement = if n == 0 {
-            page::compact_empty(Sym::Check, c::MEMBERS_DECISIONS_EMPTY, None, cx)
-                .into_any_element()
+            page::compact_empty(Sym::Check, c::MEMBERS_DECISIONS_EMPTY, None, cx).into_any_element()
         } else {
             div()
                 .flex()
@@ -1202,8 +1277,16 @@ impl MembersPage {
                 }))
                 .into_any_element()
         };
-        page::titled_card("member-decisions", c::MEMBERS_DECISIONS, None, None, body, None, cx)
-            .into_any_element()
+        page::titled_card(
+            "member-decisions",
+            c::MEMBERS_DECISIONS,
+            None,
+            None,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
     /// The detail body: the header block, a line, then the cards in pairs
@@ -1267,7 +1350,12 @@ impl MembersPage {
                     ),
             )
             .child(page::skeleton_cards(2, cx))
-            .child(page::skeleton_rows("member-sk", page::SkeletonKind::Row, 3, cx))
+            .child(page::skeleton_rows(
+                "member-sk",
+                page::SkeletonKind::Row,
+                3,
+                cx,
+            ))
     }
 }
 
@@ -1286,6 +1374,14 @@ impl Render for MembersPage {
             .as_deref()
             .and_then(|id| entries.iter().find(|e| e.member.id == id))
             .filter(|_| load == PageLoad::Ready);
+        crate::selftest::drawn::mark(
+            "members-page",
+            format!(
+                "entries={} detail={}",
+                entries.len(),
+                entry.map_or("", |e| e.member.name.as_str())
+            ),
+        );
         let scroll = |body: gpui::Div| {
             div()
                 .id("member-detail")

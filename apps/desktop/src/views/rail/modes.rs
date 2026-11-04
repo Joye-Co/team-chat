@@ -74,7 +74,10 @@ pub(super) enum Item {
         folded: bool,
     },
     /// C: a member with nothing on (`away`: not online): one row each.
-    Plain { member: Member, away: bool },
+    Plain {
+        member: Member,
+        away: bool,
+    },
     /// C: the collapsed tail of a section (`空闲 · 3`, `不在 · 2`): one
     /// dimmed row that opens to its members.
     MemberTail {
@@ -273,12 +276,8 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         })
         .clone();
     let open = i.open.clone();
-    let (mut bots, mut idle, mut people, mut away): (
-        Vec<Item>,
-        Vec<Item>,
-        Vec<Item>,
-        Vec<Item>,
-    ) = Default::default();
+    let (mut bots, mut idle, mut people, mut away): (Vec<Item>, Vec<Item>, Vec<Item>, Vec<Item>) =
+        Default::default();
     for r in rows {
         let bot = r.member.is_bot();
         if r.busy() {
@@ -381,7 +380,9 @@ impl RailView {
     /// Draws one list row from memory.
     pub(super) fn item(&self, item: &Item, cx: &mut Context<Self>) -> AnyElement {
         match item {
-            Item::GroupHeader { id, name, folded, .. } => {
+            Item::GroupHeader {
+                id, name, folded, ..
+            } => {
                 let fold_id = id.clone();
                 let this = cx.entity().downgrade();
                 let nav = self.services.nav.clone();
@@ -534,7 +535,10 @@ impl RailView {
         row = if r.waiting_on_me > 0 {
             row.trailing_element(crate::ui::native::page::status_badge(
                 crate::ui::native::page::Status::NeedsYou,
-                crate::copy::fill(c::RAIL_WAITS_ON_YOU_N, &[("n", &r.waiting_on_me.to_string())]),
+                crate::copy::fill(
+                    c::RAIL_WAITS_ON_YOU_N,
+                    &[("n", &r.waiting_on_me.to_string())],
+                ),
                 cx,
             ))
         } else {
@@ -558,16 +562,19 @@ impl RailView {
     fn plain_member(&self, m: &Member, away: bool, _cx: &App) -> AnyElement {
         let nav = self.services.nav.clone();
         let id = m.id.clone();
-        self.row(SharedString::from(format!("rail-person-{}", m.id)), m.name.clone())
-            .leading(
-                div()
-                    .when(away, |d| d.opacity(0.5))
-                    .child(MemberAvatar::new(Some(m), ROW_AVATAR)),
-            )
-            .on_click(move |_, _, cx| {
-                let id = id.clone();
-                nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
-            })
-            .into_any_element()
+        self.row(
+            SharedString::from(format!("rail-person-{}", m.id)),
+            m.name.clone(),
+        )
+        .leading(
+            div()
+                .when(away, |d| d.opacity(0.5))
+                .child(MemberAvatar::new(Some(m), ROW_AVATAR)),
+        )
+        .on_click(move |_, _, cx| {
+            let id = id.clone();
+            nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
+        })
+        .into_any_element()
     }
 }

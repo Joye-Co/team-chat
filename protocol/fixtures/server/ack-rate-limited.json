@@ -1,0 +1,14 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r300",
+    "ok": false,
+    "error": {
+      "code": "rate_limited",
+      "message": "too many frames",
+      "retryAfterMs": 50
+    }
+  }
+}

@@ -69,7 +69,6 @@ crate::copy! {
     MEMBERS_COMPUTER_BUTTON = "电脑",
     MEMBERS_TOGGLE_ASIDE = "显示或隐藏右栏",
     MEMBERS_RETRY_MESSAGE = "@{name} 上次卡住了，再试一次",
-    MEMBERS_MONEY = "¥{v}",
     MEMBERS_WORKPLACE_EMPTY = "还没有工作环境",
     MEMBERS_WORKPLACE_EMPTY_LINE = "电脑、工具和决定会显示在这里",
     // --- pages track (v12 native) ---
@@ -95,6 +94,7 @@ crate::copy! {
     MEMBERS_WORKING = "在做",
     MEMBERS_AVG_MINUTES = "平均 {m} 分钟",
     MEMBERS_NO_LIMIT = "没有上限",
+    MEMBERS_NO_COST = "–",
     MEMBERS_COL_NAME = "名称",
     MEMBERS_COL_WHERE = "在哪",
     MEMBERS_COL_TIME = "时间",
