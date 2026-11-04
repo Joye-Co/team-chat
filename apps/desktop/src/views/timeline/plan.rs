@@ -140,7 +140,7 @@ impl TimelineView {
             .h(HEADER)
             .pl(space::S14)
             .pr(space::S14)
-            .rounded(px(12.))
+            .rounded(crate::theme::radius::LG)
             .bg(n.fill)
             .flex()
             .items_center()
@@ -191,7 +191,8 @@ impl TimelineView {
     }
 
     /// A run that failed, in place of its card at the foot of the 话题: an
-    /// alert that says why (COMPLETENESS §2.15), with 重试 and 查看日志. It
+    /// alert that says why (COMPLETENESS §2.15), with 重试 and 查看日志. The
+    /// red is on its symbol only (D3); title and frame stay neutral. It
     /// shows while the newest run of the 话题 is the failed one.
     fn failed_run_alert(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::data::RunStatus;
@@ -202,8 +203,7 @@ impl TimelineView {
         }
         let n = native_colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
-        let raw_name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
-        let name = crate::copy::isolate(&raw_name);
+        let name = crate::copy::isolate(&bot.as_ref().map(|m| m.name.clone()).unwrap_or_default());
         let cause = run
             .summary
             .clone()
@@ -240,8 +240,7 @@ impl TimelineView {
             ),
         };
         let retry = {
-            // The mention carries the plain name (no isolates).
-            let (run, name) = (run.clone(), raw_name.clone());
+            let run = run.clone();
             push_button(
                 ElementId::Name(format!("run-retry-{}", run.id).into()),
                 t::RUN_RETRY,
@@ -250,15 +249,31 @@ impl TimelineView {
                 cx,
             )
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                // A new run starts when the member is asked again.
-                this.services.provider.send(crate::data::SendRequest {
-                    group_id: run.group_id.clone(),
-                    topic_id: run.topic_id.clone(),
-                    body: fill(t::RUN_RETRY_BODY, &[("name", &name)]),
-                    mentions: vec![run.bot_id.clone()],
-                    quote_of: None,
-                });
-                cx.notify();
+                // A new run with the same request (`POST /v1/runs/:id/retry`).
+                // A refusal blocks: an alert, no toast.
+                let rx = this
+                    .services
+                    .provider
+                    .retry_member_problem(&run.bot_id, &run.id);
+                cx.spawn(async move |_, cx| {
+                    let result = rx.await.unwrap_or(Err(crate::data::AdminError::Other));
+                    if let Err(e) = result {
+                        cx.update(|cx| {
+                            if let Some(window) = cx.active_window() {
+                                let _ = window.update(cx, |_, window, cx| {
+                                    crate::views::nav::dialogs::error_alert(
+                                        t::RUN_RETRY_REFUSED,
+                                        crate::views::settings::widgets::error_text(e),
+                                        |_, _| {},
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            }
+                        });
+                    }
+                })
+                .detach();
             }))
         };
         let log = {
@@ -296,14 +311,14 @@ impl TimelineView {
                         .py(space::S12)
                         .rounded(crate::theme::radius::FIELD)
                         .border_1()
-                        .border_color(n.red.opacity(0.4))
+                        .border_color(n.separator)
                         .flex()
                         .items_start()
                         .gap(space::S12)
                         .child(
                             div()
                                 .flex_none()
-                                .h(px(18.))
+                                .h(crate::ui::native::tokens::text::UI.1)
                                 .flex()
                                 .items_center()
                                 .child(ui::sym(Sym::Failed, ui::SymSize::INLINE, n.red)),
@@ -318,7 +333,7 @@ impl TimelineView {
                                 .child(
                                     div()
                                         .n_headline()
-                                        .text_color(n.red)
+                                        .text_color(n.label)
                                         .line_clamp(2)
                                         .child(title),
                                 )

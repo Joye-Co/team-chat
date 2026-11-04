@@ -68,7 +68,7 @@ crate::copy! {
     RUN_FAILED_DETAIL = "{name} {time} 停在「{step}」。看看日志，处理好后让它再试一次。",
     RUN_FAILED_DETAIL_NO_STEP = "{name} {time} 停下了。看看日志，处理好后让它再试一次。",
     RUN_RETRY = "重试",
-    RUN_RETRY_BODY = "@{name} 再试一次",
+    RUN_RETRY_REFUSED = "没能重试",
     RUN_VIEW_LOG = "查看日志",
     // --- end v12/fx-topic ---
 }
