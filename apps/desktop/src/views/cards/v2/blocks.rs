@@ -358,10 +358,11 @@ pub(crate) fn numeric(s: &str) -> bool {
 /// The width of number column `ci`: its widest header (12 pt) or mono cell (13 pt), at
 /// least [`m::TABLE_NUM_COL`], so the header and every row line up at the right.
 pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize) -> gpui::Pixels {
-    // One CJK character is about one em; a mono or Latin character about 0.62 em.
+    // One CJK character is about one em; a tabular digit about 0.62 em, 0.66 em in
+    // the semibold total row, so the estimate takes the wider one.
     let est = |t: &str, size: f32| -> f32 {
         t.chars()
-            .map(|c| if c.is_ascii() { 0.62 * size } else { size })
+            .map(|c| if c.is_ascii() { 0.66 * size } else { size })
             .sum()
     };
     let head = columns.get(ci).map_or(0., |h| est(h, 12.));
@@ -374,7 +375,7 @@ pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize)
             } else {
                 0.
             };
-            est(v, 13.) + bar
+            est(v, 14.) + bar
         })
         .fold(0f32, f32::max);
     px(head.max(cells).ceil() + 2.).max(m::TABLE_NUM_COL)
@@ -419,11 +420,11 @@ pub(crate) fn table_with_refs(
         let pct = (!head).then(|| percent(text)).flatten();
         // Text columns share the width; number columns take what their numbers need.
         let width = widths.get(ci).copied().flatten();
-        // A number column takes at least its estimate and grows to its widest value:
+        // A number column takes its widest value in every row (one x per column);
         // numbers never truncate (§2.7).
         div()
             .map(|el| match width {
-                Some(w) => el.flex_none().min_w(w),
+                Some(w) => el.flex_none().w(w),
                 None => el.flex_1(),
             })
             .when(ci == 0, |el| el.flex_grow(1.).min_w(px(96.)))
@@ -649,6 +650,8 @@ fn code(text: &str, cx: &App) -> AnyElement {
     div()
         .rounded(theme::radius::MD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .px(space::S12)
         .py(space::S8)
         .text_size(crate::ui::native::tokens::text::META.0)
@@ -1288,27 +1291,20 @@ pub(crate) fn form_grid(
                 .flex()
                 .when(top, |el| el.items_start())
                 .when(!top, |el| el.items_center())
-                .gap(space::S8)
-                // A Mac form: the label right-aligned before its control,
-                // the control as wide as its text (NATIVE.md §5.6).
+                .gap(space::S12)
+                // FormRow (§2.8, D8): the label left-aligned in a 112 column,
+                // the control fills the value column.
                 .child(
                     div()
                         .n_body()
                         .flex_none()
                         .w(m::FORM_LABEL)
-                        .flex()
-                        .justify_end()
+                        .one_line()
                         .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
                         .text_color(k.ink)
                         .child(label.clone()),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .when(!top, |el| el.max_w(px(280.)))
-                        .child(control),
-                )
+                .child(div().flex_1().min_w(px(0.)).child(control))
                 .into_any_element(),
         );
     }
@@ -1405,9 +1401,10 @@ pub(crate) fn input_control(
                     _ => None,
                 })
                 .unwrap_or_default();
+            // One control per row (§2.8).
             div()
                 .flex()
-                .flex_wrap()
+                .flex_col()
                 .gap(space::S8)
                 .children(options.iter().map(|o| {
                     let lock = locked.contains(&o.id);
@@ -1692,6 +1689,8 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         .p(space::S12)
         .rounded(theme::radius::FIELD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .children(thumbs)
         .child(texts)
         .into_any_element()
@@ -2194,10 +2193,12 @@ fn diff(
     }
     let adds = adds.unwrap_or(counted_a);
     let dels = dels.unwrap_or(counted_d);
-    // A soft `sunken` well, no outline: the card keeps the only edge.
+    // A `sunken` well with its own 1 px line (§1.7: a fill step alone is not an edge).
     div()
         .rounded(theme::radius::MD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .overflow_hidden()
         .flex()
         .flex_col()
@@ -2516,6 +2517,8 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .pr(space::S4)
             .rounded(theme::radius::MD)
             .bg(k.sunken)
+            .border_1()
+            .border_color(k.line)
             .text_color(k.ink_2)
             .child(ui::icon(Sym::Info, px(14.), k.ink_3))
             .child(
@@ -2590,7 +2593,7 @@ fn pr_state(raw: &str) -> PrState {
         "draft" => (c::REF_PR_DRAFT, PrTone::Plain),
         "merged" => (rail::CHANGES_MERGED, PrTone::Merged),
         "closed" => (rail::CHANGES_CLOSED, PrTone::Plain),
-        "failed" => (c::STRIP_FAILED, PrTone::Bad),
+        "failed" => (c::REF_CHECK_FAILED, PrTone::Bad),
         _ => {
             // A free-text state such as "已合并 11-02" or
             // "3 项检查通过 · 未合并": look at each part and its first word.
@@ -2606,7 +2609,7 @@ fn pr_state(raw: &str) -> PrState {
                         || part == common::STATUS_WAITING_REVIEW_ME
                     {
                         PrTone::Waits
-                    } else if part.ends_with(c::STRIP_FAILED) {
+                    } else if part.ends_with(c::REF_CHECK_FAILED) {
                         PrTone::Bad
                     } else if part == rail::CHANGES_MERGING || is_count(last) {
                         PrTone::Running

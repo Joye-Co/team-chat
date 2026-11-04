@@ -38,10 +38,12 @@ pub enum Section {
     Ack,
     Page,
     Notify,
+    /// Loading, a card that cannot be read, a long choice (§2.14, §2.15).
+    Load,
 }
 
 impl Section {
-    pub const ALL: [Section; 13] = [
+    pub const ALL: [Section; 14] = [
         Section::States,
         Section::Choice,
         Section::Approve,
@@ -55,6 +57,7 @@ impl Section {
         Section::Ack,
         Section::Page,
         Section::Notify,
+        Section::Load,
     ];
 
     fn number(self) -> usize {
@@ -76,6 +79,7 @@ impl Section {
             Section::Ack => c::GALLERY_S_ACK,
             Section::Page => c::GALLERY_S_PAGE,
             Section::Notify => c::GALLERY_S_NOTIFY,
+            Section::Load => c::GALLERY_S_LOAD,
         }
     }
 
@@ -94,6 +98,7 @@ impl Section {
             Section::Ack => c::GALLERY_S_ACK_NOTE,
             Section::Page => c::GALLERY_S_PAGE_NOTE,
             Section::Notify => c::GALLERY_S_NOTIFY_NOTE,
+            Section::Load => c::GALLERY_S_LOAD_NOTE,
         }
     }
 }
@@ -683,6 +688,21 @@ impl CardsGallery {
                     c::GALLERY_HOVER,
                     "",
                     self.notify_box(true, window, cx),
+                )],
+            ),
+            Section::Load => (
+                vec![
+                    item(c::GALLERY_LOADING, "", Some(super::loading_card(cx))),
+                    item(
+                        c::GALLERY_DECODE,
+                        "",
+                        Some(super::failed_card("gallery-decode".into(), cx)),
+                    ),
+                ],
+                vec![item(
+                    c::GALLERY_LONG_CHOICE,
+                    "",
+                    self.card(CHOICE_LONG, d, me, None, "a", window, cx),
                 )],
             ),
         };

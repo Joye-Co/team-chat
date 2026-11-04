@@ -83,7 +83,7 @@ fn card(v: Value) -> CardV2 {
 }
 
 fn sample(id: &str, group: &str, topic: &str, author: &str, created: Millis, v: Value) -> Sample21 {
-    let c = card(v);
+    let c = card(crate::views::cards::v2::samples::sample_json(v));
     Sample21 {
         msg: CardV2Message {
             group_id: group.into(),

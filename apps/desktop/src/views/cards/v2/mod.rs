@@ -685,7 +685,9 @@ pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
 
 /// The label and the detail of the strip.
 pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
-    let author = ctx.author.as_str();
+    // A name in a state line is cut first, so times and the state word stay.
+    let author_short = short_name(&ctx.author);
+    let author = author_short.as_str();
     let at = |a: &CardV2Answer| crate::views::shell::clock(a.at);
     let label_of = |a: &CardV2Answer| {
         ctx.card
@@ -698,7 +700,7 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
     // `Joye 发布到生产 10:40`, or `Joye 拍板 10:40` once the action is gone.
     let answered_at = |a: &CardV2Answer| {
         let label = label_of(a);
-        let name = ctx.name(&a.actor_id);
+        let name = short_name(&ctx.name(&a.actor_id));
         if label.is_empty() {
             fill(c::STRIP_DECIDED_AT, &[("name", &name), ("time", &at(a))])
         } else {
@@ -762,7 +764,7 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
             .into(),
         ),
         CardState::Answered { answer } => {
-            let who = ctx.name(&answer.actor_id);
+            let who = short_name(&ctx.name(&answer.actor_id));
             let kind = ctx
                 .card
                 .actions()
@@ -817,28 +819,30 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
                 ],
             ),
         ),
+        // The working card (§2.4): the badge says `在做 3/5`, the detail
+        // `正在做：<current step>`, then who started it and when.
         CardState::Executing { answer, progress } => {
-            let mut parts = Vec::new();
-            let label = match answer {
-                Some(a) => {
-                    parts.push(answered_at(a));
-                    c::STRIP_WORKING.to_string()
-                }
-                None => fill(c::STRIP_WORKING_SELF, &[("name", author)]),
-            };
-            if let Some(step) = progress.step {
-                parts.push(fill(
-                    c::STRIP_STEP,
+            let label = if progress.total > 0 {
+                fill(
+                    c::STRIP_WORKING_COUNT,
                     &[
-                        ("n", &step.to_string()),
+                        ("n", &progress.done.to_string()),
                         ("total", &progress.total.to_string()),
                     ],
-                ));
-                if answer.is_none()
-                    && let Some(cur) = &progress.current
-                {
-                    parts.push(cur.clone());
+                )
+            } else {
+                c::STRIP_WORKING.to_string()
+            };
+            let mut parts = Vec::new();
+            match &progress.current {
+                Some(cur) => parts.push(fill(c::STRIP_DOING, &[("step", cur)])),
+                None if answer.is_none() => {
+                    parts.push(fill(c::STRIP_WORKING_SELF, &[("name", author)]))
                 }
+                None => {}
+            }
+            if let Some(a) = answer {
+                parts.push(answered_at(a));
             }
             (label, parts.join(" · "))
         }
@@ -931,7 +935,25 @@ fn asked_names(ctx: &Ctx) -> String {
     }
     names.dedup();
     names.truncate(3);
-    names.join(c::FORM_LIST_SEPARATOR)
+    names
+        .iter()
+        .map(|n| short_name(n))
+        .collect::<Vec<_>>()
+        .join(c::FORM_LIST_SEPARATOR)
+}
+
+/// The longest name a state line keeps whole (characters).
+const SHORT_NAME: usize = 12;
+
+/// `name` cut at [`SHORT_NAME`] characters with `…`: in a state line the name
+/// gives way first, so `拍板` and the times stay (§2.21 truncation order).
+pub(crate) fn short_name(name: &str) -> String {
+    if name.chars().count() <= SHORT_NAME {
+        return name.to_string();
+    }
+    let mut s: String = name.chars().take(SHORT_NAME - 1).collect();
+    s.push('…');
+    s
 }
 
 /// The state's action at the header's trailing edge, if any: a small
@@ -1334,6 +1356,29 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// A card that is not fetched yet (§2.14): a 640 × 120 skeleton, radius 14,
+/// where the card will be.
+pub(crate) fn loading_card(_cx: &App) -> AnyElement {
+    ui::native::skeleton(gpui::relative(1.), m::CHART + space::S20)
+        .max_w(m::MAX_WIDTH)
+        .rounded(ui::native::cards::card::RADIUS)
+        .into_any_element()
+}
+
+/// A card that cannot be read (§2.15): an Alert in its place, with 重试.
+pub(crate) fn failed_card(id: SharedString, cx: &App) -> AnyElement {
+    let n = ui::native::native_colors(cx);
+    div()
+        .max_w(m::MAX_WIDTH)
+        .child(
+            ui::native::Alert::new(Sym::Failed, c::CARD_DECODE_FAILED)
+                .description(c::CARD_DECODE_FAILED_DETAIL)
+                .icon_color(n.red)
+                .action(button(id, c::STRIP_RETRY, PushStyle::Outline, cx)),
+        )
+        .into_any_element()
+}
+
 /// `text` with every run of whitespace (line breaks included) as one space.
 pub(crate) fn one_line_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -1485,10 +1530,11 @@ fn footer_bar(children: Vec<AnyElement>, cx: &App) -> AnyElement {
 /// like the rest of the card, buttons 8 pt apart.
 pub(crate) fn card_footer(_cx: &App) -> gpui::Div {
     let inset = ui::native::cards::card::INSET;
+    // One footer row (§2.4): the buttons keep their width and a note cuts at
+    // its end instead of wrapping under them.
     div()
         .flex_none()
         .flex()
-        .flex_wrap()
         .items_center()
         .gap(space::S8)
         .px(inset)

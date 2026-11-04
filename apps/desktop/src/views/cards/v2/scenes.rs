@@ -11,7 +11,7 @@ use crate::{
     selftest::scenes::{Scene, Start, capture_bounds, open_main, v2_open_topic},
 };
 
-fn open_gallery(
+pub(crate) fn open_gallery(
     services: Services,
     content: Size<Pixels>,
     start: Section,
@@ -91,9 +91,19 @@ pub const SCENES: &[Scene] = &[
         Section::Refs
     ),
     gallery_scene!(
-        "cards-v2-notify",
-        "Card v2 10 轻回应, 11 交互产出 and 12 通知: the emoji acknowledgement, a 产出 snapshot with its answer, and the notification banner at rest and on hover",
+        "cards-v2-ack",
+        "Card v2 10 轻回应 and 11 交互产出: the emoji acknowledgement and a 产出 snapshot with its answer",
         Section::Ack
+    ),
+    gallery_scene!(
+        "cards-v2-notify",
+        "Card v2 12 通知: the notification banner at rest and on hover, then 13: loading and failed cards and a long choice",
+        Section::Notify
+    ),
+    gallery_scene!(
+        "cards-v2-states",
+        "Card v2 13: a card not fetched yet (skeleton), a card that cannot be read (Alert with 重试) and a choice with 8 options",
+        Section::Load
     ),
     Scene {
         name: "cards-v2-topic",

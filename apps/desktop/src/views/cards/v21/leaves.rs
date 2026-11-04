@@ -506,6 +506,8 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .flex_col()
         .p(space::S4)
         .rounded(crate::ui::native::tokens::radius::CONTROL)
+        .border_1()
+        .border_color(crate::ui::native::native_colors(cx).separator)
         .bg(crate::ui::native::native_colors(cx).fill)
         .min_w(px(0.));
     if live {
@@ -1224,11 +1226,13 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .min_w(px(0.))
             .h(t::SLOT_CELL)
             .px(space::S10)
-            // A quiet well; the chosen slot gets `selection` and a checkmark badge,
-            // never an outline (NATIVE.md rule 4).
+            // A bordered cell (§1.7); the chosen slot: a foreground border on the
+            // muted fill and a checkmark badge (§2.17 selected row).
             .relative()
             .rounded(crate::ui::native::tokens::radius::CONTROL)
-            .bg(if on { nk.selection } else { nk.fill })
+            .border_1()
+            .border_color(if on { nk.label } else { nk.separator })
+            .bg(if on { nk.selection } else { nk.content })
             .when(on, |el| {
                 el.child(
                     div()
@@ -1553,6 +1557,8 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
         });
         cells.push(
             crate::ui::native::cards::card_well(cx)
+                .border_1()
+                .border_color(k.line)
                 .flex_1()
                 .min_w(px(0.))
                 .overflow_hidden()
@@ -2270,6 +2276,8 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .p(space::S12)
         .rounded(theme::radius::MD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .flex()
         .gap(space::S10)
         .child(
