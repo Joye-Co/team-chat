@@ -109,6 +109,8 @@ struct Ui {
     focus: FocusHandle,
     focused: Option<usize>,
     hovered: Option<usize>,
+    /// The sideways scroll of a diagram wider than the card.
+    scroll: gpui::ScrollHandle,
 }
 
 /// The inline element for a diagram.
@@ -124,6 +126,7 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
             focus: cx.focus_handle().tab_stop(true),
             focused: None,
             hovered: None,
+            scroll: gpui::ScrollHandle::new(),
         },
     );
     let normalized = normalize::normalize(&spec.source);
@@ -571,6 +574,7 @@ fn image_with_hits(
     }
     let toggle = ui.clone();
     let scrolls = fit.w > avail + 0.5;
+    let scroll = ui.read(cx).scroll.clone();
     div()
         .w_full()
         .flex()
@@ -585,7 +589,10 @@ fn image_with_hits(
                         .w_full()
                         .flex()
                         .when(!scrolls, |d| d.justify_center())
-                        .when(scrolls, |d| d.overflow_x_scroll())
+                        // Room under the drawing for the scrollbar, so it never covers it.
+                        .when(scrolls, |d| {
+                            d.overflow_x_scroll().track_scroll(&scroll).pb(space::S16)
+                        })
                         .child(
                             div()
                                 .flex_none()
@@ -596,21 +603,14 @@ fn image_with_hits(
                                 .child(layer),
                         ),
                 )
-                // A wider diagram fades at the right edge: there is more to scroll to,
-                // never a hard cut mid-glyph (§2.21).
+                // A wider diagram scrolls sideways with a scrollbar that always shows
+                // (C-05): no fade over the drawing, and the cut edge reads as "more".
                 .when(scrolls, |d| {
                     d.child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .bottom_0()
-                            .right_0()
-                            .w(space::S24)
-                            .bg(gpui::linear_gradient(
-                                90.,
-                                gpui::linear_color_stop(n.content.opacity(0.), 0.),
-                                gpui::linear_color_stop(n.content, 1.),
-                            )),
+                        div().absolute().inset_0().child(
+                            gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                                .mode(gpui_component::scroll::ScrollbarMode::Always),
+                        ),
                     )
                 }),
         )
