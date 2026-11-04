@@ -157,9 +157,10 @@ impl ComposerView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                // Two lines empty; the box grows to about 40 % of the topic
-                // view in the smallest window (§7.2), then scrolls inside.
-                .auto_grow(2, 10)
+                // One line empty; the box grows with the text to about 40 %
+                // of the topic view in the smallest window (§7.4), then
+                // scrolls inside.
+                .auto_grow(1, 10)
                 .submit_on_enter(true)
                 .placeholder(c::PLACEHOLDER)
         });
@@ -186,8 +187,11 @@ impl ComposerView {
             ),
             cx.on_focus_in(&input.focus_handle(cx), window, |_, _, cx| {
                 crate::views::refs::note_focus(false, cx);
+                // The 单独问 hint shows only while the composer has focus.
+                cx.notify();
             }),
             // --- end inc-refs
+            cx.on_focus_out(&input.focus_handle(cx), window, |_, _, _, cx| cx.notify()),
         ];
         let mut this = Self {
             services,
@@ -1431,8 +1435,10 @@ impl Render for ComposerView {
                 .into_any_element()
         } else if topic_v2 && !editing && self.working.is_some() {
             send.into_any_element()
-        } else if topic_v2 && !editing {
-            // 只想问问？ ⌘; 单独问: opens the side chat (nothing goes to the 话题).
+        } else if topic_v2 && !editing && focused {
+            // 只想问问？ ⌘; 单独问: opens the side chat (nothing goes to the
+            // 话题). Only while the composer has focus, so the empty box at
+            // rest is just the field and its tools.
             div()
                 .flex()
                 .items_center()

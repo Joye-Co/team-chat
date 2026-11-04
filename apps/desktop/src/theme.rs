@@ -279,9 +279,10 @@ pub mod size {
     pub const SELECT_WIDTH: Pixels = px(120.);
     /// Invite code box: 42 x 48.
     pub const INVITE_BOX: (Pixels, Pixels) = (px(42.), px(48.));
-    /// Composer: 12 top padding + 44 text (two 22 pt lines) + 40 toolbar.
-    pub const COMPOSER_MIN: Pixels = px(96.);
-    pub const COMPOSER_TEXT_MIN: Pixels = px(44.);
+    /// Composer: 12 top padding + 22 text (one line, it grows with the
+    /// text) + 40 toolbar.
+    pub const COMPOSER_MIN: Pixels = px(74.);
+    pub const COMPOSER_TEXT_MIN: Pixels = px(22.);
     pub const COMPOSER_TOOLBAR: Pixels = px(40.);
     /// The composer's format bar (§7.2).
     pub const FORMAT_BAR: Pixels = px(36.);

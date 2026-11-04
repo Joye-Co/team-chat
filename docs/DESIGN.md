@@ -260,7 +260,7 @@ separate groups with 10 to 16; separate sections with 24 or more.
 | Rail search field | 34 | `ui` 13 `ink-3` | 0 8 0 10 | 9 | 15 |
 | Form field (in cards, settings, dialogs) | 36 | `ui` 13 | 0 12 | 8 | 16 |
 | Option button (choice in a card) | 36 | `ui` 13 | 0 12 0 6 | 9 | key letter 20 |
-| Composer | 96 minimum | `body` | 12 14 | 14 | 16 |
+| Composer | 74 minimum (one line, grows with the text) | `body` | 12 14 | 14 | 16 |
 | Send button | 32 × 32 round | — | — | full | 16 |
 
 Hit area is at least 28 × 28.
@@ -388,9 +388,9 @@ not a block. The rail shows one selection at a time (a destination, a 群 header
 
 | Part | Value |
 | --- | --- |
-| Box | Min 96 pt; radius 14; `bg`; 1 pt `line-2`; `sec-hi`. In a topic: in the content box, 16 pt from the bottom |
-| Text area | Padding 12 14 0; `body` 14/22; min 2 lines; grows to 40 % of the page height, then scrolls |
-| Toolbar | 40 pt, padding 0 8 8: left 28 pt icon buttons `paperclip` (附件), `at-sign` (提到); right a hint (`只想问问？` `meta` `ink-3` + kbd `⌘;` + `单独问` text action, topic pages only), then send |
+| Box | Min 74 pt (one text line + the toolbar); radius 14; `bg`; 1 pt `line-2`; `sec-hi`. In a topic: in the content box, 16 pt from the bottom |
+| Text area | Padding 12 14 0; `body` 14/22; starts at one line and grows with the text to 40 % of the page height, then scrolls |
+| Toolbar | 40 pt, padding 0 8 8: left 28 pt icon buttons `paperclip` (附件), `at-sign` (提到); right a hint (`只想问问？` `meta` `ink-3` + kbd `⌘;` + `单独问` text action, topic pages only, and only while the composer has focus), then send |
 | Send | 32 round. Empty: `sunken` fill, `ink-3` arrow, disabled. With text: `btn` fill, `btn-ink` arrow, `btn-hi` |
 | Placeholder | Names what happens: topic `回复，或 @ 成员交代…`; 群 `在开发里开个话题，或 @ 成员交代…` + hint `Jojo 会先看一眼，再交给合适的成员`; while a member works `插一句…` + hint `Forge 会在下一步前看到`; 单独问 `单独问 Jojo…` + hint `⌘; 关闭` |
 
