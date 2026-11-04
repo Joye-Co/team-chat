@@ -973,7 +973,7 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
         .items_center()
         .gap(space::S6)
         .text_color(match p.stage {
-            Stage::Silent | Stage::OfflineLive | Stage::Busy => k.ink_2,
+            Stage::Silent | Stage::OfflineLive | Stage::Busy | Stage::Refused => k.ink_2,
             _ => k.live_ink,
         })
         .when(
