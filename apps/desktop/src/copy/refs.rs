@@ -1,6 +1,7 @@
 //! 引用提问 (REFS §D): part affordances, composer chips, sent references and their labels.
 
 crate::copy! {
+    MORE_CHIPS = "+{n}",
     ASK_HERE = "问这里",
     ASK_IN_TOPIC = "就这里提问",
     ASK_ALONE = "单独问这里",
