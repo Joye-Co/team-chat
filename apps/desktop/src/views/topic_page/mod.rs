@@ -298,10 +298,12 @@ impl PageView for TopicPage {
         // status words follow it (`开发 · 需要你审 PR #61`), and the shell
         // draws the needs-you symbol from the state's tone.
         TitleBarSpec {
-            breadcrumb: None,
+            // The shell draws `breadcrumb` as the subtitle's lead, not as a
+            // breadcrumb.
+            breadcrumb: group,
             title,
             style: TitleStyle::Topic,
-            subtitle: group,
+            subtitle: None,
             state: state.as_ref().map(|s| (s.text.clone(), s.tone)),
             state_detail: state.as_ref().and_then(|s| s.detail.clone()),
             state_paused: state.as_ref().is_some_and(|s| s.paused),
