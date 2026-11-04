@@ -79,6 +79,27 @@ Done for staging and production on 2026-11-03 (bot `监测`, ops group `运维`,
 6. Before the first deploy, run one archive pass on each env (Daily archive, "Run it now"): a new
    env has no complete archive, and the monitor raises **备份过期** after two checks.
 
+## Quality smoke
+
+`bun scripts/staging-smoke.ts [--env staging] [--upload-mb 100]` measures the V1 bar of
+[docs/PRODUCT.md](PRODUCT.md#v1-production-use-by-5-people-and-5-bots) against a deployed env with
+the owner token and a bot token (it uses one group named `smoke`, made once). Report:
+`.tmp/staging-smoke/report.json`, no tokens. Run it after each staging deploy, before production.
+
+| Check | Bar | Staging, 2026-11-04 (server 1.0.0) |
+| --- | --- | --- |
+| Delivery, owner send to the bot's live event | p95 < 300 ms | p95 91 ms (20 samples; WebSocket ping 21 ms) |
+| Search for a Chinese two-character word | p95 < 300 ms | p95 66 ms (20 samples, one group and all groups) |
+| Catch-up: hello, then every group fetched from seq 0 | < 2 s | 498 ms (6 groups, 136 events) |
+| Reconnect with a cursor after 5 missed messages | none lost or doubled | 0 lost, 0 doubled |
+| Live notification for a mention | `notify: "mention"` | `mention` |
+| 100 MB upload, read back | same size and SHA-256 | upload 31 s, download 3.8 s, same bytes |
+
+Not proved by this script, so not claimed as measured: the reconnect after macOS sleep and the
+notification banner on screen (app behavior, checked by hand on the app), a 10,000-message topic
+opening in under 100 ms, 60 fps scrolling and cold start under 1 s (desktop, not measured on
+1.1.0). The catch-up row fetches the whole staging log, which is smaller than a busy team day.
+
 ## Roll back
 
 A rollback changes the code only. D1 schema, D1 data, Durable Object data and R2 stay as they
