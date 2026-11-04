@@ -1747,10 +1747,15 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 let kind = style_kind(x, &mut used);
                 let (a, action) = (a.clone(), (*x).clone());
                 items.push(
-                    button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
-                        .disabled(!live)
-                        .on_click(move |_, window, cx| a.press(&action, window, cx))
-                        .into_any_element(),
+                    button(
+                        ctx.id(format!("act-{}", x.id)),
+                        shown_label(ctx.card, x),
+                        kind,
+                        cx,
+                    )
+                    .disabled(!live)
+                    .on_click(move |_, window, cx| a.press(&action, window, cx))
+                    .into_any_element(),
                 );
             }
             link_buttons(&mut items, cx);
@@ -1769,10 +1774,15 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
             for x in &answers {
                 let kind = style_kind(x, &mut used);
                 items.push(
-                    button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
-                        .disabled(true)
-                        .loading(&x.id == action_id)
-                        .into_any_element(),
+                    button(
+                        ctx.id(format!("act-{}", x.id)),
+                        shown_label(ctx.card, x),
+                        kind,
+                        cx,
+                    )
+                    .disabled(true)
+                    .loading(&x.id == action_id)
+                    .into_any_element(),
                 );
             }
             Some(footer_bar(items, cx))
@@ -1832,8 +1842,13 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let (a, action) = (a.clone(), (*x).clone());
                     let reverse = x.kind() == CardActionKind::Submit
                         && x.style.unwrap_or_default() == CardV2ActionStyle::Default;
-                    let mut b = button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
-                        .on_click(move |_, window, cx| a.press(&action, window, cx));
+                    let mut b = button(
+                        ctx.id(format!("act-{}", x.id)),
+                        shown_label(ctx.card, x),
+                        kind,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| a.press(&action, window, cx));
                     if reverse {
                         b = b.icon(ui::icon(Sym::Retry, px(14.), theme::colors(cx).ink));
                     }
