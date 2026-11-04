@@ -1413,6 +1413,7 @@ impl Render for LivePane {
             self.replay = None;
         }
         let bot = member_name(&self.services, &run.bot_id);
+        crate::selftest::drawn::mark("live", format!("{bot} {}", run.id));
         let me = self.services.me();
         let held = screen.paused_by.is_some();
         let held_by_me = held && screen.paused_by == me;

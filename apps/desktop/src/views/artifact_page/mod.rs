@@ -1187,6 +1187,10 @@ impl Render for ArtifactPage {
         let shown = version
             .filter(|v| detail.versions.iter().any(|x| x.version == *v))
             .unwrap_or(detail.summary.version);
+        crate::selftest::drawn::mark(
+            "artifact-page",
+            format!("{} v{shown}", detail.summary.title),
+        );
         let header = self.header(&detail, shown, cx);
         let frame = self.frame(&detail, shown, window, cx);
         let aside = self.aside_open.then(|| self.story(&detail, shown, cx));

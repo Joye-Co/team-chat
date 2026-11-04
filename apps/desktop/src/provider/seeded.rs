@@ -32,6 +32,8 @@ pub const TOPIC: &str = "01SEEDTOPIC000000000000000";
 pub const TOPIC_WEEKLY: &str = "01SEEDWEEKLY00000000000000";
 pub const ARTIFACT: &str = "01SEEDART00000000000000000";
 pub const RUN: &str = "01SEEDRUN00000000000000000";
+/// Forge's run on the weekly report, at work now (实时查看, the desk's running list).
+pub const RUN_WEEKLY: &str = "01SEEDRUNWEEKLY00000000000";
 pub const RECORD_ASK: &str = "01SEEDASK00000000000000000";
 pub const REVIEW_ASK: &str = "01SEEDREVIEW00000000000000";
 
@@ -90,7 +92,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
     let group: proto::GroupSummary = from(json!({
         "group": { "id": GROUP, "kind": "group", "name": "开发", "memberIds": [ME, FORGE],
                    "createdBy": ME, "createdAt": now - 86_400_000 },
-        "lastSeq": 14, "readSeq": 14, "unread": 0, "mentions": 0
+        "lastSeq": 15, "readSeq": 15, "unread": 0, "mentions": 0
     }));
     let dir = session::account_dir(root, SERVER, ME);
     let client = open_client(SERVER, String::new(), &dir).expect("a cache");
@@ -132,6 +134,16 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
         "endedAt": t0 + 42 * min, "updatedAt": t0 + 42 * min,
         "usage": { "inputTokens": 182_000, "outputTokens": 21_000, "costUsd": 0.86 },
         "durationMs": 41 * min, "resultMessageId": "01SEEDDONE"
+    }));
+    let weekly_run: proto::BotRun = from(json!({
+        "id": RUN_WEEKLY, "botId": FORGE, "groupId": GROUP, "topicId": TOPIC_WEEKLY,
+        "status": "running", "requestedBy": ME, "createdAt": now - 9 * min,
+        "startedAt": now - 9 * min, "updatedAt": now - min,
+        "plan": [
+            { "text": "收集本周合并的 PR", "state": "done" },
+            { "text": "写周报正文", "state": "current" },
+            { "text": "发到话题", "state": "pending" }
+        ]
     }));
     let pr = proto::TopicLink::Pr(proto::PrLink {
         merge: None,
@@ -323,6 +335,12 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
             "本周周报",
             cite,
         )),
+        ev(
+            15,
+            FORGE,
+            now - min,
+            EventData::RunUpdated(RunUpdatedData { run: weekly_run }),
+        ),
     ];
     store.apply_events(GROUP, &events).expect("events");
 
@@ -444,7 +462,7 @@ mod tests {
             "requestedBy": "anonymous", "createdAt": now - 60_000, "updatedAt": now
         }));
         let event = Event {
-            seq: 15,
+            seq: 16,
             group_id: GROUP.into(),
             at: now,
             actor_id: FORGE.into(),

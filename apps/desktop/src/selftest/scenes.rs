@@ -716,20 +716,118 @@ pub fn all() -> Vec<&'static Scene> {
 // --- provider track ---
 /// Scenes on the real chat-core provider (seeded cache, no server): the v2 topic parts it
 /// reads from the cache.
-const CORE_SCENES: &[Scene] = &[Scene {
-    name: "topic-core",
-    about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
-    start: Start::Core,
-    setup: |s, cx| {
-        v2_open_topic(
-            s,
-            crate::provider::seeded::GROUP,
-            crate::provider::seeded::TOPIC,
-            cx,
-        )
+const CORE_SCENES: &[Scene] = &[
+    Scene {
+        name: "topic-core",
+        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+        start: Start::Core,
+        setup: |s, cx| {
+            v2_open_topic(
+                s,
+                crate::provider::seeded::GROUP,
+                crate::provider::seeded::TOPIC,
+                cx,
+            )
+        },
+        open: open_main,
     },
-    open: open_main,
-}];
+    Scene {
+        name: "core-desk",
+        about: "首页 on the real provider and a seeded cache: the review ask that waits on me and Forge at work",
+        start: Start::Core,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "core-group",
+        about: "群 page on the real provider and a seeded cache: 开发 with its two 话题",
+        start: Start::Core,
+        setup: |s, cx| {
+            s.nav.update(cx, |nav, cx| {
+                nav.open_group(crate::provider::seeded::GROUP.into(), cx)
+            })
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "core-members",
+        about: "成员 on the real provider and a seeded cache: Forge's detail",
+        start: Start::Core,
+        setup: |s, cx| {
+            s.nav.update(cx, |nav, cx| {
+                nav.open_members(Some(crate::provider::seeded::FORGE.into()), cx)
+            })
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "core-live",
+        about: "实时查看 on the real provider and a seeded cache: Forge writing the weekly report",
+        start: Start::Core,
+        setup: |s, cx| {
+            use crate::provider::seeded as sd;
+            v2_open_topic(s, sd::GROUP, sd::TOPIC_WEEKLY, cx);
+            s.nav.update(cx, |nav, cx| {
+                nav.set_right_pane(crate::app::RightPane::Live(sd::RUN_WEEKLY.into()), cx)
+            });
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "core-side-chat",
+        about: "单独问 on the real provider and a seeded cache: an empty side chat with Forge",
+        start: Start::Core,
+        setup: |s, cx| {
+            use crate::provider::seeded as sd;
+            v2_open_topic(s, sd::GROUP, sd::TOPIC, cx);
+            s.nav.update(cx, |nav, cx| {
+                nav.set_right_pane(crate::app::RightPane::SideChat(sd::FORGE.into()), cx)
+            });
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "core-artifact",
+        about: "产出 page on the real provider and a seeded cache: 重连测试报告 v2 from the disk",
+        start: Start::Core,
+        setup: |s, cx| {
+            s.nav.update(cx, |nav, cx| {
+                nav.open_artifact(crate::provider::seeded::ARTIFACT.into(), None, cx)
+            })
+        },
+        open: open_main,
+    },
+];
+
+/// The checks of the seeded-cache scenes: each page drew what the real provider read.
+fn core_checks(name: &str) -> Option<Checks> {
+    use crate::selftest::drawn::{check, ids};
+    fn one(kind: &'static str, want: &[&str]) -> Vec<Result<String, String>> {
+        let got = ids(kind);
+        want.iter()
+            .map(|w| {
+                check(
+                    got.iter().any(|g| g.contains(w)),
+                    format!("{kind} drew {w:?} ({got:?})"),
+                )
+            })
+            .collect()
+    }
+    Some(match name {
+        "core-desk" => |_, _| one("desk", &["asks=1", "runs=1"]),
+        "core-group" => |_, _| {
+            one(
+                "group-page",
+                &[crate::provider::seeded::GROUP, "active=2", "on_me=1"],
+            )
+        },
+        "core-members" => |_, _| one("members-page", &["entries=2", "detail=Forge"]),
+        "core-live" => |_, _| one("live", &["Forge", crate::provider::seeded::RUN_WEEKLY]),
+        "core-side-chat" => |_, _| one("side-chat", &["Forge messages=0"]),
+        "core-artifact" => |_, _| one("artifact-page", &["重连测试报告 v2"]),
+        _ => return None,
+    })
+}
 // --- end provider track ---
 
 /// v2 scenes whose feature lives outside its own folder.
@@ -975,7 +1073,8 @@ pub type Checks = fn(&Services, &mut App) -> Vec<Result<String, String>>;
 
 /// The checks of scene `name`, if it has any.
 pub fn checks(name: &str) -> Option<Checks> {
-    crate::views::topic_page::scenes::checks(name)
+    core_checks(name)
+        .or_else(|| crate::views::topic_page::scenes::checks(name))
         .or_else(|| crate::views::cards::v21::scenes::checks(name))
         .or_else(|| {
             (name == "artifact-embed-states")

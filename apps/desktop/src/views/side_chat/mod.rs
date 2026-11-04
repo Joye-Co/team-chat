@@ -776,6 +776,10 @@ impl Render for SideChat {
         let name = member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
         let me = self.services.me();
         let thread: SideChatThread = self.services.provider.side_chat(&g, &t, &m);
+        crate::selftest::drawn::mark(
+            "side-chat",
+            format!("{name} messages={}", thread.messages.len()),
+        );
 
         // Keep the newest message in view when the aside or its length changes.
         let shown = (m.clone(), thread.messages.len());

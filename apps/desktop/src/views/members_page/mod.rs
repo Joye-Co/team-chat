@@ -1677,6 +1677,14 @@ impl Render for MembersPage {
         let entry = selected
             .as_deref()
             .and_then(|id| entries.iter().find(|e| e.member.id == id));
+        crate::selftest::drawn::mark(
+            "members-page",
+            format!(
+                "entries={} detail={}",
+                entries.len(),
+                entry.map_or("", |e| e.member.name.as_str())
+            ),
+        );
         let (detail, aside) = match entry {
             None => (
                 stub_body(Lucide::Users, c::MEMBERS_PICK, None, cx).into_any_element(),
