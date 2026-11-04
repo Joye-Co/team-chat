@@ -257,14 +257,17 @@ come back next to it.
    so only the members you add see the copy.
 2. `bun ops/restore/restore.ts group --from production --to production --group <targetGroupId> --from-group <sourceGroupId>`
    (add `--date YYYY-MM-DD` for an older room state). It reads every archive file of the source
-   group, gives the target group id, and new ids to every topic, message and 产出 of the source
-   (the app keys them by id, so a copy next to its source must not reuse them), keeps the seqs,
-   then writes the events and the room state into the target. A re-run makes the same ids and
-   imports nothing twice. The answer has `fromGroup`, `imported` and `lastSeq`.
-3. Limits: attachments and 产出 are listed in the copy but do not open (404): their D1 rows and
-   file bytes in R2 belong to the source group, and the import cannot move them. Links to the
-   source in message text are not rewritten. Member read cursors of the copy start at 0 (all
-   unread). Look at attachments in the source group while it exists.
+   group, gives the target group id, and new ids to every topic, message, 产出 and file of the
+   source (the app keys them by id, so a copy next to its source must not reuse them), keeps the
+   seqs, then writes the events and the room state into the target. Then
+   `POST /v1/admin/import/groups/<target>/copy-files` (20 files and 产出 per call) copies the D1
+   file and 产出 rows and the R2 bytes of the source under the new ids, so attachments and 产出
+   of the copy open. A re-run makes the same ids, imports nothing twice and copies no byte twice.
+   The answer has `fromGroup`, `imported`, `lastSeq` and `copiedFiles`.
+3. Limits: the source group's D1 rows and R2 objects must be in the target env (same env, or
+   after a whole-env restore); files whose source row or object is gone are counted as `missing`
+   and stay 404 in the copy. Links to the source in message text are not rewritten. Member read
+   cursors of the copy start at 0 (all unread).
 4. The drill tests this (below).
 
 **A whole environment** (lost D1 and rooms, or a copy into a fresh env):
@@ -298,8 +301,9 @@ and every 产出 with its files as two members see them. It also checks that the
 text is in no archive file and that B takes a new message, an old attachment and a new 产出
 version. Then it copies the group's archive into a new empty group (`--from-group`), runs the copy
 twice, and checks the copy: same events, topic titles and messages, no reused topic or message
-id, no source group id, the source group unchanged, and a new message in the copy continues the
-seq (`groupCopy` in the report). Exit 0 means all pass; the report is
+id, no source group id, the source group unchanged, the copy's 产出 open with the same pages
+and its attachment downloads under a new id with the right SHA-256, and a new message in the
+copy continues the seq (`groupCopy` in the report). Exit 0 means all pass; the report is
 `ops/restore/.drill/report.json`. Other agents run local stacks at the same time: pass a free
 `--port` (the inspector uses that port plus 1000).
 
