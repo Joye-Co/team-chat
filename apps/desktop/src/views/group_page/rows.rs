@@ -185,8 +185,6 @@ pub fn mail_row(
         .children(accessory.map(|a| {
             div()
                 .flex_none()
-                .min_w(ACCESSORY_MIN)
-                .justify_end()
                 .flex()
                 .items_center()
                 .gap(px(8.))
@@ -233,4 +231,19 @@ pub fn state_line(
                 .text_color(secondary)
         }))
         .into_any_element()
+}
+
+/// A toolbar group capsule (§5.1) around an item that is not a plain
+/// `Button` (a pull-down toolbar item): the look of `ToolbarGroup`.
+pub fn toolbar_capsule(item: impl IntoElement, cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .flex_none()
+        .h(metrics::TOOLBAR_GROUP)
+        .flex()
+        .items_center()
+        .rounded(metrics::TOOLBAR_GROUP / 2.)
+        .bg(k.capsule)
+        .shadow(k.glass())
+        .child(item)
 }

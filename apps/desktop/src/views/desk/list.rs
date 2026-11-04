@@ -137,6 +137,15 @@ pub fn ask_row(
                 })
                 .into_any_element()
             });
+            // The slot stays when 撤回 goes, so the times line up.
+            let undo = Some(
+                div()
+                    .min_w(rows::ACCESSORY_MIN)
+                    .flex()
+                    .justify_end()
+                    .children(undo)
+                    .into_any_element(),
+            );
             (second, undo)
         }
         None => {
@@ -178,7 +187,9 @@ pub fn ask_row(
                 line(from).into_any_element(),
                 Some(
                     div()
+                        .min_w(rows::ACCESSORY_MIN)
                         .flex()
+                        .justify_end()
                         .items_center()
                         .gap(px(8.))
                         .child(look)
@@ -244,7 +255,9 @@ pub fn run_row(
     let second = state_line(None, Some(rest.join(" · ")), k.secondary);
     let progress = (m > 0).then(|| {
         div()
+            .min_w(rows::ACCESSORY_MIN)
             .flex()
+            .justify_end()
             .items_center()
             .gap(px(6.))
             .child(rows::sym(Sym::Live, SymSize::INLINE, k.blue))
@@ -319,7 +332,8 @@ pub fn done_row(
         d.title.clone(),
         Some(clock(d.at)),
         second,
-        None,
+        // An empty slot: the times line up with the needs-you rows.
+        Some(div().min_w(rows::ACCESSORY_MIN).into_any_element()),
         !last,
         RowInk::new(None, cx),
         cx,
