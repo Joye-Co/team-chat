@@ -3,7 +3,7 @@
 crate::copy! {
     TITLE = "登录",
     WELCOME = "欢迎加入团队",
-    LEAD = "输入管理员发给你的邀请码",
+    LEAD = "输入管理员发给你的邀请码。",
     FOOTER = "版本 {version} · 登录后凭证保存在钥匙串里",
     SERVER_LABEL = "服务器",
     SERVER_PLACEHOLDER = "https://",

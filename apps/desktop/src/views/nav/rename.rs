@@ -16,7 +16,7 @@ use gpui_component::{
     input::{InputEvent, InputState},
 };
 
-use super::dialogs::{error_alert, sheet_form, sheet_form_row_invalid, validate_group_name};
+use super::dialogs::{error_alert, sheet_form, sheet_form_row, validate_group_name};
 use crate::{
     app::Services,
     copy::{common, nav, overlays as o},
@@ -156,12 +156,7 @@ pub fn rename_sheet(
     let invalid = footnote.is_some();
     SheetLayout::new(title)
         .explanation(explanation)
-        .body(sheet_form().child(sheet_form_row_invalid(
-            label,
-            field.full_width().error(invalid),
-            invalid,
-            cx,
-        )))
+        .body(sheet_form().child(sheet_form_row(label, field.full_width().error(invalid), cx)))
         // The error sits in the footer's left slot (2.8, 2.9).
         .when_some(footnote, |l, e| {
             l.status(crate::ui::native::sheet::sheet_status_error(e, cx))
