@@ -35,7 +35,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D10 | Selected row | Muted fill (#f5f5f5 light / #262626 dark) + font-medium, radius 6 or 8. Never an inverted black row. | Today the palette, start-dm and mention popup use black rows and the sidebar uses gray. |
 | D11 | Cancel button | Outline variant (border + background). The secondary gray fill is not used for Cancel. | A disabled primary at 50% opacity must not look like Cancel. |
 | D12 | Progress | One Progress: h4, radius full, track = primary at 20%, value = primary. | Fixes the dark-mode inversion and the 3 progress styles. |
-| D13 | Right pane | 320 wide for the inspector, Home rail, side chat, artifact pane in narrow mode. | Today 280 / 320 / 380. |
+| D13 | Right pane | 320 wide for the inspector, 改动, Home rail and side chat. 400 wide for the live pane (实时查看) and the artifact pane, which show a screen or a page. (Owner decision, v14.) | Today 280 / 320 / 380; a terminal or a web page at 320 is unreadable. |
 
 ---
 
@@ -222,7 +222,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
   4. `mt-auto` secondary items (Settings, Help) h32.
   5. Footer, pinned: user row h48, p8: avatar 32 (radius 8 for workspace logo, circle for the person), name 14 medium over 12 muted second line (workspace or role), chevrons-up-down 16 at the right. It opens account and Settings. The offline state replaces the second line and adds an Alert row above the footer (2.15). Groups scroll above the footer.
 - **Message column** (x 264-1120, or 264-1440 when the right pane is closed): gutter 24, so content x 288-1096. Two left edges only: **gutter** x 288 (toolbar title, avatars, date-divider rule start, banners, composer frame, page rows) and **text column** x 332 (= 288 + 32 + 12: names, message bodies, in-thread cards, attachment items).
-- **Right pane** (x 1120-1440, 320 wide): border-l, fill background. One anatomy for inspector, Home rail, side chat and the narrow artifact pane (2.5).
+- **Right pane** (x 1120-1440, 320 wide; x 1040-1440, 400 wide for the live and artifact panes, D13): border-l, fill background. One anatomy for inspector, Home rail and side chat (2.5).
 - Every pane runs to the bottom of the window. No blank band taller than 24% of the pane height (216 at 900) unless it holds a designed Empty state. On pages (首页, 群, 成员, 产出), space below the last frame is allowed: frames hug their rows and footer row and never stretch to the window bottom (A1).
 
 ### 2.2 Toolbar and pane headers
@@ -369,7 +369,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.17 Thread (message column)
 
-- **Thread-start block** at the top of every thread: 40 icon box, title 18 medium (the topic title), 14 muted line "<creator> 在 <group> 发起 · <date>", up to 2 outline sm actions (添加成员, 附件). 24 below the header. Short threads anchor under it at the top, not at the bottom. Check: first ink is at most 24 + 16 below y 52 in every topic scene.
+- **Thread-start block** at the top of every thread: 40 icon box, title 18 medium (the topic title), 14 muted line "<creator> 在 <group> 发起 · <date>", then one row of up to 3 outline sm suggested actions for this thread (for example 添加成员, 交代给成员, 附件). 24 below the header. Short threads stay anchored under it at the top, not at the bottom (owner decision, v14): the actions in the start block, not a filler, give the short thread its content. Check: first ink is at most 24 + 16 below y 52 in every topic scene.
 - **Message row**: avatar 32 at x 288; name 14 medium, role 12 muted, time 12 muted on one line at x 332; body 14/22 at x 332, max width 640. Group gap 16, consecutive messages 4. One message style in every thread (no gray bubbles in side chat).
 - **Date divider**: 1 px border rule across the text column with a centered label 12 medium muted on the background (px 8). 24 above, 16 below.
 - **Composer**: docked at the bottom, x 288-1096, 16 above the window bottom. Frame radius 10, border, shadow-xs, p 8: textarea 14/20 (1-8 lines), then a row: ghost 28 icon buttons (attach, mention) left, Send button sm (primary, icon arrow-up) right. Reference chips max 2 rows, then "+N". Suggested actions = outline sm buttons in one row, 8 above the composer.
@@ -403,7 +403,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.21 Density and fill rules
 
-- No region taller than 24% of its pane is blank unless it is a designed Empty state. On pages, space below the last frame does not count (A1); a frame never stretches to fill the pane.
+- No region taller than 24% of its pane is blank unless it is a designed Empty state, or it is the space under a top-anchored short thread whose start block shows its suggested actions (2.17, A1). On pages, space below the last frame does not count (A1); a frame never stretches to fill the pane.
 - Scroll content ends with 24 bottom padding above any pinned footer; nothing is cut by the window edge or a footer.
 - No duplicate data on one screen (desk 正在做 in main and rail; artifact embed and artifact pane).
 - Truncation: every single-line label truncates at the end with "…" and shows the full value in a tooltip; pop-up buttons keep the chevron; lower-priority text truncates first (role, then meta, then name). Never clip at the start or mid-glyph; never wrap a value mid-phrase in a DescriptionList.
@@ -596,7 +596,7 @@ fixCount: 11 foundation + 68 screen and polish fixes = **79**.
 Run every check on the light, dark and worst-case 1x PNG of a scene before the scene is called done. Scripts: `audit-pages/m2.py` (ink runs against a sampled background), `main-window/m*.py` (pane voids, edges), `overlays/diff.py` (state differs from base), `settings/ink.py` (ink box), with `shadcn-bar/venv/bin/python -I`. Record each value in the PR. A check marked [visual] is a reviewer check.
 
 ### A. Fill
-- A1. Per pane, the largest blank vertical band is < 24% of the pane height (216 at 900), or it holds a designed Empty state. On pages (首页, 群, 成员, 产出) a void is only a gap inside a frame or between the header and the content; space below the last frame is allowed, and frames hug their content (rows + footer row) instead of stretching to the window bottom (owner decision, v14).
+- A1. Per pane, the largest blank vertical band is < 24% of the pane height (216 at 900), or it holds a designed Empty state. Exception (owner decision, v14): a short thread stays top-anchored, so the band between its last message and the composer may be taller when the thread-start block (2.17) shows its suggested actions. On pages (首页, 群, 成员, 产出) a void is only a gap inside a frame or between the header and the content; space below the last frame is allowed, and frames hug their content (rows + footer row) instead of stretching to the window bottom (owner decision, v14).
 - A2. Topic scenes: first ink below the header is at most 40 px below y 52.
 - A3. Sidebar: the footer user row is present; last ink >= y 840.
 - A4. Scroll content ends with >= 24 px before any pinned footer or the window edge; no block is cut.
@@ -604,7 +604,7 @@ Run every check on the light, dark and worst-case 1x PNG of a scene before the s
 
 ### B. Structure
 - B1. A luminance step (border token) at y 52 at x 700 and x 1280 (both panes open).
-- B2. Right pane: width 320; first content ink at y 68 +- 2 in every right-pane scene.
+- B2. Right pane: width 320 (400 for the live and artifact panes, D13); first content ink at y 68 +- 2 in every right-pane scene.
 - B3. Message column: every block starts at x 288 or x 332 (+- 1).
 - B4. Every card has a header (title + description or action); in-thread cards in one screen share one width.
 - B5. Every list or table sits in a frame or card and has a footer or a count.

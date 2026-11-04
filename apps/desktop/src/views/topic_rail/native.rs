@@ -10,19 +10,18 @@ use gpui::{
     ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div, px,
 };
 
-use super::{
-    Data, TopicRail, duration_parts, media_time, money_text, preview_thumbnail, step_minutes,
-};
+use super::{Data, TopicRail, media_time, money_text, preview_thumbnail, step_minutes};
 use crate::{
     app::RightPane,
     copy::{fill, topic_rail as c},
-    data::{BotRunSummary, PlanState, RunStatus, v2::ChangeState},
+    data::{BotRunSummary, PlanState, v2::ChangeState},
     theme::{Type as _, space},
     ui::{
         self, Sym, SymSize,
         native::{
-            InspectorSection, NativeType as _, borderless_button, determinate_bar, label_value,
-            native_colors,
+            BadgeState, EmptyLine, InspectorSection, NativeType as _, StatusBadge,
+            badge::state_mark, borderless_button, label_value, native_colors, progress,
+            tokens::radius,
         },
         sf_symbols::Sf,
     },
@@ -42,16 +41,6 @@ pub(super) const COST: &str = "cost";
 /// A small symbol in a 14 pt slot, beside 11–13 pt text.
 fn mark(sym: Sym, color: Hsla) -> AnyElement {
     ui::sym(sym, SymSize::INLINE_SMALL, color).into_any_element()
-}
-
-/// A 6 pt state dot.
-fn dot(color: Hsla) -> AnyElement {
-    div()
-        .flex_none()
-        .size(px(6.))
-        .rounded(px(3.))
-        .bg(color)
-        .into_any_element()
 }
 
 /// A Body row: leading content, a flexible middle, trailing content.
@@ -112,37 +101,38 @@ impl TopicRail {
             .into_any_element()
     }
 
-    /// 状态: the 话题's state as a status badge (the run's while a member
-    /// works or its run failed or stops). Always shown, first.
+    /// 状态: the one state of the 话题 (`topic_page::topic_state`, the same
+    /// words as the title bar and the sidebar) as a StatusBadge, and the
+    /// step a member is on under it. Always shown, first.
     pub(super) fn native_status(&self, d: &Data, cx: &mut Context<Self>) -> AnyElement {
-        use crate::{copy::common as cm, data::TopicStatus, ui::native::StatusKind};
-        let run = d.run.as_ref();
-        let stopping = run.is_some_and(|r| self.services.provider.run_stopping(&r.id));
-        let badge: AnyElement = match (run, d.topic.as_ref().map(|t| t.status)) {
-            (Some(r), _) if r.status.is_active() || r.status == RunStatus::Failed => {
-                crate::views::process::run_badge(r, stopping, cx)
-            }
-            (_, Some(status)) => {
-                let (kind, text) = match status {
-                    TopicStatus::Open => (StatusKind::Pending, cm::STATUS_OPEN),
-                    TopicStatus::InProgress => (StatusKind::Working, cm::STATUS_IN_PROGRESS),
-                    TopicStatus::WaitingAnswer => (StatusKind::NeedsYou, cm::STATUS_WAITING_ANSWER),
-                    TopicStatus::WaitingReview => (StatusKind::NeedsYou, cm::STATUS_WAITING_REVIEW),
-                    TopicStatus::Blocked => (StatusKind::Failed, cm::STATUS_BLOCKED),
-                    TopicStatus::Done => (StatusKind::Done, cm::STATUS_DONE),
-                };
-                ui::native::status_badge(kind, text, cx).into_any_element()
-            }
-            _ => ui::native::status_badge(StatusKind::Pending, cm::STATUS_OPEN, cx)
-                .into_any_element(),
+        let k = native_colors(cx);
+        let (badge, text, detail) = match d.state.as_ref() {
+            Some(s) => (s.badge, s.text.clone(), s.detail.clone()),
+            None => (
+                BadgeState::Queued,
+                crate::copy::common::STATUS_OPEN.to_string(),
+                None,
+            ),
         };
-        self.section(STATUS, c::INSPECTOR_STATE, cx)
-            .row(row(cx).child(badge))
-            .into_any_element()
+        let mut section = self
+            .section(STATUS, c::INSPECTOR_STATE, cx)
+            .row(row(cx).child(StatusBadge::new(badge, text).max_w(px(288.))));
+        if let Some(step) = detail {
+            section = section.row(
+                div()
+                    .w_full()
+                    .pt(space::S4)
+                    .n_body()
+                    .text_color(k.secondary)
+                    .child(crate::ui::truncate::TruncText::new(step).id("rail-state-detail")),
+            );
+        }
+        section.into_any_element()
     }
 
-    /// A section with no data: its header and one quiet line, so every
-    /// 话题 shows the same sections in the same order.
+    /// A section with no data (§2.13 compact Empty): its header and one
+    /// 14 muted line with a 16 icon, so every 话题 shows the same sections
+    /// in the same order.
     pub(super) fn native_empty(
         &self,
         key: &'static str,
@@ -150,106 +140,100 @@ impl TopicRail {
         line: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let sym = match key {
+            OWNER => Sym::Person,
+            PLAN => Sym::Checklist,
+            CHANGES => Sym::PullRequest,
+            OUTPUTS => Sym::Document,
+            DECISIONS => Sym::Check,
+            WHERE => Sym::Computer,
+            _ => Sym::Waiting,
+        };
         self.section(key, title, cx)
-            .row(row(cx).child(detail(line, cx)))
+            .row(EmptyLine::new(line).icon(sym))
             .into_any_element()
     }
 
+    /// A person value (§2.5): avatar 16 and the name; the role truncates
+    /// first, then the name, each with a tooltip when cut. The name and the
+    /// role are separate runs, so a right-to-left name never reorders the
+    /// line around it.
+    fn person(
+        &self,
+        id: &str,
+        member: Option<&crate::data::Member>,
+        tail: Option<AnyElement>,
+        cx: &App,
+    ) -> AnyElement {
+        let k = native_colors(cx);
+        let name = member.map(|m| m.name.clone()).unwrap_or_default();
+        let role = member
+            .and_then(|m| m.role.clone())
+            .filter(|r| !r.trim().is_empty());
+        div()
+            .w_full()
+            .min_w(px(0.))
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(ui::MemberAvatar::new(member, px(16.)))
+            .child(
+                // The name gives way only once the role is gone.
+                div()
+                    .min_w(px(24.))
+                    .flex_shrink(1.)
+                    .text_color(k.label)
+                    .child(
+                        crate::ui::truncate::TruncText::new(name)
+                            .id(SharedString::from(format!("rail-person-{id}"))),
+                    ),
+            )
+            .children(role.map(|r| {
+                div()
+                    .min_w(px(0.))
+                    .flex_shrink(1000.)
+                    .text_color(k.secondary)
+                    .child(
+                        crate::ui::truncate::TruncText::new(r)
+                            .id(SharedString::from(format!("rail-role-{id}"))),
+                    )
+            }))
+            .children(tail)
+            .into_any_element()
+    }
+
+    /// 成员 (§2.5): 负责 and 提出 as DescriptionList rows of people. The
+    /// state is in 状态 only; this section never repeats it.
     pub(super) fn native_owner(
         &self,
         d: &Data,
-        owner: &str,
-        run: Option<&BotRunSummary>,
+        owner: Option<&str>,
         by: Option<(String, i64)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
-        let member = d.member(owner);
-        let state: Option<AnyElement> = match run {
-            Some(r) if r.status.is_active() => {
-                let done = r.plan.iter().filter(|i| i.state == PlanState::Done).count();
-                Some(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .n_subheadline()
-                        .text_color(k.secondary)
-                        .child(dot(k.blue))
-                        .child(if r.plan.is_empty() {
-                            fill(c::STATE_WORKING_NO_PLAN, &[("name", "")])
-                                .trim()
-                                .to_string()
-                        } else {
-                            fill(
-                                c::OWNER_WORKING,
-                                &[
-                                    ("n", &(done + 1).min(r.plan.len()).to_string()),
-                                    ("total", &r.plan.len().to_string()),
-                                ],
-                            )
-                        })
-                        .into_any_element(),
-                )
-            }
-            // A run that failed or was stopped says so (never 做完了).
-            Some(r) if matches!(r.status, RunStatus::Failed | RunStatus::Cancelled) => {
-                Some(crate::views::process::status_badge(r.status, cx).into_any_element())
-            }
-            Some(r) if r.ended_at.is_some() => Some(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(space::S4)
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(k.secondary)
-                    .child(mark(Sym::Check, k.secondary))
-                    .child(fill(
-                        c::DONE_AT,
-                        &[("time", &r.ended_at.map(clock).unwrap_or_default())],
-                    ))
-                    .into_any_element(),
-            ),
-            _ => None,
+        let owner_value: AnyElement = match owner {
+            Some(id) => self.person(id, d.member(id).as_ref(), None, cx),
+            None => div()
+                .text_color(k.secondary)
+                .child(c::RAIL_EMPTY_OWNER)
+                .into_any_element(),
         };
-        let role = member
-            .as_ref()
-            .and_then(|m| m.role.clone())
-            .filter(|r| !r.trim().is_empty());
-        let mut section = self.section(OWNER, c::TOPIC_RAIL_OWNER, cx).row(
-            row(cx)
-                .gap(space::S8)
-                .child(ui::MemberAvatar::new(member.as_ref(), px(20.)))
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_shrink(1.)
-                        .one_line()
-                        .child(member.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
-                )
-                .children(role.map(|r| {
-                    div()
-                        .flex_shrink(1.)
-                        .min_w(px(24.))
-                        .one_line()
-                        .n_subheadline()
-                        .text_color(k.secondary)
-                        .child(r)
-                }))
-                .child(div().flex_1())
-                .children(state),
-        );
+        let mut section = self
+            .section(OWNER, c::TOPIC_RAIL_PEOPLE, cx)
+            .row(label_value(c::INSPECTOR_OWNER, owner_value, cx));
         if let Some((id, at)) = by {
-            // A long name truncates at the tail; it never runs under the label.
+            // The time keeps a fixed tabular slot; the name truncates first.
+            let time = div()
+                .flex_none()
+                .n_subheadline()
+                .n_figures()
+                .text_color(k.secondary)
+                .child(clock(at))
+                .into_any_element();
             section = section.row(label_value(
                 c::INSPECTOR_ASKED,
-                div().min_w(px(0.)).truncate().child(fill(
-                    c::DECISION_BY,
-                    &[("name", &d.name(&id)), ("time", &clock(at))],
-                )),
+                self.person(&format!("by-{id}"), d.member(&id).as_ref(), Some(time), cx),
                 cx,
             ));
         }
@@ -278,18 +262,6 @@ impl TopicRail {
         };
         let summary = row(cx)
             .child(if all_done {
-                mark(Sym::Done, k.green)
-            } else if live {
-                div()
-                    .w(px(14.))
-                    .flex()
-                    .justify_center()
-                    .child(dot(k.blue))
-                    .into_any_element()
-            } else {
-                mark(Sym::Todo, k.secondary)
-            })
-            .child(if all_done {
                 fill(c::PLAN_ALL_DONE, &[("n", &total.to_string())])
             } else {
                 fill(
@@ -302,41 +274,36 @@ impl TopicRail {
             })
             .child(div().flex_1())
             .children(took.map(|ms| {
-                let (n, unit) = duration_parts(ms);
                 div()
                     .n_subheadline()
                     .n_figures()
                     .text_color(k.secondary)
-                    .child(format!("{n} {unit}"))
+                    .child(crate::views::timeline::plan::span_text(
+                        crate::views::timeline::plan::TOOK,
+                        ms as i64,
+                    ))
             }));
         let value = if total == 0 {
             0.
         } else {
             done as f32 / total as f32
         };
-        let bar = div().py(space::S6).child(determinate_bar(
-            value,
-            (live && !all_done).then_some(k.blue),
-            cx,
-        ));
+        let _ = live;
+        // D12: the one Progress (h4, primary on primary 20 %).
+        let bar = div().py(space::S6).child(progress(value, cx));
         let mut section = self
             .section(PLAN, c::TOPIC_RAIL_PLAN, cx)
             .row(summary)
             .row(bar);
         for (i, item) in run.plan.iter().enumerate() {
+            // §2.12: the step at work spins (info), a step that waits on a
+            // person has the needs-you icon; never a free colored dot.
             let glyph = match item.state {
                 PlanState::Done => mark(Sym::Check, k.secondary),
-                PlanState::Current => div()
-                    .w(px(14.))
-                    .flex()
-                    .justify_center()
-                    .child(super::live_dot(
-                        ElementId::Name(format!("rail-step-{i}").into()),
-                        k.blue,
-                        cx,
-                    ))
-                    .into_any_element(),
-                PlanState::Waiting => mark(Sym::NeedsYou, k.amber),
+                PlanState::Current => state_mark(BadgeState::Working, &k)
+                    .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
+                PlanState::Waiting => state_mark(BadgeState::NeedsYou, &k)
+                    .unwrap_or_else(|| mark(Sym::NeedsYou, k.amber)),
                 PlanState::Pending => mark(Sym::Todo, k.tertiary),
             };
             let ink = match item.state {
@@ -345,7 +312,14 @@ impl TopicRail {
             };
             section = section.row(
                 row(cx)
-                    .child(div().flex_none().w(px(14.)).child(glyph))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(16.))
+                            .flex()
+                            .justify_center()
+                            .child(glyph),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -360,7 +334,10 @@ impl TopicRail {
                             .n_subheadline()
                             .n_figures()
                             .text_color(k.secondary)
-                            .child(fill(c::STEP_MINUTES, &[("n", &m.to_string())]))
+                            .child(crate::views::timeline::plan::span_text(
+                                crate::views::timeline::plan::TOOK,
+                                (m * 60_000) as i64,
+                            ))
                     })),
             );
         }
@@ -382,24 +359,15 @@ impl TopicRail {
             window,
             cx,
         );
-        let state: AnyElement = match ch.state {
-            ChangeState::Merging => div()
-                .flex()
-                .items_center()
-                .gap(space::S4)
-                .child(dot(k.blue))
-                .child(c::CHANGES_MERGING)
-                .into_any_element(),
-            ChangeState::Merged => div()
-                .flex()
-                .items_center()
-                .gap(space::S4)
-                .child(mark(Sym::Merge, k.secondary))
-                .child(c::CHANGES_MERGED)
-                .into_any_element(),
-            ChangeState::Closed => div().child(c::CHANGES_CLOSED).into_any_element(),
-            _ => div().child(c::CHANGES_OPEN).into_any_element(),
+        // §2.12: every state value is a StatusBadge, never plain or colored
+        // text.
+        let (state_kind, state_text) = match ch.state {
+            ChangeState::Merging => (BadgeState::Merging, c::CHANGES_MERGING),
+            ChangeState::Merged => (BadgeState::Done, c::CHANGES_MERGED),
+            ChangeState::Closed => (BadgeState::Offline, c::CHANGES_CLOSED),
+            _ => (BadgeState::Queued, c::CHANGES_OPEN),
         };
+        let state = StatusBadge::new(state_kind, state_text);
         let checks_ok = ch.checks_total > 0 && ch.checks_passed == ch.checks_total;
         let mut section = self
             .section(CHANGES, c::TOPIC_RAIL_CHANGES, cx)
@@ -415,38 +383,30 @@ impl TopicRail {
                     .n_figures()
                     .text_color(k.secondary)
                     .child(format!("#{}", ch.number))
-                    .child(
-                        div()
-                            .text_color(k.green)
-                            .child(format!("+{}", ch.additions)),
-                    )
-                    .child(div().text_color(k.red).child(format!("−{}", ch.deletions)))
+                    .child(format!("+{}", ch.additions))
+                    .child(format!("−{}", ch.deletions))
                     .child(div().flex_1())
                     .child(fill(c::INSPECTOR_FILES, &[("n", &ch.files.to_string())])),
             );
         if ch.checks_total > 0 {
-            section = section.row(
-                div().pt(space::S6).child(label_value(
-                    c::INSPECTOR_CHECKS,
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .child(if checks_ok {
-                            mark(Sym::Done, k.green)
-                        } else {
-                            mark(Sym::Problem, k.red)
-                        })
-                        .child(fill(
-                            c::INSPECTOR_CHECKS_VALUE,
-                            &[
-                                ("passed", &ch.checks_passed.to_string()),
-                                ("total", &ch.checks_total.to_string()),
-                            ],
-                        )),
-                    cx,
-                )),
-            );
+            section = section.row(div().pt(space::S6).child(label_value(
+                c::INSPECTOR_CHECKS,
+                StatusBadge::new(
+                    if checks_ok {
+                        BadgeState::Done
+                    } else {
+                        BadgeState::Failed
+                    },
+                    fill(
+                        c::INSPECTOR_CHECKS_VALUE,
+                        &[
+                            ("passed", &ch.checks_passed.to_string()),
+                            ("total", &ch.checks_total.to_string()),
+                        ],
+                    ),
+                ),
+                cx,
+            )));
         }
         section = section.row(label_value(c::INSPECTOR_STATE, state, cx));
         Some(section.into_any_element())
@@ -478,7 +438,9 @@ impl TopicRail {
                     .h(px(80.))
                     .pt(space::S8)
                     .px(space::S12)
-                    .rounded(px(8.))
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(k.separator)
                     .bg(k.fill)
                     .overflow_hidden()
                     .child(preview_thumbnail(&preview, cx))
@@ -643,21 +605,18 @@ impl TopicRail {
                                 .min_h(px(18.))
                                 .child(div().min_w_0().flex_shrink(1.).one_line().child(name))
                                 .child(div().flex_1())
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::S4)
-                                        .n_subheadline()
-                                        .text_color(k.secondary)
-                                        .child(dot(if busy { k.blue } else { k.tertiary }))
-                                        .child(if busy {
-                                            c::MACHINE_BUSY
-                                        } else {
-                                            c::MACHINE_IDLE
-                                        }),
-                                ),
+                                .child(div().flex_none().child(StatusBadge::new(
+                                    if busy {
+                                        BadgeState::Working
+                                    } else {
+                                        BadgeState::Offline
+                                    },
+                                    if busy {
+                                        c::MACHINE_BUSY
+                                    } else {
+                                        c::MACHINE_IDLE
+                                    },
+                                ))),
                         )
                         .child(detail(line, cx)),
                 ),
@@ -670,10 +629,26 @@ impl TopicRail {
         if cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }
-        let (n, unit) = duration_parts(cost.duration_ms);
+        // One time source (T2-19): while a member works, 用时 is its run's
+        // time, the number its working card shows.
+        let active = d
+            .run
+            .as_ref()
+            .filter(|r| r.status.is_active())
+            .and_then(|r| r.started_at);
+        let used = match active {
+            Some(at) => crate::views::timeline::plan::span_text(
+                crate::views::timeline::plan::TOOK,
+                crate::selftest::clock::now_ms() - at,
+            ),
+            None => crate::views::timeline::plan::span_text(
+                crate::views::timeline::plan::TOOK,
+                cost.duration_ms as i64,
+            ),
+        };
         let mut section = self.section(COST, c::TOPIC_RAIL_COST, cx).row(label_value(
             c::INSPECTOR_TIME,
-            format!("{n} {unit}"),
+            used,
             cx,
         ));
         if let Some(cents) = cost.cost_cents {
@@ -694,11 +669,10 @@ impl TopicRail {
 /// day, or `10-31 22:10 – 11-01 01:05` across days (never `今天 11-01–11-01`).
 fn when_range(a: crate::data::Millis, b: crate::data::Millis) -> String {
     use chrono::{Local, TimeZone as _};
-    let (Some(start), Some(end)) = (
-        Local.timestamp_millis_opt(a).single(),
-        Local.timestamp_millis_opt(b).single(),
-    ) else {
-        return String::new();
+    let local =
+        |at| crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single());
+    let (Some(start), Some(end)) = (local(a), local(b)) else {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
     };
     let today = crate::selftest::clock::local_now().date_naive();
     let times = format!("{}–{}", start.format("%H:%M"), end.format("%H:%M"));

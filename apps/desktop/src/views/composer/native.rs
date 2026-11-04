@@ -284,6 +284,34 @@ impl ComposerView {
             window,
             cx,
         );
+        // The composer hint (12 muted, §2.17): offline, messages wait for
+        // the connection (§2.15); else who reads it next. It sits in the
+        // tool row, so the frame stays 16 above the window bottom.
+        let offline = !matches!(
+            self.services.provider.connection(),
+            crate::data::ConnectionState::Online
+        );
+        let hint = if editing {
+            None
+        } else if offline {
+            Some(cc::QUEUED_WHEN_ONLINE.to_string())
+        } else if group {
+            self.services
+                .provider
+                .side_chat_default_member()
+                .map(|id| crate::views::shell::member_name(&self.services, &id))
+                .filter(|n| !n.is_empty())
+                .map(|name| {
+                    fill(
+                        crate::copy::group_page::GROUP_PAGE_COMPOSER_HINT,
+                        &[("name", &name)],
+                    )
+                })
+        } else {
+            self.working
+                .as_ref()
+                .map(|name| fill(c::COMPOSER_NEXT_STEP, &[("name", name)]))
+        };
         let add = self.native_add(enabled && !editing, window, cx);
         // §2.17: one frame, radius 10, a 1 px border, shadow xs, p 8: the
         // text, then a row with the ghost tools at the left and Send at the
@@ -334,30 +362,18 @@ impl ComposerView {
                     .gap(space::S4)
                     .child(add)
                     .children(mention)
-                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .pl(space::S4)
+                            .n_footnote()
+                            .text_color(k.secondary)
+                            .one_line()
+                            .children(hint),
+                    )
                     .child(send),
             );
-
-        // The composer hint (Footnote, NATIVE.md §3): who reads it next.
-        let hint = if editing {
-            None
-        } else if group {
-            self.services
-                .provider
-                .side_chat_default_member()
-                .map(|id| crate::views::shell::member_name(&self.services, &id))
-                .filter(|n| !n.is_empty())
-                .map(|name| {
-                    fill(
-                        crate::copy::group_page::GROUP_PAGE_COMPOSER_HINT,
-                        &[("name", &name)],
-                    )
-                })
-        } else {
-            self.working
-                .as_ref()
-                .map(|name| fill(c::COMPOSER_NEXT_STEP, &[("name", name)]))
-        };
 
         let anchor = self.anchor.clone();
         div()
@@ -381,14 +397,6 @@ impl ComposerView {
                     )
                     .children(self.render_mentions(window, cx)),
             )
-            .children(hint.map(|h| {
-                div()
-                    .pt(space::S4)
-                    .n_footnote()
-                    .text_color(k.secondary)
-                    .one_line()
-                    .child(h)
-            }))
             .into_any_element()
     }
 }

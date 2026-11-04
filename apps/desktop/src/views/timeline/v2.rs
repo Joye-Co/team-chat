@@ -51,8 +51,9 @@ pub const SIDE: Pixels = crate::ui::native::tokens::space::S24;
 /// text column, gutter + 32 + 12 (x 332).
 pub const LEADING: Pixels = crate::ui::native::tokens::space::S24;
 // --- end v12/fx-topic ---
-/// The widest message text and card (NATIVE.md §9.2).
-pub const TEXT_MAX: Pixels = px(680.);
+/// The one in-thread width (§2.4, §2.17, F19): message bodies, cards,
+/// attachments, plan cards and embeds are min(640, text column).
+pub const TEXT_MAX: Pixels = crate::ui::native::tokens::layout::IN_THREAD;
 
 /// The date divider label: `11 月 3 日 周一`.
 pub fn date_label(at: crate::data::Millis) -> String {
@@ -78,20 +79,38 @@ pub fn date_label(at: crate::data::Millis) -> String {
     )
 }
 
-/// The day separator (NATIVE.md §9.2): centered `secondary` Subheadline
-/// text, no rules.
+/// The day separator (§2.17, F57): a 1 px border rule from the gutter
+/// (x 288) to the column's end, with the label 12 medium muted centered on
+/// the background (px 8). 24 above, 16 below.
 pub fn date_divider(at: crate::data::Millis, first: bool, cx: &App) -> AnyElement {
+    rule_divider(date_label(at), first, cx)
+}
+
+/// The one divider recipe of a thread (§2.17): the date and `新消息` both
+/// draw it, so the thread has one divider look.
+pub fn rule_divider(label: impl Into<SharedString>, first: bool, cx: &App) -> AnyElement {
     let k = native_colors(cx);
+    let rule = || div().flex_1().h(px(1.)).bg(k.separator);
     div()
-        .when(!first, |el| el.mt(space::S16))
-        .mb(space::S4)
-        .h(px(18.))
+        .w_full()
+        // The row wrapper insets by 16 each side; the 8 here (the rows'
+        // ROW_INSET) puts the rule's start on the gutter, x 288.
+        .px(space::S8)
+        .when(!first, |el| el.mt(space::S24))
+        .mb(space::S16)
         .flex()
         .items_center()
-        .justify_center()
-        .n_subheadline()
-        .text_color(k.secondary)
-        .child(date_label(at))
+        .child(rule())
+        .child(
+            div()
+                .flex_none()
+                .px(space::S8)
+                .n_section()
+                .n_figures()
+                .text_color(k.secondary)
+                .child(label.into()),
+        )
+        .child(rule())
         .into_any_element()
 }
 
@@ -182,14 +201,37 @@ impl TimelineView {
         at: crate::data::Millis,
         cx: &App,
     ) -> AnyElement {
+        self.v2_meta_with(author, at, false, cx)
+    }
+
+    /// The author line (§2.17, §2.21): name 14 medium, role 12 muted, time
+    /// 12 muted on one line. The role truncates first, then the name; the
+    /// time keeps its own slot. `muted` draws the name of a deleted message
+    /// in muted, regular weight (§2.7 tombstone).
+    pub(super) fn v2_meta_with(
+        &self,
+        author: Option<&Member>,
+        at: crate::data::Millis,
+        muted: bool,
+        cx: &App,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let role = author
             .and_then(|a| a.role.clone())
             .filter(|r| !r.trim().is_empty());
         let time = model::clock(at);
-        let run = match role {
-            Some(role) => fill(c::ROLE_TIME, &[("role", role.trim()), ("time", &time)]),
-            None => time,
+        let name = ui::truncating(
+            "sender-name",
+            author.map(|m| m.name.clone()).unwrap_or_default(),
+        )
+        .flex_shrink(1.)
+        .min_w(px(24.))
+        .n_headline()
+        .text_color(if muted { k.secondary } else { k.label });
+        let name = if muted {
+            name.font_weight(gpui::FontWeight::NORMAL)
+        } else {
+            name
         };
         div()
             .h(px(18.))
@@ -197,25 +239,22 @@ impl TimelineView {
             .flex()
             .items_baseline()
             .gap(space::S6)
-            .child(
-                ui::truncating(
-                    "sender-name",
-                    author.map(|m| m.name.clone()).unwrap_or_default(),
-                )
-                .flex_shrink(1.)
-                .max_w(px(200.))
-                .n_headline()
-                .text_color(k.label),
-            )
+            .child(name)
+            .children(role.map(|role| {
+                crate::ui::truncate::TruncText::new(role.trim().to_string())
+                    .id("sender-role")
+                    .flex_shrink(1000.)
+                    .min_w(px(0.))
+                    .n_subheadline()
+                    .text_color(k.secondary)
+            }))
             .child(
                 div()
-                    .flex_shrink(1.)
-                    .min_w(px(40.))
-                    .one_line()
+                    .flex_none()
                     .n_subheadline()
                     .n_figures()
                     .text_color(k.secondary)
-                    .child(run),
+                    .child(time),
             )
             .into_any_element()
     }
@@ -446,8 +485,8 @@ impl TimelineView {
                 } => Some(
                     fact(small(Sym::Branch, n.secondary))
                         .child(format!("#{number}"))
-                        .child(div().text_color(n.green).child(format!("+{additions}")))
-                        .child(div().text_color(n.red).child(format!("−{deletions}")))
+                        .child(format!("+{additions}"))
+                        .child(format!("−{deletions}"))
                         .into_any_element(),
                 ),
                 Proof::Tests { passed, failed } => Some(
@@ -601,23 +640,23 @@ impl TimelineView {
             .w_full()
             .text_color(n.label)
         });
-        // The state of the result: `checkmark.circle.fill` in `green` and
-        // its word, before the title (no chip).
-        let state = div()
-            .flex()
-            .items_center()
-            .gap(space::S4)
-            .n_callout()
-            .text_color(n.secondary)
-            .child(small(Sym::Done, n.green))
-            .child(c::DONE_MARK);
+        // §2.4 card header slot: the StatusBadge before the title.
+        let state = div().flex().child(crate::ui::native::StatusBadge::new(
+            crate::ui::native::BadgeState::Done,
+            c::DONE_MARK,
+        ));
+        // §2.4 compact in-thread card: the one width, radius 14, a 1 px
+        // border, the card fill, shadow-sm, p 16.
         let card = div()
             .w_full()
             .max_w(TEXT_MAX)
-            .rounded(px(12.))
-            .bg(n.fill)
+            .rounded(crate::ui::native::tokens::radius::CARD)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.sheet)
+            .shadow(crate::ui::native::tokens::shadow::sm())
             .overflow_hidden()
-            .p(px(14.))
+            .p(space::S16)
             .flex()
             .flex_col()
             .child(state)
@@ -759,12 +798,16 @@ impl TimelineView {
                         .id(ElementId::Name(
                             format!("v2-file-{}-{i}", message.id).into(),
                         ))
-                        .w(px(300.))
-                        .max_w_full()
+                        // §2.4: every attachment item has the one in-thread
+                        // width and a 1 px border.
+                        .w_full()
+                        .max_w(TEXT_MAX)
                         .p(space::S6)
                         .pr(space::S12)
-                        .rounded(px(10.))
-                        .bg(n.fill)
+                        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+                        .border_1()
+                        .border_color(n.separator)
+                        .bg(n.content)
                         .flex()
                         .items_center()
                         .gap(space::S10)

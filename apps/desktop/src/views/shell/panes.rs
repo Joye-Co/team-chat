@@ -1,15 +1,15 @@
 //! The right pane of the shell: one entity per pane kind, the width each
-//! one takes, and the container that slides a pane in (opacity + 12 pt from
-//! the right, 200 ms) and floats it over the page in a narrow window.
+//! one takes, and the container that shows a pane (no entrance motion) and
+//! floats it over the page in a narrow window.
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement,
-    Pixels, Styled, Subscription, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement, Pixels, Styled,
+    Subscription, Window, div,
 };
 
 use crate::{
     app::{Changes, RightPane, Services},
-    ui::{self, native::metrics},
+    ui::native::metrics,
     views::{
         artifact_page::pane::ArtifactPane,
         live::LivePane,
@@ -120,11 +120,10 @@ impl Panes {
         } else {
             div().size_full().child(view)
         };
-        let body = ui::motion::pane_enter(
-            ElementId::Name(format!("pane-enter-{kind}").into()),
-            body,
-            cx,
-        );
+        // review-animations 2: a pane toggled from the keyboard (⌘⌥I, ⌘;)
+        // or the toolbar appears at once; a slide that replays on every
+        // toggle reads as lag.
+        let _ = kind;
         let column = super::chrome::inspector_frame(width, cx).child(body).child(
             div()
                 .absolute()
@@ -147,15 +146,16 @@ impl Panes {
     }
 }
 
-/// The one width of a pane kind (coordinator decision): 280 for the
-/// inspector panes, 400 for the wide panes.
+/// The one width of a pane kind (D13, owner decision): 320 for the
+/// inspector, 改动 and 单独问; 400 for 实时查看 and the 产出 pane, which
+/// show a screen or a page.
 pub fn pane_width(pane: &RightPane) -> Pixels {
     match pane {
         RightPane::None => gpui::px(0.),
-        RightPane::TopicRail | RightPane::Changes => metrics::INSPECTOR_WIDTH,
-        RightPane::SideChat(_) | RightPane::Live(_) | RightPane::Artifact { .. } => {
-            metrics::WIDE_PANE_WIDTH
+        RightPane::TopicRail | RightPane::Changes | RightPane::SideChat(_) => {
+            metrics::INSPECTOR_WIDTH
         }
+        RightPane::Live(_) | RightPane::Artifact { .. } => metrics::WIDE_PANE_WIDTH,
     }
 }
 
@@ -220,6 +220,11 @@ mod tests {
         // D13: the inspector is 320 wide.
         assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(320.));
         assert_eq!(pane_width(&RightPane::Changes), gpui::px(320.));
+        assert_eq!(
+            pane_width(&RightPane::SideChat("m-ledger".into())),
+            gpui::px(320.)
+        );
+        assert_eq!(pane_width(&RightPane::Live("r-1".into())), gpui::px(400.));
         assert_eq!(pane_width(&RightPane::None), gpui::px(0.));
         assert!(header_less(&RightPane::TopicRail));
     }

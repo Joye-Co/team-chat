@@ -61,6 +61,12 @@ pub(super) enum Item {
         count: usize,
         folded: bool,
     },
+    /// B: a folded bucket as one dimmed row (`做完了 · 今天 · 2`) that
+    /// opens it.
+    BucketTail {
+        bucket: Bucket,
+        count: usize,
+    },
     Topic(Box<TopicItem>),
     /// C: a member and its state.
     MemberHead {
@@ -107,6 +113,9 @@ pub(super) struct TopicItem {
     pub tile: Option<Member>,
     /// C: the first-paint rise of a member's 话题 (its place in the stagger).
     pub rise: Option<usize>,
+    /// The one state of the 话题 (`topic_page::topic_state`): its short
+    /// words go to the right column.
+    pub line: crate::views::topic_page::StateLine,
 }
 
 /// What the lists depend on besides the provider.
@@ -175,6 +184,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
             for t in topics {
                 let (state, meta) = model::row_state(p, me, &t);
                 section.push(Item::topic(TopicItem {
+                    line: crate::views::topic_page::topic_state(p, me, &t),
                     key: "topic".into(),
                     selected: is_open(open, &g.id, &t.id),
                     tile: tile(p, &state),
@@ -220,6 +230,15 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
             continue;
         }
         let folded = i.folded_buckets.contains(&bucket);
+        // §2.1: a folded section is one dimmed "More" row with its count
+        // (`做完了 · 今天 · 2`), never a label with no rows under it.
+        if folded {
+            out.push(vec![Item::BucketTail {
+                bucket,
+                count: topics.len(),
+            }]);
+            continue;
+        }
         let mut section = vec![Item::BucketHeader {
             bucket,
             count: topics.len(),
@@ -239,6 +258,7 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
                         });
                 }
                 section.push(Item::topic(TopicItem {
+                    line: crate::views::topic_page::topic_state(p, me, &t),
                     key: "bucket".into(),
                     selected: is_open(i.open.as_ref(), &t.group_id, &t.id),
                     tile: tile(p, &state),
@@ -288,6 +308,11 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
                     .enumerate()
                     .map(|(ix, mt)| {
                         Item::topic(TopicItem {
+                            line: crate::views::topic_page::topic_state(
+                                p,
+                                i.me.as_deref(),
+                                &mt.topic,
+                            ),
                             key: format!("member-{}", r.member.id),
                             topic: mt.topic.clone(),
                             state: mt.state.clone(),
@@ -474,6 +499,27 @@ impl RailView {
                     },
                     None,
                 )
+            }
+            Item::BucketTail { bucket, count } => {
+                let bucket = *bucket;
+                let this = cx.entity().downgrade();
+                self.row(
+                    SharedString::from(format!("rail-bucket-tail-{bucket:?}")),
+                    crate::copy::fill(
+                        c::RAIL_TAIL,
+                        &[("word", bucket.label()), ("n", &count.to_string())],
+                    ),
+                )
+                .symbol(crate::ui::sf_symbols::Sf::More)
+                .disclosure(false)
+                .dim(true)
+                .on_click(move |_, _, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        this.folded_buckets.remove(&bucket);
+                        cx.notify();
+                    });
+                })
+                .into_any_element()
             }
             Item::Topic(t) => self.topic_row(t, cx),
             Item::MemberHead { row, expanded } => self.member_head(row, *expanded, cx),

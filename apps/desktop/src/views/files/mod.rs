@@ -24,8 +24,8 @@ pub const PREVIEW_MAX_W: Pixels = px(360.);
 pub const PREVIEW_MAX_H: Pixels = px(320.);
 /// Smallest preview side, so a thin image stays clickable.
 pub const PREVIEW_MIN: Pixels = px(48.);
-/// Width of a file row in the timeline: the one measure (§4.4).
-pub const FILE_ROW_W: Pixels = px(620.);
+/// Width of a file row in the timeline: the one in-thread width (§2.4).
+pub const FILE_ROW_W: Pixels = crate::views::timeline::v2::TEXT_MAX;
 /// Height of a file row: 12 + two lines + 12 + the 4 pt bar room (fixed, so progress does not
 /// change the row height).
 pub const FILE_ROW_H: Pixels = px(52.);
