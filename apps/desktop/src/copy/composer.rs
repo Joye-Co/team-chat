@@ -32,6 +32,7 @@ crate::copy! {
     NEW_TOPIC_TITLE = "新话题：{title}",
     NEW_TOPIC_NO_TITLE = "新话题：第一行会作为标题",
     MENTION_EMPTY = "没有匹配的成员",
+    QUEUED_WHEN_ONLINE = "消息会在连上后发出",
     REMOVE = "移除",
     PASTED_IMAGE = "粘贴的图片 {n}",
     DROP_HERE = "松开即可添加到消息",

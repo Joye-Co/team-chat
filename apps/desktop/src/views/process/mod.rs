@@ -20,7 +20,7 @@ use gpui_component::ActiveTheme as _;
 
 use crate::{
     app::{Changes, Services},
-    copy::{dev, fill, overlays as o, process as p},
+    copy::{fill, overlays as o, process as p},
     data::{
         AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess,
         RunStatus, TopicId,
@@ -28,9 +28,11 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{
         self, Sym,
-        native::{PushSize, PushStyle, StatusKind, disabled_push, native_colors, push_button},
+        native::{
+            PushSize, PushStyle, StatusKind, disabled_push, label_value, native_colors, push_button,
+        },
     },
-    views::time_text,
+    views::shell::{clock, clock_range},
 };
 
 /// How often an active run's log is fetched while the view shows it.
@@ -49,19 +51,14 @@ pub fn status_text(status: RunStatus) -> &'static str {
     }
 }
 
-/// "42 秒", "3 分 5 秒", "1 小时 2 分".
+/// "42 秒", "3 分钟", "1 小时 2 分钟": the one duration format of the
+/// run log, the live pane and the inspector.
 pub fn duration_text(ms: u64) -> String {
     let secs = ms / 1000;
     if secs < 60 {
         fill(p::DURATION_SECONDS, &[("n", &secs.to_string())])
     } else if secs < 3600 {
-        fill(
-            p::DURATION_MINUTES,
-            &[
-                ("m", &(secs / 60).to_string()),
-                ("s", &(secs % 60).to_string()),
-            ],
-        )
+        fill(p::DURATION_MINUTES, &[("m", &(secs / 60).to_string())])
     } else {
         fill(
             p::DURATION_HOURS,
@@ -401,7 +398,8 @@ impl ProcessView {
         let bot = self.member(&run.bot_id).cloned();
         let selected = self.selected.as_deref() == Some(run.id.as_str());
         let id = run.id.clone();
-        let when = time_text(run.started_at.unwrap_or(run.created_at));
+        // The one date format of the pane (`10:21`, `11-01`), as the facts.
+        let when = clock(run.started_at.unwrap_or(run.created_at));
         ui::list_row(
             gpui::ElementId::Name(format!("run-{}", run.id).into()),
             ui::RowSurface::Content,
@@ -450,91 +448,75 @@ impl ProcessView {
     ) -> impl IntoElement {
         let colors = theme::colors(cx);
         let now = crate::selftest::clock::utc_now().timestamp_millis();
-        let mut facts: Vec<String> = Vec::new();
+        // The facts as DescriptionList rows (§2.5): one label column, one
+        // value per row, so a fact never wraps onto a `·` of its own.
+        let value = |text: String| div().min_w_0().one_line().tnum().child(text);
+        let ends_with_summary = self.process.steps.iter().any(|s| {
+            matches!(
+                s,
+                crate::data::ProcessStep::Done {
+                    summary: Some(_),
+                    ..
+                }
+            )
+        });
+        let mut facts: Vec<AnyElement> = Vec::new();
         if let Some(name) = run.machine_name.clone().or_else(|| run.machine_id.clone()) {
-            facts.push(fill(p::RUN_ON, &[("name", &name)]));
+            facts.push(label_value(p::FACT_MACHINE, value(name), cx).into_any_element());
         }
         if let Some(by) = run.requested_by.as_deref().and_then(|id| self.member(id)) {
-            facts.push(fill(p::REQUESTED_BY, &[("name", &by.name)]));
+            facts.push(
+                label_value(p::FACT_REQUESTED_BY, value(by.name.clone()), cx).into_any_element(),
+            );
         }
         if let Some(at) = run.started_at {
-            facts.push(fill(p::STARTED_AT, &[("time", &time_text(at))]));
-        }
-        if let Some(at) = run.ended_at {
-            facts.push(fill(p::ENDED_AT, &[("time", &time_text(at))]));
+            // One line for the span (`11-01 10:22–10:28`), the start alone
+            // while it runs.
+            let (label, text) = match run.ended_at {
+                Some(end) => (p::FACT_TIME, clock_range(at, end)),
+                None => (p::FACT_STARTED, clock(at)),
+            };
+            facts.push(label_value(label, value(text), cx).into_any_element());
         }
         if let Some(ms) = run_duration(run, now) {
-            facts.push(fill(p::DURATION, &[("d", &duration_text(ms))]));
+            facts.push(
+                label_value(p::FACT_DURATION, value(duration_text(ms)), cx).into_any_element(),
+            );
         }
-        let live = run.status.is_active() && self.visible;
-        // The facts split by `·`; each fact keeps its words on one line, so
-        // a wrap moves a whole fact (never `58 分` alone). The summary in
-        // `body`.
-        let last = facts.len().saturating_sub(1);
-        let facts = facts.into_iter().enumerate().map(|(i, f)| {
-            div().flex_none().whitespace_nowrap().child(if i < last {
-                format!("{f} ·")
-            } else {
-                f
-            })
-        });
         div()
             .pt(space::S8)
             .flex()
             .flex_col()
             .gap(space::S6)
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_x(space::S4)
-                    .t_small()
-                    .tnum()
-                    .text_color(colors.text_2)
-                    .children(facts),
+            .child(div().flex().flex_col().children(facts))
+            // The end step below repeats the summary once the log has it.
+            .when_some(
+                run.summary.clone().filter(|_| !ends_with_summary),
+                |el, summary| el.child(div().t_body().text_color(colors.text_1).child(summary)),
             )
-            .when(live, |el| {
-                el.child(div().flex().child(ui::native::status_badge(
-                    StatusKind::Working,
-                    p::LIVE,
-                    cx,
-                )))
-            })
-            .when_some(run.summary.clone(), |el, summary| {
-                el.child(div().t_body().text_color(colors.text_1).child(summary))
-            })
             .when(developer, |el| {
-                let opt =
-                    |t: Option<Millis>| t.map(|t| t.to_string()).unwrap_or_else(|| "-".into());
-                let mut lines = vec![
-                    fill(dev::RUN_ID, &[("id", &run.id)]),
-                    fill(dev::RUN_BOT, &[("id", &run.bot_id)]),
-                    fill(
-                        dev::RUN_MACHINE,
-                        &[("id", run.machine_id.as_deref().unwrap_or("-"))],
+                let time = |t: Option<Millis>| match t.and_then(crate::views::shell::known) {
+                    Some(t) => clock(t),
+                    None => p::DEV_NONE.to_string(),
+                };
+                let mut rows: Vec<(&'static str, String)> = vec![
+                    (p::DEV_RUN_ID, run.id.clone()),
+                    (p::DEV_MEMBER_ID, run.bot_id.clone()),
+                    (
+                        p::DEV_MACHINE_ID,
+                        run.machine_id.clone().unwrap_or_else(|| p::DEV_NONE.into()),
                     ),
-                    fill(dev::RUN_STATUS, &[("status", run.status.wire_name())]),
-                    fill(
-                        dev::RUN_TIMES,
-                        &[
-                            ("created", &run.created_at.to_string()),
-                            ("started", &opt(run.started_at)),
-                            ("ended", &opt(run.ended_at)),
-                            ("updated", &run.updated_at.to_string()),
-                        ],
-                    ),
-                    fill(
-                        dev::RUN_LAST_SEQ,
-                        &[("seq", &self.process.last_seq.to_string())],
-                    ),
+                    (p::DEV_STATUS, status_text(run.status).to_string()),
+                    (p::DEV_CREATED, time(Some(run.created_at))),
+                    (p::DEV_STARTED, time(run.started_at)),
+                    (p::DEV_ENDED, time(run.ended_at)),
+                    (p::DEV_UPDATED, time(Some(run.updated_at))),
+                    (p::DEV_LOG_SEQ, self.process.last_seq.to_string()),
                 ];
                 if let Some((id, runtime)) = self.process.session.clone() {
-                    lines.push(fill(
-                        dev::RUN_SESSION,
-                        &[("id", &id), ("runtime", &runtime)],
-                    ));
+                    rows.push((p::DEV_RECORD, format!("{id} ({runtime})")));
                 }
-                el.child(developer_panel(lines, cx))
+                el.child(developer_panel(rows, cx))
             })
     }
 
@@ -543,14 +525,14 @@ impl ProcessView {
         let mono = cx.theme().mono_font_family.clone();
         let download_line = match &self.download {
             Download::Idle => None,
-            Download::Running => Some(dev::RUN_DOWNLOADING.to_string()),
+            Download::Running => Some(p::DEV_DOWNLOADING.to_string()),
             Download::Saved(path) => Some(fill(
-                dev::RUN_DOWNLOADED,
+                p::DEV_DOWNLOADED,
                 &[("path", &path.display().to_string())],
             )),
             Download::Failed(e) => Some(fill(
-                dev::RUN_DOWNLOAD_FAILED,
-                &[("error", &format!("{e:?}"))],
+                p::DEV_DOWNLOAD_FAILED,
+                &[("error", load_error_text(*e))],
             )),
         };
         let raw: Vec<_> = self
@@ -565,8 +547,12 @@ impl ProcessView {
                 if text.len() < e.json.len() {
                     text.push('…');
                 }
+                // One line per event, cut with `…` at the frame: raw JSON
+                // has no break points and would run past the pane.
                 div()
                     .py(space::S2)
+                    .min_w_0()
+                    .one_line()
                     .border_b(theme::HAIRLINE)
                     .border_color(colors.sep)
                     .child(format!("#{} {}", e.seq, text))
@@ -582,7 +568,7 @@ impl ProcessView {
                 disabled_push(
                     push_button(
                         "download-session",
-                        dev::RUN_DOWNLOAD_SESSION,
+                        p::DEV_DOWNLOAD,
                         PushStyle::Outline,
                         PushSize::Small,
                         cx,
@@ -596,11 +582,12 @@ impl ProcessView {
                 el.child(div().text_color(colors.text_2).child(line))
             })
             .child(div().pt(space::S6).text_color(colors.text_3).child(fill(
-                dev::RUN_RAW,
+                p::DEV_RAW,
                 &[("n", &self.process.raw.len().to_string())],
             )))
             .child(
                 div()
+                    .min_w_0()
                     .font_family(mono)
                     .text_color(colors.text_2)
                     .children(raw),
@@ -608,13 +595,17 @@ impl ProcessView {
     }
 }
 
-/// The developer panel of a run: a framed log panel with a 40 pt header
-/// (its title and a copy button) and the facts in 13 pt monospace, one per
-/// line.
-fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
+/// The developer panel of a run (§2.19): a framed DescriptionList with a
+/// 40 pt header (its title and a 28 copy button); localized labels, values
+/// in 13 pt monospace that truncate at the frame.
+fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
     let colors = theme::colors(cx);
     let n = native_colors(cx);
-    let text = lines.join("\n");
+    let text = rows
+        .iter()
+        .map(|(l, v)| format!("{l}: {v}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     div()
         .mt(space::S4)
         .rounded(theme::radius::FIELD)
@@ -630,19 +621,18 @@ fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
                 .items_center()
                 .border_b_1()
                 .border_color(n.separator)
-                .bg(colors.code_bg)
                 .child(
                     div()
                         .flex_1()
                         .t_meta_medium()
                         .text_color(n.secondary)
-                        .child(dev::RUN_PANEL_TITLE),
+                        .child(p::DEV_TITLE),
                 )
                 .child(
                     ui::native::icon_button_sym(
                         "run-details-copy",
                         Sym::Copy,
-                        dev::RUN_PANEL_COPY,
+                        p::DEV_COPY,
                         ui::native::IconSize::Small,
                         cx,
                     )
@@ -654,10 +644,19 @@ fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
         .child(
             div()
                 .px(space::S12)
-                .py(space::S8)
-                .t_code()
-                .text_color(colors.text_2)
-                .children(lines.into_iter().map(|l| div().child(l))),
+                .py(space::S4)
+                .children(rows.into_iter().map(|(label, v)| {
+                    label_value(
+                        label,
+                        div()
+                            .min_w_0()
+                            .one_line()
+                            .t_code()
+                            .text_color(colors.text_1)
+                            .child(v),
+                        cx,
+                    )
+                })),
         )
         .into_any_element()
 }
@@ -707,14 +706,10 @@ impl Render for ProcessView {
             .px(space::S16)
             .pb(space::S24);
         if self.runs.is_empty() {
+            // A compact Empty (§2.13): icon and one 14 muted line.
             return body
-                .child(
-                    div()
-                        .pt(space::S16)
-                        .t_meta()
-                        .text_color(colors.text_3)
-                        .child(p::EMPTY),
-                )
+                .pt(space::S16)
+                .child(ui::native::EmptyLine::new(p::EMPTY).icon(Sym::Terminal))
                 .into_any_element();
         }
         let rows: Vec<_> = self
@@ -735,18 +730,26 @@ impl Render for ProcessView {
             self.process.steps.is_empty(),
         ) {
             (Some(e), _, _) => Some((load_error_text(*e), true)),
-            (None, false, _) => Some((p::LOADING, false)),
+            // Loading draws skeleton rows below, not a line of text.
+            (None, false, _) => None,
             (None, true, true) => Some((p::NO_STEPS, false)),
             _ => None,
         };
         let titled = self.titled;
+        let loading = self.process.error.is_none() && !self.process.loaded;
         body.when(titled, |el| el.child(section(p::RUNS, cx)))
-            .when(!titled, |el| el.pt(space::S4))
+            .when(!titled, |el| el.pt(space::S16))
             .child(div().mx(-space::S8).flex().flex_col().children(rows))
             .when_some(run, |el, run| {
                 el.child(self.render_run_details(&run, developer, cx))
                     .child(section(p::STEPS, cx))
                     .children(steps)
+                    .when(loading, |el| {
+                        el.child(ui::native::skeleton_rows(
+                            ui::native::SkeletonKind::ListRow,
+                            3,
+                        ))
+                    })
                     .when_some(state_line, |el, (text, retry)| {
                         el.child(
                             div()
@@ -798,8 +801,8 @@ mod tests {
     fn durations_read_naturally() {
         assert_eq!(duration_text(0), "0 秒");
         assert_eq!(duration_text(42_900), "42 秒");
-        assert_eq!(duration_text(185_000), "3 分 5 秒");
-        assert_eq!(duration_text(3_720_000), "1 小时 2 分");
+        assert_eq!(duration_text(185_000), "3 分钟");
+        assert_eq!(duration_text(3_720_000), "1 小时 2 分钟");
     }
 
     #[test]

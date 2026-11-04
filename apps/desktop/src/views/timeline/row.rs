@@ -71,8 +71,12 @@ impl TimelineView {
             .flex_col()
             .when(last, |el| el.pb(space::S8));
         if ix == 0 {
-            // The first message sits 16 pt under the header (§7.5).
-            item = item.pt(if start { space::S16 } else { space::S10 });
+            // §2.17: the thread-start block sits 24 under the header.
+            item = item.pt(if start {
+                if v2 { space::S24 } else { space::S16 }
+            } else {
+                space::S10
+            });
         }
         if v2 {
             // The thread-start block opens a 话题 whose first message is
@@ -98,7 +102,11 @@ impl TimelineView {
             self.divider_painted = true;
         }
         if divider {
-            item = item.child(new_messages_divider(cx));
+            item = item.child(if v2 {
+                super::v2::rule_divider(t::NEW_MESSAGES, false, cx)
+            } else {
+                new_messages_divider(cx).into_any_element()
+            });
         }
         let gap = if grouped {
             None
@@ -239,10 +247,15 @@ impl TimelineView {
         // when it can, on its own line only after a code block or a table.
         let mut mark_inline = false;
         let body: Option<AnyElement> = if deleted {
+            // §2.7: the tombstone is a 16 trash icon and 14 muted text.
             Some(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
                     .t_body()
                     .text_color(colors.text_3)
+                    .child(ui::icon(Sym::Delete, theme::icon::ROW, colors.text_3))
                     .child(t::DELETED)
                     .into_any_element(),
             )
@@ -317,7 +330,14 @@ impl TimelineView {
                 refs_body.as_ref(),
             );
             mark_inline = inline;
-            Some(view.w_full().text_color(colors.text_1).into_any_element())
+            // F15 dir auto: a body whose first strong letter is right to
+            // left (Arabic, Hebrew) aligns to the right.
+            let view = view.w_full().text_color(colors.text_1);
+            Some(if crate::markdown::starts_rtl(&message.body) {
+                view.text_right().into_any_element()
+            } else {
+                view.into_any_element()
+            })
         };
         // Sending (§7.5, §12): after 400 ms the body dims to 60 % with a
         // 14 pt spinner after it, for at least 500 ms. A normal ack is
@@ -364,9 +384,15 @@ impl TimelineView {
                 .into_any_element()
         });
 
+        // §2.15: a failed message: the destructive icon 16 and 没有发出 12,
+        // then ghost sm 重试 (rotate-ccw) and a ghost sm ⋯ with the row's
+        // menu (删除, 复制).
         let failed = (message.send_state == SendState::Failed).then(|| {
+            use gpui_component::menu::DropdownMenu as _;
+            let (menu_message, view) = (message.clone(), cx.entity().downgrade());
+            let (can_edit, can_delete) = (self.can_edit(message), self.can_delete(message));
             div()
-                .h(px(22.))
+                .pt(space::S4)
                 .flex()
                 .items_center()
                 .gap(space::S8)
@@ -374,10 +400,10 @@ impl TimelineView {
                     div()
                         .flex()
                         .items_center()
-                        .gap(space::S4)
+                        .gap(space::S6)
                         .t_meta()
                         .text_color(colors.danger_text)
-                        .child(ui::icon(Sym::Alert, theme::icon::CHIP, colors.danger_text))
+                        .child(ui::icon(Sym::Failed, theme::icon::ROW, colors.danger_text))
                         .child(t::FAILED),
                 )
                 .child(
@@ -388,10 +414,30 @@ impl TimelineView {
                         ui::native::PushSize::Small,
                         cx,
                     )
+                    .icon(ui::icon(Sym::Retry, theme::icon::ROW, colors.ink))
                     .on_click(cx.listener({
                         let message = message.clone();
                         move |this, _, _, _| this.retry(&message)
                     })),
+                )
+                .child(
+                    ui::native::icon_button_bare(
+                        ElementId::Name(format!("failed-more-{key}").into()),
+                        Sym::More,
+                        ui::native::IconSize::Small,
+                    )
+                    .named(t::MORE)
+                    .dropdown_menu(move |menu, window, cx| {
+                        super::menu::build(
+                            menu,
+                            view.clone(),
+                            &menu_message,
+                            can_edit,
+                            can_delete,
+                            window,
+                            cx,
+                        )
+                    }),
                 )
                 .into_any_element()
         });
@@ -400,7 +446,7 @@ impl TimelineView {
             div()
                 .flex()
                 .flex_col()
-                .child(self.v2_meta(author.as_ref(), message.created_at, cx))
+                .child(self.v2_meta_with(author.as_ref(), message.created_at, deleted, cx))
                 .child(div().h(space::S2))
                 .into_any_element()
         });
@@ -517,6 +563,11 @@ impl TimelineView {
             .rounded(theme::radius::MD)
             .flex()
             .gap(space::S12)
+            // §2.6, T2-29: the hovered row gets the muted band at 50 %, so the
+            // hover toolbar belongs to a row.
+            .when(v2 && hovered && !deleted, |el| {
+                el.bg(crate::ui::native::native_colors(cx).fill.opacity(0.5))
+            })
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {
                 let band = crate::ui::native::native_colors(cx).fill;
@@ -835,7 +886,7 @@ impl TimelineView {
             .groups()
             .into_iter()
             .find(|g| g.id == topic.group_id);
-        let who = match group {
+        let who = match &group {
             Some(g) if g.dm_peer.is_none() && !g.name.is_empty() => fill(
                 t::STARTED_IN,
                 &[
@@ -856,22 +907,35 @@ impl TimelineView {
             )
         });
         let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
+        // A DM opens with the peer's avatar 40, a 群 话题 with the 40 icon
+        // box (§2.17, T2-15).
+        let peer = group
+            .as_ref()
+            .and_then(|g| g.dm_peer.as_deref())
+            .and_then(|id| self.members.iter().find(|m| m.id == id).cloned());
+        let media: AnyElement = match &peer {
+            Some(m) => ui::MemberAvatar::new(Some(m), crate::ui::native::tokens::avatar::LG)
+                .into_any_element(),
+            None => div()
+                .size(crate::ui::native::tokens::avatar::LG)
+                .rounded(theme::radius::FIELD)
+                .border_1()
+                .border_color(n.separator)
+                .bg(n.fill)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary))
+                .into_any_element(),
+        };
+        let actions = self.start_actions(topic, peer.is_none(), cx);
         div()
             .mx(ROW_INSET)
             .pb(space::S8)
             .flex()
             .flex_col()
             .gap(space::S12)
-            .child(
-                div()
-                    .size(crate::ui::native::tokens::avatar::LG)
-                    .rounded(theme::radius::FIELD)
-                    .bg(n.fill)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary)),
-            )
+            .child(media)
             .child(
                 div()
                     .flex()
@@ -898,6 +962,97 @@ impl TimelineView {
                             ),
                     ),
             )
+            .child(actions)
+            .into_any_element()
+    }
+
+    /// The suggested actions of the thread-start block (§2.17, owner
+    /// decision v14): one row of outline sm buttons, so a short thread
+    /// that stays top-anchored opens with what to do next instead of a
+    /// blank column. 交代给成员 puts `@` in the composer; 添加成员… opens the
+    /// 群's add-members sheet (not in a DM); 话题信息 opens the inspector.
+    fn start_actions(&self, topic: &Topic, in_group: bool, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::native::{PushSize, PushStyle, push_button};
+        let assign = push_button(
+            "start-assign",
+            t::START_ASSIGN,
+            PushStyle::Outline,
+            PushSize::Small,
+            cx,
+        )
+        .icon(ui::sym(
+            Sym::Mention,
+            ui::SymSize::INLINE,
+            theme::colors(cx).ink,
+        ))
+        .on_click(|_, window, cx| {
+            window.dispatch_action(Box::new(crate::app::MentionInComposer), cx)
+        });
+        let add = in_group.then(|| {
+            let services = self.services.clone();
+            let group_id = topic.group_id.clone();
+            push_button(
+                "start-add-members",
+                t::START_ADD_MEMBERS,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Invite,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(move |_, window, cx| {
+                let name = services
+                    .provider
+                    .groups()
+                    .into_iter()
+                    .find(|g| g.id == group_id)
+                    .map(|g| g.name)
+                    .unwrap_or_default();
+                crate::views::nav::dialogs::open_add_members(
+                    services.clone(),
+                    group_id.clone(),
+                    name,
+                    window,
+                    cx,
+                )
+            })
+        });
+        // A5: no 话题信息 while the inspector already shows.
+        let rail_open = matches!(
+            self.services.nav.read(cx).visible_pane(),
+            crate::app::RightPane::TopicRail
+        );
+        let nav = self.services.nav.clone();
+        let info = (!rail_open).then(|| {
+            push_button(
+                "start-topic-info",
+                t::START_TOPIC_INFO,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Inspector,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(move |_, _, cx| {
+                nav.update(cx, |nav, cx| {
+                    nav.set_right_pane(crate::app::RightPane::TopicRail, cx)
+                })
+            })
+        });
+        div()
+            .pt(space::S4)
+            .flex()
+            .flex_wrap()
+            .gap(space::S8)
+            .child(assign)
+            .children(add)
+            .children(info)
             .into_any_element()
     }
 

@@ -3,6 +3,10 @@
 
 crate::copy! {
     TOPIC_RAIL_OWNER = "负责",
+    TOPIC_RAIL_PEOPLE = "成员",
+    INSPECTOR_OWNER = "负责",
+    MARK_DONE = "标记完成",
+    HAND_TO = "交给…",
     TOPIC_RAIL_PLAN = "计划",
     TOPIC_RAIL_CHANGES = "改动",
     TOPIC_RAIL_OUTPUTS = "产出",
@@ -40,8 +44,13 @@ crate::copy! {
     OUTPUT_VERSION = "v{v} · {time}",
     DECISION_LINE = "{text} · {name} {time}",
     // The 话题 page title bar.
-    STATE_REVIEW = "需要你审 PR #{n}",
+    STATE_REVIEW = "等你审 PR #{n}",
     STATE_MERGING = "{name} 正在合并",
+    STATE_MERGING_SHORT = "合并中",
+    STATE_STOPPING = "{name} 停止中",
+    STATE_YOU_SHORT = "等你",
+    STATE_WORKING_SHORT = "在做",
+    STATE_PAUSED_SHORT = "已暂停",
     // The timeline.
     DATE_FULL = "{m} 月 {d} 日 {w}",
     WEEKDAY_1 = "周一",
@@ -54,6 +63,7 @@ crate::copy! {
     ROUTED = "{from} 转给了 {to}",
     PICKED = "选了「{text}」",
     SEE_QUESTION = "看问题",
+    SEE_QUESTION_SHORT = "查看",
     DONE_MARK = "做完了",
     TESTS_PASSED = "测试 {n} 项通过",
     TESTS_FAILED = "测试 {failed} 项没通过",

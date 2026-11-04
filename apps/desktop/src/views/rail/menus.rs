@@ -70,7 +70,15 @@ pub(super) fn group(menu: PopupMenu, services: &Services, group_id: &str) -> Pop
     )
     .separator()
     .item(
-        PopupMenuItem::new(nav::LEAVE_GROUP).on_click(move |_, window, cx| {
+        // T4-14: a destructive item reads in the destructive color (the
+        // Mac menu's red item), and it still asks first.
+        PopupMenuItem::element(|_: &mut gpui::Window, cx: &mut gpui::App| {
+            use gpui::{ParentElement as _, Styled as _};
+            gpui::div()
+                .text_color(crate::ui::native::native_colors(cx).red)
+                .child(nav::LEAVE_GROUP)
+        })
+        .on_click(move |_, window, cx| {
             nav_views::dialogs::confirm_leave(
                 leave.clone(),
                 g3.id.clone(),

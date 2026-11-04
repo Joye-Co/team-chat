@@ -12,14 +12,10 @@ use gpui::{
 
 use gpui_component::menu::ContextMenuExt as _;
 
-use super::{RailView, model::RowState, modes::TopicItem};
-use crate::{
-    data::Member,
-    ui::{
-        MemberAvatar, Ring,
-        native::{SidebarRow, SidebarSection},
-        sf_symbols::Sf,
-    },
+use super::{RailView, modes::TopicItem};
+use crate::ui::native::{
+    BadgeState, SidebarRow, SidebarSection,
+    sidebar::{RightColumn, SidebarMedia},
 };
 
 /// A row's click handler.
@@ -58,40 +54,17 @@ impl RailView {
         }
     }
 
-    /// The leading slot of a 话题 row: the amber needs-you symbol, the
-    /// working member's avatar, or nothing.
-    fn slot(
-        &self,
-        row: SidebarRow,
-        state: &RowState,
-        tile: Option<&Member>,
-        style: SlotStyle,
-        cx: &App,
-    ) -> SidebarRow {
-        let k = crate::views::shell::chrome::colors(cx);
-        match state {
-            RowState::NeedsYou => row.state_symbol(Sf::Alert, k.amber),
-            RowState::Working(_) if style == SlotStyle::Tile => row.leading(
-                MemberAvatar::new(tile, ROW_AVATAR)
-                    .ring(Some(Ring::Live))
-                    .on(k.sidebar),
-            ),
-            _ => row,
-        }
-    }
-
-    /// A 话题 row: slot, title (Semibold while unread), and the unread count
-    /// or a time (`09:12`, `3/5`).
+    /// A 话题 row (§2.1, §2.12): the title (Semibold while unread) and one
+    /// right-column item. No state media: inside a group every 话题 row has
+    /// the same empty media slot, and the state goes to the right column as
+    /// a StatusBadge (`等你`, `失败`, `3/5`) or the unread count pill.
     pub(super) fn topic_row(&self, item: &TopicItem, cx: &App) -> AnyElement {
         let TopicItem {
             key,
             topic,
-            state,
-            meta,
+            line,
             selected,
-            style,
             indent,
-            tile,
             ..
         } = item;
         let nav = self.services.nav.clone();
@@ -105,15 +78,20 @@ impl RailView {
             )
             .selected(*selected)
             .unread(unread);
-        row = self.slot(row, state, tile.as_ref(), *style, cx);
-        row = if unread {
-            row.count(topic.unread as u32)
-        } else {
-            match meta.as_ref().filter(|m| m.mono) {
-                Some(m) => row.trailing(m.text.clone()),
-                None => row,
-            }
-        };
+        let badge = || RightColumn::Status(line.badge, line.short.clone().into());
+        let urgent = matches!(line.badge, BadgeState::NeedsYou | BadgeState::Failed);
+        row = row
+            .media_kind(SidebarMedia::None)
+            .right(if urgent && !line.short.is_empty() {
+                badge()
+            } else if unread {
+                RightColumn::Count(topic.unread as u32)
+            } else if !line.short.is_empty() {
+                badge()
+            } else {
+                RightColumn::None
+            });
+        let _ = cx;
         let row = row.on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());
             nav.update(cx, |nav, cx| nav.open_topic(g, t, cx))

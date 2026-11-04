@@ -34,6 +34,7 @@ use gpui_component::{
 
 use crate::ui::NamedButton as _;
 use crate::ui::native::NativeType as _;
+use crate::ui::native::tokens::metrics;
 use crate::{
     app::{Changes, Services},
     copy::{composer as c, fill},
@@ -230,7 +231,12 @@ impl ComposerView {
         let key = self.key.as_ref()?;
         let topic = key.topic_id.as_deref()?;
         let runs = self.services.provider.runs(&key.group_id, topic);
-        let run = crate::views::topic_page::working_run(&runs)?;
+        let owner = self
+            .services
+            .provider
+            .topic(&key.group_id, topic)
+            .and_then(|t| t.owner_id);
+        let run = crate::views::topic_page::lead_run(&runs, owner.as_deref())?;
         Some(crate::views::shell::member_name(
             &self.services,
             &run.bot_id,
@@ -514,6 +520,10 @@ impl ComposerView {
     }
 
     fn on_changes(&mut self, changes: &Changes, cx: &mut Context<Self>) {
+        // §2.15: the queued-message line follows the connection.
+        if changes.any(|ch| matches!(ch, Change::Connection)) {
+            cx.notify();
+        }
         let Some(key) = self.key.clone() else {
             return;
         };
@@ -597,10 +607,8 @@ impl ComposerView {
             me.as_deref(),
             &query.text,
         );
-        if results.is_empty() {
-            self.mention = None;
-            return;
-        }
+        // §2.11: with no match the list stays open with a compact Empty
+        // (没有匹配的成员) instead of vanishing under the caret.
         let selected = match &self.mention {
             Some(old) if old.query.start == query.start => {
                 old.selected.min(results.len().saturating_sub(1))
@@ -659,6 +667,12 @@ impl ComposerView {
         }
         cx.stop_propagation();
         if let Some(popup) = &self.mention {
+            if popup.results.is_empty() {
+                // Nothing to pick: Enter closes the empty list.
+                self.mention = None;
+                cx.notify();
+                return;
+            }
             let index = popup.selected;
             self.pick_mention(index, window, cx);
             return;
@@ -670,7 +684,9 @@ impl ComposerView {
         if self.composing(window, cx) {
             return;
         }
-        if let Some(popup) = &self.mention {
+        if let Some(popup) = &self.mention
+            && !popup.results.is_empty()
+        {
             let index = popup.selected;
             cx.stop_propagation();
             self.pick_mention(index, window, cx);
@@ -681,7 +697,9 @@ impl ComposerView {
         if self.composing(window, cx) {
             return;
         }
-        if let Some(popup) = &mut self.mention {
+        if let Some(popup) = &mut self.mention
+            && !popup.results.is_empty()
+        {
             let n = popup.results.len();
             popup.selected = (popup.selected + n - 1) % n;
             cx.stop_propagation();
@@ -697,7 +715,9 @@ impl ComposerView {
         if self.composing(window, cx) {
             return;
         }
-        if let Some(popup) = &mut self.mention {
+        if let Some(popup) = &mut self.mention
+            && !popup.results.is_empty()
+        {
             popup.selected = (popup.selected + 1) % popup.results.len();
             cx.stop_propagation();
             cx.notify();
@@ -1109,8 +1129,8 @@ impl ComposerView {
             )
     }
 
-    /// Left edge of the @ list inside the composer: 12 pt left of the `@`
-    /// being typed (§7.2), kept inside the composer.
+    /// Left edge of the @ list inside the composer: 8 left of the `@`
+    /// being typed (§2.11: caret x − 8), kept inside the composer.
     fn mention_left(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui::Pixels {
         let anchor = self.anchor.get();
         let Some(popup) = &self.mention else {
@@ -1133,7 +1153,7 @@ impl ComposerView {
             .text_system()
             .shape_line(typed, theme::type_scale::BODY.0, &[run], None)
             .width;
-        let at = caret.origin.x - width - anchor.origin.x - space::S12;
+        let at = caret.origin.x - width - anchor.origin.x - space::S8;
         let max = (anchor.size.width - theme::size::MENTION_POPUP_WIDTH).max(px(0.));
         at.max(px(0.)).min(max)
     }
@@ -1144,51 +1164,66 @@ impl ComposerView {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let popup = self.mention.as_ref()?;
-        // The member pop-up (NATIVE.md §7.3): the native menu surface, a
-        // Section header, 28 pt rows with a 20 pt avatar, the name in Body
-        // and the 岗位 in `secondary`; the chosen row is an inset `accent`
-        // fill with `onAccent` text.
+        // The mention popup (§2.11): the kit menu surface (radius 8, p 4,
+        // border, shadow md), w 320, a GroupLabel, 32 rows (px 8, radius 6,
+        // avatar 16, gap 8, name 14 foreground, 岗位 14 muted that cuts
+        // first), at most 8 rows before it scrolls. The chosen row is the
+        // muted fill with foreground text (D10), never inverted.
         let k = ui::native::native_colors(cx);
         let left = self.mention_left(window, cx);
         let rows = popup.results.iter().enumerate().map(|(i, m)| {
             let active = i == popup.selected;
-            let (name_ink, role_ink) = if active {
-                (k.on_accent, k.on_accent.opacity(0.75))
-            } else {
-                (k.label, k.secondary)
-            };
             div()
                 .id(ElementId::Name(SharedString::from(format!(
                     "mention-{}",
                     m.id
                 ))))
                 .flex_none()
-                .h(crate::ui::native::tokens::height::SM)
-                .px(px(6.))
-                .rounded(crate::ui::native::tokens::radius::ITEM)
+                .h(metrics::MENU_ROW)
+                .px(metrics::MENU_ROW_PAD)
+                .rounded(metrics::MENU_ROW_RADIUS)
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .when(active, |el| el.bg(k.accent))
-                .child(ui::MemberAvatar::new(Some(m), px(20.)))
+                .when(active, |el| el.bg(k.fill_hover))
+                .hover(|el| el.bg(k.fill_hover))
+                .child(ui::MemberAvatar::new(
+                    Some(m),
+                    ui::native::tokens::avatar::XS,
+                ))
                 .child(
                     div()
-                        .flex_none()
+                        .flex_shrink(1.)
+                        .min_w(px(0.))
                         .n_body()
-                        .text_color(name_ink)
+                        .text_color(k.label)
+                        .one_line()
                         .child(m.name.clone()),
                 )
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .n_subheadline()
-                        .text_color(role_ink)
+                        .n_body()
+                        .text_color(k.secondary)
                         .one_line()
                         .children(m.role.clone()),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(i, window, cx)))
         });
+        let empty = popup.results.is_empty().then(|| {
+            div()
+                .h(metrics::MENU_ROW)
+                .px(metrics::MENU_ROW_PAD)
+                .flex()
+                .items_center()
+                .child(ui::native::EmptyLine::new(c::MENTION_EMPTY).icon(Sym::Search))
+        });
+        // The GroupLabel, 8 rows and the surface padding and border.
+        let max_h = ui::native::tokens::height::MENU_LABEL
+            + metrics::MENU_ROW * model::MAX_MENTION_RESULTS as f32
+            + metrics::MENU_PAD * 2.
+            + px(2.);
         Some(
             ui::native::menu_surface(cx)
                 .id("mention-popup")
@@ -1197,20 +1232,14 @@ impl ComposerView {
                 .bottom(relative(1.))
                 .mb(space::S8)
                 .w(theme::size::MENTION_POPUP_WIDTH)
-                .max_h(px(260.))
+                .max_h(max_h)
                 .overflow_y_scroll()
-                .child(
-                    div()
-                        .flex_none()
-                        .h(px(22.))
-                        .px(px(6.))
-                        .flex()
-                        .items_center()
-                        .n_section()
-                        .text_color(k.secondary)
-                        .child(crate::copy::nav::SECTION_MEMBERS),
-                )
-                .children(rows),
+                .child(ui::native::menu_label(
+                    crate::copy::nav::SECTION_MEMBERS,
+                    cx,
+                ))
+                .children(rows)
+                .children(empty),
         )
     }
 

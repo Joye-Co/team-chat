@@ -663,10 +663,7 @@ impl TimelineView {
                 .line_height(px(20.))
                 .text_color(colors.text_3)
                 .child(
-                    div()
-                        .min_w(px(0.))
-                        .one_line()
-                        .child(SharedString::from(text)),
+                    crate::ui::truncate::TruncText::new(SharedString::from(text)).id("typing-line"),
                 ),
         )
     }

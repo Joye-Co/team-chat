@@ -2,12 +2,13 @@
 //! open 话题. It reads the 话题 up to now; answers stay private; a suggestion
 //! posts into the 话题 only when pressed.
 //!
-//! Layout (400 pt, `sidebar` fill, NATIVE.md §9.2–§9.3): a 52 pt header
-//! (单独问, the member pop-up button, a borderless close), the privacy line,
-//! the aside anchored to the bottom (a centered context line, my questions
-//! as bubbles at the right, answers under the transcript's sender line,
-//! numbered points with their references as symbol + text runs, the
-//! suggestion as a push button), and the transcript's composer field.
+//! Layout (COMPLETENESS.md §2.5, 320 wide, `background` fill): a 52 header
+//! (`单独问` + the member select h28 over the 12 muted `只有你能看到`, a 32
+//! close), the aside anchored at the top (a centered context line, then the
+//! same message rows as the thread for my questions and the answers, with
+//! numbered points and their references, and the suggestion as an outline
+//! sm button), and the composer docked at the bottom. With no messages the
+//! body is an Empty state with three suggested questions.
 
 pub mod scenes;
 
@@ -35,22 +36,31 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            NativeType as _, PushSize, PushStyle, borderless_button, native_colors, popup_button,
-            push_button,
+            Empty, NativeType as _, PushSize, PushStyle, borderless_button, metrics, native_colors,
+            popup_button, push_button, tokens::avatar,
         },
         sf_symbols::Sf,
     },
     views::shell::{PaneView, clock, panes::watch},
 };
 
-/// Width of my question bubbles.
-const BUBBLE_MAX: Pixels = px(280.);
 /// The number column of a point in an answer (`1.`).
 const POINT_NUMBER: Pixels = px(16.);
 /// A reference under a point: 20 pt.
 const REF_HEIGHT: Pixels = px(20.);
-/// The longest suggestion a button shows whole.
-const SUGGEST_MAX_CHARS: usize = 20;
+/// The longest suggestion a button shows whole: an outline sm button fits
+/// the 244 text column of the 320 pane.
+const SUGGEST_MAX_CHARS: usize = 15;
+/// The longest member name the composer placeholder shows whole.
+const PLACEHOLDER_NAME_MAX: usize = 16;
+/// The member select in the header (§2.11: max 200, the name truncates).
+const SELECT_MAX: Pixels = px(200.);
+/// The suggested questions of an empty aside (§2.5).
+const STARTERS: [&str; 3] = [
+    c::SIDE_CHAT_ASK_PROGRESS,
+    c::SIDE_CHAT_ASK_RISK,
+    c::SIDE_CHAT_ASK_NEXT,
+];
 
 pub struct SideChat {
     services: Services,
@@ -114,6 +124,17 @@ impl SideChat {
         }
     }
 
+    /// Sends one of the suggested questions of the empty aside.
+    fn ask(&mut self, question: &str, cx: &mut Context<Self>) {
+        let Some((g, t, m)) = self.target(cx) else {
+            return;
+        };
+        self.services
+            .provider
+            .send_side_chat(&g, &t, &m, question.to_string(), Vec::new());
+        self.scroll.scroll_to_bottom();
+    }
+
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let body = self.input.read(cx).value().trim().to_string();
         let Some((g, t, m)) = self.target(cx) else {
@@ -163,8 +184,9 @@ impl SideChat {
             .max()
     }
 
-    /// The 52 pt header (NATIVE.md §9.3): 单独问 in Headline, the member as
-    /// a pop-up button, and a borderless `xmark` close at the trailing edge.
+    /// The h52 header (§2.2, §2.5): `单独问` and the member select h28 (max
+    /// 200, the name truncates, the full name in its tooltip) over the 12
+    /// muted `只有你能看到`, and the 32 ghost close at the far right.
     fn header(
         &self,
         member: Option<&Member>,
@@ -179,10 +201,12 @@ impl SideChat {
         let picker = popup_button(
             "side-chat-member",
             name.clone(),
-            PushSize::Regular,
+            PushSize::Small,
             window,
             cx,
         )
+        .min_w_0()
+        .max_w(SELECT_MAX)
         .named(fill(c::SIDE_CHAT_CHANGE_MEMBER, &[("name", &name)]))
         .dropdown_menu(move |mut menu, _window, _cx| {
             for m in &bots {
@@ -207,21 +231,41 @@ impl SideChat {
         let services = self.services.clone();
         div()
             .flex_none()
-            // The 52 pt toolbar row: Title 3 like the window's toolbar title.
-            .h(crate::ui::native::metrics::TOOLBAR_ROW)
-            .pl(space::S16)
-            .pr(space::S10)
+            .h(metrics::TOOLBAR_ROW)
+            .pl(metrics::INSPECTOR_PAD)
+            .pr(metrics::TOOLBAR_TRAILING)
             .flex()
             .items_center()
             .gap(space::S8)
             .child(
                 div()
-                    .n_title3()
-                    .text_color(k.label)
-                    .child(c::SIDE_CHAT_TITLE),
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(space::S6)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .n_title3()
+                                    .text_color(k.label)
+                                    .child(c::SIDE_CHAT_TITLE),
+                            )
+                            .child(picker),
+                    )
+                    .child(
+                        div()
+                            .one_line()
+                            .n_footnote()
+                            .text_color(k.secondary)
+                            .child(c::SIDE_CHAT_PRIVATE),
+                    ),
             )
-            .child(picker)
-            .child(div().flex_1())
             .child(
                 borderless_button("side-chat-close", Sf::Close, c::SIDE_CHAT_CLOSE, window, cx)
                     .on_click(move |_, _, cx| {
@@ -232,20 +276,47 @@ impl SideChat {
             )
     }
 
-    /// The privacy line: `lock` and `secondary` Subheadline text, no box.
-    fn note(&self, cx: &App) -> impl IntoElement {
-        let k = native_colors(cx);
-        div()
-            .flex_none()
-            .px(space::S16)
-            .h(px(20.))
-            .flex()
-            .items_center()
-            .gap(space::S6)
-            .n_subheadline()
-            .text_color(k.secondary)
-            .child(ui::sym(Sym::Lock, ui::SymSize::INLINE_SMALL, k.secondary))
-            .child(c::SIDE_CHAT_PRIVATE)
+    /// The Empty state of an aside with no messages (§2.5, §2.13): the
+    /// 40 icon box, what the member reads, and three suggested questions as
+    /// outline sm buttons, centered in the body.
+    fn empty(&self, name: &str, read_upto: Option<Millis>, cx: &mut Context<Self>) -> AnyElement {
+        let line = match read_upto {
+            Some(at) => fill(
+                c::SIDE_CHAT_EMPTY_LINE,
+                &[("name", name), ("time", &clock(at))],
+            ),
+            None => fill(c::SIDE_CHAT_EMPTY_LINE_NO_TIME, &[("name", name)]),
+        };
+        // Two sentences on two lines, so neither breaks mid-phrase.
+        let line = format!("{line}\n{}", c::SIDE_CHAT_EMPTY_PRIVATE);
+        let starters: Vec<_> = STARTERS
+            .iter()
+            .enumerate()
+            .map(|(i, q)| {
+                push_button(
+                    SharedString::from(format!("side-chat-starter-{i}")),
+                    *q,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.ask(q, cx)))
+            })
+            .collect();
+        Empty::new(
+            Sym::AskAside,
+            fill(c::SIDE_CHAT_EMPTY_TITLE, &[("name", name)]),
+        )
+        .description(line)
+        .action(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(space::S8)
+                .children(starters),
+        )
+        .into_any_element()
     }
 
     /// `Jojo 读过话题里 10:20 之前的内容`: centered `secondary` Subheadline,
@@ -254,47 +325,111 @@ impl SideChat {
         let k = native_colors(cx);
         let text = fill(template, &[("name", name)]);
         let text = text.replace("{time}", &clock(at));
-        ui::motion::rise(
-            "side-chat-context",
-            0,
-            div()
-                .flex()
-                .justify_center()
-                .n_subheadline()
-                .n_figures()
-                .text_color(k.secondary)
-                .child(text),
-            cx,
-        )
+        div()
+            .flex()
+            .justify_center()
+            .text_center()
+            .n_subheadline()
+            .n_figures()
+            .text_color(k.secondary)
+            .child(text)
+            .into_any_element()
     }
 
-    fn question(&self, msg: &SideChatMessage, ix: usize, cx: &App) -> AnyElement {
-        let n = native_colors(cx);
-        ui::motion::rise(
-            SharedString::from(format!("side-chat-q-{}", msg.id)),
-            ix,
-            div().flex().flex_col().items_end().child(
+    /// One message row as the thread draws it (§2.17): avatar 32, then at
+    /// the text column the sender line (name 14 medium, which keeps its
+    /// room; the role, which truncates first; the time 12 muted in its own
+    /// slot) over the body. My questions and the answers share it: no
+    /// bubbles.
+    fn row(
+        &self,
+        id: SharedString,
+        author: Option<&Member>,
+        at: Millis,
+        body: Vec<AnyElement>,
+        cx: &App,
+    ) -> AnyElement {
+        let k = native_colors(cx);
+        let role = author
+            .and_then(|m| m.role.clone())
+            .filter(|r| !r.trim().is_empty());
+        let head = div()
+            .h(px(20.))
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(space::S6)
+            .child(
+                ui::truncating(
+                    SharedString::from(format!("{id}-name")),
+                    author.map(|m| m.name.clone()).unwrap_or_default(),
+                )
+                .flex_shrink_0()
+                .max_w(gpui::relative(0.7))
+                .n_headline()
+                .text_color(k.label),
+            )
+            .children(role.map(|role| {
+                ui::truncating(
+                    SharedString::from(format!("{id}-role")),
+                    role.trim().to_string(),
+                )
+                .flex_shrink(1.)
+                .n_subheadline()
+                .text_color(k.secondary)
+            }))
+            .child(
                 div()
-                    .max_w(BUBBLE_MAX)
-                    .px(space::S12)
-                    .py(px(7.))
-                    .rounded(px(18.))
-                    .bg(n.fill_hover)
-                    .n_message()
-                    .text_color(n.label)
-                    // inc-refs: the quote lines of the chips the question carried.
-                    .child({
-                        let (labels, rest) = crate::views::refs::split_quote_lines(&msg.body);
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(space::S4)
-                            .when(!labels.is_empty(), |d| {
-                                d.child(crate::views::refs::chips::side_lines(&labels, cx))
-                            })
-                            .when(!rest.is_empty(), |d| d.child(rest.to_string()))
-                    }),
-            ),
+                    .flex_none()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(k.secondary)
+                    .child(clock(at)),
+            );
+        div()
+            .id(id)
+            .flex()
+            .items_start()
+            .gap(space::S12)
+            .child(
+                div()
+                    .flex_none()
+                    .child(ui::MemberAvatar::new(author, avatar::MD)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(head)
+                    .children(body),
+            )
+            .into_any_element()
+    }
+
+    fn question(&self, msg: &SideChatMessage, cx: &App) -> AnyElement {
+        let n = native_colors(cx);
+        let me = self.services.provider.member(&msg.author_id);
+        // inc-refs: the quote lines of the chips the question carried.
+        let (labels, rest) = crate::views::refs::split_quote_lines(&msg.body);
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(space::S4)
+            .n_message()
+            .text_color(n.label)
+            .when(!labels.is_empty(), |d| {
+                d.child(crate::views::refs::chips::side_lines(&labels, cx))
+            })
+            .when(!rest.is_empty(), |d| d.child(rest.to_string()))
+            .into_any_element();
+        self.row(
+            SharedString::from(format!("side-chat-q-{}", msg.id)),
+            me.as_ref(),
+            msg.at,
+            vec![body],
             cx,
         )
     }
@@ -303,43 +438,11 @@ impl SideChat {
         &self,
         target: &(String, String, String),
         msg: &SideChatMessage,
-        ix: usize,
         cx: &App,
     ) -> AnyElement {
         let member = self.services.provider.member(&msg.author_id);
         let id = |part: &str| SharedString::from(format!("side-chat-a-{}-{part}", msg.id));
         let n = native_colors(cx);
-        let time = clock(msg.at);
-        let run = match member.as_ref().and_then(|m| m.role.clone()) {
-            Some(role) if !role.trim().is_empty() => fill(
-                crate::copy::topic_rail::ROLE_TIME,
-                &[("role", role.trim()), ("time", &time)],
-            ),
-            _ => time,
-        };
-        // The sender line of the transcript: Headline name, then 岗位 and
-        // time as one `secondary` run (no tag pill).
-        let head = div()
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .child(ui::MemberAvatar::new(member.as_ref(), px(20.)))
-            .child(
-                div()
-                    .n_headline()
-                    .text_color(n.label)
-                    .child(member.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .one_line()
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(n.secondary)
-                    .child(run),
-            );
-
         let blocks = answer_blocks(&msg.body);
         let points = blocks
             .iter()
@@ -356,33 +459,34 @@ impl SideChat {
                     div()
                         .flex()
                         .flex_col()
-                        .gap(space::S12)
+                        .gap(space::S8)
                         .children(std::mem::take(list))
                         .into_any_element(),
                 );
             }
         };
-        for (i, b) in blocks.iter().enumerate() {
+        for b in &blocks {
             match b {
                 Block::Para(text) => {
                     flush(&mut list, &mut body);
-                    body.push(ui::motion::rise(
-                        id(&format!("p{i}")),
-                        ix + i + 1,
-                        div().n_message().text_color(n.label).child(text.clone()),
-                        cx,
-                    ));
+                    body.push(
+                        div()
+                            .n_message()
+                            .text_color(n.label)
+                            .child(text.clone())
+                            .into_any_element(),
+                    );
                 }
                 Block::Point(nn, text) => {
-                    let chip = refs_per_point
-                        .then(|| ref_chip(&msg.refs[point_ix], cx).into_any_element());
+                    let chip = refs_per_point.then(|| {
+                        ref_chip(id(&format!("ref{point_ix}")), &msg.refs[point_ix], cx)
+                            .into_any_element()
+                    });
                     point_ix += 1;
-                    list.push(ui::motion::rise(
-                        id(&format!("p{i}")),
-                        ix + i + 1,
+                    list.push(
                         div()
                             .flex()
-                            .gap(space::S10)
+                            .gap(space::S8)
                             .child(
                                 div()
                                     .flex_none()
@@ -404,9 +508,9 @@ impl SideChat {
                                         div().n_message().text_color(n.label).child(text.clone()),
                                     )
                                     .children(chip),
-                            ),
-                        cx,
-                    ));
+                            )
+                            .into_any_element(),
+                    );
                 }
             }
         }
@@ -417,7 +521,12 @@ impl SideChat {
                     .flex()
                     .flex_wrap()
                     .gap(space::S6)
-                    .children(msg.refs.iter().map(|r| ref_chip(r, cx)))
+                    .children(
+                        msg.refs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, r)| ref_chip(id(&format!("ref{i}")), r, cx)),
+                    )
                     .into_any_element(),
             );
         }
@@ -457,18 +566,16 @@ impl SideChat {
             .suggestion
             .as_ref()
             .map(|s| self.suggestion(target, msg, s, cx));
-        ui::motion::rise(
-            id("head"),
-            ix,
+        body.extend(suggestion);
+        let body = vec![
             div()
                 .flex()
                 .flex_col()
-                .gap(space::S10)
-                .child(head)
+                .gap(space::S8)
                 .children(body)
-                .children(suggestion),
-            cx,
-        )
+                .into_any_element(),
+        ];
+        self.row(id("row"), member.as_ref(), msg.at, body, cx)
     }
 
     fn suggestion(
@@ -485,26 +592,21 @@ impl SideChat {
             } else {
                 clock(at)
             };
-            return ui::motion::rise(
-                SharedString::from(format!("side-chat-posted-{}", msg.id)),
-                0,
-                div()
-                    .min_h(px(24.))
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .n_callout()
-                    .text_color(k.secondary)
-                    .child(ui::sym(Sym::Done, ui::SymSize::INLINE_SMALL, k.green))
-                    .child(c::SIDE_CHAT_POSTED)
-                    .child(div().n_figures().text_color(k.tertiary).child(when)),
-                cx,
-            );
+            return div()
+                .min_h(px(24.))
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .n_callout()
+                .text_color(k.secondary)
+                .child(ui::sym(Sym::Done, ui::SymSize::INLINE_SMALL, k.green))
+                .child(c::SIDE_CHAT_POSTED)
+                .child(div().n_figures().text_color(k.secondary).child(when))
+                .into_any_element();
         }
         let (services, (g, t, m), id) = (self.services.clone(), target.clone(), msg.id.clone());
         // A button never wraps: a long suggestion is cut, with the whole text in its tooltip.
-        let long = s.text.chars().count() > SUGGEST_MAX_CHARS;
-        let label = if long {
+        let label = if s.text.chars().count() > SUGGEST_MAX_CHARS {
             let cut: String = s.text.chars().take(SUGGEST_MAX_CHARS - 1).collect();
             format!("{cut}…")
         } else {
@@ -521,17 +623,18 @@ impl SideChat {
                     SharedString::from(format!("side-chat-suggest-{}", msg.id)),
                     label,
                     PushStyle::Outline,
-                    PushSize::Regular,
+                    PushSize::Small,
                     cx,
                 )
-                .when(long, |b| b.tooltip(full))
+                .max_w_full()
+                .tooltip(full)
                 .on_click(move |_, _, _| {
                     services.provider.post_side_chat_suggestion(&g, &t, &m, &id)
                 }),
             )
             .child(
                 div()
-                    .n_subheadline()
+                    .n_footnote()
                     .text_color(k.secondary)
                     .child(c::SIDE_CHAT_SUGGEST_HINT),
             )
@@ -539,7 +642,16 @@ impl SideChat {
     }
 
     fn composer(&self, name: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let placeholder = fill(c::SIDE_CHAT_PLACEHOLDER, &[("name", name)]);
+        // A placeholder cannot truncate itself: a long name is cut (the
+        // placeholder's own `…` ends it) so the line never clips mid-glyph
+        // at the field edge.
+        let short: String = name
+            .chars()
+            .take(PLACEHOLDER_NAME_MAX)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        let placeholder = fill(c::SIDE_CHAT_PLACEHOLDER, &[("name", &short)]);
         self.input.update(cx, |s, cx| {
             s.set_placeholder(placeholder.clone(), window, cx)
         });
@@ -647,7 +759,7 @@ impl SideChat {
 
 impl PaneView for SideChat {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        crate::views::topic_rail::PANE_WIDE
+        metrics::INSPECTOR_WIDTH
     }
 }
 
@@ -716,7 +828,7 @@ fn sources_text(sources: &[SideChatSource]) -> Option<String> {
 
 /// A reference under a point: a symbol and text run in `secondary`, the
 /// leading file name in the code font (NATIVE.md rule 4: no chips).
-fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
+fn ref_chip(id: SharedString, label: &str, cx: &App) -> impl IntoElement {
     let k = native_colors(cx);
     let (first, rest) = label.split_once(' ').unwrap_or((label, ""));
     let file_like = first.contains('.') || first.starts_with('#');
@@ -741,21 +853,21 @@ fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
                 .child(ui::sym(glyph, ui::SymSize::INLINE_SMALL, k.secondary)),
         )
         .when(file_like, |d| {
+            // A path cuts in the middle, so the file name stays (§2.21);
+            // the whole path is in the tooltip.
             d.child(
-                div()
-                    .min_w_0()
-                    .one_line()
+                ui::truncating(id.clone(), first.to_string())
+                    .text_ellipsis_middle()
                     .code_font()
                     .text_size(crate::ui::native::tokens::text::META.0)
-                    .text_color(k.label)
-                    .child(first.to_string()),
+                    .text_color(k.label),
             )
             .when(!rest.is_empty(), |d| {
                 d.child(div().flex_none().child(rest.to_string()))
             })
         })
         .when(!file_like, |d| {
-            d.child(div().min_w_0().one_line().child(label.to_string()))
+            d.child(ui::truncating(id, label.to_string()))
         })
 }
 
@@ -786,62 +898,58 @@ impl Render for SideChat {
             .iter()
             .find(|msg| Some(&msg.author_id) == me.as_ref())
             .map(|msg| msg.at);
-        let context = if thread.messages.is_empty() {
-            self.read_upto(&g, &t, None)
-                .map(|at| self.context_line(c::SIDE_CHAT_WILL_READ, &name, at, cx))
-        } else {
-            self.read_upto(&g, &t, first_question)
-                .map(|at| self.context_line(c::SIDE_CHAT_READ_UPTO, &name, at, cx))
-        };
-        let rows: Vec<AnyElement> = thread
-            .messages
-            .iter()
-            .enumerate()
-            .map(|(i, msg)| {
-                if Some(&msg.author_id) == me.as_ref() {
-                    self.question(msg, i + 1, cx)
-                } else {
-                    self.answer(&target, msg, i + 1, cx)
-                }
-            })
-            .collect();
-        let empty = thread.messages.is_empty().then(|| {
+        // Empty: the Empty state centered in the body (§2.5). Else the
+        // aside reads from the top (short threads stay top-anchored, A1),
+        // and the scroll content ends 24 above the composer (§2.21).
+        let body = if thread.messages.is_empty() {
+            let read = self.read_upto(&g, &t, None);
             div()
-                .n_body()
-                .text_color(native_colors(cx).secondary)
-                .text_center()
-                .child(fill(c::SIDE_CHAT_EMPTY, &[("name", &name)]))
-        });
+                .flex_1()
+                .min_h_0()
+                .child(self.empty(&name, read, cx))
+                .into_any_element()
+        } else {
+            let context = self
+                .read_upto(&g, &t, first_question)
+                .map(|at| self.context_line(c::SIDE_CHAT_READ_UPTO, &name, at, cx));
+            let rows: Vec<AnyElement> = thread
+                .messages
+                .iter()
+                .map(|msg| {
+                    if Some(&msg.author_id) == me.as_ref() {
+                        self.question(msg, cx)
+                    } else {
+                        self.answer(&target, msg, cx)
+                    }
+                })
+                .collect();
+            div()
+                .id("side-chat-thread")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
+                .child(
+                    div()
+                        .pt(space::S16)
+                        .px(metrics::INSPECTOR_PAD)
+                        .pb(space::S24)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S16)
+                        .children(context)
+                        .children(rows),
+                )
+                .into_any_element()
+        };
 
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(native_colors(cx).sidebar)
+            .bg(native_colors(cx).content)
             .child(self.header(member.as_ref(), window, cx))
-            .child(self.note(cx))
-            .child(
-                div()
-                    .id("side-chat-thread")
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .child(
-                        div()
-                            .min_h_full()
-                            .pt(space::S16)
-                            .px(space::S16)
-                            .pb(space::S12)
-                            .flex()
-                            .flex_col()
-                            .justify_end()
-                            .gap(space::S16)
-                            .children(context)
-                            .children(empty)
-                            .children(rows),
-                    ),
-            )
+            .child(body)
             .child(self.composer(&name, window, cx))
             .into_any_element()
     }
