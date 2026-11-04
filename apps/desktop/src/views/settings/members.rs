@@ -334,15 +334,17 @@ impl MembersPage {
             .map(one_line)
             .filter(|r| !r.is_empty())
             .unwrap_or_else(|| s::NO_ROLE.to_string());
-        // Two members with one name: the kind tells them apart.
+        // Two members with one name: the kind tells them apart. The 岗位
+        // goes last, so it is what truncates first (2.21).
         let kind = same_name.then_some(if m.is_bot() {
             s::KIND_AI
         } else {
             s::KIND_HUMAN
         });
-        let detail = std::iter::once(role.as_str())
-            .chain(kind)
+        let detail = kind
+            .into_iter()
             .chain(state)
+            .chain(std::iter::once(role.as_str()))
             .collect::<Vec<_>>()
             .join(" · ");
         let value: gpui::AnyElement = if m.deactivated {
