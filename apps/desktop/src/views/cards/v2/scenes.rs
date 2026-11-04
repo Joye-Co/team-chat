@@ -35,7 +35,7 @@ macro_rules! gallery_scene {
         Scene {
             name: $name,
             about: $about,
-            start: Start::V2,
+            start: Start::V2Gallery,
             setup: |_, _| {},
             open: |s, c, cx| open_gallery(s, c, $section, cx),
         }

@@ -160,7 +160,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-card-option-hover",
         about: "Card v2 13: the pointer on choice row B of the long choice (hover: muted at 50%)",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |_, _| {},
         open: |s, c, cx| {
             crate::views::cards::v2::scenes::open_gallery(
@@ -174,7 +174,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-card-button-hover",
         about: "Card v2 13: the pointer on 重试 of the card that cannot be read (outline sm hover)",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |_, _| {},
         open: |s, c, cx| {
             crate::views::cards::v2::scenes::open_gallery(
@@ -188,7 +188,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-card-tooltip",
         about: "Card v2 13: the pointer on the cut label of option G: the full text in a tooltip (§2.21)",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |_, _| {},
         open: |s, c, cx| {
             crate::views::cards::v2::scenes::open_gallery(
@@ -227,7 +227,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-focus-card-option",
         about: "cards-v2-choice after Tab reaches an option row: the focus ring on the option, apart from the picked one",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |s, cx| (like("cards-v2-choice").setup)(s, cx),
         open: |s, c, cx| (like("cards-v2-choice").open)(s, c, cx),
     },

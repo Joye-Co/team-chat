@@ -17,9 +17,9 @@ use crate::{
         },
     },
     fake::v2::{
-        ALL, ART_REPORT, DEV, FORGE, GROWTH, JOJO, LEDGER, ME, OPS, POCKET, RUN_VIRTUAL, SCOUT,
-        T_INVITE, T_PROMO, T_RECONNECT, T_RELEASE, T_REPORT, T_STAGING, T_V4, T_VIRTUAL, T_WEEKLY,
-        TARO, WATCH, at,
+        ALL, ART_REPORT, DEV, FORGE, GROWTH, JOJO, LEDGER, ME, OPS, POCKET, RUN_RELEASE,
+        RUN_VIRTUAL, SCOUT, T_INVITE, T_PROMO, T_RECONNECT, T_RELEASE, T_REPORT, T_STAGING, T_V4,
+        T_VIRTUAL, T_WEEKLY, TARO, WATCH, at,
     },
 };
 
@@ -463,7 +463,7 @@ fn all() -> Vec<Sample> {
             "v": 2, "rev": 2, "intent": "working", "title": "正在发布 qqbot v2.14",
             "fallback": "正在发布 qqbot v2.14",
             "blocks": [
-                { "type": "plan", "id": "steps", "items": [
+                { "type": "plan", "id": "steps", "runId": RUN_RELEASE, "items": [
                     { "text": "构建镜像", "state": "done" },
                     { "text": "逐个重启各群", "state": "current" },
                     { "text": "盯 15 分钟告警", "state": "pending" }

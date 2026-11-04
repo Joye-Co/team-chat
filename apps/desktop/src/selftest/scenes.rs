@@ -46,6 +46,9 @@ pub enum Start {
     /// (`fake::v2::refs_samples::with_card_parts`).
     V2RefParts,
     // --- end inc-refs ---
+    /// The v2 sample team as the Card v2 gallery shows it: the release I approved
+    /// runs (`fake::v2::V2Samples::with_release_run`).
+    V2Gallery,
     /// The v2 sample team with a second member at work in 开发 / 虚拟列表
     /// (`fake::v2::V2Samples::with_second_run`).
     V2TwoRuns,

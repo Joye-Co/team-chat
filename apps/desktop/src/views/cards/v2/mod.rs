@@ -299,7 +299,8 @@ pub fn render(
     };
     record(&ctx);
     Some(match mode {
-        CardMode::Line => line::overview(&ctx, cx),
+        // A card at work is the one WorkingCard in the overview too (C-04).
+        CardMode::Line => working(&ctx, window, cx).unwrap_or_else(|| line::overview(&ctx, cx)),
         CardMode::Notification => line::notification(&ctx, window, cx),
         _ => full(&ctx, window, cx),
     })
@@ -1438,7 +1439,7 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     let CardState::Executing { answer, progress } = ctx.state else {
         return None;
     };
-    if progress.waiting || !matches!(ctx.mode, CardMode::Topic | CardMode::Desk) {
+    if progress.waiting || !matches!(ctx.mode, CardMode::Topic | CardMode::Desk | CardMode::Line) {
         return None;
     }
     let n = ui::native::native_colors(cx);
@@ -1463,7 +1464,10 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         c::STRIP_WORKING.to_string()
     };
     let bar = (progress.total > 0).then_some((progress.done, progress.done, progress.total));
-    let body = if super::v21::is_21(ctx.card) {
+    // The overview shows the title only; the full card adds its blocks.
+    let body = if ctx.mode == CardMode::Line {
+        Vec::new()
+    } else if super::v21::is_21(ctx.card) {
         super::v21::body(ctx, window, cx)
     } else {
         blocks::body(ctx, window, cx)

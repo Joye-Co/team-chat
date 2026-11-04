@@ -1554,7 +1554,11 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
             if !editable {
                 continue;
             }
-            let multi = text.contains('\n') || text.chars().count() > 40;
+            // A title (the first of several drafts) or a field capped at 40
+            // characters stays one line h28 whatever its text (C-04, E5).
+            let short =
+                (ix == 0 && drafts.len() > 1) || limit(ctx.card, id).is_some_and(|l| l <= 40);
+            let multi = !short && (text.contains('\n') || text.chars().count() > 40);
             let field = ctx
                 .form
                 .update(cx, |f, cx| f.field(id, None, multi, window, cx));
@@ -1694,6 +1698,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(k.ink)
                 .line_clamp(2)
+                .text_ellipsis()
                 .child(t)
         } else {
             div()
@@ -1711,7 +1716,10 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .child(
                     small(div())
                         .text_color(k.ink_2)
+                        // The sixth line ends in "…" on a whole glyph (§2.4 draft
+                        // well), never cut sideways at the well's edge.
                         .line_clamp(DRAFT_LINES)
+                        .text_ellipsis()
                         .child(t),
                 )
         });
