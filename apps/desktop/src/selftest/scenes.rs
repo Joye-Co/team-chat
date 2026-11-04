@@ -821,7 +821,7 @@ fn core_checks(name: &str) -> Option<Checks> {
                 &[crate::provider::seeded::GROUP, "active=2", "on_me=1"],
             )
         },
-        "core-members" => |_, _| one("members-page", &["entries=2", "detail=Forge"]),
+        "core-members" => |_, _| one("members-page", &["entries=3", "detail=Forge"]),
         "core-live" => |_, _| one("live", &["Forge", crate::provider::seeded::RUN_WEEKLY]),
         "core-side-chat" => |_, _| one("side-chat", &["Forge messages=0"]),
         "core-artifact" => |_, _| one("artifact-page", &["重连测试报告 v2"]),
