@@ -17,12 +17,15 @@ use gpui::{
 
 use super::{TimelineView, model, v2::GUTTER};
 use crate::{
-    copy::{fill, live as l, topic_rail as c},
+    copy::{fill, live as l, process as pr, timeline as t, topic_rail as c},
     data::{BotRunSummary, Millis, PlanState},
     theme::{Type as _, space},
     ui::{
         self, Sym,
-        native::{NativeType as _, determinate_bar, native_colors},
+        native::{
+            NativeType as _, PushSize, PushStyle, determinate_bar, disabled_push, native_colors,
+            push_button,
+        },
     },
     views::topic_page::working_runs,
 };
@@ -332,6 +335,28 @@ impl TimelineView {
             })
             .collect();
 
+        // 停止… for the member who asked (Standard Small; the alert makes
+        // the red choice), then 正在停止… disabled until the run ends.
+        let stop = crate::views::process::asked_by(run, self.me.as_deref()).then(|| {
+            let stopping = self.services.provider.run_stopping(&run.id);
+            let run = run.clone();
+            disabled_push(
+                push_button(
+                    ElementId::Name(format!("plan-stop-{}", run.id).into()),
+                    if stopping { pr::STOPPING } else { t::PLAN_STOP },
+                    PushStyle::Standard,
+                    PushSize::Small,
+                    cx,
+                ),
+                stopping,
+                cx,
+            )
+            .ml(space::S6)
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                crate::views::process::stop_run(&this.services, &run, cx);
+                cx.notify();
+            }))
+        });
         let footer = run.started_at.map(|at| {
             div()
                 .h(FOOTER)
@@ -349,6 +374,7 @@ impl TimelineView {
                         .flex_none()
                         .child(fill(c::PLAN_STARTED_AT, &[("time", &model::clock(at))])),
                 )
+                .children(stop)
         });
 
         let card = div()
