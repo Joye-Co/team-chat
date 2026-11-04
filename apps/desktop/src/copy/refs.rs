@@ -8,6 +8,7 @@ crate::copy! {
     ASK_CARD = "就这张卡提问",
     COPY = "复制",
     TOO_MANY = "最多引用 5 处",
+    TOO_MANY_DESC = "先移除一处引用，再加新的。",
     UPDATED = "已更新",
     DELETED = "原消息已删除",
     PUT_IN_TOPIC = "已放进话题的输入框",

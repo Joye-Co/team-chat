@@ -110,5 +110,12 @@ pub const SCENES: &[Scene] = &[
             crate::diagrams::preview::open(s, c, crate::diagrams::preview::Scene::Loading, cx)
         },
     },
+    Scene {
+        name: "refs-too-many",
+        about: "Five reference chips in the composer and a sixth refused: the 最多引用 5 处 Toast bottom-right",
+        start: Start::V2Refs,
+        setup: crate::views::refs::scenes::too_many_setup,
+        open: crate::views::refs::scenes::open_too_many,
+    },
     // --- end t5-media ---
 ];

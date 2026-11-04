@@ -7,7 +7,7 @@ use gpui::{
     App, ClipboardEntry, ClipboardItem, Div, ElementId, Hsla, ImageFormat, IntoElement,
     ParentElement, SharedString, Styled, div, px,
 };
-use gpui_component::{button::Button, notification::Notification};
+use gpui_component::button::Button;
 
 use super::{Screen, state::Target};
 use crate::{
@@ -135,8 +135,12 @@ pub fn screen_tool(
 
 // --- actions ------------------------------------------------------------------------
 
+/// A done action (copied, saved, sent) as the kit Toast (§2.16): a success icon and the
+/// words.
 fn toast(text: &str, cx: &mut App) {
-    crate::views::files::notify(Notification::new().message(text.to_string()), cx);
+    crate::ui::overlay::Toast::new(Sym::Check, text.to_string())
+        .tone(crate::ui::overlay::Tone::Success)
+        .push(cx);
 }
 
 /// Copies an image file to the clipboard.

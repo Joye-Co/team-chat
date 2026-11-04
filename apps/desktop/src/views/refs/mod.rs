@@ -389,11 +389,20 @@ pub fn enabled(cx: &App) -> bool {
     services(cx).is_some_and(|s| s.provider.refs_supported())
 }
 
+/// 最多引用 5 处 as the kit Toast (§2.16): the quote icon, the rule as the title, what to do
+/// as the description; one toast at a time.
+pub fn too_many_toast() -> crate::ui::overlay::Toast {
+    crate::ui::overlay::Toast::new(crate::ui::Sym::Quote, c::TOO_MANY)
+        .description(c::TOO_MANY_DESC)
+        .id("refs-too-many")
+}
+
 fn toast(text: &str, cx: &mut App) {
-    crate::views::files::notify(
-        gpui_component::notification::Notification::new().message(text.to_string()),
-        cx,
-    );
+    if text == c::TOO_MANY {
+        too_many_toast().push(cx);
+    } else {
+        crate::ui::overlay::Toast::new(crate::ui::Sym::Quote, text.to_string()).push(cx);
+    }
 }
 
 /// The draft chip for a target, in the source's 话题.
