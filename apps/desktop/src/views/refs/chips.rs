@@ -133,21 +133,21 @@ pub fn composer_chip(
         .items_center()
         .gap(space::S6)
         .max_w(px(320.))
-        .h(px(26.))
-        .pl(space::S8)
-        .pr(space::S2)
+        // Quiet inline text with a symbol (NATIVE.md rule 4): no chip box;
+        // a flash marks it with the selection fill only.
+        .h(px(22.))
+        .px(space::S4)
         .rounded(radius::SM)
-        .bg(if flashing { k.sel } else { k.sunken })
-        .border_1()
-        .border_color(k.line)
-        .t_meta()
+        .when(flashing, |d| d.bg(k.sel))
+        .text_size(px(13.))
+        .line_height(px(18.))
         .text_color(k.ink_3)
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
         .on_click(move |_, window, cx| on_open(window, cx))
         .child(
             div()
                 .flex_none()
-                .child(ui::icon(glyph(&r.input), theme::icon::TAG, k.ink_3)),
+                .child(ui::icon(glyph(&r.input), px(16.), k.ink_3)),
         )
         .child(
             div()
@@ -171,7 +171,6 @@ pub fn composer_chip(
                         .flex_none()
                         .one_line()
                         .text_color(k.ink)
-                        .medium()
                         .child(part),
                 ),
         )
@@ -180,9 +179,9 @@ pub fn composer_chip(
         })
         .child(
             ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Sym::Close)
-                .with_size(px(22.))
-                .rounded(radius::SM)
-                .icon(ui::button_glyph(Sym::Close, theme::icon::TAG, px(22.)))
+                .with_size(px(18.))
+                .rounded(px(9.))
+                .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
                 .named(c::REMOVE)
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
@@ -419,7 +418,8 @@ pub fn row(chips: Vec<AnyElement>) -> AnyElement {
     div()
         .flex()
         .flex_wrap()
-        .gap(space::S6)
+        .gap_x(space::S12)
+        .gap_y(space::S2)
         .children(chips)
         .into_any_element()
 }

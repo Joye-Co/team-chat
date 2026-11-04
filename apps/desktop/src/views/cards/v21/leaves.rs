@@ -212,71 +212,63 @@ fn option_row(
     dimmed: bool,
     cx: &App,
 ) -> gpui::Stateful<Div> {
-    let k = theme::colors(cx);
-    let tile = if multiple {
-        div()
-            .flex_none()
-            .size(px(16.))
-            .rounded(px(4.))
-            .border_1()
-            .border_color(if picked { k.ink } else { k.line_2 })
-            .when(picked, |el| el.bg(k.ink))
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(picked, |el| {
-                el.child(ui::icon(Sym::Check, px(12.), k.bg))
-            })
-    } else if picked {
-        b20::key_tile(i, cx).bg(k.ink).text_color(k.bg)
+    use crate::ui::native::{self as nk, NativeType as _};
+    let n = nk::native_colors(cx);
+    // A radio button, or a checkbox when several may be chosen (NATIVE.md
+    // §5.4): one 24 pt row, no box around it. The row takes the click.
+    let control = if multiple {
+        nk::NativeCheckbox::new(SharedString::from(format!("{id}-c")), picked).into_any_element()
     } else {
-        b20::key_tile(i, cx)
+        nk::NativeRadio::new(SharedString::from(format!("{id}-c")), picked).into_any_element()
     };
     div()
         .id(id)
         .w_full()
         .flex()
         .items_center()
-        .gap(space::S10)
-        .h(m::OPTION)
-        .pl(space::S8)
-        .pr(space::S12)
-        .rounded(m::OPTION_RADIUS)
-        .bg(if picked { k.sunken } else { k.bg })
-        .border_1()
-        .border_color(if picked { k.ink } else { k.line_2 })
-        .when(!picked, |el| el.shadow(k.sec_hi()))
+        .gap(space::S8)
+        .min_h(px(24.))
         .when(dimmed, |el| el.opacity(0.45))
-        .text_size(px(13.))
-        .line_height(px(20.))
-        .text_color(k.ink)
-        .child(tile)
+        .n_body()
+        .text_color(n.label)
+        .child(control)
+        .child(
+            div()
+                .flex_none()
+                .w(px(12.))
+                .text_color(n.secondary)
+                .child(b20_letter(i)),
+        )
         .child(
             div()
                 .min_w(px(0.))
                 .flex_1()
                 .one_line()
-                .when(picked, |el| el.font_weight(theme::MEDIUM_WEIGHT))
                 .child(label.to_string()),
         )
         .when_some(detail, |el, d| {
             el.child(
-                meta(div())
+                div()
                     .flex_none()
                     .max_w(relative(0.45))
                     .one_line()
-                    .text_color(k.ink_2)
+                    .text_color(n.secondary)
                     .child(d.to_string()),
             )
         })
         .when(recommended, |el| {
             el.child(
-                meta(div())
+                div()
+                    .n_subheadline()
                     .flex_none()
-                    .text_color(k.ink_3)
+                    .text_color(n.secondary)
                     .child(c::RECOMMENDED),
             )
         })
+}
+
+fn b20_letter(i: usize) -> String {
+    letter(i).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +340,6 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
             let (form, block, option) = (ctx.form.clone(), id.clone(), oid.clone());
             let node_ptr = PickTarget::of(node);
             row = row
-                .hover(|s| s.border_color(k.ink_3))
                 .on_click(move |_, _, cx| {
                     form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
                     node_ptr.after(&block, cx);
