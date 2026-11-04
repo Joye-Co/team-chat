@@ -426,6 +426,10 @@ impl MembersPage {
                 cx,
             ));
         }
+        if load == PageLoad::Failed {
+            // The failure takes the whole page (§2.15); only the toolbar row stays.
+            return toolbar.w_full().into_any_element();
+        }
         div()
             .flex_none()
             .w(LIST_WIDTH)
@@ -1766,6 +1770,26 @@ impl Render for MembersPage {
                     .into_any_element()
             }
         };
+        if load == PageLoad::Failed {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(k.content)
+                .child(list)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .px(page::m::EDGE)
+                        .pt(page::m::GUTTER)
+                        .pb(page::m::GUTTER)
+                        .flex()
+                        .flex_col()
+                        .child(rows::failed_region("members", &self.services, cx)),
+                )
+                .into_any_element();
+        }
         div()
             .size_full()
             .flex()
@@ -1788,6 +1812,7 @@ impl Render for MembersPage {
                     .child(list),
             )
             .child(detail)
+            .into_any_element()
     }
 }
 
