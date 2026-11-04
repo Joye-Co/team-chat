@@ -76,9 +76,36 @@ export type RunRow = {
   // desk-5 (1.1 interaction loop)
   /** 1 while the CLI is inside a turn (turn.started without turn.completed). */
   in_turn: number;
+  // desk-6 (1.1 retry)
+  /** The run this one retries (`POST /v1/runs/:id/retry`), or null. */
+  retry_of: string | null;
+  // desk-6-queue (1.1, GAPS SF-3)
+  /** Set while the run waits for a free machine (排队); null otherwise. */
+  queued_at: number | null;
+  // desk-6 (1.1 resume)
+  /** The CLI session the run used (`run.done.sessionId` or the `session` event), or null. */
+  session_id: string | null;
+  /** The runtime the run was assigned to, or null. */
+  runtime: string | null;
+  // desk-7-pause-order (GAPS SB-16)
+  /** run.pause frames the server sent for this run. */
+  pause_gen: number;
+  /** `paused: true` events the daemon reported for this run (at most `pause_gen`). */
+  pause_seen: number;
 };
 
+/** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
+export function sessionIdOf(v: unknown): string | null {
+  return typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v) ? v : null;
+}
+
 export const ACTIVE = "ended_at IS NULL";
+/** Runs waiting for a free machine (排队): created, no machine yet, queued. */
+export const QUEUED = "ended_at IS NULL AND status = 'created' AND machine_id IS NULL AND queued_at IS NOT NULL";
+/** A queued run that gets no machine this long after it was queued fails. */
+export const QUEUE_MAX_MS = 60 * 60_000;
+/** How often the desk tries its queued runs again (machines free up in other desks too). */
+export const QUEUE_RETRY_MS = 15_000;
 /** A run still `created` with no machine this long after it was made failed to start. */
 export const START_STUCK_MS = 2 * 60_000;
 /** Follow-up runs in a row (leftover input after a run ended) before the bot stops chaining. */
@@ -101,7 +128,10 @@ export function sanitizePlan(items: unknown): RunPlan | null {
   const out: RunPlan = [];
   for (const it of items) {
     const parsed = RunPlanItem.safeParse({ ...(it as object), text: typeof it?.text === "string" ? [...it.text.trim()].slice(0, MAX_PLAN_TEXT_CHARS).join("") : it?.text });
-    if (parsed.success) out.push({ text: parsed.data.text, state: parsed.data.state });
+    if (parsed.success) {
+      const { text, state, startedAt, endedAt, estimateMs } = parsed.data;
+      out.push({ text, state, ...(startedAt !== undefined ? { startedAt } : {}), ...(endedAt !== undefined ? { endedAt } : {}), ...(estimateMs !== undefined ? { estimateMs } : {}) });
+    }
     if (out.length === MAX_PLAN_ITEMS) break;
   }
   return out;
@@ -258,6 +288,37 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             CREATE TABLE run_refs_seen (run_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY (run_id, message_id));
           `,
         },
+        {
+          // 1.1 retry: the run a run retries. Old rows read as NULL (not a retry); their request
+          // is read from the room when they are retried (meta `request:{runId}` holds it for new runs).
+          name: "desk-6-retry",
+          up: `ALTER TABLE runs ADD COLUMN retry_of TEXT;`,
+        },
+        {
+          // 1.1 queue (GAPS SF-3): a run whose machines are all busy waits instead of failing.
+          // Old rows read as NULL (not queued).
+          name: "desk-6-queue",
+          up: `ALTER TABLE runs ADD COLUMN queued_at INTEGER;`,
+        },
+        {
+          // 1.1 resume: the CLI session a run used and the runtime it ran on, so the topic's next
+          // run on the same machine continues the session. Old rows read as NULL: no resume.
+          name: "desk-6-resume",
+          up: `
+            ALTER TABLE runs ADD COLUMN session_id TEXT;
+            ALTER TABLE runs ADD COLUMN runtime TEXT;
+          `,
+        },
+        {
+          // GAPS SB-16: pause order. A `paused: false` event clears pausedBy only after the
+          // daemon reported every pause the server sent; a late one from an earlier resume does
+          // not clear a newer pause. Old rows read as 0/0: the event clears as before.
+          name: "desk-7-pause-order",
+          up: `
+            ALTER TABLE runs ADD COLUMN pause_gen INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN pause_seen INTEGER NOT NULL DEFAULT 0;
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -324,7 +385,21 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (acceptance && acceptance.length > 0) run.acceptance = acceptance;
     if (r.paused_by) run.pausedBy = r.paused_by;
     if (r.kind) run.kind = r.kind;
+    if (r.retry_of) run.retryOf = r.retry_of;
+    if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
+      run.queuedAt = r.queued_at;
+      run.queuePosition = this.queuePosition(r);
+    }
     return run;
+  }
+
+  /** 1-based place of a queued run among this bot's queued runs, oldest first. */
+  protected queuePosition(r: Pick<RunRow, "id" | "queued_at">): number {
+    return (
+      this.sql
+        .exec<{ n: number }>(`SELECT count(*) AS n FROM runs WHERE ${QUEUED} AND (queued_at < ? OR (queued_at = ? AND id < ?))`, r.queued_at, r.queued_at, r.id)
+        .one().n + 1
+    );
   }
 
   protected acceptanceOf(r: Pick<RunRow, "acceptance">): AcceptanceItem[] | null {
@@ -480,7 +555,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
-  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[]): Promise<void>;
+  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[], retryOf?: string): Promise<void>;
   /** A RunEvent `output` (`chat-run`, 1.1): performed and answered by the interaction module. */
   protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, f: { at: number; serverAt?: number }): Promise<void>;
 }

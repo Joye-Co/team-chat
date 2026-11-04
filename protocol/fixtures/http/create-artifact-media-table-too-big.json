@@ -1,0 +1,26 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": false,
+  "description": "a table is at most 200 MB",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "报名表",
+    "kind": "file",
+    "entry": "a.csv",
+    "files": [
+      {
+        "path": "a.csv",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "media": {
+      "kind": "table",
+      "mime": "text/csv",
+      "bytes": 200000001,
+      "rows": 124,
+      "cols": 6,
+      "preview": "ready"
+    }
+  }
+}

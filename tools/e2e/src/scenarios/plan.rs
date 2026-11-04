@@ -25,10 +25,7 @@ fn start(c: &mut Ctx) -> Run<'_> {
 }
 
 fn item(text: &str, state: RunPlanState) -> RunPlanItem {
-    RunPlanItem {
-        text: text.into(),
-        state,
-    }
+    RunPlanItem::new(text, state)
 }
 
 const WAIT: Duration = Duration::from_secs(20);

@@ -1,0 +1,23 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "counts are not negative",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "done",
+    "title": "修好了",
+    "fallback": "修好了",
+    "blocks": [
+      {
+        "type": "evidence",
+        "id": "tests",
+        "label": "测试",
+        "tests": {
+          "passed": -1,
+          "failed": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "RecordDecisionRequest",
+  "valid": true,
+  "value": {
+    "text": "周五停止合并，下周一发版。",
+    "topicId": "01JBX0TOPIC0000000000000AD"
+  }
+}

@@ -525,6 +525,24 @@ pub fn chapter_ticks(chapters: &[store::Cue], duration: f64, color: gpui::Hsla) 
     row
 }
 
+/// The poster of a video 产出: the sender's (`MediaInfo.posterFileId`, MEDIA §3: receivers
+/// compute nothing), else the frame made here.
+fn poster_of(spec: &InlineSpec, v: &store::Video) -> Option<std::path::PathBuf> {
+    let sender = spec
+        .target
+        .provider
+        .as_ref()
+        .and_then(|p| p.artifact_poster(&spec.key.artifact_id, spec.key.version));
+    pick_poster(sender, v.poster.clone())
+}
+
+fn pick_poster(
+    sender: Option<std::path::PathBuf>,
+    local: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    sender.or(local)
+}
+
 fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let s = screen(cx);
@@ -540,7 +558,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
         .overflow_hidden()
         .bg(s.bg)
         .cursor_pointer()
-        .when_some(v.poster.clone(), |el, p| {
+        .when_some(poster_of(spec, v), |el, p| {
             el.child(
                 img(p)
                     .size_full()
@@ -1051,4 +1069,17 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_poster;
+
+    #[test]
+    fn the_sender_s_poster_wins() {
+        let (a, b) = (Some("sent.jpg".into()), Some("made.jpg".into()));
+        assert_eq!(pick_poster(a.clone(), b.clone()), a);
+        assert_eq!(pick_poster(None, b.clone()), b);
+        assert_eq!(pick_poster(None, None), None);
+    }
 }

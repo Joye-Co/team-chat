@@ -168,6 +168,18 @@ export interface ContextMessage {
   body: string;
 }
 
+/**
+ * How a CLI reports its 验收标准 (machine-protocol.md, "Acceptance criteria"): the daemon reads
+ * the last fenced `acceptance` block of an assistant message. Limits as in the protocol.
+ */
+export const ACCEPTANCE_RULE = [
+  "Report the acceptance criteria of the request and their state as a fenced block with the info string `acceptance` in your message, for example:",
+  "```acceptance",
+  '[{ "text": "Tests pass", "state": "pass", "evidence": { "text": "cargo test: 42 passed" } }, { "text": "Deployed to staging", "state": "pending" }]',
+  "```",
+  "Each item has `text` (1-500 characters), `state` (`pending`, `pass` or `fail`) and optional `evidence` (`text` up to 1000 characters, `url`, `fileId`, or `artifact` { artifactId, version }). At most 20 items. Send the whole list again when a state changes: the last block counts.",
+].join("\n");
+
 /** The full prompt for the CLI: who it is, the topic's recent messages, and the request. */
 export function buildPrompt(opts: {
   botName: string;
@@ -181,11 +193,14 @@ export function buildPrompt(opts: {
    * question without the server's quote lines.
    */
   refs?: string;
+  /** The daemon reads acceptance blocks (feature "acceptance"): the prompt says how to write them. */
+  acceptance?: boolean;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
     `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
     "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
+    ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
     "",
     "Recent messages of the topic, oldest first:",

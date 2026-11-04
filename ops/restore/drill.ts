@@ -391,11 +391,28 @@ async function main() {
     const archiveDir = dirSource(join(WORK, "archive"));
     const copied = await restoreGroup(archiveDir, admin, copyId, { fromGroup: g.group.id });
     const again2 = await restoreGroup(archiveDir, admin, copyId, { fromGroup: g.group.id }); // a re-run is a no-op
-    // 产出 of a copy are listed but do not open: their D1 rows and file bytes belong to the source group.
+    // 产出 and attachments of a copy open (GAPS SF-6): the copy has its own D1 rows and R2 objects.
     const copyView = await view(seeded.memberToken, [copyId]);
     const copyArtifacts = await http<any[]>(`/v1/artifacts?groupId=${encodeURIComponent(copyId)}`, { token: seeded.memberToken });
-    const copyArtifactStatus = await Promise.all(
-      copyArtifacts.map(async (a) => (await fetch(`${BASE}/v1/artifacts/${a.id}`, { headers: { authorization: `Bearer ${seeded.memberToken}` } })).status),
+    const auth = { headers: { authorization: `Bearer ${seeded.memberToken}` } };
+    const copyArtifactStatus = await Promise.all(copyArtifacts.map(async (a) => (await fetch(`${BASE}/v1/artifacts/${a.id}`, auth)).status));
+    const copyEntries: string[] = [];
+    for (const a of copyArtifacts) {
+      const full = await http<any>(`/v1/artifacts/${a.id}`, { token: seeded.memberToken });
+      for (const v of full.versions) {
+        const res = await fetch(`${BASE}/v1/artifacts/${a.id}/versions/${v.version}/files/${v.entry}`, auth);
+        copyEntries.push(`${res.status} ${await res.text()}`);
+      }
+    }
+    const srcEntries = (before.owner.artifacts[g.group.id] as any[]).flatMap((a) => a.entries as string[]);
+    const copiedAttachments = (copyView.events[copyId] as any[]).filter((e) => e.type === "message.created").flatMap((e) => e.data.message.attachments ?? []);
+    const attachmentChecks = await Promise.all(
+      copiedAttachments.map(async (f: any) => {
+        const res = await fetch(`${BASE}/v1/files/${f.fileId}/content`, auth);
+        const body = new Uint8Array(await res.arrayBuffer());
+        const sha = new Bun.CryptoHasher("sha256").update(body).digest("hex");
+        return { status: res.status, sameSha: sha === f.sha256, newId: f.fileId !== seeded.note.fileId };
+      }),
     );
     const srcEvents = before.member.events[g.group.id] as any[];
     const copyEvents = copyView.events[copyId] as any[];
@@ -419,6 +436,9 @@ async function main() {
       deletedTextInCopy: copyText.includes(LATE_DELETE),
       artifactsListed: copyArtifacts.length,
       artifactStatus: copyArtifactStatus,
+      artifactEntriesSame: JSON.stringify(copyEntries) === JSON.stringify(srcEntries),
+      copiedFiles: copied.copiedFiles,
+      attachments: attachmentChecks,
       sourceUntouched: JSON.stringify(copyView.events[g.group.id].slice(0, srcEvents.length)) === JSON.stringify(srcEvents),
     };
     const { ws: cw } = await Ws.open(seeded.memberToken);
@@ -438,6 +458,11 @@ async function main() {
       !gc.sourceGroupIdInCopy &&
       !gc.deletedTextInCopy &&
       gc.sourceUntouched &&
+      copyArtifacts.length > 0 &&
+      copyArtifactStatus.every((st) => st === 200) &&
+      gc.artifactEntriesSame &&
+      attachmentChecks.length > 0 &&
+      attachmentChecks.every((x) => x.status === 200 && x.sameSha && x.newId) &&
       cSent.message.createdSeq === copied.lastSeq + 1;
     report.ok =
       differences.length === 0 &&

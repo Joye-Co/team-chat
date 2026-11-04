@@ -1,0 +1,17 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JA0000000000000000000R06",
+    "botMemberId": "01JA0000000000000000000B01",
+    "groupId": "01JA0000000000000000000G01",
+    "topicId": "01JA0000000000000000000T01",
+    "runtime": "claude",
+    "prompt": "Follow-up in the same topic",
+    "envAllowlist": [],
+    "leaseMs": 600000,
+    "resumeSessionId": "5f0c2a7e-4b1d-4c8e-9a3f-2d6b7e8f9a01"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "MediaInfo",
+  "valid": true,
+  "value": {
+    "kind": "table",
+    "mime": "text/csv",
+    "bytes": 120000,
+    "rows": 124,
+    "cols": 6,
+    "posterFileId": "01JC0FIL0000000000000INDEX",
+    "preview": "ready"
+  }
+}

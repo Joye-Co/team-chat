@@ -43,6 +43,7 @@
       {
         "id": "cmp",
         "type": "compare",
+        "fallbackText": "两个方案选一个",
         "question": "首页用哪个？",
         "options": [
           {

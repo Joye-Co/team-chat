@@ -11,13 +11,20 @@ import { MediaInfo, MediaInfoInput } from "./media.ts";
  * (decimal) on the Free and Pro plans, so the limit is 100,000,000 bytes, not 100 MiB.
  */
 export const MAX_FILE_BYTES = 100_000_000;
+/**
+ * Max bytes of one file (1.1): a file over `MAX_FILE_BYTES` uploads in parts (multipart). Equal
+ * to `MEDIA_LIMITS.anyBytes`; a larger file is refused at `POST /v1/files`, before any upload.
+ */
+export const MAX_UPLOAD_BYTES = 2_000_000_000;
+/** Bytes of each part of a multipart upload but the last (50 MiB; R2 wants equal parts of >= 5 MiB). */
+export const UPLOAD_PART_BYTES = 52_428_800;
 /** Max bytes of an avatar image. */
 export const MAX_AVATAR_BYTES = 1_048_576;
 export const MAX_ARTIFACT_FILES = 500;
 export const MAX_ARTIFACT_PATH_CHARS = 255;
 
 const FileName = z.string().min(1).max(MAX_FILE_NAME_CHARS);
-const FileSize = z.int().nonnegative().max(MAX_FILE_BYTES);
+const FileSize = z.int().nonnegative().max(MAX_UPLOAD_BYTES);
 const Pixels = z.int().positive();
 
 export const FileStatus = z.enum(["pending", "ready"]);
@@ -52,12 +59,30 @@ export const CreateFileRequest = z.object({
   height: Pixels.optional(),
 });
 export type CreateFileRequest = z.infer<typeof CreateFileRequest>;
+/**
+ * 1.1: how a file over `MAX_FILE_BYTES` uploads. `PUT <partUrl>/<n>` sends part n (1..parts) of
+ * exactly `partBytes` bytes (the last one the rest), in any order and again on failure; then
+ * `POST <completeUrl>` checks the SHA-256 and makes the file ready.
+ */
+export const MultipartUpload = z.object({
+  partBytes: z.int().positive(),
+  parts: z.int().positive().max(10_000),
+  /** Absolute URL; append `/<n>`. */
+  partUrl: z.string().min(1),
+  completeUrl: z.string().min(1),
+});
+export type MultipartUpload = z.infer<typeof MultipartUpload>;
 export const CreateFileResponse = z.object({
   file: FileMeta,
-  /** Absolute URL for `PUT` of the raw content (same bearer token). */
+  /** Absolute URL for `PUT` of the raw content (same bearer token). Files over `MAX_FILE_BYTES` use `multipart`. */
   uploadUrl: z.string().min(1),
+  /** 1.1: set when the file is over `MAX_FILE_BYTES`. */
+  multipart: MultipartUpload.optional(),
 });
 export type CreateFileResponse = z.infer<typeof CreateFileResponse>;
+/** `PUT /v1/files/:id/parts/:n` (1.1) */
+export const UploadPartResponse = z.object({ part: z.int().positive(), size: Count });
+export type UploadPartResponse = z.infer<typeof UploadPartResponse>;
 /** `PUT /v1/files/:id/content` and `GET /v1/files/:id` */
 export const FileResponse = FileMeta;
 
@@ -161,6 +186,26 @@ const ArtifactEventsInput = ArtifactEvents.refine((list) => list.every((d) => AR
 const jsonMax = (max: number, what: string) =>
   z.json().refine((v) => utf8Bytes(JSON.stringify(v)) <= max, { message: `${what} exceeds ${max} bytes` });
 
+/** 1.1: one figure of a 产出 preview card (`12 位 · 报名`, `+18%`). */
+export const ArtifactMetric = z.object({
+  label: z.string().min(1).max(40),
+  value: z.string().min(1).max(40),
+  /** A change beside the value, as text (`+18%`, `−2`). */
+  delta: z.string().min(1).max(40).optional(),
+});
+export type ArtifactMetric = z.infer<typeof ArtifactMetric>;
+export const MAX_ARTIFACT_METRICS = 6;
+/**
+ * 1.1: what the author says a version shows, for preview cards (GAPS SF-11). Readers use it
+ * before anything they scrape from the HTML.
+ */
+export const ArtifactPreview = z.object({
+  title: z.string().min(1).max(200).optional(),
+  summary: z.string().min(1).max(500).optional(),
+  metrics: z.array(ArtifactMetric).max(MAX_ARTIFACT_METRICS).optional(),
+});
+export type ArtifactPreview = z.infer<typeof ArtifactPreview>;
+
 export const ArtifactVersion = z.object({
   artifactId: Id,
   version: z.int().positive(),
@@ -178,6 +223,8 @@ export const ArtifactVersion = z.object({
   media: MediaInfo.optional(),
   /** 1.1: rev of the latest data snapshot (0 or absent = none). */
   dataRev: Count.optional(),
+  /** 1.1: the author's preview card text and figures. */
+  preview: ArtifactPreview.optional(),
 });
 export type ArtifactVersion = z.infer<typeof ArtifactVersion>;
 
@@ -199,6 +246,8 @@ const versionInput = {
   data: jsonMax(MAX_ARTIFACT_DATA_BYTES, "data").optional(),
   /** 1.1: the caller bot's active run that made it (checked by the server). */
   runId: Id.optional(),
+  /** 1.1: the preview card text and figures (any author). */
+  preview: ArtifactPreview.optional(),
 };
 
 /** `POST /v1/artifacts`: makes the 产出 and its version 1. */
@@ -217,6 +266,12 @@ export const AddArtifactVersionRequest = z.object({
   title: Title.optional(),
 });
 export type AddArtifactVersionRequest = z.infer<typeof AddArtifactVersionRequest>;
+/**
+ * `POST /v1/machine/runs/:id/artifacts` (1.1, `chat-run artifact create`): a 产出 of the run's
+ * runner member in the run's topic. The run gives `groupId`, `topicId` and `runId`.
+ */
+export const MachineCreateArtifactRequest = CreateArtifactRequest.omit({ groupId: true, topicId: true, runId: true });
+export type MachineCreateArtifactRequest = z.infer<typeof MachineCreateArtifactRequest>;
 /** Response of `POST /v1/artifacts` and `POST /v1/artifacts/:id/versions`. */
 export const ArtifactVersionResponse = z.object({ artifact: Artifact, version: ArtifactVersion });
 export type ArtifactVersionResponse = z.infer<typeof ArtifactVersionResponse>;
@@ -279,7 +334,12 @@ export type ArtifactDataFrame = z.infer<typeof ArtifactDataFrame>;
 export const ArtifactDataAck = z.object({ dataRev: z.int().positive() });
 export type ArtifactDataAck = z.infer<typeof ArtifactDataAck>;
 
-export const ArtifactReplyError = z.object({ code: z.enum(["declined", "failed"]), message: z.string().max(200) });
+export const ArtifactReplyError = z.object({
+  code: z.enum(["declined", "failed"]),
+  message: z.string().max(200),
+  /** 1.1: why, as a short id (`run.ended`: no run of the member answers the page). */
+  reason: z.string().min(1).max(64).optional(),
+});
 /** `{ t: "artifact.reply" }` (1.1): the bot answers a page `ask` (private to the asker). */
 export const ArtifactReplyFrame = z
   .object({
@@ -331,6 +391,26 @@ export const ArtifactReplyTransient = z.object({
 });
 
 /** `GET /v1/artifacts/:id/versions/:v/data` (group members). */
+/** 1.1: a stored page event of a 产出 (页面里的回应), as `GET /v1/artifacts/:id/events` lists it. */
+export const ArtifactPageEvent = z.object({
+  eventId: Id,
+  artifactId: Id,
+  version: z.int().positive(),
+  name: ArtifactEventName,
+  kind: ArtifactEventKind,
+  /** Missing on events stored before 1.1 kept payloads. */
+  payload: z.json().optional(),
+  actorId: Id,
+  at: Millis,
+  /** The version's bot answered the ask (`artifact.reply`). */
+  replied: z.boolean().optional(),
+});
+export type ArtifactPageEvent = z.infer<typeof ArtifactPageEvent>;
+/** `GET /v1/artifacts/:id/events?before=<eventId>&limit=` (1.1): newest first, `limit` 1..200 (default 100). */
+export const ArtifactEventsResponse = z.object({ events: z.array(ArtifactPageEvent), hasMore: z.boolean() });
+export type ArtifactEventsResponse = z.infer<typeof ArtifactEventsResponse>;
+export const MAX_ARTIFACT_EVENTS_PAGE = 200;
+
 export const ArtifactDataResponse = z.object({ data: z.json().nullable(), dataRev: Count, updatedAt: Millis });
 export type ArtifactDataResponse = z.infer<typeof ArtifactDataResponse>;
 /** `PUT /v1/artifacts/:id/versions/:v/data` (the version's creator bot). Response `ArtifactDataAck`. */
@@ -340,3 +420,13 @@ export const PutArtifactDataRequest = z.object({
   cause: Id.optional(),
 });
 export type PutArtifactDataRequest = z.infer<typeof PutArtifactDataRequest>;
+
+/**
+ * `PUT /v1/artifacts/:id/versions/:v/media` (the version's creator): the media of a version with
+ * its preview, sent after the upload. Stored as `artifact.previewReady`.
+ */
+export const PutArtifactMediaRequest = z.object({ media: MediaInfoInput });
+export type PutArtifactMediaRequest = z.infer<typeof PutArtifactMediaRequest>;
+/** Answer of `PUT /v1/artifacts/:id/versions/:v/media`: the version with the new media. */
+export const PutArtifactMediaResponse = z.object({ version: ArtifactVersion });
+export type PutArtifactMediaResponse = z.infer<typeof PutArtifactMediaResponse>;

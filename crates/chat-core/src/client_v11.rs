@@ -8,7 +8,7 @@ use crate::proto::machine::RunLogEntry;
 use crate::proto::{
     AnswerEdits, AnswerInputs, ArtifactDataResponse, ArtifactEventFrame, ArtifactEventKind, BotRun,
     CardActionKind, CardEventFrame, ClientFrame, EVENT_ACTION_PRESS, EVENT_ANSWER_RETRACT,
-    GroupDecision, GroupKind, MemberKind, PartRef, TopicContext, TopicLink,
+    GroupDecision, GroupKind, MemberKind, Message, PartRef, TopicContext, TopicLink,
 };
 use crate::runs::{TerminalLine, terminal_lines};
 use crate::store::{CardAnswerRow, DecisionRow, OutboxOp, OutboxState, TopicRow};
@@ -50,6 +50,9 @@ pub struct SideChatRequest {
     pub body: String,
     /// Title of the side chat topic; `None` uses the first line.
     pub title: Option<String>,
+    /// Parts of the source group the question points at (单独问 with chips). Each ref names the
+    /// source group in `source_group_id`; the server writes their quote lines before the body.
+    pub block_refs: Option<Vec<crate::proto::BlockRefInput>>,
 }
 
 /// A side chat that was queued: the DM it lives in and the `clientMsgId` of its first message.
@@ -57,6 +60,30 @@ pub struct SideChatRequest {
 pub struct SideChatStarted {
     pub dm_group_id: String,
     pub client_msg_id: String,
+}
+
+/// The `contentHash` of an answer by `action_id`: sha256 (hex) of the draft text it approves.
+fn draft_hash(
+    card: &crate::proto::CardV2,
+    action_id: &str,
+    edited: Option<&AnswerEdits>,
+) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let action = card.actions.iter().flatten().find(|a| a.id == action_id);
+    let ids: std::collections::BTreeSet<String> = match action.and_then(|a| a.inputs.as_ref()) {
+        Some(ids) => ids.iter().cloned().collect(),
+        None => card
+            .all_blocks()
+            .into_iter()
+            .filter_map(|b| match b {
+                crate::proto::CardV2Block::Draft { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect(),
+    };
+    let text = crate::proto::draft_content_text(card, &ids, edited)?;
+    let digest = Sha256::digest(text.as_bytes());
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 impl Client {
@@ -81,9 +108,10 @@ impl Client {
             .store()
             .message(message_id)?
             .ok_or(ClientError::NotFound)?;
-        if m.card_v2.is_none() {
+        let Some(card) = m.card_v2.as_ref() else {
             return Err(ClientError::Invalid("not a v2 card"));
-        }
+        };
+        let content_hash = draft_hash(card, action_id, edited_values.as_ref());
         self.enqueue(
             crate::new_id(),
             OutboxOp::CardAnswer {
@@ -94,6 +122,7 @@ impl Client {
                 action_id: action_id.into(),
                 inputs,
                 edited_values,
+                content_hash,
             },
         )
     }
@@ -153,6 +182,7 @@ impl Client {
             value: req.value.clone(),
             inputs: req.inputs.clone(),
             part: req.part.clone(),
+            content_hash: None,
         };
         frame
             .validate()
@@ -290,6 +320,37 @@ impl Client {
         self.spawn(async move { Ok(http.group_decisions(&id, None, limit).await?.decisions) })
     }
 
+    /// The newest page of `GET /v1/groups/:id/decisions`: the answered asks and the decisions
+    /// recorded by hand (记一条, `recorded`).
+    pub fn fetch_decisions_page(
+        &self,
+        group_id: &str,
+        limit: u32,
+    ) -> JoinHandle<Result<crate::proto::DecisionsResponse, ClientError>> {
+        let http = self.http();
+        let id = group_id.to_string();
+        self.spawn(async move { Ok(http.group_decisions(&id, None, limit).await?) })
+    }
+
+    /// 记一条: records a decision by hand in a 群 (or one of its 话题). The server stores it as
+    /// `decision.recorded` and lists it with the group decisions.
+    pub fn record_decision(
+        &self,
+        group_id: &str,
+        text: &str,
+        topic_id: Option<&str>,
+    ) -> Result<JoinHandle<Result<crate::proto::RecordedDecision, ClientError>>, ClientError> {
+        let req = crate::proto::RecordDecisionRequest {
+            text: text.to_string(),
+            topic_id: topic_id.map(str::to_string),
+        };
+        req.validate()
+            .map_err(|_| ClientError::Invalid("bad decision"))?;
+        let http = self.http();
+        let id = group_id.to_string();
+        Ok(self.spawn(async move { Ok(http.record_decision(&id, &req).await?.decision) }))
+    }
+
     // ------------------------------------------------------------------
     // 产出 page events and topic links
     // ------------------------------------------------------------------
@@ -405,10 +466,14 @@ impl Client {
             if bot.kind != MemberKind::Bot {
                 return Err(ClientError::Invalid("side chats are with bots"));
             }
-            if req.body.trim().is_empty() || req.body.chars().count() > crate::proto::MAX_BODY_CHARS
+            let has_refs = req.block_refs.as_ref().is_some_and(|r| !r.is_empty());
+            if (req.body.trim().is_empty() && !has_refs)
+                || req.body.chars().count() > crate::proto::MAX_BODY_CHARS
             {
                 return Err(ClientError::Invalid("bad body"));
             }
+            crate::proto::check_block_refs(req.block_refs.as_deref().filter(|r| !r.is_empty()))
+                .map_err(|_| ClientError::Invalid("bad block refs"))?;
             req.context
                 .validate()
                 .map_err(|_| ClientError::Invalid("bad context"))?;
@@ -430,6 +495,7 @@ impl Client {
                 &cmd_tx,
                 crate::new_id(),
                 OutboxOp::Send {
+                    from_aside: None,
                     group_id: dm_group_id.clone(),
                     topic_id: None,
                     title: req.title,
@@ -443,7 +509,7 @@ impl Client {
                     card_v2: None,
                     context: Some(req.context),
                     cause_event_id: None,
-                    block_refs: None,
+                    block_refs: req.block_refs.filter(|r| !r.is_empty()),
                     after_root: None,
                 },
             )?;
@@ -455,12 +521,14 @@ impl Client {
     }
 
     /// A follow-up in a side chat topic. `upto_seq`, when set, lets the bot read the source
-    /// topic up to that seq now (`send.context` with the topic's own `contextOf`).
+    /// topic up to that seq now (`send.context` with the topic's own `contextOf`). `block_refs`
+    /// are parts of the source group the follow-up points at (see [`SideChatRequest`]).
     pub fn reply_in_side_chat(
         &self,
         side_topic_id: &str,
         body: &str,
         upto_seq: Option<u64>,
+        block_refs: Option<Vec<crate::proto::BlockRefInput>>,
     ) -> Result<String, ClientError> {
         let row = self
             .store()
@@ -476,6 +544,7 @@ impl Client {
             topic_id: Some(side_topic_id.into()),
             body: body.into(),
             context,
+            block_refs: block_refs.filter(|r| !r.is_empty()),
             ..Default::default()
         })
     }
@@ -489,14 +558,41 @@ impl Client {
     // Runs: desk, pause and resume, live terminal
     // ------------------------------------------------------------------
 
+    /// 1.1: desk notes of every group (首页), newest first.
+    pub fn desk_notes(&self) -> Result<Vec<crate::DeskNoteRow>, ClientError> {
+        Ok(self.store().desk_notes()?)
+    }
+
+    /// 1.1: the purpose line of a group, from the cache.
+    pub fn group_purpose(&self, group_id: &str) -> Result<Option<String>, ClientError> {
+        Ok(self.store().group(group_id)?.and_then(|g| g.group.purpose))
+    }
+
     /// Active runs of every group (正在做), newest change first.
     pub fn active_runs(&self) -> Result<Vec<BotRun>, ClientError> {
         Ok(self.store().active_runs()?)
     }
 
+    /// Card v2 asks of every group, newest first (需要你拍板).
+    pub fn ask_messages(&self, limit: usize) -> Result<Vec<Message>, ClientError> {
+        Ok(self.store().ask_messages(limit)?)
+    }
+
     /// Runs of every group created at or after `since` (ms): member stats (这周).
     pub fn runs_since(&self, since: u64) -> Result<Vec<BotRun>, ClientError> {
         Ok(self.store().runs_since(since)?)
+    }
+
+    /// 重试 (`POST /v1/runs/:id/retry`): a new run with the same request; stores the answer.
+    pub fn retry_run(&self, run_id: &str) -> JoinHandle<Result<BotRun, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let id = run_id.to_string();
+        self.spawn(async move {
+            let run = http.retry_run(&id).await?;
+            store_run_and_emit(&shared, &run)?;
+            Ok(run)
+        })
     }
 
     /// Pauses a run for 接管 (`POST /v1/runs/:id/pause`) and stores the answer.

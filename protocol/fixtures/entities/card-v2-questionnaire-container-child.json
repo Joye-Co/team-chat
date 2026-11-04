@@ -17,7 +17,8 @@
         "children": [
           "s",
           "q"
-        ]
+        ],
+        "fallbackText": "问卷"
       },
       {
         "id": "s",

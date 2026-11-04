@@ -247,10 +247,51 @@ async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
     n.parse().map_err(|_| format!("rev-list gave {n}"))
 }
 
+/// Makes `dir` and everything below it read-only (`a-w`; a side chat run's checkout, so its CLI
+/// cannot write there whatever its own modes say), or gives the owner write access back
+/// (`u+w`). Symlinks are not followed. Errors are skipped: the walk does what it can.
+pub fn set_read_only(dir: &Path, read_only: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let set = |p: &Path, m: &std::fs::Metadata| {
+        let mode = m.permissions().mode();
+        let next = if read_only {
+            mode & !0o222
+        } else {
+            mode | 0o200
+        };
+        if next != mode {
+            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(next));
+        }
+    };
+    let Ok(meta) = std::fs::symlink_metadata(dir) else {
+        return;
+    };
+    if !meta.is_dir() {
+        if meta.is_file() {
+            set(dir, &meta);
+        }
+        return;
+    }
+    // A folder gets write access before its entries are walked and loses it after.
+    if !read_only {
+        set(dir, &meta);
+    }
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            set_read_only(&e.path(), read_only);
+        }
+    }
+    if read_only {
+        set(dir, &meta);
+    }
+}
+
 /// Removes a finished run folder and its worktree registration. The run's branch is deleted
 /// only when all its commits are also on a remote or another branch; otherwise it is kept (it
 /// costs no disk beyond its objects) and the daemon log says so.
 pub async fn remove_run(dir: &Path) {
+    // A side chat run's checkout is read-only, also after a crash.
+    set_read_only(&dir.join("work"), false);
     if let Some(meta) = read_meta(dir)
         && let Some(gd) = &meta.git_dir
     {
@@ -289,6 +330,31 @@ pub async fn remove_run(dir: &Path) {
     let _ = tokio::fs::remove_dir_all(dir).await;
 }
 
+/// Removes the `chat-run` request folders (`work/.chat-run-<run id>`) that a daemon crash left
+/// in the working folders of runs whose CLI is not running (not in `active`). Only the
+/// transport's own files go, then the folder when it is empty. Returns the folders removed.
+pub fn sweep_spools(cfg: &Config, active: &[String]) -> usize {
+    let Ok(rd) = std::fs::read_dir(runs_dir(cfg)) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if active.contains(&name) {
+            continue;
+        }
+        let spool = crate::chat_run::spool_dir(&e.path().join("work"), &name);
+        let is_dir = std::fs::symlink_metadata(&spool).is_ok_and(|m| m.is_dir());
+        if is_dir {
+            crate::chat_run::remove_spool(&spool);
+            if !spool.exists() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 /// Removes finished runs older than `keep_runs_hours`, then the oldest finished runs while
 /// free disk is below `min_free_gb`. Active runs are never touched.
 pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
@@ -321,7 +387,7 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
     let mut removed = 0;
     for (at, path) in finished {
         let low_disk = crate::health::disk(&cfg.work_root).0 < min_free;
-        if at < cutoff || low_disk {
+        if at <= cutoff || low_disk {
             remove_run(&path).await;
             removed += 1;
         }

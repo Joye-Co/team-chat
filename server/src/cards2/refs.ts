@@ -3,8 +3,10 @@
 // line `> ↳ {label}` per ref in front of the body (what 1.0.x readers see), keeps that prefix
 // on edits, and clears the label of refs whose source is deleted.
 import { type BlockRef, type BlockRefInput, MAX_BODY_CHARS, blockRefPrefix } from "@chat/protocol";
-import { ApiError } from "../core/errors";
-import type { RoomContext, RoomTx } from "../core/registry";
+import { isGroupMember } from "../core/db";
+import { roomStub } from "../core/env";
+import { ApiError, unwrap } from "../core/errors";
+import { type Actor, type RoomContext, type RoomTx, registerRoomRpc } from "../core/registry";
 import { extOf, messageRow } from "./store";
 
 /** The catalog text of a ref whose source was deleted. */
@@ -45,34 +47,61 @@ function stripPrefix(refs: BlockRef[], body: string): string {
   return rest[0] === "" ? rest.slice(1).join("\n") : body;
 }
 
-/** Checks the refs of a send and fills what the server owns. */
-export function resolveRefs(room: RoomContext, inputs: BlockRefInput[]): BlockRef[] {
-  return inputs.map((r) => {
-    const out: BlockRef = { ...r, sourceTopicId: "" };
-    if (r.messageId !== undefined) {
-      const src = messageRow(room.sql, r.messageId);
-      if (!src) throw new ApiError("invalid", "the referenced message is not in this group");
-      if (src.deleted_at !== null) throw new ApiError("not_found", "the referenced message was deleted");
-      const card = extOf(src).cardV2;
-      if (r.cardRev !== undefined && (!card || r.cardRev > card.rev)) throw new ApiError("invalid", "cardRev is not a rev of this card");
-      out.sourceAuthorId = src.author_id;
-      out.sourceTopicId = src.topic_id;
-    } else if (r.artifact) {
-      if (r.cardRev !== undefined) throw new ApiError("invalid", "cardRev is only for a card message");
-      const v = room.sql
-        .exec<{ topic_id: string; created_by: string }>(
-          `SELECT a.topic_id, v.created_by FROM artifacts a JOIN artifact_versions v ON v.artifact_id = a.id
-           WHERE a.id = ? AND v.version = ?`,
-          r.artifact.artifactId,
-          r.artifact.version,
-        )
-        .toArray()[0];
-      if (!v) throw new ApiError("not_found", "产出 version not found");
-      out.sourceAuthorId = v.created_by;
-      out.sourceTopicId = v.topic_id;
+/** The author and topic of a ref's source in this room; throws when it is not here. */
+export function refSource(room: RoomContext, r: BlockRefInput): { sourceAuthorId: string; sourceTopicId: string } {
+  if (r.messageId !== undefined) {
+    const src = messageRow(room.sql, r.messageId);
+    if (!src) throw new ApiError("invalid", "the referenced message is not in this group");
+    if (src.deleted_at !== null) throw new ApiError("not_found", "the referenced message was deleted");
+    const card = extOf(src).cardV2;
+    if (r.cardRev !== undefined && (!card || r.cardRev > card.rev)) throw new ApiError("invalid", "cardRev is not a rev of this card");
+    return { sourceAuthorId: src.author_id, sourceTopicId: src.topic_id };
+  }
+  if (r.cardRev !== undefined) throw new ApiError("invalid", "cardRev is only for a card message");
+  const artifact = r.artifact as NonNullable<BlockRefInput["artifact"]>;
+  const v = room.sql
+    .exec<{ topic_id: string; created_by: string }>(
+      `SELECT a.topic_id, v.created_by FROM artifacts a JOIN artifact_versions v ON v.artifact_id = a.id
+       WHERE a.id = ? AND v.version = ?`,
+      artifact.artifactId,
+      artifact.version,
+    )
+    .toArray()[0];
+  if (!v) throw new ApiError("not_found", "产出 version not found");
+  return { sourceAuthorId: v.created_by, sourceTopicId: v.topic_id };
+}
+
+/** Room RPC of the source group: checks a side chat's ref to one of its messages or 产出. */
+export const REF_SOURCE_RPC = "cards.refSource";
+
+registerRoomRpc(REF_SOURCE_RPC, (room, actor, args) => {
+  if (!actor || !room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of the source group");
+  return refSource(room, args as BlockRefInput);
+});
+
+/**
+ * Checks the refs of a send and fills what the server owns. A ref with `sourceGroupId` of
+ * another group is a 单独问 quoting the group it is about: only in a DM, and only when the
+ * sender is a member of that group too; the source group's room checks the source.
+ */
+export async function resolveRefs(room: RoomContext, actor: Actor, inputs: BlockRefInput[]): Promise<BlockRef[]> {
+  const out: BlockRef[] = [];
+  for (const r of inputs) {
+    const ref: BlockRef = { ...r, sourceTopicId: "" };
+    if (r.sourceGroupId === undefined || r.sourceGroupId === room.groupId) {
+      delete ref.sourceGroupId;
+      Object.assign(ref, refSource(room, r));
+    } else {
+      if (room.groupKind !== "dm") throw new ApiError("invalid", "a ref to another group is only for a side chat");
+      if (!(await isGroupMember(room.env.DB, r.sourceGroupId, actor.id))) {
+        throw new ApiError("forbidden", "not a member of the source group");
+      }
+      const { sourceGroupId: _g, ...input } = r;
+      Object.assign(ref, unwrap(await roomStub(room.env, r.sourceGroupId).rpc(r.sourceGroupId, REF_SOURCE_RPC, actor, input)));
     }
-    return out;
-  });
+    out.push(ref);
+  }
+  return out;
 }
 
 export function checkBodyLength(body: string): void {

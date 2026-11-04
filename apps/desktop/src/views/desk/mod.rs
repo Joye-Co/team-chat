@@ -266,6 +266,15 @@ impl Render for DeskPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let snap = self.snapshot();
+        crate::selftest::drawn::mark(
+            "desk",
+            format!(
+                "asks={} done={} runs={}",
+                snap.asks.len(),
+                snap.done.len(),
+                snap.runs.len()
+            ),
+        );
         let quiet = snap.asks.is_empty() && snap.done.is_empty();
         let side_has_data = !snap.runs.is_empty() || !snap.queue.is_empty();
         let show_side = side_has_data && !self.side_hidden;

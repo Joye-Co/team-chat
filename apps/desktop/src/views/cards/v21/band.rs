@@ -479,7 +479,7 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
         S::Quiet => return None,
         S::Wait | S::Slow => (words, String::new(), PendTone::Live),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
-        S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
+        S::OfflineLive | S::Busy | S::Refused => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
     })
 }
 

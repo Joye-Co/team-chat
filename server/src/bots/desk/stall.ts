@@ -1,7 +1,8 @@
 // BotDesk stall detection: the alarm that marks silent runs blocked and fails runs whose start
 // never reached a machine. Paused runs (接管) have no stall deadline until they resume.
+import { RUN_KIND_ASIDE } from "@chat/protocol";
 import { STALL_MS, TEXT } from "../dispatch";
-import { ACTIVE, type RunRow, START_STUCK_MS } from "./core";
+import { ACTIVE, QUEUE_MAX_MS, QUEUE_RETRY_MS, QUEUED, type RunRow, START_STUCK_MS } from "./core";
 import { DeskEvents } from "./events";
 
 export abstract class DeskStall extends DeskEvents {
@@ -17,10 +18,13 @@ export abstract class DeskStall extends DeskEvents {
       .one().at;
     const stuck = this.sql
       .exec<{ at: number | null }>(
-        `SELECT min(created_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL`,
+        `SELECT min(created_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL AND queued_at IS NULL`,
       )
       .one().at;
-    const times = [stall === null ? null : stall + STALL_MS, stuck === null ? null : stuck + START_STUCK_MS].filter(
+    // Queued runs (排队): try again soon, and fail the ones that waited too long.
+    const queued = this.sql.exec<{ at: number | null }>(`SELECT min(queued_at) AS at FROM runs WHERE ${QUEUED}`).one().at;
+    const retry = queued === null ? null : Math.min(Date.now() + QUEUE_RETRY_MS, queued + QUEUE_MAX_MS);
+    const times = [stall === null ? null : stall + STALL_MS, stuck === null ? null : stuck + START_STUCK_MS, retry].filter(
       (x): x is number => x !== null,
     );
     if (times.length === 0) return;
@@ -47,17 +51,27 @@ export abstract class DeskStall extends DeskEvents {
     // Runs whose start broke before they reached a machine (for example a reset mid-start).
     const stuck = this.sql
       .exec<{ id: string }>(
-        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL AND created_at <= ?`,
+        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL AND queued_at IS NULL AND created_at <= ?`,
         now - START_STUCK_MS,
       )
       .toArray();
     for (const { id } of stuck) {
       await this.serial(id, async () => {
         const r = this.run(id);
-        if (!r || r.ended_at !== null || r.machine_id || r.status !== "created") return;
+        if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || r.queued_at) return;
         await this.end(r, "failed", TEXT.failed(""), "blocked", TEXT.failed(""));
       });
     }
+    const expired = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} AND queued_at <= ?`, now - QUEUE_MAX_MS).toArray();
+    for (const { id } of expired) {
+      await this.serial(id, async () => {
+        const r = this.run(id);
+        if (!r || r.ended_at !== null || r.machine_id || !r.queued_at) return;
+        const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : TEXT.noMachine;
+        await this.end(r, "failed", why, "blocked", why);
+      });
+    }
+    await this.dispatchQueued();
     await this.scheduleStall();
   }
 

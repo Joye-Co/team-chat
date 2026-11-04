@@ -8,6 +8,8 @@ import { addBotsFixtures } from "./fixtures-bots.ts";
 import { addReactionsFixtures } from "./fixtures-reactions.ts";
 import { addV11Fixtures } from "./fixtures-v11.ts";
 import { addInteractFixtures } from "./fixtures-v11-interact.ts";
+import { addGapFixtures } from "./fixtures-v11-gaps.ts";
+import { addFilesFixtures } from "./fixtures-v11-files.ts";
 
 type Fixture = {
   kind: string;
@@ -347,6 +349,8 @@ addBotsFixtures({ ok, bad, T0, ID, base });
 addReactionsFixtures({ ok, bad, ID, base, message });
 addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic });
 addInteractFixtures({ ok, bad, T0, ID, base, message });
+addGapFixtures({ ok, bad, T0, ID, base, message });
+addFilesFixtures({ ok, bad, T0, ID, base, message });
 
 // ---------------------------------------------------------------------------
 

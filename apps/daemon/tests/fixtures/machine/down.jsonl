@@ -8,6 +8,7 @@
 {"t":"ack","runId":"01JA0000000000000000000R01","seq":16}
 {"t":"error","error":{"code":"unauthorized","message":"machine token revoked"}}
 {"t":"run.assign","runId":"01JA0000000000000000000R05","botMemberId":"01JA0000000000000000000B01","groupId":"01JA0000000000000000000G02","topicId":"01JA0000000000000000000T05","runtime":"claude","prompt":"Side chat about a topic","envAllowlist":[],"leaseMs":600000,"kind":"aside"}
+{"t":"run.assign","runId":"01JA0000000000000000000R06","botMemberId":"01JA0000000000000000000B01","groupId":"01JA0000000000000000000G01","topicId":"01JA0000000000000000000T01","runtime":"claude","prompt":"Follow-up in the same topic","envAllowlist":[],"leaseMs":600000,"resumeSessionId":"5f0c2a7e-4b1d-4c8e-9a3f-2d6b7e8f9a01"}
 {"t":"run.input","runId":"01JA0000000000000000000R04","inputId":"01JA0000000000000000000I02","text":"[card answer] ship: {\"when\":\"tonight\"}","authorId":"01JA0000000000000000000H01","answer":{"messageId":"01JA0000000000000000000E01","rev":1,"actionId":"ship","inputs":{"when":"tonight"},"editedValues":{"notes":"x"},"actorId":"01JA0000000000000000000H01"}}
 {"t":"run.input","runId":"01JA0000000000000000000R04","inputId":"01JA0000000000000000000I03","text":"[page event] pick: {\"option\":\"B\"}","authorId":"01JA0000000000000000000H01","artifactEvent":{"artifactId":"01JA0000000000000000000A01","version":2,"name":"pick","payload":{"option":"B"},"actorId":"01JA0000000000000000000H01"}}
 {"t":"run.pause","runId":"01JA0000000000000000000R04","by":"01JA0000000000000000000H01"}

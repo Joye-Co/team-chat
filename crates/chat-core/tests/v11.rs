@@ -69,6 +69,8 @@ fn answered(seq: u64, actor: &str, message_id: &str, rev: u32) -> Event {
 
 fn run(id: &str, status: RunStatus, created: u64) -> BotRun {
     BotRun {
+        queue_position: None,
+        queued_at: None,
         id: id.into(),
         bot_id: BOT.into(),
         group_id: G1.into(),
@@ -92,6 +94,7 @@ fn run(id: &str, status: RunStatus, created: u64) -> BotRun {
         acceptance: None,
         paused_by: None,
         kind: None,
+        retry_of: None,
     }
 }
 
@@ -698,6 +701,7 @@ fn card_state_cause_refs_retracts_and_previews_reach_the_cache() {
         ..Default::default()
     }];
     let version = ArtifactVersion {
+        preview: None,
         artifact_id: "A1".into(),
         version: 1,
         entry: "index.html".into(),
@@ -972,6 +976,7 @@ async fn card_events_page_events_and_interact_transients() {
                         updated_at: 1,
                     },
                     version: ArtifactVersion {
+                        preview: None,
                         artifact_id: "A1".into(),
                         version: 1,
                         entry: "index.html".into(),
@@ -1146,11 +1151,12 @@ async fn stored_answers_are_queued_while_offline() {
         .unwrap();
     let opts = json!([{ "id": "a", "label": "A" }, { "id": "b", "label": "B" }]);
     let questionnaire = json!([
-        { "id": "qs", "type": "questionnaire", "children": ["q1", "q2"] },
+        { "id": "qs", "type": "questionnaire", "children": ["q1", "q2"], "fallbackText": "问卷" },
         { "id": "q1", "type": "input", "kind": "text", "label": "一" },
         { "id": "q2", "type": "input", "kind": "text", "label": "二" }
     ]);
-    let compare = json!([{ "id": "cmp", "type": "compare", "options": opts }]);
+    let compare =
+        json!([{ "id": "cmp", "type": "compare", "options": opts, "fallbackText": "A / B" }]);
     let poll = json!([{ "id": "vote", "type": "poll", "label": "投", "voters": "group", "closesAt": 9_999, "options": opts, "fallbackText": "投" }]);
     let confirm = json!([{ "id": "go", "type": "confirm", "label": "发布？", "yes": "发", "no": "不发", "fallbackText": "发布？" }]);
     client
@@ -1387,4 +1393,41 @@ fn state_updates_of_a_card_and_cleared_refs_are_not_edits() {
     )
     .unwrap();
     assert_eq!(s.message("C1").unwrap().unwrap().edited_at(), Some(2000));
+}
+
+#[test]
+fn every_ask_message_is_found_newest_first_without_deleted_ones() {
+    let (_d, s) = open();
+    let mut events = vec![
+        topic_created(1, G1, topic("T1", G1, "M1", 1)),
+        msg_created(2, message("M1", G1, "T1", ME, 2, "root")),
+        msg_created(3, card_message("C1", 3, ask_card(1, false))),
+    ];
+    // Many plain messages after the ask: it is not in the newest 30 of its topic.
+    for i in 0..40u64 {
+        events.push(msg_created(
+            4 + i,
+            message(&format!("P{i}"), G1, "T1", ALICE, 4 + i, "plain"),
+        ));
+    }
+    events.push(msg_created(44, card_message("C2", 44, ask_card(1, true))));
+    events.push(ev(
+        45,
+        G1,
+        ALICE,
+        EventData::MessageDeleted(MessageDeletedData {
+            message_id: "C2".into(),
+            deleted_at: 50,
+        }),
+    ));
+    events.push(msg_created(46, card_message("C3", 46, ask_card(1, false))));
+    s.apply_events(G1, &events).unwrap();
+    let ids: Vec<String> = s
+        .ask_messages(10)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(ids, ["C3", "C1"]);
+    assert_eq!(s.ask_messages(1).unwrap().len(), 1);
 }

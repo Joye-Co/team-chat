@@ -32,16 +32,29 @@ pub fn of_card(card: &CardV2, links: &[TopicLink]) -> Vec<Proof> {
                 },
                 ..
             } => {
-                let size = links.iter().find_map(|l| match l {
-                    TopicLink::Pr(p) if p.number == *n => Some((p.additions, p.deletions)),
+                let link = links.iter().find_map(|l| match l {
+                    TopicLink::Pr(p) if p.number == *n => Some(p),
                     _ => None,
                 });
-                let (additions, deletions) = size.unwrap_or_default();
+                let (additions, deletions) =
+                    link.map(|p| (p.additions, p.deletions)).unwrap_or_default();
                 out.push(Proof::Pr {
                     number: (*n).min(u32::MAX as u64) as u32,
                     additions: additions.unwrap_or(0).min(u32::MAX as u64) as u32,
                     deletions: deletions.unwrap_or(0).min(u32::MAX as u64) as u32,
                 });
+                // The PR's checks (`PrLink.checks`), when the link reports them.
+                if let Some(p) = link.filter(|p| !p.checks.is_empty()) {
+                    let passed = p
+                        .checks
+                        .iter()
+                        .filter(|c| c.conclusion == "success")
+                        .count();
+                    out.push(Proof::Checks {
+                        passed: passed.min(u32::MAX as usize) as u32,
+                        total: p.checks.len().min(u32::MAX as usize) as u32,
+                    });
+                }
             }
             CardV2Block::Ref {
                 label,
@@ -56,6 +69,17 @@ pub fn of_card(card: &CardV2, links: &[TopicLink]) -> Vec<Proof> {
                 artifact_id: artifact_id.clone(),
                 title: label.clone(),
                 version: version.unwrap_or(1),
+            }),
+            // 1.1: the counts the server parsed from the run's output; older cards only
+            // have the label.
+            CardV2Block::Evidence { tests: Some(t), .. } => out.push(Proof::Tests {
+                passed: t.passed.min(u32::MAX as u64) as u32,
+                failed: t.failed.min(u32::MAX as u64) as u32,
+            }),
+            CardV2Block::Evidence {
+                recording: Some(r), ..
+            } => out.push(Proof::Recording {
+                duration_ms: r.duration_ms,
             }),
             CardV2Block::Evidence { id, label, .. } if id == "tests" => {
                 if let (Some(passed), failed) = counts(label) {
@@ -110,6 +134,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_checks_of_a_linked_pr_are_proof() {
+        let card: CardV2 = serde_json::from_value(serde_json::json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "修好了", "fallback": "修好了",
+            "blocks": [{ "type": "ref", "id": "pr-1", "label": "acme/app#42",
+              "target": { "kind": "pr", "url": "https://github.com/acme/app/pull/42", "repo": "acme/app", "number": 42 } }]
+        }))
+        .expect("a done card");
+        let link = TopicLink::Pr(chat_core::proto::PrLink {
+            repo: "acme/app".into(),
+            number: 42,
+            url: "https://github.com/acme/app/pull/42".into(),
+            title: "修好了".into(),
+            state: "open".into(),
+            checks: ["success", "failure", "success"]
+                .iter()
+                .map(|c| chat_core::proto::PrCheck {
+                    name: "ci".into(),
+                    conclusion: (*c).into(),
+                })
+                .collect(),
+            additions: Some(5),
+            deletions: Some(1),
+            changed_files: Some(1),
+            merge: None,
+        });
+        assert_eq!(
+            of_card(&card, &[link]),
+            vec![
+                Proof::Pr {
+                    number: 42,
+                    additions: 5,
+                    deletions: 1
+                },
+                Proof::Checks {
+                    passed: 2,
+                    total: 3
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn a_done_card_gives_its_pr_tests_and_artifact() {
         let card: CardV2 = serde_json::from_value(serde_json::json!({
             "v": 2, "rev": 1, "intent": "done", "title": "修好了", "fallback": "修好了",
@@ -140,6 +206,32 @@ mod tests {
                     artifact_id: "a1".into(),
                     title: "报告（第 2 版）".into(),
                     version: 2
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn counts_come_from_the_evidence_tests_and_a_recording_is_proof() {
+        let card: CardV2 = serde_json::from_value(serde_json::json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "修好了", "fallback": "修好了",
+            "blocks": [
+                { "type": "evidence", "id": "tests", "label": "测试：全部通过（3 个跳过）",
+                  "tests": { "passed": 12, "failed": 1, "skipped": 3 } },
+                { "type": "evidence", "id": "rec", "label": "录屏",
+                  "recording": { "fileId": "f1", "durationMs": 42000 } }
+            ]
+        }))
+        .expect("a done card");
+        assert_eq!(
+            of_card(&card, &[]),
+            vec![
+                Proof::Tests {
+                    passed: 12,
+                    failed: 1
+                },
+                Proof::Recording {
+                    duration_ms: 42_000
                 },
             ]
         );

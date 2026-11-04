@@ -159,7 +159,7 @@ describe("files", () => {
 
   it("enforces the size limit and the creator-only upload", async () => {
     const { owner, member, groupId } = await setup();
-    const big = await createFile(owner, groupId, new Uint8Array(1), { size: 100_000_001 });
+    const big = await createFile(owner, groupId, new Uint8Array(1), { size: 2_000_000_001 });
     expect(big.status).toBe(400);
     const ok = await createFile(owner, groupId, new Uint8Array(1), { size: 100_000_000 });
     expect(ok.status).toBe(200);

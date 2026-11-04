@@ -14,11 +14,14 @@
 //! only that window with `screencapture -l <windowNumber> -o -x`, writes
 //! `<dir>/<scene>-<theme>.png` (`-worst` before `.png` with `--worst-case`)
 //! and `<dir>/screenshots.json`, closes the window and finally exits
-//! (0 = every PNG written and every ready and verify check passed, else 1).
+//! (0 = every PNG written and every ready, verify and scene check passed, else 1).
+//! A scene with checks ([`scenes::checks`]) lists the ones that passed under `checks` in
+//! its entry, or the first that failed under `error`.
 //! Scenes live in [`scenes::all`].
 
 pub mod capture;
 pub mod clock;
+pub mod drawn;
 pub mod scenes;
 pub mod worst_case;
 
@@ -165,6 +168,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
         Start::V2 => fake::v2::V2Samples::new(),
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
+        Start::V2TwoRuns => fake::v2::V2Samples::with_second_run(),
         // --- inc-refs
         Start::V2Refs => fake::v2::V2Samples::with_refs(),
         Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),
@@ -272,10 +276,14 @@ async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
             let png = options.dir.join(&file);
             let result = shoot(scene, mode, options, &png, cx).await;
             let entry = match &result {
-                Ok((number, (w, h))) => {
+                Ok((number, (w, h), checks)) => {
                     eprintln!("{file}: {w}x{h} px (window {number})");
-                    serde_json::json!({ "scene": scene.name, "theme": mode.name(), "file": file,
-                        "ok": true, "window_number": number, "width_px": w, "height_px": h })
+                    let mut entry = serde_json::json!({ "scene": scene.name, "theme": mode.name(), "file": file,
+                        "ok": true, "window_number": number, "width_px": w, "height_px": h });
+                    if let Some(checks) = checks {
+                        entry["checks"] = serde_json::json!(checks);
+                    }
+                    entry
                 }
                 Err(error) => {
                     all_ok = false;
@@ -312,8 +320,11 @@ async fn shoot(
     options: &Options,
     png: &std::path::Path,
     cx: &mut AsyncApp,
-) -> Result<(isize, (u32, u32)), String> {
+) -> Result<(isize, (u32, u32), Option<Vec<String>>), String> {
     let provider = provider(scene.start, options.worst_case);
+    drawn::start();
+    let kept: std::rc::Rc<std::cell::RefCell<Option<Services>>> = Default::default();
+    let keep = kept.clone();
     let content = options.size;
     let handle: AnyWindowHandle = cx.update(|cx| {
         // Every scene starts from an empty media store: a scene that put its own page
@@ -321,6 +332,7 @@ async fn shoot(
         // that shows that 产出, whatever the scene order.
         crate::views::media::store::clear(cx);
         let services = Services::new(provider, cx);
+        *keep.borrow_mut() = Some(services.clone());
         (scene.setup)(&services, cx);
         (scene.open)(services, content, cx)
     })?;
@@ -433,7 +445,20 @@ async fn shoot(
         if let Some(verify) = scenes::verify_check(scene.name) {
             cx.update(|cx| verify(png, cx))?;
         }
-        Ok((number, size))
+        let checks = match scenes::checks(scene.name) {
+            Some(check) => {
+                let services = kept.borrow().clone().ok_or("no services")?;
+                let lines = cx.update(|cx| check(&services, cx));
+                Some(
+                    lines
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| format!("check failed: {e}"))?,
+                )
+            }
+            None => None,
+        };
+        Ok((number, size, checks))
     }
     .await;
     let _ = cx.update(|cx| handle.update(cx, |_, window, _| window.remove_window()));

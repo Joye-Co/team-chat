@@ -19,9 +19,10 @@ import type {
   GroupSummary,
   Member,
   PostMessageRequest,
+  PutArtifactMediaResponse,
   SendResult,
 } from "@chat/protocol";
-import { MAX_FILE_BYTES } from "@chat/protocol";
+import { MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
 import { ChatError, isRetryable } from "./errors.ts";
 import { checkArtifactEvents } from "./pattern.ts";
 
@@ -259,6 +260,15 @@ export class HttpClient {
   async addArtifactVersion(artifactId: string, req: AddArtifactVersionRequest): Promise<ArtifactVersionResponse> {
     checkArtifactEvents(req.events);
     return this.request("POST", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions`, { json: req });
+  }
+  /**
+   * Attaches the media of a version with its preview after the upload
+   * (`PUT /v1/artifacts/:id/versions/:v/media`, the version's creator only).
+   */
+  async putArtifactMedia(artifactId: string, version: number, media: PutArtifactMediaRequest["media"]): Promise<PutArtifactMediaResponse> {
+    const req = PutArtifactMediaRequest.safeParse({ media });
+    if (!req.success) throw new ChatError("invalid", `bad media: ${req.error.issues[0]?.message ?? ""}`.trim());
+    return this.request("PUT", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/media`, { json: req.data });
   }
   listArtifacts(groupId: string, topicId?: string): Promise<Artifact[]> {
     const q = new URLSearchParams({ groupId });

@@ -47,6 +47,8 @@ pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+// desktop-data: cached aggregates of the 首页, 成员, 群 and 产出 pages.
+mod snapshot;
 // provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
 pub mod seeded;
 mod topic_v2;
@@ -183,6 +185,8 @@ struct Shared {
     // --- inc-refs ---
     refs: refs::RefsCache,
     // --- end inc-refs ---
+    /// Aggregates of the pages, rebuilt on a change (`provider/snapshot.rs`).
+    snapshots: snapshot::SnapshotCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -223,6 +227,7 @@ impl CoreProvider {
                 topic_v2: topic_v2::TopicV2Cache::default(),
                 page_signals: page_host::PageSignals::default(),
                 refs: refs::RefsCache::default(),
+                snapshots: snapshot::SnapshotCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -243,6 +248,7 @@ impl CoreProvider {
         if changes.is_empty() {
             return;
         }
+        self.shared.snapshots.note(&changes);
         // A pending topic id stays open in the views after its ack: name it too.
         let aliases: Vec<(String, String)> = {
             let s = self.state();
@@ -809,6 +815,11 @@ impl CoreProvider {
                 out.push(Change::Runs { group_id, topic_id });
             }
             ClientUpdate::GroupEvent(ev) => {
+                // 记一条 on any device: the 群 page fetches its decisions again.
+                if let chat_core::proto::EventData::DecisionRecorded(_) = &ev.data {
+                    self.forget_decisions(&ev.group_id);
+                    out.push(Change::Groups);
+                }
                 // --- cards v2 track ---
                 if let chat_core::proto::EventData::CardAnswered(d) = &ev.data
                     && let Some(a) = self.account()
@@ -1980,7 +1991,15 @@ impl ChatProvider for CoreProvider {
     // --- desk track (1.1.0 首页): provider/desk.rs ---
 
     fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {
-        self.desk_asks()
+        self.snapshot().asks.clone()
+    }
+
+    fn done_today(&self) -> Vec<crate::data::v2::DoneItem> {
+        self.snapshot().done_today.clone()
+    }
+
+    fn active_runs(&self) -> Vec<crate::data::BotRunSummary> {
+        self.snapshot().active_runs.clone()
     }
 
     // Card v2 reads and answers come from the cards v2 track above.
@@ -2006,8 +2025,15 @@ impl ChatProvider for CoreProvider {
         self.side_chat_inner(group_id, topic_id, member_id)
     }
 
-    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
-        self.send_side_chat_inner(group_id, topic_id, member_id, body)
+    fn send_side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+        body: String,
+        refs: Vec<crate::data::DraftRef>,
+    ) {
+        self.send_side_chat_inner(group_id, topic_id, member_id, body, refs)
     }
 
     fn post_side_chat_suggestion(
@@ -2047,6 +2073,12 @@ impl ChatProvider for CoreProvider {
     fn group_decisions(&self, group_id: &str) -> Vec<crate::data::v2::Decision> {
         self.group_decisions_inner(group_id)
     }
+    fn can_record_decision(&self, _group_id: &str) -> bool {
+        self.account().is_some()
+    }
+    fn record_decision(&self, group_id: &str, text: String) -> AdminReply<()> {
+        self.record_decision_inner(group_id, text)
+    }
 
     fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
         self.artifact_page_events_inner(artifact_id, version)
@@ -2068,6 +2100,24 @@ impl ChatProvider for CoreProvider {
 
     fn retry_member_problem(&self, member_id: &str, run_id: &str) -> AdminReply<()> {
         self.retry_member_problem_inner(member_id, run_id)
+    }
+
+    // desktop-data: the page aggregates come from one cached snapshot (provider/snapshot.rs).
+
+    fn member_stats(&self, member_id: &str) -> Option<crate::data::v2::MemberStats> {
+        self.member_stats_inner(member_id)
+    }
+
+    fn member_extras(&self, member_id: &str) -> crate::data::pages::MemberExtras {
+        self.member_extras_inner(member_id)
+    }
+
+    fn all_artifacts(&self) -> Vec<(GroupId, ArtifactSummary)> {
+        self.snapshot().artifacts.clone()
+    }
+
+    fn group_recent_done(&self, group_id: &str) -> Vec<crate::data::pages::RecentDone> {
+        self.group_recent_done_inner(group_id)
     }
 
     // --- end pages track ---
@@ -2134,7 +2184,21 @@ impl ChatProvider for CoreProvider {
         self.media_duration_inner(file)
     }
 
-    // desk_note and queue keep their empty defaults: 1.1 has no data source for them.
+    fn desk_note(&self) -> Option<crate::data::v2::DeskNote> {
+        self.desk_note_inner()
+    }
+
+    fn queue(&self) -> Vec<crate::data::v2::QueuedItem> {
+        self.queue_inner()
+    }
+
+    fn group_purpose(&self, group_id: &str) -> Option<String> {
+        self.account()?
+            .client
+            .group_purpose(group_id)
+            .ok()
+            .flatten()
+    }
 
     // --- end provider track ---
 

@@ -24,6 +24,8 @@ import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./stat
 import { EVENT_KEEP_MS, eventRow, extOf, messageRow, pruneEvents } from "./store";
 
 import "./decisions";
+import "./restore";
+import "./backfill";
 
 export {
   type CardEventDelivery,
@@ -75,19 +77,28 @@ registerRoomRpc(CARD_EVENT_RPC, (room, actor, args) => cardEvent(room, member(ro
 registerRoomRpc(CARD_ANSWER_TAKEN_RPC, (room, actor, args) => {
   const a = member(room, actor);
   // `close: false` only asks whether the answer was taken back (a run that has not taken it yet).
-  const { seq, close = true } = args as { seq: number; close?: boolean };
+  // `liveAsk`: the answer is about to start a run, which it may only while its ask still stands
+  // (not closed, expired or superseded since); otherwise the window stays as it is.
+  const { seq, close = true, liveAsk = false } = args as { seq: number; close?: boolean; liveAsk?: boolean };
   const ev = room.sql
     .exec<{ data: string; message_id: string | null }>("SELECT data, message_id FROM events WHERE seq = ? AND type = 'card.answered'", seq)
     .toArray()[0];
   if (!ev?.message_id) throw new ApiError("not_found", "answer not found");
   const author = room.sql.exec<{ author_id: string }>("SELECT author_id FROM messages WHERE id = ?", ev.message_id).toArray()[0];
   if (author?.author_id !== a.id) throw new ApiError("forbidden", "only the card's author takes its answers");
-  const answerId = (JSON.parse(ev.data) as { answerId?: string }).answerId;
+  const { answerId, askId } = JSON.parse(ev.data) as { answerId?: string; askId?: string };
   if (!answerId) return { ok: true, retracted: false };
   const row = messageRow(room.sql, ev.message_id);
-  const retracted = (row ? extOf(row).cardState?.answers ?? [] : []).some((x) => x.answerId === answerId && x.retractedAt !== undefined);
-  if (close && !retracted) closeRetractWindow(room.sql, answerId);
-  return { ok: true, retracted };
+  const state = row ? extOf(row).cardState : undefined;
+  const retracted = (state?.answers ?? []).some((x) => x.answerId === answerId && x.retractedAt !== undefined);
+  const ask = state?.ask;
+  const askOpen =
+    ask !== undefined &&
+    ask.id === askId &&
+    (ask.status === "open" || ask.status === "answered") &&
+    (ask.expiresAt === undefined || ask.expiresAt > Date.now());
+  if (close && !retracted && (!liveAsk || askOpen)) closeRetractWindow(room.sql, answerId);
+  return { ok: true, retracted, askOpen };
 });
 
 /**
@@ -230,16 +241,16 @@ const rpc = async (frame: { groupId: string }, c: { env: Parameters<typeof roomS
 registerFrameHandler<ClientFrameOf<"card.event">>("card.event", {
   rate: "write",
   handle(f, c) {
-    const { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part } = f;
-    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part });
+    const { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part, contentHash } = f;
+    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part, contentHash });
   },
 });
 
 registerFrameHandler<ClientFrameOf<"card.answer">>("card.answer", {
   rate: "write",
   handle(f, c) {
-    const { messageId, rev, actionId, inputs, editedValues, clientEventId } = f;
-    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, actionId, inputs, editedValues, clientEventId, event: "action.press" });
+    const { messageId, rev, actionId, inputs, editedValues, clientEventId, contentHash } = f;
+    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, actionId, inputs, editedValues, clientEventId, contentHash, event: "action.press" });
   },
 });
 

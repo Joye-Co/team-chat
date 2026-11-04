@@ -6,7 +6,8 @@ import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, mergePrs, prRefs } from "../proof";
-import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage } from "./core";
+import { TOPIC_LINK_RPC } from "../../integrations/links";
+import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns } from "./runs";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
@@ -33,6 +34,7 @@ export abstract class DeskEvents extends DeskRuns {
       // here first) still gives the run its usage and time.
       if (r.ended_at !== null) {
         const late = frames.find((f): f is Extract<SeqFrame, { t: "run.done" }> => f.t === "run.done");
+        if (late) this.storeSession(r, late.sessionId);
         if (late && r.usage === null && r.duration_ms === null && this.storeUsage(r, late)) await this.setStatus(r, r.status);
         return { lastSeq: top };
       }
@@ -95,6 +97,9 @@ export abstract class DeskEvents extends DeskRuns {
         case "status":
           // A stall report among real progress: the progress wins.
           break;
+        case "session":
+          this.storeSession(r, ev.sessionId);
+          break;
         case "approval.resolved":
           if (r.approval_id === ev.approvalId) {
             this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
@@ -132,6 +137,22 @@ export abstract class DeskEvents extends DeskRuns {
           if (items && this.storeAcceptance(r, items)) planChanged = true;
           break;
         }
+        case "paused":
+          // The daemon took a pause: count it (at most the pauses sent).
+          if (ev.paused === true && r.pause_seen < r.pause_gen) {
+            this.sql.exec("UPDATE runs SET pause_seen = pause_seen + 1 WHERE id = ?", r.id);
+            r.pause_seen += 1;
+          }
+          // The CLI goes on without a resume from here (for example the daemon restarted it):
+          // the run is no longer taken over. A `paused: false` from before the daemon took the
+          // latest pause (the answer to an earlier resume) is stale and keeps pausedBy.
+          if (ev.paused === false && r.paused_by && r.pause_seen >= r.pause_gen) {
+            this.sql.exec("UPDATE runs SET paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
+            r.paused_by = null;
+            r.paused_at = null;
+            planChanged = true;
+          }
+          break;
         default:
           break;
       }
@@ -255,10 +276,14 @@ export abstract class DeskEvents extends DeskRuns {
    * the room closes its retract window (INTERACT §3.6, "the member starts acting"). A room
    * without the RPC lets the answer stand.
    */
-  protected async answerStands(groupId: string, seq: number, close: boolean): Promise<boolean> {
+  protected async answerStands(groupId: string, seq: number, close: boolean, liveAsk = false): Promise<boolean> {
     try {
-      const res = unwrap(await this.room({ group_id: groupId }).rpc(groupId, CARD_ANSWER_TAKEN_RPC, this.actor(), { seq, close })) as { retracted?: boolean };
-      return res?.retracted !== true;
+      const res = unwrap(await this.room({ group_id: groupId }).rpc(groupId, CARD_ANSWER_TAKEN_RPC, this.actor(), { seq, close, liveAsk })) as {
+        retracted?: boolean;
+        askOpen?: boolean;
+      };
+      // With `liveAsk`, an answer whose ask was closed, expired or superseded starts no run.
+      return res?.retracted !== true && !(liveAsk && res?.askOpen === false);
     } catch (err) {
       this.log.warn("answer check failed", { groupId, seq, err });
       return true;
@@ -282,8 +307,17 @@ export abstract class DeskEvents extends DeskRuns {
     return true;
   }
 
+  /** Keeps the CLI session of the run for the topic's next run (resume). */
+  protected storeSession(r: RunRow, sessionId: unknown): void {
+    const sid = sessionIdOf(sessionId);
+    if (!sid || sid === r.session_id) return;
+    r.session_id = sid;
+    this.sql.exec("UPDATE runs SET session_id = ? WHERE id = ?", sid, r.id);
+  }
+
   protected async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
     this.storeUsage(r, f);
+    this.storeSession(r, f.sessionId);
     if (f.status === "succeeded") {
       const result = (f.resultText ?? "").trim() || (f.summary ?? "").trim() || TEXT.done;
       this.dropResultFromProgress(r, result);
@@ -373,6 +407,25 @@ export abstract class DeskEvents extends DeskRuns {
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
     await this.topic(r, topicStatus);
+    // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
+    // runs' turns and must not wait inside this run's turn.
+    void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+  }
+
+  /**
+   * The pull requests a result names that the topic has no link for yet become `topic.linked`
+   * (state "open" until the GitHub adapter sends the real state, checks and size).
+   */
+  protected async linkPrs(r: RunRow, proof: RunProof, body: string): Promise<void> {
+    for (const pr of prRefs(body)) {
+      if (proof.prs.some((p) => p.url === pr.url)) continue;
+      const link = { kind: "pr", repo: pr.repo, number: pr.number, url: pr.url, title: "", state: "open", checks: [] };
+      try {
+        unwrap(await this.room(r).rpc(r.group_id, TOPIC_LINK_RPC, this.actor(), { topicId: r.topic_id, link }));
+      } catch (err) {
+        this.log.warn("topic link from the result failed", { runId: r.id, err });
+      }
+    }
   }
 
   /** Posts the result once (idempotent by client message id); returns its message id. */
@@ -384,6 +437,7 @@ export abstract class DeskEvents extends DeskRuns {
         const proof = unwrap(
           await this.room(r).rpc(r.group_id, "bots.runProof", this.actor(), { topicId: r.topic_id, runId: r.id, since: r.created_at }),
         ) as RunProof;
+        await this.linkPrs(r, proof, body);
         const card = doneCard({
           runId: r.id,
           result: body,

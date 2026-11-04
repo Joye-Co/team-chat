@@ -745,6 +745,26 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
             }
             cx.refresh_windows();
         }
+        PageSignal::Resolved { event_id } => {
+            // A card event's resolution finds no page event here.
+            let h = host(cx);
+            let Some(cid) = h.by_event.remove(&event_id) else {
+                return;
+            };
+            let Some(p) = h.pending.remove(&cid) else {
+                return;
+            };
+            forget(h, &p);
+            h.bands
+                .insert((p.artifact_id.clone(), p.version), Band::Answered);
+            // An emit settled its promise at its ack; an ask ends with no answer.
+            if p.kind == PageEventKind::Ask
+                && let Some(id) = &p.reply_id
+            {
+                finish(&p.page, p.version, id, Ok(Value::Null), cx);
+            }
+            cx.refresh_windows();
+        }
         PageSignal::Data {
             artifact_id,
             version,
@@ -1559,6 +1579,32 @@ mod tests {
             reply("ev-1", cx);
             assert!(finished().is_empty());
             assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn interaction_resolved_clears_a_waiting_page_event(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            let cid = ask(PageRef::Window(ART.into()), 4, cx);
+            ack(&cid, "ev-r", ExpectMode::Live, cx);
+            assert!(host(cx).pending.contains_key(&cid));
+            // Another event's resolution leaves it waiting.
+            on_signal(
+                PageSignal::Resolved {
+                    event_id: "ev-other".into(),
+                },
+                cx,
+            );
+            assert!(host(cx).pending.contains_key(&cid));
+            on_signal(
+                PageSignal::Resolved {
+                    event_id: "ev-r".into(),
+                },
+                cx,
+            );
+            assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+            assert_eq!(finished(), vec![(json!(4), Ok(Value::Null))]);
         });
     }
 

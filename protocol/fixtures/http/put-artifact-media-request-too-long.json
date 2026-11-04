@@ -1,0 +1,17 @@
+{
+  "kind": "PutArtifactMediaRequest",
+  "valid": false,
+  "description": "longer than 4 hours",
+  "value": {
+    "media": {
+      "kind": "video",
+      "mime": "video/mp4",
+      "bytes": 48000000,
+      "width": 1920,
+      "height": 1080,
+      "duration": 18000,
+      "posterFileId": "01JC0FIL00000000000POSTER1",
+      "preview": "ready"
+    }
+  }
+}

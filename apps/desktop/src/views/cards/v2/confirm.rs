@@ -325,6 +325,7 @@ mod tests {
     #[test]
     fn the_sheet_says_verb_target_and_consequence() {
         let action = CardV2Action {
+            role: None,
             id: "ship".into(),
             label: "发布到生产".into(),
             style: Some(CardV2ActionStyle::Primary),

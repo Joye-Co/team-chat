@@ -1,0 +1,14 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 74,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0BOT000000000000000AC",
+    "type": "desk.noted",
+    "data": {
+      "text": ""
+    }
+  }
+}

@@ -24,7 +24,7 @@ use crate::{
     data::{
         BotRunSummary, GroupKind, Member, PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
-        v2::MemberStats,
+        v2::{Currency, MemberStats},
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide, MemberAvatar, Ring},
@@ -151,8 +151,9 @@ fn count_word(n: usize) -> String {
         .unwrap_or_else(|| n.to_string())
 }
 
-fn money(cents: u64) -> String {
-    fill(c::MEMBERS_MONEY, &[("v", &(cents / 100).to_string())])
+/// Cents in the currency the data has, never converted (`$0.85`, `¥6.20`).
+fn money(cents: u64, currency: Currency) -> String {
+    crate::views::topic_rail::money_text(cents, currency)
 }
 
 impl MembersPage {
@@ -759,11 +760,12 @@ impl MembersPage {
                                 .disabled(run.is_none())
                                 .on_click(move |_, _, _| {
                                     if let Some(r) = &run {
-                                        let _ = services.provider.take_over_run(
+                                        // The 实时查看 state follows the run's change event.
+                                        drop(services.provider.take_over_run(
                                             &r.group_id,
                                             &r.topic_id,
                                             &r.id,
-                                        );
+                                        ));
                                     }
                                 }),
                             )
@@ -1042,6 +1044,7 @@ impl MembersPage {
                 .into_any_element(),
             false,
         );
+        let currency = e.stats.cost_currency;
         let cost = e.stats.cost_cents_this_week.unwrap_or(0);
         let pct = e
             .extras
@@ -1058,7 +1061,7 @@ impl MembersPage {
             .children(
                 e.extras
                     .budget_cents
-                    .map(|b| fill(c::MEMBERS_LIMIT, &[("v", &money(b))])),
+                    .map(|b| fill(c::MEMBERS_LIMIT, &[("v", &money(b, currency))])),
             )
             .into_any_element();
         let bar = pct.map(|pct| {
@@ -1077,12 +1080,16 @@ impl MembersPage {
                 ))
                 .into_any_element()
         });
-        let cost_tile = tile(
-            cost_label,
-            money(cost),
-            bar.unwrap_or_else(|| div().into_any_element()),
-            false,
-        );
+        // No tile when no run reported a cost: ¥0 or $0 would be a wrong number.
+        let cost_tile = e.stats.cost_cents_this_week.map(|_| {
+            tile(
+                cost_label,
+                money(cost, currency),
+                bar.unwrap_or_else(|| div().into_any_element()),
+                false,
+            )
+        });
+        let cols = if cost_tile.is_some() { 3 } else { 2 };
         div()
             .mt(space::S20)
             .child(kit::section_head(c::MEMBERS_THIS_WEEK, None, cx))
@@ -1092,10 +1099,10 @@ impl MembersPage {
                 ui::card(cx)
                     .mt(space::S8)
                     .grid()
-                    .grid_cols(3)
+                    .grid_cols(cols)
                     .child(done)
                     .child(outputs)
-                    .child(cost_tile),
+                    .children(cost_tile),
                 cx,
             ))
             .into_any_element()
@@ -1670,6 +1677,14 @@ impl Render for MembersPage {
         let entry = selected
             .as_deref()
             .and_then(|id| entries.iter().find(|e| e.member.id == id));
+        crate::selftest::drawn::mark(
+            "members-page",
+            format!(
+                "entries={} detail={}",
+                entries.len(),
+                entry.map_or("", |e| e.member.name.as_str())
+            ),
+        );
         let (detail, aside) = match entry {
             None => (
                 stub_body(Lucide::Users, c::MEMBERS_PICK, None, cx).into_any_element(),

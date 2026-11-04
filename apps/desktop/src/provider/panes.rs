@@ -52,6 +52,9 @@ pub(super) struct PanesCache {
     inner: Mutex<Inner>,
 }
 
+/// One of my first questions in a side chat, not in the cache yet: (clientMsgId, body, at).
+type FirstQuestion = (String, String, Millis);
+
 #[derive(Default)]
 struct Inner {
     generation: u64,
@@ -61,7 +64,7 @@ struct Inner {
     machines_at: Option<Instant>,
     machines_loading: bool,
     /// (group, topic, member) -> my first questions not in the cache yet: (clientMsgId, body, at).
-    pending: HashMap<(String, String, String), Vec<(String, String, Millis)>>,
+    pending: HashMap<(String, String, String), Vec<FirstQuestion>>,
     /// Side chat message id -> when I pressed its suggestion, until the post shows in the
     /// source topic (which keeps it across restarts).
     posted: HashMap<String, Millis>,
@@ -268,6 +271,21 @@ fn side_message(
     }
 }
 
+/// When the answer `answer_id` went into the source topic: the message whose `fromAside`
+/// names it, else (messages from before 1.1 `fromAside`) my first one with the same text.
+fn posted_state(
+    answer_id: &str,
+    text: &str,
+    answer_at: Millis,
+    by_origin: &std::collections::HashMap<String, Millis>,
+    mine: &[(String, Millis)],
+) -> Option<Millis> {
+    by_origin
+        .get(answer_id)
+        .copied()
+        .or_else(|| posted_at(text, answer_at, mine))
+}
+
 /// When a suggestion went into the source topic: my first message there with the same text
 /// at or after the answer (`mine` = my messages and queued sends there: body, time).
 fn posted_at(text: &str, answer_at: Millis, mine: &[(String, Millis)]) -> Option<Millis> {
@@ -336,26 +354,44 @@ impl CoreProvider {
             .filter(|m| m.deleted_at.flatten().is_none())
             .map(|m| side_message(m, &links, &title))
             .collect();
-        // A posted suggestion is my message in the source topic: read it from there, so a
-        // restart never offers it again.
+        // A posted suggestion is a message in the source topic whose `fromAside` names the
+        // answer (1.1, GAPS SF-4): read it from there, so a restart never offers it again.
+        // Messages from before `fromAside` fall back to my message with the same text.
         if messages.iter().any(|m| m.suggestion.is_some()) {
             let me = a.me.id.as_str();
-            let mut mine: Vec<(String, Millis)> = a
+            let source_msgs = a
                 .client
                 .messages(&source, None, POSTED_SCAN)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|m| m.author_id == me && !m.is_deleted())
-                .map(|m| (m.body, m.created_at as Millis))
-                .collect();
+                .unwrap_or_default();
+            let mut by_origin: std::collections::HashMap<String, Millis> = Default::default();
+            let mut mine: Vec<(String, Millis)> = Vec::new();
+            for m in source_msgs.into_iter().filter(|m| !m.is_deleted()) {
+                if let Some(o) = &m.from_aside {
+                    by_origin
+                        .entry(o.message_id.clone())
+                        .or_insert(m.created_at as Millis);
+                } else if m.author_id == me {
+                    mine.push((m.body, m.created_at as Millis));
+                }
+            }
             for item in a.client.pending_sends(&source).unwrap_or_default() {
-                if let chat_core::store::OutboxOp::Send { body, .. } = item.op {
-                    mine.push((body, item.created_at as Millis));
+                if let chat_core::store::OutboxOp::Send {
+                    body, from_aside, ..
+                } = item.op
+                {
+                    match from_aside {
+                        Some(o) => {
+                            by_origin
+                                .entry(o.message_id)
+                                .or_insert(item.created_at as Millis);
+                        }
+                        None => mine.push((body, item.created_at as Millis)),
+                    }
                 }
             }
             for m in &mut messages {
                 if let Some(s) = &mut m.suggestion {
-                    s.posted_at = posted_at(&s.text, m.at, &mine);
+                    s.posted_at = posted_state(&m.id, &s.text, m.at, &by_origin, &mine);
                 }
             }
         }
@@ -392,11 +428,28 @@ impl CoreProvider {
                 if known.contains(item.id.as_str()) {
                     continue;
                 }
-                if let chat_core::store::OutboxOp::Send { body, .. } = &item.op {
+                if let chat_core::store::OutboxOp::Send {
+                    body, block_refs, ..
+                } = &item.op
+                {
+                    // The quote lines the server writes for the chips (as the posted message shows).
+                    let body = match block_refs.as_deref() {
+                        Some(r) if !r.is_empty() => {
+                            let p = chat_core::proto::block_ref_prefix(
+                                r.iter().map(|x| x.label.as_str()),
+                            );
+                            if body.is_empty() {
+                                p
+                            } else {
+                                format!("{p}\n\n{body}")
+                            }
+                        }
+                        _ => body.clone(),
+                    };
                     thread.messages.push(SideChatMessage {
                         id: item.id.clone(),
                         author_id: me.clone(),
-                        body: body.clone(),
+                        body,
                         at: item.created_at as Millis,
                         refs: Vec::new(),
                         sources: Vec::new(),
@@ -415,14 +468,25 @@ impl CoreProvider {
         topic_id: &str,
         member_id: &str,
         body: String,
+        refs: Vec<crate::data::DraftRef>,
     ) {
         let body = body.trim().to_string();
         let Some(a) = self.account() else {
             return;
         };
-        if body.is_empty() {
+        if body.is_empty() && refs.is_empty() {
             return;
         }
+        // The chips point into the 话题's 群 from the member's DM (`sourceGroupId`).
+        let shown = crate::views::refs::side_chat_body(&body, &refs);
+        let block_refs: Vec<_> = refs
+            .into_iter()
+            .map(|r| chat_core::proto::BlockRefInput {
+                source_group_id: Some(r.group_id),
+                ..r.input
+            })
+            .collect();
+        let block_refs = (!block_refs.is_empty()).then_some(block_refs);
         let source = self.resolve_topic(topic_id);
         let upto = self.latest_seq(&source);
         let change = vec![Change::Messages {
@@ -430,7 +494,10 @@ impl CoreProvider {
             topic_id: topic_id.to_string(),
         }];
         if let Some(side) = self.side_topic(group_id, &source, member_id) {
-            if let Err(e) = a.client.reply_in_side_chat(&side, &body, Some(upto)) {
+            if let Err(e) = a
+                .client
+                .reply_in_side_chat(&side, &body, Some(upto), block_refs)
+            {
                 tracing::warn!(error = %e, "cannot reply in a side chat");
             }
             self.emit(change);
@@ -445,8 +512,9 @@ impl CoreProvider {
                 topic_id: source,
                 upto_seq: upto,
             },
-            body: body.clone(),
+            body,
             title: None,
+            block_refs,
         });
         let this = self.clone();
         let at = now_ms();
@@ -462,7 +530,7 @@ impl CoreProvider {
                         .pending
                         .entry(key)
                         .or_default()
-                        .push((started.client_msg_id, body, at));
+                        .push((started.client_msg_id, shown, at));
                 }
                 Err(e) => tracing::warn!(error = %e, "cannot start a side chat"),
             }
@@ -493,6 +561,37 @@ impl CoreProvider {
             .for_generation(generation)
             .posted
             .insert(message_id.to_string(), now_ms());
+        let source = self.resolve_topic(topic_id);
+        let origin = self
+            .side_topic(group_id, &source, member_id)
+            .and_then(|side| {
+                let dm = self.account()?.client.dm_with(member_id).ok().flatten()?;
+                Some(chat_core::proto::AsideOrigin {
+                    group_id: dm,
+                    topic_id: side,
+                    message_id: message_id.to_string(),
+                })
+            });
+        // The source topic exists on the server (a side chat needs its id): send with
+        // `fromAside`, so the server stores where it came from and refuses a second post.
+        if let (Some(origin), Some(a)) = (origin, self.account())
+            && super::convert::pending_cid(&source).is_none()
+        {
+            if let Err(e) = a.client.send(chat_core::SendRequest {
+                group_id: group_id.to_string(),
+                topic_id: Some(source),
+                body: text,
+                from_aside: Some(origin),
+                ..Default::default()
+            }) {
+                tracing::warn!(error = %e, "post to topic refused");
+            }
+            self.emit(vec![crate::data::Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+            return;
+        }
         use crate::data::ChatProvider as _;
         self.send(SendRequest {
             group_id: group_id.to_string(),
@@ -638,17 +737,51 @@ impl CoreProvider {
         let Some(run) = a.client.store().run(run_id).ok().flatten() else {
             return Vec::new();
         };
-        run.acceptance
-            .unwrap_or_default()
+        use crate::data::ChatProvider as _;
+        let items = run.acceptance.unwrap_or_default();
+        // Files of the 话题, read once when an item points at one.
+        let wants_files = items
+            .iter()
+            .any(|i| i.evidence.as_ref().is_some_and(|e| e.file_id.is_some()));
+        let files = if wants_files {
+            self.topic_files(&run.group_id, &run.topic_id)
+        } else {
+            Vec::new()
+        };
+        items
             .into_iter()
-            .map(|i| AcceptanceItem {
-                text: i.text,
-                met: match i.state {
-                    AcceptanceState::Pass => Some(true),
-                    AcceptanceState::Fail => Some(false),
-                    _ => None,
-                },
-                evidence: i.evidence.and_then(|e| e.text),
+            .map(|i| {
+                let evidence = i.evidence.unwrap_or_default();
+                let evidence_file = evidence.file_id.as_ref().and_then(|id| {
+                    files
+                        .iter()
+                        .find(|f| &f.file.file_id == id)
+                        .map(|f| f.file.clone())
+                });
+                let evidence_artifact = evidence.artifact.as_ref().map(|r| {
+                    let title = a
+                        .client
+                        .artifact(&r.artifact_id)
+                        .ok()
+                        .flatten()
+                        .map(|row| row.artifact.title)
+                        .unwrap_or_default();
+                    (r.artifact_id.clone(), r.version, title)
+                });
+                AcceptanceItem {
+                    text: i.text,
+                    met: match i.state {
+                        AcceptanceState::Pass => Some(true),
+                        AcceptanceState::Fail => Some(false),
+                        _ => None,
+                    },
+                    evidence: evidence.text,
+                    evidence_file,
+                    evidence_url: evidence
+                        .url
+                        .filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+                    evidence_artifact,
+                }
             })
             .collect()
     }
@@ -718,5 +851,21 @@ mod tests {
         assert_eq!(posted_at("让 Forge 补一个多端测试", 100, &mine), Some(300));
         assert_eq!(posted_at("让 Forge 补一个多端测试", 400, &mine), None);
         assert_eq!(posted_at("另一个建议", 0, &mine), None);
+    }
+
+    #[test]
+    fn a_suggestion_is_posted_when_a_message_names_its_answer_also_after_an_edit() {
+        // After a restart: the posted message was edited, so its text no longer matches; its
+        // `fromAside` still names the answer (GAPS SF-4), and only that answer.
+        let by_origin = std::collections::HashMap::from([("A1".to_string(), 120)]);
+        let mine = vec![("改过的文字".to_string(), 120)];
+        assert_eq!(
+            posted_state("A1", "建议：重连后补发", 100, &by_origin, &mine),
+            Some(120)
+        );
+        assert_eq!(
+            posted_state("A2", "建议：重连后补发", 100, &by_origin, &mine),
+            None
+        );
     }
 }

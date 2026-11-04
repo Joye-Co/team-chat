@@ -1,3 +1,7 @@
+//! Retired 1.0 view: the 1.1 shell draws the rail (`views/rail`) instead. `RootView` still
+//! builds it for the nav self-test, and other views share its helpers (`topic_display_title`,
+//! `topic_line`, the scroll-edge fades). Section numbers below are DESIGN v2.2's.
+//!
 //! The left sidebar (DESIGN.md §7.7): the 52 pt band with the traffic
 //! lights, one search field that opens the quick switcher, then three
 //! sections: 待办 (two-line rows, at most five), 群 (a `#` glyph per row) and

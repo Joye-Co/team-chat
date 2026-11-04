@@ -39,6 +39,7 @@ Group = {
   memberIds: string[]
   createdBy: string
   createdAt: number
+  purpose?: string             // 1.1: the purpose line under the name (1..200; absent = none)
 }
 
 GroupSummary = {
@@ -91,7 +92,7 @@ Event = { seq: number, groupId: string, at: number, actorId: string } & (
   | { type: "message.created",     data: { message: Message } }
   | { type: "message.updated",     data: { messageId: string, body: string, editedAt: number, streaming: boolean } }
   | { type: "message.deleted",     data: { messageId: string, deletedAt: number } }
-  | { type: "group.updated",       data: { name: string } }
+  | { type: "group.updated",       data: { name: string, purpose?: string /* 1.1: set when it changed, "" = cleared */ } }
   | { type: "group.memberAdded",   data: { memberId: string } }
   | { type: "group.memberRemoved", data: { memberId: string } }
 )
@@ -148,7 +149,7 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
 { t: "event", event: Event }
 { t: "transient", event: TransientEvent }
 { t: "ack", rid, ok: true, result?: unknown }
-{ t: "ack", rid, ok: false, error: { code: ErrorCode, message: string } }
+{ t: "ack", rid, ok: false, error: { code: ErrorCode, message: string, reason?, retryAfterMs? /* 1.1 */ } }
 { t: "page", rid, groupId, events: Event[], hasMore: boolean, lastSeq: number }
 { t: "history", rid, groupId, topicId, messages: Message[], hasMore: boolean }
 { t: "directory", members?: Member[], groups?: GroupSummary[], removedGroupIds?: string[] }
@@ -158,6 +159,14 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
 ErrorCode = "unauthorized" | "forbidden" | "not_found" | "invalid" | "conflict"
           | "rate_limited" | "too_large" | "unsupported_protocol" | "internal"
 ```
+
+- Frame limits per member (all its sockets together): write frames (`send`, `edit`, `delete`,
+  `topic.update` and feature writes such as `card.*` and `artifact.*`) about 20 per second with
+  bursts of 20; `delta` 100 per second, bursts of 200; reads (`read`, `fetch`, `history`,
+  `typing`, `search`) 50 per second, bursts of 100. Over a limit the ack is `rate_limited` with
+  `error.retryAfterMs` (1.1): the time until the next frame of that class fits. A rate-limited
+  frame gets no write number, so later writes of the socket do not wait for it. Clients pace
+  writes below the limit (the bot SDK sends at most 18 per second by default, `writeRate`).
 
 ### Rules
 
@@ -342,6 +351,8 @@ Rules:
   the same group and not deleted. The server fills `authorId` and `excerpt` (the first 200 code
   points of the quoted body, or of the card title).
 - `attachments`: each `fileId` must be a `ready` file of the same group (`invalid` otherwise).
+  1.1: `source?: { artifactId, version, t /* seconds >= 0 */ }` says the file is a frame of
+  that 产出 version (把这一帧发到话题); the version must be one of the same group (`invalid`).
   The server stores its own record for name, size, mime, width, height and sha256 and ignores the
   client's values for those fields.
 - `artifactRefs`: each must name an existing 产出 of the same group and an existing version.
@@ -443,6 +454,8 @@ file's group.
 | --- | --- | --- |
 | `POST /v1/files` | `CreateFileRequest { groupId, topicId?, name, size, mime, sha256, width?, height? }` | `CreateFileResponse { file: FileMeta, uploadUrl }` |
 | `PUT /v1/files/:id/content` | raw bytes | `FileMeta` with `status: "ready"` |
+| `PUT /v1/files/:id/parts/:n` (1.1) | raw bytes of part `n` | `UploadPartResponse { part, size }` |
+| `POST /v1/files/:id/complete` (1.1) | | `FileMeta` with `status: "ready"` |
 | `GET /v1/files/:id` | | `FileMeta` |
 | `GET /v1/files/:id/content` | | the bytes; supports `Range` (206) |
 | `PUT /v1/members/:id/avatar` | raw image bytes | `Member` (new `avatarUrl`) |
@@ -455,8 +468,19 @@ FileMeta = { id, groupId, topicId?: string | null, name, size, mime, sha256, wid
 
 Rules:
 
-- `size` is at most 100,000,000 bytes (100 MB; the Workers request body limit, so not 100 MiB).
-  `mime` is `type/subtype`. `width`/`height` are pixels, for images only.
+- `size` is at most 2,000,000,000 bytes (`MAX_UPLOAD_BYTES`, 2 GB; 1.0 servers: 100 MB). A larger
+  file is refused at `POST /v1/files` (`invalid`), before any byte is sent. One `PUT` of the
+  content carries at most 100,000,000 bytes (`MAX_FILE_BYTES`, the Workers request body limit, so
+  not 100 MiB). `mime` is `type/subtype`. `width`/`height` are pixels, for images only.
+- 1.1 multipart: for a file over `MAX_FILE_BYTES`, `CreateFileResponse.multipart = { partBytes,
+  parts, partUrl, completeUrl }` (`partBytes` = 52,428,800, `UPLOAD_PART_BYTES`). The creator
+  sends `PUT <partUrl>/<n>` for every `n` in 1..`parts`, each exactly `partBytes` bytes (the last
+  part the rest), in any order, again after a failure (the newest copy of a part wins). Then
+  `POST <completeUrl>`: `invalid` with `parts missing: <k> of <parts>` until every part is in; the
+  server joins the parts and checks the SHA-256 of the whole file; on a mismatch it drops the
+  parts, the file stays `pending` and the client sends every part again. `PUT …/content` on such
+  a file is `too_large`, and parts on a small file are `invalid`. A `pending` multipart file is
+  also deleted after 24 hours.
 - `uploadUrl` is the absolute URL of `PUT /v1/files/:id/content`; send it with the same bearer
   token. Only the file's creator may upload, once (`conflict` when already `ready`). The server
   checks that the body length equals `size` and its SHA-256 equals `sha256` (`invalid`
@@ -512,7 +536,7 @@ Module: `members.ts` / `members.rs`.
 | --- | --- | --- | --- |
 | `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated?, character?: CharacterId \| null }` | `Member` |
 | `PATCH /v1/groups/:id/prefs` | group member, for self | `UpdateGroupPrefsRequest { muted?, notify? }` | `GroupSummary` |
-| `PATCH /v1/groups/:id` | group member, or an owner | `UpdateGroupRequest { name }` | `GroupSummary` |
+| `PATCH /v1/groups/:id` | group member, or an owner | `UpdateGroupRequest { name?, purpose? }` (at least one) | `GroupSummary` |
 
 ```ts
 NotifyLevel = "all" | "mentions" | "none"
@@ -540,6 +564,16 @@ Rules:
   appends `group.updated { name }` to the group log, so every client's cache and sidebar
   update; the same name again (after normalizing) appends nothing. An owner outside the group
   gets a `GroupSummary` with `readSeq`, `unread` and `mentions` 0.
+- Whitespace is Unicode White_Space (`normalizeGroupText` / `normalize_group_text`: U+0009–000D,
+  U+0020, U+0085, U+00A0, U+1680, U+2000–200A, U+2028, U+2029, U+202F, U+205F, U+3000), the same
+  on both sides.
+- 1.1 purpose line: `purpose` is normalized like a name and may be 0..200 characters; `""`
+  clears it. Same rights as a rename; audited as `group.purpose` (`{chars}`); the event carries
+  `name` and the new `purpose`. A rename alone sends `group.updated { name }`.
+- Order: the room appends the event first; D1 then takes the room's name and purpose only when
+  the seq of the room's newest `group.updated` event is newer than the one D1 holds
+  (`groups.update_seq`). Concurrent changes end with D1 equal to the newest event of the log; a
+  retry after a lost D1 write writes D1 again without a new event.
 - Prefs are per member. The server pushes the new `GroupSummary` to my other connections as a
   `directory` frame.
 
@@ -655,7 +689,8 @@ Rules:
   with a new key starts a topic titled `title`, later posts go to that topic; keys are per hook);
   else the hook's `topicId`; else a new topic. `clientMsgId` dedupes per hook as for `send`.
 - `/github` handles `pull_request`, `pull_request_review`, `check_suite`, `workflow_run` and
-  `ping`; others answer `{ ok: true }` and are dropped. One topic per pull request with topic key
+  `ping`. `check_run` is not a CI source (its checks are in `check_suite` and `workflow_run`); it
+  and every other event answer `{ ok: true }` and are dropped. One topic per pull request with topic key
   `github:<owner>/<repo>#<number>`; CI results go to the topic of the pull request of their head
   commit, else to `github:<owner>/<repo>@<branch>`. Posts are card messages.
 - `POST /v1/groups/:id/messages` runs exactly the `send` path (same checks, idempotency and
@@ -695,9 +730,12 @@ bot) turns @mentions into runs and run progress into topic messages.
 RunStatus = "created" | "running" | "waiting" | "blocked" | "done" | "failed" | "cancelled"
 BotRun = { id, botId, groupId, topicId, machineId?, status: RunStatus, requestedBy?,
            createdAt, startedAt?, endedAt?, updatedAt, summary? /* <= 280 */,
-           plan?: RunPlanItem[] /* the latest plan; absent = none */ }
+           plan?: RunPlanItem[] /* the latest plan; absent = none */,
+           queuedAt?, queuePosition? /* 1.1, 排队 */ }
 RunPlanState = "done" | "current" | "waiting" | "pending"
-RunPlanItem = { text /* 1..200 code points */, state: RunPlanState }
+RunPlanItem = { text /* 1..200 code points */, state: RunPlanState,
+                startedAt? /* 1.1, ms: became current */, endedAt? /* 1.1, ms: became done */,
+                estimateMs? /* 1.1: the bot's estimate */ }
 RunPlan = RunPlanItem[]                    // in order, at most 30 items
 StartRunRequest = { groupId, topicId, plan?: RunPlan }
 SetRunPlanRequest = { plan: RunPlan }      // replaces the whole plan; [] clears it
@@ -763,6 +801,14 @@ Rules:
   10 minutes (the daemon's own `status: stalled` report marks it blocked at once and does not
   count as progress). A blocked run that sends events again goes back to `running`. A run that
   never reaches a machine ends as `failed` after 2 minutes.
+- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), the run
+  waits instead of failing: it stays `created` with no `machineId` and gets `queuedAt` and
+  `queuePosition` (1-based among the bot's queued runs, oldest first), stored with `run.updated`.
+  When a run of the bot ends, and every 15 s, the oldest queued run gets a free machine; the
+  runs behind it get a `run.updated` with their new place. A queued run is not failed by the
+  2-minute rule; it fails with the "no free machine" note after 60 minutes. With no machine
+  that could ever take it (labels, runtime, health), the run fails at once as before. Readers:
+  "created with no `machineId`" and `queuedAt` = 排队 at `queuePosition`.
 - Input left over when a run ends starts a follow-up run, at most 5 in a row; then the bot
   posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the
   machine gets `run.cancel`, the run ends as `cancelled` at once, the bot posts one note and the
@@ -827,6 +873,7 @@ CardV2 = {
   v: 2
   rev: number                       // 1..4294967295; every edit sends a higher rev
   intent: "ask" | "done" | "working" | "info"
+  status?: "executing" | "failed"   // 1.1: the author's work state (蓝 处理中, 红 失败); absent = follow intent
   title: string                     // 1..200
   fallback: string                  // <= 4000, plain text: old clients, notifications, search
   ask?: {
@@ -856,7 +903,9 @@ CardV2Block =
       x?: string[] /* <= 200, each <= 40 */, series: { name, values: number[] /* <= 200 */ }[] /* 1..5 */ }
   | { type: "diff", id, path? /* <= 1024 */, text /* unified diff <= 32768 */, additions?, deletions? }
   | { type: "evidence", id, label /* 1..200 */, state?: "pass" | "fail" | "info", detail? /* <= 1000 */,
-      fileId?, url?, artifact?: ArtifactRef }
+      fileId?, url?, artifact?: ArtifactRef,
+      tests?: { passed, failed, skipped? } /* 1.1: counts from the run's output; read these, not the label */,
+      recording?: { fileId, durationMs, posterFileId? } /* 1.1: 录屏, files of the same group */ }
   | { type: "ref", id, label /* 1..200 */, target: RefTarget }
   | { type: "group", id, label?, blocks: CardV2Block[] /* 1..20, no group inside */ }
 RefTarget =
@@ -867,7 +916,11 @@ RefTarget =
   | { kind: "url", url }                          // http or https, <= 2048
 CardV2Action = { id, label /* 1..40 */, style?: "primary" | "default" | "danger",
                  kind?: "submit" | "cancel" | "link" /* absent = submit */,
-                 target?: RefTarget /* exactly for link */, confirm?: { title /* 1..200 */, body? /* <= 1000 */ } }
+                 target?: RefTarget /* exactly for link */, confirm?: { title /* 1..200 */, body? /* <= 1000 */ },
+                 role?: string /* 1.1, 1..32, open text */ }
+// role "approve" (ACTION_ROLE_APPROVE): the action of a review ask that approves the change
+// (merge). Clients show 合并中 after that answer only while the PR link's `merge` has no
+// `error`; they never guess the approve action from its id or label. Unknown roles mean nothing.
 
 Message += { cardV2?: CardV2 }
 { t: "send", ..., cardV2?: CardV2 }            // makes a card message
@@ -923,17 +976,24 @@ Rules:
 
 | Method and path | Who | Response |
 | --- | --- | --- |
-| `GET /v1/groups/:id/decisions?beforeSeq=&limit=` | group member | `DecisionsResponse { decisions: GroupDecision[], hasMore }`, newest first; `limit` 1..200, default 50; `beforeSeq` = only answers with a lower seq |
+| `GET /v1/groups/:id/decisions?beforeSeq=&limit=` | group member | `DecisionsResponse { decisions: GroupDecision[], hasMore, recorded?: RecordedDecision[] }`, newest first; `limit` 1..200, default 50; `beforeSeq` = only answers with a lower seq; `recorded` (1.1) holds up to `limit` decisions recorded by hand, and `hasMore` is true when either list has more |
+| `POST /v1/groups/:id/decisions` | group member | 1.1, 记一条: `RecordDecisionRequest { text /* 1..1000, not blank, trimmed */, topicId? }` → `RecordDecisionResponse { decision: RecordedDecision }`; `not_found` for an unknown topic |
 
 ```ts
 GroupDecision = { seq /* of card.answered */, messageId, topicId, rev, title, actionId,
                   actionLabel, choices?: string[], inputs?, editedValues?, answeredBy, answeredAt }
+RecordedDecision = { id, seq /* of decision.recorded */, topicId: string | null, text, recordedBy, recordedAt }
+event decision.recorded (stored, 1.1) data: { decision: RecordedDecision }   // actorId = recordedBy
 ```
+
+A decision recorded by hand is in the group log, so the archive and a restore keep it; 1.0.x
+clients skip the event type.
 
 A deleted card's decisions are not listed, nor the decisions of a private card (a non-public
 poll, an anonymous questionnaire; see "Private answers").
 - Readers are lenient: unknown block types, intents, kinds and styles read as unknown (Rust
-  `Unknown`, rendered as nothing or the safe default), and a `cardV2` that does not parse is
+  `Unknown`, rendered as nothing or the safe default; 1.1: an unknown block keeps its `type`,
+  `id` and `fallbackText` in `CardV2::unknown`, and the client shows the fallback box with it), and a `cardV2` that does not parse is
   dropped while the v1 `card` stays. The server rejects all of these on write.
 
 ## Side chats
@@ -947,6 +1007,9 @@ TopicContext = { groupId, topicId, uptoSeq }   // the topic, read up to this seq
 Topic += { contextOf?: TopicContext }          // set on a side chat topic
 { t: "send", ..., context?: TopicContext }     // in a DM with a bot only
 topic.updated data += { contextOf? }           // the context moved on
+AsideOrigin = { groupId /* the DM */, topicId /* the side chat */, messageId /* the answer */ }
+{ t: "send", ..., fromAside?: AsideOrigin }     // 1.1: post a side chat answer to its topic
+Message += { fromAside?: AsideOrigin }
 ```
 
 Rules:
@@ -962,8 +1025,31 @@ Rules:
   `aside`; with none it ends `failed` with one note. It sets no status on the side chat topic.
   Its answers stay in the DM. Nothing is posted to the source topic: a
   "post to topic" button on the client sends a normal message by the person.
+- 1.1: that message carries `fromAside`. The server checks that the sender is a member of
+  `fromAside.groupId`, that its `topicId` is a side chat whose `contextOf` is the send's group
+  and topic (`invalid`, reason `aside.bad_origin`; a send without `topicId` too), and that the
+  answer message is in it (`not_found`). It stores `fromAside` on the message, so every client
+  shows the answer as posted after a restart. A second message with the same
+  `fromAside.messageId` in the topic is refused (`conflict`, reason `aside.already_posted`);
+  a resend with the same `clientMsgId` is a duplicate as usual.
 - Clients list the side chats of a topic by `contextOf` and hide side chat topics from the DM's
   normal topic list.
+
+## Desk notes
+
+Module: `desk.ts` / `desk.rs` (1.1). A desk note is a bot member's one-line priority for the
+首页 desk ("今天先把 1.1 发出去"). It is kept in the group log, so every client syncs it.
+
+```ts
+PUT /v1/desk-note  PutDeskNoteRequest { groupId, text /* trimmed: 0..140 code points, "" clears */ }
+                   -> PutDeskNoteResponse { seq: number | null /* null: same text, nothing stored */ }
+desk.noted (stored event) data: { text }       // actorId = the bot
+GET /v1/groups/:id/desk-notes -> DeskNotesResponse { notes: { memberId, text, at, seq }[] /* newest first */ }
+```
+
+Rules: only a bot member of the group sets its own note (`forbidden` for people, `not_found`
+outside the group). The text is normalized like a group name. Readers keep the newest
+`desk.noted` per bot and group; `""` removes it. 1.0.x clients skip the event.
 
 ## Run fields, pause and resume
 
@@ -977,6 +1063,7 @@ BotRun += {
   acceptance?: AcceptanceItem[]                     // at most 20; replaced as a whole
   pausedBy?: string                                 // present while paused (接管): who
   kind?: string                                     // "aside" = side chat run; absent = normal
+  retryOf?: string                                  // the run this one retries
 }
 AcceptanceItem = { text /* 1..500 */, state: "pending" | "pass" | "fail",
                    evidence?: { text? /* <= 1000 */, fileId?, url?, artifact?: ArtifactRef } }
@@ -990,17 +1077,20 @@ Machine += { features?: string[], takeoverUrl?: string }
 | `POST /v1/runs/:id/pause` | the run's requester or an owner | | `BotRun` with `pausedBy`; `conflict` when the run ended, is paused, or its machine lacks feature `pause`; audited as `run.pause` |
 | `POST /v1/runs/:id/resume` | the run's requester or an owner | `ResumeRunRequest` | `BotRun` without `pausedBy`; `conflict` when not paused; audited as `run.resume` |
 | `PUT /v1/runs/:id/acceptance` | the run's bot | `SetRunAcceptanceRequest` | `BotRun`; `conflict` when the run ended; an equal list stores nothing |
+| `POST /v1/runs/:id/retry` | the run's requester or an owner (people) | | the new `BotRun` with `retryOf`: the same request (author, text, follow-ups) as a new run of the same runner member in the same topic; `conflict` when the run is still active, was started with `POST /v1/runs`, the topic has an active run, or the member cannot take runs; audited as `run.retry` |
 
 Rules:
 
 - The done card of a run (output contract): `intent: "done"`, `title` = the result's first
   line, `fallback` and `body` = the result, `data.runId` = the run, and blocks in this order: a
   `text` block `result`; an `evidence` block `tests` when the result reports test counts
-  (`12 passed`, `3 failed`, `12 pass`); one `evidence` block `acceptance-N` per acceptance item
+  (`12 passed`, `3 failed`, `12 pass`, `2 skipped`), with the counts in `tests`; one `evidence` block `acceptance-N` per acceptance item
   (`pending` = `info`); one `ref` block `pr-N` per pull request (the topic's `topic.linked`
   links, then GitHub pull request URLs in the result; at most 5); one `ref` block `artifact-N`
   per 产出 the run made (versions with its `runId`, or by the bot in the topic since the run
-  started; the newest version each; at most 10). A card that does not fit the Card v2 limits
+  started; the newest version each; at most 10). A GitHub pull request URL in the result that
+  the topic has no link for yet becomes a `topic.linked` (state `open`, no checks) before the
+  card is posted; the GitHub adapter later replaces it with the real state. A card that does not fit the Card v2 limits
   falls back to a text message. Its v1 `card` is the derived one without the fallback text
   block and the `result` block (the message body holds the result, and 1.0.x draws the body).
   Side chat runs answer with a text message.
@@ -1021,11 +1111,14 @@ Rules:
 Module: `files.ts` / `files.rs`.
 
 ```ts
-ArtifactVersion += { runId?: string, events?: ArtifactEventDecl[] /* <= 20 */, media?: MediaInfo, dataRev?: number }
+ArtifactVersion += { runId?: string, events?: ArtifactEventDecl[] /* <= 20 */, media?: MediaInfo, dataRev?: number,
+                     preview?: ArtifactPreview }
+ArtifactPreview = { title? /* 1..200 */, summary? /* 1..500 */,
+                    metrics?: { label /* 1..40 */, value /* 1..40 */, delta? /* 1..40 */ }[] /* <= 6 */ }
 ArtifactEventDecl = { name /* 1..128; writes: [a-z][A-Za-z0-9_.-]{0,63}, unique */, label? /* <= 200 */,
                       kind?: "emit" | "ask" /* default emit */, schema?: TcSchema }
-CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */ }
-AddArtifactVersionRequest += { events?, runId?, media?, data? }
+CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */, preview? }
+AddArtifactVersionRequest += { events?, runId?, media?, data?, preview? }
 { t: "artifact.event", rid, groupId, artifactId, version, clientEventId?, name, kind?, payload?: JSON /* <= 16 KiB */ }
    // ack.result (1.1 server) = ArtifactEventAck { eventId, duplicate?, expect: Expect }
 ```
@@ -1034,8 +1127,23 @@ Page events are **not stored** in the group log (they are transient and audited;
 pre-release type `artifact.evented` is gone). The bridge frames, transients and data routes are
 in [Interaction loop](#interaction-loop-tccard21).
 
+The group room keeps a **page log** of each 产出 (页面里的回应) for 180 days, so every computer of
+every member sees it after a restart:
+
+```ts
+GET /v1/artifacts/:id/events?before=<eventId>&limit=<1..200, default 100>
+  -> ArtifactEventsResponse { events: ArtifactPageEvent[] /* newest first */, hasMore }
+ArtifactPageEvent = { eventId, artifactId, version, name, kind: "emit" | "ask", payload?: JSON,
+                      actorId, at, replied?: true }
+```
+
+Any member of the 产出's group may read it (`not_found` otherwise). `payload` is missing on
+events stored before the page log kept payloads.
+
 Rules:
 
+- `preview` (any author) is the text and figures of the version's preview card. Readers use it
+  first and scrape the HTML only when a version has none.
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
 - `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum
@@ -1062,7 +1170,8 @@ Module: `links.ts` / `links.rs`.
 TopicLink = { kind: "pr", repo /* owner/name */, number, url, title /* <= 500 */,
               state /* plain text: open | draft | merged | closed */,
               checks: { name /* 1..200 */, conclusion /* 1..32, "pending" while it runs */ }[] /* <= 100 */,
-              additions?, deletions?, changedFiles? }
+              additions?, deletions?, changedFiles?,
+              merge?: { queuedAt, error? /* 1..200 */ } /* 1.1 */ }
 topic.linked (stored event) data: { topicId, link: TopicLink }   // actorId = the integration's bot
 ```
 
@@ -1072,6 +1181,11 @@ Rules:
   (`Topic: <id>` in its body) whenever its state, checks or size change. A link with the same
   `kind` and `url` replaces the older one; clients keep the newest per key.
 - Readers skip a `kind` they do not know (Rust `TopicLink::Unknown`).
+- 1.1 `merge`: the pull request waits to merge. GitHub `pull_request` actions `enqueued` (merge
+  queue) and `auto_merge_enabled` set `{ queuedAt }`; `dequeued` and `auto_merge_disabled` keep
+  `queuedAt` and set `error` (GitHub's `reason` as plain text, `MERGE_CONFLICT` → `merge
+  conflict`, else "merge stopped"). A merged or closed pull request has no `merge`. Clients show
+  合并中 only while `merge` is set without `error` and `state` is `open`.
 
 ## Client cache recovery
 
@@ -1098,6 +1212,10 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
 ```
 
 - The new transient types go only to connections whose `hello.features` has `interact/1`.
+- The gateway keeps `hello.supportedCatalogs` per connection (the `tc.card/2.x` entries). A live
+  `message.created` / `message.updated` event whose `cardV2` catalog (absent = `tc.card/2.0`) is
+  in that list comes without the derived v1 `card`; other connections, `history` and `fetch`
+  pages keep it.
 - A 1.1 client hides an affordance (events, refs, diagrams) the server does not list.
 - Errors keep their `ErrorCode`; `reason` names the rule: `card.style_property`,
   `card.unknown_catalog`, `card.unknown_block`, `card.limits`, `card.depth`,
@@ -1112,6 +1230,11 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
   `voters`: `"group"` or 1..200 member ids) also names `card.limits`. An unknown block type gets `card.unknown_block`;
   an input of kind `secret` gets `card.secret_deferred`. An invalid card fixture names the
   expected reason in its `reason` field, and both fixture tests check it.
+- Every `fileId` a card names (`image`, `imageChoice` options, `compare` previews, `evidence`
+  and its `posterFileId`) must be a ready file of the same group, and every 产出 (`embed`,
+  `evidence.artifact`, `compare` previews, `ref`/`link` blocks and `link` actions with an
+  `artifact` target) a 产出 (version) of the same group. Else `invalid`, `card.limits`, with
+  `file not in group` or `产出 not in group` in the message; checked on send, edit and patch.
 
 ### Card v2.1
 
@@ -1131,6 +1254,9 @@ options[2..4] {id, label, pros?, cons?, preview?, recommended?, children?}, note
 {tabs[2..5] {id, label, children}, selected?}`, `questionnaire {children, submitLabel?,
 anonymous?}`. New leaves (catalog 2.1, `fallbackText` required): `rank`, `rating` (max 5),
 `scale`, `confirm`, `imageChoice`, `matrix`, `slots`, `poll`, `buttons`, `diagram`, `embed`.
+The two containers that ask, `compare` and `questionnaire`, need `fallbackText` too (1.1.0). A
+block's `fallbackText` is at most 300 characters; the card's `fallback` stays at most 4000 (a
+released 2.0 field: readers show it whole in old clients, notifications and search).
 CARD21's `choice` is the 2.0 `decision` block (wire name kept) with `label?`, `required?`,
 `help?`, `minSelect?`, `maxSelect?`, `allowOther?`, option `recommended?`. `input` gains kind
 `slider` (`step`, `unit`); `secret` is refused. `table` gains `title?`, `rowKeys?` (one key per
@@ -1154,8 +1280,9 @@ Readers keep unknown event names and an unknown `diagram.syntax` (show the sourc
 
 ```ts
 { t: "card.event", rid, groupId, messageId, rev, clientEventId, blockId? | actionId?, event: CardEventName,
-  value?: JSON /* <= 4 KiB */, inputs?: Record<blockId, JSON> /* <= 16 KiB, action.press only */, part?: PartRef }
-{ t: "card.answer", ..., clientEventId? }        // short form of card.event action.press
+  value?: JSON /* <= 4 KiB */, inputs?: Record<blockId, JSON> /* <= 16 KiB, action.press only */, part?: PartRef,
+  contentHash?: string /* 1.1: sha256 hex of the draft text the answer approves */ }
+{ t: "card.answer", ..., clientEventId?, contentHash? }        // short form of card.event action.press
 { t: "card.answer.retract", rid, groupId, messageId, answerId }   // short form of card.event answer.retract
 ack.result = CardEventAck { eventId, stored, answerId?, duplicate?, expect: Expect }
 Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs? }
@@ -1165,7 +1292,7 @@ card.retracted (stored) data: { messageId, answerId, askId?, eventId? }         
 Message += { cardState?: CardState, cause?: Cause }       message.updated data += { cardState?, cause? }
 CardState = { ask?: { id, status: "open"|"answered"|"expired"|"closed"|"superseded", from: memberId[], blocking,
               expiresAt?, answeredBy?, answeredAt? }, answers: CardAnswer[] /* <= 500 */,
-              tally?, tallyBy?, emitters?, lastCause?: Cause }
+              tally?, tallyBy?, emitters?, lastCause?: Cause, answerCount? /* 1.1, private cards */ }
 Cause = { eventId, actorId, at, event, blockId?, actionId? }
 transient card.event: { groupId, topicId, messageId, eventId, rev, blockId?, actionId?, event, value?, inputs?, part?, actorId, at }
 ```
@@ -1177,6 +1304,12 @@ answer.retract`. `chart.select` sends `part {kind: "point"|"bar", keys: {series,
 other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
+
+Draft answers: an answer that submits `draft` blocks (a footer action whose inputs name them,
+or a 2.0 submit) stores `contentHash` in its `CardAnswer`: the sha256 (lowercase hex of the
+UTF-8 bytes) of the draft texts it approves, in card order, each the edited text when edited,
+joined with U+0000 (`draftContentText`). A client may send the same `contentHash`; when it
+differs from the server's, the answer gets `conflict`, `card.superseded` (the draft changed).
 
 Edit marks: a `message.updated` that the server makes for a state change (an answer, a
 retract or an expiry of a card ask; a ref whose source was deleted) has no `cardV2` and carries
@@ -1198,9 +1331,13 @@ member gets its own view, live, in `fetch` pages, in `history` and in acks. The 
 their own answers in full. Every other answer, `card.answered`, `card.retracted` and the state
 `message.updated` they cause carry `actorId: "anonymous"` (not a member id), and
 `cardState.ask.answeredBy`, `tallyBy` and the voter in `lastCause`/`cause` are left out. The
-card's author gets the values of `card.answered`, and for an anonymous questionnaire the other
-answers in `cardState.answers` (with `actorId: "anonymous"`); other members get neither (a poll's
-`tally` is for everyone). The derived v1 status of an answered private card is "已回答".
+author of an anonymous questionnaire gets the values of `card.answered` and the other answers
+in `cardState.answers` (with `actorId: "anonymous"`). The author of a counts-only poll gets only
+the aggregate: `card.answered` without the values, and the `tally` (a runner author's run gets
+`run.answer` with `tally` and no value). Other members get neither (a poll's `tally` is for
+everyone). Every viewer of a private card gets `cardState.answerCount`, the number of live
+answers of the current ask round (the aggregate in place of hidden answers). The derived v1
+status of an answered private card is "已回答".
 
 The card's author never learns who used a private card. An SDK author gets the live
 `card.event` transient with `actorId: "anonymous"`. A runner author's run gets `run.answer`
@@ -1216,7 +1353,7 @@ decision names `answeredBy`). `ask.record` stays valid on a private card.
 ```ts
 { t: "card.patch", rid, groupId, messageId, baseRev, ops: PatchOp[] /* 1..50 */, cause?: eventId, clientPatchId? }
 PatchOp = { op: "set", id, props } | { op: "replace", id, block } | { op: "insert", block, parent?, after? | before? | index? }
-        | { op: "remove", id } | { op: "data", path, value? } | { op: "card", props: { title?, summary?, intent?, fallback?, ask?: CardAsk | null, actions? } }
+        | { op: "remove", id } | { op: "data", path, value? } | { op: "card", props: { title?, summary?, intent?, status?: "executing" | "failed" | null, fallback?, ask?: CardAsk | null, actions? } }
 ack.result = CardPatchAck { message, rev, duplicate? }
 send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
 { t: "interaction.resolve", rid, groupId, eventId, result: "ignored" | "failed", note? /* <= 120 */ }
@@ -1234,13 +1371,17 @@ page event of one of its 产出 versions (`Cause.event` is the page event's name
 
 ```ts
 { t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result { dataRev }
-{ t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message } }
+{ t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message, reason? } }
 transient artifact.event: { groupId, topicId, artifactId, version, eventId, name, kind, payload?, actorId, at }   // to the version's creator
 transient artifact.data:  { groupId, artifactId, version, dataRev, data? /* inline when <= 64 KiB */, cause? }    // to every member
 transient artifact.reply: { groupId, eventId, ok, payload?, error? }                                               // to the asker only
 GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
 PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
 ```
+
+A page `ask` that no run of the version's runner member will answer (the run ended and none is
+open in the topic) gets `artifact.reply` from that member at once: `ok: false`, `error { code:
+"declined", reason: "run.ended" }`, so the page's promise settles.
 
 Audit actions: `card.event`, `artifact.event` (payload: first 1 KiB, redacted), `artifact.data`
 (`{version, dataRev, bytes}`, no content).
@@ -1255,7 +1396,7 @@ MediaInfo = { kind: "html"|"markdown"|"image"|"imageSet"|"video"|"audio"|"pdf"|"
               focus? { fromLine, toLine }, preview: "ready" | "pending" | "failed" }
 ArtifactVersion += { media? }      FileRef (message attachments) += { media? }
 artifact.previewReady (stored) data: { artifactId, version, media }
-PUT /v1/artifacts/:id/versions/:v/media  { media: MediaInfo } -> { version }   // stores artifact.previewReady
+PUT /v1/artifacts/:id/versions/:v/media  PutArtifactMediaRequest { media: MediaInfo } -> PutArtifactMediaResponse { version }   // stores artifact.previewReady; SDK putArtifactMedia
 ```
 
 The version's creator may set `media` at any time; another group member only while the stored
@@ -1263,18 +1404,26 @@ The version's creator may set `media` at any time; another group member only whi
 of the group.
 
 The sender's client computes `media`; the server checks the limits (`mediaProblem`: 2 GB, 4 h,
-images 50 MB / 100 MP, PDF 500 MB / 2000 pages, HTML 20 MB, Markdown and code 5 MB) and never
-decodes media.
+images 50 MB / 100 MP, PDF 500 MB / 2000 pages, HTML 20 MB, Markdown and code 5 MB, tables
+200 MB) and never decodes media. It also checks the files that `media` names
+(`mediaFileProblem`): a poster at most 200 KB and 1280 px, each frame at most 200 KB and 320 px,
+a transcript at most 2 MB (`too_large`).
 
 ### References to a part (引用提问)
 
 ```ts
 PartRef = { kind: PartKind /* 1..16 of [a-z], open set */, keys?: Record</* [a-z]{1,16} */ string, string /* <= 256 */ | int >= 0> /* <= 4 */ }
-BlockRefInput = { messageId? | artifact? { artifactId, version } /* exactly one */, cardRev?, blockId, part?, label /* 1..120, no control characters */, value? /* <= 2048 bytes */ }
+BlockRefInput = { messageId? | artifact? { artifactId, version } /* exactly one */, sourceGroupId? /* 1.1 */, cardRev?, blockId, part?, label /* 1..120, no control characters */, value? /* <= 2048 bytes */ }
 BlockRef = BlockRefInput & { sourceAuthorId?, sourceTopicId, deleted?: true /* label "", no value */ }
 Message += { blockRefs?: BlockRef[] /* <= 5 */ }    send / PostMessageRequest += { blockRefs?: BlockRefInput[] /* 1..5 */ }
 message.updated data += { blockRefs? }
 ```
+
+`sourceGroupId` (1.1): a side chat (单独问) in a DM quotes a message or 产出 of the group it is
+about. It is allowed only in a DM, the sender must be a member of that group (`forbidden`
+otherwise), and that group's room checks the source as it checks its own refs; the stored ref
+keeps `sourceGroupId`. Absent (or this group): the source is in this group. A delete in the
+source group does not clear the ref of the side chat (the asker keeps the quote line).
 
 `blockId` is a Card v2 block id, `card`, `page` (a 产出 page), `v1:<0..49>` or `md:<0..199>`.
 Table keys: `row` = `rowKeys[i]` when present, else the 0-based row index; `col` = the 0-based

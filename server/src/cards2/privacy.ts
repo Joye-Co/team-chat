@@ -4,7 +4,8 @@
 // what a member gets live, in `fetch` pages, in history and in acks is that member's view:
 // - the answerer: their own answers, in full;
 // - the card's author: other answers of an anonymous questionnaire with `actorId` "anonymous",
-//   and `card.answered` with the values but without the voter; of a poll, the tally only;
+//   and `card.answered` with the values but without the voter; of a poll, `card.answered`
+//   without the voter or the values, and the tally;
 // - every other member: the tally, no other answers, `card.answered`/`card.retracted` without
 //   the voter or the values.
 // Once a card was private, it stays private (its log already holds private answers).
@@ -51,6 +52,12 @@ function privateOf(sql: SqlStorage, messageId: string | undefined): Private | un
   return r ? { authorId: r.author_id, anonymous: r.anonymous === 1 } : undefined;
 }
 
+/** The stored privacy of a card: "anonymous", "poll" (counts only) or undefined (public). */
+export function storedPrivacy(sql: SqlStorage, messageId: string): "poll" | "anonymous" | undefined {
+  const p = privateOf(sql, messageId);
+  return p ? (p.anonymous ? "anonymous" : "poll") : undefined;
+}
+
 /** True when the card a cause names is private (its stored cause then hides the voter). */
 export function hidesCause(sql: SqlStorage, eventMessageId: string): boolean {
   return privateOf(sql, eventMessageId) !== undefined;
@@ -91,6 +98,9 @@ export function viewState(state: CardState, viewerId: string, p: Private): CardS
   }
   if (out.lastCause && out.lastCause.actorId !== viewerId) out.lastCause = { ...out.lastCause, actorId: ANONYMOUS_ID };
   delete out.tallyBy;
+  // The aggregate every viewer gets in place of the hidden answers.
+  const round = state.ask?.id;
+  out.answerCount = state.answers.filter((a) => a.retractedAt === undefined && (round === undefined || a.askId === round)).length;
   return out;
 }
 
@@ -112,7 +122,9 @@ registerEventView((event, viewerId, sql) => {
       const p = privateOf(sql, e.data.messageId as string);
       if (!p) return event;
       const data = { ...e.data };
-      if (!(e.type === "card.answered" && viewerId === p.authorId)) {
+      // The author of an anonymous questionnaire gets the values; of a poll, only the tally
+      // (in the card state).
+      if (!(e.type === "card.answered" && viewerId === p.authorId && p.anonymous)) {
         delete data.value;
         delete data.inputs;
         delete data.editedValues;

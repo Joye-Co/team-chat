@@ -194,7 +194,15 @@ try {
   const first = await ledger.postCardV2({ groupId }, table);
   const topicId = first.message.topicId;
   const fixture = JSON.parse(readFileSync(join(ROOT, "protocol/fixtures/entities/card-v2-report-compose.json"), "utf8")).value as CardV2;
-  const card = { ...fixture, ask: { ...(fixture.ask as NonNullable<CardV2["ask"]>), from: [humanId] } };
+  // A card names only 产出 of its own group: the report's `full` ref points at a page Ledger
+  // publishes in this 话题 (the fixture's id is not on this server).
+  const page = await ledger.http.publishHtml({ groupId, topicId, title: "10 月数据月报", html: "<!doctype html><p>10 月数据月报</p>" });
+  const blocks21 = fixture.blocks.map((b) =>
+    b.type === "ref" && b.target.kind === "artifact"
+      ? { ...b, target: { ...b.target, artifactId: page.artifact.id, version: page.version.version } }
+      : b,
+  );
+  const card = { ...fixture, blocks: blocks21, ask: { ...(fixture.ask as NonNullable<CardV2["ask"]>), from: [humanId] } };
   const posted = await ledger.postCardV2({ groupId, topicId }, card);
   const messageId = posted.message.id;
   report.server = { url, groupId, topicId, reportMessageId: messageId, tableMessageId: first.message.id, ledgerId, humanId };

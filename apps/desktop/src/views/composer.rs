@@ -132,7 +132,7 @@ pub struct ComposerView {
     editing: Option<EditTarget>,
     typing: model::TypingThrottle,
     too_long: bool,
-    /// Files the last paste or drop could not add (folders, over 100 MB).
+    /// Files the last paste or drop could not add (folders, over 2 GB).
     rejected: Vec<String>,
     /// The emoji picker is open.
     emoji_open: bool,

@@ -1,0 +1,22 @@
+{
+  "kind": "TopicLink",
+  "valid": true,
+  "value": {
+    "kind": "pr",
+    "repo": "Joye-Co/team-chat",
+    "number": 61,
+    "url": "https://github.com/Joye-Co/team-chat/pull/61",
+    "title": "fix: resend after reconnect",
+    "state": "open",
+    "checks": [
+      {
+        "name": "CI",
+        "conclusion": "success"
+      }
+    ],
+    "merge": {
+      "queuedAt": 1762128000000,
+      "error": "merge conflict"
+    }
+  }
+}

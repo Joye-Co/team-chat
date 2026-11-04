@@ -1,0 +1,362 @@
+// 1.1.0 gap fixes of the cards area: files and 产出 a card names, draft content hashes,
+// reserved 产出 paths, anonymous counts, refs from an aside topic, recorded decisions, member
+// card status, shape reasons, catalogs per socket and frame sources.
+import { SELF, env } from "cloudflare:test";
+import { afterAll, describe, expect, it } from "vitest";
+import type { CardV2 } from "@chat/protocol";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 300));
+  expect(protocolViolations).toEqual([]);
+});
+
+const FEATURES = ["interact/1", "refs/1"];
+
+export const base = (extra: Partial<CardV2>): CardV2 => ({
+  v: 2,
+  catalog: "tc.card/2.1",
+  rev: 1,
+  intent: "info",
+  title: "卡片",
+  fallback: "卡片",
+  blocks: [],
+  ...extra,
+});
+
+async function sha(bytes: Uint8Array): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function upload(m: TestMember, groupId: string, name = "a.png", mime = "image/png", text = "png"): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const c = await api("/v1/files", { token: m.token, body: { groupId, name, size: bytes.length, mime, sha256: await sha(bytes) } });
+  expect(c.status, JSON.stringify(c.body)).toBe(200);
+  const put = await SELF.fetch(`${BASE}/v1/files/${c.body.file.id}/content`, { method: "PUT", headers: { authorization: `Bearer ${m.token}` }, body: bytes });
+  expect(put.status).toBe(200);
+  return c.body.file.id as string;
+}
+
+async function world() {
+  const owner = await createMember({ level: "owner", name: "Joye" });
+  const alice = await createMember({ name: "Alice" });
+  const bob = await createMember({ name: "Bob" });
+  const bot = await createMember({ kind: "bot", name: "Ledger" });
+  const gid = await createGroup(owner, [alice.id, bob.id, bot.id]);
+  const connect = async (m: TestMember, features: string[] = FEATURES) => (await Client.connect(m.token, { features })).c;
+  return { owner, alice, bob, bot, gid, connect };
+}
+
+const send = (c: Client, gid: string, cardV2: CardV2, extra: Record<string, unknown> = {}) =>
+  c.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2, ...extra });
+
+describe("files and 产出 a card names (PC-2)", () => {
+  it("refuses a file or 产出 of another group and takes one of this group", async () => {
+    const w = await world();
+    const other = await createGroup(w.owner, [w.bot.id]);
+    const mine = await upload(w.bot, w.gid);
+    const theirs = await upload(w.bot, other);
+    const cbot = await w.connect(w.bot);
+    const image = (fileId: string) => base({ blocks: [{ id: "img", type: "image", fileId }] });
+    const bad = await send(cbot, w.gid, image(theirs));
+    expect(bad, JSON.stringify(bad)).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    expect(bad.error.message).toContain("file not in group");
+    const choice = base({
+      intent: "ask",
+      ask: { from: [w.alice.id] },
+      blocks: [
+        {
+          id: "pick",
+          type: "imageChoice",
+          label: "哪个？",
+          fallbackText: "选图",
+          options: [
+            { id: "a", label: "A", fileId: mine },
+            { id: "b", label: "B", fileId: theirs },
+          ],
+        },
+      ],
+    });
+    expect(await send(cbot, w.gid, choice)).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    const evidence = base({ blocks: [{ id: "e", type: "evidence", label: "截图", fileId: theirs }] });
+    expect(await send(cbot, w.gid, evidence)).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    const ref = base({ blocks: [{ id: "r", type: "ref", label: "页面", target: { kind: "artifact", artifactId: "01JBX0ART0000000000000000Z" } }] });
+    const r = await send(cbot, w.gid, ref);
+    expect(r).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    expect(r.error.message).toContain("产出 not in group");
+    const ok = await send(cbot, w.gid, image(mine));
+    expect(ok, JSON.stringify(ok)).toMatchObject({ ok: true });
+    // A patch that names a file of the other group is refused too.
+    const p = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: ok.result.message.id, baseRev: 1, ops: [{ op: "set", id: "img", props: { fileId: theirs } }] });
+    expect(p).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    cbot.close();
+  });
+});
+
+async function hex(text: string): Promise<string> {
+  return sha(new TextEncoder().encode(text));
+}
+
+describe("increment rules (PC-6)", () => {
+  it("stores the content hash of a draft answer and refuses a stale one", async () => {
+    const w = await world();
+    const [ca, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bot)]);
+    const card = base({
+      intent: "ask",
+      title: "公告稿",
+      ask: { from: [w.alice.id] },
+      blocks: [{ id: "d", type: "draft", text: "明天发版。", editable: true }],
+      actions: [{ id: "ok", label: "发", inputs: ["d"] }],
+    });
+    const m = (await send(cbot, w.gid, card)).result.message;
+    const stale = await ca.request({ t: "card.answer", groupId: w.gid, messageId: m.id, rev: 1, actionId: "ok", contentHash: await hex("今天发版。") });
+    expect(stale, JSON.stringify(stale)).toMatchObject({ ok: false, error: { code: "conflict", reason: "card.superseded" } });
+    const edited = "明天上午发版。";
+    const r = await ca.request({ t: "card.answer", groupId: w.gid, messageId: m.id, rev: 1, actionId: "ok", editedValues: { d: edited }, contentHash: await hex(edited) });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    const u = await cbot.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardState.answers.length === 1);
+    expect(u.data.cardState.answers[0].contentHash).toBe(await hex(edited));
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("refuses 产出 paths under __teamchat/", async () => {
+    const w = await world();
+    const cbot = await w.connect(w.bot);
+    const root = (await cbot.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "页面" })).message;
+    const html = await upload(w.bot, w.gid, "index.html", "text/html", "<p>x</p>");
+    const files = (path: string) => [{ path: "index.html", fileId: html }, { path, fileId: html }];
+    const bad = await api("/v1/artifacts", { token: w.bot.token, body: { groupId: w.gid, topicId: root.topicId, title: "页", kind: "html", entry: "index.html", files: files("__teamchat/x.js") } });
+    expect(bad.status, JSON.stringify(bad.body)).toBe(400);
+    expect(bad.body.error.code).toBe("invalid");
+    const ok = await api("/v1/artifacts", { token: w.bot.token, body: { groupId: w.gid, topicId: root.topicId, title: "页", kind: "html", entry: "index.html", files: files("teamchat/x.js") } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    const v2 = await api(`/v1/artifacts/${ok.body.artifact.id}/versions`, { token: w.bot.token, body: { entry: "index.html", files: files("__teamchat/diagram.js") } });
+    expect(v2.status, JSON.stringify(v2.body)).toBe(400);
+    cbot.close();
+  });
+
+  it("gives members who do not see the answers of an anonymous questionnaire the count", async () => {
+    const w = await world();
+    const [ca, cb, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bob), w.connect(w.bot)]);
+    const card = base({
+      intent: "ask",
+      title: "实习反馈",
+      ask: { from: [w.alice.id, w.bob.id], blocking: false },
+      blocks: [
+        { id: "q", type: "questionnaire", children: ["mood", "next"], anonymous: true, fallbackText: "实习反馈" },
+        { id: "mood", type: "input", kind: "text", label: "感受" },
+        { id: "next", type: "input", kind: "text", label: "建议" },
+      ],
+    });
+    const m = (await send(cbot, w.gid, card)).result.message;
+    const r = await ca.request({ t: "card.event", groupId: w.gid, messageId: m.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "q", event: "action.press", inputs: { mood: { value: "还行" } } });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    const u = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+    expect(u.data.cardState.answers).toEqual([]);
+    expect(u.data.cardState.answerCount).toBe(1);
+    const h = await cb.request({ t: "history", groupId: w.gid, topicId: m.topicId });
+    expect(h.messages.find((x: any) => x.id === m.id).cardState.answerCount).toBe(1);
+    for (const c of [ca, cb, cbot]) c.close();
+  });
+});
+
+describe("记一条 (PC-8)", () => {
+  it("records a decision by hand, lists it and refuses non-members and empty text", async () => {
+    const w = await world();
+    const ca = await w.connect(w.alice);
+    const root = (await ca.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "发版" })).message;
+    const r = await api(`/v1/groups/${w.gid}/decisions`, { token: w.alice.token, body: { text: "  周五停止合并  ", topicId: root.topicId } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.decision).toMatchObject({ text: "周五停止合并", topicId: root.topicId, recordedBy: w.alice.id });
+    const ev = await ca.waitEvent((e) => e.type === "decision.recorded");
+    expect(ev.data.decision.id).toBe(r.body.decision.id);
+    const g = await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, body: { text: "群里定的" } });
+    expect(g.status).toBe(200);
+    expect(g.body.decision.topicId).toBeNull();
+    const list = await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, method: "GET" });
+    expect(list.status).toBe(200);
+    expect(list.body.recorded.map((d: any) => d.text)).toEqual(["群里定的", "周五停止合并"]);
+    const outsider = await createMember();
+    expect((await api(`/v1/groups/${w.gid}/decisions`, { token: outsider.token, body: { text: "x" } })).status).toBe(404);
+    expect((await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, body: { text: "   " } })).status).toBe(400);
+    expect((await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, body: { text: "x", topicId: "01JBX0TOPIC0000000000000ZZ" } })).status).toBe(404);
+    ca.close();
+  });
+});
+
+describe("member card status (PC-9)", () => {
+  it("lets the author mark a card executing, failed and clear it by patch", async () => {
+    const w = await world();
+    const [ca, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bot)]);
+    const card = base({ intent: "done", title: "发版", blocks: [{ id: "t", type: "text", text: "开始发版。" }] });
+    const m = (await send(cbot, w.gid, { ...card, status: "executing" } as CardV2)).result.message;
+    expect(m.cardV2.status).toBe("executing");
+    const p = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 1, ops: [{ op: "card", props: { status: "failed" } }] });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true });
+    expect(p.result.message.cardV2.status).toBe("failed");
+    const u = await ca.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardV2?.status === "failed");
+    expect(u.data.cardV2.rev).toBe(2);
+    const c = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 2, ops: [{ op: "card", props: { status: null } }] });
+    expect(c, JSON.stringify(c)).toMatchObject({ ok: true });
+    expect(c.result.message.cardV2.status).toBeUndefined();
+    expect(await ca.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 3, ops: [{ op: "card", props: { status: "failed" } }] })).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    const bad = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 3, ops: [{ op: "card", props: { status: "paused" } }] });
+    expect(bad).toMatchObject({ ok: false, error: { code: "invalid" } });
+    for (const x of [ca, cbot]) x.close();
+  });
+});
+
+describe("error reasons (PC-12)", () => {
+  it("names card.limits for a bad card shape and card.block_gone for a patch on a missing card", async () => {
+    const w = await world();
+    const cbot = await w.connect(w.bot);
+    const bad = await send(cbot, w.gid, { ...base({}), intent: "maybe" } as unknown as CardV2);
+    expect(bad, JSON.stringify(bad)).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    const m = (await send(cbot, w.gid, base({ blocks: [{ id: "t", type: "text", text: "x" }] }))).result.message;
+    const op = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 1, ops: [{ op: "card", props: { intent: "maybe" } }] });
+    expect(op, JSON.stringify(op)).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    const gone = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: "01JBX0MSG000000000000000ZZ", baseRev: 1, ops: [{ op: "remove", id: "t" }] });
+    expect(gone, JSON.stringify(gone)).toMatchObject({ ok: false, error: { code: "not_found", reason: "card.block_gone" } });
+    cbot.close();
+  });
+});
+
+describe("catalogs per socket (PC-13)", () => {
+  it("sends the derived v1 card only to sockets that do not read the card's catalog", async () => {
+    const w = await world();
+    const cbot = await w.connect(w.bot);
+    const v20 = (await Client.connect(w.alice.token, { features: FEATURES, supportedCatalogs: ["tc.card/2.0"] })).c;
+    const v21 = (await Client.connect(w.bob.token, { features: FEATURES, supportedCatalogs: ["tc.card/2.0", "tc.card/2.1"] })).c;
+    const old = (await Client.connect(w.owner.token)).c;
+    const m = (await send(cbot, w.gid, base({ blocks: [{ id: "t", type: "text", text: "x" }] }))).result.message;
+    const created = (c: Client) => c.waitEvent((e) => e.type === "message.created" && e.data.message.id === m.id);
+    const [a, b, o] = await Promise.all([created(v20), created(v21), created(old)]);
+    expect(a.data.message.card).toBeDefined();
+    expect(o.data.message.card).toBeDefined();
+    expect(b.data.message.card).toBeUndefined();
+    expect(b.data.message.cardV2.title).toBe("卡片");
+    const p = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 1, ops: [{ op: "set", id: "t", props: { text: "y" } }] });
+    expect(p).toMatchObject({ ok: true });
+    const updated = (c: Client) => c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardV2);
+    const [ua, ub] = await Promise.all([updated(v20), updated(v21)]);
+    expect(ua.data.card).toBeDefined();
+    expect(ub.data.card).toBeUndefined();
+    // History keeps the fallback for everyone.
+    const h = await v21.request({ t: "history", groupId: w.gid, topicId: m.topicId });
+    expect(h.messages.find((x: any) => x.id === m.id).card).toBeDefined();
+    for (const c of [cbot, v20, v21, old]) c.close();
+  });
+});
+
+describe("引用提问 from 单独问 (PC-7)", () => {
+  it("stores a side chat ref to a part of a group card for a member of both and refuses others", async () => {
+    const w = await world();
+    const [ca, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bot)]);
+    const card = (await send(cbot, w.gid, base({ blocks: [{ id: "t", type: "table", columns: ["渠道", "数"], rows: [["B 站", "3"]] }] }))).result.message;
+    const dm = await api("/v1/dms", { token: w.alice.token, body: { memberId: w.bot.id } });
+    expect(dm.status, JSON.stringify(dm.body)).toBe(200);
+    const ref = { messageId: card.id, sourceGroupId: w.gid, cardRev: 1, blockId: "t", part: { kind: "cell", keys: { row: 0, col: 1 } }, label: "B 站 · 3" };
+    const sent = await ca.request({ t: "send", groupId: dm.body.group.id, clientMsgId: clientMsgId(), body: "这个数对吗？", blockRefs: [ref] });
+    expect(sent, JSON.stringify(sent)).toMatchObject({ ok: true });
+    expect(sent.result.message.blockRefs[0]).toMatchObject({ ...ref, sourceAuthorId: w.bot.id, sourceTopicId: card.topicId });
+    expect(sent.result.message.body).toContain("> ↳ B 站 · 3");
+    // A member of the DM's bot who is not in the group is refused.
+    const outsider = await createMember({ name: "Eve" });
+    const co = await w.connect(outsider);
+    const dm2 = await api("/v1/dms", { token: outsider.token, body: { memberId: w.bot.id } });
+    expect(dm2.status).toBe(200);
+    const no = await co.request({ t: "send", groupId: dm2.body.group.id, clientMsgId: clientMsgId(), body: "?", blockRefs: [ref] });
+    expect(no, JSON.stringify(no)).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    // In a group, a ref to another group is refused.
+    const other = await createGroup(w.owner, [w.alice.id]);
+    const g = await ca.request({ t: "send", groupId: other, clientMsgId: clientMsgId(), body: "?", blockRefs: [ref] });
+    expect(g).toMatchObject({ ok: false, error: { code: "invalid" } });
+    for (const c of [ca, cbot, co]) c.close();
+  });
+});
+
+describe("录屏 evidence (PC-3)", () => {
+  it("takes a recording file of the group and refuses one of another group", async () => {
+    const w = await world();
+    const other = await createGroup(w.owner, [w.bot.id]);
+    const cbot = await w.connect(w.bot);
+    const video = await upload(w.bot, w.gid, "demo.mp4", "video/mp4", "mp4");
+    const poster = await upload(w.bot, w.gid, "demo.png", "image/png", "png");
+    const theirs = await upload(w.bot, other, "x.mp4", "video/mp4", "mp4");
+    const rec = (fileId: string, posterFileId?: string) =>
+      base({ intent: "done", blocks: [{ id: "rec", type: "evidence", label: "录屏", state: "pass", recording: { fileId, durationMs: 42_000, ...(posterFileId ? { posterFileId } : {}) } }] });
+    const ok = await send(cbot, w.gid, rec(video, poster));
+    expect(ok, JSON.stringify(ok)).toMatchObject({ ok: true });
+    expect(ok.result.message.cardV2.blocks[0].recording).toEqual({ fileId: video, durationMs: 42_000, posterFileId: poster });
+    expect(await send(cbot, w.gid, rec(theirs))).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    expect(await send(cbot, w.gid, rec(video, theirs))).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    cbot.close();
+  });
+});
+
+describe("backfill of rooms from before the cards2 tables (PC-15)", () => {
+  it("gives an old waiting topic its base, private cards their mark and old answers their decision", async () => {
+    const { runInDurableObject } = await import("cloudflare:test");
+    const { runMigrations } = await import("../src/core/migrations");
+    const { roomMigrationSteps } = await import("../src/core/room");
+    const w = await world();
+    const [ca, cb, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bob), w.connect(w.bot)]);
+    const ask = base({
+      intent: "ask",
+      title: "今天发版吗？",
+      ask: { from: [w.alice.id], record: true },
+      blocks: [{ id: "pick", type: "decision", deliver: "immediate", options: [{ id: "yes", label: "发" }, { id: "no", label: "不发" }] }],
+    });
+    const recorded = (await send(cbot, w.gid, ask)).result.message;
+    const r1 = await ca.request({ t: "card.event", groupId: w.gid, messageId: recorded.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "pick", event: "choice.submit", value: { value: "yes" } });
+    expect(r1, JSON.stringify(r1)).toMatchObject({ ok: true });
+    const waiting = (await send(cbot, w.gid, { ...ask, title: "合并吗？", ask: { from: [w.alice.id] } }, { topicId: recorded.topicId })).result.message;
+    const poll = base({
+      intent: "ask",
+      ask: { from: ["owners"], blocking: false },
+      blocks: [{ id: "p", type: "poll", label: "投", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], voters: [w.bob.id], closesAt: Date.now() + 3600_000, fallbackText: "投" }],
+    });
+    const priv = (await send(cbot, w.gid, poll, { topicId: recorded.topicId })).result.message;
+    await cb.waitEvent((e) => e.type === "message.created" && e.data.message.id === priv.id);
+    const room = env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(w.gid));
+    // The room as a development build left it: no base, no private mark, no decision row.
+    await runInDurableObject(room, (_o, state) => {
+      const sql = state.storage.sql;
+      expect(sql.exec("SELECT status FROM topics WHERE id = ?", recorded.topicId).one().status).toBe("waiting_answer");
+      sql.exec("DELETE FROM card_topic_base");
+      sql.exec("DELETE FROM card_private");
+      sql.exec("DELETE FROM card_decisions");
+      sql.exec("DELETE FROM migrations WHERE name = 'cards2-8-backfill'");
+      expect(runMigrations(state.storage, roomMigrationSteps())).toEqual(["cards2-8-backfill"]);
+      expect(sql.exec("SELECT status FROM card_topic_base WHERE topic_id = ?", recorded.topicId).toArray()).toEqual([{ status: "in_progress" }]);
+      expect(sql.exec("SELECT message_id FROM card_private").toArray()).toEqual([{ message_id: priv.id }]);
+      expect(sql.exec("SELECT message_id, action_label FROM card_decisions").toArray()).toEqual([{ message_id: recorded.id, action_label: "发" }]);
+    });
+    // The answer closes the last blocking ask: the topic leaves waiting_answer.
+    const r2 = await ca.request({ t: "card.event", groupId: w.gid, messageId: waiting.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "pick", event: "choice.submit", value: { value: "no" } });
+    expect(r2, JSON.stringify(r2)).toMatchObject({ ok: true });
+    await ca.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === recorded.topicId && e.data.status === "in_progress");
+    for (const c of [ca, cb, cbot]) c.close();
+  });
+});
+
+describe("frame source of an attachment (PC-14)", () => {
+  it("keeps the 产出 version and time of a frame and refuses a 产出 of another group", async () => {
+    const w = await world();
+    const ca = await w.connect(w.alice);
+    const root = (await ca.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "录屏" })).message;
+    const video = await upload(w.alice, w.gid, "demo.mp4", "video/mp4", "mp4");
+    const art = await api("/v1/artifacts", { token: w.alice.token, body: { groupId: w.gid, topicId: root.topicId, title: "演示", kind: "file", entry: "demo.mp4", files: [{ path: "demo.mp4", fileId: video }] } });
+    expect(art.status, JSON.stringify(art.body)).toBe(200);
+    const frame = await upload(w.alice, w.gid, "frame.png", "image/png", "frame");
+    const att = (source: unknown) => [{ fileId: frame, name: "frame.png", size: 5, mime: "image/png", sha256: "0".repeat(64), source }];
+    const source = { artifactId: art.body.artifact.id, version: 1, t: 12.5 };
+    const ok = await ca.request({ t: "send", groupId: w.gid, topicId: root.topicId, clientMsgId: clientMsgId(), body: "看这一帧", attachments: att(source) });
+    expect(ok, JSON.stringify(ok)).toMatchObject({ ok: true });
+    expect(ok.result.message.attachments[0].source).toEqual(source);
+    const bad = await ca.request({ t: "send", groupId: w.gid, topicId: root.topicId, clientMsgId: clientMsgId(), body: "?", attachments: att({ ...source, version: 9 }) });
+    expect(bad).toMatchObject({ ok: false, error: { code: "invalid" } });
+    ca.close();
+  });
+});

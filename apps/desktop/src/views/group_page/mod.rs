@@ -93,7 +93,8 @@ impl GroupPage {
         if text.is_empty() {
             return;
         }
-        let _ = self.services.provider.record_decision(&g, text);
+        // Fire and forget: the decision list follows the provider's change event.
+        drop(self.services.provider.record_decision(&g, text));
         self.close_note(cx);
     }
 }
@@ -1122,6 +1123,10 @@ impl Render for GroupPage {
                 .then(b.1.last_activity_at.cmp(&a.1.last_activity_at))
         });
         let on_me = active.iter().filter(|(s, _)| *s == Standing::OnMe).count();
+        crate::selftest::drawn::mark(
+            "group-page",
+            format!("{g} active={} on_me={on_me}", active.len()),
+        );
         let leading = kit::leading(&self.services, cx);
         let window_w = window.viewport_size().width;
         let rail_w = if self.services.nav.read(cx).sidebar_hidden {

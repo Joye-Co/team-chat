@@ -45,7 +45,16 @@ fn migrations_are_named_and_run_once() {
         .unwrap();
     assert_eq!(
         names,
-        vec!["characters-1", "core-1", "ext-1", "v11-1", "v11-2", "v11-3"]
+        vec![
+            "asks-1",
+            "characters-1",
+            "core-1",
+            "ext-1",
+            "v11-1",
+            "v11-2",
+            "v11-3",
+            "v11-files-1"
+        ]
     );
     let mode: String = s
         .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
@@ -267,6 +276,7 @@ fn edits_and_deletes_keep_rows() {
                 G1,
                 ME,
                 EventData::GroupUpdated(GroupUpdatedData {
+                    purpose: None,
                     name: "renamed".into(),
                 }),
             ),
@@ -657,4 +667,57 @@ fn a_topic_read_in_a_long_group_takes_only_that_topic_off_the_totals() {
         second.as_secs_f64() * 1e3
     );
     assert!(second.as_millis() < 10, "topic read took {second:?}");
+}
+
+#[test]
+fn group_purpose_and_desk_notes_sync_from_the_log() {
+    let (_d, s) = open();
+    let purpose = |p: Option<&str>| GroupUpdatedData {
+        name: format!("group {G1}"),
+        purpose: p.map(str::to_string),
+    };
+    let note = |text: &str| EventData::DeskNoted(DeskNotedData { text: text.into() });
+    s.apply_events(
+        G1,
+        &[
+            ev(1, G1, ME, EventData::GroupUpdated(purpose(Some("开发")))),
+            ev(2, G1, ALICE, note("先发 1.1")),
+            ev(3, G1, ALICE, note("今天先把 1.1 发出去")),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        s.group(G1).unwrap().unwrap().group.purpose.as_deref(),
+        Some("开发")
+    );
+    let notes = s.desk_notes().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(
+        (
+            notes[0].member_id.as_str(),
+            notes[0].text.as_str(),
+            notes[0].seq
+        ),
+        (ALICE, "今天先把 1.1 发出去", 3)
+    );
+    // A rename alone keeps the purpose; "" clears both.
+    s.apply_events(
+        G1,
+        &[
+            ev(4, G1, ME, EventData::GroupUpdated(purpose(None))),
+            ev(5, G1, ALICE, note("")),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        s.group(G1).unwrap().unwrap().group.purpose.as_deref(),
+        Some("开发")
+    );
+    assert!(s.desk_notes().unwrap().is_empty());
+    s.apply_events(
+        G1,
+        &[ev(6, G1, ME, EventData::GroupUpdated(purpose(Some(""))))],
+    )
+    .unwrap();
+    assert_eq!(s.group(G1).unwrap().unwrap().group.purpose, None);
 }

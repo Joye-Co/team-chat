@@ -5,6 +5,7 @@
 // a resend never posts twice.
 import { readFileSync, statSync } from "node:fs";
 import {
+  ACK_EMOJI,
   AcceptanceItem,
   type ArtifactRef,
   type ArtifactVersion,
@@ -59,8 +60,8 @@ import { type StreamOptions, StreamWriter } from "./stream.ts";
 
 export const SDK_VERSION = "1.1.0";
 
-/** The reaction `ack()` adds by default: "I saw it and work on it". */
-export const ACK_EMOJI = "👀";
+/** The reaction `ack()` adds by default: "I saw it and work on it" (the same one runner runs use). */
+export { ACK_EMOJI };
 
 /** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22+ through undici). */
 export type WebSocketCtor = new (url: string, opts?: { headers?: Record<string, string> }) => WebSocket;
@@ -92,6 +93,13 @@ export interface BotOptions {
   requestTimeoutMs?: number;
   /** How long `stop()` waits for running handlers. Default 10 s. */
   stopTimeoutMs?: number;
+  /**
+   * Client-side pacing of write frames (send, edit, delete, topic.update, cards, page bridge).
+   * The server allows about 20 per second per member and answers `rate_limited` above it; the
+   * bot sends at most `rate` per second with bursts of `burst` (default 18 and 18), so a burst
+   * of sends lands instead of failing. On `rate_limited` it waits the server's `retryAfterMs`.
+   */
+  writeRate?: { rate: number; burst: number };
   /**
    * Run `onMention` and `onMessage` for messages from other bots too. Default false: two bots
    * that answer each other would loop until the rate limit stops them. Turn it on only when
@@ -251,8 +259,13 @@ export interface CardEventContext {
   inputs: Record<string, unknown>;
   /** The part the event targets (`chart.select`: point or bar; `metric.press`: metric). */
   part?: PartRef;
-  /** Who acted (always a person). */
+  /**
+   * Who acted (always a person), or "anonymous" (`ANONYMOUS_ACTOR`) on a private card (a
+   * non-public poll, an anonymous questionnaire): then it is not a member id.
+   */
   actorId: string;
+  /** True on a private card: the server does not say who acted, and `actorId` is "anonymous". */
+  anonymous: boolean;
   /** True for a stored answer. */
   stored: boolean;
   answerId?: string;
@@ -379,6 +392,43 @@ export interface EventContext {
 
 type Handler<C> = (ctx: C) => unknown | Promise<unknown>;
 
+/** Frames the server counts in its read, delta or no bucket; every other frame is a write. */
+const NOT_WRITES = new Set(["hello", "ping", "delta", "typing", "read", "fetch", "history", "search"]);
+/** Default client-side write pace: a little under the server's 20 per second. */
+export const DEFAULT_WRITE_RATE = { rate: 18, burst: 18 };
+
+/** Token bucket of the client-side write pace. */
+class Pace {
+  private tokens: number;
+  private last = Date.now();
+  private readonly rate: number;
+  private readonly burst: number;
+  constructor(rate: number, burst: number) {
+    this.rate = rate;
+    this.burst = burst;
+    this.tokens = burst;
+  }
+  private refill(): void {
+    const now = Date.now();
+    this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) / 1000) * this.rate);
+    this.last = now;
+  }
+  /** Takes a token, or returns the milliseconds until one is there. */
+  take(): number {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return 0;
+    }
+    return Math.ceil(((1 - this.tokens) / this.rate) * 1000);
+  }
+  /** The server said wait: no tokens until then. */
+  block(ms: number): void {
+    this.refill();
+    this.tokens = Math.min(this.tokens, -((ms / 1000) * this.rate) + 1);
+  }
+}
+
 interface Pending {
   rid: string;
   /** Do not resend on `rate_limited` (patches queue and merge instead). */
@@ -400,6 +450,8 @@ interface GroupState {
   /** Seqs whose handlers are still running. */
   running: Set<number>;
   member: boolean;
+  /** Set while a DM group is read for side chat topics before its cursor; events wait. */
+  scanning?: boolean;
   readTimer: ReturnType<typeof setTimeout> | null;
   lastReadSent: number;
 }
@@ -446,6 +498,18 @@ interface PatchLane {
   running: boolean;
   notBefore: number;
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** The actor id the server gives instead of a member id on a private card (protocol.md "Private answers"). */
+export const ANONYMOUS_ACTOR = "anonymous";
+
+/**
+ * A run that an answer on a private card started has `requestedBy: "anonymous"`: no member
+ * asked for it that the SDK may name, so the field is left out (no requester).
+ */
+export function withoutAnonymousRequester<R extends { requestedBy?: string | null }>(run: R): R {
+  if (run.requestedBy === ANONYMOUS_ACTOR) delete run.requestedBy;
+  return run;
 }
 
 const PING_MS = 30_000;
@@ -1098,6 +1162,7 @@ export class Bot {
   }
 
   private noteRun(run: BotRun): void {
+    withoutAnonymousRequester(run);
     if (run.botId !== this.meMember?.id && this.meMember) return;
     if (run.endedAt === undefined) this.currentRuns.set(run.topicId, run.id);
     else if (this.currentRuns.get(run.topicId) === run.id) this.currentRuns.delete(run.topicId);
@@ -1356,9 +1421,47 @@ export class Bot {
   }
 
   private trySend(p: Pending): void {
+    if (!NOT_WRITES.has(p.frame.t)) {
+      // Writes go out in order, at the client-side pace.
+      if (!this.paceQueue.includes(p)) this.paceQueue.push(p);
+      this.pumpWrites();
+      return;
+    }
     if (this.sendRaw(p.frame)) {
       p.sent = true;
       p.attempts++;
+    }
+  }
+
+  private pace: Pace | null = null;
+  private readonly paceQueue: Pending[] = [];
+  private paceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Sends queued writes while the pace allows; waits for the next token otherwise. */
+  private pumpWrites(): void {
+    if (this.paceTimer) return;
+    const r = this.opts.writeRate ?? DEFAULT_WRITE_RATE;
+    this.pace ??= new Pace(r.rate, r.burst);
+    while (this.paceQueue.length > 0) {
+      const p = this.paceQueue[0] as Pending;
+      if (this.pending.get(p.rid) !== p) {
+        this.paceQueue.shift();
+        continue;
+      }
+      if (!this.ws || this.ws.readyState !== 1 || !this.ready) return; // resent after the next welcome
+      const wait = this.pace.take();
+      if (wait > 0) {
+        this.paceTimer = setTimeout(() => {
+          this.paceTimer = null;
+          this.pumpWrites();
+        }, wait);
+        return;
+      }
+      this.paceQueue.shift();
+      if (this.sendRaw(p.frame)) {
+        p.sent = true;
+        p.attempts++;
+      }
     }
   }
 
@@ -1366,12 +1469,15 @@ export class Bot {
     const p = this.pending.get(rid);
     if (!p) return;
     if (!ok) {
-      const e = value as { code: ChatError["code"]; message: string; reason?: string };
-      if (e.code === "rate_limited" && !p.noRateRetry && Date.now() + 1000 * p.attempts < p.deadline) {
+      const e = value as { code: ChatError["code"]; message: string; reason?: string; retryAfterMs?: number };
+      // The server says how long to wait (1.1); older servers: 1 s more per attempt.
+      const wait = typeof e.retryAfterMs === "number" && e.retryAfterMs >= 0 ? Math.max(e.retryAfterMs, 50) : 1000 * p.attempts;
+      if (e.code === "rate_limited" && !p.noRateRetry && Date.now() + wait < p.deadline) {
         p.sent = false;
+        if (!NOT_WRITES.has(p.frame.t)) this.pace?.block(wait);
         setTimeout(() => {
           if (this.pending.get(rid) === p) this.trySend(p);
-        }, 1000 * p.attempts);
+        }, wait);
         return;
       }
       this.pending.delete(rid);
@@ -1498,7 +1604,67 @@ export class Bot {
       }
     }
     g.member = true;
+    if (s.group.kind === "dm" && this.state.asideScan?.[gid] === undefined && !g.scanning) {
+      if (g.applied > 0) {
+        void this.scanAsides(gid, g);
+        return;
+      }
+      // Read from its start: every side chat topic arrives as an event.
+      (this.state.asideScan ??= {})[gid] = 0;
+      this.scheduleSave();
+    }
     if (s.lastSeq > g.applied) void this.catchUp(gid);
+  }
+
+  /**
+   * Reads a DM group from its start up to the cursor for side chat topics (topic.created and
+   * topic.updated with `contextOf`) and remembers them, without running handlers. Live events
+   * and catch-up wait until it is done.
+   */
+  private async scanAsides(gid: string, g: GroupState): Promise<void> {
+    g.scanning = true;
+    const upto = g.applied;
+    let after = 0;
+    try {
+      while (after < upto) {
+        if (this.stopped || !g.member) {
+          g.scanning = false;
+          return;
+        }
+        const page = (await this.request({ t: "fetch", groupId: gid, afterSeq: after, limit: FETCH_LIMIT })) as { events: RawEvent[]; hasMore: boolean };
+        for (const raw of page.events) {
+          if (raw.seq > upto) break;
+          const parsed = EventSchema.safeParse({ ...raw, groupId: gid });
+          if (!parsed.success) continue;
+          const e = parsed.data;
+          if (e.type === "topic.created" && e.data.topic.contextOf) {
+            this.noteAside(gid, e.data.topic.id, e.data.topic.contextOf);
+            this.follow(gid, e.data.topic.id);
+          } else if (e.type === "topic.updated" && e.data.contextOf) this.noteAside(gid, e.data.topicId, e.data.contextOf);
+        }
+        const last = page.events.at(-1)?.seq ?? after;
+        if (!page.hasMore || last <= after) break;
+        after = last;
+      }
+      (this.state.asideScan ??= {})[gid] = upto;
+      this.scheduleSave();
+      g.scanning = false;
+    } catch (err) {
+      if (err instanceof ChatError && (err.code === "forbidden" || err.code === "not_found")) {
+        g.member = false;
+        g.scanning = false;
+        return;
+      }
+      if (err instanceof ChatError && err.code === "closed") {
+        // The next welcome starts the scan again.
+        g.scanning = false;
+        return;
+      }
+      this.log.warn("side chat scan failed; retrying", { groupId: gid, err: String(err) });
+      setTimeout(() => void this.scanAsides(gid, g), 2000);
+      return;
+    }
+    void this.catchUp(gid);
   }
 
   private onEventFrame(raw: RawEvent, catchUp: boolean): void {
@@ -1510,6 +1676,10 @@ export class Bot {
       this.groups.set(raw.groupId, g);
     }
     if (raw.seq <= g.applied) return;
+    if (g.scanning) {
+      g.buffer.set(raw.seq, raw);
+      return;
+    }
     if (raw.seq > g.applied + 1) {
       g.buffer.set(raw.seq, raw);
       void this.catchUp(raw.groupId);
@@ -1526,7 +1696,7 @@ export class Bot {
   /** Fetches pages until the group has no gap. One loop per group at a time. */
   private async catchUp(gid: string): Promise<void> {
     const g = this.groups.get(gid);
-    if (!g || g.fetching) return;
+    if (!g || g.fetching || g.scanning) return;
     g.fetching = true;
     try {
       for (;;) {
@@ -1573,6 +1743,7 @@ export class Bot {
     g.applied = raw.seq;
     const parsed = EventSchema.safeParse(raw);
     const event = parsed.success ? parsed.data : null;
+    if (event?.type === "run.updated") withoutAnonymousRequester(event.data.run);
     if (!parsed.success) this.log.debug("unknown or invalid event; skipped", { type: raw.type, seq: raw.seq });
     const me = this.meMember?.id;
     const jobs: (() => unknown)[] = [];
@@ -1862,6 +2033,7 @@ export class Bot {
     const ctx: CardEventContext = {
       bot: this,
       ...rest,
+      anonymous: rest.actorId === ANONYMOUS_ACTOR,
       groupId,
       topicId,
       messageId,
@@ -2237,11 +2409,28 @@ export class Bot {
     return undefined;
   }
 
+  /**
+   * A message from the topic history: one of my card messages by its saved `createdSeq` (one
+   * read, however old the card is), else by paging back from the newest.
+   */
+  private async readMessage(groupId: string, topicId: string, messageId: string): Promise<Message | undefined> {
+    const ref = this.state.cards[messageId];
+    if (ref?.seq !== undefined && ref.groupId === groupId) {
+      const r = await this.history(groupId, topicId, { beforeSeq: ref.seq + 1, limit: 1 });
+      const m = r.messages.find((x) => x.id === messageId);
+      if (m) {
+        this.noteMessage(m);
+        return m;
+      }
+    }
+    return this.findMessage(groupId, topicId, messageId);
+  }
+
   /** The newest known v2 card of a message: the cache, else the topic history. */
   private async ensureCard(groupId: string, topicId: string, messageId: string): Promise<CardV2 | undefined> {
     const known = this.cardCache.get(messageId);
     if (known) return known;
-    const m = await this.findMessage(groupId, topicId, messageId);
+    const m = await this.readMessage(groupId, topicId, messageId);
     if (m?.cardV2) this.cacheCard(messageId, m.cardV2, m.cardState);
     return this.cardCache.get(messageId);
   }
@@ -2270,7 +2459,7 @@ export class Bot {
     if (newer()) return newer();
     const topicId = this.state.cards[messageId]?.topicId ?? this.messageCache.get(messageId)?.topicId;
     if (!topicId) return undefined;
-    const m = await this.findMessage(groupId, topicId, messageId);
+    const m = await this.readMessage(groupId, topicId, messageId);
     if (m?.cardV2) this.cacheCard(messageId, m.cardV2, m.cardState);
     return newer();
   }

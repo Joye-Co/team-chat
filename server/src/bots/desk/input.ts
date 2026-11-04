@@ -147,7 +147,8 @@ export abstract class DeskInput extends DeskStall {
   /**
    * A person answered a v2 card of this bot. The topic's active run gets it as `run.answer` (a
    * 1.1 daemon) or `run.input` with the text envelope (older daemons; typed `answer` for feature
-   * "answer"), see MachineLink; with no active run, the answer starts a run like a mention.
+   * "answer"), see MachineLink; with no active run, the answer starts a run like a mention
+   * while its ask still stands.
    * Idempotent by the answer's seq.
    */
   async cardAnswer(botId: string, a: CardAnswerIn): Promise<void> {
@@ -161,7 +162,7 @@ export abstract class DeskInput extends DeskStall {
       if (!(await this.botActive())) return;
       const actor = { id: a.actorId, name: a.actorName };
       const inputId = ulid();
-      const text = answerText(a.card, a.answer, actor, inputId);
+      const text = answerText(a.card, a.tally ? { ...a.answer, tally: a.tally } : a.answer, actor, inputId);
       const m: TopicMessage = {
         groupId: a.groupId,
         topicId: a.topicId,
@@ -173,16 +174,17 @@ export abstract class DeskInput extends DeskStall {
         mentioned: true,
       };
       const active = this.activeRun(a.topicId);
-      // cards2 (F5): an answer that starts a run closes its retract window first.
+      // cards2 (F5): an answer that starts a run closes its retract window first. It starts a
+      // run only while its ask still stands: an answer to a closed ask of an ended run does not.
       if (!active) {
-        if (!(await this.answerStands(a.groupId, a.seq, true))) return;
+        if (!(await this.answerStands(a.groupId, a.seq, true, true))) return;
         return await this.start(m);
       }
       await this.serial(active.id, async () => {
         const r = this.run(active.id);
         if (!r) return;
         if (r.ended_at !== null) {
-          if (!(await this.answerStands(a.groupId, a.seq, true))) return;
+          if (!(await this.answerStands(a.groupId, a.seq, true, true))) return;
           return this.start(m);
         }
         if (!(await this.answerStands(a.groupId, a.seq, false))) return;

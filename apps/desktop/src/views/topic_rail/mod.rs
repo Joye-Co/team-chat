@@ -32,7 +32,7 @@ struct Data {
     group_id: String,
     topic_id: String,
     topic: Option<Topic>,
-    /// The newest run.
+    /// The run the rail shows (`rail_run`): the owner's newest, else the newest.
     run: Option<BotRunSummary>,
     step_times: Vec<Millis>,
     changes: Option<TopicChanges>,
@@ -50,7 +50,10 @@ impl Data {
     fn read(services: &Services, g: &str, t: &str) -> Self {
         let p = &services.provider;
         let topic = p.topic(g, t);
-        let run = p.runs(g, t).into_iter().next();
+        let run = rail_run(
+            p.runs(g, t),
+            topic.as_ref().and_then(|t| t.owner_id.as_deref()),
+        );
         let artifacts = p.artifacts(g, t);
         let preview = artifacts
             .first()
@@ -408,7 +411,7 @@ impl TopicRail {
     fn plan_card(&self, d: &Data, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
         let k = theme::colors(cx);
         let starts = &d.step_times;
-        let minutes = step_minutes(run, &starts);
+        let minutes = step_minutes(run, starts);
         let all_done = run.plan.iter().all(|i| i.state == PlanState::Done);
         let open = !all_done || self.plan_open;
         let total = match (run.started_at, run.ended_at) {
@@ -951,7 +954,7 @@ impl TopicRail {
 
     fn cost_card(&self, d: &Data, cx: &App) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let cost = d.cost.clone()?;
+        let cost = d.cost?;
         if cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }
@@ -1095,6 +1098,17 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// The run of a 话题 the rail shows (runs come newest first): the owner's newest run, so
+/// the 负责 card and the 计划 card belong to the same member; else the newest run.
+fn rail_run(runs: Vec<BotRunSummary>, owner: Option<&str>) -> Option<BotRunSummary> {
+    let own = owner.and_then(|o| runs.iter().position(|r| r.bot_id == o));
+    let mut runs = runs;
+    match own {
+        Some(i) => Some(runs.swap_remove(i)),
+        None => runs.into_iter().next(),
+    }
+}
+
 /// The recording proof of the 话题's result, when one reported it.
 fn topic_recording(services: &Services, g: &str, t: &str) -> Option<u64> {
     let p = &services.provider;
@@ -1128,7 +1142,10 @@ impl Render for TopicRail {
             let by = topic
                 .filter(|x| x.created_by != owner)
                 .map(|x| (x.created_by.clone(), x.created_at));
-            cards.push(self.owner_card(&d, &owner, run, by, cx));
+            // The 负责 card says only what its own member does (DU-1): another member's
+            // run in the same 话题 is not the owner's.
+            let own = run.filter(|r| r.bot_id == owner);
+            cards.push(self.owner_card(&d, &owner, own, by, cx));
         }
         // 计划
         if let Some(r) = run.filter(|r| !r.plan.is_empty()) {
@@ -1229,5 +1246,46 @@ mod money_tests {
         assert_eq!(money_text(1_234, Currency::Usd), "$12.34");
         assert_eq!(money_text(620, Currency::Cny), "¥6.20");
         assert_eq!(money_text(0, Currency::Usd), "$0.00");
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+    use crate::data::RunStatus;
+
+    fn run(id: &str, bot: &str) -> BotRunSummary {
+        BotRunSummary {
+            id: id.into(),
+            bot_id: bot.into(),
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            machine_id: None,
+            machine_name: None,
+            status: RunStatus::Running,
+            requested_by: None,
+            created_at: 0,
+            started_at: Some(0),
+            ended_at: None,
+            updated_at: 0,
+            summary: None,
+            plan: Vec::new(),
+        }
+    }
+
+    /// DU-1: two members work in one 话题; the rail shows the owner's run, not the newest.
+    #[test]
+    fn the_rail_shows_the_owners_run() {
+        let runs = || {
+            vec![
+                run("scout", "Scout"),
+                run("forge", "Forge"),
+                run("old", "Forge"),
+            ]
+        };
+        assert_eq!(rail_run(runs(), Some("Forge")).unwrap().id, "forge");
+        assert_eq!(rail_run(runs(), Some("Taro")).unwrap().id, "scout");
+        assert_eq!(rail_run(runs(), None).unwrap().id, "scout");
+        assert!(rail_run(vec![], Some("Forge")).is_none());
     }
 }

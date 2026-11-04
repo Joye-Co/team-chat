@@ -362,6 +362,7 @@ mod tests {
         let log = CardEventLog::default();
         log.sent("m", "c1".into(), req("bars"), false, 1);
         let err = ErrorBody {
+            retry_after_ms: None,
             code: ErrorCode::Conflict,
             message: String::new(),
             reason: Some("card.stale_rev".into()),
@@ -375,6 +376,7 @@ mod tests {
             }
         ));
         let off = ErrorBody {
+            retry_after_ms: None,
             code: ErrorCode::Internal,
             message: String::new(),
             reason: Some("client.offline".into()),

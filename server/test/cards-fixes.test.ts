@@ -337,7 +337,8 @@ describe("private answers", () => {
       expect(names([a, u], alice.id)).toBe(false);
     }
     expect((await ans(cb)).data.value).toBeUndefined();
-    expect((await ans(cbot)).data.value).toEqual({ value: "a" });
+    // The author gets the aggregate only: no single vote.
+    expect((await ans(cbot)).data.value).toBeUndefined();
     const mine = await upd(ca);
     expect(mine.data.cardState.answers).toHaveLength(1);
     expect(mine.data.cardState.answers[0]).toMatchObject({ actorId: alice.id, value: { value: "a" } });
@@ -506,6 +507,148 @@ describe("private answers reach the card's author without the voter", () => {
     expect(prompt).toContain("不错");
     expect(prompt).not.toContain(`"requestedBy":"${w.human.id}"`);
     for (const x of [c, d]) x.close();
+  });
+});
+
+describe("private answers in the runner hand-off", () => {
+  const anonymousCard = (from: string[]) =>
+    base({
+      intent: "ask",
+      title: "实习反馈",
+      ask: { from, blocking: false },
+      blocks: [
+        { id: "q", type: "questionnaire", children: ["mood", "next"], anonymous: true, fallbackText: "实习反馈" },
+        { id: "mood", type: "input", kind: "text", label: "感受" },
+        { id: "next", type: "input", kind: "text", label: "建议" },
+      ],
+    });
+  const poll = (voters: string[]) =>
+    base({
+      intent: "ask",
+      title: "周五团建去哪？",
+      ask: { from: voters, blocking: false },
+      blocks: [
+        {
+          id: "where",
+          type: "poll",
+          label: "去哪",
+          options: [{ id: "a", label: "爬山" }, { id: "b", label: "火锅" }],
+          voters,
+          closesAt: Date.now() + 60_000,
+          public: false,
+          changeable: true,
+          fallbackText: "投票",
+        },
+      ],
+    });
+  /** Holds the topic's hand-offs back so the outbox row can be read before delivery. */
+  const hold = (gid: string, topicId: string) =>
+    runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO bot_outbox (kind, topic_id, payload, next_at, created_at) VALUES ('artifact', ?, '{}', ?, ?)",
+        topicId,
+        Date.now() + 3600_000,
+        Date.now(),
+      );
+    });
+  const release = (gid: string) =>
+    runInDurableObject(roomOf(gid), async (_o, state) => {
+      const sql = state.storage.sql;
+      const rows = sql.exec<{ payload: string }>("SELECT payload FROM bot_outbox WHERE kind = 'answer'").toArray().map((r) => r.payload);
+      sql.exec("DELETE FROM bot_outbox WHERE kind = 'artifact'");
+      await state.storage.setAlarm(Date.now());
+      return rows;
+    });
+
+  it("keep member B's id out of the outbox row, the run.answer frame, the prompt and the bot's view", async () => {
+    const w = await world();
+    const b = await createMember({ name: "Bea" });
+    await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: b.id } });
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, { features: FEATURES });
+    const { c: cb } = await Client.connect(b.token, { features: FEATURES });
+    const { c: cbot } = await Client.connect(w.bot.token, { features: FEATURES });
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    const hidden = (x: unknown) => {
+      const t = JSON.stringify(x);
+      expect(t).not.toContain(b.id);
+      expect(t).not.toContain("Bea");
+    };
+    // Questionnaire: the run gets B's answer without B.
+    const post = async (outputId: string) => {
+      d.event(runId, { type: "output", outputId, op: "card.post", body: { card: anonymousCard([b.id]) } });
+      const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === outputId);
+      expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+      return posted.result.messageId as string;
+    };
+    const m1 = await post("p1");
+    void w.human;
+    const m2 = await post("p2");
+    await hold(w.gid, topicId);
+    const a1 = await cb.ok({ t: "card.event", groupId: w.gid, messageId: m1, rev: 1, clientEventId: crypto.randomUUID(), blockId: "q", event: "action.press", inputs: { mood: { value: "还行" } } });
+    const rows = await release(w.gid);
+    expect(rows).toHaveLength(1);
+    // The card names who is asked; the rest of the row names nobody.
+    const { card: _card, ...row } = JSON.parse(rows[0]);
+    hidden(row);
+    const answer = await d.next((f) => f.t === "run.answer" && f.source.answerId === a1.answerId, 10_000);
+    expect(answer).toMatchObject({ actor: { id: "anonymous" }, inputs: { mood: { value: "还行" } } });
+    hidden(answer);
+    const seen = await cbot.waitEvent((e) => e.type === "card.answered" && e.data.messageId === m1);
+    expect(seen.actorId).toBe("anonymous");
+    hidden(seen);
+    // With no run, an answer starts one: its prompt and requester name nobody.
+    d.send({ t: "run.event", runId, seq: 99, at: Date.now(), event: { type: "input.accepted", inputId: answer.inputId } });
+    d.send({ t: "run.done", runId, seq: 100, at: Date.now(), durationMs: 1000, status: "succeeded", resultText: "好" });
+    const desk = (env as unknown as BotsEnv).BOT_DESK.get((env as unknown as BotsEnv).BOT_DESK.idFromName(w.bot.id));
+    await waitUntil(
+      async () => ((await runInDurableObject(desk, async (_o, state) => state.storage.sql.exec("SELECT 1 FROM runs WHERE ended_at IS NULL").toArray().length)) === 0 ? true : undefined),
+      5000,
+      "run end",
+    );
+    await cb.ok({ t: "card.event", groupId: w.gid, messageId: m2, rev: 1, clientEventId: crypto.randomUUID(), blockId: "q", event: "action.press", inputs: { mood: { value: "不错" } } });
+    const next = await d.next((f) => f.t === "run.assign" && f.runId !== runId, 10_000);
+    expect(next.prompt).toContain("不错");
+    hidden(next);
+    const started = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === next.runId);
+    expect(started.data.run.requestedBy).toBe("anonymous");
+    for (const x of [c, cb, cbot, d]) x.close();
+  });
+
+  it("give a runner a vote of a counts-only poll as the tally, without the voter or the choice", async () => {
+    const w = await world();
+    const b = await createMember({ name: "Bea" });
+    await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: b.id } });
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, { features: FEATURES });
+    const { c: cb } = await Client.connect(b.token, { features: FEATURES });
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: poll([b.id, w.human.id]) } });
+    const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === "p1");
+    expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+    const m = posted.result.messageId as string;
+    await hold(w.gid, topicId);
+    const vote = await cb.ok({ t: "card.event", groupId: w.gid, messageId: m, rev: 1, clientEventId: crypto.randomUUID(), blockId: "where", event: "choice.submit", value: { value: "b" } });
+    const rows = await release(w.gid);
+    expect(rows).toHaveLength(1);
+    const { card: _card, ...row } = JSON.parse(rows[0]);
+    expect(row.answer.value).toBeUndefined();
+    expect(JSON.stringify(row)).not.toContain(b.id);
+    const got = await d.next((f) => f.t === "run.answer" && f.source.answerId === vote.answerId, 10_000);
+    expect(got).toMatchObject({ actor: { id: "anonymous" }, tally: { a: 0, b: 1 } });
+    expect(got.value).toBeUndefined();
+    expect(got.fallback).toBeUndefined();
+    // The block lists who may vote (card data); nothing else names the voter.
+    const { block: _block, ...frame } = got;
+    expect(JSON.stringify(frame)).not.toContain(b.id);
+    void topicId;
+    for (const x of [c, cb, d]) x.close();
   });
 });
 

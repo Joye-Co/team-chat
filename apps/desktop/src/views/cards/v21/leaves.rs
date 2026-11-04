@@ -2148,6 +2148,22 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
     let declared: Vec<String> = b.base().map(|x| x.events().to_vec()).unwrap_or_default();
     let state = folder(ctx, artifact_id, *version, cx);
     let shown = embed_body(&state, detail.is_some());
+    // A 产出 that is not a web page is framed as a file: its kind, no sandbox and no page
+    // actions (CARD21 §3 embed).
+    let file = match (&state, shown) {
+        (Some(Ok(f)), EmbedBody::NotPage) => {
+            use crate::views::media;
+            Some(media::file_kind(&f.entry, media::mime_for(&f.entry)))
+        }
+        _ => None,
+    };
+    crate::selftest::drawn::mark(
+        "embed-frame",
+        format!(
+            "{id}:{}",
+            file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+        ),
+    );
     let body: AnyElement = match (state, shown) {
         (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
@@ -2261,7 +2277,11 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 .bg(k.raised)
                 .border_b_1()
                 .border_color(k.line)
-                .child(ui::icon(Lucide::FileText, px(14.), k.ink_3))
+                .child(ui::icon(
+                    file.map_or(Lucide::FileText, crate::views::media::MediaKind::icon),
+                    px(14.),
+                    k.ink_3,
+                ))
                 .child(
                     b20::small(div())
                         .min_w(px(0.))
@@ -2277,26 +2297,27 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .text_color(k.ink_3)
                         .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
                 )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(k.ink_3)
-                        .child(format!("· {}", c::EMBED_KIND)),
-                )
-                .child(
-                    div()
-                        .ml_auto()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .text_color(k.ink_3)
-                        .child(ui::icon(Lucide::Shield, px(12.), k.ink_3))
-                        .child(c::EMBED_SANDBOX),
-                )
+                .child(div().flex_none().text_color(k.ink_3).child(format!(
+                    "· {}",
+                    file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+                )))
+                .when(file.is_none(), |el| {
+                    el.child(
+                        div()
+                            .ml_auto()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(space::S4)
+                            .text_color(k.ink_3)
+                            .child(ui::icon(Lucide::Shield, px(12.), k.ink_3))
+                            .child(c::EMBED_SANDBOX),
+                    )
+                })
                 .child(
                     div()
                         .id(eid(node, format!("embed-open-{id}")))
+                        .when(file.is_some(), |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
                         .rounded(px(6.))
@@ -2310,30 +2331,81 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 ),
         )
         .child(body)
-        .child(
-            meta(div())
-                .h(px(32.))
-                .px(space::S12)
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .bg(k.raised)
-                .border_t_1()
-                .border_color(k.line)
-                .text_color(k.ink_3)
-                .child(ui::icon(Lucide::ArrowRight, px(12.), k.ink_3))
-                .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
-                .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
-        )
+        .when(file.is_none(), |el| {
+            el.child(
+                meta(div())
+                    .h(px(32.))
+                    .px(space::S12)
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .bg(k.raised)
+                    .border_t_1()
+                    .border_color(k.line)
+                    .text_color(k.ink_3)
+                    .child(ui::icon(Lucide::ArrowRight, px(12.), k.ink_3))
+                    .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
+                    .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
+            )
+        })
         .into_any_element()
+}
+
+/// Sends my answer that did not get there again (CARD21 §2: the red 失败 band with 重试):
+/// with the same `clientEventId` when the outbox still has it, else as a new event.
+pub fn resend_answer(ctx: &Ctx) -> impl Fn() + 'static {
+    let provider = ctx.env.provider.clone();
+    let (g, tp, msg) = (
+        ctx.msg.group_id.clone(),
+        ctx.msg.topic_id.clone(),
+        ctx.msg.message_id.clone(),
+    );
+    let rev = ctx.card.rev;
+    let pending = provider.card_v2_pending(&g, &msg);
+    let last = provider
+        .card_v2_events(&g, &msg)
+        .into_iter()
+        .rev()
+        .find(|e| e.durable && !e.dropped);
+    move || {
+        crate::selftest::drawn::mark("card-resend", msg.clone());
+        if let Some(e) = &last
+            && provider.retry_card_event(&g, &tp, &msg, &e.client_event_id)
+        {
+            return;
+        }
+        let request = match (&last, &pending) {
+            (Some(e), _) => e.request.clone(),
+            (None, Some(p)) => {
+                let value = p.inputs.as_ref().and_then(|i| i.get(&p.action_id)).cloned();
+                crate::data::cards_v2::CardEventRequest {
+                    rev,
+                    block_id: Some(p.action_id.clone()),
+                    event: "choice.submit".into(),
+                    value,
+                    ..Default::default()
+                }
+            }
+            _ => return,
+        };
+        provider.send_card_event(&g, &tp, &msg, request);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // A block this version does not know (CARD21 §6)
 
-pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
+pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let k = theme::colors(cx);
+    // CARD21 §6: the block's own fallbackText, when the sender gave one.
+    let fallback = ctx
+        .card
+        .blocks
+        .iter()
+        .position(|x| std::ptr::eq(x, b))
+        .and_then(|i| ctx.card.unknown_fallback(i))
+        .map(str::to_string);
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
@@ -2346,23 +2418,31 @@ pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
                 .child(ui::icon(Lucide::Info, px(14.), k.ink_3)),
         )
         .child(
-            div().flex().flex_col().gap(space::S4).min_w(px(0.)).child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap(space::S8)
-                    .child(
-                        b20::small(div())
-                            .font_weight(theme::MEDIUM_WEIGHT)
-                            .text_color(k.ink)
-                            .child(c::UNKNOWN_BLOCK),
-                    )
-                    .child(meta(div()).mono().text_color(k.ink_3).child(format!(
-                        "{} · {}",
-                        ctx.card.catalog(),
-                        c::UNKNOWN_KIND
-                    ))),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S4)
+                .min_w(px(0.))
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(space::S8)
+                        .child(
+                            b20::small(div())
+                                .font_weight(theme::MEDIUM_WEIGHT)
+                                .text_color(k.ink)
+                                .child(c::UNKNOWN_BLOCK),
+                        )
+                        .child(meta(div()).mono().text_color(k.ink_3).child(format!(
+                            "{} · {}",
+                            ctx.card.catalog(),
+                            c::UNKNOWN_KIND
+                        ))),
+                )
+                .when_some(fallback, |el, t| {
+                    el.child(b20::small(div()).text_color(k.ink_2).child(t))
+                }),
         )
         .into_any_element()
 }
@@ -2418,19 +2498,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
     }
     // My answer did not get there: 重试 with the same answer, and it goes again by itself.
     if let CardState::SendFailed { .. } = ctx.state {
-        let provider = ctx.env.provider.clone();
-        let (g, tp, msg) = (
-            ctx.msg.group_id.clone(),
-            ctx.msg.topic_id.clone(),
-            ctx.msg.message_id.clone(),
-        );
-        let rev = ctx.card.rev;
-        let pending = provider.card_v2_pending(&g, &msg);
-        let last = provider
-            .card_v2_events(&g, &msg)
-            .into_iter()
-            .rev()
-            .find(|e| e.durable && !e.dropped);
+        let resend = resend_answer(ctx);
         return Some(Some(bar(vec![
             button(
                 ctx.id("retry21"),
@@ -2439,29 +2507,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 cx,
             )
             .icon(ui::icon(Lucide::RefreshCw, px(14.), k.ink))
-            .on_click(move |_, _, _| {
-                // The same `clientEventId` when the outbox still has it; else again.
-                if let Some(e) = &last
-                    && provider.retry_card_event(&g, &tp, &msg, &e.client_event_id)
-                {
-                    return;
-                }
-                let request = match (&last, &pending) {
-                    (Some(e), _) => e.request.clone(),
-                    (None, Some(p)) => {
-                        let value = p.inputs.as_ref().and_then(|i| i.get(&p.action_id)).cloned();
-                        crate::data::cards_v2::CardEventRequest {
-                            rev,
-                            block_id: Some(p.action_id.clone()),
-                            event: "choice.submit".into(),
-                            value,
-                            ..Default::default()
-                        }
-                    }
-                    _ => return,
-                };
-                provider.send_card_event(&g, &tp, &msg, request);
-            })
+            .on_click(move |_, _, _| resend())
             .into_any_element(),
             note(c::SEND_AUTO.into()),
         ])));

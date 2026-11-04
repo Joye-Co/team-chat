@@ -139,6 +139,7 @@ fn card_live_write(id: &str, op: &OutboxOp) -> Option<LiveWrite> {
 /// The error a live write gets when it never left this client.
 pub(crate) fn offline_error() -> ErrorBody {
     ErrorBody {
+        retry_after_ms: None,
         code: ErrorCode::Internal,
         message: "not connected".into(),
         reason: Some("client.offline".into()),
@@ -152,6 +153,7 @@ pub(crate) fn emit_live_ack(
     result: Result<Option<serde_json::Value>, ErrorBody>,
 ) {
     let bad_result = || ErrorBody {
+        retry_after_ms: None,
         code: ErrorCode::Internal,
         message: "ack without a valid result".into(),
         reason: None,
@@ -873,8 +875,10 @@ impl Session {
                     context,
                     cause_event_id,
                     block_refs,
+                    from_aside,
                     ..
                 } => ClientFrame::Send(SendFrame {
+                    from_aside,
                     rid: rid.clone(),
                     group_id,
                     topic_id,
@@ -982,6 +986,7 @@ impl Session {
                     action_id,
                     inputs,
                     edited_values,
+                    content_hash,
                     ..
                 } => ClientFrame::CardAnswer(CardAnswerFrame {
                     rid: rid.clone(),
@@ -992,6 +997,7 @@ impl Session {
                     inputs,
                     edited_values,
                     client_event_id: Some(item.id.clone()),
+                    content_hash,
                 }),
                 OutboxOp::ArtifactEvent {
                     group_id,
@@ -1034,6 +1040,7 @@ impl Session {
                     value,
                     inputs,
                     part,
+                    content_hash: None,
                 }),
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {
@@ -1497,6 +1504,7 @@ impl Session {
             return None;
         }
         let err = error.unwrap_or(ErrorBody {
+            retry_after_ms: None,
             code: ErrorCode::Internal,
             message: String::new(),
             reason: None,

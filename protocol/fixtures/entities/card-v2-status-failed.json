@@ -1,0 +1,21 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "the author marked the card failed",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 2,
+    "intent": "done",
+    "title": "发版",
+    "fallback": "发版",
+    "blocks": [
+      {
+        "id": "t",
+        "type": "text",
+        "text": "发版失败：签名过期。"
+      }
+    ],
+    "status": "failed"
+  }
+}

@@ -80,6 +80,9 @@ pub(super) fn signal(u: &ClientUpdate) -> Option<PageSignal> {
             data: d.data.clone(),
             cause: d.cause.clone(),
         }),
+        ClientUpdate::InteractionResolved(t) => Some(PageSignal::Resolved {
+            event_id: t.event_id.clone(),
+        }),
         _ => None,
     }
 }

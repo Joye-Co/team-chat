@@ -51,13 +51,35 @@ impl HttpClient {
     /// whitespace; a DM answers `forbidden`.
     pub async fn rename_group(&self, group_id: &str, name: &str) -> ApiResult<GroupSummary> {
         let req = UpdateGroupRequest {
-            name: name.to_string(),
+            purpose: None,
+            name: Some(name.to_string()),
         };
+        self.update_group(group_id, &req).await
+    }
+
+    /// 1.1: sets a group's purpose line (`""` clears it). Same rights as a rename.
+    pub async fn set_group_purpose(
+        &self,
+        group_id: &str,
+        purpose: &str,
+    ) -> ApiResult<GroupSummary> {
+        let req = UpdateGroupRequest {
+            purpose: Some(purpose.to_string()),
+            name: None,
+        };
+        self.update_group(group_id, &req).await
+    }
+
+    async fn update_group(
+        &self,
+        group_id: &str,
+        req: &UpdateGroupRequest,
+    ) -> ApiResult<GroupSummary> {
         req.validate().map_err(invalid)?;
         self.call(
             Method::PATCH,
             &format!("/v1/groups/{}", enc(group_id)),
-            Some(&req),
+            Some(req),
             true,
         )
         .await
@@ -195,6 +217,50 @@ impl HttpClient {
             true,
         )
         .await
+    }
+
+    /// 1.1: sets the calling bot's desk note in a group (`""` clears it).
+    pub async fn put_desk_note(
+        &self,
+        group_id: &str,
+        text: &str,
+    ) -> ApiResult<crate::proto::PutDeskNoteResponse> {
+        let req = crate::proto::PutDeskNoteRequest {
+            group_id: group_id.to_string(),
+            text: text.to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(Method::PUT, "/v1/desk-note", Some(&req), true)
+            .await
+    }
+
+    /// 1.1: the newest desk note per bot member of a group.
+    pub async fn desk_notes(&self, group_id: &str) -> ApiResult<crate::proto::DeskNotesResponse> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/groups/{}/desk-notes", enc(group_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// 1.1: the page log of a 产出 (页面里的回应), newest first; `before` is an event id.
+    pub async fn artifact_events(
+        &self,
+        artifact_id: &str,
+        before: Option<&str>,
+        limit: u32,
+    ) -> ApiResult<crate::proto::ArtifactEventsResponse> {
+        let mut path = format!(
+            "/v1/artifacts/{}/events?limit={}",
+            enc(artifact_id),
+            limit.clamp(1, crate::proto::MAX_ARTIFACT_EVENTS_PAGE)
+        );
+        if let Some(b) = before {
+            path.push_str(&format!("&before={}", enc(b)));
+        }
+        self.call::<(), _>(Method::GET, &path, None, true).await
     }
 
     pub async fn artifact(&self, artifact_id: &str) -> ApiResult<ArtifactResponse> {

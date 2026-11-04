@@ -242,6 +242,20 @@ describe("github hook", () => {
     cs = (await cards(c, gid)).get(topic.id) as any[];
     expect(JSON.stringify(cs[0].card)).toContain("server: 通过");
 
+    // check_run is not a CI source (check_suite and workflow_run are): a delivery adds no line.
+    const run = (action: string, status: string, conclusion: string | null) => ({
+      action,
+      check_run: { name: "e2e", head_sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", status, conclusion, html_url: "https://github.com/x", pull_requests: [{ number: 42 }] },
+      repository: { full_name: REPO, html_url: `https://github.com/${REPO}` },
+    });
+    const beforeRuns = JSON.stringify(((await cards(c, gid)).get(topic.id) as any[])[0].card);
+    await ok("check_run", run("created", "in_progress", null));
+    await ok("check_run", run("completed", "completed", "success"));
+    cs = (await cards(c, gid)).get(topic.id) as any[];
+    expect(cs).toHaveLength(1);
+    expect(JSON.stringify(cs[0].card)).not.toContain("e2e");
+    expect(JSON.stringify(cs[0].card)).toBe(beforeRuns);
+
     await ok("pull_request_review", reviewEvent("changes_requested", "rev-gh"));
     expect((await topics(c, gid)).get(topic.id)).toMatchObject({ status: "in_progress", waitingOn: [owner.id] });
 
@@ -362,3 +376,38 @@ describe("github payload parsing", () => {
   });
 });
 
+
+describe("GitHub merge state (1.1, GAPS SF-5)", () => {
+  const links = async (c: Client, gid: string) =>
+    (await events(c, gid)).filter((e) => e.type === "topic.linked").map((e) => e.data.link);
+
+  it("store a queued merge on the PR link, set its error when GitHub dequeues it, and drop it once merged", async () => {
+    const { hook, secret, gid, c } = await setup("github");
+    const post = async (action: string, o: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => {
+      const r = await postGithub(hook.id, secret, "pull_request", pullRequestEvent(action, { number: 12, ...o }, extra));
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    };
+    await post("opened");
+    expect((await links(c, gid)).at(-1).merge).toBeUndefined();
+    const t0 = Date.now();
+    await post("enqueued");
+    const queued = (await links(c, gid)).at(-1);
+    expect(queued.merge.queuedAt).toBeGreaterThanOrEqual(t0);
+    expect(queued.merge.error).toBeUndefined();
+    // A merge failure: the topic leaves 合并中 (the link says why).
+    await post("dequeued", {}, { reason: "MERGE_CONFLICT" });
+    const failed = (await links(c, gid)).at(-1);
+    expect(failed.merge).toEqual({ queuedAt: queued.merge.queuedAt, error: "merge conflict" });
+    // Auto-merge again, then merged: no queued merge on a merged PR.
+    await post("auto_merge_enabled");
+    expect((await links(c, gid)).at(-1).merge.error).toBeUndefined();
+    await post("auto_merge_disabled", {}, { reason: "Base branch was modified" });
+    expect((await links(c, gid)).at(-1).merge.error).toBe("Base branch was modified");
+    await post("enqueued");
+    await post("closed", { state: "closed", merged: true });
+    const merged = (await links(c, gid)).at(-1);
+    expect(merged).toMatchObject({ state: "merged" });
+    expect(merged.merge).toBeUndefined();
+    c.close();
+  });
+});

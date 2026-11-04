@@ -3,12 +3,14 @@
 // stops, and the run shows `pausedBy` until someone resumes it (run.resume, with an optional
 // note for the CLI). The run's bot replaces its 验收标准 over HTTP.
 import type { AcceptanceItem, BotRun } from "@chat/protocol";
-import { ApiError, type Result } from "../../core/errors";
+import { ApiError, type Result, unwrap } from "../../core/errors";
+import { ulid } from "../../core/ids";
 import { TokenBucket } from "../../core/ratelimit";
 import { hasFeature } from "../dispatch";
 import { linkStub } from "../env";
 import { loadMachines } from "../store";
 import { PLAN_RATE, type RunRow, result } from "./core";
+import type { RunRequest } from "./runs";
 import { DeskInput } from "./input";
 
 /** Who may pause or resume: a person who is the run's requester, or an owner. */
@@ -41,9 +43,12 @@ export abstract class DeskTakeover extends DeskInput {
         const sent = await linkStub(this.env, r.machine_id).toRun({ t: "run.pause", runId, by: actor.id } as never);
         if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine");
         const now = Date.now();
-        this.sql.exec("UPDATE runs SET paused_by = ?, paused_at = ? WHERE id = ?", actor.id, now, runId);
+        // A new pause generation: a `paused: false` sent before the daemon took this pause does
+        // not clear it (events.ts).
+        this.sql.exec("UPDATE runs SET paused_by = ?, paused_at = ?, pause_gen = pause_gen + 1 WHERE id = ?", actor.id, now, runId);
         r.paused_by = actor.id;
         r.paused_at = now;
+        r.pause_gen += 1;
         await this.setStatus(r, r.status);
         this.log.info("run paused", { runId, actorId: actor.id });
         return this.toRun(r);
@@ -76,6 +81,59 @@ export abstract class DeskTakeover extends DeskInput {
         return this.toRun(r);
       });
     });
+  }
+
+  /**
+   * 重试: starts a new run with the same request as an ended run (its author, text and
+   * follow-ups), linked by `retryOf`. The requester or an owner (a person) may.
+   */
+  async retry(botId: string, runId: string, actor: TakeoverActor): Promise<Result<BotRun>> {
+    return result(async () => {
+      this.bind(botId);
+      const r = this.run(runId);
+      if (!r) throw new ApiError("not_found", "run not found");
+      if (!this.mayTakeOver(r, actor)) throw new ApiError("forbidden", "only the requester or an owner retries a run");
+      if (r.ended_at === null) throw new ApiError("conflict", "the run is still active");
+      if (r.external) throw new ApiError("conflict", "a run started over HTTP cannot be retried");
+      if (!(await this.botActive())) throw new ApiError("conflict", "the member takes no runs");
+      if (this.activeRun(r.topic_id)) throw new ApiError("conflict", "the topic has an active run");
+      const request = this.requestOf(r) ?? (await this.requestFromRoom(r));
+      if (!request) throw new ApiError("conflict", "the request of this run is gone");
+      // A key of its own: the original message already started a run.
+      const key = `retry:${ulid()}`;
+      const ack = request.m.ackMessageId ?? (r.trigger_message_id.includes(":") ? undefined : r.trigger_message_id);
+      await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, request.followUps, r.id);
+      const started = this.sql.exec<RunRow>("SELECT * FROM runs WHERE trigger_message_id = ?", key).toArray()[0] as RunRow | undefined;
+      if (!started) throw new ApiError("conflict", "the member takes no runs in this topic");
+      this.log.info("run retried", { runId, retryId: started.id, actorId: actor.id });
+      return this.toRun(started);
+    });
+  }
+
+  protected requestOf(r: RunRow): RunRequest | null {
+    const raw = this.meta(`request:${r.id}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as RunRequest;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The request of a run made before requests were kept: its trigger message, from the room. */
+  protected async requestFromRoom(r: RunRow): Promise<RunRequest | null> {
+    if (r.trigger_message_id.includes(":")) return null;
+    try {
+      const m = unwrap(await this.room(r).rpc(r.group_id, "bots.request", this.actor(), { messageId: r.trigger_message_id })) as {
+        authorId: string;
+        body: string;
+      } | null;
+      if (!m) return null;
+      return { m: { groupId: r.group_id, topicId: r.topic_id, messageId: r.trigger_message_id, authorId: m.authorId, body: m.body, mentioned: true }, followUps: [] };
+    } catch (err) {
+      this.log.warn("request lookup failed", { runId: r.id, err });
+      return null;
+    }
   }
 
   /** Replaces the acceptance criteria of an active run of this bot (HTTP; the caller is the bot). */

@@ -34,13 +34,18 @@ import {
   CardRetractedEvent,
   CardState,
   CardV2,
+  DecisionRecordedEvent,
   DecisionsResponse,
   GroupDecision,
+  RecordDecisionRequest,
+  RecordDecisionResponse,
+  RecordedDecision,
   InteractionResolvedTransient,
   InteractionResolveFrame,
   PartRef,
 } from "./card2.ts";
 import { ArtifactPreviewReadyEvent, MediaInfo } from "./media.ts";
+import { DeskNotedEvent, DeskNotesResponse, PutDeskNoteRequest, PutDeskNoteResponse } from "./desk.ts";
 import { TopicLink, TopicLinkedEvent } from "./links.ts";
 import { CharacterId } from "./characters.ts";
 import {
@@ -53,6 +58,7 @@ import {
   CreateFileRequest,
   CreateFileResponse,
   CreateArtifactRequest,
+  MachineCreateArtifactRequest,
   FileMeta,
   FileResponse,
   Artifact,
@@ -67,6 +73,10 @@ import {
   ArtifactReplyTransient,
   ArtifactDataResponse,
   PutArtifactDataRequest,
+  PutArtifactMediaRequest,
+  PutArtifactMediaResponse,
+  UploadPartResponse,
+  ArtifactEventsResponse,
 } from "./files.ts";
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
 import { BlockRef, BlockRefInput, editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
@@ -75,7 +85,7 @@ import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, Upda
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
-import { sendContextFields, TopicContext, TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
+import { messageAsideFields, sendContextFields, TopicContext, TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
 import { UpdateInfo } from "./updates.ts";
 import { DiagnosticsResponse } from "./diagnostics.ts";
 import { AuditResponse, AuditEntry } from "./audit.ts";
@@ -104,8 +114,10 @@ export * from "./topic.ts";
 export * from "./reads.ts";
 export * from "./card.ts";
 export * from "./card2.ts";
+export * from "./pattern.ts";
 export * from "./diagram.ts";
 export * from "./media.ts";
+export * from "./desk.ts";
 export * from "./links.ts";
 export * from "./message.ts";
 export * from "./files.ts";
@@ -151,6 +163,8 @@ export const Group = z.object({
   memberIds: z.array(Id),
   createdBy: Id,
   createdAt: Millis,
+  /** 1.1: the purpose line under the group's name (absent = none). */
+  purpose: z.string().min(1).max(200).optional(),
 });
 export type Group = z.infer<typeof Group>;
 
@@ -204,6 +218,7 @@ export const Message = z.object({
   streaming: z.boolean().optional(),
   ...messageFields,
   ...messageReactionFields,
+  ...messageAsideFields,
 });
 export type Message = z.infer<typeof Message>;
 
@@ -225,6 +240,8 @@ export const ErrorBody = z.object({
   message: z.string(),
   /** 1.1: the specific reason, e.g. `card.already_answered` (no new `ErrorCode` values). */
   reason: z.string().min(1).max(64).optional(),
+  /** 1.1, `rate_limited`: wait at least this long before the next try. */
+  retryAfterMs: z.int().nonnegative().optional(),
 });
 export type ErrorBody = z.infer<typeof ErrorBody>;
 
@@ -272,7 +289,8 @@ export const MessageDeletedEvent = z.object({
 export const GroupUpdatedEvent = z.object({
   ...eventBase,
   type: z.literal("group.updated"),
-  data: z.object({ name: z.string() }),
+  /** `name` is the group's name after the change; 1.1 `purpose` is set when it changed ("" = cleared). */
+  data: z.object({ name: z.string(), purpose: z.string().max(200).optional() }),
 });
 export const GroupMemberAddedEvent = z.object({
   ...eventBase,
@@ -304,6 +322,8 @@ export const Event = z.discriminatedUnion("type", [
   TopicLinkedEvent,
   CardRetractedEvent,
   ArtifactPreviewReadyEvent,
+  DecisionRecordedEvent,
+  DeskNotedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -678,10 +698,16 @@ export const schemas = {
   CreateFileRequest,
   CreateFileResponse,
   FileResponse,
+  UploadPartResponse,
+  ArtifactEventsResponse,
+  PutDeskNoteRequest,
+  PutDeskNoteResponse,
+  DeskNotesResponse,
   Artifact,
   ArtifactVersion,
   CreateArtifactRequest,
   AddArtifactVersionRequest,
+  MachineCreateArtifactRequest,
   ArtifactVersionResponse,
   ArtifactResponse,
   ArtifactsResponse,
@@ -722,6 +748,9 @@ export const schemas = {
   TopicContext,
   GroupDecision,
   DecisionsResponse,
+  RecordedDecision,
+  RecordDecisionRequest,
+  RecordDecisionResponse,
   SetRunAcceptanceRequest,
   ResumeRunRequest,
   // 1.1 interaction loop, refs, media
@@ -736,6 +765,8 @@ export const schemas = {
   ArtifactDataAck,
   ArtifactDataResponse,
   PutArtifactDataRequest,
+  PutArtifactMediaRequest,
+  PutArtifactMediaResponse,
 } as const;
 export type SchemaName = keyof typeof schemas;
 
