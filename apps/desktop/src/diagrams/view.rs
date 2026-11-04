@@ -3,13 +3,10 @@
 //! 问这里, keyboard focus over the nodes, 看原文 / 复制原文 / 放大, and the error frames
 //! that keep the source visible.
 
-use std::time::Duration;
-
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, ClipboardItem, ElementId, FocusHandle,
-    ImageSource, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, canvas, div, img,
-    linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px,
+    AnyElement, App, ClipboardItem, ElementId, FocusHandle, ImageSource, InteractiveElement as _,
+    IntoElement, KeyDownEvent, ParentElement as _, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, canvas, div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{Selectable as _, Sizable as _, button::ButtonVariants as _};
 
@@ -26,10 +23,15 @@ use crate::{
 
 /// Largest inline height before the image scales down or is cut.
 pub const MAX_INLINE_HEIGHT: f32 = 360.;
-/// The smallest scale a tall diagram may shrink to before it is cut instead.
-pub const MIN_FIT_SCALE: f32 = 0.6;
 /// The box shown while a diagram renders.
 pub const PENDING_HEIGHT: f32 = 160.;
+/// The smallest scale inline. Node labels are drawn at 13 px and measure about 9 px of
+/// CJK ink at 1×, the least C1 allows, so a diagram never shrinks below 1× inline
+/// (COMPLETENESS.md F64): a wider one scrolls sideways, one with too many nodes shows a
+/// summary with 打开查看器.
+pub const MIN_TEXT_SCALE: f32 = 1.0;
+/// Above this many nodes a diagram never shows inline; the viewer has room for it.
+pub const MAX_INLINE_NODES: usize = 60;
 /// Padding around the image inside the frame.
 const PAD: f32 = 16.;
 /// Lines of source shown before 展开.
@@ -60,35 +62,20 @@ pub struct Fit {
     pub clipped: bool,
 }
 
-/// REFS §B4: content width, never above 1×; taller than 360 shrinks while the scale
-/// stays ≥ 0.6, else the top 360 shows (unless expanded).
+/// The inline fit (F64): the content width, never above 1× and never below
+/// [`MIN_TEXT_SCALE`] (12 px text); a wider diagram scrolls sideways inside the card. A
+/// diagram taller than [`MAX_INLINE_HEIGHT`] shows its top with 展开 in a footer row.
 pub fn inline_fit(w: f32, h: f32, avail: f32, expanded: bool) -> Fit {
     let w = w.max(1.);
     let h = h.max(1.);
-    let s0 = (avail.max(1.) / w).min(1.);
-    if h * s0 <= MAX_INLINE_HEIGHT || expanded {
-        return Fit {
-            scale: s0,
-            w: w * s0,
-            h: h * s0,
-            clipped: false,
-        };
-    }
-    let s1 = MAX_INLINE_HEIGHT / h;
-    if s1 >= MIN_FIT_SCALE {
-        Fit {
-            scale: s1,
-            w: w * s1,
-            h: MAX_INLINE_HEIGHT,
-            clipped: false,
-        }
-    } else {
-        Fit {
-            scale: s0,
-            w: w * s0,
-            h: MAX_INLINE_HEIGHT,
-            clipped: true,
-        }
+    let scale = (avail.max(1.) / w).clamp(MIN_TEXT_SCALE, 1.);
+    let full = h * scale;
+    let clipped = full > MAX_INLINE_HEIGHT && !expanded;
+    Fit {
+        scale,
+        w: w * scale,
+        h: if clipped { MAX_INLINE_HEIGHT } else { full },
+        clipped,
     }
 }
 
@@ -129,6 +116,10 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
     );
     let normalized = normalize::normalize(&spec.source);
     let (state, kind) = match &normalized {
+        // `diagram-loading` holds the drawing back to show the skeleton.
+        Ok(n) if super::preview::LOADING.load(std::sync::atomic::Ordering::Relaxed) => {
+            (State::Pending, Some(n.kind))
+        }
         Ok(n) => (super::request(n, INLINE_SCALE, true, cx), Some(n.kind)),
         Err(r) => (State::Failed(ErrorKind::from_refusal(r), None), None),
     };
@@ -187,17 +178,20 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
     let key_ui = ui.clone();
     let key_spec = spec.clone();
     let key_norm = normalized.clone().ok();
+    let n = ui::native::native_colors(cx);
+    // §2.4: one card width in the thread, the card frame; focus is the 3 px ring.
     div()
         .id(ElementId::Name(format!("diagram-{id}").into()))
         .relative()
-        .w_full()
-        .max_w(px(theme::PAGE_MEASURE.into()))
+        .w(ui::native::tokens::card_v2::MAX_WIDTH)
+        .max_w_full()
         .flex()
         .flex_col()
-        .rounded(radius::LG)
+        .rounded(ui::native::tokens::radius::CARD)
         .border_1()
-        .border_color(if focused_frame { k.ink_3 } else { k.line })
-        .bg(k.raised)
+        .border_color(n.separator)
+        .when(focused_frame, |d| d.shadow(vec![ring_shadow(n.focus)]))
+        .bg(n.content)
         .overflow_hidden()
         .aria_label(alt)
         .track_focus(&focus)
@@ -300,6 +294,17 @@ fn open_viewer(
     );
 }
 
+/// The 3 px focus ring around a frame, drawn outside it.
+pub fn ring_shadow(color: gpui::Hsla) -> gpui::BoxShadow {
+    gpui::BoxShadow {
+        color,
+        offset: gpui::point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: px(3.),
+        inset: false,
+    }
+}
+
 fn header(
     spec: &InlineSpec,
     kind: Option<DiagramType>,
@@ -316,19 +321,21 @@ fn header(
     let viewer = normalized
         .cloned()
         .map(|n| (spec.clone(), n, ui.read(cx).focus.clone()));
+    let n = ui::native::native_colors(cx);
+    let _ = &k;
     div()
-        .h(px(36.))
-        .px(space::S12)
+        .h(ui::native::tokens::height::LG)
+        .px(space::S16)
         .flex()
         .items_center()
-        .gap(space::S6)
+        .gap(space::S8)
         .border_b_1()
-        .border_color(k.line)
-        .child(ui::icon(Sym::Diagram, px(14.), k.ink_3))
+        .border_color(n.separator)
+        .child(ui::icon(Sym::Diagram, px(16.), n.secondary))
         .child(
             div()
                 .t_meta()
-                .text_color(k.ink_3)
+                .text_color(n.secondary)
                 .child(kind.map_or(c::BLOCK, DiagramType::word)),
         )
         .when_some(spec.title.clone(), |el, t| {
@@ -336,25 +343,29 @@ fn header(
                 div()
                     .t_small()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(k.ink)
+                    .text_color(n.label)
+                    .min_w(px(0.))
+                    .one_line()
                     .child(crate::markdown::clip(&t, 80)),
             )
         })
         .child(div().flex_1())
         .when(actions, |el| {
             el.child(
-                gpui_component::button::Button::new(ElementId::Name(format!("dsrc-{id}").into()))
-                    .ghost()
-                    .compact()
-                    .label(c::VIEW_SOURCE)
-                    .with_size(gpui_component::Size::XSmall)
-                    .selected(show_source)
-                    .on_click(move |_, _, cx| {
-                        toggle_ui.update(cx, |s, cx| {
-                            s.show_source = !s.show_source;
-                            cx.notify();
-                        })
-                    }),
+                ui::native::push_button(
+                    ElementId::Name(format!("dsrc-{id}").into()),
+                    c::VIEW_SOURCE,
+                    ui::native::PushStyle::Ghost,
+                    ui::native::PushSize::Small,
+                    cx,
+                )
+                .selected(show_source)
+                .on_click(move |_, _, cx| {
+                    toggle_ui.update(cx, |s, cx| {
+                        s.show_source = !s.show_source;
+                        cx.notify();
+                    })
+                }),
             )
             .child(
                 ui::native::icon_button_bare(
@@ -383,44 +394,11 @@ fn header(
         })
 }
 
-/// The 正在画图 box: `--sunken`, 160 high, a moving line (static with Reduce motion).
-fn pending(id: &SharedString, avail: f32, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    let line_w = 64.;
-    let travel = (avail - line_w).max(0.);
-    let line = div()
-        .absolute()
-        .bottom(px(48.))
-        .h(px(2.))
-        .w(px(line_w))
-        .rounded(px(1.))
-        .bg(k.line_2);
-    let line: AnyElement = if cx.reduce_motion() {
-        line.left(px(travel / 2.)).into_any_element()
-    } else {
-        line.with_animation(
-            ElementId::Name(format!("dpending-{id}").into()),
-            Animation::new(Duration::from_millis(1400)).repeat(),
-            move |el, t| {
-                // Ease in and out across the width and back.
-                let p = if t < 0.5 { t * 2. } else { 2. - t * 2. };
-                let eased = p * p * (3. - 2. * p);
-                el.left(px(travel * eased))
-            },
-        )
-        .into_any_element()
-    };
-    div()
-        .relative()
-        .w_full()
-        .h(px(PENDING_HEIGHT))
+/// The box while a diagram renders: a pulsing skeleton of the diagram's height
+/// (§2.14), static with Reduce motion; no text in the empty region.
+fn pending(_id: &SharedString, _avail: f32, _cx: &App) -> AnyElement {
+    ui::native::skeleton(gpui::relative(1.), px(PENDING_HEIGHT))
         .rounded(radius::MD)
-        .bg(k.sunken)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(div().t_small().text_color(k.ink_3).child(c::DRAWING))
-        .child(line)
         .into_any_element()
 }
 
@@ -432,14 +410,60 @@ fn image_with_hits(
     _window: &mut Window,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
+    let id = spec.id.clone();
+    // Too many nodes to read inline: a summary and the viewer (F64).
+    if ready.meta.nodes.len() > MAX_INLINE_NODES {
+        let viewer = normalize::normalize(&spec.source)
+            .ok()
+            .map(|nz| (spec.clone(), nz, ui.read(cx).focus.clone()));
+        return div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(space::S12)
+            .child(ui::icon(Sym::Diagram, px(16.), n.secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .gap(space::S2)
+                    .child(div().t_small().text_color(n.label).child(c::TOO_DENSE))
+                    .child(
+                        div()
+                            .t_meta()
+                            .tnum()
+                            .text_color(n.secondary)
+                            .child(crate::copy::fill(
+                                c::ERROR_NODES,
+                                &[("n", &ready.meta.nodes.len().to_string())],
+                            )),
+                    ),
+            )
+            .when_some(viewer, |d, (spec, nz, focus)| {
+                d.child(
+                    ui::native::push_button(
+                        ElementId::Name(format!("dview-{id}").into()),
+                        c::OPEN_VIEWER,
+                        ui::native::PushStyle::Outline,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        open_viewer(&spec, &nz, focus.clone(), window, cx)
+                    }),
+                )
+            })
+            .into_any_element();
+    }
     let (expanded, hovered, focused) = {
         let u = ui.read(cx);
         (u.expanded, u.hovered, u.focused)
     };
     let fit = inline_fit(ready.meta.width, ready.meta.height, avail, expanded);
     let full_h = ready.meta.height * fit.scale;
-    let id = spec.id.clone();
     let mut layer = div().relative().w(px(fit.w)).h(px(full_h)).child(
         img(ImageSource::Image(ready.image.clone()))
             .w(px(fit.w))
@@ -448,13 +472,8 @@ fn image_with_hits(
     let refs_on = crate::views::refs::enabled(cx);
     for (i, node) in ready.meta.nodes.iter().enumerate() {
         let (x, y, w, h) = hit_rect(node, fit.scale);
-        let ring = if focused == Some(i) {
-            Some((px(2.), k.ink_3))
-        } else if hovered == Some(i) {
-            Some((px(1.), k.line_2))
-        } else {
-            None
-        };
+        // E3: hover = one 1 px line around the node; focus = the 3 px ring.
+        let hover_line = hovered == Some(i) && focused != Some(i);
         let hover_ui = ui.clone();
         let origin = spec.origin.clone();
         let (nid, label) = (node.id.clone(), node.label.clone());
@@ -464,13 +483,16 @@ fn image_with_hits(
             div()
                 .id(ElementId::Name(format!("dnode-{id}-{i}").into()))
                 .absolute()
-                .left(px(x - 3.))
-                .top(px(y - 3.))
-                .w(px(w + 6.))
-                .h(px(h + 6.))
+                .left(px(x - 2.))
+                .top(px(y - 2.))
+                .w(px(w + 4.))
+                .h(px(h + 4.))
                 .rounded(radius::MD)
                 .aria_label(node.label.clone())
-                .when_some(ring, |el, (wd, color)| el.border(wd).border_color(color))
+                .when(hover_line, |el| el.border_1().border_color(n.secondary))
+                .when(focused == Some(i), |el| {
+                    el.shadow(vec![ring_shadow(n.focus)])
+                })
                 .on_hover(move |on, _, cx| {
                     hover_ui.update(cx, |s, cx| {
                         let next = if *on {
@@ -491,77 +513,111 @@ fn image_with_hits(
                         super::on_node_ref(origin.clone(), &nid, &label, window, cx);
                     }
                 })
-                // inc-refs: the ink 问这里 of every part, only when the server takes refs.
+                // inc-refs: 问这里 outside the node's top edge, never over the node's
+                // border or a connector beside it.
                 .when(hovered == Some(i) && refs_on, |el| {
                     el.child(
-                        div().absolute().top(px(-12.)).right(px(-8.)).child(
-                            crate::views::refs::affordance::ask_button(
-                                ElementId::Name(format!("dask-{id}-{i}").into()),
-                                cx,
-                            )
-                            .on_click(move |_, window, cx| {
-                                cx.stop_propagation();
-                                super::on_node_ref(
-                                    ask_origin.clone(),
-                                    &ask_id,
-                                    &ask_label,
-                                    window,
+                        div()
+                            .absolute()
+                            .bottom_full()
+                            .right(px(0.))
+                            .pb(space::S4)
+                            .child(
+                                crate::views::refs::affordance::ask_button(
+                                    ElementId::Name(format!("dask-{id}-{i}").into()),
                                     cx,
                                 )
-                            }),
-                        ),
+                                .on_click(move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    super::on_node_ref(
+                                        ask_origin.clone(),
+                                        &ask_id,
+                                        &ask_label,
+                                        window,
+                                        cx,
+                                    )
+                                }),
+                            ),
                     )
                 }),
         );
     }
     let toggle = ui.clone();
+    let scrolls = fit.w > avail + 0.5;
     div()
-        .relative()
         .w_full()
         .flex()
-        .justify_center()
+        .flex_col()
         .child(
             div()
                 .relative()
-                .w(px(fit.w))
-                .h(px(fit.h))
-                .when(fit.clipped, |el| el.overflow_hidden())
-                .child(layer)
-                .when(fit.clipped, |el| {
-                    el.child(
+                .w_full()
+                .child(
+                    div()
+                        .id(ElementId::Name(format!("dscroll-{id}").into()))
+                        .w_full()
+                        .flex()
+                        .when(!scrolls, |d| d.justify_center())
+                        .when(scrolls, |d| d.overflow_x_scroll())
+                        .child(
+                            div()
+                                .flex_none()
+                                .relative()
+                                .w(px(fit.w))
+                                .h(px(fit.h))
+                                .when(fit.clipped, |el| el.overflow_hidden())
+                                .child(layer),
+                        ),
+                )
+                // A wider diagram fades at the right edge: there is more to scroll to,
+                // never a hard cut mid-glyph (§2.21).
+                .when(scrolls, |d| {
+                    d.child(
                         div()
                             .absolute()
-                            .left_0()
-                            .right_0()
+                            .top_0()
                             .bottom_0()
-                            .h(px(72.))
-                            .bg(linear_gradient(
-                                180.,
-                                linear_color_stop(k.raised.opacity(0.), 0.),
-                                linear_color_stop(k.raised, 1.),
-                            ))
-                            .flex()
-                            .items_end()
-                            .justify_center()
-                            .pb(space::S8)
-                            .child(
-                                ui::native::push_button(
-                                    ElementId::Name(format!("dexpand-{id}").into()),
-                                    c::EXPAND,
-                                    ui::native::PushStyle::Outline,
-                                    ui::native::PushSize::Small,
-                                    cx,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    toggle.update(cx, |s, cx| {
-                                        s.expanded = true;
-                                        cx.notify();
-                                    })
-                                }),
-                            ),
+                            .right_0()
+                            .w(space::S24)
+                            .bg(gpui::linear_gradient(
+                                90.,
+                                gpui::linear_color_stop(n.content.opacity(0.), 0.),
+                                gpui::linear_color_stop(n.content, 1.),
+                            )),
                     )
                 }),
         )
+        // The top of a tall diagram: 展开 in a footer row under a line (§2.4), not on a
+        // fade over the picture.
+        .when(fit.clipped, |el| {
+            el.child(
+                div()
+                    .mt(space::S12)
+                    .mx(px(-PAD))
+                    .mb(px(-PAD))
+                    .px(px(PAD))
+                    .py(space::S8)
+                    .border_t_1()
+                    .border_color(n.separator)
+                    .flex()
+                    .items_center()
+                    .child(
+                        ui::native::push_button(
+                            ElementId::Name(format!("dexpand-{id}").into()),
+                            c::EXPAND,
+                            ui::native::PushStyle::Ghost,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            toggle.update(cx, |s, cx| {
+                                s.expanded = true;
+                                cx.notify();
+                            })
+                        }),
+                    ),
+            )
+        })
         .into_any_element()
 }
 
@@ -632,87 +688,71 @@ fn source_listing(id: &SharedString, source: &str, ui: &gpui::Entity<Ui>, cx: &A
         .into_any_element()
 }
 
-/// An error frame (REFS §B4 table): the reason in the header, then what it is about (the
-/// line the library could not read, or the node count of a too large diagram), the source
-/// below. Red only for 图没有画出来 (Refs.dc.html §07: 红色只用在这里); a too large
-/// diagram has its own quiet state (Refs.dc.html 状态一览: 图比较大).
+/// A diagram that did not draw (F64, §2.15): one Alert in place of the picture: the
+/// icon (red only for 图没有画出来, the one the writer can fix), the reason as the
+/// title, what it is about (the line the library could not read, or the node count) as
+/// the description, then 看原文 and 复制原文. The source shows under it on 看原文.
 fn error_frame(
     spec: &InlineSpec,
     error: ErrorKind,
     hint: Option<Hint>,
-    kind: Option<DiagramType>,
+    _kind: Option<DiagramType>,
     ui: &gpui::Entity<Ui>,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
     let id = spec.id.clone();
-    let red = error == ErrorKind::Failed;
     let source = spec.source.clone();
-    let (border, head_bg, icon, icon_color, text_color) = match error {
-        ErrorKind::Failed => (
-            k.bad.opacity(0.35),
-            k.bad.opacity(0.07),
-            Sym::Failed,
-            k.bad_ink,
-            k.bad_ink,
-        ),
-        ErrorKind::TooBig => (k.line, k.sunken, Sym::Waiting, k.ink_3, k.ink_2),
-        ErrorKind::Unsupported | ErrorKind::Forbidden => {
-            (k.line, k.raised, Sym::Diagram, k.ink_3, k.ink)
-        }
+    let (icon, icon_color, fallback) = match error {
+        ErrorKind::Failed => (Sym::Failed, n.red, c::ERROR_FAILED_DESC),
+        ErrorKind::TooBig => (Sym::Diagram, n.secondary, c::ERROR_TOO_BIG_DESC),
+        ErrorKind::Unsupported => (Sym::Diagram, n.secondary, c::ERROR_UNSUPPORTED_DESC),
+        ErrorKind::Forbidden => (Sym::Diagram, n.secondary, c::ERROR_FORBIDDEN_DESC),
     };
     let hint_text = hint.and_then(|h| match h {
         Hint::Line(n) => super::normalize::original_line(&spec.source, n)
             .map(|line| crate::copy::fill(c::ERROR_LINE, &[("n", &line.to_string())])),
         Hint::Nodes(n) => Some(crate::copy::fill(c::ERROR_NODES, &[("n", &n.to_string())])),
     });
-    let focus = ui.read(cx).focus.clone();
+    let description = match hint_text {
+        Some(h) => format!("{h} · {fallback}"),
+        None => fallback.to_string(),
+    };
+    let (focus, show_source) = {
+        let u = ui.read(cx);
+        (u.focus.clone(), u.show_source)
+    };
+    let toggle = ui.clone();
     div()
         .id(ElementId::Name(format!("diagram-{id}").into()))
-        .w_full()
-        .max_w(px(theme::PAGE_MEASURE.into()))
+        .w(ui::native::tokens::card_v2::MAX_WIDTH)
+        .max_w_full()
         .flex()
         .flex_col()
-        .rounded(radius::LG)
-        .border_1()
-        .border_color(border)
-        .bg(k.raised)
-        .overflow_hidden()
+        .gap(space::S8)
         .track_focus(&focus)
         .child(
-            div()
-                .h(px(36.))
-                .px(space::S12)
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .bg(head_bg)
-                .border_b_1()
-                .border_color(border)
-                .child(ui::icon(icon, px(14.), icon_color))
-                .when_some(kind.filter(|_| !red), |el, kind| {
-                    el.child(div().t_meta().text_color(k.ink_3).child(kind.word()))
-                })
-                .child(
-                    div()
-                        .t_small()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(text_color)
-                        .child(error.text()),
-                )
-                .when_some(hint_text, |el, text| {
-                    el.child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .t_small()
-                            .text_color(k.ink_2)
-                            .child(text),
+            ui::native::Alert::new(icon, error.text())
+                .icon_color(icon_color)
+                .description(description)
+                .action(
+                    ui::native::push_button(
+                        ElementId::Name(format!("dsrc-{id}").into()),
+                        c::VIEW_SOURCE,
+                        ui::native::PushStyle::Outline,
+                        ui::native::PushSize::Small,
+                        cx,
                     )
-                })
-                .child(div().flex_1())
-                .child(
+                    .selected(show_source)
+                    .on_click(move |_, _, cx| {
+                        toggle.update(cx, |s, cx| {
+                            s.show_source = !s.show_source;
+                            cx.notify();
+                        })
+                    }),
+                )
+                .action(
                     ui::native::icon_button_bare(
                         ElementId::Name(format!("dcopy-{id}").into()),
                         Sym::Copy,
@@ -724,11 +764,9 @@ fn error_frame(
                     }),
                 ),
         )
-        .child(
-            div()
-                .p(space::S12)
-                .child(source_listing(&id, &spec.source, ui, cx)),
-        )
+        .when(show_source, |d| {
+            d.child(source_listing(&id, &spec.source, ui, cx))
+        })
         .into_any_element()
 }
 
@@ -749,24 +787,19 @@ mod tests {
     }
 
     #[test]
-    fn fits_width_and_never_upscales() {
-        let f = inline_fit(300., 100., 560., false);
+    fn never_shrinks_text_and_scrolls_a_wide_diagram() {
+        let f = inline_fit(300., 100., 608., false);
         assert_eq!((f.scale, f.w, f.h, f.clipped), (1., 300., 100., false));
-        let f = inline_fit(1120., 200., 560., false);
-        assert_eq!((f.scale, f.w, f.h), (0.5, 560., 100.));
+        // Wider than the card: 1×, the rest scrolls sideways.
+        let f = inline_fit(1216., 200., 608., false);
+        assert_eq!((f.scale, f.w, f.h), (1., 1216., 200.));
     }
 
     #[test]
-    fn tall_diagrams_shrink_or_cut() {
-        // 500 high at 1×: 360 / 500 = 0.72 ≥ 0.6, shrinks.
-        let f = inline_fit(400., 500., 560., false);
-        assert!((f.scale - 0.72).abs() < 1e-4 && !f.clipped);
-        assert!((f.h - 360.).abs() < 1e-3);
-        // 1000 high: 0.36 < 0.6, the top 360 at 1× with a fade.
-        let f = inline_fit(400., 1000., 560., false);
+    fn tall_diagrams_show_their_top_until_expanded() {
+        let f = inline_fit(400., 1000., 608., false);
         assert_eq!((f.scale, f.h, f.clipped), (1., 360., true));
-        // Expanded: the whole height.
-        let f = inline_fit(400., 1000., 560., true);
+        let f = inline_fit(400., 1000., 608., true);
         assert_eq!((f.h, f.clipped), (1000., false));
     }
 

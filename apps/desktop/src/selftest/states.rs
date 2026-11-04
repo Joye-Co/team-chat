@@ -101,5 +101,14 @@ pub const SCENES: &[Scene] = &[
             )
         },
     },
+    Scene {
+        name: "diagram-loading",
+        about: "A diagram in the thread while it draws: the skeleton in place of the picture",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            crate::diagrams::preview::open(s, c, crate::diagrams::preview::Scene::Loading, cx)
+        },
+    },
     // --- end t5-media ---
 ];

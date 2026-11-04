@@ -213,12 +213,16 @@ impl DiagramViewer {
         let kind = self.spec.normalized.kind;
         let raw = self.spec.raw.clone();
         let image = ready.map(|r| r.image.clone());
+        let n = ui::native::native_colors(cx);
         div()
-            .h(px(52.))
+            .flex_none()
+            .h(ui::native::metrics::TOOLBAR_ROW)
             .px(space::S16)
             .flex()
             .items_center()
             .gap(space::S8)
+            .border_b_1()
+            .border_color(n.separator)
             .child(ui::icon(Sym::Diagram, px(16.), k.ink_3))
             .child(
                 div().t_bar_title().text_color(k.ink).child(
@@ -380,7 +384,16 @@ impl DiagramViewer {
             );
         }
         // One panel (Quick Look): the drawing sits on the panel itself, no card inside.
-        div().p(px(32.)).flex_none().child(layer).into_any_element()
+        // Centered while it is smaller than the viewport (at fit), from the top left when
+        // zoomed past it.
+        div()
+            .min_w(gpui::relative(1.))
+            .min_h(gpui::relative(1.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(div().p(px(32.)).flex_none().child(layer))
+            .into_any_element()
     }
 }
 

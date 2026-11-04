@@ -181,36 +181,73 @@ fn title(s: Sample) -> &'static str {
     }
 }
 
-/// The main window's first 话题 with the scene's sample messages at its end.
+/// One message a scene adds to the end of the thread.
+#[derive(Clone, Debug)]
+pub struct Extra {
+    pub author: String,
+    pub body: String,
+    pub streaming: bool,
+    /// The 产出 version the message points at.
+    pub artifact: Option<MediaKey>,
+}
+
+/// The main window's first 话题 with a scene's messages at its end (the media and
+/// diagram scenes): the real thread, not a drawn copy of it.
 pub struct MediaThread {
     inner: Arc<dyn ChatProvider>,
     group_id: String,
     topic_id: String,
-    samples: Vec<Sample>,
+    extras: Vec<Extra>,
     /// Folder and entry of each sample on disk.
     folders: Vec<(Sample, PathBuf, String)>,
 }
 
 impl MediaThread {
+    /// The thread with `extras` at its end and no 产出 of its own.
+    pub fn with_messages(inner: Arc<dyn ChatProvider>, extras: Vec<Extra>) -> Arc<Self> {
+        let (group_id, topic_id) = first_topic(&inner);
+        Arc::new(Self {
+            inner,
+            group_id,
+            topic_id,
+            extras,
+            folders: Vec::new(),
+        })
+    }
+
     fn new(inner: Arc<dyn ChatProvider>, samples: Vec<Sample>) -> Arc<Self> {
-        let group = inner.groups().first().cloned();
-        let topic = group.as_ref().and_then(|g| {
-            inner
-                .topics(&g.id)
-                .into_iter()
-                .find(|t| t.id != crate::fake::LONG_TOPIC)
-        });
+        let (group_id, topic_id) = first_topic(&inner);
         let folders = samples
             .iter()
             .filter_map(|s| write_sample(*s).map(|(dir, entry)| (*s, dir, entry)))
             .collect();
+        let extras = samples
+            .iter()
+            .map(|s| {
+                let p = post(*s);
+                Extra {
+                    author: p.author.into(),
+                    body: p.text.into(),
+                    streaming: false,
+                    artifact: Some(s.key()),
+                }
+            })
+            .collect();
         Arc::new(Self {
             inner,
-            group_id: group.map(|g| g.id).unwrap_or_default(),
-            topic_id: topic.map(|t| t.id).unwrap_or_default(),
-            samples,
+            group_id,
+            topic_id,
+            extras,
             folders,
         })
+    }
+
+    pub fn group_id(&self) -> &str {
+        &self.group_id
+    }
+
+    pub fn topic_id(&self) -> &str {
+        &self.topic_id
     }
 
     fn mine(&self, g: &str, t: &str) -> bool {
@@ -219,33 +256,35 @@ impl MediaThread {
 
     fn extra_messages(&self) -> Vec<Message> {
         let now = crate::selftest::clock::utc_now().timestamp_millis();
-        self.samples
+        self.extras
             .iter()
             .enumerate()
-            .map(|(i, s)| {
-                let p = post(*s);
+            .map(|(i, x)| {
                 let at = now - 600_000 + i as i64 * 60_000;
-                let key = s.key();
                 Message {
-                    id: format!("media-{i}"),
-                    client_msg_id: format!("c-media-{i}"),
+                    id: format!("extra-{i}"),
+                    client_msg_id: format!("c-extra-{i}"),
                     group_id: self.group_id.clone(),
                     topic_id: self.topic_id.clone(),
-                    author_id: p.author.into(),
-                    body: p.text.into(),
+                    author_id: x.author.clone(),
+                    body: x.body.clone(),
                     mentions: Vec::new(),
                     created_seq: 900_000 + i as u64,
                     created_at: at,
                     edited_at: None,
                     deleted_at: None,
-                    streaming: false,
+                    streaming: x.streaming,
                     send_state: SendState::Sent,
                     quote_of: None,
                     attachments: Vec::new(),
-                    artifact_refs: vec![ArtifactRef {
-                        artifact_id: key.artifact_id.clone(),
-                        version: key.version,
-                    }],
+                    artifact_refs: x
+                        .artifact
+                        .iter()
+                        .map(|key| ArtifactRef {
+                            artifact_id: key.artifact_id.clone(),
+                            version: key.version,
+                        })
+                        .collect(),
                     reactions: Vec::new(),
                 }
             })
@@ -282,6 +321,21 @@ impl MediaThread {
                 .collect(),
         }
     }
+}
+
+/// The first 群 and its first ordinary 话题 (the one `open_first_topic` opens).
+fn first_topic(inner: &Arc<dyn ChatProvider>) -> (String, String) {
+    let group = inner.groups().first().cloned();
+    let topic = group.as_ref().and_then(|g| {
+        inner
+            .topics(&g.id)
+            .into_iter()
+            .find(|t| t.id != crate::fake::LONG_TOPIC)
+    });
+    (
+        group.map(|g| g.id).unwrap_or_default(),
+        topic.map(|t| t.id).unwrap_or_default(),
+    )
 }
 
 /// The files of a sample folder, as a version lists them.
