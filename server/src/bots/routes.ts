@@ -4,6 +4,7 @@ import {
   CreateFileRequest,
   CreateMachineRequest,
   EndRunRequest,
+  MAX_FILE_BYTES,
   MachineCreateArtifactRequest,
   RUN_KIND_ASIDE,
   ResumeRunRequest,
@@ -19,7 +20,7 @@ import { getMember, isGroupMember } from "../core/db";
 import { ApiError, unwrap } from "../core/errors";
 import { ulid } from "../core/ids";
 import { registerRoute } from "../core/registry";
-import { type WriterContext, addArtifactVersionAs, artifactGroupOf, completeFile, createArtifactAs, reserveFile, toFileMeta } from "../files/routes";
+import { type WriterContext, addArtifactVersionAs, artifactGroupOf, completeFile, createArtifactAs, reserveFile } from "../files/routes";
 import { toMachine } from "./dispatch";
 import { deskStub, linkStub } from "./env";
 import type { TakeoverActor } from "./desk/takeover";
@@ -247,6 +248,8 @@ export function registerBotRoutes(): void {
       if (!run || run.machine_id !== machine.id) throw new ApiError("not_found", "run not found");
       const declared = request.headers.get("content-length");
       if (declared === null || !/^\d+$/.test(declared)) throw new ApiError("invalid", "Content-Length is required");
+      // A run uploads with one PUT; parts are for member clients.
+      if (Number(declared) > MAX_FILE_BYTES) throw new ApiError("too_large", "file too large");
       const size = Number(declared);
       if (size > MAX_SESSION_BYTES) throw new ApiError("too_large", "session is larger than 100 MiB");
       if (!request.body || size === 0) throw new ApiError("invalid", "empty session");
@@ -304,8 +307,7 @@ export function registerBotRoutes(): void {
         throw new ApiError("invalid", `invalid file: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim());
       }
       const row = await reserveFile(env, writer, req.data);
-      await completeFile(env, writer, row, request);
-      return toFileMeta({ ...row, status: "ready" });
+      return completeFile(env, writer, row, request);
     },
   });
 

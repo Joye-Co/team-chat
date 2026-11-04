@@ -11,13 +11,20 @@ import { MediaInfo, MediaInfoInput } from "./media.ts";
  * (decimal) on the Free and Pro plans, so the limit is 100,000,000 bytes, not 100 MiB.
  */
 export const MAX_FILE_BYTES = 100_000_000;
+/**
+ * Max bytes of one file (1.1): a file over `MAX_FILE_BYTES` uploads in parts (multipart). Equal
+ * to `MEDIA_LIMITS.anyBytes`; a larger file is refused at `POST /v1/files`, before any upload.
+ */
+export const MAX_UPLOAD_BYTES = 2_000_000_000;
+/** Bytes of each part of a multipart upload but the last (50 MiB; R2 wants equal parts of >= 5 MiB). */
+export const UPLOAD_PART_BYTES = 52_428_800;
 /** Max bytes of an avatar image. */
 export const MAX_AVATAR_BYTES = 1_048_576;
 export const MAX_ARTIFACT_FILES = 500;
 export const MAX_ARTIFACT_PATH_CHARS = 255;
 
 const FileName = z.string().min(1).max(MAX_FILE_NAME_CHARS);
-const FileSize = z.int().nonnegative().max(MAX_FILE_BYTES);
+const FileSize = z.int().nonnegative().max(MAX_UPLOAD_BYTES);
 const Pixels = z.int().positive();
 
 export const FileStatus = z.enum(["pending", "ready"]);
@@ -52,12 +59,30 @@ export const CreateFileRequest = z.object({
   height: Pixels.optional(),
 });
 export type CreateFileRequest = z.infer<typeof CreateFileRequest>;
+/**
+ * 1.1: how a file over `MAX_FILE_BYTES` uploads. `PUT <partUrl>/<n>` sends part n (1..parts) of
+ * exactly `partBytes` bytes (the last one the rest), in any order and again on failure; then
+ * `POST <completeUrl>` checks the SHA-256 and makes the file ready.
+ */
+export const MultipartUpload = z.object({
+  partBytes: z.int().positive(),
+  parts: z.int().positive().max(10_000),
+  /** Absolute URL; append `/<n>`. */
+  partUrl: z.string().min(1),
+  completeUrl: z.string().min(1),
+});
+export type MultipartUpload = z.infer<typeof MultipartUpload>;
 export const CreateFileResponse = z.object({
   file: FileMeta,
-  /** Absolute URL for `PUT` of the raw content (same bearer token). */
+  /** Absolute URL for `PUT` of the raw content (same bearer token). Files over `MAX_FILE_BYTES` use `multipart`. */
   uploadUrl: z.string().min(1),
+  /** 1.1: set when the file is over `MAX_FILE_BYTES`. */
+  multipart: MultipartUpload.optional(),
 });
 export type CreateFileResponse = z.infer<typeof CreateFileResponse>;
+/** `PUT /v1/files/:id/parts/:n` (1.1) */
+export const UploadPartResponse = z.object({ part: z.int().positive(), size: Count });
+export type UploadPartResponse = z.infer<typeof UploadPartResponse>;
 /** `PUT /v1/files/:id/content` and `GET /v1/files/:id` */
 export const FileResponse = FileMeta;
 

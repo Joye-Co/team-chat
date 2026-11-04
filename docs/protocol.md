@@ -445,6 +445,8 @@ file's group.
 | --- | --- | --- |
 | `POST /v1/files` | `CreateFileRequest { groupId, topicId?, name, size, mime, sha256, width?, height? }` | `CreateFileResponse { file: FileMeta, uploadUrl }` |
 | `PUT /v1/files/:id/content` | raw bytes | `FileMeta` with `status: "ready"` |
+| `PUT /v1/files/:id/parts/:n` (1.1) | raw bytes of part `n` | `UploadPartResponse { part, size }` |
+| `POST /v1/files/:id/complete` (1.1) | | `FileMeta` with `status: "ready"` |
 | `GET /v1/files/:id` | | `FileMeta` |
 | `GET /v1/files/:id/content` | | the bytes; supports `Range` (206) |
 | `PUT /v1/members/:id/avatar` | raw image bytes | `Member` (new `avatarUrl`) |
@@ -457,8 +459,19 @@ FileMeta = { id, groupId, topicId?: string | null, name, size, mime, sha256, wid
 
 Rules:
 
-- `size` is at most 100,000,000 bytes (100 MB; the Workers request body limit, so not 100 MiB).
-  `mime` is `type/subtype`. `width`/`height` are pixels, for images only.
+- `size` is at most 2,000,000,000 bytes (`MAX_UPLOAD_BYTES`, 2 GB; 1.0 servers: 100 MB). A larger
+  file is refused at `POST /v1/files` (`invalid`), before any byte is sent. One `PUT` of the
+  content carries at most 100,000,000 bytes (`MAX_FILE_BYTES`, the Workers request body limit, so
+  not 100 MiB). `mime` is `type/subtype`. `width`/`height` are pixels, for images only.
+- 1.1 multipart: for a file over `MAX_FILE_BYTES`, `CreateFileResponse.multipart = { partBytes,
+  parts, partUrl, completeUrl }` (`partBytes` = 52,428,800, `UPLOAD_PART_BYTES`). The creator
+  sends `PUT <partUrl>/<n>` for every `n` in 1..`parts`, each exactly `partBytes` bytes (the last
+  part the rest), in any order, again after a failure (the newest copy of a part wins). Then
+  `POST <completeUrl>`: `invalid` with `parts missing: <k> of <parts>` until every part is in; the
+  server joins the parts and checks the SHA-256 of the whole file; on a mismatch it drops the
+  parts, the file stays `pending` and the client sends every part again. `PUT …/content` on such
+  a file is `too_large`, and parts on a small file are `invalid`. A `pending` multipart file is
+  also deleted after 24 hours.
 - `uploadUrl` is the absolute URL of `PUT /v1/files/:id/content`; send it with the same bearer
   token. Only the file's creator may upload, once (`conflict` when already `ready`). The server
   checks that the body length equals `size` and its SHA-256 equals `sha256` (`invalid`

@@ -500,7 +500,7 @@ async fn upload_streams_with_hash_and_download_is_verified_and_cached() {
     let big = src.path().join("big.bin");
     std::fs::File::create(&big)
         .unwrap()
-        .set_len(MAX_FILE_BYTES + 1)
+        .set_len(MAX_UPLOAD_BYTES + 1)
         .unwrap();
     let e = client
         .upload_file(
@@ -1387,4 +1387,42 @@ async fn run_plans_sync_with_the_run_and_stay_in_the_cache() {
     // Reading the run log refreshes the cached run with its plan.
     client.run_log("R1", 0).await.unwrap().unwrap();
     assert_eq!(client.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan2));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn upload_over_100_mb_goes_in_parts_with_progress_and_retries() {
+    let http = MockHttp::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = http_client(&http, dir.path(), |_| {});
+    let src = tempfile::tempdir().unwrap();
+    let size = 150_000_000usize;
+    let data = noise(size, 3);
+    let path = src.path().join("录屏.mov");
+    std::fs::write(&path, &data).unwrap();
+    // One part fails once with 503 and is sent again.
+    http.with(|s| s.fail_parts = 1);
+    let (progress, seen) = recorder();
+    let meta = client
+        .upload_file(
+            UploadRequest {
+                group_id: G1.into(),
+                path,
+                ..Default::default()
+            },
+            progress,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(meta.status, FileStatus::Ready);
+    assert_eq!(meta.sha256, sha(&data));
+    assert_eq!(http.with(|s| s.count("PUT", "/v1/files/")), 4);
+    assert!(http.with(|s| s.upload_lengths.is_empty()));
+    let seen = seen.lock().unwrap();
+    let ups: Vec<u64> = seen
+        .iter()
+        .filter(|p| p.phase == Phase::Uploading)
+        .map(|p| p.done)
+        .collect();
+    assert_eq!(ups, vec![60_000_000, 120_000_000, size as u64]);
 }

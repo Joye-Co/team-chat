@@ -231,8 +231,9 @@ pub struct Reaction {
     pub member_ids: Vec<MemberId>,
 }
 
-/// Largest file one message or 产出 can carry (`docs/protocol.md`).
-pub const MAX_FILE_BYTES: u64 = 100_000_000;
+/// Largest file one message or 产出 can carry (`docs/protocol.md`): 2 GB since 1.1, files over
+/// 100 MB upload in parts. Checked before the upload starts.
+pub const MAX_FILE_BYTES: u64 = chat_core::proto::MAX_UPLOAD_BYTES;
 
 /// A file attached to a message (the wire `FileRef`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

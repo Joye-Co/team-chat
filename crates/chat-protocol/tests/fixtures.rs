@@ -114,6 +114,7 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("CreateFileRequest", validated::<CreateFileRequest>),
     ("CreateFileResponse", plain::<CreateFileResponse>),
     ("FileResponse", plain::<FileResponse>),
+    ("UploadPartResponse", plain::<UploadPartResponse>),
     ("Artifact", plain::<Artifact>),
     ("ArtifactVersion", plain::<ArtifactVersion>),
     ("CreateArtifactRequest", validated::<CreateArtifactRequest>),

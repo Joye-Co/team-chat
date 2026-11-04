@@ -15,6 +15,11 @@ use serde_json::Value;
 
 /// Max bytes of one file upload: 100 MB (decimal), the Workers request body limit.
 pub const MAX_FILE_BYTES: u64 = 100_000_000;
+/// Max bytes of one file (1.1): a file over [`MAX_FILE_BYTES`] uploads in parts. Equal to
+/// `MEDIA_MAX_BYTES`; a larger file is refused at `POST /v1/files`, before any upload.
+pub const MAX_UPLOAD_BYTES: u64 = 2_000_000_000;
+/// Bytes of each part of a multipart upload but the last (50 MiB).
+pub const UPLOAD_PART_BYTES: u64 = 52_428_800;
 /// Max bytes of an avatar image.
 pub const MAX_AVATAR_BYTES: u64 = 1_048_576;
 pub const MAX_ARTIFACT_FILES: usize = 500;
@@ -133,8 +138,8 @@ impl CreateFileRequest {
             check_id("topicId", t)?;
         }
         check_chars("name", &self.name, 1, MAX_FILE_NAME_CHARS)?;
-        if self.size > MAX_FILE_BYTES {
-            return fail("size", format!("at most {MAX_FILE_BYTES} bytes"));
+        if self.size > MAX_UPLOAD_BYTES {
+            return fail("size", format!("at most {MAX_UPLOAD_BYTES} bytes"));
         }
         check_mime("mime", &self.mime)?;
         check_sha256("sha256", &self.sha256)?;
@@ -147,8 +152,44 @@ impl CreateFileRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateFileResponse {
     pub file: FileMeta,
-    /// Absolute URL for `PUT` of the raw content (same bearer token).
+    /// Absolute URL for `PUT` of the raw content (same bearer token). Files over
+    /// [`MAX_FILE_BYTES`] use `multipart`.
     pub upload_url: String,
+    /// 1.1: set when the file is over [`MAX_FILE_BYTES`].
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub multipart: Option<MultipartUpload>,
+}
+
+/// 1.1: how a file over [`MAX_FILE_BYTES`] uploads. `PUT <partUrl>/<n>` sends part n
+/// (1..=parts) of exactly `partBytes` bytes (the last one the rest); then `POST <completeUrl>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultipartUpload {
+    pub part_bytes: u64,
+    pub parts: u32,
+    /// Absolute URL; append `/<n>`.
+    pub part_url: String,
+    pub complete_url: String,
+}
+
+impl MultipartUpload {
+    /// Bytes of part `n` (1-based) of a file of `size` bytes.
+    pub fn part_size(&self, size: u64, n: u32) -> u64 {
+        self.part_bytes
+            .min(size.saturating_sub(u64::from(n.saturating_sub(1)) * self.part_bytes))
+    }
+}
+
+/// `PUT /v1/files/:id/parts/:n` (1.1)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadPartResponse {
+    pub part: u32,
+    pub size: u64,
 }
 
 /// `PUT /v1/files/:id/content` and `GET /v1/files/:id`
