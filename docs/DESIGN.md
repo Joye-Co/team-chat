@@ -644,8 +644,9 @@ event without a change. A shared card stays one object: everyone sees the newest
   (`CHANGE_FILL`) that fades over 1.6 s (`CHANGE_FLASH`, §12). A changed block ends on `bg`; an
   inserted one keeps a steady `live` 7 % tint (`INSERTED_FILL`) and `Ledger 刚加的` (`meta`
   `live-ink`) at its top right, sharing the row of a `问你` / `等 Joye` mark or a group's title, until
-  the next rev. Changed or inserted top-level blocks that follow each other join into one tinted
-  run: no gap between them and a 1 pt `line` hairline at the top of each later one. A nested block
+  the next rev. Changed or inserted top-level blocks that follow each other sit with no gap
+  between them and a 1 pt `line` hairline at the top of each later one; a changed block settles on
+  `bg` after its flash, an inserted one keeps its tint. A nested block
   gets a small rounded tint instead (radius 8).
 - **Picked bar** (Interact artboard 02): a single-series bar chart the viewer can pick from is
   drawn as rows, one per x: 30 pt rows (`BAR_ROW`, radius 7), the x in a 60 pt column
@@ -1102,8 +1103,8 @@ Cards
 - [ ] Card v2.1: every container and choice form matches CardsCompose; the status band on every
       card except `info`; a row folds under 560 pt; the unknown-block box.
 - [ ] Interaction loop: optimistic state, pending band at 400 ms / soft / hard with 重试 and 不等了,
-      the update band (`按你点的「…」` / `按 {name} 的选择`), `Ledger 刚加的` and one tinted run of
-      changed blocks, the picked bar rows, the conflict toast and read-only controls for other
+      the update band (`按你点的「…」` / `按 {name} 的选择`), `Ledger 刚加的`, changed and inserted blocks
+      without gaps (hairlines, flash on change, tint on insert), the picked bar rows, the conflict toast and read-only controls for other
       viewers (Interact).
 - [ ] 引用提问: 问这里 after 300 ms, ⌥-click, context menu, keyboard; 5 chips; sent chips go back to
       the part (Refs). Diagrams in the app's colors in both themes; every error state keeps the source.

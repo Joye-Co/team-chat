@@ -40,8 +40,8 @@ then the app and the machine daemon.
   retract, poll tally). The app shows a pending band (等 {name} 回应, {name} 还在处理, {name} 没有回应 with
   重试 and 不等了), re-renders on a conflict with a toast. A rev with a `cause` gets the update band ({name} 更新了这张卡 · 刚刚 ·
   按你点的「…」 for the person whose event caused it, 按 {name} 的选择 for others); changed and inserted top-level
-  blocks join one tinted run with a hairline and no gap, and inserted ones keep a light tint and {name} 刚加的
-  until the next rev. A pickable single-series bar chart is drawn as rows that keep the chart label, the summary
+  blocks sit with no gap and a hairline between them; changed ones flash and settle on the card color, and
+  inserted ones keep a light tint and {name} 刚加的 until the next rev. A pickable single-series bar chart is drawn as rows that keep the chart label, the summary
   and the pick chip (left out when that pick caused the rev). Two short single-select options sit side by side.
   The card header shows the creation time; table number columns are right-aligned mono at the row end with
   32 pt rows, and the table-row 问这里 follows the row name.
