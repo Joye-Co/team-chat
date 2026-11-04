@@ -34,8 +34,12 @@ import {
   CardRetractedEvent,
   CardState,
   CardV2,
+  DecisionRecordedEvent,
   DecisionsResponse,
   GroupDecision,
+  RecordDecisionRequest,
+  RecordDecisionResponse,
+  RecordedDecision,
   InteractionResolvedTransient,
   InteractionResolveFrame,
   PartRef,
@@ -304,6 +308,7 @@ export const Event = z.discriminatedUnion("type", [
   TopicLinkedEvent,
   CardRetractedEvent,
   ArtifactPreviewReadyEvent,
+  DecisionRecordedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -722,6 +727,9 @@ export const schemas = {
   TopicContext,
   GroupDecision,
   DecisionsResponse,
+  RecordedDecision,
+  RecordDecisionRequest,
+  RecordDecisionResponse,
   SetRunAcceptanceRequest,
   ResumeRunRequest,
   // 1.1 interaction loop, refs, media

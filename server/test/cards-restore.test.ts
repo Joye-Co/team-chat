@@ -28,7 +28,7 @@ const base = (extra: Partial<CardV2>): CardV2 => ({
   ...extra,
 });
 
-const TABLES = ["card_private", "card_revs", "block_refs", "card_timers", "card_topic_base", "card_events", "card_requesters", "artifact_data"];
+const TABLES = ["card_private", "card_revs", "block_refs", "card_timers", "card_topic_base", "card_events", "card_requesters", "artifact_data", "recorded_decisions"];
 
 async function cardTables(gid: string) {
   return runInDurableObject(roomOf(gid), (_o, state) => {
@@ -126,8 +126,12 @@ describe("Card v2 state after a restore", () => {
       );
     });
 
+    // A decision recorded by hand (记一条) is in the log.
+    const rec = await api(`/v1/groups/${gid}/decisions`, { token: alice.token, body: { text: "周五停止合并", topicId } });
+    expect(rec.status, JSON.stringify(rec.body)).toBe(200);
     await runArchive(env, { skipD1: true });
     const original = await cardTables(gid);
+    expect(original.recorded_decisions).toHaveLength(1);
     expect(original.card_private).toHaveLength(2);
     expect(original.card_timers.length).toBeGreaterThan(0);
     expect(original.card_topic_base).toHaveLength(1);

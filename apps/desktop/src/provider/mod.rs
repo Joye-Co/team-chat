@@ -2047,6 +2047,12 @@ impl ChatProvider for CoreProvider {
     fn group_decisions(&self, group_id: &str) -> Vec<crate::data::v2::Decision> {
         self.group_decisions_inner(group_id)
     }
+    fn can_record_decision(&self, _group_id: &str) -> bool {
+        self.account().is_some()
+    }
+    fn record_decision(&self, group_id: &str, text: String) -> AdminReply<()> {
+        self.record_decision_inner(group_id, text)
+    }
 
     fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
         self.artifact_page_events_inner(artifact_id, version)

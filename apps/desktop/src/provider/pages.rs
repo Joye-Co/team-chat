@@ -157,7 +157,7 @@ impl CoreProvider {
         if !entry.in_flight && (entry.list.is_none() || entry.local_key != key) {
             entry.in_flight = true;
             entry.local_key = key;
-            let handle = a.client.fetch_decisions(group_id, 50);
+            let handle = a.client.fetch_decisions_page(group_id, 50);
             let this = self.clone();
             let group = group_id.to_string();
             a.client.spawn(async move {
@@ -181,19 +181,30 @@ impl CoreProvider {
                         .unwrap_or_else(|e| e.into_inner());
                     let entry = map.entry(group.clone()).or_default();
                     entry.in_flight = false;
-                    if let Some(list) = &fetched {
-                        entry.list = Some(
-                            list.iter()
-                                .map(|d| Decision {
-                                    id: format!("{}-{}", d.message_id, d.seq),
-                                    group_id: group.clone(),
-                                    topic_id: Some(d.topic_id.clone()),
-                                    text: server_text(d),
-                                    by: d.answered_by.clone(),
-                                    at: d.answered_at.min(i64::MAX as u64) as i64,
-                                })
-                                .collect(),
-                        );
+                    if let Some(page) = &fetched {
+                        let mut list: Vec<Decision> = page
+                            .decisions
+                            .iter()
+                            .map(|d| Decision {
+                                id: format!("{}-{}", d.message_id, d.seq),
+                                group_id: group.clone(),
+                                topic_id: Some(d.topic_id.clone()),
+                                text: server_text(d),
+                                by: d.answered_by.clone(),
+                                at: d.answered_at.min(i64::MAX as u64) as i64,
+                            })
+                            .collect();
+                        // 记一条: the decisions recorded by hand.
+                        list.extend(page.recorded.iter().flatten().map(|d| Decision {
+                            id: format!("recorded-{}", d.id),
+                            group_id: group.clone(),
+                            topic_id: d.topic_id.clone(),
+                            text: d.text.clone(),
+                            by: d.recorded_by.clone(),
+                            at: d.recorded_at.min(i64::MAX as u64) as i64,
+                        }));
+                        list.sort_by_key(|d| std::cmp::Reverse(d.at));
+                        entry.list = Some(list);
                     }
                 }
                 if fetched.is_some() {
@@ -215,6 +226,34 @@ impl CoreProvider {
             }
             None => local,
         }
+    }
+
+    /// 记一条: records a decision by hand; the next read fetches the list again.
+    pub(super) fn record_decision_inner(&self, group_id: &str, text: String) -> AdminReply<()> {
+        let this = self.clone();
+        let group = group_id.to_string();
+        self.request(move |client, _| async move {
+            let handle = client
+                .record_decision(&group, &text, None)
+                .map_err(|e| super::settings::admin_error(&e))?;
+            handle
+                .await
+                .map_err(|_| AdminError::Other)?
+                .map_err(|e| super::settings::admin_error(&e))?;
+            {
+                let mut map = this
+                    .shared
+                    .decisions
+                    .inner
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some(entry) = map.get_mut(&group) {
+                    entry.list = None;
+                }
+            }
+            this.emit(vec![Change::Groups]);
+            Ok(())
+        })
     }
 
     fn local_decisions(&self, group_id: &str) -> Vec<Decision> {

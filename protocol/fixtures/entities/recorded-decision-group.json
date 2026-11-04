@@ -1,0 +1,13 @@
+{
+  "kind": "RecordedDecision",
+  "valid": true,
+  "description": "recorded for the group, not a 话题",
+  "value": {
+    "id": "01JC0DEC000000000000000001",
+    "seq": 412,
+    "topicId": null,
+    "text": "周五停止合并，下周一发版。",
+    "recordedBy": "01JBX0OWNER0000000000000AA",
+    "recordedAt": 1762128000000
+  }
+}

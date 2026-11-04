@@ -923,12 +923,18 @@ Rules:
 
 | Method and path | Who | Response |
 | --- | --- | --- |
-| `GET /v1/groups/:id/decisions?beforeSeq=&limit=` | group member | `DecisionsResponse { decisions: GroupDecision[], hasMore }`, newest first; `limit` 1..200, default 50; `beforeSeq` = only answers with a lower seq |
+| `GET /v1/groups/:id/decisions?beforeSeq=&limit=` | group member | `DecisionsResponse { decisions: GroupDecision[], hasMore, recorded?: RecordedDecision[] }`, newest first; `limit` 1..200, default 50; `beforeSeq` = only answers with a lower seq; `recorded` (1.1) holds up to `limit` decisions recorded by hand, and `hasMore` is true when either list has more |
+| `POST /v1/groups/:id/decisions` | group member | 1.1, 记一条: `RecordDecisionRequest { text /* 1..1000, not blank, trimmed */, topicId? }` → `RecordDecisionResponse { decision: RecordedDecision }`; `not_found` for an unknown topic |
 
 ```ts
 GroupDecision = { seq /* of card.answered */, messageId, topicId, rev, title, actionId,
                   actionLabel, choices?: string[], inputs?, editedValues?, answeredBy, answeredAt }
+RecordedDecision = { id, seq /* of decision.recorded */, topicId: string | null, text, recordedBy, recordedAt }
+event decision.recorded (stored, 1.1) data: { decision: RecordedDecision }   // actorId = recordedBy
 ```
+
+A decision recorded by hand is in the group log, so the archive and a restore keep it; 1.0.x
+clients skip the event type.
 
 A deleted card's decisions are not listed, nor the decisions of a private card (a non-public
 poll, an anonymous questionnaire; see "Private answers").

@@ -13,5 +13,16 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   bad("client/card.answer-content-hash-upper.json", "ClientFrame", { t: "card.answer", rid: "r202", groupId: G, messageId: M, rev: 2, actionId: "send", contentHash: HASH.toUpperCase() }, "contentHash is 64 lowercase hex digits");
   ok("client/card.event-content-hash.json", "ClientFrame", { t: "card.event", rid: "r203", groupId: G, messageId: M, rev: 1, clientEventId: "01JC0CEV000000000000000099", actionId: "send", event: "action.press", contentHash: HASH });
   ok("entities/card-state-anonymous-count.json", "CardState", { ask: { id: "a1", status: "open", from: [JOYE, ID.alice], blocking: false }, answers: [], answerCount: 1 }, "an anonymous questionnaire as another member sees it: the count only");
-  void T0;
+
+  // PC-8: 记一条, decisions recorded by hand.
+  const recorded = { id: "01JC0DEC000000000000000001", seq: 412, topicId: ID.topic, text: "周五停止合并，下周一发版。", recordedBy: JOYE, recordedAt: T0 };
+  ok("entities/recorded-decision.json", "RecordedDecision", recorded);
+  ok("entities/recorded-decision-group.json", "RecordedDecision", { ...recorded, topicId: null }, "recorded for the group, not a 话题");
+  ok("http/record-decision-request.json", "RecordDecisionRequest", { text: "周五停止合并，下周一发版。", topicId: ID.topic });
+  ok("http/record-decision-request-minimal.json", "RecordDecisionRequest", { text: "用 Postgres。" });
+  bad("http/record-decision-request-blank.json", "RecordDecisionRequest", { text: "   " }, "text is required");
+  bad("http/record-decision-request-too-long.json", "RecordDecisionRequest", { text: "长".repeat(1001) }, "at most 1000 characters");
+  ok("http/record-decision-response.json", "RecordDecisionResponse", { decision: recorded });
+  ok("http/decisions-response-recorded.json", "DecisionsResponse", { decisions: [], hasMore: false, recorded: [recorded] }, "decisions with the ones recorded by hand");
+  ok("events/decision.recorded.json", "Event", { seq: 412, groupId: G, at: T0, actorId: JOYE, type: "decision.recorded", data: { decision: recorded } });
 }

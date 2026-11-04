@@ -60,7 +60,8 @@ check!(
     PartRef,
     BlockRefInput,
     BlockRef,
-    PutArtifactDataRequest
+    PutArtifactDataRequest,
+    RecordDecisionRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -180,6 +181,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
         "PutArtifactDataRequest",
         validated::<PutArtifactDataRequest>,
     ),
+    // 1.1 gap fixes
+    ("RecordedDecision", plain::<RecordedDecision>),
+    ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
+    ("RecordDecisionResponse", plain::<RecordDecisionResponse>),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -332,7 +337,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 17);
+    assert_eq!(valid("Event", "type").len(), 18);
     assert_eq!(valid("TransientEvent", "type").len(), 8);
 }
 

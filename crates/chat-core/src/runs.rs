@@ -122,6 +122,21 @@ impl HttpClient {
         self.call::<(), _>(Method::GET, &path, None, true).await
     }
 
+    /// 1.1: 记一条, records a decision by hand (`POST /v1/groups/:id/decisions`).
+    pub async fn record_decision(
+        &self,
+        group_id: &str,
+        req: &crate::proto::RecordDecisionRequest,
+    ) -> ApiResult<crate::proto::RecordDecisionResponse> {
+        self.call(
+            Method::POST,
+            &format!("/v1/groups/{}/decisions", enc(group_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
     /// 1.1: resumes a paused run (交还). `note` becomes the CLI's next input when set.
     /// Answers with the run (`pausedBy` cleared); `conflict` when it is not paused.
     pub async fn resume_run(&self, run_id: &str, note: Option<&str>) -> ApiResult<BotRun> {

@@ -1349,7 +1349,50 @@ export const GroupDecision = z.object({
 });
 export type GroupDecision = z.infer<typeof GroupDecision>;
 
-export const DecisionsResponse = z.object({ decisions: z.array(GroupDecision), hasMore: z.boolean() });
+/** Max characters of a decision recorded by hand (记一条). */
+export const MAX_RECORDED_DECISION_CHARS = 1000;
+
+/**
+ * 1.1: a decision a member recorded by hand (记一条, `POST /v1/groups/:id/decisions`), stored
+ * as `decision.recorded` in the group log.
+ */
+export const RecordedDecision = z.object({
+  id: Id,
+  /** Seq of the `decision.recorded` event. */
+  seq: Seq,
+  /** The 话题 it was recorded in; null for the group. */
+  topicId: Id.nullable(),
+  text: z.string().min(1).max(MAX_RECORDED_DECISION_CHARS),
+  recordedBy: Id,
+  recordedAt: Millis,
+});
+export type RecordedDecision = z.infer<typeof RecordedDecision>;
+
+/** Body of `POST /v1/groups/:id/decisions`. */
+export const RecordDecisionRequest = z.object({
+  text: z
+    .string()
+    .max(MAX_RECORDED_DECISION_CHARS)
+    .refine((t) => t.trim().length > 0, { message: "text is required" }),
+  topicId: Id.optional(),
+});
+export type RecordDecisionRequest = z.infer<typeof RecordDecisionRequest>;
+export const RecordDecisionResponse = z.object({ decision: RecordedDecision });
+export type RecordDecisionResponse = z.infer<typeof RecordDecisionResponse>;
+
+/** Stored event: a decision recorded by hand. */
+export const DecisionRecordedEvent = z.object({
+  ...eventBase,
+  type: z.literal("decision.recorded"),
+  data: z.object({ decision: RecordedDecision }),
+});
+
+export const DecisionsResponse = z.object({
+  decisions: z.array(GroupDecision),
+  hasMore: z.boolean(),
+  /** 1.1: decisions recorded by hand with seq < beforeSeq, newest first (at most `limit`). */
+  recorded: z.array(RecordedDecision).optional(),
+});
 export type DecisionsResponse = z.infer<typeof DecisionsResponse>;
 
 // ---------------------------------------------------------------------------

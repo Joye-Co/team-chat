@@ -4382,4 +4382,69 @@ pub struct GroupDecision {
 pub struct DecisionsResponse {
     pub decisions: Vec<GroupDecision>,
     pub has_more: bool,
+    /// 1.1: decisions recorded by hand with seq < beforeSeq, newest first (at most `limit`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub recorded: Option<Vec<RecordedDecision>>,
+}
+
+/// Max characters of a decision recorded by hand (记一条).
+pub const MAX_RECORDED_DECISION_CHARS: usize = 1000;
+
+/// 1.1: a decision a member recorded by hand (记一条, `POST /v1/groups/:id/decisions`), stored
+/// as `decision.recorded` in the group log.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordedDecision {
+    pub id: String,
+    /// Seq of the `decision.recorded` event.
+    pub seq: crate::entities::Seq,
+    /// The 话题 it was recorded in; `None` (null) for the group.
+    pub topic_id: Option<String>,
+    pub text: String,
+    pub recorded_by: String,
+    pub recorded_at: Millis,
+}
+
+/// Body of `POST /v1/groups/:id/decisions`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordDecisionRequest {
+    pub text: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub topic_id: Option<String>,
+}
+
+impl RecordDecisionRequest {
+    pub fn validate(&self) -> Validation {
+        check_chars("text", &self.text, 0, MAX_RECORDED_DECISION_CHARS)?;
+        if self.text.trim().is_empty() {
+            return fail("text", "text is required");
+        }
+        if let Some(t) = &self.topic_id {
+            check_id("topicId", t)?;
+        }
+        Ok(())
+    }
+}
+
+/// Answer of `POST /v1/groups/:id/decisions`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordDecisionResponse {
+    pub decision: RecordedDecision,
+}
+
+/// Data of the stored `decision.recorded` event.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionRecordedData {
+    pub decision: RecordedDecision,
 }

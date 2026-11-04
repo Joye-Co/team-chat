@@ -46523,6 +46523,56 @@
         },
         "hasMore": {
           "type": "boolean"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "topicId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "recordedBy": {
+                "type": "string",
+                "minLength": 1
+              },
+              "recordedAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id",
+              "seq",
+              "topicId",
+              "text",
+              "recordedBy",
+              "recordedAt"
+            ]
+          }
         }
       },
       "required": [
@@ -46562,6 +46612,124 @@
           ]
         }
       }
+    },
+    "RecordedDecision": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "topicId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "recordedBy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recordedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "seq",
+        "topicId",
+        "text",
+        "recordedBy",
+        "recordedAt"
+      ]
+    },
+    "RecordDecisionRequest": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "RecordDecisionResponse": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "topicId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "recordedBy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "recordedAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "id",
+            "seq",
+            "topicId",
+            "text",
+            "recordedBy",
+            "recordedAt"
+          ]
+        }
+      },
+      "required": [
+        "decision"
+      ]
     },
     "SetRunAcceptanceRequest": {
       "type": "object",

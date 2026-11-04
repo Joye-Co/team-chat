@@ -9,6 +9,7 @@ use crate::bots::RunUpdatedData;
 use crate::card::Card;
 use crate::card2::{
     CardAnsweredData, CardEventTransient, CardRetractedData, CardState, CardV2, Cause,
+    DecisionRecordedData,
     InteractionResolvedTransient, lenient_card_v2,
 };
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
@@ -83,6 +84,9 @@ pub enum EventData {
     /// 1.1: the preview of a 产出 version is ready.
     #[serde(rename = "artifact.previewReady")]
     ArtifactPreviewReady(ArtifactPreviewReadyData),
+    /// 1.1: a decision recorded by hand (记一条).
+    #[serde(rename = "decision.recorded")]
+    DecisionRecorded(DecisionRecordedData),
 }
 
 impl EventData {
@@ -105,6 +109,7 @@ impl EventData {
             Self::TopicLinked(_) => "topic.linked",
             Self::CardRetracted(_) => "card.retracted",
             Self::ArtifactPreviewReady(_) => "artifact.previewReady",
+            Self::DecisionRecorded(_) => "decision.recorded",
         }
     }
 }

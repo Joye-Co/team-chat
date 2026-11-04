@@ -317,6 +317,37 @@ impl Client {
         self.spawn(async move { Ok(http.group_decisions(&id, None, limit).await?.decisions) })
     }
 
+    /// The newest page of `GET /v1/groups/:id/decisions`: the answered asks and the decisions
+    /// recorded by hand (记一条, `recorded`).
+    pub fn fetch_decisions_page(
+        &self,
+        group_id: &str,
+        limit: u32,
+    ) -> JoinHandle<Result<crate::proto::DecisionsResponse, ClientError>> {
+        let http = self.http();
+        let id = group_id.to_string();
+        self.spawn(async move { Ok(http.group_decisions(&id, None, limit).await?) })
+    }
+
+    /// 记一条: records a decision by hand in a 群 (or one of its 话题). The server stores it as
+    /// `decision.recorded` and lists it with the group decisions.
+    pub fn record_decision(
+        &self,
+        group_id: &str,
+        text: &str,
+        topic_id: Option<&str>,
+    ) -> Result<JoinHandle<Result<crate::proto::RecordedDecision, ClientError>>, ClientError> {
+        let req = crate::proto::RecordDecisionRequest {
+            text: text.to_string(),
+            topic_id: topic_id.map(str::to_string),
+        };
+        req.validate()
+            .map_err(|_| ClientError::Invalid("bad decision"))?;
+        let http = self.http();
+        let id = group_id.to_string();
+        Ok(self.spawn(async move { Ok(http.record_decision(&id, &req).await?.decision) }))
+    }
+
     // ------------------------------------------------------------------
     // 产出 page events and topic links
     // ------------------------------------------------------------------

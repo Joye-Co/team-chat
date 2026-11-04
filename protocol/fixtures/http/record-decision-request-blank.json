@@ -1,0 +1,8 @@
+{
+  "kind": "RecordDecisionRequest",
+  "valid": false,
+  "description": "text is required",
+  "value": {
+    "text": "   "
+  }
+}

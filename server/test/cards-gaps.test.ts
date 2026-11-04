@@ -160,3 +160,27 @@ describe("increment rules (PC-6)", () => {
     for (const c of [ca, cb, cbot]) c.close();
   });
 });
+
+describe("记一条 (PC-8)", () => {
+  it("records a decision by hand, lists it and refuses non-members and empty text", async () => {
+    const w = await world();
+    const ca = await w.connect(w.alice);
+    const root = (await ca.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "发版" })).message;
+    const r = await api(`/v1/groups/${w.gid}/decisions`, { token: w.alice.token, body: { text: "  周五停止合并  ", topicId: root.topicId } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.decision).toMatchObject({ text: "周五停止合并", topicId: root.topicId, recordedBy: w.alice.id });
+    const ev = await ca.waitEvent((e) => e.type === "decision.recorded");
+    expect(ev.data.decision.id).toBe(r.body.decision.id);
+    const g = await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, body: { text: "群里定的" } });
+    expect(g.status).toBe(200);
+    expect(g.body.decision.topicId).toBeNull();
+    const list = await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, method: "GET" });
+    expect(list.status).toBe(200);
+    expect(list.body.recorded.map((d: any) => d.text)).toEqual(["群里定的", "周五停止合并"]);
+    const outsider = await createMember();
+    expect((await api(`/v1/groups/${w.gid}/decisions`, { token: outsider.token, body: { text: "x" } })).status).toBe(404);
+    expect((await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, body: { text: "   " } })).status).toBe(400);
+    expect((await api(`/v1/groups/${w.gid}/decisions`, { token: w.bob.token, body: { text: "x", topicId: "01JBX0TOPIC0000000000000ZZ" } })).status).toBe(404);
+    ca.close();
+  });
+});

@@ -797,6 +797,10 @@ fn apply_one(
             out.topic_list_changed = true;
             out.other_events.push(ev.clone());
         }
+        // 记一条: the server lists these (`GET /v1/groups/:id/decisions`); nothing to cache.
+        EventData::DecisionRecorded(_) => {
+            out.other_events.push(ev.clone());
+        }
     }
     Ok(())
 }
