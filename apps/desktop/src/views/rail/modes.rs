@@ -6,9 +6,10 @@
 //! the frame path must not read the cache.
 
 use gpui::{
-    AnyElement, App, Context, IntoElement, ParentElement, Pixels, SharedString,
-    StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Pixels,
+    SharedString, StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::menu::ContextMenuExt as _;
 
 use super::{
     MEMBER_AVATAR, RailView,
@@ -362,7 +363,8 @@ impl RailView {
                 let this = cx.entity().downgrade();
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
-                self.section_header(
+                let (menu_services, menu_id) = (self.services.clone(), id.clone());
+                let header = self.section_header(
                     SharedString::from(format!("rail-group-{id}")),
                     name.clone(),
                     None,
@@ -383,7 +385,15 @@ impl RailView {
                         nav.update(cx, |nav, cx| nav.open_group(g, cx))
                     })),
                     cx,
-                )
+                );
+                // A right click on the header opens the 群's menu (§7.3).
+                div()
+                    .id(SharedString::from(format!("rail-group-menu-{id}")))
+                    .child(header)
+                    .context_menu(move |menu, _, _| {
+                        super::menus::group(menu, &menu_services, &menu_id)
+                    })
+                    .into_any_element()
             }
             Item::DmHeader { folded } => {
                 let this = cx.entity().downgrade();
@@ -438,6 +448,10 @@ impl RailView {
                 .on_click(move |_, _, cx| {
                     let id = open_id.clone();
                     nav.update(cx, |nav, cx| nav.open_group(id, cx))
+                })
+                .context_menu({
+                    let (services, id) = (self.services.clone(), id.clone());
+                    move |menu, _, _| super::menus::group(menu, &services, &id)
                 })
                 .into_any_element()
             }

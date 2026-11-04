@@ -175,7 +175,25 @@ impl TimelineView {
             && self.editing.as_ref().is_none_or(|e| e.key != key)
             && let Some(row) = self.v2_special_row(message, key, cx)
         {
-            return row;
+            // v12/behavior: the special rows get the message menu too (§7.3).
+            let menu_message = message.clone();
+            let view = cx.entity().downgrade();
+            let (can_edit, can_delete) = (self.can_edit(message), self.can_delete(message));
+            return div()
+                .id(ElementId::Name(format!("special-{key}").into()))
+                .child(row)
+                .context_menu(move |menu, window, cx| {
+                    super::menu::build(
+                        menu,
+                        view.clone(),
+                        &menu_message,
+                        can_edit,
+                        can_delete,
+                        window,
+                        cx,
+                    )
+                })
+                .into_any_element();
         }
         let v2 = self.v2;
         let colors = theme::colors(cx);
@@ -505,7 +523,6 @@ impl TimelineView {
             .rounded(theme::radius::MD)
             .flex()
             .gap(space::S12)
-            .when(hovered, |el| el.bg(colors.hover))
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {
                 el.bg(colors.me_bg.opacity(self.highlight_alpha(key)))

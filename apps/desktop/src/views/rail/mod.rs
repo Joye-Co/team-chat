@@ -12,6 +12,9 @@
 //!   话题; idle members in one row; 同事 below. 话题 replaces 成员 among the
 //!   destinations and the team strip is left out.
 
+// --- v12/behavior ---
+mod menus;
+// --- end v12/behavior ---
 pub mod model;
 mod modes;
 mod rows;
@@ -99,6 +102,10 @@ pub struct RailView {
     cache: Option<Cache>,
     /// The virtual list of [`Cache::entries`].
     list: ListState,
+    // --- v12/behavior ---
+    /// The rail's key focus: ↑/↓ move the selection, Return opens it.
+    focus: gpui::FocusHandle,
+    // --- end v12/behavior ---
     _subscriptions: Vec<Subscription>,
 }
 
@@ -116,6 +123,7 @@ impl RailView {
             services,
             cache: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            focus: cx.focus_handle(),
             show_all: false,
             folded_groups: HashSet::new(),
             chip: None,
@@ -631,6 +639,11 @@ impl Render for RailView {
             .flex()
             .flex_col()
             .bg(k.rail)
+            .track_focus(&self.focus)
+            .key_context(KEY_CONTEXT)
+            .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.move_selection(-1, cx)))
+            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
+            .on_action(cx.listener(|this, _: &OpenSelected, _, cx| this.move_selection(0, cx)))
             .px(space::S10)
             .pb(space::S10)
             // Title row: the traffic lights, then 新话题.
@@ -665,6 +678,11 @@ impl Render for RailView {
                     .flex_1()
                     .min_h(px(0.))
                     .when(mode == RailMode::Attention, |el| el.mt(space::S8))
+                    // A click in the list makes it take the arrow keys (§10).
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
+                    )
                     .child(rows),
             )
             // App banners (connection, update) sit above the footer.
@@ -673,6 +691,95 @@ impl Render for RailView {
             .child(self.me_row(cx))
     }
 }
+
+// --- v12/behavior ---
+gpui::actions!(rail, [SelectPrevious, SelectNext, OpenSelected]);
+
+/// The key context of the rail.
+const KEY_CONTEXT: &str = "Rail";
+
+/// ↑/↓ move the selection in the rail's 话题 and 私聊 rows, Return opens
+/// the selected row (call once at start-up).
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("up", SelectPrevious, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("down", SelectNext, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("enter", OpenSelected, Some(KEY_CONTEXT)),
+    ]);
+}
+
+impl RailView {
+    /// Where the first 话题 row (or, with `group_header`, the first 群
+    /// header) was drawn last frame, in window coordinates (the screenshot
+    /// scenes right-click it).
+    pub fn first_row_bounds(&self, group_header: bool) -> Option<gpui::Bounds<gpui::Pixels>> {
+        let entries = self.cache.as_ref()?.entries.clone();
+        let ix = entries.iter().position(|e| match e.item {
+            modes::Item::GroupHeader { .. } => group_header,
+            modes::Item::Topic(_) => !group_header,
+            _ => false,
+        })?;
+        self.list.bounds_for_item(ix)
+    }
+
+    /// A: whether the list shows 全部话题 (else 我参与的).
+    pub fn shows_all_topics(&self) -> bool {
+        self.show_all
+    }
+
+    /// A: switches between 我参与的 and 全部话题 (显示 menu and the list
+    /// header menu).
+    pub fn set_show_all_topics(&mut self, all: bool, cx: &mut Context<Self>) {
+        if self.show_all != all {
+            self.show_all = all;
+            cx.notify();
+        }
+    }
+
+    /// Selects the 话题 or 私聊 row `step` rows from the selected one (the
+    /// first or last when none is selected) and opens it, as a click does;
+    /// a step of 0 opens the selected row again.
+    fn move_selection(&mut self, step: isize, cx: &mut Context<Self>) {
+        self.refresh(cx);
+        let Some(entries) = self.cache.as_ref().map(|c| c.entries.clone()) else {
+            return;
+        };
+        let rows: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| matches!(e.item, modes::Item::Topic(_) | modes::Item::Dm { .. }))
+            .map(|(ix, _)| ix)
+            .collect();
+        let Some(last) = rows.len().checked_sub(1) else {
+            return;
+        };
+        let current = rows.iter().position(|&ix| match &entries[ix].item {
+            modes::Item::Topic(t) => t.selected,
+            modes::Item::Dm { selected, .. } => *selected,
+            _ => false,
+        });
+        let next = match current {
+            Some(p) => p.saturating_add_signed(step).min(last),
+            None if step < 0 => last,
+            None => 0,
+        };
+        let ix = rows[next];
+        self.list.scroll_to_reveal_item(ix);
+        let nav = self.services.nav.clone();
+        match &entries[ix].item {
+            modes::Item::Topic(t) => {
+                let (g, id) = (t.topic.group_id.clone(), t.topic.id.clone());
+                nav.update(cx, |nav, cx| nav.open_topic(g, id, cx));
+            }
+            modes::Item::Dm { id, .. } => {
+                let id = id.clone();
+                nav.update(cx, |nav, cx| nav.open_group(id, cx));
+            }
+            _ => {}
+        }
+    }
+}
+// --- end v12/behavior ---
 
 /// C's 话题 destination: the 群 of the open 话题, else the first 群.
 fn choose_topics(nav: &mut crate::app::Navigation, cx: &mut Context<crate::app::Navigation>) {
@@ -709,7 +816,6 @@ impl RailView {
             .flex()
             .items_center()
             .gap(space::S8)
-            .cursor_pointer()
             .hover(|s| s.border_color(k.line_2))
             .child(ui::icon(Lucide::Search, theme::icon::CHIP, k.ink_3))
             .child(
@@ -795,7 +901,6 @@ impl RailView {
                     .flex()
                     .items_center()
                     .t_meta()
-                    .cursor_pointer()
                     .when(on, |el| el.bg(k.sel).text_color(k.ink).medium())
                     .when(!on, |el| {
                         el.text_color(k.ink_2)
@@ -902,4 +1007,61 @@ mod tests {
             "a change reads again"
         );
     }
+
+    // --- v12/behavior ---
+    /// With the rail focused, ↓ selects and opens the next 话题 row (Mac
+    /// sidebar behavior, NATIVE.md §10), ↑ goes back, Return keeps it.
+    #[gpui::test]
+    fn arrow_keys_move_the_selection_through_the_rows(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            RailView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let rows = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, _| {
+                this.cache
+                    .as_ref()
+                    .unwrap()
+                    .entries
+                    .iter()
+                    .filter_map(|e| match &e.item {
+                        modes::Item::Topic(t) => {
+                            Some((t.topic.group_id.clone(), t.topic.id.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+        let open = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, cx| this.services.nav.read(cx).topic.clone())
+        };
+        let topics = rows(&view, cx);
+        assert!(topics.len() >= 2, "the sample rail lists 话题");
+        view.update_in(cx, |this, window, cx| window.focus(&this.focus, cx));
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        let first = open(&view, cx).expect("↓ opened a row");
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        let second = open(&view, cx).expect("↓ opened the next row");
+        assert_ne!(first, second, "↓ moved the selection");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(
+            open(&view, cx),
+            Some(second.clone()),
+            "Return keeps it open"
+        );
+        cx.simulate_keystrokes("up");
+        cx.run_until_parked();
+        assert_eq!(open(&view, cx), Some(first), "↑ went back");
+    }
+    // --- end v12/behavior ---
 }
