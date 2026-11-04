@@ -183,10 +183,12 @@ pub fn mime_for(path: &str) -> &'static str {
 
 // --- formatting -------------------------------------------------------------------
 
-/// `1.2 MB`, `820 KB`, `3.4 GB`.
+/// `1.2 MB`, `820 KB`, `3.4 GB`, `1.1 TB`.
 pub fn size_text(bytes: u64) -> String {
     let b = bytes as f64;
-    if b >= 1e9 {
+    if b >= 1e12 {
+        format!("{:.1} TB", b / 1e12).replace(".0 TB", " TB")
+    } else if b >= 1e9 {
         format!("{:.1} GB", b / 1e9).replace(".0 GB", " GB")
     } else if b >= 1e6 {
         format!("{:.1} MB", b / 1e6)

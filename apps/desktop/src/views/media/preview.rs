@@ -579,6 +579,24 @@ impl Render for StatesPreview {
     }
 }
 
+/// A file name of the states scene: a long one with `--worst-case` (F65).
+fn file_name(normal: &'static str, worst: &'static str) -> &'static str {
+    if crate::selftest::worst_case() {
+        worst
+    } else {
+        normal
+    }
+}
+
+/// A size of the states scene: `worst` with `--worst-case` (0 B and 1 TB sizes).
+fn bytes(normal: u64, worst: u64) -> u64 {
+    if crate::selftest::worst_case() {
+        worst
+    } else {
+        normal
+    }
+}
+
 fn states_column(cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     let label = |t: &'static str| div().t_small().semibold().text_color(k.text_1).child(t);
@@ -592,10 +610,13 @@ fn states_column(cx: &App) -> gpui::Div {
         .child(states::row(
             "st-up",
             Lead::Icon(Sym::Video),
-            "重连后重复-第二次.mov",
+            file_name(
+                "重连后重复-第二次.mov",
+                "IMG_20251103_183022_HDR_portrait_重连后消息重复的第二次完整录屏_最终版_v12_edited.mov",
+            ),
             &Status::Uploading {
-                done: 2_400_000,
-                total: 3_900_000,
+                done: bytes(2_400_000, 0),
+                total: bytes(3_900_000, 1_099_511_627_776),
             },
             Some(states::action("st-cancel", cm::CANCEL, None, cx)),
             cx,
@@ -628,8 +649,13 @@ fn states_column(cx: &App) -> gpui::Div {
         .child(states::row(
             "st-fail",
             Lead::Icon(Sym::File),
-            "夹夹 3.0 发布会.key",
-            &Status::Failed { size: 18_600_000 },
+            file_name(
+                "夹夹 3.0 发布会.key",
+                "夹夹 3.0 发布会_全渠道版_含演讲者备注和全部动画_最终确认版本_请勿再改.key",
+            ),
+            &Status::Failed {
+                size: bytes(18_600_000, 0),
+            },
             Some(states::action(
                 "st-sys",
                 cm::OPEN_WITH_SYSTEM,
@@ -641,10 +667,13 @@ fn states_column(cx: &App) -> gpui::Div {
         .child(states::row(
             "st-big",
             Lead::Icon(Sym::Video),
-            "周会全程-4K.mov",
+            file_name(
+                "周会全程-4K.mov",
+                "2025 年 11 月 3 日全员周会全程录像（4K，含屏幕共享和全部问答环节）.mov",
+            ),
             &Status::TooLarge {
                 limit: 2_000_000_000,
-                size: 3_400_000_000,
+                size: bytes(3_400_000_000, 1_099_511_627_776),
             },
             Some(states::action("st-rm", cm::REMOVE, None, cx)),
             cx,
