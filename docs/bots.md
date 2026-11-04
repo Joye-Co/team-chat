@@ -210,7 +210,10 @@ their DM with the bot, in a topic whose `contextOf` names the source topic and t
 read up to. `onAside` gets these messages, @ or not (without an `onAside` handler they go to
 `onMention`). `ctx.aside` is the context and `ctx.source()` reads the source topic up to
 `uptoSeq`, oldest first. Answer with `ctx.reply`: it stays in the DM. Never post into the source
-topic from a side chat; the member does that with the suggestion button.
+topic from a side chat; the member does that with the suggestion button. A side chat opened before the bot's
+cursor (a first start that skipped history, or state of an older SDK) is found too: the SDK reads
+each DM group once from its start for side chat topics (`asideScan` in the state file), without
+running handlers, before it handles that group's newer events.
 
 **Page events.** A bot's 产出 page may send events back when its version declares them:
 `http.publishHtml({ ..., events: [{ name: "filter.pick", kind: "ask" }, { name: "report.flag" }] })`
