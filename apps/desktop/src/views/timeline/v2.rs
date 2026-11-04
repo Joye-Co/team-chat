@@ -27,7 +27,7 @@ use crate::{
     copy::{fill, topic_rail as c},
     data::{FileAttachment, Member, Message, RunStatus, v2::ChangeState, v2::Proof},
     markdown,
-    theme::{self, Type as _, space},
+    theme::{Type as _, space},
     ui::{
         self, Sym,
         native::{NativeType as _, native_colors},
@@ -724,7 +724,6 @@ impl TimelineView {
         {
             return None;
         }
-        let k = theme::colors(cx);
         let n = native_colors(cx);
         let p = self.services.provider.clone();
         Some(
@@ -739,58 +738,12 @@ impl TimelineView {
                         Some(ms) => format!("{} · {}", media_time(ms), size_text(file.size)),
                         None => size_text(file.size),
                     };
-                    // inc-host: the poster frame (the sender's, else made here).
-                    let poster = (file.mime.starts_with("video/"))
-                        .then(|| p.file_poster(&message.group_id, &message.topic_id, file))
-                        .flatten();
-                    let thumb = if video {
-                        div()
-                            .flex_none()
-                            .relative()
-                            .w(px(72.))
-                            .h(px(44.))
-                            .rounded(px(6.))
-                            .bg(k.screen)
-                            .children(poster.map(|path| {
-                                gpui::StyledImage::object_fit(
-                                    gpui::img(path),
-                                    gpui::ObjectFit::Cover,
-                                )
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full()
-                            }))
-                            // The screen is the card's own color in dark.
-                            .when(theme::is_dark(cx), |el| {
-                                el.border_1().border_color(k.line_2)
-                            })
-                            .overflow_hidden()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .right(px(5.))
-                                    .bottom(px(5.))
-                                    .size(px(16.))
-                                    .rounded(px(8.))
-                                    .bg(k.screen_ink)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(ui::icon(Sym::Play, px(8.), k.screen)),
-                            )
-                    } else {
-                        div()
-                            .flex_none()
-                            .w(px(72.))
-                            .h(px(44.))
-                            .rounded(px(6.))
-                            .bg(n.fill)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(ui::sym(Sym::File, ui::SymSize::SIDEBAR, n.secondary))
-                    };
+                    // R2-10: the one file item (`files::extra`): the 32
+                    // media box, a play symbol for video and audio.
+                    let thumb = crate::views::files::extra::file_media(
+                        if video { Sym::Play } else { Sym::File },
+                        cx,
+                    );
                     let file_c: FileAttachment = file.clone();
                     let (g, t) = (message.group_id.clone(), message.topic_id.clone());
                     let name: SharedString = file.name.clone().into();
@@ -802,23 +755,34 @@ impl TimelineView {
                         // width and a 1 px border.
                         .w_full()
                         .max_w(TEXT_MAX)
-                        .p(space::S6)
-                        .pr(space::S12)
+                        .h(crate::views::files::FILE_ROW_H)
+                        .px(space::S12)
                         .rounded(crate::ui::native::tokens::radius::CONTAINER)
                         .border_1()
                         .border_color(n.separator)
                         .bg(n.content)
                         .flex()
                         .items_center()
-                        .gap(space::S10)
+                        .gap(space::S12)
                         .child(thumb)
                         .child(
                             div()
+                                .flex_1()
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .gap(px(2.))
-                                .child(div().n_body().text_color(n.label).one_line().child(name))
+                                // F3: cut in the middle, so the extension
+                                // stays; the whole name in the tooltip.
+                                .child(
+                                    crate::ui::truncate::TruncText::new(name)
+                                        .id(SharedString::from(format!(
+                                            "v2-file-name-{}-{i}",
+                                            message.id
+                                        )))
+                                        .middle()
+                                        .n_headline()
+                                        .text_color(n.label),
+                                )
                                 .child(
                                     div()
                                         .n_subheadline()

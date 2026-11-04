@@ -327,8 +327,13 @@ impl LivePane {
             )
             .on_click(cx.listener(move |this, _, _, cx| this.pause(&run, false, cx)))
         };
-        // A decision bar (NATIVE.md §9.2): on `fill`, no border, no shadow.
+        // The Alert anatomy (§2.15, D5): a bordered container, px 16.
         decision_bar(cx)
+            .px(space::S16)
+            .rounded(crate::ui::native::tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.content)
             .mb(px(12.))
             .child(Sym::Pointer.icon(SymSize::INLINE).text_color(n.label))
             .child(
@@ -930,11 +935,13 @@ impl LivePane {
                 .flex_none()
                 .mt(space::S16)
                 .pt(space::S12)
-                .px(space::S14)
+                .px(space::S16)
                 .pb(space::S4)
-                // A grouped section (§8): `group` fill, no border, no shadow.
-                .rounded(metrics::GROUP_RADIUS)
-                .bg(native_colors(cx).group)
+                // D5, §1.7 (R2-06): a bordered container, never a fill step.
+                .rounded(crate::ui::native::tokens::radius::CONTAINER)
+                .border_1()
+                .border_color(native_colors(cx).separator)
+                .bg(native_colors(cx).content)
                 .child(
                     div()
                         .flex()
@@ -1106,13 +1113,15 @@ impl LivePane {
             div()
                 .flex_none()
                 .mt(space::S16)
-                .rounded(metrics::GROUP_RADIUS)
-                .bg(native_colors(cx).group)
+                .rounded(crate::ui::native::tokens::radius::CONTAINER)
+                .border_1()
+                .border_color(native_colors(cx).separator)
+                .bg(native_colors(cx).content)
                 .overflow_hidden()
                 .child(
                     div()
                         .pt(space::S12)
-                        .px(space::S14)
+                        .px(space::S16)
                         .flex()
                         .flex_col()
                         .gap(space::S10)
@@ -1161,10 +1170,11 @@ impl LivePane {
         let n = native_colors(cx);
         let take = (!held && active && can_control).then(|| {
             let run = run.clone();
+            // Owner decision v15: 停止… and 接管 are equal outline halves.
             push_button(
                 "live-take-over",
                 c::LIVE_TAKE_OVER,
-                PushStyle::Default,
+                PushStyle::Outline,
                 PushSize::Regular,
                 cx,
             )
@@ -1189,9 +1199,8 @@ impl LivePane {
         if hint.is_none() && stop.is_none() && take.is_none() {
             return div().into_any_element();
         }
-        // §2.5 footer: border-t, p 16, the buttons fill the pane's width
-        // (one row of equal halves keeps the footer low enough that the
-        // plan above it is not cut).
+        // §2.5 footer (owner decision v15): border-t, p 16, 停止… and 接管
+        // side by side as equal outline buttons.
         div()
             .flex_none()
             .w_full()
@@ -1315,6 +1324,28 @@ impl LivePane {
 
 /// 停止… (destructive), and while the stop is on its way 停止中 with a
 /// spinner at the same width (§1.8 loading): no click, no 50 % fade.
+/// A pane section with no data (§2.13 compact): the bordered panel of its
+/// kind, its label, and one 16 icon + 14 muted line.
+fn compact_panel(label: &'static str, line: &'static str, sym: Sym, cx: &App) -> AnyElement {
+    let n = native_colors(cx);
+    let k = theme::colors(cx);
+    div()
+        .flex_none()
+        .mt(space::S16)
+        .px(space::S16)
+        .py(space::S12)
+        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+        .border_1()
+        .border_color(n.separator)
+        .bg(n.content)
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .child(div().t_meta_medium().text_color(k.ink_3).child(label))
+        .child(crate::ui::native::EmptyLine::new(line).icon(sym))
+        .into_any_element()
+}
+
 fn stop_button(stopping: bool, cx: &App) -> gpui_component::button::Button {
     let label = if stopping {
         c::LIVE_STOPPING
@@ -1324,7 +1355,7 @@ fn stop_button(stopping: bool, cx: &App) -> gpui_component::button::Button {
     push_button(
         "live-stop",
         label,
-        PushStyle::Destructive,
+        PushStyle::Outline,
         PushSize::Regular,
         cx,
     )
@@ -1587,9 +1618,31 @@ impl Render for LivePane {
                             self.held_banner(&bot, &screen, &run, held_by_me, can_control, cx)
                         }))
                         .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
-                        .children(self.replay(&run, &times, current, replay_step, end, cx))
-                        .children(self.acceptance(&run, &criteria, cx))
-                        .children(self.plan(&run, &times, held, cx)),
+                        // R2-06, A1: a section with no data keeps its place
+                        // as a compact empty, so the pane never ends in a
+                        // blank band.
+                        .child(
+                            self.replay(&run, &times, current, replay_step, end, cx)
+                                .unwrap_or_else(|| {
+                                    compact_panel(
+                                        c::LIVE_REPLAY,
+                                        c::LIVE_REPLAY_EMPTY,
+                                        Sym::Video,
+                                        cx,
+                                    )
+                                }),
+                        )
+                        .child(self.acceptance(&run, &criteria, cx).unwrap_or_else(|| {
+                            compact_panel(
+                                c::LIVE_ACCEPTANCE,
+                                c::LIVE_ACCEPTANCE_EMPTY,
+                                Sym::Checklist,
+                                cx,
+                            )
+                        }))
+                        .child(self.plan(&run, &times, held, cx).unwrap_or_else(|| {
+                            compact_panel(c::LIVE_PLAN, c::LIVE_PLAN_EMPTY, Sym::Checklist, cx)
+                        })),
                 )
                 .into_any_element(),
         };

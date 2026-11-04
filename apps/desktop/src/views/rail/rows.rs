@@ -80,17 +80,23 @@ impl RailView {
             .unread(unread);
         let badge = || RightColumn::Status(line.badge, line.short.clone().into());
         let urgent = matches!(line.badge, BadgeState::NeedsYou | BadgeState::Failed);
-        row = row
-            .media_kind(SidebarMedia::None)
-            .right(if urgent && !line.short.is_empty() {
-                badge()
-            } else if unread {
-                RightColumn::Count(topic.unread as u32)
-            } else if !line.short.is_empty() {
-                badge()
-            } else {
-                RightColumn::None
-            });
+        // §2.1: inside one group every item has a 16 media or none has; the
+        // 话题 under a member (indented) get the 话题 symbol, as the member
+        // rows of that group have avatars.
+        row = if *indent > px(0.) {
+            row.symbol(crate::ui::sf_symbols::Sf::Group)
+        } else {
+            row.media_kind(SidebarMedia::None)
+        };
+        row = row.right(if urgent && !line.short.is_empty() {
+            badge()
+        } else if unread {
+            RightColumn::Count(topic.unread as u32)
+        } else if !line.short.is_empty() {
+            badge()
+        } else {
+            RightColumn::None
+        });
         let _ = cx;
         let row = row.on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());
