@@ -15,10 +15,14 @@ crate::copy! {
     CODE_PLACEHOLDER = "XXXX-XXXX",
     CODE_HINT = "向管理员要一个邀请码。粘贴带横线或空格的格式也可以。",
     SUBMIT = "加入",
-    SIGNING_IN = "正在加入…",
+    SIGNING_IN = "正在验证…",
     ERROR_BAD_CREDENTIAL = "邀请码不对，请检查后再试。",
     ERROR_UNREACHABLE = "连不上服务器，请检查地址和网络",
     ERROR_UNSUPPORTED = "这个版本太旧了，请更新应用",
     ERROR_OTHER = "登录失败，请稍后再试",
     ERROR_EMPTY = "请填写服务器地址",
+    // --- v14/t4 nav ---
+    SERVER_TITLE = "连接服务器",
+    SERVER_LEAD = "填写团队服务器的地址，管理员会告诉你。",
+    // --- end v14/t4 nav ---
 }

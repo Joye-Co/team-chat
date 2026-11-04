@@ -9,6 +9,10 @@ use crate::data::Member;
 /// Words before a name that only say "ask" (让 Ledger …, 请 Forge …).
 const LEAD_WORDS: &[&str] = &["让", "请", "叫", "找", "交给", "给", "@"];
 
+/// Ask words that are always followed by a name (`给` and `叫` are not:
+/// `给设计稿加评论`).
+const NAME_WORDS: &[&str] = &["让", "请", "找", "@"];
+
 /// A match of `text` against `query`: its score (matched characters) and
 /// the byte ranges of `text` to set heavier.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -62,7 +66,15 @@ pub fn weigh(text: &str, query: &str) -> Option<Weighed> {
         // the whole query always counts.
         let ascii = lower[a..b].iter().all(|c| c.is_ascii());
         let whole = b - a == q.len() && lower[a..b] == q[..];
-        if visible >= min && (!ascii || visible >= 3 || whole) {
+        // A Latin run of a sentence counts only from the start of a word,
+        // in the text and in the query: `ger` inside `fitzgerald` is not a
+        // match for `Ledger` (COMPLETENESS 2.11: results explain themselves).
+        let word = |s: &[char], at: usize| at == 0 || !s[at - 1].is_ascii_alphanumeric();
+        let run = &lower[a..b];
+        let starts_word = word(&lower, a)
+            && (0..=q.len().saturating_sub(run.len()))
+                .any(|p| q[p..].starts_with(run) && word(&q, p));
+        if visible >= min && (!ascii || whole || (visible >= 3 && starts_word)) {
             out.score += visible;
             let start = chars[a].0;
             let end = chars.get(b).map(|(at, _)| *at).unwrap_or(text.len());
@@ -85,6 +97,27 @@ pub fn named<'a>(query: &str, members: &'a [Member], me: Option<&str>) -> Vec<&'
         .collect();
     found.sort_by_key(|(at, _)| *at);
     found.into_iter().map(|(_, m)| m).collect()
+}
+
+/// The name a query asks for when it starts with an ask word (`让 Ledger
+/// …` → `Ledger`): the word after it, up to a space or punctuation.
+/// `None` when the query does not start that way.
+pub fn intended_name(query: &str) -> Option<String> {
+    let query = query.trim();
+    let after = NAME_WORDS.iter().find_map(|w| query.strip_prefix(w))?;
+    // The name stands alone: a space before it (`@` needs none) and the
+    // work after it.
+    if !query.starts_with('@') && !after.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = after.trim_start();
+    let name: String = rest
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !matches!(c, ',' | '，' | ':' | '：'))
+        .collect();
+    let more = rest[name.len()..].trim();
+    (!name.is_empty() && !more.is_empty() && name.chars().any(char::is_alphanumeric))
+        .then_some(name)
 }
 
 /// The work in a query once the member is taken out: `让 Ledger 拉一下 10
@@ -152,5 +185,17 @@ mod tests {
         assert_eq!(task("今天的周报", None), "今天的周报");
         // I am never offered.
         assert!(named("Joye 看一下", &members, Some(d::ME)).is_empty());
+        assert_eq!(intended_name(ASK).as_deref(), Some("Ledger"));
+        assert_eq!(intended_name("今天的周报"), None);
+        assert_eq!(intended_name("请看一下周报"), None);
+    }
+
+    #[test]
+    fn latin_matches_start_a_word() {
+        // `ger` of `fitzgerald` is not a match for `Ledger` in a sentence.
+        assert!(weigh("bartholomew.fitzgerald@northwind.example", ASK).is_none());
+        assert!(weigh("Ledger 数据", ASK).is_some());
+        // A typed fragment still finds a name anywhere.
+        assert!(weigh("Fitzgerald", "ger").is_some());
     }
 }

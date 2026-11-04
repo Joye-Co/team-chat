@@ -22,9 +22,9 @@ use crate::{
 
 /// A tile's picture (System Settings: about 68 × 44).
 const TILE: (Pixels, Pixels) = (px(68.), px(44.));
-const TILE_RADIUS: Pixels = px(7.);
-/// The selection ring around the chosen tile.
-const RING: Pixels = px(3.);
+const TILE_RADIUS: Pixels = crate::ui::native::tokens::radius::ITEM;
+/// The space between a tile and the ring of the chosen one.
+const RING: Pixels = crate::ui::native::tokens::space::S2;
 
 pub struct AppearancePage {
     size: Entity<SliderState>,
@@ -62,15 +62,16 @@ impl AppearancePage {
     /// tile shows the other theme too, so its swatches do not follow the
     /// current one (§4 `content` and `sidebar` of each mode).
     fn picture(choice: ThemeChoice) -> AnyElement {
+        // The neutral background, sidebar and border of each theme (1.2).
         let light = (
             gpui::rgb(0xFFFFFF),
-            gpui::rgb(0xE9E9EB),
-            gpui::rgb(0xC9C9CE),
+            gpui::rgb(0xF5F5F5),
+            gpui::rgb(0xD4D4D4),
         );
         let dark = (
-            gpui::rgb(0x1E1E1E),
-            gpui::rgb(0x2E2E31),
-            gpui::rgb(0x4A4A4E),
+            gpui::rgb(0x0A0A0A),
+            gpui::rgb(0x262626),
+            gpui::rgb(0x525252),
         );
         let half = |(content, sidebar, line): (gpui::Rgba, gpui::Rgba, gpui::Rgba)| {
             div()
@@ -113,6 +114,7 @@ impl AppearancePage {
 
 impl Render for AppearancePage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ui::native::tokens::{space, text};
         let k = native_colors(cx);
         let current = theme::theme_choice();
         let saving = prefs::saving();
@@ -133,25 +135,35 @@ impl Render for AppearancePage {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(crate::ui::native::tokens::space::S4)
+                    .gap(space::S8)
+                    .cursor_pointer()
                     .child(
+                        // The chosen tile: a 2 px foreground ring (2.17
+                        // selected = foreground border).
                         div()
                             .p(RING)
-                            .rounded(TILE_RADIUS + RING)
-                            .when(on, |d| d.bg(k.primary))
+                            .rounded(TILE_RADIUS + RING * 2.)
+                            .border_2()
+                            .border_color(if on {
+                                k.label
+                            } else {
+                                gpui::transparent_black()
+                            })
                             .child(
                                 div()
                                     .w(TILE.0)
                                     .h(TILE.1)
                                     .rounded(TILE_RADIUS)
                                     .overflow_hidden()
-                                    .shadow(vec![k.inner_edge(k.separator)])
+                                    .border_1()
+                                    .border_color(k.separator)
                                     .child(Self::picture(choice)),
                             ),
                     )
                     .child(
                         div()
-                            .n_subheadline()
+                            .n_body()
+                            .when(on, |d| d.font_weight(gpui::FontWeight::MEDIUM))
                             .text_color(if on { k.label } else { k.secondary })
                             .child(title),
                     )
@@ -165,54 +177,75 @@ impl Render for AppearancePage {
                     .into_any_element()
             })
             .collect();
-        let mark = |size: Pixels| {
+        let size = prefs::get().message_size;
+        let mark = |t: (Pixels, Pixels)| {
             div()
                 .flex_none()
-                .text_size(size)
-                .line_height(px(18.))
+                .text_size(t.0)
+                .line_height(t.1)
                 .text_color(k.secondary)
                 .child(s::TEXT_SIZE_MARK)
         };
-        let theme_row = div()
-            .w_full()
-            .px(crate::ui::native::metrics::FORM_ROW_INSET)
-            .py(px(12.))
-            .flex()
-            .items_start()
-            .child(
+        let theme_section = widgets::section(
+            crate::ui::native::SectionTitle::new(s::SECTION_THEME)
+                .description(s::SECTION_THEME_HINT),
+            GroupedForm::new().row(
                 div()
-                    .flex_1()
-                    .pt(px(16.))
-                    .n_body()
-                    .text_color(k.label)
-                    .child(s::APPEARANCE),
-            )
-            .child(
-                div()
+                    .w_full()
+                    .p(crate::ui::native::metrics::FORM_ROW_INSET)
                     .flex()
-                    .gap(crate::ui::native::tokens::space::S16)
+                    .gap(space::S24)
                     .children(tiles),
-            );
-        widgets::pane().child(
-            GroupedForm::new().row(theme_row).row(
-                FormRow::new(s::MESSAGE_TEXT_SIZE).control(
-                    div()
-                        .w(px(220.))
-                        .flex()
-                        .items_center()
-                        .gap(crate::ui::native::tokens::space::S12)
-                        .child(mark(px(11.)))
-                        .child(
-                            div().flex_1().child(
-                                Slider::new(&self.size)
-                                    .horizontal()
-                                    .accessibility_label(s::MESSAGE_TEXT_SIZE),
-                            ),
-                        )
-                        .child(mark(px(17.))),
-                ),
             ),
-        )
+        );
+        let text_section = widgets::section(
+            crate::ui::native::SectionTitle::new(s::SECTION_TEXT).description(s::SECTION_TEXT_HINT),
+            GroupedForm::new()
+                .row(
+                    FormRow::new(s::MESSAGE_TEXT_SIZE).control(
+                        div()
+                            .w(crate::ui::native::metrics::INLINE_FIELD_WIDTH + space::S48)
+                            .flex()
+                            .items_center()
+                            .gap(space::S12)
+                            .child(mark(text::META))
+                            .child(
+                                div().flex_1().child(
+                                    Slider::new(&self.size)
+                                        .horizontal()
+                                        .accessibility_label(s::MESSAGE_TEXT_SIZE),
+                                ),
+                            )
+                            .child(mark(text::HEADING))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(space::S48)
+                                    .flex()
+                                    .justify_end()
+                                    .n_body()
+                                    .n_figures()
+                                    .text_color(k.secondary)
+                                    .child(crate::copy::fill(
+                                        s::TEXT_SIZE_VALUE,
+                                        &[("n", &size.to_string())],
+                                    )),
+                            ),
+                    ),
+                )
+                // The preview: a message line at the chosen size.
+                .row(
+                    div()
+                        .w_full()
+                        .px(crate::ui::native::metrics::FORM_ROW_INSET)
+                        .py(space::S12)
+                        .text_size(px(f32::from(size)))
+                        .line_height(px(f32::from(size) * 1.5))
+                        .text_color(k.label)
+                        .child(s::TEXT_PREVIEW),
+                ),
+        );
+        widgets::pane().child(theme_section).child(text_section)
     }
 }
 
