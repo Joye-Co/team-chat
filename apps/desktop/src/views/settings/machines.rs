@@ -594,6 +594,10 @@ mod tests {
     fn a_machine_gets_the_glyph_of_its_kind() {
         assert_eq!(
             machine_glyph(&machine("办公室 Mac mini", &["mac"])),
+            Sym::MacMini
+        );
+        assert_eq!(
+            machine_glyph(&machine("设计组 iMac", &["mac"])),
             Sym::Computer
         );
         assert_eq!(
