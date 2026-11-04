@@ -1761,24 +1761,17 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     CardV2Block::Plan { run_id, .. } => run_id.clone(),
                     _ => None,
                 });
-                let k = theme::colors(cx);
                 let a2 = a.clone();
                 items.push(
-                    div()
-                        .id(ctx.id("watch"))
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .h(m::BUTTON)
-                        .px(space::S6)
-                        .rounded(theme::radius::MD)
-                        .hover(|s| s.bg(k.hover))
-                        .text_size(px(13.))
-                        .text_color(k.ink_2)
-                        .child(ui::icon(Sym::Computer, px(14.), k.ink_2))
-                        .child(fill(c::PLAN_WATCH_COMPUTER, &[("name", &ctx.author)]))
-                        .on_click(move |_, window, cx| a2.open_live(run.as_deref(), window, cx))
-                        .into_any_element(),
+                    button(
+                        ctx.id("watch"),
+                        fill(c::PLAN_WATCH_COMPUTER, &[("name", &ctx.author)]),
+                        ButtonKind::Secondary,
+                        cx,
+                    )
+                    .icon(Sym::Computer)
+                    .on_click(move |_, window, cx| a2.open_live(run.as_deref(), window, cx))
+                    .into_any_element(),
                 );
             }
             link_buttons(&mut items, cx);

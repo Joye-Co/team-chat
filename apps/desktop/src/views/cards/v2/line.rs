@@ -239,12 +239,9 @@ pub fn plan_row(
             .gap(space::S10)
             .h(px(36.))
             .px(space::S12)
-            .rounded(theme::radius::FIELD)
-            .border_1()
-            .border_color(k.line)
-            .bg(k.bg)
-            .text_size(px(13.))
-            .line_height(px(20.))
+            .rounded(ui::native::cards::card::RADIUS)
+            .bg(ui::native::native_colors(cx).fill)
+            .n_body()
             .child(
                 ui::MemberAvatar::new(member.as_ref(), m::TILE).ring(working.then_some(Ring::Live)),
             )
@@ -257,9 +254,10 @@ pub fn plan_row(
                     .child(text),
             )
             .child(
-                meta(div())
+                div()
                     .flex_none()
-                    .mono()
+                    .n_subheadline()
+                    .n_figures()
                     .text_color(k.ink_3)
                     .child(meta_text),
             )
@@ -275,8 +273,7 @@ pub fn plan_row(
                     .child(ui::icon(glyph, px(14.), k.ink_3)),
             )
             .when(working, |el| {
-                el.hover(|s| s.bg(k.hover))
-                    .on_click(move |_, window, cx| a.open_live(run.as_deref(), window, cx))
+                el.on_click(move |_, window, cx| a.open_live(run.as_deref(), window, cx))
             })
             .into_any_element(),
     )

@@ -1219,16 +1219,27 @@ pub(crate) fn form_grid(
                 .flex()
                 .when(top, |el| el.items_start())
                 .when(!top, |el| el.items_center())
-                .gap(space::S12)
+                .gap(space::S8)
+                // A Mac form: the label right-aligned before its control,
+                // the control as wide as its text (NATIVE.md §5.6).
                 .child(
-                    small(div())
+                    div()
+                        .n_body()
                         .flex_none()
                         .w(m::FORM_LABEL)
-                        .when(top, |el| el.pt(space::S6))
+                        .flex()
+                        .justify_end()
+                        .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
                         .text_color(k.ink)
                         .child(label.clone()),
                 )
-                .child(div().flex_1().min_w(px(0.)).child(control))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .when(!top, |el| el.max_w(px(280.)))
+                        .child(control),
+                )
                 .into_any_element(),
         );
     }
@@ -1283,7 +1294,7 @@ pub(crate) fn input_control(
                 !live,
                 cx,
             )
-            .min_w(px(160.));
+            .w_full();
             if !live {
                 return trigger.into_any_element();
             }
@@ -2416,19 +2427,17 @@ fn ref_tile(glyph: Sym, dashed: bool, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .size(m::REF_TILE)
-        .rounded(px(7.))
+        .size(px(20.))
         .flex()
         .items_center()
         .justify_center()
-        .map(|el| {
-            if dashed {
-                el.border_1().border_dashed().border_color(k.line_2)
-            } else {
-                el.bg(k.sunken)
-            }
-        })
-        .child(ui::icon(glyph, px(15.), k.ink_2))
+        // A plain `secondary` symbol, no tile (NATIVE.md §6); a missing
+        // target reads `tertiary`.
+        .child(ui::icon(
+            glyph,
+            px(18.),
+            if dashed { k.ink_3 } else { k.ink_2 },
+        ))
         .into_any_element()
 }
 
@@ -2608,7 +2617,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 RefTarget::Member { member_id } => {
                     let member = p.member(member_id);
                     (
-                        ui::MemberAvatar::new(member.as_ref(), m::REF_TILE).into_any_element(),
+                        ui::MemberAvatar::new(member.as_ref(), px(20.)).into_any_element(),
                         member.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| label.clone()),
                         member.and_then(|m| m.role).unwrap_or_default(),
                         None,
@@ -2639,7 +2648,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .flex()
                 .items_center()
                 .gap(space::S12)
-                .min_h(m::REF_ROW)
+                .min_h(px(44.))
                 .py(space::S8)
                 .when(!gone, |el| {
                     el
