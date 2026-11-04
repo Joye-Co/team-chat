@@ -52,10 +52,13 @@ pub const HTML_H: f32 = 300.;
 const MD_BODY_H: f32 = 236.;
 const GRID_H: f32 = 148.;
 const SINGLE_H: f32 = 300.;
-const VIDEO_W: f32 = 480.;
-const PDF_W: f32 = 420.;
-const AUDIO_W: f32 = 460.;
+// Every in-thread item has the one card width (§2.4): min(640, text column).
+const VIDEO_W: f32 = 640.;
+const PDF_W: f32 = 640.;
+const AUDIO_W: f32 = 640.;
 const CODE_LINES: usize = 8;
+/// Table rows inline: compact h40 (§2.7).
+const TABLE_ROW: gpui::Pixels = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
 const TABLE_ROWS: usize = 4;
 
 /// The inline preview of one 产出 version, or `None` when the kind shows as a file row.
@@ -127,12 +130,8 @@ fn ready(spec: &InlineSpec, media: &Arc<Media>, window: &mut Window, cx: &mut Ap
 fn loading(spec: &InlineSpec, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let (w, h) = inline_box(spec.kind);
-    let note = div()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .child(ui::spinner())
-        .child(cm::STATE_LOADING);
+    let _ = k;
+    // §2.14: a skeleton of the final shape, no spinner text in an empty region.
     card(cx)
         .w(w)
         .max_w_full()
@@ -140,13 +139,14 @@ fn loading(spec: &InlineSpec, cx: &App) -> AnyElement {
         .child(
             div()
                 .h(h)
-                .bg(k.code_bg)
+                .px(space::S16)
+                .pb(space::S16)
                 .flex()
-                .items_center()
-                .justify_center()
-                .t_small()
-                .text_color(k.text_3)
-                .child(note),
+                .flex_col()
+                .gap(space::S8)
+                .child(ui::native::skeleton(gpui::relative(1.), h - px(64.)))
+                .child(ui::native::skeleton(gpui::relative(0.6), px(14.)))
+                .child(ui::native::skeleton(gpui::relative(0.35), px(14.))),
         )
         .into_any_element()
 }
@@ -162,7 +162,11 @@ fn inline_box(kind: MediaKind) -> (gpui::Pixels, gpui::Pixels) {
         MediaKind::Audio => (px(AUDIO_W), px(70.)),
         MediaKind::Pdf => (px(PDF_W), px(186.)),
         MediaKind::Code => (INLINE_W, px(CODE_LINES as f32 * 20. + 16.)),
-        MediaKind::Table => (INLINE_W, px(32. + TABLE_ROWS as f32 * 30. + 34.)),
+        MediaKind::Table => (
+            INLINE_W,
+            TABLE_ROW * (TABLE_ROWS as f32 + 1.)
+                + crate::ui::native::tokens::height::TABLE_ROW_COMPACT,
+        ),
         MediaKind::File => (INLINE_W, px(64.)),
     }
 }
@@ -197,6 +201,16 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let id = &spec.key.artifact_id;
     let version = spec.key.version;
+    // While the 产出 pane shows this page, the thread keeps one reference row
+    // instead of a second live copy (§2.17, F36).
+    if host::shown_in_pane(id, cx) {
+        return host::reference_row(
+            ElementId::Name(format!("{}-ref", spec.id).into()),
+            spec.title.clone(),
+            version,
+            cx,
+        );
+    }
     // inc-host: the page host's bridge (capabilities by author, live data, asks, refs).
     let page_spec = match spec.target.provider.as_deref() {
         Some(p) => {
@@ -975,11 +989,14 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
 fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let cols = t.header.len().max(1);
-    let cell = |text: String, numeric: bool, header: bool| {
+    let cell = |text: String, numeric: bool, header: bool, c: usize| {
+        // §2.7: cells px 12, 16 at the frame edges; number columns keep their width.
         let el = div()
             .flex_1()
             .min_w(px(0.))
             .px(space::S12)
+            .when(c == 0, |d| d.pl(space::S16))
+            .when(c + 1 == cols, |d| d.pr(space::S16))
             .flex()
             .one_line();
         let el = if numeric { el.justify_end() } else { el };
@@ -991,32 +1008,36 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
             el.t_small().text_color(k.text_1).child(text)
         }
     };
+    let n = ui::native::native_colors(cx);
     let mut head = div()
-        .h(crate::ui::native::tokens::height::DEFAULT)
+        .h(TABLE_ROW)
         .flex()
         .items_center()
-        .border_b_1()
-        .border_color(k.sep);
+        .border_y_1()
+        .border_color(n.separator)
+        .bg(n.fill);
     for (i, h) in t.header.iter().enumerate() {
         head = head.child(cell(
             h.clone(),
             t.numeric.get(i).copied().unwrap_or(false),
             true,
+            i,
         ));
     }
     let mut body = div().flex().flex_col();
     for r in t.rows.iter().take(TABLE_ROWS) {
         let mut row = div()
-            .h(px(30.))
+            .h(TABLE_ROW)
             .flex()
             .items_center()
             .border_b_1()
-            .border_color(k.sep);
+            .border_color(n.separator);
         for c in 0..cols {
             row = row.child(cell(
                 r.get(c).cloned().unwrap_or_default(),
                 t.numeric.get(c).copied().unwrap_or(false),
                 false,
+                c,
             ));
         }
         body = body.child(row);
@@ -1031,7 +1052,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                     fill(
                         cm::TABLE_META,
                         &[
-                            ("rows", &t.total_rows.to_string()),
+                            ("rows", &group_digits(t.total_rows as u64)),
                             ("cols", &cols.to_string()),
                         ],
                     ),
@@ -1045,8 +1066,8 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         .child(
             div()
                 .id(ElementId::Name(format!("{}-all", spec.id).into()))
-                .h(px(34.))
-                .px(space::S12)
+                .h(crate::ui::native::tokens::height::TABLE_ROW_COMPACT)
+                .px(space::S16)
                 .flex()
                 .items_center()
                 .gap(space::S4)
@@ -1055,7 +1076,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 .hover(|st| st.text_color(k.text_1))
                 .child(fill(
                     cm::TABLE_SHOW_ALL,
-                    &[("n", &t.total_rows.to_string())],
+                    &[("n", &group_digits(t.total_rows as u64))],
                 ))
                 .child(ui::icon(Sym::ChevronRight, px(13.), k.text_2))
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),

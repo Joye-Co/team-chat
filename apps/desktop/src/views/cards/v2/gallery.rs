@@ -18,7 +18,7 @@ use crate::{
     app::Services,
     copy::{cards_v2 as c, fill},
     fake::v2::{ME, OPS, XIAOWANG},
-    theme::{self, Type as _, card_v2::mix, space},
+    theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
     ui,
 };
 
@@ -38,10 +38,12 @@ pub enum Section {
     Ack,
     Page,
     Notify,
+    /// Loading, a card that cannot be read, a long choice (§2.14, §2.15).
+    Load,
 }
 
 impl Section {
-    pub const ALL: [Section; 13] = [
+    pub const ALL: [Section; 14] = [
         Section::States,
         Section::Choice,
         Section::Approve,
@@ -55,6 +57,7 @@ impl Section {
         Section::Ack,
         Section::Page,
         Section::Notify,
+        Section::Load,
     ];
 
     fn number(self) -> usize {
@@ -76,6 +79,7 @@ impl Section {
             Section::Ack => c::GALLERY_S_ACK,
             Section::Page => c::GALLERY_S_PAGE,
             Section::Notify => c::GALLERY_S_NOTIFY,
+            Section::Load => c::GALLERY_S_LOAD,
         }
     }
 
@@ -94,6 +98,7 @@ impl Section {
             Section::Ack => c::GALLERY_S_ACK_NOTE,
             Section::Page => c::GALLERY_S_PAGE_NOTE,
             Section::Notify => c::GALLERY_S_NOTIFY_NOTE,
+            Section::Load => c::GALLERY_S_LOAD_NOTE,
         }
     }
 }
@@ -145,11 +150,11 @@ fn caption(item: &Item, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// One gallery column at the one card width (§2.4); two sit 16 apart.
 fn column(items: Vec<Option<Item>>, cx: &App) -> AnyElement {
     div()
-        .flex_1()
-        .min_w(px(0.))
-        .max_w(px(600.))
+        .flex_none()
+        .w(m::MAX_WIDTH)
         .flex()
         .flex_col()
         .gap(space::S24)
@@ -226,20 +231,11 @@ impl CardsGallery {
                 .child(t)
                 .into_any_element()
         };
-        let dot = |color: Option<gpui::Hsla>, t: &'static str| {
+        // The legend: each state as its StatusBadge (§2.12), never a free dot.
+        let dot = |state: ui::native::BadgeState, t: &'static str| {
             div()
                 .flex()
-                .items_center()
-                .gap(space::S8)
-                .child(match color {
-                    Some(c) => div().size(px(8.)).rounded_full().bg(c),
-                    None => div()
-                        .size(px(8.))
-                        .rounded_full()
-                        .border(px(1.5))
-                        .border_color(k.ink_3),
-                })
-                .child(t)
+                .child(ui::native::StatusBadge::new(state, t))
                 .into_any_element()
         };
         let chips = Section::ALL[1..].iter().map(|s| {
@@ -314,11 +310,11 @@ impl CardsGallery {
                     .child(list(
                         c::GALLERY_COLORS,
                         vec![
-                            dot(Some(k.you), c::GALLERY_COLOR_YOU),
-                            dot(Some(k.live), c::GALLERY_COLOR_LIVE),
-                            dot(Some(k.ok), c::GALLERY_COLOR_OK),
-                            dot(Some(k.bad), c::GALLERY_COLOR_BAD),
-                            dot(None, c::GALLERY_COLOR_REST),
+                            dot(ui::native::BadgeState::NeedsYou, c::GALLERY_COLOR_YOU),
+                            dot(ui::native::BadgeState::Working, c::GALLERY_COLOR_LIVE),
+                            dot(ui::native::BadgeState::Done, c::GALLERY_COLOR_OK),
+                            dot(ui::native::BadgeState::Failed, c::GALLERY_COLOR_BAD),
+                            dot(ui::native::BadgeState::Queued, c::GALLERY_COLOR_REST),
                         ],
                     ))
                     .child(list(
@@ -411,20 +407,19 @@ impl CardsGallery {
         let mut rows = Vec::new();
         let mut it = cells.into_iter().peekable();
         while it.peek().is_some() {
-            let row: Vec<Item> = it.by_ref().take(4).collect();
-            let n = row.len();
+            // Two cards per row at the card width, 16 apart (§2.4, F66).
+            let row: Vec<Item> = it.by_ref().take(2).collect();
             rows.push(
                 div()
                     .flex()
-                    .gap(space::S24)
+                    .gap(space::S16)
                     .children(row.into_iter().map(|i| {
                         div()
-                            .flex_1()
-                            .min_w(px(0.))
+                            .flex_none()
+                            .w(m::MAX_WIDTH)
                             .child(caption(&i, cx))
                             .child(i.el)
                     }))
-                    .children((n..4).map(|_| div().flex_1()))
                     .into_any_element(),
             );
         }
@@ -695,11 +690,25 @@ impl CardsGallery {
                     self.notify_box(true, window, cx),
                 )],
             ),
+            Section::Load => (
+                vec![
+                    item(c::GALLERY_LOADING, "", Some(super::loading_card(cx))),
+                    item(
+                        c::GALLERY_DECODE,
+                        "",
+                        Some(super::failed_card("gallery-decode".into(), cx)),
+                    ),
+                ],
+                vec![item(
+                    c::GALLERY_LONG_CHOICE,
+                    "",
+                    self.card(CHOICE_LONG, d, me, None, "a", window, cx),
+                )],
+            ),
         };
         div()
             .flex()
-            .justify_center()
-            .gap(space::S32)
+            .gap(space::S16)
             .child(column(left, cx))
             .child(column(right, cx))
             .into_any_element()
@@ -852,7 +861,11 @@ impl CardsGallery {
 impl Render for CardsGallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
-        let mut body = div().w_full().max_w(px(1232.)).mx_auto().flex().flex_col();
+        let mut body = div()
+            .w(m::MAX_WIDTH * 2. + space::S16)
+            .mx_auto()
+            .flex()
+            .flex_col();
         if self.start == Section::States {
             body = body.child(self.header(cx));
         }

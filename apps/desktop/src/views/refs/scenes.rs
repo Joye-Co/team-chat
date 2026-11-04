@@ -147,7 +147,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "refs-diagram-viewer",
-        about: "The diagram viewer zoomed to 250 % with a node under the pointer: its ring and 问这里",
+        about: "The diagram viewer as it opens (at fit) with a node under the pointer: its outline and 问这里",
         start: Start::SignedIn,
         setup: |_, cx| reset(cx),
         open: |s, c, cx| {
@@ -156,6 +156,35 @@ pub const SCENES: &[Scene] = &[
         },
     },
 ];
+
+// --- t5-media ---
+/// `refs-too-many`: the five chips of `refs-composer`, then the sixth part refused with
+/// the 最多引用 5 处 Toast bottom-right.
+pub fn too_many_setup(s: &Services, cx: &mut App) {
+    reset(cx);
+    open_report(s, cx);
+    let key = DraftKey::topic(d::GROWTH, d::T_REPORT);
+    for t in five(crate::selftest::worst_case()) {
+        s.provider.add_draft_ref(&key, chip(&t));
+    }
+}
+
+/// Opens the main window, then pushes the Toast the sixth reference shows.
+pub fn open_too_many(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<gpui::AnyWindowHandle, String> {
+    use gpui_component::WindowExt as _;
+    let handle = open_main(services, content, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            window.push_notification(super::too_many_toast().notification(), cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+// --- end t5-media ---
 
 /// Scenes that wait for something before the capture.
 pub fn ready(name: &str) -> Option<fn(&App) -> bool> {

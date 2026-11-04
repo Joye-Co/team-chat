@@ -44,10 +44,6 @@ use crate::{
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
-/// Widest a card grows in the timeline: the one measure of text, cards,
-/// files and images (§4.4, §7.10).
-pub const CARD_MAX_WIDTH: f32 = 620.;
-
 /// The timeline extra that draws card messages.
 pub struct CardExtra;
 
@@ -102,7 +98,7 @@ impl MessageExtra for CardExtra {
                 div()
                     .mt(space::S6)
                     .w_full()
-                    .max_w(px(CARD_MAX_WIDTH))
+                    .max_w(crate::ui::native::tokens::layout::IN_THREAD)
                     .child(card)
                     .into_any_element(),
             );
@@ -267,7 +263,7 @@ pub fn render_card(
 
     ui::native::cards::card_frame(cx)
         .mt(space::S6)
-        .max_w(px(CARD_MAX_WIDTH))
+        .max_w(crate::ui::native::tokens::layout::IN_THREAD)
         .child(
             div()
                 .p(ui::native::cards::card::INSET)

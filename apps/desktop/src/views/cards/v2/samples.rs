@@ -27,6 +27,8 @@ use crate::{
 pub const CHOICE: &str = "cv2-choice";
 pub const CHOICE_PICKED: &str = "cv2-choice-picked";
 pub const CHOICE_MANY: &str = "cv2-choice-many";
+/// A choice with 8 options, one long (COMPLETENESS.md §4: more than 6).
+pub const CHOICE_LONG: &str = "cv2-choice-long";
 pub const APPROVE: &str = "cv2-approve";
 pub const SHIPPING: &str = "cv2-shipping";
 pub const SHIPPED: &str = "cv2-shipped";
@@ -79,6 +81,139 @@ fn card(v: serde_json::Value) -> CardV2 {
     serde_json::from_value(v).expect("sample v2 card parses")
 }
 
+// --- worst-case card data (break-ui, F65): `--worst-case` reaches every block, not
+// only the title and the text ---
+
+/// A long option, field value, ref or step label with no break for 30 characters.
+const WORST_LONG: &str = "后海划船，再去旁边的胡同里找一家能坐下二十个人的小馆子吃晚饭，Aleksandra Wiśniewska-Kowalczyk 订位";
+/// A right-to-left name in a mixed line.
+const WORST_RTL: &str = "نور الهدى عبد الرحمن · 审核";
+/// A file name that only the middle may give way in.
+const WORST_FILE: &str = "IMG_20250914_183022_HDR_portrait_edited_edited_final_v3.HEIC";
+/// A long address in a field.
+const WORST_EMAIL: &str = "bartholomew.fitzgerald@northwind-industries-holdings.example.com";
+
+/// Card JSON with worst-case data in every block: long and right-to-left options
+/// (and more than 6 of them), long field values and labels, long table names and
+/// 7-digit numbers, long refs (12 in a ref list), long file names, a 2,000-character
+/// draft, long plan steps and huge metrics. Ids and the structure stay valid.
+pub(crate) fn worsen(v: &mut serde_json::Value) {
+    use serde_json::Value;
+    let draft: String = "改过的内容会整体替换原稿。".repeat(160);
+    fn walk(v: &mut Value, draft: &str) {
+        match v {
+            Value::Array(items) => {
+                // A list of ref blocks grows to 12.
+                let refs: Vec<Value> = items
+                    .iter()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("ref"))
+                    .cloned()
+                    .collect();
+                if let Some(first) = refs.first().filter(|_| refs.len() >= 2) {
+                    for n in refs.len()..12 {
+                        let mut extra = first.clone();
+                        if let Some(id) = extra.get("id").and_then(Value::as_str) {
+                            extra["id"] = Value::from(format!("{id}-w{n}"));
+                        }
+                        extra["label"] = Value::from(format!("#{} {WORST_LONG}", 600 + n));
+                        items.push(extra);
+                    }
+                }
+                for item in items.iter_mut() {
+                    walk(item, draft);
+                }
+            }
+            Value::Object(o) => {
+                let kind = o.get("type").and_then(Value::as_str).map(str::to_string);
+                match kind.as_deref() {
+                    Some("decision") => {
+                        if let Some(Value::Array(opts)) = o.get_mut("options") {
+                            if let Some(x) = opts.get_mut(1) {
+                                x["label"] = Value::from(WORST_LONG);
+                            }
+                            if let Some(x) = opts.get_mut(2) {
+                                x["label"] = Value::from(WORST_RTL);
+                            }
+                            for n in opts.len()..7 {
+                                opts.push(serde_json::json!({
+                                    "id": format!("w{n}"),
+                                    "label": format!("{} {n}", WORST_RTL),
+                                    "detail": "1,284 人"
+                                }));
+                            }
+                        }
+                    }
+                    Some("fields") => {
+                        if let Some(Value::Array(fields)) = o.get_mut("fields") {
+                            for (i, f) in fields.iter_mut().enumerate() {
+                                f["value"] =
+                                    Value::from(if i % 2 == 0 { WORST_LONG } else { WORST_EMAIL });
+                            }
+                        }
+                    }
+                    Some("table") => {
+                        if let Some(Value::Array(rows)) = o.get_mut("rows") {
+                            for (i, r) in rows.iter_mut().enumerate() {
+                                if let Value::Array(cells) = r {
+                                    if i == 0
+                                        && let Some(c) = cells.first_mut()
+                                    {
+                                        *c = Value::from(WORST_LONG);
+                                    }
+                                    if let Some(c) = cells.get_mut(1)
+                                        && c.as_str().is_some_and(|t| {
+                                            t.chars().all(|ch| ch.is_ascii_digit())
+                                        })
+                                    {
+                                        *c = Value::from("1,284,000");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some("ref") => {
+                        o.insert("label".into(), Value::from(WORST_LONG));
+                    }
+                    Some("image") => {
+                        o.insert("alt".into(), Value::from(WORST_FILE));
+                    }
+                    Some("draft") => {
+                        o.insert("text".into(), Value::from(draft));
+                    }
+                    Some("metric") => {
+                        o.insert("value".into(), Value::from(1_284_567));
+                        o.insert("label".into(), Value::from(WORST_LONG));
+                    }
+                    Some("input") => {
+                        o.insert("label".into(), Value::from(WORST_LONG));
+                    }
+                    _ => {}
+                }
+                if kind.as_deref() == Some("plan")
+                    && let Some(Value::Array(items)) = o.get_mut("items")
+                {
+                    for it in items.iter_mut() {
+                        it["text"] = Value::from(WORST_LONG);
+                    }
+                }
+                for (_, x) in o.iter_mut() {
+                    walk(x, draft);
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(v, &draft);
+}
+
+/// The sample's JSON, with worst-case data under `--worst-case`.
+pub(crate) fn sample_json(mut v: serde_json::Value) -> serde_json::Value {
+    if crate::selftest::worst_case() {
+        worsen(&mut v);
+    }
+    v
+}
+
 fn sample(
     id: &str,
     group: &str,
@@ -88,7 +223,7 @@ fn sample(
     edited: Option<Millis>,
     v: serde_json::Value,
 ) -> Sample {
-    let c = card(v);
+    let c = card(sample_json(v));
     debug_assert!(
         c.validate().is_ok(),
         "sample {id} is valid: {:?}",
@@ -275,6 +410,33 @@ fn all() -> Vec<Sample> {
                 { "type": "text", "id": "why", "text": "Pocket 推荐周二：人最齐。" },
                 { "type": "input", "id": "note", "kind": "text", "label": "补充一句",
                   "placeholder": "补充一句（可选）" }
+            ],
+            "actions": [{ "id": "submit", "label": "提交", "style": "primary" }]
+        }),
+    ));
+
+    out.push(sample(
+        CHOICE_LONG,
+        ALL,
+        T_WEEKLY,
+        POCKET,
+        at(10, 13),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "ask", "title": "这周的团建去哪儿？",
+            "fallback": "Pocket 在等你选团建的地方",
+            "ask": { "from": [ME] },
+            "blocks": [
+                { "type": "decision", "id": "place", "default": ["park"], "options": [
+                    { "id": "park", "label": "奥森公园野餐", "detail": "人均 60" },
+                    { "id": "bowl", "label": "保龄球", "detail": "人均 90" },
+                    { "id": "escape", "label": "密室逃脱", "detail": "人均 120" },
+                    { "id": "hotpot", "label": "火锅", "detail": "人均 110" },
+                    { "id": "museum", "label": "国家博物馆", "detail": "免费" },
+                    { "id": "climb", "label": "室内攀岩", "detail": "人均 150" },
+                    { "id": "boat", "label": "后海划船，再去旁边的胡同里找一家能坐下二十个人的小馆子吃晚饭，吃完沿着什刹海走回地铁站", "detail": "人均 80" },
+                    { "id": "office", "label": "就在公司点外卖" }
+                ]}
             ],
             "actions": [{ "id": "submit", "label": "提交", "style": "primary" }]
         }),

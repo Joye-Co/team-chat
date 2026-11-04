@@ -915,8 +915,14 @@ impl ChatProvider for FakeProvider {
             Credential::InviteCode(code) => code != "WRONG-CODE-0000" && code != "0000-0000",
             Credential::Token(token) => token.len() > 3,
         };
+        // A `.invalid` host (RFC 2606) never answers: the login-unreachable scene.
+        let unreachable = request.server_url.contains(".invalid");
         self.with(|s| {
-            if ok && !request.server_url.trim().is_empty() {
+            if unreachable {
+                s.session = SessionState::SignedOut {
+                    last_error: Some(LoginError::ServerUnreachable),
+                };
+            } else if ok && !request.server_url.trim().is_empty() {
                 s.sign_in(request.server_url.clone());
             } else {
                 s.session = SessionState::SignedOut {

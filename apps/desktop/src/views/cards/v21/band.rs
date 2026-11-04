@@ -30,8 +30,11 @@ use super::{interact, is_21};
 /// `今天 12:00`, `明天 09:00`, `11月3日 18:00`.
 pub fn day_time(at: Millis) -> String {
     use chrono::{Local, TimeZone as _};
-    let Some(then) = Local.timestamp_millis_opt(at).single() else {
-        return String::new();
+    // A missing time is 未知, never 1970 (§2.15): the shell's zero guard.
+    let Some(then) =
+        crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single())
+    else {
+        return crate::views::shell::clock(at);
     };
     let today = crate::selftest::clock::local_now().date_naive();
     let time = then.format("%H:%M").to_string();

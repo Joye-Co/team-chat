@@ -5,7 +5,7 @@
 //! feature folder (`views/desk/scenes.rs`, …), which [`all`] chains: a name (the PNG is `<name>-<theme>.png`), what it shows, the
 //! data it starts from, a `setup` that moves navigation (or anything else in
 //! `Services`) into place, and an `open` that opens the window. Use
-//! [`open_main`] or [`open_settings`], or write your own opener for a new
+//! [`open_main`] or a settings opener, or write your own opener for a new
 //! window kind. The runner forces the theme, waits for the frames, captures
 //! the window and closes it.
 
@@ -60,6 +60,9 @@ pub enum Start {
     /// pages' Empty states.
     V2Bare,
     // --- end v13/ux-pages ---
+    /// The sample data with one part reshaped for a state scene
+    /// ([`super::shaped`]): no messages, older messages loading, first sync.
+    Shaped(super::shaped::Shape),
 }
 
 pub struct Scene {
@@ -74,27 +77,6 @@ pub struct Scene {
 
 /// Every scene, in the default order.
 pub const SCENES: &[Scene] = &[
-    Scene {
-        name: "components",
-        about: "The component gallery: every shared component of DESIGN.md §7 in its states",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: |s, c, cx| open_gallery(s, c, 0, cx),
-    },
-    Scene {
-        name: "components-2",
-        about: "The component gallery: the composer, overlays and surfaces",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: |s, c, cx| open_gallery(s, c, 1, cx),
-    },
-    Scene {
-        name: "components-v3",
-        about: "The component gallery: v3 tokens (surfaces, member tints, states, shadows), buttons, tags, rings, rail rows and motion",
-        start: Start::V2,
-        setup: |_, _| {},
-        open: |s, c, cx| open_gallery(s, c, 2, cx),
-    },
     Scene {
         name: "main",
         about: "First 群 of the sidebar with its newest ordinary 话题 open",
@@ -111,7 +93,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "todo",
-        about: "The 待办 list (its sidebar header selected) with the first entry that waits on me open and selected",
+        about: "首页 opened from the sidebar on the v1 sample team: what waits on me, with no 话题 open",
         start: Start::SignedIn,
         setup: open_todo,
         open: open_main,
@@ -176,6 +158,13 @@ pub const SCENES: &[Scene] = &[
         open: |services, content, cx| open_login(services, content, "^K7QM2X9A", false, cx),
     },
     Scene {
+        name: "login-unreachable",
+        about: "The login card after a code was sent to a server that cannot be reached: the field error under the server",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "@K7QM2X9A", false, cx),
+    },
+    Scene {
         name: "offline",
         about: "The connection banner above the sidebar footer while reconnecting",
         start: Start::Offline,
@@ -223,13 +212,6 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_machine_dialog,
-    },
-    Scene {
-        name: "settings",
-        about: "The settings window",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: open_settings,
     },
     Scene {
         name: "settings-members",
@@ -527,7 +509,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "topic-compose",
-        about: "The composer while reconnecting: the sidebar banner, a quote chip, the format bar and the emoji picker",
+        about: "The composer while reconnecting: the offline Alert above it, a quote chip, a markdown draft and the queued line",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: crate::views::timeline::preview::open_compose,
@@ -700,7 +682,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "diagram-viewer",
-        about: "The diagram viewer zoomed to 250 %",
+        about: "The diagram viewer as it opens, at fit",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Viewer, cx),
@@ -710,7 +692,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 21] = [
+    let slices: &[&'static [Scene]] = &[
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -737,9 +719,6 @@ pub fn all() -> Vec<&'static Scene> {
         // --- inc-refs ---
         crate::views::refs::scenes::SCENES,
         // --- end inc-refs ---
-        // --- v11/pl-sf-symbols ---
-        crate::ui::sf_symbols::scene::SCENES,
-        // --- end v11/pl-sf-symbols ---
         // --- v12/kit ---
         crate::ui::native::scene::SCENES,
         // --- end v12/kit ---
@@ -752,8 +731,11 @@ pub fn all() -> Vec<&'static Scene> {
         // --- v12/settings track ---
         crate::views::settings::selftest::SCENES,
         // --- end v12/settings track ---
+        // --- v14 state scenes: one line per track, in track order ---
+        super::states::SCENES,
+        // --- end v14 state scenes ---
     ];
-    slices.into_iter().flatten().collect()
+    slices.iter().copied().flatten().collect()
 }
 
 // --- provider track ---
@@ -985,11 +967,6 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         return Some(check);
     }
     // --- end inc-refs ---
-    // --- v11/pl-sf-symbols ---
-    if name == "sf-symbols" {
-        return Some(crate::ui::sf_symbols::scene::ready);
-    }
-    // --- end v11/pl-sf-symbols ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -1025,11 +1002,6 @@ pub fn verify_check(name: &str) -> Option<Verify> {
         return Some(check);
     }
     // --- end v11/media ---
-    // --- v11/pl-sf-symbols ---
-    if name == "sf-symbols" {
-        return Some(crate::ui::sf_symbols::scene::verify);
-    }
-    // --- end v11/pl-sf-symbols ---
     match name {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
@@ -1054,6 +1026,9 @@ fn diagram_ready(name: &str) -> Option<fn(&App) -> bool> {
         "diagram-inline" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Inline, cx)),
         "diagram-error" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Error, cx)),
         "diagram-viewer" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx)),
+        // --- t5-media ---
+        "diagram-loading" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Loading, cx)),
+        // --- end t5-media ---
         _ => None,
     }
 }
@@ -1096,6 +1071,38 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-states" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-states").expect("sample"), cx)
         }),
+        // --- t5-media ---
+        "media-inline-docs" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-docs").expect("sample"),
+                cx,
+            )
+        }),
+        "media-inline-data" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-data").expect("sample"),
+                cx,
+            )
+        }),
+        "media-inline-av" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-inline-av").expect("sample"),
+                cx,
+            )
+        }),
+        "media-viewer-loading" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-viewer-loading").expect("sample"),
+                cx,
+            )
+        }),
+        "media-viewer-failed" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-viewer-failed").expect("sample"),
+                cx,
+            )
+        }),
+        // --- end t5-media ---
         _ => None,
     }
 }
@@ -1196,19 +1203,10 @@ pub fn open_first_topic(services: &Services, cx: &mut App) {
 }
 
 pub fn open_todo(services: &Services, cx: &mut App) {
-    // An entry that waits on me stays in the list once read (a mention
-    // leaves it), so the list shows its row selected.
-    let todo = services.provider.todo();
-    let first = todo
-        .iter()
-        .find(|item| item.reason == crate::data::TodoReason::WaitingOnMe)
-        .or(todo.first())
-        .cloned();
+    // The 待办 list became 首页: the place opens with no 话题, so the scene
+    // shows the page, not the first entry's 话题 (that is topic-dm).
     services.nav.update(cx, |nav, cx| {
         nav.open_todo(cx);
-        if let Some(item) = first {
-            nav.open_topic(item.group_id, item.topic.id, cx);
-        }
         debug_assert_eq!(nav.place, Some(Place::Todo));
     });
 }
@@ -1272,16 +1270,27 @@ pub fn open_login(
         let root =
             cx.new(|cx| crate::views::login::LoginWindow::new_for_scene(services, window, cx));
         let login = root.read(cx).login().clone();
-        // A leading `!` submits the code, for the error scene.
-        // A leading `!` submits the code, for the error scene; a leading `~`
-        // sets a custom server instead.
+        // A leading `!` submits the code, for the error scene; `^` shows it
+        // while it is checked; `~` sets a custom server instead; `@` submits
+        // it against a server that cannot be reached.
+        // With `--worst-case` every login scene runs on a 120-character
+        // server URL, and its code becomes a pasted token, a legacy code or
+        // a long wrong code (C2-28).
+        let worst = super::worst_case();
+        let code: &str = if worst { worst_login_code(code) } else { code };
         login.update(cx, |l, cx| {
+            if worst && !code.starts_with('~') {
+                l.preview_server(WORST_SERVER, window, cx);
+            }
             if let Some(code) = code.strip_prefix('!') {
                 l.preview_submit(code, window, cx)
             } else if let Some(code) = code.strip_prefix('^') {
                 l.preview_signing_in(code, window, cx)
             } else if let Some(server) = code.strip_prefix('~') {
                 l.preview_server(server, window, cx)
+            } else if let Some(code) = code.strip_prefix('@') {
+                l.preview_server(UNREACHABLE_SERVER, window, cx);
+                l.preview_submit(code, window, cx)
             } else {
                 l.preview(code, server_open, window, cx)
             }
@@ -1292,30 +1301,24 @@ pub fn open_login(
     .map_err(|e| e.to_string())
 }
 
-/// The component gallery (DESIGN.md §16) at 1440 x 900.
-pub fn open_gallery(
-    _services: Services,
-    content: Size<Pixels>,
-    page: u8,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| crate::ui::gallery::Gallery::new(page, window, cx))
-    })
-    .map(|(handle, _)| handle)
-    .map_err(|e| e.to_string())
-}
+/// A server the fake provider cannot reach (`.invalid`, RFC 2606).
+const UNREACHABLE_SERVER: &str = "https://team.northwind.invalid";
 
-/// The settings window at its own size (the requested size is ignored).
-pub fn open_settings(
-    services: Services,
-    content: Size<Pixels>,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    settings_scenes::open_profile(services, content, cx)
+/// A 120-character custom server URL.
+const WORST_SERVER: &str = "https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2";
+
+/// The worst-case code of a login scene.
+fn worst_login_code(code: &'static str) -> &'static str {
+    match code {
+        // Half a code becomes a pasted access token (a locked line).
+        "K7QM2X" => "tc_live_9fK2mQ7xL0pR4sT8vW1yZ3bD6gH5jN2cE7aU0iO9",
+        // A checked code becomes a 12-character legacy code.
+        "^K7QM2X9A" => "^ABCDEFGHJKLM",
+        "~https://team.joye.co" => {
+            "~https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2"
+        }
+        other => other,
+    }
 }
 
 /// The main window with the quick switcher open (DESIGN.md §13.12).

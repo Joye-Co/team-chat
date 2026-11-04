@@ -1,32 +1,26 @@
-//! Screenshot self-test scenes for diagrams (Refs.dc.html §04, §06, §07): a 话题 with
-//! messages whose bodies hold ```mermaid fences, drawn by the real pipeline (normalize,
-//! hidden renderer, snapshot, cache) through the real Markdown body.
+//! Screenshot self-test scenes for diagrams (Refs.dc.html §04, §06, §07): the real main
+//! window, whose first 话题 ends with messages whose bodies hold ```mermaid fences, drawn
+//! by the real pipeline (normalize, hidden renderer, snapshot, cache) through the real
+//! thread.
 //!
 //! - `diagram-inline`: a sequence diagram, a flowchart and a gantt.
-//! - `diagram-error`: each error kind (parse, unsupported, forbidden, too large; the tall
-//!   too-large ones last so all four fit the capture), a fifth fence that stays code, a
-//!   streaming body.
-//! - `diagram-viewer`: the expand viewer zoomed to 250 % (the 4× raster).
-//! - With `--worst-case`: a 150-node flowchart with long Chinese labels in a narrow window
-//!   (`diagram-inline`, `diagram-viewer`); `diagram-error` keeps each error state there.
+//! - `diagram-error`: each error kind (parse, unsupported, forbidden, too large), a fifth
+//!   fence that stays code, a streaming body.
+//! - `diagram-viewer`: the viewer as it opens, at fit.
+//! - `diagram-loading`: a diagram while it draws (the skeleton).
+//! - With `--worst-case`: a 150-node flowchart with long Chinese labels (`diagram-inline`,
+//!   `diagram-viewer`); `diagram-error` keeps each error state.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, ElementId, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
-    Styled, Window, WindowBounds, div, prelude::FluentBuilder as _, px, size,
-};
+use gpui::{AnyWindowHandle, App, Pixels};
 
 use super::{INLINE_SCALE, normalize};
 use crate::{
-    app::{Services, main_window_options},
-    data::Member,
-    fake, markdown,
-    selftest::scenes::capture_bounds,
-    theme::{self, Type as _, space},
-    ui::MemberAvatar,
+    app::Services,
+    selftest::scenes::{open_first_topic, open_main},
+    views::media::preview::{Extra, MediaThread},
 };
 
 /// The cache folder self-tests use (emptied once per run), never the person's cache.
@@ -37,11 +31,11 @@ pub enum Scene {
     Inline,
     Error,
     Viewer,
+    Loading,
 }
 
 struct Msg {
     author: &'static str,
-    time: &'static str,
     body: String,
     streaming: bool,
 }
@@ -79,9 +73,8 @@ pub fn big_flowchart(n: usize, long: bool) -> String {
 }
 
 fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
-    let m = |author, time, body: String| Msg {
+    let m = |author, _time: &str, body: String| Msg {
         author,
-        time,
         body,
         streaming: false,
     };
@@ -105,6 +98,11 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
         ];
     }
     match scene {
+        Scene::Loading => vec![m(
+            "m-coder",
+            "10:02",
+            format!("发布流程也补一张：\n\n{}", fence(FLOW)),
+        )],
         Scene::Inline | Scene::Viewer => vec![
             m(
                 "m-xiaowang",
@@ -131,6 +129,23 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
             ),
         ],
         Scene::Error => vec![
+            m(
+                "m-coder",
+                "10:16",
+                format!(
+                    "五张图放一条消息里，第五张只显示原文：\n\n{}\n{}\n{}\n{}\n{}",
+                    fence("flowchart LR\n  a1[一] --> a2[二]"),
+                    fence("flowchart LR\n  b1[一] --> b2[二]"),
+                    fence("flowchart LR\n  c1[一] --> c2[二]"),
+                    fence("flowchart LR\n  d1[一] --> d2[二]"),
+                    fence("flowchart LR\n  e1[第五张] --> e2[原文]")
+                ),
+            ),
+            Msg {
+                author: "m-coder",
+                body: "正在写：\n\n```mermaid\nflowchart LR\n  x[收到] --> y[处理".to_string(),
+                streaming: true,
+            },
             m(
                 "m-coder",
                 "10:12",
@@ -167,24 +182,6 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
                 "10:14",
                 format!("原始清单：\n\n{}", fence(&big_flowchart(400, true))),
             ),
-            m(
-                "m-coder",
-                "10:16",
-                format!(
-                    "五张图放一条消息里，第五张只显示原文：\n\n{}\n{}\n{}\n{}\n{}",
-                    fence("flowchart LR\n  a1[一] --> a2[二]"),
-                    fence("flowchart LR\n  b1[一] --> b2[二]"),
-                    fence("flowchart LR\n  c1[一] --> c2[二]"),
-                    fence("flowchart LR\n  d1[一] --> d2[二]"),
-                    fence("flowchart LR\n  e1[第五张] --> e2[原文]")
-                ),
-            ),
-            Msg {
-                author: "m-coder",
-                time: "10:17",
-                body: "正在写：\n\n```mermaid\nflowchart LR\n  x[收到] --> y[处理".to_string(),
-                streaming: true,
-            },
         ],
     }
 }
@@ -214,124 +211,6 @@ fn sources(scene: Scene, worst: bool) -> Vec<normalize::Normalized> {
     out
 }
 
-pub struct DiagramPreview {
-    scene: Scene,
-    worst: bool,
-    members: Vec<Member>,
-}
-
-impl DiagramPreview {
-    fn new(services: &Services, scene: Scene, worst: bool, cx: &mut Context<Self>) -> Self {
-        super::clear_memory(cx);
-        let members = ["m-xiaowang", "m-coder", "m-alex", "m-sentry", fake::ME]
-            .iter()
-            .filter_map(|id| services.provider.member(id))
-            .collect();
-        Self {
-            scene,
-            worst,
-            members,
-        }
-    }
-
-    fn row(&self, i: usize, msg: &Msg, cx: &App) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let member = self
-            .members
-            .iter()
-            .find(|m| m.id == msg.author)
-            .or(self.members.first());
-        let (view, _) = markdown::message_body_marked(
-            ElementId::Name(format!("dprev-body-{i}").into()),
-            msg.body.clone(),
-            &[],
-            false,
-            Some(&markdown::DiagramContext {
-                message_id: format!("dprev-{i}"),
-                topic_id: "dprev-topic".into(),
-                streaming: msg.streaming,
-            }),
-        );
-        div()
-            .flex()
-            .gap(space::S12)
-            .py(space::S8)
-            .child(MemberAvatar::new(member, px(28.)))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .gap(space::S4)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S8)
-                            .child(div().t_small().semibold().text_color(k.ink).child(
-                                SharedString::from(
-                                    member.map(|m| m.name.clone()).unwrap_or_default(),
-                                ),
-                            ))
-                            .child(div().t_mono().text_color(k.ink_3).child(msg.time)),
-                    )
-                    .child(view.w_full().text_color(k.ink)),
-            )
-    }
-}
-
-impl Render for DiagramPreview {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let msgs = messages(self.scene, self.worst);
-        div()
-            .id("diagram-preview")
-            .size_full()
-            .bg(k.bg)
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .h(px(52.))
-                    .flex_none()
-                    .pl(px(92.))
-                    .pr(space::S20)
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .border_b_1()
-                    .border_color(k.line)
-                    .child(div().t_small().text_color(k.ink_3).child("开发 /"))
-                    .child(
-                        div()
-                            .t_bar_title()
-                            .text_color(k.ink)
-                            .child("断线重连后消息重复"),
-                    ),
-            )
-            .child(
-                div()
-                    .id("diagram-preview-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .mx_auto()
-                            .w_full()
-                            .max_w(px(theme::PAGE_MEASURE.into()))
-                            .px(space::S24)
-                            .py(space::S16)
-                            .flex()
-                            .flex_col()
-                            .children(msgs.iter().enumerate().map(|(i, m)| self.row(i, m, cx))),
-                    ),
-            )
-            .when(self.worst, |el| el)
-    }
-}
-
 fn clear_cache_once() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -351,19 +230,27 @@ pub fn open(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     clear_cache_once();
+    super::clear_memory(cx);
+    // Only diagram-loading holds diagrams pending; every later scene draws them.
+    LOADING.store(
+        scene == Scene::Loading,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let worst = crate::selftest::worst_case();
-    let content = if worst {
-        size(px(760.), content.height)
-    } else {
-        content
-    };
-    let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
-    options.window_min_size = None;
-    let (handle, _) = gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|cx| DiagramPreview::new(&services, scene, worst, cx))
-    })
-    .map_err(|e| e.to_string())?;
+    let extras = messages(scene, worst)
+        .into_iter()
+        .map(|m| Extra {
+            author: m.author.into(),
+            body: m.body,
+            streaming: m.streaming,
+            artifact: None,
+        })
+        .collect();
+    let thread = MediaThread::with_messages(services.provider.clone(), extras);
+    let topic = (thread.group_id().to_string(), thread.topic_id().to_string());
+    let services = Services::new(thread, cx);
+    open_first_topic(&services, cx);
+    let handle = open_main(services, content, cx)?;
     if scene == Scene::Viewer {
         let source = sources(Scene::Viewer, worst).into_iter().next();
         if let Some(n) = source {
@@ -380,8 +267,8 @@ pub fn open(
                                 "重连的顺序".into()
                             }),
                             origin: super::DiagramSource {
-                                message_id: Some("dprev-1".into()),
-                                topic_id: Some("dprev-topic".into()),
+                                message_id: Some("extra-1".into()),
+                                topic_id: Some(topic.1.clone()),
                                 artifact: None,
                                 block: super::DiagramBlock::MarkdownFence {
                                     offset: 0,
@@ -394,7 +281,8 @@ pub fn open(
                         window,
                         cx,
                     );
-                    viewer.update(cx, |v, cx| v.set_zoom(if worst { 1.0 } else { 2.5 }, cx));
+                    // The viewer opens at fit (F64): the scene shows it as it opens.
+                    let _ = viewer;
                 })
                 .map_err(|e| e.to_string())?;
         }
@@ -402,19 +290,27 @@ pub fn open(
     Ok(handle)
 }
 
+/// Set by `diagram-loading`: inline diagrams stay pending, so the scene shows the
+/// skeleton.
+pub static LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// True once every diagram of the scene has an answer (image or error).
 pub fn ready(scene: Scene, cx: &App) -> bool {
+    if scene == Scene::Loading {
+        return true;
+    }
+    // The thread draws only the messages in view: every diagram it asked for has an
+    // answer, and at least one did.
     let worst = crate::selftest::worst_case();
-    let all = sources(scene, worst).iter().all(|n| {
-        let scale = INLINE_SCALE;
-        matches!(super::peek(n, scale, cx), Some(s) if !s.is_pending())
-    });
-    let zoomed = scene != Scene::Viewer
-        || worst
-        || sources(scene, worst).first().is_none_or(
-            |n| matches!(super::peek(n, super::ZOOM_SCALE, cx), Some(s) if !s.is_pending()),
-        );
-    all && zoomed && super::idle(cx)
+    let states: Vec<_> = sources(scene, worst)
+        .iter()
+        .map(|n| super::peek(n, INLINE_SCALE, cx))
+        .collect();
+    let all = states
+        .iter()
+        .all(|s| s.as_ref().is_none_or(|s| !s.is_pending()))
+        && states.iter().any(|s| s.is_some());
+    all && super::idle(cx)
 }
 
 #[cfg(test)]

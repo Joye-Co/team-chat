@@ -28,7 +28,10 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
-    ui::{self, Sym, native::NativeType as _},
+    ui::{
+        self, Sym,
+        native::{BadgeState, NativeType as _},
+    },
     views::refs::{
         affordance::Anchor,
         cards::{self as ref_parts, BlockParts, CardParts, Pick},
@@ -355,10 +358,11 @@ pub(crate) fn numeric(s: &str) -> bool {
 /// The width of number column `ci`: its widest header (12 pt) or mono cell (13 pt), at
 /// least [`m::TABLE_NUM_COL`], so the header and every row line up at the right.
 pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize) -> gpui::Pixels {
-    // One CJK character is about one em; a mono or Latin character about 0.62 em.
+    // One CJK character is about one em; a tabular digit about 0.62 em, 0.66 em in
+    // the semibold total row, so the estimate takes the wider one.
     let est = |t: &str, size: f32| -> f32 {
         t.chars()
-            .map(|c| if c.is_ascii() { 0.62 * size } else { size })
+            .map(|c| if c.is_ascii() { 0.66 * size } else { size })
             .sum()
     };
     let head = columns.get(ci).map_or(0., |h| est(h, 12.));
@@ -371,7 +375,7 @@ pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize)
             } else {
                 0.
             };
-            est(v, 13.) + bar
+            est(v, 14.) + bar
         })
         .fold(0f32, f32::max);
     px(head.max(cells).ceil() + 2.).max(m::TABLE_NUM_COL)
@@ -416,6 +420,8 @@ pub(crate) fn table_with_refs(
         let pct = (!head).then(|| percent(text)).flatten();
         // Text columns share the width; number columns take what their numbers need.
         let width = widths.get(ci).copied().flatten();
+        // A number column takes its widest value in every row (one x per column);
+        // numbers never truncate (§2.7).
         div()
             .map(|el| match width {
                 Some(w) => el.flex_none().w(w),
@@ -434,25 +440,42 @@ pub(crate) fn table_with_refs(
                     cx,
                 )))
             })
-            .child(
+            .child(if num {
                 div()
-                    .one_line()
-                    .when(num && !head, |el| el.mono())
+                    .flex_none()
+                    .whitespace_nowrap()
+                    .when(!head, |el| el.n_figures())
                     .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
-                    .child(text.to_string()),
-            )
+                    .child(text.to_string())
+                    .into_any_element()
+            } else {
+                // A text cell cuts at the end with the full text in a tooltip (§2.21).
+                ui::truncate::TruncText::new(text.to_string())
+                    .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
+                    .into_any_element()
+            })
     };
     let last = rows.len().saturating_sub(1);
+    // The compact table of §2.7 in a frame: radius 10, a 1 px border, a muted
+    // 12 medium header, rows 40 apart with a line between them.
     small(div())
         .flex()
         .flex_col()
+        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+        .border_1()
+        .border_color(k.line)
+        .overflow_hidden()
         .child(
             meta(div())
                 .flex()
+                .items_center()
                 .gap(space::S12)
-                .pb(space::S8)
+                .h(m::TABLE_ROW)
+                .px(space::S12)
+                .bg(k.hover)
                 .border_b_1()
                 .border_color(k.line)
+                .font_weight(theme::MEDIUM_WEIGHT)
                 .text_color(k.ink_3)
                 .children(columns.iter().enumerate().map(|(ci, col)| {
                     let mut el = cell(ci, col, true, false);
@@ -475,8 +498,8 @@ pub(crate) fn table_with_refs(
                 .items_center()
                 .gap(space::S12)
                 .h(m::TABLE_ROW)
+                .px(space::S12)
                 .when(ri < last, |el| el.border_b_1().border_color(k.line))
-                .when(total, |el| el.border_t_1().border_color(k.line_2))
                 .text_color(k.ink);
             let line = match refs {
                 Some((rf, w)) => rf.row(line, ri, w, cx),
@@ -558,11 +581,15 @@ pub(crate) fn list_with(
                     div().flex_none().w(px(16.)).flex().justify_center().child(
                         match (glyph, it.status) {
                             (Some(g), _) => ui::icon(g, px(14.), color).into_any_element(),
-                            (None, Some(CardListStatus::InProgress)) => div()
-                                .size(px(8.))
-                                .rounded_full()
-                                .bg(color)
-                                .into_any_element(),
+                            // Work in progress: the working loader (§2.12), not a dot.
+                            (None, Some(CardListStatus::InProgress)) => {
+                                gpui_component::Sizable::with_size(
+                                    ui::motion::spinner(),
+                                    crate::ui::native::tokens::icon::SM,
+                                )
+                                .color(color)
+                                .into_any_element()
+                            }
                             _ => div()
                                 .size(px(5.))
                                 .rounded_full()
@@ -603,11 +630,10 @@ fn segments(label: Option<&str>) -> Option<usize> {
     (2..=40).contains(&n).then_some(n)
 }
 
-/// Progress (NATIVE.md §5.7): the one determinate bar, 4 pt, radius 2, in `blue` while
-/// it is live work. A counted label (`已重启 9/24`) stays text; no segments.
+/// Progress (D12): the one Progress, h4, primary on primary 20%. A counted label
+/// (`已重启 9/24`) stays text; no segments.
 fn progress_bar(value: f64, label: Option<&str>, _count: Option<usize>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
-    let n = ui::native::native_colors(cx);
     let v = value.clamp(0., 1.) as f32;
     div()
         .flex()
@@ -616,7 +642,7 @@ fn progress_bar(value: f64, label: Option<&str>, _count: Option<usize>, cx: &App
         .when_some(label, |el, l| {
             el.child(meta(div()).text_color(k.ink_3).child(l.to_string()))
         })
-        .child(ui::native::determinate_bar(v, Some(n.blue), cx))
+        .child(ui::native::progress(v, cx))
         .into_any_element()
 }
 
@@ -625,6 +651,8 @@ fn code(text: &str, cx: &App) -> AnyElement {
     div()
         .rounded(theme::radius::MD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .px(space::S12)
         .py(space::S8)
         .text_size(crate::ui::native::tokens::text::META.0)
@@ -647,16 +675,32 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Statefu
         .h(px(200.))
         .rounded(theme::radius::MD)
         .overflow_hidden()
-        .bg(k.ph[0])
         .map(|el| match path {
             Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
-            None => el.when_some(alt, |el, a| {
-                el.flex()
-                    .items_center()
-                    .justify_center()
-                    .child(meta(div()).text_color(k.ink_3).child(a.to_string()))
-            }),
+            None => missing_image(el, cx)
+                .flex_col()
+                .gap(space::S8)
+                .when_some(alt, |el, a| {
+                    el.child(meta(div()).text_color(k.ink_3).child(a.to_string()))
+                }),
         })
+}
+
+/// An image with no file: a 1 px border on the card fill and the 16 image icon in
+/// the middle (§2.21, F5), never a grey placeholder box.
+pub(crate) fn missing_image<E: Styled + ParentElement>(el: E, cx: &App) -> E {
+    let k = theme::colors(cx);
+    el.border_1()
+        .border_color(k.line)
+        .bg(k.bg)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(ui::icon(
+            Sym::Image,
+            crate::ui::native::tokens::icon::MD,
+            k.ink_3,
+        ))
 }
 
 fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> AnyElement {
@@ -701,91 +745,118 @@ pub(crate) fn decision(
     recommended: &[String],
     cx: &App,
 ) -> AnyElement {
-    use crate::ui::native::{self as nk, NativeType as _};
-    let n = nk::native_colors(cx);
     let quick = ctx.quick();
     let live = ctx.live();
     let chosen = ctx.form.read(cx).choice(id).to_vec();
     let a = ctx.answerer();
     let sending = matches!(ctx.state, CardState::Sending { .. });
     let enabled = live && !sending;
-    // Two or three short options: a row of Regular push buttons, a press
-    // answers (NATIVE.md §5.2). No letters: the recommended option is the
-    // Default button, the chosen one leads with a checkmark.
-    if quick {
-        let buttons = options.iter().map(|o| {
-            let picked = chosen.contains(&o.id);
-            let (a, block, option) = (a.clone(), id.to_string(), o.id.clone());
-            option_button(
-                ctx.id(format!("opt-{id}-{}", o.id)),
-                &o.label,
-                recommended.contains(&o.id),
-                picked,
-                enabled || picked,
-                cx,
-            )
-            .on_click(move |_, _, cx| a.pick(&block, &option, cx))
-        });
-        return div()
-            .flex()
-            .flex_wrap()
-            .gap(space::S8)
-            .children(buttons)
-            .into_any_element();
-    }
-    // More: radio buttons (checkboxes when several may be chosen), one
-    // 24 pt row each: the label, `推荐` in `secondary` right after it, then
-    // a `secondary` detail (§5.4). No letters, no tiles.
-    let rows = options.iter().map(|o| {
+    // Every choice is a RadioGroup of full-width rows (§2.17): h40, a 1 px
+    // border, radius 8, the letter in a 20 box (a checkbox when several may
+    // be chosen). With two or three short options a press answers at once.
+    let rows = options.iter().enumerate().map(|(i, o)| {
         let picked = chosen.contains(&o.id);
         let rec = recommended.contains(&o.id);
-        let choose = {
-            let (block, option, form) = (id.to_string(), o.id.clone(), ctx.form.clone());
-            move |_: bool, _: &mut Window, cx: &mut App| {
-                form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx))
-            }
-        };
-        let control = if multiple {
-            nk::NativeCheckbox::new(ctx.id(format!("opt-{id}-{}-c", o.id)), picked)
-                .disabled(!enabled)
-                .on_change(choose.clone())
-                .into_any_element()
-        } else {
-            nk::NativeRadio::new(ctx.id(format!("opt-{id}-{}-c", o.id)), picked)
-                .disabled(!enabled)
-                .on_change(choose.clone())
-                .into_any_element()
-        };
-        div()
-            .id(ctx.id(format!("opt-{id}-{}", o.id)))
-            .min_h(px(24.))
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .n_body()
-            .text_color(n.label)
-            .when(enabled, |el| {
-                el.on_click(move |_, window, cx| choose(true, window, cx))
-            })
-            .child(control)
-            .child(option_title(&o.label, rec, cx))
-            .when_some(o.detail.clone(), |el, d| {
-                el.child(
-                    div()
-                        .ml_auto()
-                        .min_w(px(0.))
-                        .one_line()
-                        .text_color(n.secondary)
-                        .child(d),
-                )
-            })
+        let row = choice_row(
+            ctx.id(format!("opt-{id}-{}", o.id)),
+            i,
+            &o.label,
+            o.detail.as_deref(),
+            rec,
+            picked,
+            multiple,
+            enabled || (quick && picked),
+            cx,
+        );
+        if !enabled {
+            return row;
+        }
+        if quick {
+            let (a, block, option) = (a.clone(), id.to_string(), o.id.clone());
+            return row.on_click(move |_, _, cx| a.pick(&block, &option, cx));
+        }
+        let (block, option, form) = (id.to_string(), o.id.clone(), ctx.form.clone());
+        row.on_click(move |_, _, cx| {
+            form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx))
+        })
     });
     div()
         .flex()
         .flex_col()
-        .gap(space::S4)
+        .gap(space::S8)
         .children(rows)
         .into_any_element()
+}
+
+/// One choice row (§2.17): h40, full width, a 1 px border, radius 8; the
+/// letter in a 20 box (a checkbox when several may be chosen), the label
+/// with `推荐`, the detail at the trailing edge. Selected: a foreground
+/// border on the muted fill. Hover: muted at 50%. A row that cannot be
+/// chosen shows at 50% with no hover.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn choice_row(
+    id: SharedString,
+    index: usize,
+    label: &str,
+    detail: Option<&str>,
+    recommended: bool,
+    picked: bool,
+    multiple: bool,
+    enabled: bool,
+    cx: &App,
+) -> gpui::Stateful<Div> {
+    use crate::ui::native::{self as nk, NativeType as _};
+    let n = nk::native_colors(cx);
+    let mark = if multiple {
+        nk::NativeCheckbox::new(SharedString::from(format!("{id}-c")), picked)
+            .disabled(!enabled)
+            .into_any_element()
+    } else {
+        let letter = char::from_u32('A' as u32 + (index as u32 % 26)).unwrap_or('A');
+        div()
+            .flex_none()
+            .size(m::TILE)
+            .rounded(theme::radius::ITEM)
+            .border_1()
+            .border_color(if picked { n.primary } else { n.separator })
+            .bg(if picked { n.primary } else { n.content })
+            .flex()
+            .items_center()
+            .justify_center()
+            .n_section()
+            .text_color(if picked { n.on_primary } else { n.secondary })
+            .child(letter.to_string())
+            .into_any_element()
+    };
+    let hover = m::alpha(n.fill, 0.5);
+    div()
+        .id(id)
+        .w_full()
+        .min_h(m::OPTION)
+        .px(space::S12)
+        .rounded(m::OPTION_RADIUS)
+        .border_1()
+        .border_color(if picked { n.label } else { n.separator })
+        .when(picked, |el| el.bg(n.selection))
+        .when(enabled && !picked, |el| el.hover(move |s| s.bg(hover)))
+        .when(!enabled, |el| el.opacity(0.5))
+        .flex()
+        .items_center()
+        .gap(space::S12)
+        .n_body()
+        .text_color(n.label)
+        .child(mark)
+        .child(option_title(label, recommended, cx).flex_1())
+        .when_some(detail, |el, d| {
+            el.child(
+                div()
+                    .flex_none()
+                    .max_w(gpui::relative(0.45))
+                    .one_line()
+                    .text_color(n.secondary)
+                    .child(d.to_string()),
+            )
+        })
 }
 
 /// The title of an option row: the label, then `推荐` as `secondary` text
@@ -799,7 +870,7 @@ pub(crate) fn option_title(label: &str, recommended: bool, cx: &App) -> Div {
         .gap(space::S6)
         .n_body()
         .text_color(n.label)
-        .child(div().min_w(px(0.)).one_line().child(label.to_string()))
+        .child(ui::truncate::TruncText::new(label.to_string()))
         .when(recommended, |el| {
             el.child(
                 div()
@@ -846,7 +917,7 @@ pub(crate) fn option_button(
     };
     let ink = if recommended { n.on_primary } else { n.label };
     nk::disabled_push(
-        nk::push_button(id, "", style, nk::PushSize::Regular, cx)
+        nk::push_button(id, "", style, nk::PushSize::Small, cx)
             .flex_none()
             .child(
                 div()
@@ -1055,7 +1126,9 @@ pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> Button {
 /// The optional one-line field after a decision of three or more options
 /// that the footer draws inline (`补充一句（可选）`): its id and placeholder.
 pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>)> {
-    if super::quick(card) {
+    // A 2.1 card draws its inputs in the body with their labels; the footer
+    // never repeats one as a field with no label (F51).
+    if super::quick(card) || crate::views::cards::v21::is_21(card) {
         return None;
     }
     let blocks = card.all_blocks();
@@ -1075,8 +1148,13 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
             kind: InputKind::Text,
             required,
             placeholder,
+            label,
             ..
-        } if !required.unwrap_or(false) => Some((id.clone(), placeholder.clone())),
+        } if !required.unwrap_or(false) => Some((
+            id.clone(),
+            // Every input is labeled: the placeholder, else its label.
+            placeholder.clone().or_else(|| Some(label.clone())),
+        )),
         _ => None,
     })
 }
@@ -1089,8 +1167,9 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
 /// sides, the 3 pt focus ring; `red` edge on an error.
 pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
     let n = ui::native::native_colors(cx);
+    // In-card fields are sm h28 (§1.8, F51); a multi-line area keeps its height.
     let h = if height <= m::OPTION {
-        ui::native::metrics::FIELD
+        crate::ui::native::tokens::height::SM
     } else {
         height
     };
@@ -1220,27 +1299,20 @@ pub(crate) fn form_grid(
                 .flex()
                 .when(top, |el| el.items_start())
                 .when(!top, |el| el.items_center())
-                .gap(space::S8)
-                // A Mac form: the label right-aligned before its control,
-                // the control as wide as its text (NATIVE.md §5.6).
+                .gap(space::S12)
+                // FormRow (§2.8, D8): the label left-aligned in a 112 column,
+                // the control fills the value column.
                 .child(
                     div()
                         .n_body()
                         .flex_none()
                         .w(m::FORM_LABEL)
-                        .flex()
-                        .justify_end()
+                        .one_line()
                         .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
                         .text_color(k.ink)
                         .child(label.clone()),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .when(!top, |el| el.max_w(px(280.)))
-                        .child(control),
-                )
+                .child(div().flex_1().min_w(px(0.)).child(control))
                 .into_any_element(),
         );
     }
@@ -1288,7 +1360,7 @@ pub(crate) fn input_control(
                 ui::native::popup_button(
                     ctx.id(format!("select-{id}")),
                     shown,
-                    ui::native::PushSize::Regular,
+                    ui::native::PushSize::Small,
                     window,
                     cx,
                 ),
@@ -1337,9 +1409,10 @@ pub(crate) fn input_control(
                     _ => None,
                 })
                 .unwrap_or_default();
+            // One control per row (§2.8).
             div()
                 .flex()
-                .flex_wrap()
+                .flex_col()
                 .gap(space::S8)
                 .children(options.iter().map(|o| {
                     let lock = locked.contains(&o.id);
@@ -1559,9 +1632,10 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .h(h)
                 .rounded(theme::radius::SM)
                 .overflow_hidden()
-                .bg(k.ph[i % 3])
-                .when_some(path, |el, p| {
-                    el.child(img(p).size_full().object_fit(ObjectFit::Cover))
+                .map(|el| match path {
+                    Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                    // No file yet: the image icon in a bordered box, never a blank fill.
+                    None => missing_image(el, cx),
                 })
         };
         let grid = if images.len() >= 3 {
@@ -1623,6 +1697,8 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         .p(space::S12)
         .rounded(theme::radius::FIELD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .children(thumbs)
         .child(texts)
         .into_any_element()
@@ -1720,11 +1796,13 @@ fn plan(
             }
             let glyph: AnyElement = match it.state {
                 RunPlanState::Done => ui::icon(Sym::Check, px(14.), k.ink_3).into_any_element(),
-                RunPlanState::Current => ui::motion::breathe(
-                    ctx.id(format!("plan-dot-{i}")),
-                    div().size(px(8.)).rounded_full().bg(k.live),
-                    cx,
-                ),
+                // The current step: the working loader (§2.12), not a breathing dot.
+                RunPlanState::Current => gpui_component::Sizable::with_size(
+                    ui::motion::spinner(),
+                    crate::ui::native::tokens::icon::SM,
+                )
+                .color(k.live)
+                .into_any_element(),
                 _ => div()
                     .size(px(9.))
                     .rounded_full()
@@ -1859,6 +1937,7 @@ pub(crate) fn metrics_with(
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
     div()
         .flex()
         .gap(space::S16)
@@ -1916,55 +1995,77 @@ pub(crate) fn metrics_with(
                 .when(bp.is_some(), |el| {
                     el.mx(-space::S8).px(space::S8).my(-space::S4).py(space::S4)
                 })
+                // KPI (§2.4): label 14 muted, the number 24/32 semibold
+                // tabular, the trend as an outline Badge with a 12 icon; the
+                // color sits on the icon only (§1.3).
                 .child(
-                    meta(div())
+                    div()
                         .one_line()
+                        .n_body()
                         .text_color(k.ink_3)
                         .child(label.clone()),
                 )
                 .child(
                     div()
-                        .mt(space::S2)
+                        .mt(space::S4)
                         .flex()
                         .items_baseline()
                         .gap(space::S2)
                         .child(
                             div()
-                                .text_size(crate::ui::native::tokens::text::HEADING.0)
-                                .line_height(px(24.))
+                                .flex_none()
+                                .text_size(crate::ui::native::tokens::text::KPI_COMPACT.0)
+                                .line_height(crate::ui::native::tokens::text::KPI_COMPACT.1)
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .mono()
+                                .n_figures()
                                 .text_color(k.ink)
                                 .child(fmt_number(v)),
                         )
                         .when_some(unit.clone().filter(|u| u != "%"), |el, u| {
-                            el.child(small(div()).text_color(k.ink).child(u))
+                            el.child(div().n_body().text_color(k.ink_3).child(u))
                         })
                         .when(unit.as_deref() == Some("%") && d.is_none(), |el| {
-                            el.child(small(div()).text_color(k.ink).child("%"))
+                            el.child(div().n_body().text_color(k.ink_3).child("%"))
                         }),
                 )
                 .when(delta_text.is_some() || !tail.is_empty(), |el| {
+                    // `% 比 9 月`: the % belongs to the delta (`+12%`).
+                    let mut tail = tail.join("，");
+                    let delta_text = match (delta_text, tail.strip_prefix('%')) {
+                        (Some(t), Some(rest)) => {
+                            let t = format!("{t}%");
+                            tail = rest.trim().to_string();
+                            Some(t)
+                        }
+                        (t, _) => t,
+                    };
+                    let up = d.is_some_and(|d| d >= 0.);
+                    let icon_color = match good {
+                        Some(true) => n.green,
+                        Some(false) => n.red,
+                        None => n.secondary,
+                    };
                     el.child(
-                        meta(div())
-                            .mt(space::S2)
-                            .one_line()
-                            .text_color(match good {
-                                Some(true) => k.ok_ink,
-                                Some(false) => k.bad_ink,
-                                None => k.ink_3,
-                            })
+                        div()
+                            .mt(space::S8)
                             .flex()
-                            .when_some(delta_text, |el, t| el.child(div().mono().child(t)))
+                            .items_center()
+                            .gap(space::S8)
+                            .min_w(px(0.))
+                            .when_some(delta_text, |el, t| {
+                                el.child(ui::native::Badge::new(t).icon(
+                                    if up { Sym::ArrowUp } else { Sym::ArrowDown },
+                                    icon_color,
+                                ))
+                            })
                             .when(!tail.is_empty(), |el| {
-                                let t = tail.join("，");
-                                // `% 比 9 月` sticks to the number.
-                                let glued = t.starts_with('%');
                                 el.child(
                                     div()
-                                        .when(!glued, |el| el.ml(space::S4))
+                                        .min_w(px(0.))
                                         .one_line()
-                                        .child(t),
+                                        .n_subheadline()
+                                        .text_color(k.ink_3)
+                                        .child(tail),
                                 )
                             }),
                     )
@@ -2100,10 +2201,12 @@ fn diff(
     }
     let adds = adds.unwrap_or(counted_a);
     let dels = dels.unwrap_or(counted_d);
-    // A soft `sunken` well, no outline: the card keeps the only edge.
+    // A `sunken` well with its own 1 px line (§1.7: a fill step alone is not an edge).
     div()
         .rounded(theme::radius::MD)
         .bg(k.sunken)
+        .border_1()
+        .border_color(k.line)
         .overflow_hidden()
         .flex()
         .flex_col()
@@ -2126,8 +2229,9 @@ fn diff(
                         .text_color(k.ink)
                         .child(path.unwrap_or("").to_string()),
                 )
-                .child(div().text_color(k.ok_ink).child(format!("+{adds}")))
-                .child(div().text_color(k.bad_ink).child(format!("−{dels}"))),
+                // Counts in muted text; the +/− glyph carries the meaning (§1.3).
+                .child(div().text_color(k.ink_3).child(format!("+{adds}")))
+                .child(div().text_color(k.ink_3).child(format!("−{dels}"))),
         )
         .child(
             div()
@@ -2278,21 +2382,24 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                             .flex()
                             .flex_col()
                             .gap(crate::ui::native::tokens::space::S4)
+                            // The label and at most 2 log lines at 12/16 fit the 84
+                            // tile inside its padding: nothing is cut mid-glyph (§2.21).
                             .child(
                                 div()
                                     .text_size(crate::ui::native::tokens::text::META.0)
-                                    .line_height(px(14.))
+                                    .line_height(crate::ui::native::tokens::text::META.1)
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(k.ink)
-                                    .pb(px(3.))
+                                    .pb(space::S4)
                                     .border_b_1()
                                     .border_color(k.line)
+                                    .one_line()
                                     .child(label.clone()),
                             )
-                            .children(detail.iter().flat_map(|d| d.lines()).take(3).map(|l| {
+                            .children(detail.iter().flat_map(|d| d.lines()).take(2).map(|l| {
                                 div()
                                     .text_size(crate::ui::native::tokens::text::META.0)
-                                    .line_height(px(15.))
+                                    .line_height(crate::ui::native::tokens::text::META.1)
                                     .text_color(k.ink_3)
                                     .one_line()
                                     .child(l.to_string())
@@ -2418,6 +2525,8 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .pr(space::S4)
             .rounded(theme::radius::MD)
             .bg(k.sunken)
+            .border_1()
+            .border_color(k.line)
             .text_color(k.ink_2)
             .child(ui::icon(Sym::Info, px(14.), k.ink_3))
             .child(
@@ -2434,7 +2543,6 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                     ui::native::PushStyle::Outline,
                     cx,
                 )
-                .h(px(30.))
                 .on_click(move |_, _, _| a.mention(&author, &name, c::EVIDENCE_ASK_MESSAGE)),
             )
             .into_any_element(),
@@ -2493,7 +2601,7 @@ fn pr_state(raw: &str) -> PrState {
         "draft" => (c::REF_PR_DRAFT, PrTone::Plain),
         "merged" => (rail::CHANGES_MERGED, PrTone::Merged),
         "closed" => (rail::CHANGES_CLOSED, PrTone::Plain),
-        "failed" => (c::STRIP_FAILED, PrTone::Bad),
+        "failed" => (c::REF_CHECK_FAILED, PrTone::Bad),
         _ => {
             // A free-text state such as "已合并 11-02" or
             // "3 项检查通过 · 未合并": look at each part and its first word.
@@ -2509,7 +2617,7 @@ fn pr_state(raw: &str) -> PrState {
                         || part == common::STATUS_WAITING_REVIEW_ME
                     {
                         PrTone::Waits
-                    } else if part.ends_with(c::STRIP_FAILED) {
+                    } else if part.ends_with(c::REF_CHECK_FAILED) {
                         PrTone::Bad
                     } else if part == rail::CHANGES_MERGING || is_count(last) {
                         PrTone::Running
@@ -2555,7 +2663,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
         let CardV2Block::Ref { label, target, .. } = b else {
             return None;
         };
-        let (lead, name, line, right, right_color): (AnyElement, String, String, Option<String>, Hsla) =
+        let (lead, name, line, right, right_state): (AnyElement, String, String, Option<String>, Option<BadgeState>) =
             match target {
                 RefTarget::Pr { state, number, repo, .. } => {
                     let state = state.as_deref().map(pr_state);
@@ -2573,10 +2681,11 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         repo.clone().unwrap_or_default(),
                         state.map(|s| s.text),
                         match tone {
-                            PrTone::Waits => k.you_ink,
-                            PrTone::Bad => k.bad_ink,
-                            PrTone::Running => k.live_ink,
-                            PrTone::Merged | PrTone::Plain => k.ink_2,
+                            PrTone::Waits => Some(BadgeState::NeedsYou),
+                            PrTone::Bad => Some(BadgeState::Failed),
+                            PrTone::Running => Some(BadgeState::Working),
+                            PrTone::Merged => Some(BadgeState::Done),
+                            PrTone::Plain => None,
                         },
                     )
                 }
@@ -2595,7 +2704,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                             newer.then(|| {
                                 fill(c::REF_ARTIFACT_NEWER, &[("version", &a.summary.version.to_string())])
                             }),
-                            k.ink,
+                            None,
                         )
                     }
                     None => (
@@ -2603,7 +2712,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         c::REF_ARTIFACT_GONE.to_string(),
                         fill(c::REF_ARTIFACT_GONE_DETAIL, &[("title", label)]),
                         None,
-                        k.ink_3,
+                        None,
                     ),
                 },
                 RefTarget::Topic { group_id, topic_id } => {
@@ -2632,7 +2741,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         topic.map(|t| t.title).unwrap_or_else(|| label.clone()),
                         fill(c::REF_TOPIC_LINE, &[("group", &group), ("status", &status)]),
                         run,
-                        k.ink_2,
+                        Some(BadgeState::Working),
                     )
                 }
                 RefTarget::Member { member_id } => {
@@ -2642,7 +2751,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         member.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| label.clone()),
                         member.and_then(|m| m.role).unwrap_or_default(),
                         None,
-                        k.ink_2,
+                        None,
                     )
                 }
                 RefTarget::Url { url } => (
@@ -2650,14 +2759,14 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     label.clone(),
                     url.clone(),
                     None,
-                    k.ink_2,
+                    None,
                 ),
                 RefTarget::Unknown => (
                     ref_tile(Sym::Link, false, cx),
                     label.clone(),
                     String::new(),
                     None,
-                    k.ink_2,
+                    None,
                 ),
             };
         let a = ctx.answerer();
@@ -2683,24 +2792,33 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         .flex()
                         .flex_col()
                         .child(
-                            small(div())
-                                .one_line()
+                            ui::truncate::TruncText::new(name)
+                                .id(ctx.id(format!("ref-name-{i}")))
+                                .text_size(crate::ui::native::tokens::text::UI.0)
+                                .line_height(px(20.))
                                 .font_weight(theme::MEDIUM_WEIGHT)
-                                .text_color(if gone { k.ink_2 } else { k.ink })
-                                .child(name),
+                                .text_color(if gone { k.ink_2 } else { k.ink }),
                         )
                         .when(!line.is_empty(), |el| {
-                            el.child(meta(div()).one_line().text_color(k.ink_3).child(line))
+                            el.child(
+                                ui::truncate::TruncText::new(line)
+                                    .id(ctx.id(format!("ref-line-{i}")))
+                                    .text_size(crate::ui::native::tokens::text::META.0)
+                                    .line_height(crate::ui::native::tokens::text::META.1)
+                                    .text_color(k.ink_3),
+                            )
                         }),
                 )
+                // The state in one right column as a StatusBadge (§2.12, F30).
                 .when_some(right, |el, r| {
-                    el.child(
-                        meta(div())
-                            .flex_none()
-                            .font_weight(theme::MEDIUM_WEIGHT)
-                            .text_color(right_color)
-                            .child(r),
-                    )
+                    el.child(match right_state {
+                        Some(state) => ui::native::StatusBadge::new(state, r)
+                            .max_w(m::MAX_WIDTH / 4.)
+                            .into_any_element(),
+                        None => ui::native::Badge::new(r)
+                            .max_w(m::MAX_WIDTH / 4.)
+                            .into_any_element(),
+                    })
                 }),
         )
     });

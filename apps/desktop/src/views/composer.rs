@@ -1343,7 +1343,9 @@ impl Render for ComposerView {
                 cx,
             ));
         }
-        chips = chips.children(ref_chips);
+        // §2.17: at most 2 rows of reference chips, the rest fold into "+N".
+        let ref_labels: Vec<String> = self.refs.iter().map(|r| r.input.label.clone()).collect();
+        chips = chips.children(crate::views::refs::chips::capped(ref_chips, &ref_labels));
         for file in files {
             let id = file.id.clone();
             chips = chips.child(self.render_chip(

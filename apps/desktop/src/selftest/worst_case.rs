@@ -165,6 +165,17 @@ fn topic(mut t: Topic, i: usize, now: Millis) -> Topic {
     t
 }
 
+/// An 产出 with a long title, a 999 / 1 / 12 version and 100 MB / 0 / 1,284 B.
+fn worst_artifact(mut a: ArtifactSummary, i: usize) -> ArtifactSummary {
+    a.title = pick(FILE_TITLES, i).to_string();
+    a.version = [999, 1, 12][i % 3];
+    a.size_bytes = a.size_bytes.map(|_| [104_857_600, 0, 1_284][i % 3]);
+    a
+}
+
+/// A long self-hosted server URL.
+const WORST_SERVER_URL: &str = "https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2";
+
 fn now_ms() -> Millis {
     crate::selftest::clock::now_ms()
 }
@@ -213,11 +224,12 @@ impl WorstCase {
 impl ChatProvider for WorstCase {
     fn session(&self) -> SessionState {
         match self.inner.session() {
-            SessionState::SignedIn { me, server_url } => {
+            SessionState::SignedIn { me, .. } => {
                 let i = self.member_index(&me.id);
                 SessionState::SignedIn {
                     me: member(me, i),
-                    server_url,
+                    // A 120-character self-hosted server (Settings, developer view).
+                    server_url: WORST_SERVER_URL.to_string(),
                 }
             }
             other => other,
@@ -417,12 +429,7 @@ impl ChatProvider for WorstCase {
             .artifacts(group_id, topic_id)
             .into_iter()
             .enumerate()
-            .map(|(i, mut a)| {
-                a.title = pick(FILE_TITLES, i).to_string();
-                a.version = [999, 1, 12][i % 3];
-                a.size_bytes = a.size_bytes.map(|_| [104_857_600, 0, 1_284][i % 3]);
-                a
-            })
+            .map(|(i, a)| worst_artifact(a, i))
             .collect()
     }
     fn send(&self, request: SendRequest) -> ClientMsgId {
@@ -1012,6 +1019,148 @@ impl ChatProvider for WorstCase {
             .retry_card_event(group_id, topic_id, message_id, client_event_id)
     }
     // --- end cards v2 track ---
+    // Every other call reaches the sample data unchanged, so a scene keeps
+    // its state (merge, approvals, decisions, costs) under worst data.
+    fn member(&self, id: &str) -> Option<Member> {
+        let i = self.member_index(id);
+        self.inner.member(id).map(|m| member(m, i))
+    }
+    fn quoted_message(
+        &self,
+        group_id: &str,
+        quoting_id: &str,
+        quoted_id: &str,
+    ) -> Option<QuotedMessage> {
+        self.inner.quoted_message(group_id, quoting_id, quoted_id)
+    }
+    fn rename_topic(&self, group_id: &str, topic_id: &str, title: String) {
+        self.inner.rename_topic(group_id, topic_id, title)
+    }
+    fn add_group_members(&self, group_id: &str, member_ids: Vec<MemberId>) -> AdminReply<()> {
+        self.inner.add_group_members(group_id, member_ids)
+    }
+    fn rename_group(&self, group_id: &str, name: String) -> AdminReply<()> {
+        self.inner.rename_group(group_id, name)
+    }
+    fn set_member_character(
+        &self,
+        member_id: &str,
+        character: Option<CharacterId>,
+    ) -> AdminReply<Member> {
+        self.inner.set_member_character(member_id, character)
+    }
+    fn set_member_plan(&self, member_id: &str, plan: pages::MemberPlan) -> AdminReply<Member> {
+        self.inner.set_member_plan(member_id, plan)
+    }
+    fn followed_topics(&self) -> Vec<FollowedTopic> {
+        self.inner.followed_topics()
+    }
+    fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<v2::AskItem> {
+        self.inner.pinned_ask(group_id, topic_id)
+    }
+    fn topic_result_proof(&self, group_id: &str, topic_id: &str) -> Vec<v2::Proof> {
+        self.inner.topic_result_proof(group_id, topic_id)
+    }
+    fn active_runs(&self) -> Vec<BotRunSummary> {
+        self.inner.active_runs()
+    }
+    fn topic_changes(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicChanges> {
+        self.inner.topic_changes(group_id, topic_id)
+    }
+    fn run_usage(&self, run_id: &str) -> Option<v2::RunUsage> {
+        self.inner.run_usage(run_id)
+    }
+    fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
+        self.inner.topic_cost(group_id, topic_id)
+    }
+    fn topic_decisions(&self, group_id: &str, topic_id: &str) -> Vec<v2::Decision> {
+        self.inner.topic_decisions(group_id, topic_id)
+    }
+    fn group_decisions(&self, group_id: &str) -> Vec<v2::Decision> {
+        self.inner.group_decisions(group_id)
+    }
+    fn group_purpose(&self, group_id: &str) -> Option<String> {
+        self.inner.group_purpose(group_id)
+    }
+    fn set_group_purpose(&self, group_id: &str, purpose: String) -> AdminReply<()> {
+        self.inner.set_group_purpose(group_id, purpose)
+    }
+    fn member_stats(&self, member_id: &str) -> Option<v2::MemberStats> {
+        self.inner.member_stats(member_id)
+    }
+    fn all_artifacts(&self) -> Vec<(GroupId, ArtifactSummary)> {
+        self.inner
+            .all_artifacts()
+            .into_iter()
+            .enumerate()
+            .map(|(i, (g, a))| (g, worst_artifact(a, i)))
+            .collect()
+    }
+    fn artifact_story(&self, artifact_id: &str) -> Option<v2::ArtifactStory> {
+        self.inner.artifact_story(artifact_id)
+    }
+    fn message_proof(&self, group_id: &str, message_id: &str) -> Vec<v2::Proof> {
+        self.inner.message_proof(group_id, message_id)
+    }
+    fn changes_approval(&self, group_id: &str, topic_id: &str) -> Option<(MemberId, Millis)> {
+        self.inner.changes_approval(group_id, topic_id)
+    }
+    fn approve_changes(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.inner.approve_changes(group_id, topic_id)
+    }
+    fn withdraw_changes_approval(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.inner.withdraw_changes_approval(group_id, topic_id)
+    }
+    fn changes_approval_queued(&self, group_id: &str, topic_id: &str) -> bool {
+        self.inner.changes_approval_queued(group_id, topic_id)
+    }
+    fn clock_now(&self) -> Millis {
+        self.inner.clock_now()
+    }
+    fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
+        self.inner.topic_glance(group_id, topic_id)
+    }
+    fn group_recent_done(&self, group_id: &str) -> Vec<pages::RecentDone> {
+        self.inner.group_recent_done(group_id)
+    }
+    fn group_artifacts(&self, group_id: &str) -> Vec<ArtifactSummary> {
+        self.inner
+            .group_artifacts(group_id)
+            .into_iter()
+            .enumerate()
+            .map(|(i, a)| worst_artifact(a, i))
+            .collect()
+    }
+    fn artifact_thumb(&self, artifact_id: &str) -> Option<pages::ArtifactThumb> {
+        self.inner.artifact_thumb(artifact_id)
+    }
+    fn can_record_decision(&self, group_id: &str) -> bool {
+        self.inner.can_record_decision(group_id)
+    }
+    fn record_decision(&self, group_id: &str, text: String) -> AdminReply<()> {
+        self.inner.record_decision(group_id, text)
+    }
+    fn member_extras(&self, member_id: &str) -> pages::MemberExtras {
+        self.inner.member_extras(member_id)
+    }
+    fn retry_member_problem(&self, member_id: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.retry_member_problem(member_id, run_id)
+    }
+    fn artifact_responses_load(&self, artifact_id: &str) -> pages::ResponsesLoad {
+        self.inner.artifact_responses_load(artifact_id)
+    }
+    fn reload_artifact_responses(&self, artifact_id: &str) {
+        self.inner.reload_artifact_responses(artifact_id)
+    }
+    fn side_chat_topics(&self) -> std::collections::HashSet<(GroupId, TopicId)> {
+        self.inner.side_chat_topics()
+    }
+    fn set_notify_preferences(&self, prefs: NotifyPreferences) -> AdminReply<NotifyPreferences> {
+        self.inner.set_notify_preferences(prefs)
+    }
+    fn set_approval_defaults(&self, defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
+        self.inner.set_approval_defaults(defaults)
+    }
 }
 
 /// A long run of mixed text with an unbroken token (panes track).

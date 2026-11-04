@@ -111,7 +111,7 @@ pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
     )
     .bg(n.sheet)
     .shadow(n.float())
-    .icon(ui::icon(Sym::Quote, px(14.), n.secondary))
+    .icon(ui::icon(Sym::Quote, px(16.), n.secondary))
 }
 
 /// Starts the 300 ms hover timer of `id`, or clears it.
@@ -197,9 +197,11 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
     };
     let alt = window.modifiers().alt;
     let show_button = shown && !spec.control;
-    // No hover fill or ring on rows (NATIVE.md §10): the button shows the
-    // part is askable; ⌥ shows the ring.
-    let ring = (spec.fill && hovered && alt).then_some(k.line_2);
+    // E3, §2.6: the hover look is muted at 50 %, at once (the button follows after the
+    // delay); ⌥ adds a 1 px line.
+    let n = crate::ui::native::native_colors(cx);
+    let hover_fill = (spec.fill && hovered && !spec.control).then_some(n.fill.opacity(0.5));
+    let ring = (spec.fill && hovered && alt).then_some(n.separator);
     let id = spec.id.clone();
     let click_target = spec.target.clone();
     let menu_target = spec.target.clone();
@@ -207,6 +209,7 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
     let el = el
         .relative()
         .rounded(spec.radius)
+        .when_some(hover_fill, |el, fill| el.bg(fill))
         .when(flashing, |el| el.bg(k.sel))
         .when_some(ring, |el, color| el.border_1().border_color(color))
         .on_hover({
@@ -228,7 +231,8 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
             );
             let holder = div().absolute().flex().items_center();
             let holder = match spec.anchor {
-                Anchor::TopRight => holder.top(px(-11.)).right(px(-6.)),
+                // Above the part's top-right corner, clear of its edge (2 px).
+                Anchor::TopRight => holder.bottom_full().right_0().pb(px(2.)),
                 Anchor::RowEnd => holder.top_0().bottom_0().right(px(8.)),
                 Anchor::Corner => holder.top(px(4.)).right(px(4.)),
             };
@@ -250,6 +254,19 @@ pub fn inline_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App)
             cx.stop_propagation();
             ask_about(target(cx), RefIntent::Topic, window, cx);
         })
+        .into_any_element()
+}
+
+/// The 问这里 button of a part whose renderer has no hover of its own (the action strip of a
+/// code fence): it keeps its place but shows only while the pointer is over it, so a capture
+/// or a glance at rest never shows it (§2.6 hover, E2).
+pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) -> AnyElement {
+    let shown = hub_of(cx).is_some_and(|h| h.read(cx).hovered(id));
+    div()
+        .id(ElementId::Name(format!("ask-slot-{id}").into()))
+        .on_hover(track_hover(id.to_string()))
+        .when(!shown, |d| d.opacity(0.))
+        .child(inline_button(id, target, cx))
         .into_any_element()
 }
 

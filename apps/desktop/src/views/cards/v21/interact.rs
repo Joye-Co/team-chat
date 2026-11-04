@@ -649,18 +649,17 @@ fn reply_link(ctx: &Ctx, block: &str, reply: &str, cx: &mut App) -> AnyElement {
         .flex()
         .items_center()
         .gap(space::S6)
-        .text_color(k.live_ink)
-        .child(div().size(px(5.)).rounded_full().bg(k.live))
+        .text_color(k.ink_2)
         .child(
             b20::quiet_button(
                 ctx.id(format!("reply-{block}")),
                 &fill(c::NEW_MESSAGE, &[("name", &ctx.author)]),
                 cx,
             )
-            .text_color(k.live_ink)
+            .text_color(k.ink)
             .on_click(move |_, window, cx| a.open_message(&reply, window, cx)),
         )
-        .child(ui::icon(ui::Sym::ArrowDown, px(12.), k.live_ink))
+        .child(ui::icon(ui::Sym::ArrowDown, px(12.), k.ink_2))
         .into_any_element()
 }
 
@@ -754,37 +753,31 @@ pub fn decorate(
             .flex_none()
             .ml_auto()
             .one_line()
-            .text_color(k.live_ink)
+            .text_color(k.ink_3)
             .child(fill(c::JUST_ADDED, &[("name", &ctx.author)]))
     });
 
     let mut col = div().flex().flex_col().min_w(px(0.));
     let mut added = added;
     if let Some(m) = mark {
-        let (ink, dot, text) = match m {
-            super::band::Mark::You => (k.you_ink, k.you, c::BAND_SURFACE_YOU.to_string()),
+        // The ask on a surface is a StatusBadge (§2.12), never a free dot.
+        let (state, text) = match m {
+            super::band::Mark::You => (
+                crate::ui::native::BadgeState::NeedsYou,
+                c::BAND_SURFACE_YOU.to_string(),
+            ),
             super::band::Mark::Waiting(names) => (
-                k.ink_2,
-                k.ink_3,
+                crate::ui::native::BadgeState::Queued,
                 fill(c::BAND_WAITING_ON, &[("name", &names)]),
             ),
         };
         col = col.child(
-            meta(div())
-                .mb(space::S6)
+            div()
+                .mb(space::S8)
                 .flex()
                 .items_center()
-                .gap(space::S6)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .text_color(ink)
-                        .font_weight(theme::MEDIUM_WEIGHT)
-                        .child(div().size(px(6.)).rounded_full().bg(dot))
-                        .child(text),
-                )
+                .gap(space::S8)
+                .child(crate::ui::native::StatusBadge::new(state, text))
                 // The mark and 刚加的 share the row (the artboard's 问你 … Ledger 刚加的).
                 .children(added.take()),
         );
@@ -863,15 +856,14 @@ pub fn decorate(
                 .rounded(theme::radius::MD)
                 .child(col)
         };
-        let rest = if inserted {
-            mix(k.live, k.bg, t::INSERTED_FILL)
-        } else {
-            k.bg
-        };
+        // Provenance is a 2 px line at the left and the muted label, never a
+        // state color fill (§1.3); a change flashes in the muted fill only.
+        let tinted = tinted.when(inserted, |el| el.border_l_2().border_color(k.border_strong));
+        let rest = k.bg;
         if cx.reduce_motion() {
-            return if inserted { tinted.bg(rest) } else { tinted }.into_any_element();
+            return tinted.into_any_element();
         }
-        let tint = mix(k.live, k.bg, t::CHANGE_FILL);
+        let tint = k.hover;
         let rev = ctx.card.rev;
         return crate::ui::motion::once(
             ctx.id(format!("chg-{id}-{rev}")),
@@ -910,8 +902,8 @@ fn draft_changed(ctx: &Ctx, id: &str, cx: &mut App) -> AnyElement {
         .flex()
         .items_center()
         .gap(space::S6)
-        .text_color(k.live_ink)
-        .child(div().size(px(5.)).rounded_full().bg(k.live))
+        .text_color(k.ink_2)
+        .child(ui::icon(ui::Sym::Alert, px(12.), k.ink_2))
         .child(c::DRAFT_CHANGED)
         .child(
             b20::quiet_button(ctx.id(format!("use-new-{id}")), c::DRAFT_USE_NEW, cx)
@@ -940,10 +932,7 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
         .flex()
         .items_center()
         .gap(space::S6)
-        .text_color(match p.stage {
-            Stage::Silent | Stage::OfflineLive | Stage::Busy | Stage::Refused => k.ink_2,
-            _ => k.live_ink,
-        })
+        .text_color(k.ink_2)
         .when(
             words && matches!(p.stage, Stage::Wait | Stage::Slow),
             |el| el.child(crate::ui::motion::spinner().color(k.live)),
@@ -1256,8 +1245,55 @@ mod tests {
 }
 
 // --- v12/fx-cards ---
+/// The conflicts that already showed their Toast, by client event id.
+#[derive(Default)]
+struct ShownConflicts(std::collections::HashSet<String>);
+
+impl gpui::Global for ShownConflicts {}
+
+/// Shows the conflict Toast once per conflicting event (§2.16, owner decision on F53):
+/// 卡片刚更新了, what happened, and 看新版, which settles the event.
+pub fn conflict_toast(ctx: &Ctx, cx: &mut App) {
+    let events = ctx
+        .env
+        .provider
+        .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    let Some(e) = events.last().filter(|e| {
+        matches!(
+            e.phase,
+            CardEventPhase::Failed {
+                failure: CardEventFailure::Conflict,
+                ..
+            }
+        )
+    }) else {
+        return;
+    };
+    let cid = e.client_event_id.clone();
+    let shown = cx.default_global::<ShownConflicts>();
+    if !shown.0.insert(cid.clone()) {
+        return;
+    }
+    let (provider, g, t, m) = (
+        ctx.env.provider.clone(),
+        ctx.msg.group_id.clone(),
+        ctx.msg.topic_id.clone(),
+        ctx.msg.message_id.clone(),
+    );
+    let toast_id = format!("card-conflict-{m}");
+    cx.defer(move |cx| {
+        crate::ui::overlay::Toast::new(ui::Sym::Refresh, c::CONFLICT_TITLE)
+            .description(c::CONFLICT_DETAIL)
+            .action_button(crate::copy::cards_v2::STRIP_SEE_NEW, move |_, _| {
+                provider.drop_card_event(&g, &t, &m, &cid)
+            })
+            .id(toast_id)
+            .push(cx);
+    });
+}
+
 /// True while my newest event on the card came back as a conflict: the card changed under
-/// me. The card header says so inline (NATIVE.md §7.4: no toast).
+/// me. The header keeps a muted line; the Toast says it once ([`conflict_toast`]).
 pub fn conflicted(ctx: &Ctx) -> bool {
     let events = ctx
         .env

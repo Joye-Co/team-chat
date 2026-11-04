@@ -665,7 +665,7 @@ pub enum SkeletonKind {
     /// A table (§2.7): an h40 header, then h48 rows, in a frame.
     TableRow,
     /// A member list row: unframed, a group label, then 32 avatar circle,
-    /// name over role, pitch 52.
+    /// name over role, pitch 56 (the member list row).
     MemberRow,
     /// A sidebar item (§2.14): 16 square and a h14 bar, pitch 32, px 8, on
     /// the sidebar fill.
@@ -673,7 +673,7 @@ pub enum SkeletonKind {
 }
 
 /// The pitch of a member list row.
-pub const MEMBER_ROW: Pixels = px(52.);
+pub const MEMBER_ROW: Pixels = px(56.);
 
 /// `n` skeleton rows of `kind` at the real row height and frame.
 pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyElement {

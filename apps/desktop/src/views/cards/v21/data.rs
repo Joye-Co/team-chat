@@ -534,7 +534,6 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                 .gap(space::S6)
                 .text_color(k.ink)
                 .font_weight(theme::MEDIUM_WEIGHT)
-                .child(div().size(px(6.)).rounded_full().bg(k.ink))
                 .child(t),
         );
     }
@@ -593,10 +592,11 @@ fn bar_rows(
         .min_w(px(0.));
     for (i, xv) in xs.iter().enumerate() {
         let on = picked == Some(i);
+        // Every value is primary on a primary 20% track (D12, §2.22); the picked
+        // bar says so by its weight, never by fading the others under their track.
         let (name_ink, weight, bar) = match picked {
-            None => (k.ink, gpui::FontWeight::NORMAL, k.ink_3),
             Some(_) if on => (k.ink, gpui::FontWeight::SEMIBOLD, k.ink),
-            Some(_) => (k.ink_3, gpui::FontWeight::NORMAL, k.line_2),
+            _ => (k.ink_2, gpui::FontWeight::NORMAL, k.ink),
         };
         let y = values.get(i).copied().flatten();
         let shown = y.map(|v| match unit {
@@ -698,7 +698,7 @@ fn bar_rows(
                     .min_w(px(0.))
                     .h(t::BAR_TRACK)
                     .rounded(t::BAR_TRACK_RADIUS)
-                    .bg(k.sunken)
+                    .bg(theme::card_v2::alpha(k.ink, 0.2))
                     .overflow_hidden()
                     .child(
                         div()
@@ -770,7 +770,6 @@ fn bar_rows(
                         .gap(space::S6)
                         .text_color(k.ink)
                         .font_weight(theme::MEDIUM_WEIGHT)
-                        .child(div().size(px(6.)).rounded_full().bg(k.ink))
                         .child(t),
                 )
             },

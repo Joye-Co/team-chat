@@ -1,5 +1,5 @@
-//! Upload and preview states of a 产出 file (Media.dc.html §08 状态): each state says what is
-//! happening in one line with a glyph and words; only 发不了 is red. Never color only.
+//! Upload and preview states of a 产出 file (Media.dc.html §08 状态): each state is a framed
+//! list row whose StatusBadge says what is happening; color only on the badge icon.
 
 use std::path::PathBuf;
 
@@ -12,14 +12,13 @@ use gpui::{
 use super::{
     MediaKind,
     inline::InlineSpec,
-    parts::{self, mono},
-    size_text,
+    parts, size_text,
     store::Media,
     viewer::{self, Opening},
 };
 use crate::{
     copy::{fill, media as cm},
-    theme::{self, Type as _, radius, space},
+    theme::{self, Type as _, space},
     ui::{self, PushSize, PushStyle, Sym},
 };
 
@@ -39,35 +38,33 @@ pub enum Status {
     TooLarge { limit: u64, size: u64 },
 }
 
+/// The 32 media box of a row (§2.6): a symbol in the kit box, or the poster cut to the
+/// same box.
 fn lead_el(lead: &Lead, cx: &App) -> Div {
-    let k = theme::colors(cx);
-    match lead {
-        // A plain `secondary` symbol, no tile (NATIVE.md §6).
-        Lead::Icon(icon) => div()
+    let n = crate::ui::native::native_colors(cx);
+    let boxed = || {
+        div()
             .flex_none()
-            .size(px(28.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(ui::icon(*icon, px(20.), k.text_3)),
-        Lead::Thumb(path) => div()
-            .flex_none()
-            .w(px(64.))
-            .h(crate::ui::native::tokens::height::LG)
-            .rounded(radius::MARK)
+            .size(crate::ui::native::tokens::avatar::MD)
+            .rounded(crate::ui::native::tokens::radius::ITEM)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.fill)
             .overflow_hidden()
-            .bg(super::screen(cx).bg)
-            .child(img(path.clone()).size_full().object_fit(ObjectFit::Cover)),
-        Lead::Blank => div()
-            .flex_none()
-            .w(px(64.))
-            .h(crate::ui::native::tokens::height::LG)
-            .rounded(radius::MARK)
-            .bg(super::screen(cx).bg),
+    };
+    match lead {
+        Lead::Icon(icon) => crate::ui::native::media_box(*icon, cx),
+        Lead::Thumb(path) => {
+            boxed().child(img(path.clone()).size_full().object_fit(ObjectFit::Cover))
+        }
+        // The poster is being made: the box with the video symbol.
+        Lead::Blank => crate::ui::native::media_box(Sym::Video, cx),
     }
 }
 
-/// One state row. `trailing` is a button or a mark on the right.
+/// One state row (§2.6 ListRow, F30): a 1 px frame, the 32 media box, the name 14 medium
+/// over a 12 muted line, then the state as a StatusBadge and the action. The state's
+/// color sits only on the badge icon. `trailing` is a button on the right.
 pub fn row(
     id: impl Into<ElementId>,
     lead: Lead,
@@ -76,81 +73,66 @@ pub fn row(
     trailing: Option<AnyElement>,
     cx: &App,
 ) -> gpui::Stateful<Div> {
-    let k = theme::colors(cx);
-    let line: AnyElement = match status {
+    use crate::ui::native::{BadgeState, StatusBadge};
+    let n = crate::ui::native::native_colors(cx);
+    let meta: String = match status {
         Status::Uploading { done, total } => {
             let p = if *total > 0 { done * 100 / total } else { 0 };
-            mono(
-                fill(
-                    cm::STATE_UPLOADING,
-                    &[
-                        ("done", &size_text(*done)),
-                        ("total", &size_text(*total)),
-                        ("p", &p.to_string()),
-                    ],
-                ),
-                k.text_3,
+            fill(
+                cm::STATE_UPLOADING,
+                &[
+                    ("done", &size_text(*done)),
+                    ("total", &size_text(*total)),
+                    ("p", &p.to_string()),
+                ],
             )
-            .into_any_element()
         }
-        Status::Generating { .. } => div()
-            .t_meta()
-            .text_color(k.text_3)
-            .child(cm::STATE_GENERATING)
-            .into_any_element(),
-        Status::Ready { meta } => mono(meta.clone(), k.text_3).into_any_element(),
-        Status::Failed { size } => div()
-            .flex()
-            .items_center()
-            .gap(space::S4)
-            .t_meta()
-            .text_color(k.text_3)
-            .child(ui::icon(Sym::Alert, px(12.), k.text_3))
-            .child(format!(
-                "{} · {}",
-                cm::STATE_FAILED_DETAIL,
-                size_text(*size)
-            ))
-            .into_any_element(),
-        Status::TooLarge { limit, size } => div()
-            .flex()
-            .items_center()
-            .gap(space::S4)
-            .t_meta()
-            .child(
-                div()
-                    .text_color(k.danger_text)
-                    .child(fill(cm::STATE_TOO_LARGE, &[("limit", &size_text(*limit))])),
-            )
-            .child(div().text_color(k.text_3).child(format!(
-                "· {} · {}",
-                size_text(*size),
-                cm::STATE_TOO_LARGE_HINT
-            )))
-            .into_any_element(),
+        Status::Generating { duration } => match duration {
+            Some(d) => format!("{} · {}", cm::STATE_GENERATING, super::time_text(*d)),
+            None => cm::STATE_GENERATING.to_string(),
+        },
+        Status::Ready { meta } => meta.clone(),
+        // A size of 0 is unknown, never "0 B" (F5).
+        Status::Failed { size: 0 } => cm::STATE_FAILED_HINT.to_string(),
+        Status::Failed { size } => format!("{} · {}", cm::STATE_FAILED_HINT, size_text(*size)),
+        Status::TooLarge { limit, size } => format!(
+            "{} · {}",
+            fill(
+                cm::STATE_TOO_LARGE_DETAIL,
+                &[("size", &size_text(*size)), ("limit", &size_text(*limit))]
+            ),
+            cm::STATE_TOO_LARGE_HINT
+        ),
+    };
+    let badge = match status {
+        Status::Uploading { .. } => {
+            Some(StatusBadge::new(BadgeState::Working, cm::BADGE_UPLOADING))
+        }
+        Status::Generating { .. } => {
+            Some(StatusBadge::new(BadgeState::Working, cm::BADGE_GENERATING))
+        }
+        Status::Ready { .. } => None,
+        Status::Failed { .. } => Some(StatusBadge::new(BadgeState::Failed, cm::STATE_FAILED)),
+        Status::TooLarge { .. } => Some(StatusBadge::new(BadgeState::Failed, cm::BADGE_TOO_LARGE)),
     };
     let progress = match status {
         Status::Uploading { done, total } if *total > 0 => Some(*done as f32 / *total as f32),
         _ => None,
     };
-    let trailing = trailing.or_else(|| match status {
-        Status::Generating { duration: Some(d) } => {
-            Some(mono(super::time_text(*d), k.text_2).into_any_element())
-        }
-        _ => None,
-    });
     div()
         .id(id.into())
         .w_full()
-        .rounded(crate::ui::native::cards::card::RADIUS)
-        .bg(crate::ui::native::native_colors(cx).fill)
+        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+        .border_1()
+        .border_color(n.separator)
+        .bg(n.content)
         .flex()
         .flex_col()
         .child(
             div()
                 .min_h(px(56.))
-                .px(space::S10)
-                .py(space::S8)
+                .px(space::S12)
+                .py(space::S12)
                 .flex()
                 .items_center()
                 .gap(space::S12)
@@ -166,35 +148,35 @@ pub fn row(
                             div()
                                 .t_small()
                                 .medium()
-                                .text_color(k.text_1)
+                                .text_color(n.label)
                                 .one_line()
                                 .child(name.into()),
                         )
-                        .child(line),
+                        .child(
+                            div()
+                                .t_meta()
+                                .tnum()
+                                .text_color(n.secondary)
+                                .one_line()
+                                .child(meta),
+                        ),
                 )
-                .children(trailing),
+                .children(badge.map(|b| div().flex_none().child(b)))
+                .children(trailing.map(|t| div().flex_none().child(t))),
         )
         .when_some(progress, |el, p| {
             el.child(
                 div()
-                    .px(space::S10)
-                    .pb(space::S8)
+                    .px(space::S12)
+                    .pb(space::S12)
                     .child(crate::ui::native::determinate_bar(p, None, cx)),
             )
         })
 }
 
-/// The ✓ 可以看了 mark.
-pub fn ready_mark(cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    div()
-        .flex()
-        .items_center()
-        .gap(space::S4)
-        .t_meta()
-        .text_color(k.text_2)
-        .child(ui::icon(Sym::Check, px(13.), k.success_text))
-        .child(cm::STATE_READY)
+/// The 可以看了 mark: a StatusBadge, color on its icon only.
+pub fn ready_mark(_cx: &App) -> AnyElement {
+    crate::ui::native::StatusBadge::new(crate::ui::native::BadgeState::Done, cm::STATE_READY)
         .into_any_element()
 }
 

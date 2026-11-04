@@ -1,12 +1,14 @@
 //! 引用提问 (REFS §D): part affordances, composer chips, sent references and their labels.
 
 crate::copy! {
+    MORE_CHIPS = "+{n}",
     ASK_HERE = "问这里",
     ASK_IN_TOPIC = "就这里提问",
     ASK_ALONE = "单独问这里",
     ASK_CARD = "就这张卡提问",
     COPY = "复制",
     TOO_MANY = "最多引用 5 处",
+    TOO_MANY_DESC = "先移除一处引用，再加新的。",
     UPDATED = "已更新",
     DELETED = "原消息已删除",
     PUT_IN_TOPIC = "已放进话题的输入框",
