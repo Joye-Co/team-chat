@@ -29,8 +29,10 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            NativeType as _, PushSize, PushStyle, StatusKind, ToolbarGroup, disabled_push, metrics,
-            native_colors,
+            BadgeState, NativeType as _, PushSize, PushStyle, StatusBadge, StatusKind,
+            ToolbarGroup,
+            badge::state_mark,
+            metrics, native_colors,
             overlays::{decision_bar, sym_toolbar_item, sym_toolbar_toggle},
             push_button, status_badge, steps_bar,
         },
@@ -43,6 +45,8 @@ use crate::{
     },
 };
 
+/// A terminal line in the screen preview (12 / 20 mono).
+const TERMINAL_LINE: Pixels = px(20.);
 /// The pane header: 48 pt.
 const HEADER: Pixels = px(48.);
 /// The side padding of the pane body.
@@ -67,7 +71,7 @@ const MARK_NOW: Pixels = px(12.);
 const CRITERION_MIN: Pixels = px(40.);
 const VALUE_COLUMN: Pixels = px(160.);
 /// Rows of the plan card: 34 pt.
-const PLAN_ROW: Pixels = px(34.);
+const PLAN_ROW: Pixels = px(32.);
 /// The held banner: 48 pt.
 const BANNER: Pixels = px(48.);
 /// The running run's screen is read again this often while the pane shows.
@@ -181,9 +185,11 @@ impl LivePane {
                     &[("who", &member_name(&self.services, who))],
                 ),
             )),
-            None if run.status.is_active() => Some((Sym::Live, n.blue, c::LIVE_NOW.to_string())),
             None => None,
         };
+        // A live run says so with the one StatusBadge (§2.12), not a blue dot.
+        let live_badge = (screen.paused_by.is_none() && run.status.is_active())
+            .then(|| StatusBadge::new(BadgeState::Working, c::LIVE_NOW).dense());
         let end = run.ended_at.unwrap_or_else(now_ms);
         let elapsed = screen
             .started_at
@@ -200,6 +206,10 @@ impl LivePane {
             .n_figures()
             .text_color(n.secondary);
         let mut first = true;
+        if let Some(badge) = live_badge {
+            subtitle = subtitle.child(div().flex_none().child(badge));
+            first = false;
+        }
         if let Some((sym, color, text)) = state {
             subtitle = subtitle
                 .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))
@@ -415,6 +425,8 @@ impl LivePane {
         let rows: Vec<AnyElement> = if lines.is_empty() {
             vec![
                 div()
+                    .flex_none()
+                    .h(TERMINAL_LINE)
                     .text_color(k.ink_3)
                     .child(c::LIVE_NO_LINES)
                     .into_any_element(),
@@ -424,7 +436,12 @@ impl LivePane {
                 .iter()
                 .enumerate()
                 .map(|(i, l)| {
+                    // A whole 20 pt row that never shrinks: the lines that
+                    // fit are chosen in `render`, so none is squashed or
+                    // overprinted (break-ui).
                     let row = div()
+                        .flex_none()
+                        .h(TERMINAL_LINE)
                         .when(i > 0 && l.kind == ScreenLineKind::Command, |d| {
                             d.mt(space::S8)
                         })
@@ -472,8 +489,8 @@ impl LivePane {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .text_size(px(12.))
-                    .line_height(px(20.))
+                    .t_meta()
+                    .line_height(TERMINAL_LINE)
                     .code_font()
                     .children(rows)
                     .children(cursor),
@@ -481,7 +498,9 @@ impl LivePane {
         let pointer = pointer.map(|name| {
             div()
                 .absolute()
-                .left(relative(0.78))
+                // Far enough from the right edge that the name tag (max
+                // 120) stays inside the frame.
+                .left(relative(0.5))
                 .top(relative(0.56))
                 .child(ui::motion::rise(
                     "live-pointer",
@@ -493,13 +512,11 @@ impl LivePane {
                         .child(ui::icon(Sym::Pointer, theme::icon::HEADER, k.ink))
                         .child(
                             div()
-                                .mt(px(14.))
-                                .h(px(18.))
+                                .mt(space::S16)
                                 .px(space::S6)
                                 .rounded(theme::TAG_RADIUS)
                                 .bg(k.btn)
-                                .text_size(px(11.))
-                                .line_height(px(18.))
+                                .t_meta()
                                 .medium()
                                 .text_color(k.btn_ink)
                                 .max_w(px(120.))
@@ -561,24 +578,15 @@ impl LivePane {
                 }
             };
             let selected = shown == Some(i);
+            // The knob is foreground (§2.12: no state color as decoration).
             let dot = if is_last && active {
                 div()
-                    .relative()
                     .size(MARK_NOW)
                     .rounded_full()
-                    .bg(k.live)
-                    .child(ui::motion::breathe(
-                        "live-replay-now",
-                        div()
-                            .absolute()
-                            .top(px(-5.))
-                            .left(px(-5.))
-                            .size(px(22.))
-                            .rounded_full()
-                            .border(px(1.5))
-                            .border_color(k.live),
-                        cx,
-                    ))
+                    .bg(k.ink)
+                    .border_2()
+                    .border_color(k.bg)
+                    .shadow(ui::native::tokens::shadow::xs())
                     .into_any_element()
             } else {
                 div()
@@ -832,23 +840,42 @@ impl LivePane {
         let k = theme::colors(cx);
         let met = items.iter().filter(|i| i.met == Some(true)).count();
         let count = [("met", met.to_string()), ("total", items.len().to_string())];
-        let summary = match run.requested_by.as_deref() {
-            Some(who) => mono_fill(
-                c::LIVE_ACCEPTANCE_FROM,
-                &[
-                    ("name", member_name(&self.services, who), false),
-                    ("met", count[0].1.clone(), true),
-                    ("total", count[1].1.clone(), true),
-                ],
-            ),
-            None => mono_fill(
-                c::LIVE_ACCEPTANCE_COUNT,
-                &[
-                    ("met", count[0].1.clone(), true),
-                    ("total", count[1].1.clone(), true),
-                ],
-            ),
-        };
+        // `来自 <name> 的要求` cuts with `…` (full text in a tooltip); the
+        // `2/3 达标` count after it never cuts (§2.21).
+        let from = run.requested_by.as_deref().map(|who| {
+            fill(
+                c::LIVE_ACCEPTANCE_FROM_NAME,
+                &[("name", &member_name(&self.services, who))],
+            )
+        });
+        let tally = mono_fill(
+            c::LIVE_ACCEPTANCE_COUNT,
+            &[
+                ("met", count[0].1.clone(), true),
+                ("total", count[1].1.clone(), true),
+            ],
+        );
+        let has_from = from.is_some();
+        let summary = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(space::S4)
+            .children(from.map(|f| {
+                let tip: SharedString = f.clone().into();
+                div()
+                    .id("live-acceptance-from")
+                    .min_w_0()
+                    .one_line()
+                    .child(f)
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                    })
+            }))
+            .children(has_from.then(|| div().flex_none().child(c::LIVE_ACCEPTANCE_DOT)))
+            .child(div().flex_none().child(tally));
         let active = run.status.is_active();
         let rows = items.iter().enumerate().map(|(i, item)| {
             // The state as a status badge (never a bare colored dot or
@@ -873,12 +900,15 @@ impl LivePane {
                         .t_small()
                         .text_color(k.ink)
                         .line_clamp(2)
+                        .text_ellipsis()
                         .child(item.text.clone()),
                 )
+                // The value column takes what its badge and evidence need,
+                // at most 160, so a short criterion never wraps an orphan.
                 .child(
                     div()
                         .flex_none()
-                        .w(VALUE_COLUMN)
+                        .max_w(VALUE_COLUMN)
                         .flex()
                         .items_center()
                         .justify_end()
@@ -912,12 +942,12 @@ impl LivePane {
                         .gap(space::S8)
                         .child(
                             div()
+                                .flex_none()
                                 .t_meta_medium()
                                 .text_color(k.ink_3)
                                 .child(c::LIVE_ACCEPTANCE),
                         )
-                        .child(div().flex_1())
-                        .child(div().t_meta().text_color(k.ink_3).child(summary)),
+                        .child(summary.t_meta().text_color(k.ink_3)),
                 )
                 .child(div().mt(space::S6).children(rows))
                 .into_any_element(),
@@ -929,7 +959,6 @@ impl LivePane {
         &self,
         run: &BotRunSummary,
         times: &[Millis],
-        bot: &str,
         held: bool,
         cx: &App,
     ) -> Option<AnyElement> {
@@ -970,25 +999,23 @@ impl LivePane {
                 PlanState::Current | PlanState::Waiting => {
                     let mark: AnyElement = if held {
                         ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
-                    } else if p.state == PlanState::Waiting {
-                        div()
-                            .size(px(8.))
-                            .rounded_full()
-                            .bg(k.you)
-                            .into_any_element()
                     } else {
-                        ui::motion::breathe(
-                            SharedString::from(format!("live-plan-{i}")),
-                            div().size(px(8.)).rounded_full().bg(k.live),
-                            cx,
-                        )
+                        // §2.12: the step it is on spins (working); a step
+                        // that waits on a person shows the needs-you icon.
+                        let state = if p.state == PlanState::Waiting {
+                            BadgeState::NeedsYou
+                        } else {
+                            BadgeState::Working
+                        };
+                        state_mark(state, &native_colors(cx))
+                            .unwrap_or_else(|| div().into_any_element())
                     };
                     div()
                         .flex()
                         .flex_col()
                         .gap(space::S2)
-                        .pt(px(7.))
-                        .pb(space::S8)
+                        .pt(space::S6)
+                        .pb(space::S6)
                         .px(space::S8)
                         .rounded(theme::radius::MD)
                         .bg(k.sunken)
@@ -1024,15 +1051,6 @@ impl LivePane {
                                         .child(span_fill(plan::FOR, now - s))
                                 })),
                         )
-                        .when(held, |d| {
-                            d.child(
-                                div()
-                                    .pl(px(26.))
-                                    .t_meta()
-                                    .text_color(k.ink_2)
-                                    .child(fill(c::LIVE_PLAN_HELD, &[("name", bot)])),
-                            )
-                        })
                         .into_any_element()
                 }
                 state => {
@@ -1130,14 +1148,11 @@ impl LivePane {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn footer(
         &self,
         run: &BotRunSummary,
         bot: &str,
-        step: &str,
         held: bool,
-        held_by_me: bool,
         can_control: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1158,26 +1173,11 @@ impl LivePane {
         // 停止 asks in an alert first (停止成员的工作, NATIVE.md §7.2).
         let stop = active.then(|| {
             let (services, run) = (self.services.clone(), run.clone());
-            disabled_push(
-                push_button(
-                    "live-stop",
-                    if stopping {
-                        c::LIVE_STOPPING
-                    } else {
-                        c::LIVE_STOP
-                    },
-                    PushStyle::Destructive,
-                    PushSize::Regular,
-                    cx,
-                ),
-                stopping,
-                cx,
-            )
-            .on_click(move |_, _, cx| stop_run(&services, &run, cx))
+            stop_button(stopping, cx).on_click(move |_, _, cx| stop_run(&services, &run, cx))
         });
-        let hint = if held && held_by_me {
-            Some(fill(c::LIVE_HELD_HINT, &[("name", bot), ("step", step)]))
-        } else if active && !held && can_control {
+        // While I hold the computer the banner at the top says it once
+        // (A5); the footer adds no second sentence.
+        let hint = if active && !held && can_control {
             Some(fill(c::LIVE_TAKE_OVER_HINT, &[("name", bot)]))
         } else {
             None
@@ -1189,10 +1189,13 @@ impl LivePane {
         if hint.is_none() && stop.is_none() && take.is_none() {
             return div().into_any_element();
         }
+        // §2.5 footer: border-t, p 16, the buttons fill the pane's width
+        // (one row of equal halves keeps the footer low enough that the
+        // plan above it is not cut).
         div()
             .flex_none()
-            .px(px(20.))
-            .py(px(12.))
+            .w_full()
+            .p(space::S16)
             .border_t_1()
             .border_color(n.separator)
             .flex()
@@ -1201,12 +1204,12 @@ impl LivePane {
             .children(hint.map(|h| div().n_subheadline().text_color(n.secondary).child(h)))
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .items_center()
-                    .justify_end()
-                    .gap(px(12.))
-                    .children(stop)
-                    .children(take),
+                    .gap(space::S8)
+                    .children(stop.map(|b| div().flex_1().min_w_0().child(b.w_full())))
+                    .children(take.map(|b| div().flex_1().min_w_0().child(b.w_full()))),
             )
             .into_any_element()
     }
@@ -1258,26 +1261,10 @@ impl LivePane {
         let stopping = self.services.provider.run_stopping(&run.id);
         let stop = run.status.is_active().then(|| {
             let (services, run) = (self.services.clone(), run.clone());
-            disabled_push(
-                push_button(
-                    "live-stop",
-                    if stopping {
-                        c::LIVE_STOPPING
-                    } else {
-                        c::LIVE_STOP
-                    },
-                    PushStyle::Destructive,
-                    PushSize::Regular,
-                    cx,
-                ),
-                stopping,
-                cx,
-            )
-            .on_click(move |_, _, cx| stop_run(&services, &run, cx))
+            stop_button(stopping, cx).on_click(move |_, _, cx| stop_run(&services, &run, cx))
         });
         let developer = self.services.nav.read(cx).developer_view;
         let nav = self.services.nav.clone();
-        let badge = crate::views::process::run_badge(run, stopping, cx);
         div()
             .size_full()
             .flex()
@@ -1301,7 +1288,6 @@ impl LivePane {
                             .text_color(n.label)
                             .child(crate::copy::process::RUNS),
                     )
-                    .child(badge)
                     .child(div().flex_1())
                     .child(ToolbarGroup::new([sym_toolbar_toggle(
                         "steps-developer",
@@ -1318,16 +1304,33 @@ impl LivePane {
             .children(stop.map(|stop| {
                 div()
                     .flex_none()
-                    .px(px(20.))
-                    .py(px(12.))
+                    .w_full()
+                    .p(space::S16)
                     .border_t_1()
                     .border_color(n.separator)
-                    .flex()
-                    .items_center()
-                    .child(div().flex_1())
-                    .child(stop)
+                    .child(stop.w_full())
             }))
     }
+}
+
+/// 停止… (destructive), and while the stop is on its way 停止中 with a
+/// spinner at the same width (§1.8 loading): no click, no 50 % fade.
+fn stop_button(stopping: bool, cx: &App) -> gpui_component::button::Button {
+    let label = if stopping {
+        c::LIVE_STOPPING
+    } else {
+        c::LIVE_STOP
+    };
+    push_button(
+        "live-stop",
+        label,
+        PushStyle::Destructive,
+        PushSize::Regular,
+        cx,
+    )
+    // gpui-component draws its spinner in the icon slot.
+    .when(stopping, |b| b.icon(gpui_component::IconName::Loader))
+    .loading(stopping)
 }
 
 impl PaneView for LivePane {
@@ -1499,10 +1502,6 @@ impl Render for LivePane {
             .or_else(|| run.plan.iter().rposition(|s| s.state == PlanState::Done));
         let replay_step = self.replay.as_ref().map(|(_, s)| *s);
         let shown_step = replay_step.or(current);
-        let step_text = current
-            .and_then(|i| run.plan.get(i))
-            .map(|s| s.text.clone())
-            .unwrap_or_default();
         let shown_text = shown_step
             .and_then(|i| run.plan.get(i))
             .map(|s| s.text.clone())
@@ -1526,13 +1525,20 @@ impl Render for LivePane {
         let live_now = run.status.is_active() && !held && replay_step.is_none();
         // Show the newest lines that fit the terminal window, from its top.
         let window_w = window.viewport_size().width;
-        let pane_w = self
-            .width(window_w)
-            .min(window_w - theme::RAIL_WIDTH - theme::PAGE_MIN_WIDTH)
-            .max(theme::LIVE_PANE_MIN_WIDTH);
+        // The shell gives the pane one width (D13: 400); full screen takes
+        // the window less the page's minimum.
+        let pane_w = if self.expanded {
+            (window_w - theme::RAIL_WIDTH - theme::PAGE_MIN_WIDTH).max(metrics::WIDE_PANE_WIDTH)
+        } else {
+            metrics::WIDE_PANE_WIDTH
+        };
         let screen_h = (pane_w - SIDE * 2.) / SCREEN_RATIO;
-        let room = (screen_h - MENU_BAR) * 0.84 - WINDOW_BAR - space::S12 * 2.;
-        let mut budget = f32::from(room) - if live_now { 20. } else { 0. };
+        // The terminal: 84 % of the area under the menu bar, less its
+        // title bar, its 1 pt frame and its 12 pt padding.
+        let room =
+            (screen_h - MENU_BAR) * 0.84 - WINDOW_BAR - space::S12 * 2. - space::S2 - space::S2;
+        let line = f32::from(TERMINAL_LINE);
+        let mut budget = f32::from(room) - if live_now { line } else { 0. };
         let mut keep = 0;
         for (i, l) in lines.iter().enumerate().rev() {
             let gap = if i > 0 && l.kind == ScreenLineKind::Command {
@@ -1540,10 +1546,10 @@ impl Render for LivePane {
             } else {
                 0.
             };
-            if budget < 20. + gap {
+            if budget < line + gap {
                 break;
             }
-            budget -= 20. + gap;
+            budget -= line + gap;
             keep += 1;
         }
         let lines: Vec<&ScreenLine> = lines[lines.len() - keep..].to_vec();
@@ -1570,7 +1576,8 @@ impl Render for LivePane {
                 .overflow_y_scroll()
                 .child(
                     div()
-                        .pt(space::S4)
+                        // First content at y 68 (§2.2: 16 under the header).
+                        .pt(space::S16)
                         .px(SIDE)
                         // Nothing ends cut under the bottom bar (§2.21).
                         .pb(space::S24)
@@ -1582,7 +1589,7 @@ impl Render for LivePane {
                         .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
                         .children(self.replay(&run, &times, current, replay_step, end, cx))
                         .children(self.acceptance(&run, &criteria, cx))
-                        .children(self.plan(&run, &times, &bot, held, cx)),
+                        .children(self.plan(&run, &times, held, cx)),
                 )
                 .into_any_element(),
         };
@@ -1594,7 +1601,7 @@ impl Render for LivePane {
             .bg(native_colors(cx).content)
             .child(self.header(&bot, &screen, &run, held_by_me, cx))
             .child(body)
-            .child(self.footer(&run, &bot, &step_text, held, held_by_me, can_control, cx))
+            .child(self.footer(&run, &bot, held, can_control, cx))
             .into_any_element()
     }
 }
