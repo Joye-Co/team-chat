@@ -14,7 +14,11 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Design bar**: first-class visual design is a V1 requirement, not polish for later. Build
   every UI element from gpui-component (the first-class GPUI component library: button, input,
   list, popover, menu, dialog, tooltip, badge, avatar, tabs, switch, notification and the rest),
-  styled through the theme; never hand-roll a control that gpui-component has. The app is a
+  styled through the theme; never hand-roll a control that gpui-component has. The binding
+  finish spec is [docs/design/COMPLETENESS.md](docs/design/COMPLETENESS.md): pure black and white
+  like shadcn, one token module (`apps/desktop/src/ui/native/tokens.rs`), one scale, every state
+  drawn. It wins over NATIVE.md and DESIGN.md where they differ, and a screen is done only when it
+  passes its §4 checklist. The app is a
   Mac client, not a web page: follow [docs/design/NATIVE.md](docs/design/NATIVE.md) (window,
   toolbar, sidebar, controls, SF Symbols, sheets, settings window, behavior), which wins over
   [docs/DESIGN.md](docs/DESIGN.md) where they differ; DESIGN.md still owns Card v2, status words
