@@ -276,8 +276,10 @@ How the 1.1 daemon does each one:
   `SIGCONT`, moves the deadline by the paused time, emits `paused { paused: false }`, and sends
   `note` (cut to 2000 characters) as the next input with `inputId` `resume-<n>`. A
   `run.cancel` while paused sends `SIGCONT` first (a stopped process cannot handle
-  `SIGTERM`), emits `paused { paused: false }`, then cancels as usual. A repeated pause, or a
-  resume of a run that is not paused, does nothing.
+  `SIGTERM`), emits `paused { paused: false }`, then cancels as usual. A repeated pause
+  signals nothing but emits `paused { paused: true, by }` again, so the server counts every
+  pause it sent and the next `paused { paused: false }` clears `pausedBy` (a resume the daemon
+  never got leaves the CLI stopped). A resume of a run that is not paused does nothing.
 - **answer**: the CLI gets `text` (when not empty) followed by a fenced `json` block for
   `answer` and one for `artifactEvent`, each after a line that labels it as untrusted data from a
   member of the group. The fence is longer than any backtick run in the data, so the data cannot

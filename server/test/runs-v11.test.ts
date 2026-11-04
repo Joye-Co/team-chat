@@ -382,6 +382,33 @@ describe("1.1 runs", () => {
     d.close();
   });
 
+  it("clear pausedBy on paused: false after the daemon skipped a pause because the run was still stopped (SB-16)", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const { c } = await Client.connect(w.human.token);
+    const { runId } = await startRun(w, c, d);
+    const pause = () => api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} });
+    expect((await pause()).status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    // The resume reaches the server but the daemon never acts on it: the CLI stays stopped.
+    expect((await api(`/v1/runs/${runId}/resume`, { token: w.human.token, body: {} })).status).toBe(200);
+    await d.next((f) => f.t === "run.resume");
+    // The next pause finds the CLI already stopped; the daemon reports the pause again.
+    expect((await pause()).status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    // The daemon then goes on by itself (for example after a restart of the CLI).
+    const on = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, on);
+    const got = await api(`/v1/runs/${runId}`, { token: w.human.token });
+    expect(got.status).toBe(200);
+    expect(got.body.pausedBy).toBeUndefined();
+    expect((await pause()).status).toBe(200);
+    c.close();
+    d.close();
+  });
+
   it("retry an ended run with the same request, for the requester or an owner, audited", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, []);
