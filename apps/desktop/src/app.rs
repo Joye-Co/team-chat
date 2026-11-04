@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
+    App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
     WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
 };
 
@@ -597,6 +597,10 @@ pub struct RootView {
     first_frame: Option<FirstFrameHook>,
     /// v12/shell: draw as an inactive window (a self-test scene).
     show_inactive: bool,
+    /// The app's own focus, on its root: a fresh window focuses it, so the
+    /// first Tab goes through the app's `FocusNext` handler (it is not a
+    /// tab stop, so that Tab lands on the first control).
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -608,6 +612,10 @@ impl RootView {
         cx: &mut Context<Self>,
     ) -> Self {
         crate::views::nav::attach_window(window, cx);
+        // Focus the app root before the views below build: a view that takes
+        // the focus itself (the login field) still wins.
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         let subscriptions = vec![
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
@@ -649,6 +657,7 @@ impl RootView {
             services,
             first_frame,
             show_inactive: false,
+            focus,
             _subscriptions: subscriptions,
         }
     }
@@ -691,7 +700,12 @@ impl Render for RootView {
             window.on_next_frame(hook);
         }
         let k = theme::colors(cx);
-        let root = div().id("root").size_full().bg(k.bg).text_color(k.ink);
+        let root = div()
+            .id("root")
+            .track_focus(&self.focus)
+            .size_full()
+            .bg(k.bg)
+            .text_color(k.ink);
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root = crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
             .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
@@ -752,6 +766,12 @@ impl Render for RootView {
             SessionState::SignedIn { .. }
         ) {
             return root.child(self.login.clone());
+        }
+        // Signed in, nothing drawn has the focus: none at all, or the login
+        // field that took it when the window was made (it is not drawn now).
+        // The app root takes it, so the first Tab reaches the first control.
+        if window.focused(cx).is_none() || self.login.read(cx).has_focus(window, cx) {
+            window.focus(&self.focus, cx);
         }
         // v12/shell: the main window of NATIVE.md §2: the floating sidebar
         // (traffic lights inside it), the content running under its 8 pt
@@ -904,6 +924,24 @@ pub fn open_settings_window(services: Services, cx: &mut App) {
     crate::views::settings::open(services, cx);
 }
 
+/// The keys of the views that need no services: Tab through the window's
+/// tab stops and the arrow keys of the lists. The screenshot self-test binds
+/// them too, so its key scenes press the app's real keys.
+pub fn bind_view_keys(cx: &mut App) {
+    cx.bind_keys([
+        // Tab moves keyboard focus through the window's tab stops (§11);
+        // inputs keep their own Tab binding.
+        KeyBinding::new("tab", FocusNext, None),
+        KeyBinding::new("shift-tab", FocusPrev, None),
+    ]);
+    crate::views::topic_list::bind_keys(cx);
+    // --- v12/behavior ---
+    crate::views::rail::bind_keys(cx);
+    crate::views::timeline::bind_keys(cx);
+    crate::views::members_page::bind_keys(cx);
+    // --- end v12/behavior ---
+}
+
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.bind_keys([
@@ -918,22 +956,63 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-shift-h", OpenDesk, None),
         KeyBinding::new("cmd-shift-m", OpenMembers, None),
         KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
-        // Tab moves keyboard focus through the window's tab stops (§11);
-        // inputs keep their own Tab binding.
-        KeyBinding::new("tab", FocusNext, None),
-        KeyBinding::new("shift-tab", FocusPrev, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
-    crate::views::topic_list::bind_keys(cx);
-    // --- v12/behavior ---
-    crate::views::rail::bind_keys(cx);
-    crate::views::timeline::bind_keys(cx);
-    crate::views::members_page::bind_keys(cx);
-    // --- end v12/behavior ---
+    bind_view_keys(cx);
     // --- v12/shell: the accent of System Settings (NATIVE.md §4) ---
     theme::watch_system_accent(cx);
     // --- end v12/shell ---
     crate::ui::motion::watch_reduce_motion(cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    /// The first Tab in a fresh signed-in window reaches a control: the
+    /// login field that took the focus when the window was made is not
+    /// drawn, so the app root takes it back (v15 tail, R1 report).
+    #[gpui::test]
+    fn the_first_tab_reaches_a_control(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_view_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = crate::fake::FakeProvider::new();
+        let root = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let keep = root.clone();
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                cx.open_window(Default::default(), move |window, cx| {
+                    let view = cx.new(|cx| RootView::new(services, None, window, cx));
+                    *keep.borrow_mut() = Some(view.clone());
+                    cx.new(|cx| gpui_base::Root::new(view, window, cx))
+                })
+            })
+            .expect("the window opens");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        let view = root.borrow().clone().expect("the root view");
+        let (app_focus, login) = view.read_with(cx, |v, _| (v.focus.clone(), v.login.clone()));
+        cx.update(|window, _| {
+            assert!(app_focus.is_focused(window), "the app root holds the focus");
+        });
+        cx.simulate_keystrokes("tab");
+        cx.update(|window, cx| {
+            assert!(window.focused(cx).is_some(), "Tab focused something");
+            assert!(!app_focus.is_focused(window), "Tab left the app root");
+            assert!(
+                !login.read(cx).has_focus(window, cx),
+                "not the hidden login field"
+            );
+        });
+    }
 }

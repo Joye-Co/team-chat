@@ -168,6 +168,10 @@ impl ComposerView {
                 .placeholder(c::PLACEHOLDER)
         });
         let refs_hub = crate::views::refs::hub(cx);
+        // This composer lifted the toasts (it has the focus): it puts them
+        // back when it goes away with the focus (a closed window).
+        let lifted = std::rc::Rc::new(std::cell::Cell::new(false));
+        let (lift, drop_lift, out_lift) = (lifted.clone(), lifted.clone(), lifted);
         let subscriptions = vec![
             cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
@@ -188,13 +192,35 @@ impl ComposerView {
                     this.on_refs_event(event, window, cx);
                 },
             ),
-            cx.on_focus_in(&input.focus_handle(cx), window, |_, _, cx| {
+            cx.on_focus_in(&input.focus_handle(cx), window, move |this, window, cx| {
                 crate::views::refs::note_focus(false, cx);
+                // R1-15: pushed toasts end above the focused composer, so
+                // they never cover Send. Deferred, so it lands after the
+                // focus-out of another composer in the same move.
+                let anchor = this.anchor.clone();
+                let lift = lift.clone();
+                window.defer(cx, move |window, cx| {
+                    let top = anchor.get().origin.y;
+                    if top > gpui::px(0.) {
+                        let floor = window.viewport_size().height - top;
+                        crate::ui::overlay::set_toast_floor(floor, cx);
+                        lift.set(true);
+                    }
+                });
                 // The 单独问 hint shows only while the composer has focus.
                 cx.notify();
             }),
             // --- end inc-refs
-            cx.on_focus_out(&input.focus_handle(cx), window, |_, _, _, cx| cx.notify()),
+            cx.on_focus_out(&input.focus_handle(cx), window, move |_, _, _, cx| {
+                out_lift.set(false);
+                crate::ui::overlay::set_toast_floor(gpui::px(0.), cx);
+                cx.notify()
+            }),
+            cx.on_release(move |_, cx| {
+                if drop_lift.get() {
+                    crate::ui::overlay::set_toast_floor(gpui::px(0.), cx);
+                }
+            }),
         ];
         let mut this = Self {
             services,

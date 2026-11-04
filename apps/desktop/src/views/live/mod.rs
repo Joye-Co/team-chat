@@ -982,12 +982,7 @@ impl LivePane {
             .filter(|p| p.state == PlanState::Done)
             .count();
         let total = run.plan.len();
-        // 3/5: the step it is on, or the steps done when none is on.
-        let done = run
-            .plan
-            .iter()
-            .position(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
-            .map_or(done, |i| i + 1);
+        // 2/5: steps done over all (§2.12, one count everywhere).
         // The one progress drawing (D12): the steps done as a determinate
         // bar, `blue` while the member works, as in the 话题's plan card.
         let finished = run

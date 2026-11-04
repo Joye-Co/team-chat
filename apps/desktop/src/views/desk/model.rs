@@ -74,7 +74,7 @@ pub struct RunCard {
 impl RunCard {
     /// The step number shown as `3/5`: done steps plus the one in progress.
     pub fn step(&self) -> (usize, usize) {
-        // One count everywhere (R2): the step the run is on.
+        // One count everywhere (§2.12): steps done over all.
         crate::views::topic_page::plan_progress(&self.run.plan).map_or((0, 0), |(n, m, _)| (n, m))
     }
 

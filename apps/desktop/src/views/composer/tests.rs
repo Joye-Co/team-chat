@@ -566,3 +566,41 @@ fn cmd_semicolon_takes_the_chips_into_the_side_chat(cx: &mut TestAppContext) {
     });
     assert_eq!(moved, 1);
 }
+
+/// R1-15: while the composer has the focus, pushed toasts end 16 above it
+/// (the window bottom minus its top); when it lets go they come back to 16.
+#[gpui::test]
+fn the_focused_composer_lifts_the_toasts(cx: &mut TestAppContext) {
+    let _lock = crate::ui::overlay::TOAST_FLOOR_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (h, cx) = open(cx, Some(TOPIC));
+    // Focus events reach their listeners only in the active window.
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+    let bottom = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            gpui_component::ActiveTheme::theme(cx)
+                .notification
+                .margins
+                .bottom
+        })
+    };
+    // Focus again now that the composer has been drawn (its top is known).
+    h.view.update_in(cx, |_, window, cx| window.blur(cx));
+    cx.run_until_parked();
+    assert_eq!(bottom(cx), px(16.));
+    h.view.update_in(cx, |this, window, cx| {
+        let input = this.input.clone();
+        input.update(cx, |state, cx| state.focus(window, cx));
+    });
+    cx.run_until_parked();
+    let lifted = bottom(cx);
+    let top = h.view.update(cx, |this, _| this.anchor.get().origin.y);
+    assert!(top > px(0.), "the composer was drawn");
+    let height = cx.update(|window, _| window.viewport_size().height);
+    assert_eq!(lifted, height - top + px(16.));
+    h.view.update_in(cx, |_, window, cx| window.blur(cx));
+    cx.run_until_parked();
+    assert_eq!(bottom(cx), px(16.));
+}

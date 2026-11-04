@@ -326,7 +326,22 @@ pub fn responses(artifact_id: &str) -> Vec<ArtifactResponse> {
     if artifact_id != ART_REPORT {
         return Vec::new();
     }
-    vec![
+    // B2-11: a choice sent from the page shows at once, newest first, at the
+    // sample's 10:21 (the time the page's own footer gives it).
+    let sent = super::sent_page_events::snapshot()
+        .into_iter()
+        .rev()
+        .filter(|(id, _, name, _)| id == artifact_id && name == "choose")
+        .filter_map(|(_, _, _, payload)| {
+            let label = payload?.get("label")?.as_str()?.to_string();
+            Some(ArtifactResponse {
+                member_id: ME.into(),
+                text: format!("Joye 选了「{label}」"),
+                at: Some(at(10, 21)),
+                topic: None,
+            })
+        });
+    sent.chain([
         ArtifactResponse {
             member_id: ME.into(),
             text: "Joye 选了「B 站」".into(),
@@ -339,7 +354,8 @@ pub fn responses(artifact_id: &str) -> Vec<ArtifactResponse> {
             at: None,
             topic: Some((GROWTH.into(), T_REPORT.into())),
         },
-    ]
+    ])
+    .collect()
 }
 
 /// Writes the page of a sample 产出 version to a temporary folder.

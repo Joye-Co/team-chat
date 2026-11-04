@@ -466,7 +466,11 @@ impl RailView {
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
                 let row = self
-                    .row(SharedString::from(format!("rail-dm-{id}")), name.clone())
+                    .row(
+                        SharedString::from(format!("rail-dm-{id}")),
+                        // D1-56: beside the avatar, no leading emoji.
+                        crate::ui::avatar::name_beside_avatar(name).to_string(),
+                    )
                     .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
                     .selected(*selected)
                     .on_click(move |_, _, cx| {
@@ -573,7 +577,7 @@ impl RailView {
         let mut row = self
             .row(
                 SharedString::from(format!("rail-member-{}", r.member.id)),
-                r.member.name.clone(),
+                crate::ui::avatar::name_beside_avatar(&r.member.name).to_string(),
             )
             .leading(MemberAvatar::new(Some(&r.member), ROW_AVATAR).on(k.sidebar))
             .unread(r.waiting_on_me > 0);
@@ -619,7 +623,7 @@ impl RailView {
         let id = m.id.clone();
         self.row(
             SharedString::from(format!("rail-person-{}", m.id)),
-            m.name.clone(),
+            crate::ui::avatar::name_beside_avatar(&m.name).to_string(),
         )
         .leading(
             div()

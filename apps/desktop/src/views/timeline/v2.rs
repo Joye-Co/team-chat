@@ -222,7 +222,10 @@ impl TimelineView {
         let time = model::clock(at);
         let name = ui::truncating(
             "sender-name",
-            author.map(|m| m.name.clone()).unwrap_or_default(),
+            // D1-56: the avatar sits in the gutter; no emoji "avatar" again.
+            author
+                .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+                .unwrap_or_default(),
         )
         .flex_shrink(1.)
         .min_w(px(24.))
@@ -739,9 +742,16 @@ impl TimelineView {
                         None => size_text(file.size),
                     };
                     // R2-10: the one file item (`files::extra`): the 32
-                    // media box, a play symbol for video and audio.
-                    let thumb = crate::views::files::extra::file_media(
+                    // media box, a play symbol for video and audio; a video
+                    // with a poster (the sender's, else made here) shows it.
+                    let poster = file
+                        .mime
+                        .starts_with("video/")
+                        .then(|| p.file_poster(&message.group_id, &message.topic_id, file))
+                        .flatten();
+                    let thumb = crate::views::files::extra::file_media_poster(
                         if video { Sym::Play } else { Sym::File },
+                        poster,
                         cx,
                     );
                     let file_c: FileAttachment = file.clone();

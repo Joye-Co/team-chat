@@ -328,9 +328,8 @@ pub fn step_bar(id: &str, plan: &[PlanItem], gap: Pixels, cx: &App) -> Div {
         }))
 }
 
-/// `n/m` of a plan: steps done (the current one counts) over all.
+/// `n/m` of a plan: steps done over all (§2.12, one count everywhere).
 pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize)> {
-    // One count everywhere (R2): the step the run is on.
     crate::views::topic_page::plan_progress(plan).map(|(n, m, _)| (n, m))
 }
 

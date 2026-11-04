@@ -15,14 +15,13 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    copy::{common, fill, topic_rail as c},
+    copy::{common, topic_rail as c},
     data::v2::ArtifactPreview,
     theme::{self, Type as _, space},
     ui::{
         self, Sym,
-        native::{NativeType as _, PushSize, PushStyle, metrics, native_colors, push_button},
+        native::{NativeType as _, PushSize, PushStyle, native_colors, push_button},
     },
-    views::shell::clock,
 };
 
 /// A bar grows from zero to `share` of its track once, after `delay`. With
@@ -299,74 +298,44 @@ fn header_button(
     crate::ui::native::icon_button_sym(id, sym, name, crate::ui::native::IconSize::Regular, cx)
 }
 
-/// The 产出 pane for one 产出 (`version` or its latest): a 52 pt header in
-/// the toolbar style (Title 3 title over a `secondary` subtitle, borderless
-/// 在窗口打开 and close), then the page edge to edge on `content`.
+/// The 产出 pane for one 产出 (`version` or its latest): the kit pane header
+/// (the name 产出 over "<title> · <kind> · v<n>", 在窗口打开 and close), then
+/// the page edge to edge on `content`.
 pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> Option<AnyElement> {
     let n = native_colors(cx);
     let p = &services.provider;
     let detail = p.artifact(id)?;
     let v = version.unwrap_or(detail.summary.version);
-    let at = detail
-        .versions
-        .iter()
-        .find(|x| x.version == v)
-        .map(|x| x.created_at)
-        .unwrap_or(detail.summary.updated_at);
     let preview = p.artifact_preview(id, v);
     let nav = services.nav.clone();
     let open_id = id.to_string();
-    let header = div()
-        .flex_none()
-        .h(metrics::TOOLBAR_ROW)
-        .pl(space::S16)
-        .pr(space::S10)
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .min_w_0()
-                        .one_line()
-                        .n_title3()
-                        .text_color(n.label)
-                        .child(detail.summary.title.clone()),
-                )
-                .child(
-                    div()
-                        .one_line()
-                        .n_subheadline()
-                        .n_figures()
-                        .text_color(n.secondary)
-                        .child(fill(
-                            c::OUTPUT_VERSION,
-                            &[("v", &v.to_string()), ("time", &clock(at))],
-                        )),
-                ),
-        )
-        .child(
-            header_button("out-open-window", Sym::OpenExternal, c::OPEN_WINDOW, cx).on_click({
-                let nav = nav.clone();
-                let id = open_id.clone();
-                move |_: &ClickEvent, _, cx| {
-                    nav.update(cx, |nav, cx| nav.open_artifact(id.clone(), Some(v), cx));
-                }
-            }),
-        )
-        .child(
-            header_button("out-close", Sym::Close, common::CLOSE, cx).on_click({
-                let nav = nav.clone();
-                move |_: &ClickEvent, _, cx| {
-                    nav.update(cx, |nav, cx| nav.set_right_pane(RightPane::TopicRail, cx));
-                }
-            }),
-        );
+    // The pane header (§2.2): the pane's name 产出 over "<title> · <kind> ·
+    // v<n>", then 在窗口打开 and close at the far right, like the 产出
+    // page's pane.
+    let open_window = header_button("out-open-window", Sym::OpenExternal, c::OPEN_WINDOW, cx)
+        .on_click({
+            let nav = nav.clone();
+            let id = open_id.clone();
+            move |_: &ClickEvent, _, cx| {
+                nav.update(cx, |nav, cx| nav.open_artifact(id.clone(), Some(v), cx));
+            }
+        });
+    let close = header_button("out-close", Sym::Close, common::CLOSE, cx).on_click({
+        let nav = nav.clone();
+        move |_: &ClickEvent, _, cx| {
+            nav.update(cx, |nav, cx| nav.set_right_pane(RightPane::TopicRail, cx));
+        }
+    });
+    let header = crate::views::group_page::kit::pane_header(
+        crate::copy::artifact_page::ARTIFACTS_TITLE,
+        format!(
+            "{} · {} · v{v}",
+            detail.summary.title,
+            crate::views::group_page::kind_label(detail.summary.kind)
+        ),
+        vec![open_window.into_any_element(), close.into_any_element()],
+        cx,
+    );
     let body: AnyElement = match preview {
         Some(preview) => div()
             .id("out-sheet")

@@ -250,12 +250,11 @@ fn run(options: Options) -> i32 {
             // windows (grey traffic lights).
             cx.set_activation_policy(ActivationPolicy::Accessory);
             capture::keep_frames();
-            // The focus scenes press Tab: the app's Tab stops, as in the real
-            // window (`app::install_menus_and_actions` binds them there).
-            cx.bind_keys([
-                gpui::KeyBinding::new("tab", crate::app::FocusNext, None),
-                gpui::KeyBinding::new("shift-tab", crate::app::FocusPrev, None),
-            ]);
+            // The key scenes press the app's real keys: Tab through the tab
+            // stops and the arrows of the lists and sheets (the member
+            // picker's ↓), bound as `main` binds them.
+            crate::app::bind_view_keys(cx);
+            crate::views::nav::bind_sheet_keys(cx);
             let started = Instant::now();
             cx.spawn(async move |cx| {
                 let ok = run_all(&options, cx).await;
@@ -558,16 +557,10 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
             for key in keys.iter().copied() {
+                // The app root holds the focus in a fresh window, so the
+                // first Tab reaches the app's `FocusNext` like a real one.
                 if let Ok(stroke) = gpui::Keystroke::parse(key) {
-                    let handled = window.dispatch_keystroke(stroke, cx);
-                    // A fresh window keeps the focus on gpui-base's `Root`,
-                    // above the app view that handles `FocusNext`: move the
-                    // focus the way the action does.
-                    match (handled, key) {
-                        (false, "tab") => window.focus_next(cx),
-                        (false, "shift-tab") => window.focus_prev(cx),
-                        _ => {}
-                    }
+                    window.dispatch_keystroke(stroke, cx);
                 }
             }
         })

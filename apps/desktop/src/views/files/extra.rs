@@ -352,6 +352,24 @@ pub fn file_media(sym: Sym, cx: &App) -> gpui::Div {
         .child(ui::sym(sym, ui::SymSize::INLINE, n.secondary))
 }
 
+/// [`file_media`] for a video or a PDF with a poster: the poster cut to
+/// the same 32 box (radius 6, 1 px border), else the box with `sym`.
+pub fn file_media_poster(sym: Sym, poster: Option<std::path::PathBuf>, cx: &App) -> gpui::Div {
+    let Some(path) = poster else {
+        return file_media(sym, cx);
+    };
+    let n = native_colors(cx);
+    div()
+        .flex_none()
+        .size(px(32.))
+        .rounded(crate::ui::native::tokens::radius::ITEM)
+        .border_1()
+        .border_color(n.separator)
+        .bg(n.fill)
+        .overflow_hidden()
+        .child(img(path).size_full().object_fit(ObjectFit::Cover))
+}
+
 /// A borderless symbol button inside a file row (§5.2, §6): 24 × 24,
 /// radius 6, a 13 pt Regular symbol (inline size, not the 16 pt toolbar
 /// size), `fillHover` on hover.

@@ -998,6 +998,8 @@ impl NativeKit {
                             page: 2,
                             pages: 3,
                             go: Some(std::rc::Rc::new(|_, _, _| {})),
+                            per_page: 10,
+                            set_per_page: Some(std::rc::Rc::new(|_, _, _| {})),
                         },
                         cx,
                     )),
@@ -1129,7 +1131,10 @@ impl NativeKit {
                         .child(state(n, PushStyle::Outline, t::CANCEL))
                 }),
             ));
-        let col = || div().w(px(440.)).flex().flex_col().gap(space::S24);
+        // The middle column is wider: the page table's footer holds the
+        // count, 每页, the page and four page buttons (§2.7) on one line.
+        let col_w = |w: f32| div().w(px(w)).flex().flex_col().gap(space::S24);
+        let col = || col_w(420.);
         div()
             .size_full()
             .bg(k.content)
@@ -1147,7 +1152,7 @@ impl NativeKit {
                     .child(card)
                     .child(matrix),
             )
-            .child(col().child(list).child(tables).child(page_table))
+            .child(col_w(500.).child(list).child(tables).child(page_table))
             .child(col().child(feedback).child(empty).child(loading))
             .into_any_element()
     }

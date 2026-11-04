@@ -443,6 +443,16 @@ fn first_letter(name: &str) -> String {
     }
 }
 
+/// `name` as it reads next to the member's avatar: a leading emoji (and its
+/// ZWJ parts, skin tones and spaces) is left out, so the row never shows a
+/// second, emoji "avatar" (review 2 D1-56). A name that is only symbols
+/// stays whole.
+pub fn name_beside_avatar(name: &str) -> &str {
+    let rest = name
+        .trim_start_matches(|c: char| c.is_whitespace() || (!c.is_ascii() && !c.is_alphanumeric()));
+    if rest.is_empty() { name } else { rest }
+}
+
 /// The initials of a person's name (§7.9): one character for a CJK name
 /// (the second of a two-character name that starts with 小, 老 or 阿); two
 /// letters for a Latin name at 32 pt and above, one at 24 pt and below; a
@@ -500,6 +510,15 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_leading_emoji_stays_out_of_the_name_beside_the_avatar() {
+        assert_eq!(name_beside_avatar("👩🏽\u{200d}💻 Priya"), "Priya");
+        assert_eq!(name_beside_avatar("🦊 代码审查助手"), "代码审查助手");
+        assert_eq!(name_beside_avatar("🚀🚀🚀"), "🚀🚀🚀");
+        assert_eq!(name_beside_avatar("@ops 王"), "@ops 王");
+        assert_eq!(name_beside_avatar("Joye"), "Joye");
+    }
 
     #[test]
     fn initials_follow_section_7_9() {
