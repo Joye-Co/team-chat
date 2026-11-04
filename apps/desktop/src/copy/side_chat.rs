@@ -2,10 +2,16 @@
 
 crate::copy! {
     SIDE_CHAT_TITLE = "单独问",
-    SIDE_CHAT_PRIVATE = "只有你能看到，不会发到话题里",
+    SIDE_CHAT_PRIVATE = "只有你能看到",
+    SIDE_CHAT_EMPTY_TITLE = "关于这个话题，问 {name}",
+    SIDE_CHAT_EMPTY_LINE = "{name} 会读话题里 {time} 之前的内容。",
+    SIDE_CHAT_EMPTY_LINE_NO_TIME = "{name} 会读这个话题。",
+    SIDE_CHAT_EMPTY_PRIVATE = "问答不会发到话题里。",
+    SIDE_CHAT_ASK_PROGRESS = "现在做到哪一步了？",
+    SIDE_CHAT_ASK_RISK = "有什么风险？",
+    SIDE_CHAT_ASK_NEXT = "接下来要做什么？",
     SIDE_CHAT_PLACEHOLDER = "单独问 {name}…",
     SIDE_CHAT_POSTED = "已发到话题",
-    SIDE_CHAT_EMPTY = "问 {name} 一个关于这个话题的问题",
     SIDE_CHAT_READ_UPTO = "{name} 读过话题里 {time} 之前的内容",
     SIDE_CHAT_WILL_READ = "{name} 会读话题里 {time} 之前的内容",
     SIDE_CHAT_SUGGEST_HINT = "按下才会发到话题",
