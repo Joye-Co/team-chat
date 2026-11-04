@@ -332,6 +332,7 @@ impl Render for MediaPreview {
                         close: Some(std::rc::Rc::new(|_: &mut Window, _: &mut App| {})),
                         id: SharedString::from(format!("scene-full-{s:?}")),
                         autoplay: false,
+                        title_row: None,
                     };
                     let body = full::render(&spec, &state, window, cx);
                     let images = s == Sample::Images;
@@ -368,13 +369,9 @@ trait WhenImages {
 }
 
 impl WhenImages for gpui::Div {
-    /// The lightbox sits on a grey desk with padding, as in the design.
-    fn when_images(self, on: bool, cx: &App) -> Self {
-        if on {
-            self.h(px(600.)).p(px(24.)).bg(theme::colors(cx).tile)
-        } else {
-            self
-        }
+    /// The image viewer is one Quick Look panel: no grey desk around it.
+    fn when_images(self, on: bool, _cx: &App) -> Self {
+        if on { self.h(px(600.)) } else { self }
     }
 }
 

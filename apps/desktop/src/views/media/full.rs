@@ -55,6 +55,9 @@ pub struct FullSpec {
     pub id: SharedString,
     /// Start the video playing.
     pub autoplay: bool,
+    /// In its own window: the leading inset of the window's title row (after the traffic
+    /// lights). The image viewer then puts its title and tools in that row (Quick Look).
+    pub title_row: Option<gpui::Pixels>,
 }
 
 pub fn render(
@@ -502,31 +505,42 @@ fn lightbox(
     };
     let (copy_path, save_path) = (pic.path.clone(), pic.path.clone());
     let (send_path, target) = (pic.path.clone(), spec.target.clone());
+    // Quick Look (NATIVE.md §9.7): one panel, its title and tools in its title row; no
+    // second frame, no keyboard hint line (the shortcuts live in the menu bar).
     let mut header = div()
-        .h(px(48.))
-        .px(space::S16)
+        .flex_none()
+        .h(crate::ui::native::metrics::TOOLBAR_ROW)
+        .pl(spec.title_row.unwrap_or(space::S16))
+        .pr(space::S12)
         .flex()
         .items_center()
         .gap(space::S8)
         .child(
             div()
-                .t_small()
-                .semibold()
-                .text_color(gpui::white())
+                .flex_shrink(1.)
+                .min_w(px(0.))
+                .text_size(px(13.))
+                .line_height(px(18.))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(s.ink)
                 .one_line()
                 .child(spec.media.title.clone()),
         )
-        .child(mono(
-            format!(
-                "{} · {}",
-                fill(
-                    cm::IMG_POSITION,
-                    &[("i", &(ix + 1).to_string()), ("n", &n.to_string())]
-                ),
-                pic.name
-            ),
-            s.dim,
-        ))
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(11.))
+                .line_height(px(14.))
+                .text_color(s.dim)
+                .child(format!(
+                    "{} · {}",
+                    fill(
+                        cm::IMG_POSITION,
+                        &[("i", &(ix + 1).to_string()), ("n", &n.to_string())]
+                    ),
+                    pic.name
+                )),
+        )
         .child(div().flex_1())
         .child(
             screen_tool(id(spec, "copy"), Sym::Copy, cm::COPY, &s, cx)
@@ -591,12 +605,16 @@ fn lightbox(
                 }),
         );
     }
+    let in_window = spec.title_row.is_some();
     div()
         .size_full()
         .flex()
         .flex_col()
         .bg(s.bg)
-        .rounded(radius::LG)
+        .when(!in_window, |d| {
+            d.rounded(px(12.))
+                .shadow(crate::ui::native::native_colors(cx).float())
+        })
         .overflow_hidden()
         .child(header)
         .child(
@@ -624,17 +642,7 @@ fn lightbox(
                 )
                 .child(nav("next", Sym::ChevronRight, cm::IMG_NEXT).on_click(step(1))),
         )
-        .child(div().pt(space::S12).child(strip))
-        .child(
-            div()
-                .h(px(36.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .t_meta()
-                .text_color(s.dim)
-                .child(cm::IMG_HINT),
-        )
+        .child(div().pt(space::S12).pb(space::S16).child(strip))
         .into_any_element()
 }
 

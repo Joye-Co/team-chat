@@ -524,6 +524,7 @@ impl WebEmbedState {
             if let Ok(Some(png)) = rx.await {
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
+                    remember_preview(&s.artifact_id().to_string(), image.clone());
                     s.snapshot = Some(image);
                     cx.notify();
                 });
@@ -1076,3 +1077,21 @@ pub fn clear_cache(cx: &mut App) {
         cx.set_global(EmbedCache::default());
     }
 }
+
+// --- v12/fx-cards: page previews for the 产出 list ---
+thread_local! {
+    /// The last snapshot of each 产出's page, by 产出 id: the 产出 list's thumbnail shows
+    /// the rendered page once it was on screen (NATIVE.md §9.6), else the kind symbol.
+    static PREVIEWS: RefCell<std::collections::HashMap<String, Arc<gpui::Image>>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+fn remember_preview(artifact_id: &str, image: Arc<gpui::Image>) {
+    PREVIEWS.with(|p| p.borrow_mut().insert(artifact_id.to_string(), image));
+}
+
+/// The rendered page of `artifact_id` as last seen, if it was on screen this session.
+pub fn page_preview(artifact_id: &str) -> Option<Arc<gpui::Image>> {
+    PREVIEWS.with(|p| p.borrow().get(artifact_id).cloned())
+}
+// --- end v12/fx-cards ---
