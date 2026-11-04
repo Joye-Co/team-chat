@@ -2,7 +2,7 @@
 // with its checks. See docs/protocol.md, "Topic links".
 import { z } from "zod";
 import { WebUrl } from "./card.ts";
-import { Count, eventBase, Id } from "./common.ts";
+import { Count, eventBase, Id, Millis } from "./common.ts";
 
 export const MAX_LINK_CHECKS = 100;
 
@@ -12,6 +12,17 @@ export const PrCheck = z.object({
   conclusion: z.string().min(1).max(32),
 });
 export type PrCheck = z.infer<typeof PrCheck>;
+
+/**
+ * 1.1: a queued merge of a pull request, from GitHub (`enqueued`, `auto_merge_enabled`,
+ * `dequeued`, `auto_merge_disabled`). `error` is set when the merge stopped without merging.
+ */
+export const PrMerge = z.object({
+  queuedAt: Millis,
+  /** Plain text from GitHub, e.g. "merge conflict", "checks failed". */
+  error: z.string().min(1).max(200).optional(),
+});
+export type PrMerge = z.infer<typeof PrMerge>;
 
 export const TopicLink = z.discriminatedUnion("kind", [
   z.object({
@@ -27,6 +38,8 @@ export const TopicLink = z.discriminatedUnion("kind", [
     additions: Count.optional(),
     deletions: Count.optional(),
     changedFiles: Count.optional(),
+    /** 1.1: the pull request waits to merge; absent = not queued (or merged). */
+    merge: PrMerge.optional(),
   }),
 ]);
 export type TopicLink = z.infer<typeof TopicLink>;

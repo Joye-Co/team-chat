@@ -11,11 +11,11 @@ import {
   type ClientFrameOf,
   type Expect,
   MAX_ARTIFACT_DATA_INLINE_BYTES,
-  MediaInfoInput,
+  PutArtifactMediaRequest,
+  type PutArtifactMediaResponse,
   PutArtifactDataRequest,
   utf8Bytes,
 } from "@chat/protocol";
-import { z } from "zod";
 import type { AuditEntry } from "../core/audit";
 import { auditValue } from "../core/auditvalue";
 import type { AuthContext } from "../core/auth";
@@ -46,8 +46,10 @@ const PAGE_EVENT_HOURLY = 300;
 const DATA_RATE = { rate: 2, burst: 4 };
 /** A reply must come within this long of its event. */
 export const REPLY_WINDOW_MS = 120_000;
-/** Idempotency of page events, and how long they are kept. */
+/** Idempotency of page events. */
 const KEEP_EVENTS_MS = 24 * 3600_000;
+/** How long page events stay in the page log (页面里的回应, `GET /v1/artifacts/:id/events`). */
+export const KEEP_PAGE_LOG_MS = 180 * 24 * 3600_000;
 /** A `cause` is an event of the same 产出 version from the last 30 minutes. */
 const CAUSE_WINDOW_MS = 30 * 60_000;
 
@@ -229,10 +231,21 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
   const again = repeat();
   if (again) return again;
   const eventId = ulid(now);
-  room.sql.exec("DELETE FROM page_events WHERE at < ?", now - KEEP_EVENTS_MS);
+  room.sql.exec("DELETE FROM page_events WHERE at < ?", now - KEEP_PAGE_LOG_MS);
+  // The page log keeps events past the idempotency window: an old event with the same client id
+  // gives the id up instead of blocking the unique index.
+  if (e.clientEventId) {
+    room.sql.exec(
+      "UPDATE page_events SET client_event_id = NULL WHERE actor_id = ? AND artifact_id = ? AND version = ? AND client_event_id = ?",
+      a.id,
+      e.artifactId,
+      e.version,
+      e.clientEventId,
+    );
+  }
   room.sql.exec(
-    `INSERT INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, client_event_id, ack, at, name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, client_event_id, ack, at, name, payload)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     eventId,
     e.artifactId,
     e.version,
@@ -243,6 +256,7 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     JSON.stringify({ eventId, expect: { by: v.created_by, mode: "none" } } satisfies PageEventAck),
     now,
     e.name,
+    e.payload === undefined ? null : JSON.stringify(e.payload),
   );
   let expect: Expect;
   try {
@@ -461,13 +475,13 @@ registerRoomRpc(ARTIFACT_PREVIEW_RPC, (room, actor, args) => {
 // HTTP
 // ---------------------------------------------------------------------------
 
-async function artifactGroup(env: Env, id: string, auth: AuthContext): Promise<string> {
+export async function artifactGroup(env: Env, id: string, auth: AuthContext): Promise<string> {
   const row = await env.DB.prepare("SELECT group_id FROM artifacts WHERE id = ?").bind(id).first<{ group_id: string }>();
   if (!row || !(await isGroupMember(env.DB, row.group_id, auth.memberId))) throw new ApiError("not_found", "产出 not found");
   return row.group_id;
 }
 
-function versionParam(v: string): number {
+export function versionParam(v: string): number {
   if (!/^[1-9][0-9]{0,8}$/.test(v)) throw new ApiError("invalid", "bad version");
   return Number(v);
 }
@@ -507,8 +521,6 @@ registerRoute({
   },
 });
 
-/** Body of `PUT /v1/artifacts/:id/versions/:v/media`: the version's media with its preview. */
-const PutArtifactMediaRequest = z.object({ media: MediaInfoInput });
 
 registerRoute({
   method: "PUT",
@@ -519,6 +531,8 @@ registerRoute({
     const version = versionParam(params.v);
     const groupId = await artifactGroup(env, params.id, a);
     const req = await body(PutArtifactMediaRequest);
-    return unwrap(await roomStub(env, groupId).rpc(groupId, ARTIFACT_PREVIEW_RPC, actorOf(a), { artifactId: params.id, version, media: req.media }));
+    return unwrap(
+      await roomStub(env, groupId).rpc(groupId, ARTIFACT_PREVIEW_RPC, actorOf(a), { artifactId: params.id, version, media: req.media }),
+    ) as PutArtifactMediaResponse;
   },
 });

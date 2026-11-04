@@ -21,9 +21,8 @@ fn fence(src: &str) -> String {
 
 #[test]
 fn finds_closed_mermaid_fences_case_insensitively() {
-    let body = format!(
-        "intro\n\n```Mermaid \ngraph TD\nA-->B\n```\n\n```rust\nfn x() {{}}\n```\n\n~~~ mermaid\nsequenceDiagram\nA->>B: hi\n~~~\n"
-    );
+    let body = "intro\n\n```Mermaid \ngraph TD\nA-->B\n```\n\n```rust\nfn x() {}\n```\n\n~~~ mermaid\nsequenceDiagram\nA->>B: hi\n~~~\n"
+        .to_string();
     let f = fences(&body);
     assert_eq!(f.len(), 3);
     assert!(f.iter().all(|f| f.closed));

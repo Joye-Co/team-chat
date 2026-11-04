@@ -21,8 +21,8 @@ use std::{
     },
 };
 
-use gpui_component::Icon;
 use gpui::Styled as _;
+use gpui_component::Icon;
 
 use super::{
     Weight, raster,
@@ -245,7 +245,11 @@ pub fn prewarm(scale: f32) {
             for &sym in Sym::ALL {
                 for slot in [24., 21.] {
                     for size in [SymSize::TOOLBAR, SymSize::INLINE] {
-                        paths.push(path_at(sym, SymSize::new(size.point, slot, size.weight), scale));
+                        paths.push(path_at(
+                            sym,
+                            SymSize::new(size.point, slot, size.weight),
+                            scale,
+                        ));
                     }
                 }
             }
@@ -308,8 +312,16 @@ fn base64(bytes: &[u8]) -> String {
         let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -329,8 +341,14 @@ mod tests {
         assert!(parse("sf/tray/x/150/180/200.svg").is_none());
         assert!(parse("icons/tray.svg").is_none());
         // The live dot draws smaller than its context.
-        assert_eq!(path_at(Sym::Live, SymSize::INLINE, 1.), "sf/circle.fill/r/60/160/100.svg");
-        assert_eq!(path_at(Sym::Missing, SymSize::INLINE, 1.), "sf/-/r/130/160/100.svg");
+        assert_eq!(
+            path_at(Sym::Live, SymSize::INLINE, 1.),
+            "sf/circle.fill/r/60/160/100.svg"
+        );
+        assert_eq!(
+            path_at(Sym::Missing, SymSize::INLINE, 1.),
+            "sf/-/r/130/160/100.svg"
+        );
     }
 
     #[test]

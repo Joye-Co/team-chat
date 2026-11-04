@@ -51,7 +51,11 @@ pub fn toolbar_leading(services: &Services, cx: &App) -> Pixels {
 
 /// A content section header (§3 Headline): the name in `label` and an
 /// optional `secondary` count, lined up with the rows' text.
-pub fn section_header(label: impl Into<SharedString>, count: Option<String>, cx: &App) -> gpui::Div {
+pub fn section_header(
+    label: impl Into<SharedString>,
+    count: Option<String>,
+    cx: &App,
+) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
@@ -62,13 +66,7 @@ pub fn section_header(label: impl Into<SharedString>, count: Option<String>, cx:
         .items_center()
         .gap(px(6.))
         .child(div().n_headline().text_color(k.label).child(label.into()))
-        .children(count.map(|n| {
-            div()
-                .n_body()
-                .n_figures()
-                .text_color(k.secondary)
-                .child(n)
-        }))
+        .children(count.map(|n| div().n_body().n_figures().text_color(k.secondary).child(n)))
 }
 
 /// An SF Symbol at a §6 context size in `color`.
@@ -165,9 +163,10 @@ pub fn mail_row(
                         .items_center()
                         .gap(px(8.))
                         .child(line(title).flex_1().n_headline().text_color(ink.title))
-                        .children(title_trailing.map(|t| {
-                            div().flex_none().flex().items_center().child(t)
-                        })),
+                        .children(
+                            title_trailing
+                                .map(|t| div().flex_none().flex().items_center().child(t)),
+                        ),
                 )
                 .child(
                     // 20 pt, the height of a small push button, so rows with

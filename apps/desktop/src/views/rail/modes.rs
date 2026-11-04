@@ -74,7 +74,10 @@ pub(super) enum Item {
         folded: bool,
     },
     /// C: a member with nothing on (`away`: not online): one row each.
-    Plain { member: Member, away: bool },
+    Plain {
+        member: Member,
+        away: bool,
+    },
 }
 
 impl Item {
@@ -332,7 +335,9 @@ impl RailView {
     /// Draws one list row from memory.
     pub(super) fn item(&self, item: &Item, cx: &mut Context<Self>) -> AnyElement {
         match item {
-            Item::GroupHeader { id, name, folded, .. } => {
+            Item::GroupHeader {
+                id, name, folded, ..
+            } => {
                 let fold_id = id.clone();
                 let this = cx.entity().downgrade();
                 let nav = self.services.nav.clone();
@@ -492,16 +497,19 @@ impl RailView {
     fn plain_member(&self, m: &Member, away: bool, _cx: &App) -> AnyElement {
         let nav = self.services.nav.clone();
         let id = m.id.clone();
-        self.row(SharedString::from(format!("rail-person-{}", m.id)), m.name.clone())
-            .leading(
-                div()
-                    .when(away, |d| d.opacity(0.5))
-                    .child(MemberAvatar::new(Some(m), ROW_AVATAR)),
-            )
-            .on_click(move |_, _, cx| {
-                let id = id.clone();
-                nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
-            })
-            .into_any_element()
+        self.row(
+            SharedString::from(format!("rail-person-{}", m.id)),
+            m.name.clone(),
+        )
+        .leading(
+            div()
+                .when(away, |d| d.opacity(0.5))
+                .child(MemberAvatar::new(Some(m), ROW_AVATAR)),
+        )
+        .on_click(move |_, _, cx| {
+            let id = id.clone();
+            nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
+        })
+        .into_any_element()
     }
 }

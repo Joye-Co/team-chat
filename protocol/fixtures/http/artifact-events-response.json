@@ -1,0 +1,44 @@
+{
+  "kind": "ArtifactEventsResponse",
+  "valid": true,
+  "description": "newest first; the last one is from before payloads were kept",
+  "value": {
+    "events": [
+      {
+        "eventId": "01JC0EV0000000000000000002",
+        "artifactId": "01JC0ART00000000000000OCT3",
+        "version": 2,
+        "name": "pick",
+        "kind": "emit",
+        "payload": {
+          "channel": "bili"
+        },
+        "actorId": "01JBX0OWNER0000000000000AA",
+        "at": 1762128060000
+      },
+      {
+        "eventId": "01JC0EV0000000000000000001",
+        "artifactId": "01JC0ART00000000000000OCT3",
+        "version": 1,
+        "name": "ask.total",
+        "kind": "ask",
+        "payload": {
+          "month": "2026-10"
+        },
+        "actorId": "01JBX0ALICE0000000000000AB",
+        "at": 1762128000000,
+        "replied": true
+      },
+      {
+        "eventId": "01JC0EV0000000000000000000",
+        "artifactId": "01JC0ART00000000000000OCT3",
+        "version": 1,
+        "name": "pick",
+        "kind": "emit",
+        "actorId": "01JBX0ALICE0000000000000AB",
+        "at": 1762127999999
+      }
+    ],
+    "hasMore": true
+  }
+}

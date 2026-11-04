@@ -10,6 +10,8 @@ import {
   RedeemRequest,
   RevokeTokensRequest,
   UpdateGroupRequest,
+  MAX_GROUP_PURPOSE_CHARS,
+  normalizeGroupText,
 } from "@chat/protocol";
 import { auditStatement } from "./audit";
 import type { AuthContext } from "./auth";
@@ -40,11 +42,18 @@ export const MAX_GROUP_NAME_CHARS = 64;
  * line breaks) one space, 1..64 code points. Group create and rename use the same rule.
  */
 export function normalizeGroupName(raw: string): string {
-  const name = raw.trim().replace(/\s+/gu, " ");
+  const name = normalizeGroupText(raw);
   const chars = [...name].length;
   if (chars === 0) throw new ApiError("invalid", "name is empty");
   if (chars > MAX_GROUP_NAME_CHARS) throw new ApiError("invalid", `name is longer than ${MAX_GROUP_NAME_CHARS} characters`);
   return name;
+}
+
+/** A purpose line as it is stored: normalized like a name, 0..200 code points ("" = none). */
+export function normalizeGroupPurpose(raw: string): string {
+  const purpose = normalizeGroupText(raw);
+  if ([...purpose].length > MAX_GROUP_PURPOSE_CHARS) throw new ApiError("invalid", `purpose is longer than ${MAX_GROUP_PURPOSE_CHARS} characters`);
+  return purpose;
 }
 
 type Wait = (p: Promise<unknown>) => void;
@@ -473,23 +482,38 @@ export function registerCoreRoutes(): void {
       const member = await isGroupMember(env.DB, group.id, a.memberId);
       if (!member && a.member.level !== "owner") throw new ApiError("forbidden", "not a member of this group");
       if (group.kind === "dm") throw new ApiError("forbidden", "a DM cannot be renamed");
-      const name = normalizeGroupName(req.name);
-      // The room first: it decides whether the name changed and appends `group.updated`, which
-      // updates every client's cache. Then D1, the source of truth for GroupSummary. A retry
-      // after a failed D1 write appends nothing and writes D1 again.
-      const r = unwrap(await roomStub(env, group.id).groupUpdated(group.id, a.memberId, name, group.name));
-      if (group.name !== name) {
-        await env.DB.batch([
-          env.DB.prepare("UPDATE groups SET name = ? WHERE id = ?").bind(name, group.id),
-          auditStatement(env.DB, a, { action: "group.rename", target: group.id, details: { from: group.name, to: name } }),
-        ]);
+      const name = req.name === undefined ? undefined : normalizeGroupName(req.name);
+      const purpose = req.purpose === undefined ? undefined : normalizeGroupPurpose(req.purpose);
+      // The room first: it decides whether anything changed and appends `group.updated`, which
+      // updates every client's cache. Then D1, the source of truth for GroupSummary, takes the
+      // room's values only when their seq is newer than its own (SF-9): concurrent renames end
+      // with D1 equal to the newest event of the log, and a retry after a failed D1 write writes
+      // D1 again without a new event.
+      const before = { name: group.name, purpose: group.purpose ?? "" };
+      const r = unwrap(await roomStub(env, group.id).groupUpdated(group.id, a.memberId, { name, purpose }, before));
+      const audits = [];
+      if (r.seq !== null && r.name !== before.name) {
+        audits.push(auditStatement(env.DB, a, { action: "group.rename", target: group.id, details: { from: before.name, to: r.name } }));
       }
+      if (r.seq !== null && r.purpose !== before.purpose) {
+        audits.push(auditStatement(env.DB, a, { action: "group.purpose", target: group.id, details: { chars: [...r.purpose].length } }));
+      }
+      await env.DB.batch([
+        env.DB.prepare("UPDATE groups SET name = ?, purpose = ?, update_seq = ? WHERE id = ? AND update_seq < ?").bind(
+          r.name,
+          r.purpose === "" ? null : r.purpose,
+          r.updateSeq,
+          group.id,
+          r.updateSeq,
+        ),
+        ...audits,
+      ]);
       if (member) return summaryFor(env, a.memberId, group.id);
       // An owner outside the group: no read position of its own.
       const memberIds = await groupMemberIds(env.DB, group.id);
       const names = new Map((await listMembers(env.DB)).map((m) => [m.id, m.name]));
       return {
-        group: viewGroup({ ...group, name }, memberIds, a.memberId, names),
+        group: viewGroup({ ...group, name: r.name, purpose: r.purpose }, memberIds, a.memberId, names),
         lastSeq: r.lastSeq,
         readSeq: 0,
         unread: 0,

@@ -158,11 +158,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                 .child(div().one_line().child(label.clone()))
                 .when_some(sorted_here, |el, (_, asc)| {
                     el.child(ui::icon(
-                        if asc {
-                            Sym::ArrowUp
-                        } else {
-                            Sym::ArrowDown
-                        },
+                        if asc { Sym::ArrowUp } else { Sym::ArrowDown },
                         px(12.),
                         k.ink_2,
                     ))

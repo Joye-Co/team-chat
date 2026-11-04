@@ -143,6 +143,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
       {
         id: "cmp",
         type: "compare",
+        fallbackText: "两个方案选一个",
         question: "首页用哪个？",
         options: [
           { id: "A", label: "按活动整理", pros: ["找照片最快"], cons: ["每个活动要先归类"], preview: { fileId: FILE }, recommended: true, children: ["a_note"] },
@@ -190,7 +191,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     fallback: "三道题，一起提交。",
     ask: { from: ["owners"] },
     blocks: [
-      { id: "qs", type: "questionnaire", children: ["q1", "q2", "q3"], submitLabel: "一起提交", anonymous: true },
+      { id: "qs", type: "questionnaire", children: ["q1", "q2", "q3"], submitLabel: "一起提交", anonymous: true, fallbackText: "实习反馈问卷" },
       { id: "q1", type: "rating", label: "带教清楚吗？", max: 5, required: true, fallbackText: "1 到 5 分" },
       { id: "q2", type: "decision", label: "想留下吗？", options: [{ id: "y", label: "想" }, { id: "n", label: "不想" }], allowOther: { label: "其他", placeholder: "说说看" } },
       { id: "q3", type: "input", kind: "textarea", label: "还想说什么", maxLength: 500 },
@@ -270,8 +271,8 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("entities/card-v2-style-key.json", "CardV2", card21([{ id: "a", type: "text", text: "红字", color: "red" }]), "card.style_property: color", "card.style_property");
   bad("entities/card-v2-two-primary.json", "CardV2", card21([leaf("a")], { actions: [{ id: "x", label: "X", style: "primary" }, { id: "y", label: "Y", style: "primary" }] }), "two primary actions", "card.limits");
   bad("entities/card-v2-two-decision-surfaces.json", "CardV2", card21([
-    { id: "cmp", type: "compare", options: [{ id: "A", label: "A" }, { id: "B", label: "B" }] },
-    { id: "qs", type: "questionnaire", children: ["q1", "q2"] },
+    { id: "cmp", type: "compare", options: [{ id: "A", label: "A" }, { id: "B", label: "B" }], fallbackText: "比较 A 和 B" },
+    { id: "qs", type: "questionnaire", children: ["q1", "q2"], fallbackText: "问卷" },
     { id: "q1", type: "input", kind: "text", label: "一" },
     { id: "q2", type: "input", kind: "text", label: "二" },
   ], { intent: "ask", ask: { from: ["owners"] } }), "card.decision_surfaces: a compare and a questionnaire for one ask", "card.decision_surfaces");
@@ -289,14 +290,14 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("entities/card-v2-matrix-one-column.json", "CardV2", card21([{ id: "m", type: "matrix", label: "选", rows: [{ id: "a", label: "A" }], columns: [{ id: "x", label: "X" }], fallbackText: "选" }]), "matrix has 2..5 columns", "card.limits");
   bad("entities/card-v2-poll-201-voters.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: Array.from({ length: 201 }, (_, i) => `m${i}`), closesAt: T0, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], fallbackText: "投" }]), "poll voters are \"group\" or 1..200 member ids", "card.limits");
   bad("entities/card-v2-poll-7-options.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: "group", closesAt: T0, options: Array.from({ length: 7 }, (_, i) => ({ id: `o${i}`, label: `${i}` })), fallbackText: "投" }]), "poll has 2..6 options", "card.limits");
-  bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options", "card.limits");
+  bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", fallbackText: "比较", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options", "card.limits");
   bad("entities/card-v2-group-13-children.json", "CardV2", card21([{ id: "g", type: "group", title: "多", children: Array.from({ length: 13 }, (_, i) => `x${i}`) }, ...Array.from({ length: 13 }, (_, i) => leaf(`x${i}`))]), "group has 1..12 children", "card.limits");
   bad("entities/card-v2-group-blocks-and-children.json", "CardV2", card21([{ id: "g", type: "group", title: "两", blocks: [], children: ["a"] }, leaf("a")]), "a group has blocks or children, even an empty blocks list", "card.limits");
   const inlineGroup = { id: "g", type: "group", title: "填", blocks: [{ id: "i", type: "input", kind: "text", label: "名字" }] };
   bad("entities/card-v2-deliver-on-group.json", "CardV2", card21([{ ...inlineGroup, deliver: "onSubmit" }]), "deliver is for input blocks, not a group of them", "card.limits");
   bad("entities/card-v2-action-inputs-group.json", "CardV2", card21([inlineGroup], { actions: [{ id: "s", label: "交", inputs: ["g"] }] }), "action inputs name input blocks, not a group", "card.limits");
   bad("entities/card-v2-questionnaire-container-child.json", "CardV2", card21([
-    { id: "qs", type: "questionnaire", children: ["s", "q"] },
+    { id: "qs", type: "questionnaire", children: ["s", "q"], fallbackText: "问卷" },
     { id: "s", type: "stack", children: ["a"] },
     { id: "q", type: "input", kind: "text", label: "一" },
     leaf("a"),
@@ -639,6 +640,13 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   ok("transient/artifact.data-ref.json", "TransientEvent", { type: "artifact.data", groupId: G, artifactId: ART, version: 1, dataRev: 3 }, "over 64 KiB: GET the data");
   ok("transient/artifact.reply.json", "TransientEvent", { type: "artifact.reply", groupId: G, eventId: EV(20), ok: true, payload: { series: [1, 1, 1, 2] } });
   ok("transient/artifact.reply-failed.json", "TransientEvent", { type: "artifact.reply", groupId: G, eventId: EV(22), ok: false, error: { code: "failed", message: "没算出来" } });
+  ok("transient/artifact.reply-run-ended.json", "TransientEvent", {
+    type: "artifact.reply",
+    groupId: G,
+    eventId: EV(23),
+    ok: false,
+    error: { code: "declined", message: "no run of this member is open", reason: "run.ended" },
+  });
 
   // -------------------------------------------------------------------------
   // HTTP: 产出 data and versions
@@ -659,6 +667,11 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     data: { asOf: "2026-10-31", channels: { all: 38, xhs: 14, invite: 10, bili: 9, douyin: 5 } },
   };
   ok("http/create-artifact-media-data.json", "CreateArtifactRequest", createArt, "V11-INTERACT 7.3 (declarations on `events`, R5)");
+  {
+    const { groupId: _g, topicId: _t, runId: _r, ...machineArt } = createArt as Record<string, unknown>;
+    ok("http/machine-create-artifact-request.json", "MachineCreateArtifactRequest", machineArt, "chat-run artifact create: the run gives group, topic and run");
+    bad("http/machine-create-artifact-request-no-files.json", "MachineCreateArtifactRequest", { ...machineArt, files: [] }, "at least one file");
+  }
   bad("entities/artifact-version-bad-event-name.json", "CreateArtifactRequest", { ...createArt, events: [{ name: "Breakdown!", kind: "ask" }] }, "event names are [a-z][A-Za-z0-9_.-]{0,63}");
   bad("http/create-artifact-schema-ref.json", "CreateArtifactRequest", { ...createArt, events: [{ name: "x", schema: { $ref: "#/data/x" } }] }, "no $ref in a page event schema");
   bad("http/create-artifact-reserved-path.json", "CreateArtifactRequest", { ...createArt, files: [{ path: "__teamchat/mermaid.min.js", fileId: FILE }] }, "paths under __teamchat/ are reserved");
@@ -686,6 +699,22 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     eventId: EV(2),
     block: { id: "check", type: "decision", label: "这个数据对不对？", options: [{ id: "right", label: "对" }, { id: "wrong", label: "不对" }] },
   });
+  ok(
+    "machine/run.answer-poll-tally.json",
+    "MachineDownFrame",
+    {
+      t: "run.answer",
+      runId: RUN,
+      inputId: "in-9",
+      source: { kind: "card", messageId: M, askId: "where", answerId: "01JC0AN0000000000000000002", rev: 1 },
+      blockId: "where",
+      event: "choice.submit",
+      actor: { id: "anonymous", name: "anonymous" },
+      eventId: EV(3),
+      tally: { a: 2, b: 1 },
+    },
+    "a vote of a counts-only poll: no voter, no value, the tally",
+  );
   ok("machine/run.interaction-card.json", "MachineDownFrame", {
     t: "run.interaction",
     runId: RUN,

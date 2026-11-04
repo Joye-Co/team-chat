@@ -57,7 +57,7 @@ registerRoute({
     const parsed = PostMessageRequest.safeParse(raw);
     if (!parsed.success) {
       const first = parsed.error.issues.find((i) => schemaReason({}, i.message)) ?? parsed.error.issues[0];
-      throw new ApiError("invalid", `invalid body: ${first?.path.join(".") || "(root)"} ${first?.message ?? ""}`.trim(), schemaReason(raw, first?.message));
+      throw new ApiError("invalid", `invalid body: ${first?.path.join(".") || "(root)"} ${first?.message ?? ""}`.trim(), schemaReason(raw, first?.message, first?.path));
     }
     const frame = { ...parsed.data, t: "send" as const, rid: "http", groupId: group.id };
     const actor: Actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };

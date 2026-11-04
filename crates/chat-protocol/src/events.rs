@@ -9,7 +9,7 @@ use crate::bots::RunUpdatedData;
 use crate::card::Card;
 use crate::card2::{
     CardAnsweredData, CardEventTransient, CardRetractedData, CardState, CardV2, Cause,
-    InteractionResolvedTransient, lenient_card_v2,
+    DecisionRecordedData, InteractionResolvedTransient, lenient_card_v2,
 };
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
 use crate::files::{
@@ -83,6 +83,12 @@ pub enum EventData {
     /// 1.1: the preview of a 产出 version is ready.
     #[serde(rename = "artifact.previewReady")]
     ArtifactPreviewReady(ArtifactPreviewReadyData),
+    /// 1.1: a decision recorded by hand (记一条).
+    #[serde(rename = "decision.recorded")]
+    DecisionRecorded(DecisionRecordedData),
+    /// 1.1: a bot member set its desk note (首页).
+    #[serde(rename = "desk.noted")]
+    DeskNoted(crate::desk::DeskNotedData),
 }
 
 impl EventData {
@@ -105,6 +111,8 @@ impl EventData {
             Self::TopicLinked(_) => "topic.linked",
             Self::CardRetracted(_) => "card.retracted",
             Self::ArtifactPreviewReady(_) => "artifact.previewReady",
+            Self::DecisionRecorded(_) => "decision.recorded",
+            Self::DeskNoted(_) => "desk.noted",
         }
     }
 }
@@ -248,7 +256,15 @@ pub struct MessageDeletedData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupUpdatedData {
+    /// The group's name after the change.
     pub name: String,
+    /// 1.1: set when the purpose line changed (`""` = cleared).
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub purpose: Option<String>,
 }
 
 /// Data of `group.memberAdded` and `group.memberRemoved`.

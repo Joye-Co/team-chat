@@ -43,8 +43,8 @@ impl Mask {
         for &cov in &self.alpha {
             bytes.extend_from_slice(&[bl, g, r, (cov as f32 * a).round() as u8]);
         }
-        let buffer = image::RgbaImage::from_raw(self.side, self.side, bytes)
-            .expect("side * side * 4 bytes");
+        let buffer =
+            image::RgbaImage::from_raw(self.side, self.side, bytes).expect("side * side * 4 bytes");
         RenderImage::new(vec![image::Frame::new(buffer)])
     }
 }
@@ -122,7 +122,8 @@ pub fn draw(name: &str, point: f32, weight: Weight, slot: f32, scale: f32) -> Op
             if tx < 0 || tx >= side as i64 {
                 continue;
             }
-            alpha[(ty as u32 * side + tx as u32) as usize] = canvas.alpha[(y * canvas.w + x) as usize];
+            alpha[(ty as u32 * side + tx as u32) as usize] =
+                canvas.alpha[(y * canvas.w + x) as usize];
         }
     }
     let ink = ink_box(&alpha, side, side)?;
@@ -167,8 +168,10 @@ mod appkit {
     }
 
     fn symbol(name: &str, point: f32, w: Weight) -> Option<Retained<NSImage>> {
-        let image =
-            NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)?;
+        let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+            &NSString::from_str(name),
+            None,
+        )?;
         let config = NSImageSymbolConfiguration::configurationWithPointSize_weight_scale(
             point as f64,
             weight(w),

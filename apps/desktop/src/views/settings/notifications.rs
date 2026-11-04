@@ -4,8 +4,8 @@
 
 use gpui::{
     App, Context, ElementId, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -180,97 +180,109 @@ impl NotificationsPage {
 
     /// 按群设置… : the sheet with every 群 and 私聊 and its pop-up.
     pub fn open_groups(this: Entity<Self>, window: &mut Window, cx: &mut App) {
-        widgets::open_sheet(window, cx, SheetWidth::List, px(640.), move |dialog, window, cx| {
-            let k = native_colors(cx);
-            let page = this.read(cx);
-            let provider = page.services.provider.clone();
-            let members = provider.members();
-            let (dms, groups): (Vec<_>, Vec<_>) = provider
-                .groups()
-                .into_iter()
-                .partition(|g| g.kind == GroupKind::Dm);
-            let rows: Vec<gpui::AnyElement> = groups
-                .iter()
-                .chain(dms.iter())
-                .map(|g| {
-                    let prefs = provider.group_prefs(&g.id);
-                    let shown = if prefs.muted {
-                        NotifyLevel::None
-                    } else {
-                        prefs.notify
-                    };
-                    let peer = (g.kind == GroupKind::Dm)
-                        .then(|| {
-                            g.dm_peer
-                                .as_ref()
-                                .and_then(|p| members.iter().find(|m| &m.id == p))
-                        })
-                        .flatten();
-                    let page = this.clone();
-                    let gid = g.id.clone();
-                    let name: SharedString = g.name.split_whitespace().collect::<Vec<_>>().join(" ").into();
-                    FormRow::new(name)
-                        .when_some(peer.cloned(), |row, m| {
-                            row.leading(ui::MemberAvatar::new(Some(&m), px(18.)).on(k.sheet))
-                        })
-                        .control(
-                            widgets::popup_fixed(
-                                ElementId::Name(format!("notify-{}", g.id).into()),
-                                level_text(shown),
-                                px(112.),
-                                window,
-                                cx,
+        widgets::open_sheet(
+            window,
+            cx,
+            SheetWidth::List,
+            px(640.),
+            move |dialog, window, cx| {
+                let k = native_colors(cx);
+                let page = this.read(cx);
+                let provider = page.services.provider.clone();
+                let members = provider.members();
+                let (dms, groups): (Vec<_>, Vec<_>) = provider
+                    .groups()
+                    .into_iter()
+                    .partition(|g| g.kind == GroupKind::Dm);
+                let rows: Vec<gpui::AnyElement> = groups
+                    .iter()
+                    .chain(dms.iter())
+                    .map(|g| {
+                        let prefs = provider.group_prefs(&g.id);
+                        let shown = if prefs.muted {
+                            NotifyLevel::None
+                        } else {
+                            prefs.notify
+                        };
+                        let peer = (g.kind == GroupKind::Dm)
+                            .then(|| {
+                                g.dm_peer
+                                    .as_ref()
+                                    .and_then(|p| members.iter().find(|m| &m.id == p))
+                            })
+                            .flatten();
+                        let page = this.clone();
+                        let gid = g.id.clone();
+                        let name: SharedString = g
+                            .name
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .into();
+                        FormRow::new(name)
+                            .when_some(peer.cloned(), |row, m| {
+                                row.leading(ui::MemberAvatar::new(Some(&m), px(18.)).on(k.sheet))
+                            })
+                            .control(
+                                widgets::popup_fixed(
+                                    ElementId::Name(format!("notify-{}", g.id).into()),
+                                    level_text(shown),
+                                    px(112.),
+                                    window,
+                                    cx,
+                                )
+                                .dropdown_menu(
+                                    move |menu, _, _| {
+                                        LEVELS.into_iter().fold(menu, |menu, level| {
+                                            let (page, gid) = (page.clone(), gid.clone());
+                                            menu.item(
+                                                PopupMenuItem::new(level_text(level))
+                                                    .checked(level == shown)
+                                                    .on_click(move |_, _, cx| {
+                                                        page.update(cx, |p, cx| {
+                                                            p.pick_level(&gid, level, cx)
+                                                        })
+                                                    }),
+                                            )
+                                        })
+                                    },
+                                ),
                             )
-                            .dropdown_menu(move |menu, _, _| {
-                                LEVELS.into_iter().fold(menu, |menu, level| {
-                                    let (page, gid) = (page.clone(), gid.clone());
-                                    menu.item(
-                                        PopupMenuItem::new(level_text(level))
-                                            .checked(level == shown)
-                                            .on_click(move |_, _, cx| {
-                                                page.update(cx, |p, cx| p.pick_level(&gid, level, cx))
-                                            }),
-                                    )
-                                })
-                            }),
+                            .into_any_element()
+                    })
+                    .collect();
+                let table = if rows.is_empty() {
+                    div()
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(s::NO_GROUPS)
+                        .into_any_element()
+                } else {
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        // Column names over the table, as a Mac table header.
+                        .child(
+                            div()
+                                .px(metrics::FORM_ROW_INSET + px(2.))
+                                .pb(px(4.))
+                                .flex()
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .child(div().flex_1().child(s::COL_GROUP))
+                                .child(div().w(px(112.)).child(s::COL_NOTIFY)),
+                        )
+                        .child(
+                            div()
+                                .id("notify-groups")
+                                .max_h(px(296.))
+                                .overflow_y_scroll()
+                                .child(GroupedForm::new().rows(rows)),
                         )
                         .into_any_element()
-                })
-                .collect();
-            let table = if rows.is_empty() {
-                div()
-                    .n_body()
-                    .text_color(k.secondary)
-                    .child(s::NO_GROUPS)
-                    .into_any_element()
-            } else {
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    // Column names over the table, as a Mac table header.
-                    .child(
-                        div()
-                            .px(metrics::FORM_ROW_INSET + px(2.))
-                            .pb(px(4.))
-                            .flex()
-                            .n_subheadline()
-                            .text_color(k.secondary)
-                            .child(div().flex_1().child(s::COL_GROUP))
-                            .child(div().w(px(112.)).child(s::COL_NOTIFY)),
-                    )
-                    .child(
-                        div()
-                            .id("notify-groups")
-                            .max_h(px(296.))
-                            .overflow_y_scroll()
-                            .child(GroupedForm::new().rows(rows)),
-                    )
-                    .into_any_element()
-            };
-            dialog
-                .on_ok(|_, _, _| true)
-                .child(
+                };
+                dialog.on_ok(|_, _, _| true).child(
                     SheetLayout::new(s::PER_GROUP_TITLE)
                         .explanation(s::PER_GROUP_HINT)
                         .body(table)
@@ -284,7 +296,8 @@ impl NotificationsPage {
                         )
                         .on_click(|_, window, cx| window.close_dialog(cx))]),
                 )
-        });
+            },
+        );
     }
 }
 
@@ -350,20 +363,35 @@ impl Render for NotificationsPage {
         };
         let remind = GroupedForm::new()
             .header(s::REMIND_ME)
-            .row(switch("notify-waiting", s::NOTIFY_WAITING, p.waiting, |p, v| {
-                p.waiting = v
-            }))
-            .row(switch("notify-result", s::NOTIFY_RESULT, p.result, |p, v| {
-                p.result = v
-            }))
-            .row(switch("notify-blocked", s::NOTIFY_BLOCKED, p.blocked, |p, v| {
-                p.blocked = v
-            }))
-            .row(switch("notify-mention", s::NOTIFY_MENTION, p.mention, |p, v| {
-                p.mention = v
-            }))
+            .row(switch(
+                "notify-waiting",
+                s::NOTIFY_WAITING,
+                p.waiting,
+                |p, v| p.waiting = v,
+            ))
+            .row(switch(
+                "notify-result",
+                s::NOTIFY_RESULT,
+                p.result,
+                |p, v| p.result = v,
+            ))
+            .row(switch(
+                "notify-blocked",
+                s::NOTIFY_BLOCKED,
+                p.blocked,
+                |p, v| p.blocked = v,
+            ))
+            .row(switch(
+                "notify-mention",
+                s::NOTIFY_MENTION,
+                p.mention,
+                |p, v| p.mention = v,
+            ))
             .row(digest);
-        let time_row = |label: &'static str, id: &'static str, at: ClockTime, set: fn(&mut NotifyPreferences, ClockTime)| {
+        let time_row = |label: &'static str,
+                        id: &'static str,
+                        at: ClockTime,
+                        set: fn(&mut NotifyPreferences, ClockTime)| {
             let page = page.clone();
             FormRow::new(label).control(widgets::time_popup(
                 id,
@@ -378,37 +406,40 @@ impl Render for NotificationsPage {
             .row(switch("notify-quiet", s::QUIET, p.quiet_enabled, |p, v| {
                 p.quiet_enabled = v
             }))
-            .row(time_row(s::QUIET_FROM, "notify-quiet-from", p.quiet_start, |p, t| {
-                p.quiet_start = t
-            }))
-            .row(time_row(s::QUIET_TO, "notify-quiet-to", p.quiet_end, |p, t| {
-                p.quiet_end = t
-            }))
+            .row(time_row(
+                s::QUIET_FROM,
+                "notify-quiet-from",
+                p.quiet_start,
+                |p, t| p.quiet_start = t,
+            ))
+            .row(time_row(
+                s::QUIET_TO,
+                "notify-quiet-to",
+                p.quiet_end,
+                |p, t| p.quiet_end = t,
+            ))
             .footer(s::QUIET_FOOTER);
         let groups_page = page.clone();
-        widgets::pane()
-            .child(remind)
-            .child(quiet)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .child(
-                        div().flex().child(
-                            push_button(
-                                "notify-groups-open",
-                                s::PER_GROUP_OPEN,
-                                PushStyle::Standard,
-                                PushSize::Regular,
-                                cx,
-                            )
-                            .on_click(move |_, window, cx| {
-                                Self::open_groups(groups_page.clone(), window, cx)
-                            }),
-                        ),
-                    )
-                    .children(widgets::native_status(&self.status, cx)),
-            )
+        widgets::pane().child(remind).child(quiet).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(
+                    div().flex().child(
+                        push_button(
+                            "notify-groups-open",
+                            s::PER_GROUP_OPEN,
+                            PushStyle::Standard,
+                            PushSize::Regular,
+                            cx,
+                        )
+                        .on_click(move |_, window, cx| {
+                            Self::open_groups(groups_page.clone(), window, cx)
+                        }),
+                    ),
+                )
+                .children(widgets::native_status(&self.status, cx)),
+        )
     }
 }

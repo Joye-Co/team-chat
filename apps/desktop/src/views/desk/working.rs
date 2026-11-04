@@ -14,7 +14,10 @@ use crate::{
     data::Millis,
     ui::{
         MemberAvatar,
-        native::{InspectorSection, NativeType as _, determinate_bar, inspector_column, metrics, native_colors},
+        native::{
+            InspectorSection, NativeType as _, determinate_bar, inspector_column, metrics,
+            native_colors,
+        },
     },
     views::{group_page::rows::line, shell::clock},
 };
@@ -79,13 +82,7 @@ pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) 
     col.into_any_element()
 }
 
-fn run_block(
-    i: usize,
-    r: &RunCard,
-    snap: &Snapshot,
-    services: &Services,
-    cx: &App,
-) -> AnyElement {
+fn run_block(i: usize, r: &RunCard, snap: &Snapshot, services: &Services, cx: &App) -> AnyElement {
     let k = native_colors(cx);
     let member = snap.member(&r.run.bot_id);
     let (n, m) = r.step();
@@ -130,22 +127,12 @@ fn run_block(
                         .child(format!("{n}/{m}")),
                 ),
         )
-        .children(detail.map(|d| {
-            line(d)
-                .pl(px(24.))
-                .n_subheadline()
-                .text_color(k.secondary)
-        }))
-        .child(
-            div()
-                .pl(px(24.))
-                .pt(px(4.))
-                .child(determinate_bar(
-                    if m == 0 { 0. } else { n as f32 / m as f32 },
-                    Some(k.blue),
-                    cx,
-                )),
-        )
+        .children(detail.map(|d| line(d).pl(px(24.)).n_subheadline().text_color(k.secondary)))
+        .child(div().pl(px(24.)).pt(px(4.)).child(determinate_bar(
+            if m == 0 { 0. } else { n as f32 / m as f32 },
+            Some(k.blue),
+            cx,
+        )))
         .on_click(move |_, _, cx| {
             let (g, t, id) = (g.clone(), t.clone(), id.clone());
             nav.update(cx, |nav, cx| {

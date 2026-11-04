@@ -19,7 +19,7 @@ export const Labels = z.array(Label).max(MAX_LABELS);
 export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
-export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output"] as const;
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume"] as const;
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -251,6 +251,8 @@ export const RunAssignFrame = z.object({
   sessionUpload: SessionUpload.optional(),
   /** 1.1: "aside" = a read-only side chat run. Sent only to a daemon with feature "aside". */
   kind: z.string().min(1).max(32).optional(),
+  /** 1.1 (feature "resume"): the CLI session of the topic's last run on this machine, to continue. */
+  resumeSessionId: z.string().min(1).max(128).optional(),
 });
 export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
 
@@ -300,6 +302,8 @@ export const RunAnswerFrame = z.object({
   eventId: Id.optional(),
   /** The block the answer names, as it was at `source.rev` (the CLI has no copy of the card). */
   block: z.json().optional(),
+  /** A poll that shows counts only: the votes per option now; `value`/`inputs` are then absent. */
+  tally: z.record(z.string(), z.int().nonnegative()).optional(),
 });
 export type RunAnswerFrame = z.infer<typeof RunAnswerFrame>;
 export const RunInteractionSource = z.discriminatedUnion("kind", [

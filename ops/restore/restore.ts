@@ -142,13 +142,32 @@ export function copiedId(toGroup: string, oldId: string): string {
   return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(oldId) ? oldId.slice(0, 10) + tail.slice(0, 16) : tail;
 }
 
+/** Keys whose string values are file ids (attachments, 产出 version files, media). */
+const FILE_ID_KEYS = new Set(["fileId", "posterFileId", "peaksFileId", "transcriptFileId", "thumbFileId"]);
+
+/** Every file id the value names under a `FILE_ID_KEYS` key, at any depth. */
+export function fileIdsIn(v: unknown, out: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(v)) for (const x of v) fileIdsIn(x, out);
+  else if (v && typeof v === "object") {
+    for (const [k, x] of Object.entries(v)) {
+      if (FILE_ID_KEYS.has(k) && typeof x === "string" && x !== "") out.add(x);
+      else fileIdsIn(x, out);
+    }
+  }
+  return out;
+}
+
+/** The kind of each id a copy maps (for the copy-files admin call). */
+export type CopyKinds = { topics: Set<string>; files: Set<string>; artifacts: Set<string> };
+
 /**
  * The id map of a copy into another group: the source group id to the target id, and every
- * topic, message and 产出 id the archived events create to a new id. Clients key topics,
- * messages and 产出 by id alone, so a copy next to its source must not reuse them. File ids stay:
- * the file rows in D1 belong to the source group.
+ * topic, message, 产出 and file id the archived events name to a new id. Clients key topics,
+ * messages and 产出 by id alone, so a copy next to its source must not reuse them. Files get new
+ * ids too (GAPS SF-6): the copy gets its own D1 rows and R2 objects (`copy-files`), so its
+ * attachments and 产出 open. `kinds`, when given, collects which ids are topics, files and 产出.
  */
-export function copyIdMap(fromGroup: string, toGroup: string, ndjsonTexts: string[]): Map<string, string> {
+export function copyIdMap(fromGroup: string, toGroup: string, ndjsonTexts: string[], kinds?: CopyKinds): Map<string, string> {
   const map = new Map<string, string>([[fromGroup, toGroup]]);
   const add = (id: unknown) => {
     if (typeof id === "string" && id !== "" && !map.has(id)) map.set(id, copiedId(toGroup, id));
@@ -157,9 +176,18 @@ export function copyIdMap(fromGroup: string, toGroup: string, ndjsonTexts: strin
     for (const line of text.split("\n")) {
       if (line.trim() === "") continue;
       const e = JSON.parse(line) as { type?: string; topicId?: unknown; messageId?: unknown; data?: any };
-      if (e.type === "topic.created") add(e.data?.topic?.id);
-      else if (e.type === "message.created") add(e.data?.message?.id);
-      else if (e.type === "artifact.created") add(e.data?.artifact?.id);
+      if (e.type === "topic.created") {
+        add(e.data?.topic?.id);
+        if (typeof e.data?.topic?.id === "string") kinds?.topics.add(e.data.topic.id);
+      } else if (e.type === "message.created") add(e.data?.message?.id);
+      else if (e.type === "artifact.created") {
+        add(e.data?.artifact?.id);
+        if (typeof e.data?.artifact?.id === "string") kinds?.artifacts.add(e.data.artifact.id);
+      }
+      for (const f of fileIdsIn(e.data)) {
+        add(f);
+        kinds?.files.add(f);
+      }
     }
   }
   return map;
@@ -176,23 +204,26 @@ function remapGzip(text: string, map: Map<string, string>, ndjson: boolean): Uin
 }
 
 const GROUP_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Files and 产出 per copy-files call (server COPY_FILES_MAX). */
+const COPY_CHUNK = 20;
 
 export async function restoreGroup(
   source: ArchiveSource,
   target: AdminApi,
   groupId: string,
   opts: { date?: string; fromGroup?: string } = {},
-): Promise<{ groupId: string; fromGroup: string; files: number; imported: number; lastSeq: number; stateRows: number; fileRows: number }> {
+): Promise<{ groupId: string; fromGroup: string; files: number; imported: number; lastSeq: number; stateRows: number; fileRows: number; copiedFiles: number }> {
   const fromGroup = opts.fromGroup ?? groupId;
   if (!GROUP_ID.test(groupId) || !GROUP_ID.test(fromGroup)) fail("a group id has letters, digits, - and _ only");
   const retarget = fromGroup !== groupId;
   const keys = await source.list(`archive/groups/${fromGroup}/`);
   if (retarget && !keys.some((k) => parseGroupFileKey(k))) fail(`no archived events of group ${fromGroup} in ${source.describe}`);
   let map: Map<string, string> | null = null;
+  const kinds: CopyKinds = { topics: new Set(), files: new Set(), artifacts: new Set() };
   if (retarget) {
     const texts: string[] = [];
     for (const k of keys) if (parseGroupFileKey(k)) texts.push(gunzipText(await source.get(k)));
-    map = copyIdMap(fromGroup, groupId, texts);
+    map = copyIdMap(fromGroup, groupId, texts, kinds);
   }
   const read = async (k: string, ndjson: boolean) => {
     const bytes = await source.get(k);
@@ -228,13 +259,30 @@ export async function restoreGroup(
     });
     stateRows = r.rows;
   }
+  // A copy gets its own D1 file and 产出 rows and R2 objects under the new ids, before the room
+  // refills its file records from D1.
+  let copiedFiles = 0;
+  if (map && files.length > 0) {
+    const pairs = (ids: Set<string>) => [...ids].map((id) => [id, map!.get(id) as string] as [string, string]);
+    const topics = pairs(kinds.topics);
+    const fileList = pairs(kinds.files);
+    const artList = pairs(kinds.artifacts);
+    for (let i = 0; i < Math.max(fileList.length, artList.length); i += COPY_CHUNK) {
+      const r = await target.json<{ files: number; artifacts: number }>(`/v1/admin/import/groups/${groupId}/copy-files`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fromGroup, files: fileList.slice(i, i + COPY_CHUNK), artifacts: artList.slice(i, i + COPY_CHUNK), topics }),
+      });
+      copiedFiles += r.files;
+    }
+  }
   // Ready-file records (attachments and 产出 files) have no event: refill them from D1.
   let fileRows = 0;
   if (files.length > 0) {
     const r = await target.json<{ rows: number }>(`/v1/admin/import/groups/${groupId}/files`, { method: "POST" });
     fileRows = r.rows;
   }
-  return { groupId, fromGroup, files: files.length, imported, lastSeq, stateRows, fileRows };
+  return { groupId, fromGroup, files: files.length, imported, lastSeq, stateRows, fileRows, copiedFiles };
 }
 
 export async function restoreEnv(

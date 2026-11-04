@@ -73,6 +73,7 @@ async function roomTables(gid: string) {
       mentions: q("SELECT * FROM mentions ORDER BY member_id, seq, message_id"),
       topicStates: q("SELECT * FROM topic_states ORDER BY member_id, topic_id"),
       prefs: q("SELECT * FROM member_prefs ORDER BY member_id"),
+      pageEvents: q("SELECT * FROM page_events ORDER BY event_id"),
       joined: q("SELECT member_id, joined_seq FROM room_members ORDER BY member_id"),
     };
   });
@@ -224,10 +225,17 @@ describe("restore", () => {
     await runInDurableObject(env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(gid)), (_o, state) => {
       state.storage.sql.exec("INSERT INTO member_prefs (member_id, muted, notify) VALUES (?, 1, 'none')", b.id);
       state.storage.sql.exec("UPDATE topic_states SET read_seq = 5 WHERE member_id = ?", b.id);
+      // The 产出 page log (GAPS SF-2) is room state too.
+      state.storage.sql.exec(
+        "INSERT INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, ack, at, name, payload) VALUES ('01PAGEEVENT0000000000000001', 'art', 1, ?, ?, 'emit', '{}', 1, 'pick', '{\"c\":1}')",
+        b.id,
+        a.id,
+      );
     });
     await runArchive(env, { skipD1: true });
     const original = await roomTables(gid);
     expect(original.prefs).toHaveLength(1);
+    expect(original.pageEvents).toHaveLength(1);
     expect(original.joined).toContainEqual({ member_id: joiner.id, joined_seq: joinedAt });
     const keys = await archivedKeys(`${GROUP_PREFIX}${gid}/`);
     expect(keys).toHaveLength(2);

@@ -88,6 +88,9 @@ pub fn bar_divider(cx: &App) -> Div {
     div().flex_none().w(px(1.)).h(px(16.)).bg(k.line_2)
 }
 
+/// What a collapse press does.
+type OnCollapse = Box<dyn Fn(&mut gpui::Window, &mut App)>;
+
 /// The side column of a page: `rail` fill, a hairline at its start and its
 /// own 52 pt header with a title and, when `on_collapse` is given, the
 /// collapse button.
@@ -96,7 +99,7 @@ pub fn aside(
     title: &str,
     width: Pixels,
     pad: Pixels,
-    on_collapse: Option<Box<dyn Fn(&mut gpui::Window, &mut App)>>,
+    on_collapse: Option<OnCollapse>,
     cx: &App,
 ) -> Stateful<Div> {
     let k = theme::colors(cx);

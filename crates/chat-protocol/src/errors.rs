@@ -27,6 +27,14 @@ pub struct ErrorBody {
         skip_serializing_if = "Option::is_none"
     )]
     pub reason: Option<String>,
+    /// 1.1, `rate_limited`: wait at least this long (ms) before the next try.
+    #[serde(
+        rename = "retryAfterMs",
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub retry_after_ms: Option<u64>,
 }
 
 /// A frame that could not be parsed or encoded. Codes match `parseFrame` in packages/protocol:

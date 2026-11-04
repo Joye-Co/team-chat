@@ -73,6 +73,7 @@ impl OutboxState {
 
 /// One queued write. Sends are keyed by their `clientMsgId`. New optional fields must
 /// use `#[serde(default)]` so rows written by older builds still decode.
+#[allow(clippy::large_enum_variant)] // one row per queued write; boxing changes every match on it
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OutboxOp {
@@ -105,6 +106,9 @@ pub enum OutboxOp {
         /// 1.1: refs to parts (引用提问).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         block_refs: Option<Vec<crate::proto::BlockRefInput>>,
+        /// 1.1: the side chat answer this send posts to its source topic.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_aside: Option<crate::proto::AsideOrigin>,
         /// A follow-up into a topic that is still being started: the `clientMsgId` of the
         /// topic's first message. The row waits until that message is acked or applied, and
         /// then gets the topic id.
@@ -173,6 +177,9 @@ pub enum OutboxOp {
         inputs: Option<AnswerInputs>,
         #[serde(default)]
         edited_values: Option<AnswerEdits>,
+        /// sha256 of the draft text the answer approves (rows queued before 1.1.0 have none).
+        #[serde(default)]
+        content_hash: Option<String>,
     },
     /// 1.1: an event an interactive 产出 page sent.
     ArtifactEvent {
@@ -326,13 +333,14 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
 }
 
 pub(crate) const GROUP_COLS: &str = "id, kind, name, member_ids, created_by, created_at, last_seq, read_seq, \
-     unread, mentions, last_activity_at, muted, notify";
+     unread, mentions, last_activity_at, muted, notify, purpose";
 
 pub(crate) fn group_from_row(r: &Row<'_>) -> rusqlite::Result<GroupRow> {
     let ids: String = r.get(3)?;
     let notify: Option<String> = r.get(12)?;
     Ok(GroupRow {
         group: Group {
+            purpose: r.get(13)?,
             id: r.get(0)?,
             kind: enum_from(r.get(1)?)?,
             name: r.get(2)?,

@@ -796,9 +796,9 @@ impl TimelineView {
                                 cx,
                             );
                         }))
-                })),
+                }))
+                .into_any_element(),
         )
-        .map(IntoElement::into_any_element)
     }
 }
 

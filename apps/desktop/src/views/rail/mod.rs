@@ -27,8 +27,8 @@ use std::{collections::HashSet, rc::Rc};
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ListAlignment, ListState, ParentElement, Render, SharedString,
-    Styled, Subscription, WeakEntity, Window, div, list, px,
+    ListAlignment, ListState, ParentElement, Render, SharedString, Styled, Subscription,
+    WeakEntity, Window, div, list, px,
 };
 use gpui_component::{
     Sizable as _,
@@ -106,7 +106,8 @@ pub struct RailView {
 
 impl RailView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder(common::SEARCH_PLACEHOLDER));
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(common::SEARCH_PLACEHOLDER));
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, _: &Changes, cx| {
                 this.cache = None;
@@ -397,30 +398,30 @@ impl Render for RailView {
         .size_full();
         // The same three destinations in every sidebar style (§9.1).
         let destinations: Vec<AnyElement> = vec![
-                self.destination(
-                    "rail-desk",
-                    Sf::Desk,
-                    c::RAIL_DESK,
-                    page == Page::Desk,
-                    Some(asks),
-                    |n, cx| n.open_desk(cx),
-                ),
-                self.destination(
-                    "rail-artifacts",
-                    Sf::Outputs,
-                    c::RAIL_ARTIFACTS,
-                    matches!(page, Page::Artifacts | Page::Artifact),
-                    None,
-                    |n, cx| n.open_artifacts(cx),
-                ),
-                self.destination(
-                    "rail-members",
-                    Sf::Members,
-                    c::RAIL_MEMBERS,
-                    page == Page::Members,
-                    None,
-                    |n, cx| n.open_members(None, cx),
-                ),
+            self.destination(
+                "rail-desk",
+                Sf::Desk,
+                c::RAIL_DESK,
+                page == Page::Desk,
+                Some(asks),
+                |n, cx| n.open_desk(cx),
+            ),
+            self.destination(
+                "rail-artifacts",
+                Sf::Outputs,
+                c::RAIL_ARTIFACTS,
+                matches!(page, Page::Artifacts | Page::Artifact),
+                None,
+                |n, cx| n.open_artifacts(cx),
+            ),
+            self.destination(
+                "rail-members",
+                Sf::Members,
+                c::RAIL_MEMBERS,
+                page == Page::Members,
+                None,
+                |n, cx| n.open_members(None, cx),
+            ),
         ];
         let new_topic = self
             .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx)

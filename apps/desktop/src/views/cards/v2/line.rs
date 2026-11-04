@@ -12,7 +12,7 @@ use crate::{
     copy::{cards_v2 as c, fill},
     data::cards_v2::{CardActionKind, CardIntent, CardV2Block, CardV2Message},
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, ButtonKind, Sym, Ring, native::NativeType as _},
+    ui::{self, ButtonKind, Ring, Sym, native::NativeType as _},
 };
 
 /// The state overview: the strip, then the title on one line.
@@ -159,8 +159,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                             },
                             cx,
                         )
-                        .flex_1()
-                        ;
+                        .flex_1();
                         b.on_click(move |_, window, cx| a.press(&action, window, cx))
                     })),
             )

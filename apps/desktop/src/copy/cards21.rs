@@ -237,7 +237,7 @@ crate::copy! {
     BAND_STEP = "{n}/{total}",
     // v11/pb-cards: the notes scene.
     I_NOTES_OFFLINE = "成员不在线",
-    I_NOTES_BUSY = "成员接不了",
+    I_NOTES_BUSY = "这一块不能操作",
     I_NOTES_DRAFT = "你在写的时候卡片变了",
     I_NOTES_REPLY = "成员回在了下面",
     // --- v12/fx-cards ---

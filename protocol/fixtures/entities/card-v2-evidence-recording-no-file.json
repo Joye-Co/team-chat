@@ -1,0 +1,22 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a recording names its file",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "done",
+    "title": "修好了",
+    "fallback": "修好了",
+    "blocks": [
+      {
+        "type": "evidence",
+        "id": "rec",
+        "label": "录屏",
+        "recording": {
+          "durationMs": 1
+        }
+      }
+    ]
+  }
+}

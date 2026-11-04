@@ -155,7 +155,7 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
       case "card": {
         for (const [k, v] of Object.entries(op.props)) {
           if (v === undefined) continue;
-          if (k === "ask" && v === null) delete d.ask;
+          if ((k === "ask" || k === "status") && v === null) delete d[k];
           else d[k] = structuredClone(v);
         }
         break;
@@ -171,7 +171,8 @@ export function checkCard(raw: unknown): CardV2 {
   const r = CardV2.safeParse(raw);
   if (r.success) return r.data;
   const issue = r.error.issues.find((x) => schemaReason({}, x.message)) ?? r.error.issues[0];
-  const reason = schemaReason(raw as Record<string, unknown>, issue?.message) ?? schemaReason({ cardV2: raw }, issue?.message);
+  const reason =
+    schemaReason(raw as Record<string, unknown>, issue?.message) ?? schemaReason({ cardV2: raw }, issue?.message, ["cardV2", ...(issue?.path ?? [])]);
   if (/exceeds 64 KiB/.test(issue?.message ?? "")) throw new ApiError("too_large", "card exceeds 64 KiB");
   throw new ApiError("invalid", `the patched card: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), reason);
 }

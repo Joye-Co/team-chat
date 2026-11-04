@@ -1,0 +1,16 @@
+{
+  "kind": "PutArtifactMediaRequest",
+  "valid": true,
+  "value": {
+    "media": {
+      "kind": "video",
+      "mime": "video/mp4",
+      "bytes": 48000000,
+      "width": 1920,
+      "height": 1080,
+      "duration": 95.5,
+      "posterFileId": "01JC0FIL00000000000POSTER1",
+      "preview": "ready"
+    }
+  }
+}

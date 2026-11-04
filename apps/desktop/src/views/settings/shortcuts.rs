@@ -2,9 +2,7 @@
 //! one group per menu. It reads the menus and the key bindings themselves,
 //! so it never disagrees with the menu bar.
 
-use gpui::{
-    App, Context, IntoElement, ParentElement, Render, SharedString, Window, div, px,
-};
+use gpui::{App, Context, IntoElement, ParentElement, Render, SharedString, Window, div, px};
 
 use super::widgets;
 use crate::{
@@ -113,11 +111,12 @@ impl Render for ShortcutsPage {
         let n = groups.len();
         widgets::pane()
             .children(groups.into_iter().enumerate().map(|(ix, g)| {
-                let form = GroupedForm::new().header(g.menu).rows(
-                    g.rows
-                        .into_iter()
-                        .map(|(name, keys)| FormRow::new(name).value(keys, cx).min_height(px(30.))),
-                );
+                let form =
+                    GroupedForm::new()
+                        .header(g.menu)
+                        .rows(g.rows.into_iter().map(|(name, keys)| {
+                            FormRow::new(name).value(keys, cx).min_height(px(30.))
+                        }));
                 if ix + 1 == n {
                     form.footer(s::SHORTCUTS_FOOTER)
                 } else {

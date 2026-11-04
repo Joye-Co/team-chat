@@ -78,6 +78,23 @@ pub struct FileRef {
         skip_serializing_if = "Option::is_none"
     )]
     pub media: Option<MediaInfo>,
+    /// 1.1: the frame of a 产出 version this file was taken from (把这一帧发到话题).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source: Option<AttachmentSource>,
+}
+
+/// 1.1: where an attachment was taken from: a 产出 version at `t` seconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentSource {
+    pub artifact_id: String,
+    pub version: u32,
+    /// Seconds into the version (video, audio, page recording).
+    pub t: serde_json::Number,
 }
 
 /// A reference to one version of a 产出.
@@ -126,6 +143,13 @@ impl FileRef {
         check_mime("attachments.mime", &self.mime)?;
         check_positive("attachments.width", self.width)?;
         check_positive("attachments.height", self.height)?;
+        if let Some(src) = &self.source {
+            check_id("attachments.source.artifactId", &src.artifact_id)?;
+            check_positive("attachments.source.version", Some(src.version))?;
+            if src.t.as_f64().is_none_or(|t| t < 0.0) {
+                return fail("attachments.source.t", "seconds, not negative");
+            }
+        }
         check_sha256("attachments.sha256", &self.sha256)
     }
 }
@@ -208,6 +232,14 @@ pub struct BlockRefInput {
         skip_serializing_if = "Option::is_none"
     )]
     pub artifact: Option<ArtifactVersionRef>,
+    /// 1.1: the group of the source when it is not this group: a side chat (单独问) quoting a
+    /// message or 产出 of the group it is about. The sender must be a member of both.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_group_id: Option<String>,
     /// The Card v2 `rev` the sender saw.
     #[serde(
         default,
@@ -274,6 +306,9 @@ impl BlockRefInput {
         if let Some(a) = &self.artifact {
             check_id("blockRefs.artifact.artifactId", &a.artifact_id)?;
             check_positive("blockRefs.artifact.version", Some(a.version))?;
+        }
+        if let Some(g) = &self.source_group_id {
+            check_id("blockRefs.sourceGroupId", g)?;
         }
         check_positive("blockRefs.cardRev", self.card_rev)?;
         if !is_block_ref_id(&self.block_id) {

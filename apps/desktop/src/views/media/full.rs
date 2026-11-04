@@ -737,6 +737,14 @@ const PLAYER_CAPS: artifact_view::Capabilities = artifact_view::Capabilities {
     emit: true,
     ..artifact_view::Capabilities::NONE
 };
+// The player only reports its position: it emits, and asks, reads and points at nothing.
+const _: () = assert!(
+    PLAYER_CAPS.emit
+        && !PLAYER_CAPS.ask
+        && !PLAYER_CAPS.get_data
+        && !PLAYER_CAPS.r#ref
+        && !PLAYER_CAPS.live_data
+);
 
 fn sanitize(id: &str) -> String {
     id.chars()
@@ -1715,7 +1723,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
 
 #[cfg(test)]
 mod tests {
-    use super::{PLAYER_CAPS, media_ext, player_html, sections, store::Cue};
+    use super::{media_ext, player_html, sections, store::Cue};
 
     #[test]
     fn chapter_text_stays_data_in_the_player_page() {
@@ -1741,9 +1749,6 @@ mod tests {
 
     #[test]
     fn the_player_only_reports_its_position() {
-        assert!(PLAYER_CAPS.emit);
-        assert!(!PLAYER_CAPS.ask && !PLAYER_CAPS.get_data && !PLAYER_CAPS.r#ref);
-        assert!(!PLAYER_CAPS.live_data);
         let ext = |p: &str| media_ext(std::path::Path::new(p));
         assert_eq!(ext("clip.MOV"), "mov");
         assert_eq!(ext("clip.mp4\"><b"), "mp4");

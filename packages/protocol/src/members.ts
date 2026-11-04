@@ -33,10 +33,25 @@ export const UpdateGroupPrefsRequest = z.object({
 export type UpdateGroupPrefsRequest = z.infer<typeof UpdateGroupPrefsRequest>;
 
 /**
- * `PATCH /v1/groups/:id`: renames a group (not a DM). The server trims the name and collapses
- * runs of whitespace to one space, then checks the length (1..64). Response: `GroupSummary`.
+ * The whitespace both sides collapse in group names and purposes: Unicode White_Space, the
+ * set of Rust `char::is_whitespace` (JS `\s` adds U+FEFF and leaves out U+0085).
  */
-export const UpdateGroupRequest = z.object({ name: Name });
+export const GROUP_TEXT_SPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/gu;
+/** Trims and collapses every run of `GROUP_TEXT_SPACE` to one space (Rust `normalize_group_text`). */
+export function normalizeGroupText(raw: string): string {
+  return raw.replace(GROUP_TEXT_SPACE, " ").replace(/^ | $/g, "");
+}
+/** Max code points of a group's purpose line (1.1). */
+export const MAX_GROUP_PURPOSE_CHARS = 200;
+
+/**
+ * `PATCH /v1/groups/:id`: renames a group (not a DM) and/or sets its purpose line (1.1). The
+ * server normalizes both with `normalizeGroupText`, then checks the name (1..64) and the purpose
+ * (0..200; empty clears it). At least one of them. Response: `GroupSummary`.
+ */
+export const UpdateGroupRequest = z
+  .object({ name: Name.optional(), purpose: z.string().max(4 * MAX_GROUP_PURPOSE_CHARS).optional() })
+  .refine((r) => r.name !== undefined || r.purpose !== undefined, { message: "name or purpose is required" });
 export type UpdateGroupRequest = z.infer<typeof UpdateGroupRequest>;
 
 /** Why an event should notify the receiving member. */

@@ -21,7 +21,7 @@ use super::{
 use crate::{
     copy::diagrams as c,
     theme::{self, Type as _, radius, space},
-    ui::{self, Sym, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
 };
 
 /// Largest inline height before the image scales down or is cut.
@@ -365,14 +365,11 @@ fn header(
             )
             .when_some(viewer, |el, (spec, n, focus)| {
                 el.child(
-                    ui::icon_button_sm(
-                        ElementId::Name(format!("dzoom-{id}").into()),
-                        Sym::Expand,
-                    )
-                    .named(c::ZOOM_IN)
-                    .on_click(move |_, window, cx| {
-                        open_viewer(&spec, &n, focus.clone(), window, cx)
-                    }),
+                    ui::icon_button_sm(ElementId::Name(format!("dzoom-{id}").into()), Sym::Expand)
+                        .named(c::ZOOM_IN)
+                        .on_click(move |_, window, cx| {
+                            open_viewer(&spec, &n, focus.clone(), window, cx)
+                        }),
                 )
             })
         })

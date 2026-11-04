@@ -33,7 +33,13 @@ pub struct Fit {
 impl Fit {
     /// The pane laid out at `wanted` (toolbar plus pane). Changes the window
     /// height after this frame when it differs from the window's.
-    pub fn measured(&self, wanted: Pixels, handle: AnyWindowHandle, window: &mut Window, cx: &mut App) {
+    pub fn measured(
+        &self,
+        wanted: Pixels,
+        handle: AnyWindowHandle,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let floor = if window.has_active_dialog(cx) {
             SHEET_FLOOR.with(|f| f.get())
         } else {
@@ -44,7 +50,9 @@ impl Fit {
             .clamp(f32::from(MIN_HEIGHT), f32::from(MAX_HEIGHT))
             .round();
         let now = f32::from(window.viewport_size().height);
-        if (target - now).abs() < 1. || (target - self.applied.get()).abs() < 1. && self.fitted.get() {
+        if (target - now).abs() < 1.
+            || (target - self.applied.get()).abs() < 1. && self.fitted.get()
+        {
             return;
         }
         self.applied.set(target);
@@ -52,9 +60,9 @@ impl Fit {
         // After this frame and outside the window update: AppKit calls back
         // into the window while it resizes.
         cx.spawn(async move |cx| {
-            let Ok(Some((ns_window, now))) =
-                handle.update(cx, |_, window, _| ns_window(window).map(|w| (w, window.viewport_size().height)))
-            else {
+            let Ok(Some((ns_window, now))) = handle.update(cx, |_, window, _| {
+                ns_window(window).map(|w| (w, window.viewport_size().height))
+            }) else {
                 return;
             };
             set_height(ns_window, now, px(target), animate);

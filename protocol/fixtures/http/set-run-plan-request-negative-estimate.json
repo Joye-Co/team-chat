@@ -1,0 +1,14 @@
+{
+  "kind": "SetRunPlanRequest",
+  "valid": false,
+  "description": "estimateMs is not negative",
+  "value": {
+    "plan": [
+      {
+        "text": "读代码",
+        "state": "current",
+        "estimateMs": -1
+      }
+    ]
+  }
+}

@@ -245,13 +245,19 @@ pub struct MachineScreen {
 }
 
 /// One item of 验收标准, reported by the run.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AcceptanceItem {
     pub text: String,
     /// `None` while not checked yet.
     pub met: Option<bool>,
     /// What the run measured (`现在 57 fps`), when it said.
     pub evidence: Option<String>,
+    /// A file of the 话题 the run gave as proof, when the 话题 has it.
+    pub evidence_file: Option<crate::data::FileAttachment>,
+    /// A web page the run gave as proof.
+    pub evidence_url: Option<String>,
+    /// A 产出 version the run gave as proof: id, version and title.
+    pub evidence_artifact: Option<(String, u32, String)>,
 }
 
 /// A machine as the 成员 page and the topic rail show it.
@@ -283,6 +289,8 @@ pub struct MemberStats {
     pub done_this_week: u32,
     pub artifacts_this_week: u32,
     pub cost_cents_this_week: Option<u64>,
+    /// The currency of [`MemberStats::cost_cents_this_week`] (never converted).
+    pub cost_currency: Currency,
     pub reports_to: Option<MemberId>,
     /// 需要批准的事 (merge to main, release to production…).
     pub needs_approval: Vec<String>,

@@ -41,8 +41,11 @@ the process list or the shell history.
    reports: the release version when HEAD has a release tag `v<semver>`, otherwise the
    12-character commit (`-dirty` when `server/`, `packages/` or `protocol/` have uncommitted
    changes); `DEPLOY_VERSION=<v>` overrides it. See it first with
-   `scripts/deploy-server.sh staging --print-version`; check it after with
-   `curl -s https://chat-api-staging.huangdeshiou.workers.dev/v1/health`.
+   `scripts/deploy-server.sh staging --print-version`. A `0.0.0*` version is refused, and the
+   script fails unless `/v1/health` reports the deployed version within 60 seconds; check it
+   again any time with `scripts/deploy-server.sh staging --check-health --expect <v>`. Before a
+   release, `scripts/release-check.sh <v> --env staging` checks the versions, the changelog and
+   the notes as well.
 4. Wait for two green monitor checks of staging (10 minutes, no alert in the `运维` group), or run
    the end-to-end clients in `tools/e2e` against staging.
 5. Production: `cd server && bun run deploy:production`.
@@ -75,6 +78,27 @@ Done for staging and production on 2026-11-03 (bot `监测`, ops group `运维`,
    topic of `运维`.
 6. Before the first deploy, run one archive pass on each env (Daily archive, "Run it now"): a new
    env has no complete archive, and the monitor raises **备份过期** after two checks.
+
+## Quality smoke
+
+`bun scripts/staging-smoke.ts [--env staging] [--upload-mb 100]` measures the V1 bar of
+[docs/PRODUCT.md](PRODUCT.md#v1-production-use-by-5-people-and-5-bots) against a deployed env with
+the owner token and a bot token (it uses one group named `smoke`, made once). Report:
+`.tmp/staging-smoke/report.json`, no tokens. Run it after each staging deploy, before production.
+
+| Check | Bar | Staging, 2026-11-04 (server 1.0.0) |
+| --- | --- | --- |
+| Delivery, owner send to the bot's live event | p95 < 300 ms | p95 91 ms (20 samples; WebSocket ping 21 ms) |
+| Search for a Chinese two-character word | p95 < 300 ms | p95 66 ms (20 samples, one group and all groups) |
+| Catch-up: hello, then every group fetched from seq 0 | < 2 s | 498 ms (6 groups, 136 events) |
+| Reconnect with a cursor after 5 missed messages | none lost or doubled | 0 lost, 0 doubled |
+| Live notification for a mention | `notify: "mention"` | `mention` |
+| 100 MB upload, read back | same size and SHA-256 | upload 31 s, download 3.8 s, same bytes |
+
+Not proved by this script, so not claimed as measured: the reconnect after macOS sleep and the
+notification banner on screen (app behavior, checked by hand on the app), a 10,000-message topic
+opening in under 100 ms, 60 fps scrolling and cold start under 1 s (desktop, not measured on
+1.1.0). The catch-up row fetches the whole staging log, which is smaller than a busy team day.
 
 ## Roll back
 
@@ -239,6 +263,11 @@ The cron `0 3 * * *` on `chat-api-*` writes to the env's own bucket:
 idempotent: run the same command again after a failure. The target must run the same or a newer
 server version, with its D1 migrations applied.
 
+Last real-archive check: 2026-11-04. Staging's archive (`lastRun` 2026-11-04 03:02 UTC, complete,
+0 failed) was copied with `restore.ts fetch --from staging` (165 objects) and restored with
+`restore.ts env --from-dir` into an empty local `wrangler dev`: 418 D1 rows, 18 groups,
+1,568 events, 0 failures.
+
 **One group** (its room lost or damaged; its D1 row and members exist in the target):
 
 1. If the room still has data, it cannot be imported over: use point-in-time recovery, or copy
@@ -257,14 +286,17 @@ come back next to it.
    so only the members you add see the copy.
 2. `bun ops/restore/restore.ts group --from production --to production --group <targetGroupId> --from-group <sourceGroupId>`
    (add `--date YYYY-MM-DD` for an older room state). It reads every archive file of the source
-   group, gives the target group id, and new ids to every topic, message and 产出 of the source
-   (the app keys them by id, so a copy next to its source must not reuse them), keeps the seqs,
-   then writes the events and the room state into the target. A re-run makes the same ids and
-   imports nothing twice. The answer has `fromGroup`, `imported` and `lastSeq`.
-3. Limits: attachments and 产出 are listed in the copy but do not open (404): their D1 rows and
-   file bytes in R2 belong to the source group, and the import cannot move them. Links to the
-   source in message text are not rewritten. Member read cursors of the copy start at 0 (all
-   unread). Look at attachments in the source group while it exists.
+   group, gives the target group id, and new ids to every topic, message, 产出 and file of the
+   source (the app keys them by id, so a copy next to its source must not reuse them), keeps the
+   seqs, then writes the events and the room state into the target. Then
+   `POST /v1/admin/import/groups/<target>/copy-files` (20 files and 产出 per call) copies the D1
+   file and 产出 rows and the R2 bytes of the source under the new ids, so attachments and 产出
+   of the copy open. A re-run makes the same ids, imports nothing twice and copies no byte twice.
+   The answer has `fromGroup`, `imported`, `lastSeq` and `copiedFiles`.
+3. Limits: the source group's D1 rows and R2 objects must be in the target env (same env, or
+   after a whole-env restore); files whose source row or object is gone are counted as `missing`
+   and stay 404 in the copy. Links to the source in message text are not rewritten. Member read
+   cursors of the copy start at 0 (all unread).
 4. The drill tests this (below).
 
 **A whole environment** (lost D1 and rooms, or a copy into a fresh env):
@@ -298,8 +330,9 @@ and every 产出 with its files as two members see them. It also checks that the
 text is in no archive file and that B takes a new message, an old attachment and a new 产出
 version. Then it copies the group's archive into a new empty group (`--from-group`), runs the copy
 twice, and checks the copy: same events, topic titles and messages, no reused topic or message
-id, no source group id, the source group unchanged, and a new message in the copy continues the
-seq (`groupCopy` in the report). Exit 0 means all pass; the report is
+id, no source group id, the source group unchanged, the copy's 产出 open with the same pages
+and its attachment downloads under a new id with the right SHA-256, and a new message in the
+copy continues the seq (`groupCopy` in the report). Exit 0 means all pass; the report is
 `ops/restore/.drill/report.json`. Other agents run local stacks at the same time: pass a free
 `--port` (the inspector uses that port plus 1000).
 
@@ -351,6 +384,7 @@ curl -s -X POST -H @<(printf 'authorization: Bearer %s' "$(cat $S)") \
   `MONITOR_ADMIN_SECRET` is not set (the route is off); `429` one test per minute; `503 no_sink`
   the chosen env failed its check (the reason is in `message`); `502 post_failed`.
 - Check the card in `运维` of that env, and that the people on call got a mention notification.
+- Last run: 2026-11-04, `{"sink":"staging"}` from the deployed Worker answered `200`.
 - First time: `(umask 077; openssl rand -base64 33 | tr -d '\n=' | tr '+/' '-_' > $S)`, then
   `cd ops/monitor && bunx wrangler secret put MONITOR_ADMIN_SECRET < $S`. Rotate the same way.
 - First run: 2026-11-02 23:34 UTC, to staging, card posted in `运维` with one

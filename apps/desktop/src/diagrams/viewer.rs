@@ -20,7 +20,7 @@ use super::{
 use crate::{
     copy::diagrams as c,
     theme::{self, Type as _, radius, space},
-    ui::{self, Sym, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
 };
 
 pub const MIN_ZOOM: f32 = 0.25;
@@ -274,33 +274,33 @@ impl DiagramViewer {
             .child(
                 ui::icon_button_sm("dv-fit", Sym::Scan)
                     .named(c::FIT)
-                .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
                 ui::icon_button_sm("dv-src", Sym::Code)
                     .named(c::VIEW_SOURCE)
-                .selected(self.show_source)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_source = !this.show_source;
-                    cx.notify();
-                })),
+                    .selected(self.show_source)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_source = !this.show_source;
+                        cx.notify();
+                    })),
             )
             .child(
                 ui::icon_button_sm("dv-copy", Sym::Copy)
                     .named(c::COPY_SOURCE)
-                .on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
-                }),
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
+                    }),
             )
             .child(
                 ui::icon_button_sm("dv-img", Sym::Image)
                     .named(c::COPY_IMAGE)
-                .disabled(image.is_none())
-                .on_click(move |_, _, cx| {
-                    if let Some(i) = &image {
-                        cx.write_to_clipboard(ClipboardItem::new_image(i));
-                    }
-                }),
+                    .disabled(image.is_none())
+                    .on_click(move |_, _, cx| {
+                        if let Some(i) = &image {
+                            cx.write_to_clipboard(ClipboardItem::new_image(i));
+                        }
+                    }),
             )
             .child(
                 ui::icon_button_sm("dv-close", Sym::Close)

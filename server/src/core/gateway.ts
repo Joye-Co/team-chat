@@ -61,6 +61,8 @@ export interface SocketState {
   client?: { name: string; version: string };
   /** 1.1: `hello.features` of this socket (e.g. "interact/1"). */
   features?: string[];
+  /** 1.1: `hello.supportedCatalogs` of this socket (e.g. "tc.card/2.1"). */
+  catalogs?: string[];
 }
 
 /**
@@ -75,13 +77,53 @@ export function featureTransient(feature: string, event: Record<string, unknown>
 }
 
 /** The text of `frame` for a socket with these features, or null when it must not get it. */
-function frameText(frame: unknown, features: string[] | undefined): string | null {
+function frameText(frame: unknown, features: string[] | undefined, catalogs?: string[]): string | null {
   if (frame && typeof frame === "object" && ONLY_FEATURE in frame) {
     const { [ONLY_FEATURE]: need, ...rest } = frame as Record<string, unknown>;
     if (!features?.includes(need as string)) return null;
     return JSON.stringify(rest);
   }
-  return featureAllows(features, frame) ? JSON.stringify(frame) : null;
+  if (!featureAllows(features, frame)) return null;
+  return JSON.stringify(withoutV1Fallback(frame, catalogs) ?? frame);
+}
+
+/** The catalog of a Card v2 (absent = tc.card/2.0). */
+function catalogOf(card: unknown): string | undefined {
+  if (!card || typeof card !== "object") return undefined;
+  const c = (card as { catalog?: unknown }).catalog;
+  return typeof c === "string" ? c : "tc.card/2.0";
+}
+
+/**
+ * A live `message.created` / `message.updated` event without the derived v1 `card` for a socket
+ * whose `hello.supportedCatalogs` has the catalog of the event's `cardV2`: that client renders
+ * the v2 card, so the v1 fallback is only for the others. Undefined when nothing changes.
+ */
+function withoutV1Fallback(frame: unknown, catalogs: string[] | undefined): unknown {
+  if (!catalogs || catalogs.length === 0 || !frame || typeof frame !== "object") return undefined;
+  const f = frame as { t?: unknown; event?: { type?: unknown; data?: Record<string, unknown> } };
+  if (f.t !== "event" || !f.event?.data) return undefined;
+  const data = f.event.data;
+  if (f.event.type === "message.created") {
+    const m = data.message as Record<string, unknown> | undefined;
+    const cat = catalogOf(m?.cardV2);
+    if (!m || m.card === undefined || !cat || !catalogs.includes(cat)) return undefined;
+    const { card: _c, ...message } = m;
+    return { ...f, event: { ...f.event, data: { ...data, message } } };
+  }
+  if (f.event.type === "message.updated") {
+    const cat = catalogOf(data.cardV2);
+    if (data.card === undefined || !cat || !catalogs.includes(cat)) return undefined;
+    const { card: _c, ...rest } = data;
+    return { ...f, event: { ...f.event, data: rest } };
+  }
+  return undefined;
+}
+
+/** True when the frame is a live event that may carry a Card v2 with its v1 fallback. */
+function hasV1Fallback(frame: unknown): boolean {
+  const f = frame as { t?: unknown; event?: { type?: unknown } } | null;
+  return !!f && f.t === "event" && (f.event?.type === "message.created" || f.event?.type === "message.updated");
 }
 
 /** Transient types that only `interact/1` sockets get (docs/protocol.md, "Features and catalogs"). */
@@ -327,7 +369,7 @@ export class MemberGateway extends DurableObject<Env> {
       const issue = result.error.issues.find((i) => schemaReason({}, i.message)) ?? result.error.issues[0];
       const where = issue?.path.join(".") || "(root)";
       const message = `invalid frame: ${where} ${issue?.message ?? ""}`.trim();
-      const reason = schemaReason(obj, issue?.message);
+      const reason = schemaReason(obj, issue?.message, issue?.path);
       if (reason === "card.limits" && /exceeds 64 KiB/.test(issue?.message ?? "")) {
         return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
       }
@@ -351,7 +393,9 @@ export class MemberGateway extends DurableObject<Env> {
 
       const feature = frameHandlers.get(frame.t);
       const rate = CORE_RATE[frame.t] ?? feature?.rate ?? "write";
-      if (rate !== "none" && !this.buckets[rate].take()) throw new ApiError("rate_limited", "too many frames");
+      if (rate !== "none" && !this.buckets[rate].take()) {
+        throw new ApiError("rate_limited", "too many frames", undefined, this.buckets[rate].waitMs());
+      }
 
       const c = this.frameContext(ws, state);
       for (const v of [...(frameValidators.get("*") ?? []), ...(frameValidators.get(frame.t) ?? [])]) {
@@ -496,8 +540,10 @@ export class MemberGateway extends DurableObject<Env> {
       return;
     }
     // Before syncing starts, so frames buffered during the directory load see the features.
-    if (frame.features) {
-      state.features = frame.features.slice(0, 32);
+    if (frame.features || frame.supportedCatalogs) {
+      if (frame.features) state.features = frame.features.slice(0, 32);
+      // Only the Card v2 catalogs this server knows (tc.card/2.x); the rest is ignored.
+      if (frame.supportedCatalogs) state.catalogs = frame.supportedCatalogs.filter((c) => /^tc\.card\/2\.\d+$/.test(c)).slice(0, 8);
       ws.serializeAttachment(state);
     }
     this.syncing.set(ws, []);
@@ -633,12 +679,12 @@ export class MemberGateway extends DurableObject<Env> {
   /** Sends frames to every ready socket (and buffers them for sockets still syncing), by feature. */
   private sendFrames(frames: unknown[]): number {
     const sockets = this.readySockets();
-    const plain = frames.every((f) => !(f && typeof f === "object" && ONLY_FEATURE in f) && featureAllows(undefined, f));
+    const plain = frames.every((f) => !(f && typeof f === "object" && ONLY_FEATURE in f) && featureAllows(undefined, f) && !hasV1Fallback(f));
     const shared = plain ? frames.map((f) => JSON.stringify(f)) : null;
     const textsFor = (ws: WebSocket) => {
       if (shared) return shared;
-      const features = (ws.deserializeAttachment() as SocketState | null)?.features;
-      return frames.map((f) => frameText(f, features)).filter((t): t is string => t !== null);
+      const st = ws.deserializeAttachment() as SocketState | null;
+      return frames.map((f) => frameText(f, st?.features, st?.catalogs)).filter((t): t is string => t !== null);
     };
     for (const ws of sockets) for (const text of textsFor(ws)) this.sendText(ws, text);
     for (const [ws, buf] of this.syncing) {

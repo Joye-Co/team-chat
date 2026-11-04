@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateGroupRequest",
+  "valid": true,
+  "description": "1.1: rename and clear the purpose",
+  "value": {
+    "name": "开发",
+    "purpose": ""
+  }
+}

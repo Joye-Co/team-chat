@@ -13,7 +13,7 @@ import {
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
-import { ACK_EMOJI } from "../src/bots/proof";
+import { ACK_EMOJI } from "@chat/protocol";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
@@ -239,6 +239,7 @@ describe("runner-backed bots", () => {
     // The acknowledgement is a reaction on the request, not a text line.
     const ack = await c.waitEvent((e) => e.type === "reaction.changed" && e.data.messageId === trigger.id);
     expect(ack).toMatchObject({ actorId: w.bot.id, data: { emoji: ACK_EMOJI, on: true } });
+    expect(ACK_EMOJI).toBe("👀");
     await waitUntil(() => topicStatuses(c, topicId).includes("in_progress"), 5000, "in_progress");
     const owned = c.events().find((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.ownerId);
     expect(owned.data.ownerId).toBe(w.bot.id);
@@ -268,7 +269,10 @@ describe("runner-backed bots", () => {
     expect(card.kind).toBe("card");
     expect(card.cardV2).toMatchObject({ v: 2, intent: "done", title: "修好了：sync 测试不再随机失败。", data: { runId } });
     expect(card.cardV2.blocks).toContainEqual({ type: "text", id: "result", text: result });
-    expect(card.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: "测试：12 个通过", state: "pass" });
+    expect(card.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: "测试：12 个通过", state: "pass", tests: { passed: 12, failed: 0 } });
+    // The pull request the result names becomes a topic link.
+    const linked = await c.waitEvent((e) => e.type === "topic.linked" && e.data.topicId === topicId);
+    expect(linked.data.link).toMatchObject({ kind: "pr", repo: "acme/app", number: 42, url: "https://github.com/acme/app/pull/42", state: "open" });
     expect(card.cardV2.blocks).toContainEqual({
       type: "ref",
       id: "pr-1",
@@ -689,6 +693,15 @@ describe("run plans", () => {
     expect(withPlan().at(-1).data.run.plan).toEqual(plan2);
     const n = withPlan().filter((e) => JSON.stringify(e.data.run.plan) === JSON.stringify(plan2)).length;
     expect(n).toBe(1);
+    // 1.1: step times and estimates are kept.
+    const timed = [
+      { text: "读代码", state: "done", startedAt: 1_000, endedAt: 61_000 },
+      { text: "改", state: "current", startedAt: 61_000, estimateMs: 600_000 },
+    ];
+    const st = d.event(runId, { type: "plan", items: timed });
+    await d.acked(runId, st);
+    const gotTimed = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.plan?.[1]?.startedAt === 61_000);
+    expect(gotTimed.data.run.plan).toEqual(timed);
     // Items past the limits are cut to them (a newer or broken daemon), bad items are dropped.
     const s2 = d.event(runId, {
       type: "plan",

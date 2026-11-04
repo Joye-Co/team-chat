@@ -73,7 +73,12 @@ impl ButtonSpec for Button {
             ButtonSize::Md | ButtonSize::Page | ButtonSize::Card => {
                 (size::BUTTON_MD, space::S12, px(6.), type_scale::UI)
             }
-            ButtonSize::Lg => (size::BUTTON_LG, space::S16, size::BUTTON_LG / 2., type_scale::UI),
+            ButtonSize::Lg => (
+                size::BUTTON_LG,
+                space::S16,
+                size::BUTTON_LG / 2.,
+                type_scale::UI,
+            ),
         };
         self.with_size(gpui_component::Size::Medium)
             .h(h)
@@ -329,7 +334,11 @@ impl RenderOnce for TextField {
         let radius = if search { height / 2. } else { px(6.) };
         // A focused field is opaque: the ring's shadow would show through
         // the translucent search fill.
-        let fill = if search && !focused { n.fill } else { n.content };
+        let fill = if search && !focused {
+            n.fill
+        } else {
+            n.content
+        };
         let edge = if self.error {
             Some(n.red)
         } else if search {

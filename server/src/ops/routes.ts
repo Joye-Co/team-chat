@@ -6,6 +6,8 @@
 //   POST /v1/admin/import/groups/:id           gzip NDJSON of archived events -> empty GroupRoom
 //   POST /v1/admin/import/groups/:id/state     gzip JSON room state snapshot, right after the events
 //   POST /v1/admin/import/groups/:id/files     refill the room's ready-file records from D1 files
+//   POST /v1/admin/import/groups/:id/copy-files { fromGroup, files, artifacts, topics } copy D1 file and
+//                                              产出 rows and R2 bytes of a --from-group copy, under new ids
 //   POST /v1/admin/import/members/:id/state    gzip JSON member gateway snapshot (cursors, hook map)
 //   GET  /v1/admin/import/d1                   row counts per D1 table (restore pre-check)
 //   POST /v1/admin/import/d1                   { table, columns, rows } -> INSERT OR IGNORE
@@ -31,6 +33,19 @@ const D1_BATCH = 200;
 const FILES_PAGE = 500;
 const PITR_MARGIN_MS = 60_000;
 const REVOCATIONS_BYTES = 4 * 1024 * 1024;
+/** Files and 产出 per copy-files call (R2 bytes are copied inside the request). */
+export const COPY_FILES_MAX = 50;
+
+const IdPair = z.tuple([z.string().min(1).max(64), z.string().min(1).max(64)]);
+const CopyFilesBody = z.object({
+  fromGroup: z.string().min(1).max(64),
+  /** [source file id, copy file id] */
+  files: z.array(IdPair).max(COPY_FILES_MAX),
+  /** [source 产出 id, copy 产出 id] */
+  artifacts: z.array(IdPair).max(COPY_FILES_MAX),
+  /** [source topic id, copy topic id] for the rows' topic. */
+  topics: z.array(IdPair).max(50_000),
+});
 
 const Revoked = z.object({ id: z.string().min(1).max(64), at: z.int().nonnegative() });
 const Revocations = z.object({
@@ -310,6 +325,74 @@ export function registerOpsRoutes(): void {
       }
       await audit(env.DB, null, { action: "admin.import.groupFiles", target: params.id, details: { rows } });
       return { groupId: params.id, rows };
+    },
+  });
+
+  // GAPS SF-6: a --from-group copy gets its own D1 file and 产出 rows and its own R2 objects
+  // (new ids, the ids the copied events name), so attachments and 产出 of the copy open. Run it
+  // after the events and before `/files`, which refills the room's file records from these rows.
+  // Idempotent: rows that exist are kept, objects that exist are not copied again.
+  registerRoute({
+    method: "POST",
+    path: "/v1/admin/import/groups/:id/copy-files",
+    auth: "none",
+    bodyLimit: 4 * 1024 * 1024,
+    async handler({ request, env, params, body }) {
+      await requireAdmin(request, env);
+      const req = await body(CopyFilesBody);
+      const to = params.id;
+      if (req.fromGroup === to) throw new ApiError("invalid", "fromGroup is the target group");
+      const target = await env.DB.prepare("SELECT id FROM groups WHERE id = ?").bind(to).first();
+      if (!target) throw new ApiError("not_found", "no such target group");
+      const topics = new Map(req.topics);
+      let files = 0;
+      let bytes = 0;
+      let missing = 0;
+      for (const [oldId, newId] of req.files) {
+        const f = await env.DB.prepare("SELECT * FROM files WHERE id = ? AND group_id = ? AND status = 'ready' AND deleted_at IS NULL")
+          .bind(oldId, req.fromGroup)
+          .first<{ topic_id: string | null; name: string; size: number; mime: string; sha256: string; width: number | null; height: number | null; created_by: string; created_at: number; ready_at: number | null }>();
+        if (!f) {
+          missing++;
+          continue;
+        }
+        const newKey = `files/${to}/${newId}`;
+        if (!(await env.FILES.head(newKey))) {
+          const obj = await env.FILES.get(`files/${req.fromGroup}/${oldId}`);
+          if (!obj) {
+            missing++;
+            continue;
+          }
+          const fixed = new FixedLengthStream(obj.size);
+          const piping = obj.body.pipeTo(fixed.writable);
+          await env.FILES.put(newKey, fixed.readable, { httpMetadata: obj.httpMetadata, sha256: f.sha256 });
+          await piping;
+          bytes += obj.size;
+        }
+        await env.DB.prepare(
+          `INSERT OR IGNORE INTO files (id, group_id, topic_id, name, size, mime, sha256, width, height, status, created_by, created_at, ready_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)`,
+        )
+          .bind(newId, to, f.topic_id ? (topics.get(f.topic_id) ?? null) : null, f.name, f.size, f.mime, f.sha256, f.width, f.height, f.created_by, f.created_at, f.ready_at ?? f.created_at)
+          .run();
+        files++;
+      }
+      let artifacts = 0;
+      for (const [oldId, newId] of req.artifacts) {
+        const a = await env.DB.prepare("SELECT topic_id, created_by, created_at FROM artifacts WHERE id = ? AND group_id = ?")
+          .bind(oldId, req.fromGroup)
+          .first<{ topic_id: string; created_by: string; created_at: number }>();
+        if (!a) {
+          missing++;
+          continue;
+        }
+        await env.DB.prepare("INSERT OR IGNORE INTO artifacts (id, group_id, topic_id, created_by, created_at) VALUES (?, ?, ?, ?, ?)")
+          .bind(newId, to, topics.get(a.topic_id) ?? a.topic_id, a.created_by, a.created_at)
+          .run();
+        artifacts++;
+      }
+      await audit(env.DB, null, { action: "admin.import.copyFiles", target: to, details: { fromGroup: req.fromGroup, files, artifacts, bytes, missing } });
+      return { groupId: to, files, artifacts, bytes, missing };
     },
   });
 

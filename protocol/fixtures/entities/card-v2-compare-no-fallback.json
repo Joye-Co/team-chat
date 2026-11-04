@@ -1,0 +1,35 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a compare needs fallbackText",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "ask",
+    "title": "选",
+    "fallback": "选",
+    "ask": {
+      "from": [
+        "01JBX0OWNER0000000000000AA"
+      ]
+    },
+    "blocks": [
+      {
+        "id": "c",
+        "type": "compare",
+        "options": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ]
+      }
+    ]
+  }
+}

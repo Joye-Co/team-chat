@@ -1,3 +1,6 @@
+//! Retired 1.0 view: the 1.1 rail lists the 话题. Other views share its helpers
+//! (`relative_time`, `list_time`, `bind_keys`). Section numbers below are DESIGN v2.2's.
+//!
 //! The middle column (DESIGN.md §7.6, §8.1): the topics of the selected 群
 //! (or the 待办 list) under a 92 pt header band (the 52 pt title row with
 //! the 新话题 button, then the 40 pt tabs 全部 · 未读 · 等我). Each topic is a
@@ -21,7 +24,7 @@ use crate::{
     copy::{common, fill, nav, realtime as r},
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
     theme::{self, Type as _, size, space},
-    ui::{self, BadgeKind, CountBadge, Sym, RowSurface, StatusChip},
+    ui::{self, BadgeKind, CountBadge, RowSurface, StatusChip, Sym},
     views::{
         sidebar::{edge_fade, scroll_edges, topic_line, watch_scroll_edges},
         topic_menu,

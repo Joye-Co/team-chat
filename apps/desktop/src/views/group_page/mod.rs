@@ -53,7 +53,11 @@ pub struct GroupPage {
 impl GroupPage {
     /// `_composer`: the shared composer, which this page no longer shows
     /// (topics start in the 新话题 sheet); the shell still passes it.
-    pub fn new(services: Services, _composer: Entity<ComposerView>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        services: Services,
+        _composer: Entity<ComposerView>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             _subscriptions: watch(&services, cx),
             services,
@@ -75,7 +79,8 @@ pub fn open_record_sheet(services: Services, group: String, window: &mut Window,
     if window.has_active_dialog(cx) {
         return;
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder(c::GROUP_PAGE_RECORD_PLACEHOLDER));
+    let input =
+        cx.new(|cx| InputState::new(window, cx).placeholder(c::GROUP_PAGE_RECORD_PLACEHOLDER));
     let save = {
         let (services, group, input) = (services.clone(), group.clone(), input.clone());
         move |window: &mut Window, cx: &mut App| {
@@ -99,12 +104,7 @@ pub fn open_record_sheet(services: Services, group: String, window: &mut Window,
         if first.replace(false) {
             input.update(cx, |s, cx| s.focus(window, cx));
         }
-        let [cancel, ok] = sheet_buttons(
-            "group-record",
-            common::CANCEL,
-            c::GROUP_PAGE_SAVE,
-            cx,
-        );
+        let [cancel, ok] = sheet_buttons("group-record", common::CANCEL, c::GROUP_PAGE_SAVE, cx);
         let save = save.clone();
         native_sheet(dialog, SheetWidth::Form, cx).child(
             SheetLayout::new(c::GROUP_PAGE_RECORD_TITLE)
@@ -185,7 +185,6 @@ pub fn short_time(now: crate::data::Millis, at: crate::data::Millis) -> String {
         kit::month_day(at)
     }
 }
-
 
 impl GroupPage {
     /// The toolbar row: the 群's name over its purpose; 产出 and 群设置, then
@@ -271,7 +270,14 @@ impl GroupPage {
 
     /// One 进行中 row: the owner, the title, the state as a symbol and text
     /// in its state color, the time; a run shows its step at the end.
-    fn topic_row(&self, t: &Topic, st: Standing, run: Option<&BotRunSummary>, last: bool, cx: &App) -> AnyElement {
+    fn topic_row(
+        &self,
+        t: &Topic,
+        st: Standing,
+        run: Option<&BotRunSummary>,
+        last: bool,
+        cx: &App,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let p = &self.services.provider;
         let owner_id = run
@@ -321,7 +327,10 @@ impl GroupPage {
                 parts.push(kit::elapsed(p.clock_now(), since));
                 let progress = kit::plan_progress(&r.plan)
                     .map(|(n, m)| rows::progress_slot(n, m, k.blue, k.secondary));
-                (state_line(None, Some(parts.join(" · ")), k.secondary), progress)
+                (
+                    state_line(None, Some(parts.join(" · ")), k.secondary),
+                    progress,
+                )
             }
             Standing::OnOthers => {
                 let who = t
@@ -387,10 +396,12 @@ impl GroupPage {
         })
         .context_menu(move |menu, _, _| {
             let (nav, g, t) = (menu_nav.clone(), mg.clone(), mt.clone());
-            menu.item(PopupMenuItem::new(c::GROUP_PAGE_OPEN_TOPIC).on_click(move |_, _, cx| {
-                let (g, t) = (g.clone(), t.clone());
-                nav.update(cx, |n, cx| n.open_topic(g, t, cx))
-            }))
+            menu.item(
+                PopupMenuItem::new(c::GROUP_PAGE_OPEN_TOPIC).on_click(move |_, _, cx| {
+                    let (g, t) = (g.clone(), t.clone());
+                    nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                }),
+            )
         })
         .into_any_element()
     }
@@ -554,7 +565,11 @@ impl GroupPage {
                         .flex()
                         .items_start()
                         .gap(px(8.))
-                        .child(div().pt(px(1.)).child(rows::sym(glyph, SymSize::INLINE, k.secondary)))
+                        .child(div().pt(px(1.)).child(rows::sym(
+                            glyph,
+                            SymSize::INLINE,
+                            k.secondary,
+                        )))
                         .child(
                             div()
                                 .flex_1()
@@ -562,16 +577,18 @@ impl GroupPage {
                                 .flex()
                                 .flex_col()
                                 .child(line(a.title.clone()).n_body().text_color(k.label))
-                                .child(line(fill(
-                                    c::GROUP_PAGE_ARTIFACT_META,
-                                    &[
-                                        ("v", &a.version.to_string()),
-                                        ("kind", kind_label(a.kind)),
-                                        ("name", &member_name(&self.services, &a.created_by)),
-                                    ],
-                                ))
-                                .n_subheadline()
-                                .text_color(k.secondary)),
+                                .child(
+                                    line(fill(
+                                        c::GROUP_PAGE_ARTIFACT_META,
+                                        &[
+                                            ("v", &a.version.to_string()),
+                                            ("kind", kind_label(a.kind)),
+                                            ("name", &member_name(&self.services, &a.created_by)),
+                                        ],
+                                    ))
+                                    .n_subheadline()
+                                    .text_color(k.secondary),
+                                ),
                         )
                         .child(
                             div()
@@ -637,7 +654,11 @@ impl GroupPage {
                         .flex()
                         .items_start()
                         .gap(px(8.))
-                        .child(div().pt(px(1.)).child(rows::sym(glyph, SymSize::INLINE, k.secondary)))
+                        .child(div().pt(px(1.)).child(rows::sym(
+                            glyph,
+                            SymSize::INLINE,
+                            k.secondary,
+                        )))
                         .child(
                             div()
                                 .flex_1()
@@ -651,7 +672,13 @@ impl GroupPage {
                                         .gap(px(6.))
                                         .n_body()
                                         .child(line(name).text_color(k.label))
-                                        .child(div().flex_none().size(px(6.)).rounded_full().bg(k.blue))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .size(px(6.))
+                                                .rounded_full()
+                                                .bg(k.blue),
+                                        )
                                         .child(
                                             div()
                                                 .flex_none()
@@ -692,6 +719,7 @@ impl Render for GroupPage {
         });
         let n = active.len();
         let on_me = active.iter().filter(|(s, ..)| *s == Standing::OnMe).count();
+        crate::selftest::drawn::mark("group-page", format!("{g} active={n} on_me={on_me}"));
         let toolbar = self.toolbar(&g, window, cx);
         let topic_rows: Vec<AnyElement> = active
             .iter()
@@ -720,7 +748,10 @@ impl Render for GroupPage {
                             .n_body()
                             .text_color(k.amber)
                             .child(rows::sym(Sym::NeedsYou, SymSize::INLINE_SMALL, k.amber))
-                            .child(fill(c::GROUP_PAGE_WAITING_YOU, &[("n", &on_me.to_string())])),
+                            .child(fill(
+                                c::GROUP_PAGE_WAITING_YOU,
+                                &[("n", &on_me.to_string())],
+                            )),
                     ),
                 )
                 .children(topic_rows);
@@ -771,8 +802,12 @@ fn group_menu(
     let muted = p.group_muted(&g.id);
     let (s, id) = (services.clone(), g.id.clone());
     let menu = menu.item(
-        PopupMenuItem::new(if muted { nav_copy::UNMUTE } else { nav_copy::MUTE })
-            .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
+        PopupMenuItem::new(if muted {
+            nav_copy::UNMUTE
+        } else {
+            nav_copy::MUTE
+        })
+        .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
     );
     if g.kind != crate::data::GroupKind::Group {
         return menu;
