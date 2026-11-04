@@ -19,7 +19,7 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::ButtonVariants as _,
     input::{InputEvent, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
@@ -39,7 +39,7 @@ use crate::{
             NativeType as _, PushSize, PushStyle, borderless_button, native_colors, popup_button,
             push_button,
         },
-        sf_symbols::{Sf, Weight},
+        sf_symbols::Sf,
     },
     views::shell::{PaneView, clock, panes::watch},
 };
@@ -595,29 +595,25 @@ impl SideChat {
         // The composer of the transcript (NATIVE.md §9.2): radius 18, at
         // least 36 pt, `content` with a hairline in light and `fill` in
         // dark, the `accent` send circle only when there is text.
-        let send = ready.then(|| {
-            Button::new("side-chat-send")
-                .custom(
-                    ButtonCustomVariant::new(cx)
-                        .color(n.accent)
-                        .foreground(n.on_accent)
-                        .hover(n.accent)
-                        .active(n.accent.opacity(0.82)),
-                )
-                .with_size(px(24.))
-                .size(px(24.))
-                .p_0()
-                .rounded(px(12.))
-                .bg(n.accent)
-                .tooltip(c::SIDE_CHAT_SEND)
-                .child(ui::sym(
-                    Sym::ArrowUp,
-                    ui::SymSize::new(13., 14., Weight::Semibold),
-                    n.on_accent,
-                ))
-                .on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
-        });
-        let dark = n.is_dark();
+        // The composer (COMPLETENESS.md §2.17): one frame, radius 10, a
+        // 1 px border, shadow xs, p 8; Send is a primary sm icon button at
+        // 50 % until there is text.
+        let send = ui::native::disabled_push(
+            ui::native::icon_button_styled(
+                "side-chat-send",
+                Sym::ArrowUp,
+                c::SIDE_CHAT_SEND,
+                ui::native::PushStyle::Default,
+                ui::native::IconSize::Small,
+                window,
+                cx,
+            )
+            .when(ready, |b| {
+                b.on_click(cx.listener(|this, _, window, cx| this.send(window, cx)))
+            }),
+            !ready,
+            cx,
+        );
         div()
             .flex_none()
             .px(space::S16)
@@ -626,38 +622,25 @@ impl SideChat {
                 div()
                     .id("side-chat-composer")
                     .w_full()
-                    .min_h(px(36.))
-                    .rounded(px(18.))
-                    .map(|el| {
-                        if dark {
-                            el.bg(n.fill)
-                        } else {
-                            el.bg(n.content).border(px(0.5)).border_color(n.separator)
-                        }
-                    })
+                    .rounded(ui::native::tokens::radius::CONTAINER)
+                    .bg(n.content)
+                    .border_1()
+                    .border_color(n.separator)
+                    .shadow(ui::native::tokens::shadow::xs())
                     .cursor_text()
-                    .pl(px(10.))
-                    .pr(px(6.))
+                    .p(space::S8)
                     .flex()
                     .flex_col()
-                    .children(chip_row.map(|row| div().pt(space::S8).pl(px(4.)).child(row)))
+                    .gap(space::S8)
+                    .children(chip_row.map(|row| div().px(space::S4).child(row)))
                     .child(
                         div()
                             .w_full()
-                            .min_h(px(35.))
-                            .flex()
-                            .items_end()
-                            .gap(space::S6)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .py(px(7.))
-                                    .text_color(n.label)
-                                    .child(editor),
-                            )
-                            .children(send.map(|b| div().flex_none().pb(px(6.)).child(b))),
-                    ),
+                            .px(space::S4)
+                            .text_color(n.label)
+                            .child(editor),
+                    )
+                    .child(div().w_full().flex().justify_end().child(send)),
             )
             .into_any_element()
     }

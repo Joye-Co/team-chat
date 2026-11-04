@@ -1438,7 +1438,7 @@ fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
     }
 }
 
-/// A 36 pt toolbar item drawn with a concept symbol (§5.1): `label` (or `secondary` in
+/// A toolbar item drawn with a concept symbol (D4: a 32 ghost square): `label` (or `secondary` in
 /// an inactive window), on a 28 pt `selection` pill with the symbol in `accent` when
 /// toggled. Like `native::toolbar_item`, for symbols outside its comparison set.
 fn sym_toolbar_item(
@@ -1449,39 +1449,7 @@ fn sym_toolbar_item(
     active: bool,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use crate::ui::native::{self as nk, metrics};
-    use gpui_component::{Sizable as _, button::ButtonVariants as _};
-    let n = nk::native_colors(cx);
-    let ink = match (toggled, active) {
-        (true, true) => n.accent,
-        (_, true) => n.label,
-        _ => n.secondary,
-    };
-    let glyph = sym.toolbar().text_color(ink);
-    gpui_component::button::Button::new(id)
-        .custom(nk::borderless_variant(cx))
-        .with_size(metrics::TOOLBAR_ITEM)
-        .size(metrics::TOOLBAR_ITEM)
-        .p_0()
-        .rounded(metrics::TOOLBAR_ITEM / 2.)
-        .accessibility_label(name)
-        .tooltip(name)
-        .map(|b| {
-            if toggled {
-                b.child(
-                    div()
-                        .size(metrics::TOOLBAR_PILL)
-                        .rounded_full()
-                        .bg(n.selection)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(glyph),
-                )
-            } else {
-                b.child(glyph)
-            }
-        })
+    crate::ui::native::toolbar_item_sym(id, sym, name, toggled, active, cx)
 }
 
 /// A 160 × 120 pt thumbnail, radius 8 (§9.6): the rendered page once it was on screen,

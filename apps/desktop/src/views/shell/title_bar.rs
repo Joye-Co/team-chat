@@ -106,7 +106,7 @@ pub struct TitleButton {
 }
 
 impl TitleButton {
-    pub fn new(kind: TitleButtonKind, pane: RightPane) -> Self {
+    pub fn of(kind: TitleButtonKind, pane: RightPane) -> Self {
         Self { kind, pane }
     }
 }
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn the_panes_share_a_capsule_and_the_inspector_has_its_own() {
-        let b = |kind| TitleButton::new(kind, RightPane::TopicRail);
+        let b = |kind| TitleButton::of(kind, RightPane::TopicRail);
         let spec = TitleBarSpec {
             buttons: vec![
                 b(TitleButtonKind::SideChat),

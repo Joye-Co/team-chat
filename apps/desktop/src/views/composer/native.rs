@@ -12,7 +12,7 @@ use gpui::{
 };
 use gpui_component::{
     Disableable as _, Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::{Button, ButtonVariants as _},
     input::Textarea,
     menu::{DropdownMenu as _, PopupMenuItem},
 };
@@ -25,7 +25,7 @@ use crate::{
     ui::{
         self, Sym,
         native::{NativeType as _, native_colors},
-        sf_symbols::{Sf, Weight, symbol},
+        sf_symbols::Sf,
     },
 };
 
@@ -93,31 +93,19 @@ impl ComposerView {
         .detach();
     }
 
-    /// The `plus` circle and its menu.
+    /// The attach button and its menu: a 28 ghost icon button inside the
+    /// composer frame (COMPLETENESS.md §2.17, F28).
     fn native_add(&self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let k = native_colors(cx);
         let view = cx.entity().downgrade();
-        Button::new("composer-add")
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(k.fill)
-                    .foreground(k.secondary)
-                    .hover(k.fill_hover)
-                    .active(k.quaternary),
-            )
-            .with_size(ADD)
-            .size(ADD)
-            .p_0()
-            .rounded(ADD / 2.)
-            .disabled(!enabled)
-            .tooltip(c::ATTACH_MORE)
-            .child(symbol(
-                Sf::Plus,
-                px(16.),
-                Weight::Medium,
-                k.secondary,
-                window,
-            ))
+        let b = ui::native::icon_button(
+            "composer-add",
+            Sf::Plus,
+            c::ATTACH_MORE,
+            ui::native::IconSize::Small,
+            window,
+            cx,
+        );
+        ui::native::disabled_push(b, !enabled, cx)
             .dropdown_menu(move |menu, _, _| {
                 let (a, b, s) = (view.clone(), view.clone(), view.clone());
                 menu.item(
@@ -139,33 +127,46 @@ impl ComposerView {
             .into_any_element()
     }
 
-    /// The send circle: `accent` with `arrow.up` (`checkmark` while editing).
-    fn native_send(&self, editing: bool, cx: &mut Context<Self>) -> Button {
-        let k = native_colors(cx);
-        Button::new("send")
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(k.accent)
-                    .foreground(k.on_accent)
-                    .hover(k.accent)
-                    .active(k.accent.opacity(0.82)),
-            )
-            .with_size(SEND)
-            .size(SEND)
-            .p_0()
-            .rounded(SEND / 2.)
-            .bg(k.accent)
-            .tooltip(if editing {
+    /// The mention button: a 28 ghost icon button that types `@`.
+    fn native_mention(&self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) -> Button {
+        let b = ui::native::icon_button(
+            "composer-mention",
+            Sym::Mention,
+            cc::MENTION,
+            ui::native::IconSize::Small,
+            window,
+            cx,
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.insert_text("@", window, cx)));
+        ui::native::disabled_push(b, !enabled, cx)
+    }
+
+    /// Send (§2.17): a primary sm icon button with `arrow.up` (`checkmark`
+    /// while editing), at 50 % until there is something to send.
+    fn native_send(
+        &self,
+        editing: bool,
+        ready: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        let b = ui::native::icon_button_styled(
+            "send",
+            if editing { Sym::Check } else { Sym::ArrowUp },
+            if editing {
                 crate::copy::common::SAVE
             } else {
                 c::SEND
-            })
-            .child(ui::sym(
-                if editing { Sym::Check } else { Sym::ArrowUp },
-                ui::SymSize::new(13., 14., Weight::Semibold),
-                k.on_accent,
-            ))
-            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))
+            },
+            ui::native::PushStyle::Default,
+            ui::native::IconSize::Small,
+            window,
+            cx,
+        )
+        .when(ready, |b| {
+            b.on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)))
+        });
+        ui::native::disabled_push(b, !ready, cx)
     }
 
     /// The native composer. `group` is the 群 page's (starts a 话题).
@@ -271,7 +272,8 @@ impl ComposerView {
         }
 
         let has_text = !self.last_text.trim().is_empty() || has_chips;
-        let send = (has_text && enabled).then(|| self.native_send(editing, cx));
+        let send = self.native_send(editing, has_text && enabled, window, cx);
+        let mention = (!editing).then(|| self.native_mention(enabled, window, cx));
         let editor = ui::placeholder_input(
             Textarea::new(&self.input)
                 .appearance(false)
@@ -282,31 +284,27 @@ impl ComposerView {
             window,
             cx,
         );
-        let dark = k.is_dark();
+        let add = self.native_add(enabled && !editing, window, cx);
+        // §2.17: one frame, radius 10, a 1 px border, shadow xs, p 8: the
+        // text, then a row with the ghost tools at the left and Send at the
+        // right.
         let field = div()
             .id("composer-box")
-            .flex_1()
-            .min_w_0()
-            .min_h(FIELD_MIN)
-            .rounded(FIELD_RADIUS)
-            .map(|el| {
-                if dark {
-                    el.bg(k.fill)
-                } else {
-                    el.bg(k.content).border(px(0.5)).border_color(k.separator)
-                }
-            })
+            .w_full()
+            .rounded(ui::native::tokens::radius::CONTAINER)
+            .bg(k.content)
+            .border_1()
+            .border_color(k.separator)
+            .shadow(ui::native::tokens::shadow::xs())
             .cursor_text()
-            .pl(FIELD_PAD)
-            .pr(px(6.))
+            .p(space::S8)
             .flex()
             .flex_col()
+            .gap(space::S8)
             .when(!above.is_empty(), |el| {
                 el.child(
                     div()
-                        .pt(space::S8)
-                        .pl(px(4.))
-                        .pr(px(8.))
+                        .px(space::S4)
                         .flex()
                         .flex_col()
                         .gap(space::S6)
@@ -316,27 +314,28 @@ impl ComposerView {
             .child(
                 div()
                     .w_full()
-                    .min_h(FIELD_MIN - px(1.))
+                    .px(space::S4)
+                    .text_color(k.label)
+                    .capture_action(cx.listener(Self::on_enter))
+                    .capture_action(cx.listener(Self::on_tab))
+                    .capture_action(cx.listener(Self::on_up))
+                    .capture_action(cx.listener(Self::on_down))
+                    .capture_action(cx.listener(Self::on_escape))
+                    .capture_action(cx.listener(Self::on_paste))
+                    .capture_key_down(cx.listener(Self::on_format_key))
+                    .capture_key_down(cx.listener(Self::on_refs_key))
+                    .child(editor),
+            )
+            .child(
+                div()
+                    .w_full()
                     .flex()
-                    .items_end()
-                    .gap(space::S6)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .py(px(7.))
-                            .text_color(k.label)
-                            .capture_action(cx.listener(Self::on_enter))
-                            .capture_action(cx.listener(Self::on_tab))
-                            .capture_action(cx.listener(Self::on_up))
-                            .capture_action(cx.listener(Self::on_down))
-                            .capture_action(cx.listener(Self::on_escape))
-                            .capture_action(cx.listener(Self::on_paste))
-                            .capture_key_down(cx.listener(Self::on_format_key))
-                            .capture_key_down(cx.listener(Self::on_refs_key))
-                            .child(editor),
-                    )
-                    .children(send.map(|b| div().flex_none().pb(px(6.)).child(b))),
+                    .items_center()
+                    .gap(space::S4)
+                    .child(add)
+                    .children(mention)
+                    .child(div().flex_1())
+                    .child(send),
             );
 
         // The composer hint (Footnote, NATIVE.md §3): who reads it next.
@@ -360,7 +359,6 @@ impl ComposerView {
                 .map(|name| fill(c::COMPOSER_NEXT_STEP, &[("name", name)]))
         };
 
-        let add = self.native_add(enabled && !editing, window, cx);
         let anchor = self.anchor.clone();
         div()
             .id("composer")
@@ -375,10 +373,6 @@ impl ComposerView {
                 div()
                     .relative()
                     .w_full()
-                    .flex()
-                    .items_end()
-                    .gap(space::S8)
-                    .child(div().flex_none().pb(px(4.)).child(add))
                     .child(field)
                     .child(
                         gpui::canvas(move |bounds, _, _| anchor.set(bounds), |_, _, _, _| {})
@@ -390,7 +384,6 @@ impl ComposerView {
             .children(hint.map(|h| {
                 div()
                     .pt(space::S4)
-                    .pl(ADD + space::S8 + px(14.))
                     .n_footnote()
                     .text_color(k.secondary)
                     .one_line()

@@ -31,8 +31,7 @@ use gpui::{
     WeakEntity, Window, div, list, px,
 };
 use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::{Button, ButtonVariants as _},
     input::InputState,
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
@@ -44,7 +43,7 @@ use crate::{
     copy::{common, rail as c},
     data::{GroupId, MemberId, Topic},
     ui::{
-        self, Sym,
+        Sym,
         native::{SearchField, metrics},
         sf_symbols::Sf,
     },
@@ -315,27 +314,7 @@ impl RailView {
     /// circle with a 16 pt toolbar symbol, `fillHover` on hover. Named: the
     /// name is its tooltip and what VoiceOver reads.
     fn tool(&self, id: &'static str, sym: Sym, name: &'static str, cx: &App) -> Button {
-        let k = crate::views::shell::chrome::colors(cx);
-        let active = !self.show_inactive;
-        Button::new(id)
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(gpui::transparent_black())
-                    .foreground(k.label)
-                    .hover(k.fill_hover)
-                    .active(k.quaternary),
-            )
-            .with_size(TOOL)
-            .size(TOOL)
-            .p_0()
-            .rounded(TOOL / 2.)
-            .accessibility_label(name)
-            .tooltip(name)
-            .child(ui::sym(
-                sym,
-                ui::SymSize::TOOLBAR,
-                if active { k.label } else { k.secondary },
-            ))
+        crate::ui::native::toolbar_item_sym(id, sym, name, false, !self.show_inactive, cx)
     }
 
     /// The filter pull-down (`line.3.horizontal.decrease`): what the list

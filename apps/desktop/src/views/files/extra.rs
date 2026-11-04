@@ -344,12 +344,7 @@ fn row_frame(
 /// radius 6, a 13 pt Regular symbol (inline size, not the 16 pt toolbar
 /// size), `fillHover` on hover.
 fn row_button(id: ElementId, glyph: Sym) -> gpui_component::button::Button {
-    use gpui_component::{Sizable as _, button::ButtonVariants as _};
-    gpui_component::button::Button::new(id)
-        .ghost()
-        .icon(ui::icons::button_sym(glyph, SymSize::INLINE, px(24.)))
-        .with_size(px(24.))
-        .rounded(n_metrics::BUTTON_REGULAR_RADIUS)
+    crate::ui::native::icon_button_bare(id, glyph, crate::ui::native::IconSize::Small)
 }
 
 fn upload_row(

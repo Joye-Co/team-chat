@@ -8,8 +8,7 @@ use gpui::{
     ParentElement, SharedString, Styled, div, px,
 };
 use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::{Button, ButtonVariants as _},
     notification::Notification,
 };
 
@@ -17,7 +16,7 @@ use super::{Screen, state::Target};
 use crate::{
     copy::media as cm,
     data::{DraftKey, NewFile},
-    theme::{self, Type as _, radius, space},
+    theme::{self, Type as _, space},
     ui::{self, NamedButton as _, Sym},
 };
 
@@ -134,18 +133,7 @@ pub fn screen_tool(
     s: &Screen,
     cx: &App,
 ) -> Button {
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(gpui::transparent_black())
-                .foreground(s.ink)
-                .hover(gpui::hsla(0., 0., 1., 0.10))
-                .active(gpui::hsla(0., 0., 1., 0.16)),
-        )
-        .icon(ui::button_glyph(icon, theme::icon::ROW, px(28.)))
-        .with_size(px(28.))
-        .rounded(radius::SM)
-        .named(name)
+    crate::ui::native::screen_button(id, icon, name, false, s.ink, cx)
 }
 
 // --- actions ------------------------------------------------------------------------

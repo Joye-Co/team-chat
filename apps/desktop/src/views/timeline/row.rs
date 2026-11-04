@@ -941,15 +941,23 @@ impl TimelineView {
                     .flex()
                     .gap(space::S8)
                     .child(
-                        Button::new("edit-save")
-                            .primary()
-                            .label(common::SAVE)
-                            .h(theme::size::BUTTON_SM)
-                            .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
+                        ui::native::push_button(
+                            "edit-save",
+                            common::SAVE,
+                            ui::native::PushStyle::Default,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
                     )
                     .child(
-                        ui::native::push_button("edit-cancel", common::CANCEL, ui::native::PushStyle::Outline, ui::native::PushSize::Regular, cx)
-                            .h(theme::size::BUTTON_SM)
+                        ui::native::push_button(
+                            "edit-cancel",
+                            common::CANCEL,
+                            ui::native::PushStyle::Outline,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
                             .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx))),
                     ),
             )

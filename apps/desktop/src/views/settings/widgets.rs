@@ -7,14 +7,14 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
 };
 
 use crate::{
     copy::{fill, settings as s},
     data::{AdminError, AdminReply, MemberLevel, Millis},
-    theme::{self, Elevation, Type as _, space},
+    theme::{self, Type as _, space},
     ui::Sym,
 };
 
@@ -461,33 +461,7 @@ pub fn skeleton_table(rows: usize, cx: &App) -> Div {
 /// trailing `chevrons-up-down` 14 in `text-3`. Open its menu with
 /// `.dropdown_menu`.
 pub fn select_button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
-    let k = theme::colors(cx);
-    Button::new(id)
-        .font_weight(gpui::FontWeight::NORMAL)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(k.content)
-                .foreground(k.text_1)
-                .hover(k.hover)
-                .active(k.pressed),
-        )
-        .h(theme::size::SELECT)
-        .w(theme::size::SELECT_WIDTH)
-        .pl(space::S12)
-        .pr(space::S8)
-        .rounded(theme::radius::MD)
-        .border_1()
-        .border_color(k.border)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .t_ui()
-                .font_weight(gpui::FontWeight::NORMAL)
-                .one_line()
-                .child(label.into()),
-        )
-        .child(crate::ui::icon(Sym::PopUp, theme::icon::CHIP, k.text_3))
+    crate::ui::native::select_button(id, label, crate::ui::native::PushSize::Regular, cx)
 }
 
 /// A presence dot of the settings tables (§8.4): 8 pt; filled for a live
@@ -586,75 +560,25 @@ pub fn secret_block(id: impl Into<ElementId>, label: &'static str, value: &str, 
     )
 }
 
-/// A segmented control (§8.4, 通知): 32 pt, `field` track with 2 pt inset,
-/// 28 pt segments; the selected one has a `content` fill with the level-1
-/// shadow. Each segment is a gpui-component button; `on_pick` gets the index.
+/// A segmented control (§8.4, 通知): the one Segmented (K09).
 pub fn choice(
     id: impl Into<ElementId>,
     options: &[&'static str],
     selected: usize,
     disabled: bool,
     on_pick: impl Fn(usize, &mut Window, &mut App) + 'static,
-    cx: &App,
+    _cx: &App,
 ) -> Div {
-    let k = theme::colors(cx);
-    let id: ElementId = id.into();
-    let on_pick = std::rc::Rc::new(on_pick);
-    // The wrapper keeps the track at its own width in a stretching column.
-    // Disabled (a muted 群): no hover or press, the shown value stays
-    // readable on its segment (`text-2`) and the others go `placeholder`;
-    // gpui-component's disabled style would fade the value away.
-    let track = div()
-        .flex_none()
-        .h(theme::size::BUTTON_MD)
-        .p(space::S2)
-        .rounded(theme::radius::MD)
-        .bg(k.field)
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .children(options.iter().enumerate().map(|(ix, label)| {
-            let on = ix == selected;
-            let pick = on_pick.clone();
-            let rest = if on {
-                k.overlay
-            } else {
-                gpui::transparent_black()
-            };
-            let fg = match (on, disabled) {
-                (true, false) => k.text_1,
-                (true, true) | (false, false) => k.text_2,
-                (false, true) => k.placeholder,
-            };
-            Button::new(ElementId::NamedInteger(
-                SharedString::from(format!("{id}-opt")),
-                ix as u64,
-            ))
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(rest)
-                    .foreground(fg)
-                    .hover(if on || disabled { rest } else { k.hover })
-                    .active(if on || disabled { rest } else { k.pressed }),
-            )
-            .label(*label)
-            .h(theme::size::BUTTON_SM)
-            .px(space::S12)
-            .rounded(theme::radius::SM)
-            .text_size(theme::type_scale::SMALL.0)
-            .line_height(theme::type_scale::SMALL.1)
-            .when(on, |b| {
-                b.bg(k.overlay)
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .shadow(k.shadow(Elevation::Float))
-            })
-            .toggled(on)
-            .when(disabled, |b| b.cursor_default())
-            .when(!disabled && !on, |b| {
-                b.on_click(move |_, window, cx| pick(ix, window, cx))
-            })
-        }));
-    div().flex().child(track)
+    use crate::ui::native::{Segment, Segmented};
+    div().flex().child(
+        Segmented::new(
+            id,
+            options.iter().map(|l| Segment::Label(SharedString::from(*l))),
+        )
+        .selected(selected)
+        .disabled(disabled)
+        .on_change(on_pick),
+    )
 }
 
 /// A dialog footer (§7.12): right-aligned `md` buttons, secondary then

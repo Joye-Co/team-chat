@@ -17,7 +17,7 @@ use gpui::{
 };
 use gpui_component::{
     WindowExt as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::ButtonVariants as _,
     input::{InputEvent, InputState},
 };
 
@@ -701,21 +701,17 @@ impl Render for Switcher {
         // The 群 a search is scoped to (⌘F): a token before the text; click
         // or ⌫ in an empty field removes it.
         let scope_token = self.scope.as_ref().map(|(_, name)| {
-            Button::new("switcher-scope")
-                .custom(
-                    ButtonCustomVariant::new(cx)
-                        .color(k.fill)
-                        .foreground(k.label)
-                        .hover(k.fill)
-                        .active(k.fill_hover),
+            crate::ui::native::chip_button("switcher-scope", true, cx)
+                .gap(crate::ui::native::tokens::space::S4)
+                .max_w(crate::ui::native::tokens::size::CHIP_MAX)
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(fill(search_copy::SCOPE_IN_GROUP, &[("name", name)])),
                 )
-                .h(px(26.))
-                .pl(px(8.))
-                .pr(px(6.))
-                .gap(px(4.))
-                .rounded(px(6.))
-                .n_body()
-                .child(fill(search_copy::SCOPE_IN_GROUP, &[("name", name)]))
                 .child(
                     Sym::Close
                         .icon(SymSize::INLINE_SMALL)

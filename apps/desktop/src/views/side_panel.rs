@@ -20,7 +20,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::Disableable as _;
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+use gpui_component::button::{Button, ButtonVariants as _};
 
 use crate::ui::NamedButton as _;
 use crate::{
@@ -830,14 +830,7 @@ impl SidePanel {
                     )
                 })
         });
-        let add = Button::new("panel-add-member")
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .foreground(k.accent_text)
-                    .hover(k.hover)
-                    .active(k.pressed),
-            )
-            .w_full()
+        let add = crate::ui::native::row_button("panel-add-member", cx)
             .h(size::PANEL_ROW)
             .mx(-space::S8)
             .px(space::S8)

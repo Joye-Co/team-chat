@@ -37,7 +37,9 @@ pub mod toolbar;
 pub use buttons::{
     Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
     borderless_variant, disabled_push, ghost_button, icon_button, icon_button_bare, icon_button_styled,
-    popup_button, pull_down, push_button, square_button, square_pair, toolbar_item,
+    chip_button, popup_button, pull_down, push_button, row_button, screen_button, select_button,
+    icon_button_sym, square_button, square_pair, tile_button, toolbar_item, toolbar_item_sym,
+    toolbar_tab,
 };
 #[allow(unused_imports)]
 pub use badge::{Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge};

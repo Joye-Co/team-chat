@@ -456,6 +456,197 @@ pub fn borderless_text(
     push_button(id, label, PushStyle::Ghost, PushSize::Small, cx)
 }
 
+/// A select (§1.9) built without a window: an outline button whose title is
+/// the chosen value, a 16 `chevron.up.chevron.down` at the end, the title
+/// truncating at the end; 160 wide unless the caller sets a width. Chain
+/// `.dropdown_menu(..)` to open the menu.
+pub fn select_button(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    size: PushSize,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let b = Button::new(id)
+        .with_size(gpui_component::Size::Medium)
+        .h(size.height())
+        .w(crate::ui::native::tokens::size::SELECT_WIDTH)
+        .pl(metrics::FIELD_PAD)
+        .pr(space::S8)
+        .rounded(size.radius())
+        .n_body();
+    styled(b, PushStyle::Outline, cx).child(
+        div()
+            .w_full()
+            .min_w(px(0.))
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(title.into()),
+            )
+            .child(crate::ui::icons::icon(Sym::PopUp, icon::MD, k.secondary)),
+    )
+}
+
+/// A toggle chip (reactions, scope chips): h28, radius full, px 8. At rest
+/// an outline chip; selected ("mine") the `muted` fill with a foreground
+/// border (COMPLETENESS.md F30), never a state color.
+pub fn chip_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let (fill, edge) = if selected {
+        (k.fill, k.label)
+    } else {
+        (k.content, k.quaternary)
+    };
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(fill)
+                .foreground(k.label)
+                .hover(k.fill_hover)
+                .active(k.pressed),
+        )
+        .with_size(gpui_component::Size::Medium)
+        .h(metrics::BUTTON_SMALL)
+        .min_w(metrics::BUTTON_SMALL)
+        .px(space::S8)
+        .rounded_full()
+        .bg(fill)
+        .border_1()
+        .border_color(edge)
+        .text_color(k.label)
+        .n_section()
+}
+
+/// A ghost button around custom content (an "add member" row in a list):
+/// full width, radius 8, `accent` on hover.
+pub fn row_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    let b = Button::new(id)
+        .with_size(gpui_component::Size::Medium)
+        .w_full()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .n_body();
+    styled(b, PushStyle::Ghost, cx)
+}
+
+/// A square tile in a picker grid (avatar grid): ghost at rest; selected
+/// the `muted` fill with a foreground ring.
+pub fn tile_button(id: impl Into<ElementId>, side: Pixels, selected: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS);
+    styled(b, PushStyle::Ghost, cx).when(selected, |b| {
+        b.bg(k.fill).border_1().border_color(k.label)
+    })
+}
+
+/// A tool on the dark media screen (lightbox, video): `ink` icon, white
+/// 10 % hover; a 32 square, or a `round` 36 circle for the pager arrows.
+pub fn screen_button(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    round: bool,
+    ink: Hsla,
+    cx: &App,
+) -> Button {
+    let name = name.into();
+    let side = if round {
+        metrics::BUTTON_LARGE
+    } else {
+        metrics::BUTTON_REGULAR
+    };
+    let rest = if round {
+        gpui::hsla(0., 0., 1., 0.10)
+    } else {
+        gpui::transparent_black()
+    };
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rest)
+                .foreground(ink)
+                .hover(gpui::hsla(0., 0., 1., 0.18))
+                .active(gpui::hsla(0., 0., 1., 0.24)),
+        )
+        .icon(button_sym(sym, SymSize::for_slot(icon::MD), side))
+        .with_size(side)
+        .size(side)
+        .map(|b| {
+            if round {
+                b.rounded_full()
+            } else {
+                b.rounded(metrics::BUTTON_REGULAR_RADIUS)
+            }
+        })
+        .accessibility_label(name.clone())
+        .tooltip(name)
+}
+
+/// A tab of the Settings window's toolbar tab strip (Mac chrome, kept by
+/// COMPLETENESS.md §2.19): an 18 symbol over a 12 label; the selected tab
+/// has the `muted` fill. `active` is the key-window state.
+pub fn toolbar_tab(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    label: impl Into<SharedString>,
+    on: bool,
+    active: bool,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let label = label.into();
+    let ink = match (on, active) {
+        (true, true) => k.accent_text,
+        (true, false) => k.label,
+        (false, _) => k.secondary,
+    };
+    let rest = if on {
+        k.selection
+    } else {
+        gpui::transparent_black()
+    };
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rest)
+                .foreground(ink)
+                .hover(if on { rest } else { k.fill_hover })
+                .active(if on { rest } else { k.fill }),
+        )
+        .h(px(56.))
+        .min_w(px(60.))
+        .px(space::S8)
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .bg(rest)
+        .accessibility_label(label.clone())
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(space::S4)
+                .child(crate::ui::icons::sym(sym, SymSize::TAB, ink))
+                .child(
+                    div()
+                        .n_subheadline()
+                        .text_color(ink)
+                        .whitespace_nowrap()
+                        .child(label),
+                ),
+        )
+}
+
 /// How a toolbar item draws (§2.2, D4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolbarItemKind {
@@ -495,6 +686,59 @@ pub fn toolbar_item(
         .accessibility_label(name.clone())
         .tooltip(name);
     styled(b, style, cx).child(symbol(sf, icon::MD, Weight::Regular, ink, window))
+}
+
+/// A toolbar item drawn with an app concept (no window at hand): the same
+/// 32 ghost square as [`toolbar_item`]; `toggled` takes the `muted` fill.
+pub fn toolbar_item_sym(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    toggled: bool,
+    emphasized: bool,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let (style, ink) = match (toggled, emphasized) {
+        (true, _) => (PushStyle::Secondary, k.label),
+        (false, true) => (PushStyle::Ghost, k.label),
+        (false, false) => (PushStyle::Ghost, k.secondary),
+    };
+    let b = Button::new(id)
+        .with_size(metrics::TOOLBAR_ITEM)
+        .size(metrics::TOOLBAR_ITEM)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, style, cx).child(crate::ui::icons::sym(sym, SymSize::for_slot(icon::MD), ink))
+}
+
+/// A ghost icon button drawn with an app concept (no window at hand): 32 or
+/// 28, radius 8, a 16 icon in `muted-foreground`. Named.
+pub fn icon_button_sym(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    size: IconSize,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let side = size.side();
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, PushStyle::Ghost, cx).child(crate::ui::icons::sym(
+        sym,
+        SymSize::for_slot(icon::MD),
+        k.secondary,
+    ))
 }
 
 #[cfg(test)]

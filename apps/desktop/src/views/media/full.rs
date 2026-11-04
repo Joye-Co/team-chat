@@ -13,7 +13,7 @@ use gpui::{
     StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
 
-use gpui_component::{Selectable as _, Sizable as _, button::ButtonVariants as _};
+use gpui_component::{Selectable as _, button::ButtonVariants as _};
 
 use super::{
     inline::{code_line, fit, group_digits},
@@ -572,18 +572,7 @@ fn lightbox(
         );
     }
     let nav = |idn: &str, icon: Sym, label: &'static str| {
-        gpui_component::button::Button::new(id(spec, idn))
-            .custom(
-                gpui_component::button::ButtonCustomVariant::new(cx)
-                    .color(gpui::hsla(0., 0., 1., 0.10))
-                    .foreground(gpui::white())
-                    .hover(gpui::hsla(0., 0., 1., 0.18))
-                    .active(gpui::hsla(0., 0., 1., 0.24)),
-            )
-            .icon(ui::button_glyph(icon, px(18.), px(36.)))
-            .with_size(px(36.))
-            .rounded_full()
-            .accessibility_label(label)
+        ui::native::screen_button(id(spec, idn), icon, label, true, gpui::white(), cx)
     };
     let mut strip = div().flex().justify_center().gap(space::S6);
     for (i, p) in pics.iter().enumerate() {

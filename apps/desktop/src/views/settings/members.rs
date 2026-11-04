@@ -769,7 +769,7 @@ pub fn character_picker(
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
     cx: &App,
 ) -> gpui::Div {
-    let accent = theme::colors(cx).accent;
+    let _accent = theme::colors(cx).accent;
     div()
         .flex()
         .flex_wrap()
@@ -777,15 +777,13 @@ pub fn character_picker(
         .children(CharacterId::ALL.iter().enumerate().map(|(ix, c)| {
             let c = *c;
             let pick = pick.clone();
-            Button::new(ElementId::NamedInteger(id.into(), ix as u64))
-                .ghost()
-                .size(px(40.))
-                .p_0()
-                .selected(selected == Some(c))
-                .when(selected == Some(c), |b| {
-                    b.shadow(ui::rows::focus_ring(accent))
-                })
-                .disabled(disabled)
+            crate::ui::native::tile_button(
+                ElementId::NamedInteger(id.into(), ix as u64),
+                crate::ui::native::tokens::avatar::LG,
+                selected == Some(c),
+                cx,
+            )
+            .disabled(disabled)
                 .child(characters::image(c, CharacterStatus::Idle, px(32.)))
                 .on_click(move |_, window, cx| pick(c, window, cx))
         }))

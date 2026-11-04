@@ -19,9 +19,9 @@ use crate::{
     data::v2::ArtifactPreview,
     theme::{self, Type as _, space},
     ui::{
-        self, NamedButton as _, Sym,
+        self, Sym,
         native::{
-            NativeType as _, PushSize, PushStyle, borderless_variant, metrics, native_colors,
+            NativeType as _, PushSize, PushStyle, metrics, native_colors,
             push_button,
         },
     },
@@ -299,16 +299,7 @@ fn header_button(
     name: &'static str,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use gpui_component::{Sizable as _, button::ButtonVariants as _};
-    let n = native_colors(cx);
-    gpui_component::button::Button::new(id)
-        .custom(borderless_variant(cx))
-        .with_size(gpui_component::Size::Small)
-        .size(metrics::BUTTON_REGULAR)
-        .p_0()
-        .rounded(metrics::BUTTON_REGULAR_RADIUS)
-        .child(ui::icon(sym, px(15.), n.secondary))
-        .named(name)
+    crate::ui::native::icon_button_sym(id, sym, name, crate::ui::native::IconSize::Regular, cx)
 }
 
 /// The 产出 pane for one 产出 (`version` or its latest): a 52 pt header in
