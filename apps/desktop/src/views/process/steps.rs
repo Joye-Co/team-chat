@@ -45,9 +45,24 @@ pub fn render_steps(
     cx: &mut App,
 ) -> Vec<AnyElement> {
     let start = process.steps.len().saturating_sub(MAX_STEPS);
+    // One failure row (A5): when the run ended failed, a failed turn before
+    // it would state the cause a second time.
+    let ended_with_error = process.steps.iter().any(|s| {
+        matches!(
+            s,
+            ProcessStep::Done { error: Some(_), .. }
+                | ProcessStep::Done {
+                    status: RunStatus::Failed | RunStatus::Blocked,
+                    ..
+                }
+        )
+    });
     process.steps[start..]
         .iter()
         .enumerate()
+        .filter(|(_, step)| {
+            !(ended_with_error && matches!(step, ProcessStep::TurnCompleted { ok: false, .. }))
+        })
         .filter_map(|(i, step)| render_step(start + i, step, bot_name, developer, window, cx))
         .collect()
 }

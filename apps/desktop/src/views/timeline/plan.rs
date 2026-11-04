@@ -337,16 +337,19 @@ impl TimelineView {
                                         .line_clamp(2)
                                         .child(title),
                                 )
-                                .child(div().n_body().text_color(n.secondary).child(detail)),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(space::S8)
-                                .child(log)
-                                .child(retry),
+                                .child(div().n_body().text_color(n.secondary).child(detail))
+                                // The actions sit under the description, so
+                                // the text keeps the card's width and never
+                                // wraps a lone `次。` (break-ui).
+                                .child(
+                                    div()
+                                        .pt(space::S8)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S8)
+                                        .child(retry)
+                                        .child(log),
+                                ),
                         ),
                 )
                 .into_any_element(),
