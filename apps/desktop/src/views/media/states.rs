@@ -18,6 +18,7 @@ use super::{
 use crate::{
     copy::{fill, media as cm},
     theme::{self, Type as _, space},
+    ui::native::tokens::NativeType as _,
     ui::{self, PushSize, PushStyle, Sym},
 };
 
@@ -129,7 +130,9 @@ pub fn row(
         .flex_col()
         .child(
             div()
-                .min_h(px(56.))
+                // §2.17 file item: h60, px 12, the same recipe as the
+                // thread's file item (`files::extra::row_frame`).
+                .min_h(px(60.))
                 .px(space::S12)
                 .py(space::S12)
                 .flex()
@@ -142,17 +145,15 @@ pub fn row(
                         .min_w(px(0.))
                         .flex()
                         .flex_col()
-                        .gap(space::S2)
                         .child(
                             crate::ui::native::file_name(name)
-                                .t_small()
-                                .medium()
+                                .n_headline()
                                 .text_color(n.label),
                         )
                         .child(
                             div()
-                                .t_meta()
-                                .tnum()
+                                .n_subheadline()
+                                .n_figures()
                                 .text_color(n.secondary)
                                 .one_line()
                                 .child(meta),

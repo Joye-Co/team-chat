@@ -241,7 +241,10 @@ pub fn failed(
         // skeleton's place.
         .child(
             div().p(space::S24).child(
-                ui::native::Alert::new(Sym::Alert, cm::STATE_FAILED)
+                // The same destructive variant as the inline row (one
+                // failure, one Alert).
+                ui::native::Alert::new(Sym::Warning, cm::STATE_FAILED)
+                    .tone(ui::native::AlertTone::Destructive)
                     .description(cm::STATE_FAILED_RETRY)
                     .action(
                         ui::native::push_button(
@@ -330,12 +333,14 @@ fn tool_separator(cx: &App) -> gpui::Div {
 }
 
 fn frame(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
+    // §2.9: a sheet sits on the card surface (23 in dark), not the window
+    // background.
+    let n = ui::native::native_colors(cx);
     div()
         .size_full()
         .flex()
         .flex_col()
-        .bg(k.content)
+        .bg(n.sheet)
         .overflow_hidden()
 }
 
@@ -823,6 +828,7 @@ fn lightbox(
                 .child(
                     div()
                         .flex_1()
+                        .min_w(px(0.))
                         .h_full()
                         .py(space::S4)
                         .flex()
@@ -1232,6 +1238,20 @@ if(v.autoplay){v.muted=true;v.play()}
 
 // --- audio --------------------------------------------------------------------------
 
+/// The height of the full audio view's player block (wave, speakers,
+/// controls), so the sheet hugs it.
+pub fn audio_player_height(a: &store::Audio) -> gpui::Pixels {
+    let speakers = a.transcript.iter().any(|c| c.speaker.is_some()) && a.duration > 0.;
+    // pt 16, wave 64, gap 8, controls 4 + 36, pb 12, the 1 px rule.
+    let base = px(16. + 64. + 8. + 40. + 12. + 1.);
+    // The speaker segments (6) and the legend (16), each after a gap of 8.
+    if speakers {
+        base + px(8. + 6. + 8. + 16.)
+    } else {
+        base
+    }
+}
+
 fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let st = state.read(cx);
@@ -1409,18 +1429,9 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .border_b_1()
                 .border_color(k.sep)
                 .child(wave)
-                .when(!speakers.is_empty(), |el| el.child(segs))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .child(legend)
-                        .child(div().flex_1())
-                        .child(mono(
-                            format!("00:00   {}", super::clock_text(a.duration)),
-                            k.text_3,
-                        )),
-                )
+                // The time shows once, in the controls (A5); the speakers row
+                // shows only when the transcript names speakers.
+                .when(!speakers.is_empty(), |el| el.child(segs).child(legend))
                 .child(
                     div()
                         .pt(space::S4)
@@ -1737,7 +1748,6 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     })
     .track_scroll(&state.read(cx).list)
     .flex_1()
-    .py(space::S8)
     .t_code()
     .tnum();
     let all = lines.join("\n");
@@ -1782,7 +1792,6 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
             .id(id(spec, "wrapped"))
             .flex_1()
             .overflow_y_scroll()
-            .py(space::S8)
             .t_code();
         for (i, l) in lines.iter().enumerate() {
             col = col.child(
@@ -1813,7 +1822,18 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     };
     frame(cx)
         .child(header)
-        .child(div().flex_1().min_h(px(0.)).flex().flex_col().child(body))
+        // The same space above the first line's ink and under the last
+        // line's (A4): 8 + the line's own leading at the top, 12 under it.
+        .child(
+            div()
+                .flex_1()
+                .min_h(px(0.))
+                .pt(space::S8)
+                .pb(space::S12)
+                .flex()
+                .flex_col()
+                .child(body),
+        )
         .into_any_element()
 }
 

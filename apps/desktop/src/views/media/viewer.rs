@@ -199,7 +199,7 @@ impl Render for MediaViewer {
             .flex_col()
             .rounded(metrics::SHEET_RADIUS)
             .overflow_hidden()
-            .bg(k.content)
+            .bg(crate::ui::native::native_colors(cx).sheet)
             .text_color(k.text_1)
             .child(body)
     }
@@ -220,14 +220,16 @@ impl MediaViewer {
                 Some(head + space::S24 * 2. + STATE_BOX)
             }
             Some(Load::Ready(m)) => match &m.data {
-                Data::Code(c) => Some(head + space::S8 * 2. + px(20.) * c.lines.len() as f32),
+                Data::Code(c) => {
+                    Some(head + space::S8 + space::S12 + px(20.) * c.lines.len() as f32)
+                }
                 Data::Table(t) => {
                     Some(head + full::TABLE_ROW * (t.rows.len() as f32 + 1.) + full::FOOT_HEIGHT)
                 }
                 // A short transcript: the sheet hugs it (A1): the player block,
                 // the transcript label, then one row per cue.
                 Data::Audio(a) => Some(
-                    head + AUDIO_PLAYER
+                    head + full::audio_player_height(a)
                         + space::S8 * 2.
                         + space::S32
                         + AUDIO_CUE * a.transcript.len().max(1) as f32,
@@ -241,8 +243,6 @@ impl MediaViewer {
 
 /// The content box of the loading and failed states (the Alert's height).
 const STATE_BOX: Pixels = px(72.);
-/// The audio player block of the full view (wave, speakers, controls).
-const AUDIO_PLAYER: Pixels = px(180.);
 /// One transcript row of the full audio view (one line, its gap).
 const AUDIO_CUE: Pixels = px(34.);
 
