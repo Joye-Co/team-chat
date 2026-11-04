@@ -776,6 +776,19 @@ fn hex(c: gpui::Hsla) -> String {
     }
 }
 
+/// `top` composited over the opaque `under`.
+fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
+    let (t, u) = (gpui::Rgba::from(top), gpui::Rgba::from(under));
+    let mix = |a: f32, b: f32| a * t.a + b * (1. - t.a);
+    gpui::Rgba {
+        r: mix(t.r, u.r),
+        g: mix(t.g, u.g),
+        b: mix(t.b, u.b),
+        a: 1.,
+    }
+    .into()
+}
+
 /// The host base stylesheet in this theme's token values (see
 /// [`WebEmbedState::apply_base`]).
 fn base_css(pad: Pixels, cx: &App) -> String {
@@ -795,7 +808,7 @@ p{{margin:0 0 12px}}small{{color:var(--tc-muted)}}\
 a{{color:inherit;text-underline-offset:2px}}\
 table{{border-collapse:collapse;width:100%;margin:8px 0 16px;font-variant-numeric:tabular-nums}}\
 th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:start}}\
-[data-tc-num]{{text-align:right}}\
+[data-tc-num]{{text-align:right!important}}\
 th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
 hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
 code,pre{{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px}}\
@@ -804,7 +817,9 @@ pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8
         bg = hex(k.content),
         fg = hex(k.label),
         muted = hex(k.secondary),
-        border = hex(k.separator),
+        // Opaque on the page background: a line the page draws twice (a row
+        // and its cells) keeps the token's value (§2.22, D2).
+        border = hex(over(k.separator, k.content)),
         fill = hex(k.fill),
     )
 }
@@ -813,11 +828,13 @@ pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8
 /// `¥3.2`, `+12%`, `−0.3 秒`) with `data-tc-num`, header included, so the
 /// base stylesheet right-aligns it (§2.21: numbers right-aligned in columns).
 /// It runs again when the page changes its tables (live data).
-const NUMERIC_COLUMNS: &str = "var tcNum=function(){var re=/^[\\s+\\-\\u2212\\u00a5$\\u20ac]*[\\d][\\d.,]*\\s*(%|\\S{0,2})$/;\
-document.querySelectorAll('table').forEach(function(t){var rows=t.tBodies.length?[].concat.apply([],[].map.call(t.tBodies,function(b){return [].slice.call(b.rows)})):[].slice.call(t.rows,1);\
-var n=0;rows.forEach(function(r){n=Math.max(n,r.cells.length)});\
-for(var i=0;i<n;i++){var any=false,all=true;rows.forEach(function(r){var c=r.cells[i];if(!c)return;var v=c.textContent.trim();if(!v||v==='\\u2014'||v==='-')return;any=true;if(!re.test(v))all=false;});\
-if(any&&all){rows.forEach(function(r){if(r.cells[i])r.cells[i].setAttribute('data-tc-num','')});if(t.tHead&&t.tHead.rows[0]&&t.tHead.rows[0].cells[i])t.tHead.rows[0].cells[i].setAttribute('data-tc-num','');}}});};\
+const NUMERIC_COLUMNS: &str = "var tcNum=function(){var re=/^[\\s+\\-\\u2212\\u00a5$\\u20ac]*\\d[\\d.,]*\\s*(%|\\S{0,2})$/;\
+document.querySelectorAll('table').forEach(function(t){var rows=[].slice.call(t.rows);\
+var head=function(r){return r.cells.length>0&&[].every.call(r.cells,function(c){return c.tagName==='TH';});};\
+var body=rows.filter(function(r){return !head(r);}),heads=rows.filter(head);\
+var n=0;body.forEach(function(r){n=Math.max(n,r.cells.length)});\
+for(var i=0;i<n;i++){var any=false,all=true;body.forEach(function(r){var c=r.cells[i];if(!c)return;var v=c.textContent.trim();if(!v||v==='\\u2014'||v==='\\u2013'||v==='-')return;any=true;if(!re.test(v))all=false;});\
+if(any&&all){rows.forEach(function(r){if(r.cells[i])r.cells[i].setAttribute('data-tc-num','');});}}});};\
 tcNum();if(!window.__tcNumObs&&window.MutationObserver&&document.body){var p=0;window.__tcNumObs=new MutationObserver(function(){if(p)return;p=1;setTimeout(function(){p=0;tcNum();},50);});\
 window.__tcNumObs.observe(document.body,{childList:true,subtree:true,characterData:true});}";
 
