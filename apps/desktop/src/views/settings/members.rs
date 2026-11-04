@@ -1,7 +1,9 @@
-//! 成员 (NATIVE.md §8): the team's members as grouped-form rows with a
-//! 级别 pop-up (owners); `邀请成员…` and `添加 AI 成员…` open sheets; the
-//! group 默认规则 holds the approval rules for AI members. Members who are
-//! not owners see it all read-only.
+//! 成员 (COMPLETENESS 2.19): section 成员 (count, description, a filter,
+//! `添加 AI 成员…` and `邀请成员…` in its header) lists the active members
+//! with a 级别 select (owners) and "⋯"; section 已停用 holds deactivated
+//! members with a badge and "⋯" › 恢复; section 默认规则 holds the
+//! approval rules for AI members. Members who are not owners see it all
+//! read-only.
 
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
@@ -13,18 +15,21 @@ use gpui_component::{
     button::Button,
     clipboard::Clipboard,
     input::{InputEvent, InputState},
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
+    menu::{DropdownMenu as _, PopupMenuItem},
 };
 
 use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_top};
+use crate::views::nav::dialogs::{
+    sheet_error, sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_invalid,
+    sheet_form_row_top,
+};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus, status::StatusBoard},
-    copy::{common, fill, overlays as o, settings as s},
+    copy::{common, fill, settings as s},
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, Change, InviteCreated, InviteRequest, Member,
         MemberKind, MemberLevel, RunnerSetup,
@@ -33,10 +38,10 @@ use crate::{
     ui::{
         self,
         native::{
-            AlertLayout, FormRow, GroupedForm, InlineValueField, NativeSwitch, NativeTextField,
-            NativeType as _, PushSize, PushStyle, SheetLayout, SheetWidth, alert_button,
-            disabled_push, inline_commit, metrics, native_colors, popup_button, pull_down,
-            push_button,
+            AlertLayout, BadgeState, FormRow, GroupedForm, NativeSwitch, NativeTextField,
+            NativeType as _, PushSize, PushStyle, SearchField, SectionTitle, SheetLayout,
+            SheetWidth, StatusBadge, alert_button, disabled_push, inline_commit, metrics,
+            native_colors, page::outline_badge, pull_down, push_button, tokens,
         },
     },
 };
@@ -81,6 +86,17 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The width of every select in the 成员 tab (2.8: one value column).
+const SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDTH;
+/// The spend limit field (2.8 number field).
+const SPEND_WIDTH: gpui::Pixels = metrics::LABEL_COLUMN;
+
+/// The spend limit as the field shows it: "¥1,000,000", or empty (不限).
+fn spend_text(n: Option<u32>) -> String {
+    n.map(|n| fill(s::RULES_SPEND_VALUE, &[("n", &widgets::grouped(n.into()))]))
+        .unwrap_or_default()
+}
+
 pub struct MembersPage {
     services: Services,
     /// The last row request's result (level or deactivate).
@@ -88,6 +104,7 @@ pub struct MembersPage {
     rules: Option<ApprovalDefaults>,
     rules_status: Status,
     spend: Entity<InputState>,
+    filter: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,7 +112,13 @@ impl MembersPage {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let spend =
             cx.new(|cx| InputState::new(window, cx).placeholder(s::RULES_SPEND_PLACEHOLDER));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(s::MEMBERS_FILTER));
         let subscriptions = vec![
+            cx.subscribe(&filter, |_, _, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
                 if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
                     cx.notify();
@@ -111,6 +134,7 @@ impl MembersPage {
             rules: None,
             rules_status: Status::Idle,
             spend,
+            filter,
             _subscriptions: subscriptions,
         }
     }
@@ -173,10 +197,7 @@ impl MembersPage {
             let _ = this.update_in(cx, |this, window, cx| {
                 match result {
                     Ok(rules) => {
-                        let text = rules
-                            .max_spend_cny
-                            .map(|n| n.to_string())
-                            .unwrap_or_default();
+                        let text = spend_text(rules.max_spend_cny);
                         this.spend
                             .update(cx, |st, cx| st.set_value(text, window, cx));
                         this.rules = Some(rules);
@@ -223,16 +244,19 @@ impl MembersPage {
         let Some(rules) = self.rules else { return };
         match parse_spend(text) {
             Ok(n) => {
+                // The field shows the value with its separators again.
+                let shown = spend_text(n);
+                if shown != text.trim() {
+                    self.spend
+                        .update(cx, |st, cx| st.set_value(shown, window, cx));
+                }
                 if n != rules.max_spend_cny {
                     self.change_rules(|r| r.max_spend_cny = n, cx);
                 }
             }
             Err(()) => {
                 self.rules_status = Status::Failed(s::SPEND_INVALID.into());
-                let back = rules
-                    .max_spend_cny
-                    .map(|n| n.to_string())
-                    .unwrap_or_default();
+                let back = spend_text(rules.max_spend_cny);
                 self.spend
                     .update(cx, |st, cx| st.set_value(back, window, cx));
                 cx.notify();
@@ -268,20 +292,16 @@ impl MembersPage {
         });
     }
 
-    fn active_count(&self) -> usize {
-        self.services
-            .provider
-            .members()
-            .iter()
-            .filter(|m| !m.deactivated)
-            .count()
-    }
-
+    /// One member (2.19, h64): avatar 32, the name (with "你"), 岗位 ·
+    /// state (and the kind when another member has the same name), the 级别
+    /// select in the value column and "⋯". A deactivated member shows the
+    /// 已停用 badge instead of the select.
     fn row(
         &self,
         m: &Member,
         me: Option<&str>,
         owner: bool,
+        same_name: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
@@ -296,87 +316,114 @@ impl MembersPage {
             CharacterStatus::default()
         };
         let state = if m.deactivated {
-            common::MEMBER_DEACTIVATED
+            None
         } else if live == CharacterStatus::Working {
-            s::MEMBER_WORKING
+            Some(s::MEMBER_WORKING)
         } else if live == CharacterStatus::NeedsInput {
-            s::MEMBER_WAITING
+            Some(s::MEMBER_WAITING)
         } else if live == CharacterStatus::Error {
-            s::MEMBER_ERROR
+            Some(s::MEMBER_ERROR)
         } else if m.online {
-            s::MEMBER_ONLINE
+            Some(s::MEMBER_ONLINE)
         } else {
-            s::MEMBER_OFFLINE
+            Some(s::MEMBER_OFFLINE)
         };
-        let role = m.role.as_deref().map(one_line).filter(|r| !r.is_empty());
-        let detail = match role {
-            Some(r) => format!("{r} · {state}"),
-            None => state.to_string(),
-        };
-        let name = if is_me {
-            format!("{} · {}", one_line(&m.name), s::MEMBER_ME)
+        let role = m
+            .role
+            .as_deref()
+            .map(one_line)
+            .filter(|r| !r.is_empty())
+            .unwrap_or_else(|| s::NO_ROLE.to_string());
+        // Two members with one name: the kind tells them apart.
+        let kind = same_name.then_some(if m.is_bot() {
+            s::KIND_AI
         } else {
-            one_line(&m.name)
-        };
-        let level: gpui::AnyElement = if owner && !m.deactivated && !is_me {
+            s::KIND_HUMAN
+        });
+        let detail = std::iter::once(role.as_str())
+            .chain(kind)
+            .chain(state)
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let value: gpui::AnyElement = if m.deactivated {
+            StatusBadge::new(BadgeState::Deactivated, common::MEMBER_DEACTIVATED).into_any_element()
+        } else if owner {
+            // One select width down the column; my own is the same select,
+            // disabled (I cannot change my own level).
             let current = m.level;
             let target = id.clone();
             let page = page.clone();
-            widgets::popup_fixed(
+            let select = widgets::popup_fixed(
                 ElementId::Name(format!("level-{id}").into()),
                 widgets::level_text(m.level),
-                px(112.),
+                SELECT_WIDTH,
                 window,
                 cx,
-            )
-            .dropdown_menu(move |menu, _, _| {
-                [MemberLevel::Owner, MemberLevel::Member]
-                    .into_iter()
-                    .fold(menu, |menu, level| {
-                        let (page, target) = (page.clone(), target.clone());
-                        menu.item(
-                            PopupMenuItem::new(widgets::level_text(level))
-                                .checked(level == current)
-                                .on_click(move |_, _, cx| {
-                                    if level != current {
-                                        let target = target.clone();
-                                        page.update(cx, |p, cx| p.set_level(target, level, cx));
-                                    }
-                                }),
+            );
+            if is_me {
+                div()
+                    .id(ElementId::Name(format!("level-self-{id}").into()))
+                    .tooltip(|window, cx| {
+                        gpui_component::tooltip::Tooltip::new(s::LEVEL_SELF).build(window, cx)
+                    })
+                    .child(disabled_push(select, true, cx))
+                    .into_any_element()
+            } else {
+                select
+                    .dropdown_menu(move |menu, _, _| {
+                        [MemberLevel::Owner, MemberLevel::Member].into_iter().fold(
+                            menu,
+                            |menu, level| {
+                                let (page, target) = (page.clone(), target.clone());
+                                menu.item(
+                                    PopupMenuItem::new(widgets::level_text(level))
+                                        .checked(level == current)
+                                        .on_click(move |_, _, cx| {
+                                            if level != current {
+                                                let target = target.clone();
+                                                page.update(cx, |p, cx| {
+                                                    p.set_level(target, level, cx)
+                                                });
+                                            }
+                                        }),
+                                )
+                            },
                         )
                     })
-            })
-            .into_any_element()
+                    .into_any_element()
+            }
         } else {
-            div()
-                .n_body()
-                .text_color(k.secondary)
-                .child(widgets::level_text(m.level))
-                .into_any_element()
+            outline_badge(widgets::level_text(m.level), cx)
         };
-        let row = FormRow::new(name)
-            .detail(detail)
-            .leading(
-                div().when(m.deactivated, |d| d.opacity(0.5)).child(
-                    ui::MemberAvatar::new(Some(m), px(28.))
-                        .status(CharacterStatus::Idle)
-                        .on(k.window),
-                ),
-            )
-            .control(level)
-            .min_height(px(44.));
-        // The context menu: 更换形象… for an AI member, 停用… or 恢复.
+        let row = widgets::ItemRow::new(
+            ElementId::Name(format!("member-{id}").into()),
+            one_line(&m.name),
+        )
+        .media(
+            ui::MemberAvatar::new(Some(m), tokens::avatar::MD)
+                .status(CharacterStatus::Idle)
+                .on(k.group),
+        )
+        .when(is_me, |r| r.title_lead(outline_badge(s::MEMBER_ME, cx)))
+        .description(detail)
+        .value(value)
+        .muted(m.deactivated);
+        if !owner {
+            return row.into_any_element();
+        }
+        if is_me {
+            // Keep the "⋯" column so the selects line up.
+            return row.menu(div().size(tokens::height::SM)).into_any_element();
+        }
+        // "⋯": 更换形象… for an AI member, 停用…; or 恢复.
         let member = m.clone();
         let deactivated = m.deactivated;
-        let can_manage = owner && !is_me;
-        let base = div()
-            .id(ElementId::Name(format!("member-{id}").into()))
-            .when(m.deactivated, |d| d.opacity(0.6))
-            .child(row);
-        if !can_manage {
-            return base.into_any_element();
-        }
-        base.context_menu(move |menu, _, _| {
+        let more = widgets::more_button(
+            ElementId::Name(format!("member-more-{id}").into()),
+            window,
+            cx,
+        )
+        .dropdown_menu(move |menu, _, _| {
             let page = page.clone();
             if deactivated {
                 let target = member.id.clone();
@@ -402,38 +449,35 @@ impl MembersPage {
                     Self::confirm_deactivate(page.clone(), &member, window, cx)
                 }),
             )
-        })
-        .into_any_element()
+        });
+        row.menu(more).into_any_element()
     }
 
-    fn rules_group(
-        &self,
-        owner: bool,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
-        let k = native_colors(cx);
+    /// 默认规则 (2.19): switches, the spend limit as a number field with
+    /// "¥" in it and separators, and who approves; its loading and failed
+    /// states.
+    fn rules_section(&self, owner: bool, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+        let header = SectionTitle::new(s::RULES).description(if owner {
+            s::RULES_FOOTER
+        } else {
+            s::RULES_READONLY
+        });
         let Some(r) = self.rules else {
             let body = match &self.rules_status {
-                Status::Failed(t) => div()
-                    .n_body()
-                    .text_color(k.secondary)
-                    .child(t.clone())
+                Status::Failed(t) => widgets::failed_alert(
+                    "rules-failed",
+                    s::RULES_FAILED,
+                    Some(t.clone()),
+                    Some(widgets::retry_button("rules-retry", cx).on_click(
+                        cx.listener(|this, _, window, cx| this.refresh_rules(window, cx)),
+                    )),
+                    cx,
+                ),
+                _ => GroupedForm::new()
+                    .row(widgets::list_loading("rules-loading", 2, false, cx))
                     .into_any_element(),
-                _ => ui::native::spinner().into_any_element(),
             };
-            return GroupedForm::new()
-                .header(s::RULES)
-                .row(
-                    div()
-                        .h(metrics::FORM_ROW)
-                        .px(metrics::FORM_ROW_INSET)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(body),
-                )
-                .into_any_element();
+            return widgets::section(header, body);
         };
         let page = cx.entity();
         let switch = |id: &'static str,
@@ -450,32 +494,12 @@ impl MembersPage {
                     }),
             )
         };
-        let spend: gpui::AnyElement = if owner {
-            div()
-                .flex()
-                .items_center()
-                .gap(crate::ui::native::tokens::space::S2)
-                .child(div().n_body().text_color(k.secondary).child("¥"))
-                .child(
-                    InlineValueField::new(
-                        "rules-spend",
-                        &self.spend,
-                        r.max_spend_cny.map(|n| n.to_string()).unwrap_or_default(),
-                    )
-                    .width(px(96.)),
-                )
-                .into_any_element()
-        } else {
-            div()
-                .n_body()
-                .n_figures()
-                .text_color(k.secondary)
-                .child(match r.max_spend_cny {
-                    Some(n) => fill(s::RULES_SPEND_VALUE, &[("n", &n.to_string())]),
-                    None => s::RULES_SPEND_PLACEHOLDER.to_string(),
-                })
-                .into_any_element()
-        };
+        let spend_bad =
+            matches!(&self.rules_status, Status::Failed(t) if t.as_ref() == s::SPEND_INVALID);
+        let spend = NativeTextField::new("rules-spend", &self.spend)
+            .width(SPEND_WIDTH)
+            .disabled(!owner)
+            .error(spend_bad);
         let approver_text = |a: ApproverRole| match a {
             ApproverRole::Requester => s::APPROVER_REQUESTER,
             ApproverRole::Owners => s::APPROVER_OWNERS,
@@ -483,10 +507,10 @@ impl MembersPage {
         let current = r.approver;
         let approver_page = page.clone();
         let approver = disabled_push(
-            popup_button(
+            widgets::popup_fixed(
                 "rules-approver",
                 approver_text(current),
-                PushSize::Regular,
+                SELECT_WIDTH,
                 window,
                 cx,
             ),
@@ -507,8 +531,7 @@ impl MembersPage {
                     )
                 })
         });
-        GroupedForm::new()
-            .header(s::RULES)
+        let group = GroupedForm::new()
             .row(switch(
                 "rules-merge",
                 s::RULES_MERGE,
@@ -522,13 +545,29 @@ impl MembersPage {
                 |r, v| r.deploy_prod = v,
             ))
             .row(FormRow::new(s::RULES_SPEND).control(spend))
-            .row(FormRow::new(s::RULES_APPROVER).control(approver))
-            .footer(if owner {
-                s::RULES_FOOTER
-            } else {
-                s::RULES_READONLY
-            })
-            .into_any_element()
+            .row(FormRow::new(s::RULES_APPROVER).control(approver));
+        // A value the server refused or a spend that is not a number: the
+        // Alert under the group.
+        let failed = match &self.rules_status {
+            Status::Failed(t) => Some(widgets::failed_alert(
+                "rules-save-failed",
+                s::RULES_SAVE_FAILED,
+                Some(t.clone()),
+                None,
+                cx,
+            )),
+            _ => None,
+        };
+        widgets::section(
+            header,
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(tokens::space::S12)
+                .child(group)
+                .children(failed),
+        )
     }
 }
 
@@ -537,59 +576,112 @@ impl Render for MembersPage {
         let owner = i_am_owner(&self.services);
         let me = self.services.me();
         let members = sorted(self.services.provider.members(), me.as_deref());
-        let rows: Vec<gpui::AnyElement> = members
+        // Names that more than one member has.
+        let mut seen = std::collections::HashMap::<String, usize>::new();
+        for m in &members {
+            *seen.entry(one_line(&m.name).to_lowercase()).or_default() += 1;
+        }
+        let same_name = |m: &Member| seen.get(&one_line(&m.name).to_lowercase()).copied() > Some(1);
+        let query = self.filter.read(cx).value().trim().to_lowercase();
+        let matches = |m: &Member| {
+            query.is_empty()
+                || m.name.to_lowercase().contains(&query)
+                || m.role
+                    .as_deref()
+                    .is_some_and(|r| r.to_lowercase().contains(&query))
+        };
+        let (active, off): (Vec<&Member>, Vec<&Member>) =
+            members.iter().partition(|m| !m.deactivated);
+        let active_rows: Vec<gpui::AnyElement> = active
             .iter()
-            .map(|m| self.row(m, me.as_deref(), owner, window, cx))
+            .filter(|m| matches(m))
+            .map(|m| self.row(m, me.as_deref(), owner, same_name(m), window, cx))
             .collect();
         let services = self.services.clone();
         let bot_services = self.services.clone();
-        let header = fill(
-            s::MEMBERS_HEADER,
-            &[("n", &self.active_count().to_string())],
-        );
-        let mut group = GroupedForm::new().header(header).rows(rows);
-        group = if owner {
-            group.below(
+        let mut header = SectionTitle::new(s::PAGE_MEMBERS)
+            .count(active.len() as u32)
+            .description(if owner {
+                s::MEMBERS_NOTE
+            } else {
+                s::MEMBERS_READONLY
+            });
+        if owner {
+            header = header.action(
                 div()
                     .flex()
-                    .gap(crate::ui::native::tokens::space::S8)
-                    .child(
-                        push_button(
-                            "member-invite",
-                            s::INVITE_OPEN,
-                            PushStyle::Outline,
-                            PushSize::Regular,
-                            cx,
-                        )
-                        .on_click(move |_, window, cx| {
-                            open_invite(services.clone(), window, cx);
-                        }),
-                    )
+                    .gap(tokens::space::S8)
                     .child(
                         push_button(
                             "member-add-ai",
                             s::ADD_AI_OPEN,
                             PushStyle::Outline,
-                            PushSize::Regular,
+                            PushSize::Small,
                             cx,
                         )
                         .on_click(move |_, window, cx| {
                             open_add_bot(bot_services.clone(), window, cx);
                         }),
+                    )
+                    .child(
+                        push_button(
+                            "member-invite",
+                            s::INVITE_OPEN,
+                            PushStyle::Default,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .on_click(move |_, window, cx| {
+                            open_invite(services.clone(), window, cx);
+                        }),
                     ),
-            )
+            );
+        }
+        let list = if active_rows.is_empty() {
+            widgets::list_empty(ui::Sym::Search, s::MEMBERS_NO_MATCH, None, cx).into_any_element()
         } else {
-            group.footer(s::MEMBERS_READONLY)
+            widgets::item_rows(active_rows, tokens::avatar::MD, cx).into_any_element()
         };
-        widgets::pane()
-            .child(group)
-            .children(widgets::native_status(&self.status, cx))
-            .child(self.rules_group(owner, window, cx))
-            .children(
-                (self.rules.is_some() && matches!(self.rules_status, Status::Failed(_)))
-                    .then(|| widgets::native_status(&self.rules_status, cx))
-                    .flatten(),
+        let status = match &self.status {
+            Status::Failed(t) => Some(widgets::failed_alert(
+                "members-failed",
+                s::MEMBERS_FAILED,
+                Some(t.clone()),
+                None,
+                cx,
+            )),
+            Status::Done(t) => Some(widgets::quiet(t.clone(), cx).into_any_element()),
+            _ => None,
+        };
+        let column = tokens::size::SETTINGS_COLUMN - metrics::GROUP_MARGIN * 2.;
+        let members_section = widgets::section(
+            header,
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(tokens::space::S12)
+                .child(SearchField::new("members-filter", &self.filter).width(column))
+                .child(GroupedForm::new().row(list))
+                .children(status),
+        );
+        let off_rows: Vec<gpui::AnyElement> = off
+            .iter()
+            .filter(|m| matches(m))
+            .map(|m| self.row(m, me.as_deref(), owner, same_name(m), window, cx))
+            .collect();
+        let off_section = (!off_rows.is_empty()).then(|| {
+            widgets::section(
+                SectionTitle::new(s::MEMBERS_DEACTIVATED)
+                    .count(off_rows.len() as u32)
+                    .description(s::MEMBERS_DEACTIVATED_HINT),
+                GroupedForm::new().row(widgets::item_rows(off_rows, tokens::avatar::MD, cx)),
             )
+        });
+        widgets::pane()
+            .child(members_section)
+            .children(off_section)
+            .child(self.rules_section(owner, window, cx))
     }
 }
 
@@ -632,56 +724,61 @@ fn secret_row(id: &'static str, label: &'static str, value: &str, cx: &App) -> g
         )
 }
 
-/// A form row with a standalone field (§5.6) in a sheet: the label
-/// right-aligned, the field on the sheet background (no group fill).
+/// A row of a sheet form (2.8) with a full-width field; `invalid` turns
+/// the field and its label destructive.
 fn field_row(
     label: &'static str,
     id: &'static str,
     state: &Entity<InputState>,
+    invalid: bool,
     cx: &App,
 ) -> gpui::Div {
-    sheet_form_row(
+    sheet_form_row_invalid(
         label,
-        NativeTextField::new(id, state).width(SHEET_FIELD),
+        NativeTextField::new(id, state).full_width().error(invalid),
+        invalid,
         cx,
     )
 }
 
-/// The field problem of a name and 岗位 for the footnote: `None` when both
-/// are fine or the name is only empty (that only turns the button off).
-fn name_role_problem(name: &str, role: &str) -> (bool, Option<String>) {
-    if name.is_empty() {
-        return (true, None);
-    }
-    match widgets::check_len(name, 64).and(widgets::check_len(role, 64)) {
-        Ok(()) => (false, None),
-        Err(e) => (true, Some(e)),
-    }
+/// The field problems of a name and 岗位: whether the default button is
+/// off, then the name's and the 岗位's message. An empty name only turns
+/// the button off.
+fn name_role_problem(name: &str, role: &str) -> (bool, Option<String>, Option<String>) {
+    let name_err = (!name.is_empty())
+        .then(|| widgets::check_len(name, 64).err())
+        .flatten();
+    let role_err = widgets::check_len(role, 64).err();
+    (
+        name.is_empty() || name_err.is_some() || role_err.is_some(),
+        name_err,
+        role_err,
+    )
 }
 
-/// A server refusal blocks: an alert over the sheet, once per refusal.
-fn alert_refusal(
+/// A server refusal in a sheet (2.15): an Alert in the sheet with 重试,
+/// never a second modal over it.
+fn refusal(
+    id: &'static str,
     status: &Status,
-    alerted: &mut bool,
     title: &'static str,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    if let Status::Failed(text) = status
-        && !*alerted
-    {
-        *alerted = true;
-        let text = text.clone();
-        window.defer(cx, move |window, cx| {
-            crate::views::nav::dialogs::error_alert(title, text, |_, _| {}, window, cx)
-        });
+    retry: impl Fn(&mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Option<gpui::AnyElement> {
+    match status {
+        Status::Failed(t) => Some(widgets::failed_alert(
+            id,
+            title,
+            Some(t.clone()),
+            Some(
+                widgets::retry_button(SharedString::from(format!("{id}-retry")), cx)
+                    .on_click(move |_, window, cx| retry(window, cx)),
+            ),
+            cx,
+        )),
+        _ => None,
     }
 }
-
-/// Standalone fields in a 460 pt sheet's form rows.
-const SHEET_FIELD: gpui::Pixels = px(240.);
-/// The pop-ups of a sheet form.
-const SHEET_POPUP: gpui::Pixels = px(140.);
 
 /// A pop-up row in a sheet: two choices, `on` is the second.
 fn choice_row(
@@ -698,7 +795,7 @@ fn choice_row(
     sheet_form_row(
         label,
         disabled_push(
-            widgets::popup_fixed(id, options[usize::from(second)], SHEET_POPUP, window, cx),
+            widgets::popup_fixed(id, options[usize::from(second)], SELECT_WIDTH, window, cx),
             disabled,
             cx,
         )
@@ -729,7 +826,7 @@ fn sheet_actions(
             SharedString::from(format!("{id}-cancel")),
             common::CANCEL,
             PushStyle::Outline,
-            PushSize::Large,
+            PushSize::Regular,
             cx,
         )
         .on_click(|_, window, cx| window.close_dialog(cx)),
@@ -738,7 +835,7 @@ fn sheet_actions(
                 SharedString::from(format!("{id}-submit")),
                 default,
                 PushStyle::Default,
-                PushSize::Large,
+                PushSize::Regular,
                 cx,
             ),
             busy,
@@ -750,12 +847,16 @@ fn sheet_actions(
 
 /// The 完成 button of a sheet that only shows a result.
 fn done_button(id: &'static str, cx: &App) -> Button {
-    push_button(id, s::DONE, PushStyle::Default, PushSize::Large, cx)
+    push_button(id, s::DONE, PushStyle::Default, PushSize::Regular, cx)
         .on_click(|_, window, cx| window.close_dialog(cx))
 }
-/// The 26 characters as a grid of 40 pt ghost buttons with the idle look at 32 pt; the chosen
-/// one is selected: the selected fill and a 2 pt `accent` ring inside its edge, so the choice
-/// reads at a glance in both themes. `pick` gets the clicked character.
+/// Columns of the look grid: 26 looks and one random cell make 3 rows of
+/// 9 (2.9 avatar grid).
+const PICKER_COLUMNS: f32 = 9.;
+
+/// The 26 characters and a random cell as a 9-column grid of 40 ghost
+/// tiles, gap 8, the idle look at 32; the chosen one has the selected fill
+/// and a `label` edge. `pick` gets the clicked (or the random) character.
 pub fn character_picker(
     id: &'static str,
     selected: Option<CharacterId>,
@@ -763,24 +864,54 @@ pub fn character_picker(
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
     cx: &App,
 ) -> gpui::Div {
-    let _accent = theme::colors(cx).accent;
+    let k = native_colors(cx);
+    let cell = tokens::avatar::LG;
+    let gap = tokens::space::S8;
+    let random_pick = pick.clone();
+    let random =
+        crate::ui::native::tile_button(SharedString::from(format!("{id}-random")), cell, false, cx)
+            .disabled(disabled)
+            .tooltip(s::CHARACTER_RANDOM)
+            .child(crate::ui::icons::icon(
+                ui::Sym::Refresh,
+                tokens::icon::MD,
+                k.secondary,
+            ))
+            .on_click(move |_, window, cx| {
+                let all = CharacterId::ALL;
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos() as usize)
+                    .unwrap_or(0);
+                let mut c = all[nanos % all.len()];
+                if Some(c) == selected {
+                    c = all[(nanos + 1) % all.len()];
+                }
+                random_pick(c, window, cx)
+            });
     div()
+        .w(cell * PICKER_COLUMNS + gap * (PICKER_COLUMNS - 1.))
         .flex()
         .flex_wrap()
-        .gap(crate::ui::native::tokens::space::S4)
+        .gap(gap)
         .children(CharacterId::ALL.iter().enumerate().map(|(ix, c)| {
             let c = *c;
             let pick = pick.clone();
             crate::ui::native::tile_button(
                 ElementId::NamedInteger(id.into(), ix as u64),
-                crate::ui::native::tokens::avatar::LG,
+                cell,
                 selected == Some(c),
                 cx,
             )
             .disabled(disabled)
-            .child(characters::image(c, CharacterStatus::Idle, px(32.)))
+            .child(characters::image(
+                c,
+                CharacterStatus::Idle,
+                tokens::avatar::MD,
+            ))
             .on_click(move |_, window, cx| pick(c, window, cx))
         }))
+        .child(random)
 }
 
 /// The look a new bot gets until one is picked by hand: the roster's character for `name`,
@@ -806,22 +937,31 @@ pub struct InviteForm {
     kind: MemberKind,
     level: MemberLevel,
     status: Status,
-    /// The refusal in `status` was shown in an alert.
-    alerted: bool,
     created: Option<InviteCreated>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl InviteForm {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(s::INVITE_NAME_PLACEHOLDER));
+        let role = cx.new(|cx| InputState::new(window, cx).placeholder(s::ROLE_PLACEHOLDER));
+        // The default button and the field errors follow the typing.
+        let notify =
+            |_: &mut Self, _: Entity<InputState>, e: &InputEvent, cx: &mut Context<Self>| {
+                if matches!(e, InputEvent::Change) {
+                    cx.notify();
+                }
+            };
+        let subscriptions = vec![cx.subscribe(&name, notify), cx.subscribe(&role, notify)];
         Self {
             services,
-            name: cx.new(|cx| InputState::new(window, cx).placeholder(s::INVITE_NAME_PLACEHOLDER)),
-            role: cx.new(|cx| InputState::new(window, cx).placeholder(s::ROLE_PLACEHOLDER)),
+            name,
+            role,
             kind: MemberKind::Human,
             level: MemberLevel::Member,
             status: Status::Idle,
-            alerted: false,
             created: None,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -854,7 +994,6 @@ impl InviteForm {
             cx.notify();
             return;
         }
-        self.alerted = false;
         let reply = self.services.provider.create_invite(InviteRequest {
             name,
             kind: self.kind,
@@ -909,24 +1048,39 @@ impl Render for InviteForm {
                 .into_any_element();
         }
         let busy = self.status.busy();
-        alert_refusal(
-            &self.status,
-            &mut self.alerted,
-            o::INVITE_REFUSED,
-            window,
-            cx,
-        );
-        let (off, footnote) = name_role_problem(
+        let (off, name_err, role_err) = name_role_problem(
             self.name.read(cx).value().trim(),
             self.role.read(cx).value().trim(),
         );
-        let (kind_page, level_page, submit) = (cx.entity(), cx.entity(), cx.entity());
+        let (kind_page, level_page, submit, retry) =
+            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let failed = refusal(
+            "invite-failed",
+            &self.status,
+            s::INVITE_FAILED,
+            move |_, cx| retry.update(cx, |f, cx| f.submit(cx)),
+            cx,
+        );
         SheetLayout::new(s::INVITE)
+            .explanation(s::INVITE_HINT)
             .body(
                 sheet_form()
-                    .child(field_row(s::NAME, "member-name", &self.name, cx))
-                    .child(field_row(s::ROLE, "member-role", &self.role, cx))
-                    .children(footnote.map(|f| sheet_footnote(f, cx)))
+                    .child(field_row(
+                        s::NAME,
+                        "member-name",
+                        &self.name,
+                        name_err.is_some(),
+                        cx,
+                    ))
+                    .children(name_err.map(|e| sheet_error(e, cx)))
+                    .child(field_row(
+                        s::ROLE,
+                        "member-role",
+                        &self.role,
+                        role_err.is_some(),
+                        cx,
+                    ))
+                    .children(role_err.map(|e| sheet_error(e, cx)))
                     .child(choice_row(
                         s::INVITE_KIND,
                         "invite-kind",
@@ -966,6 +1120,7 @@ impl Render for InviteForm {
                         cx,
                     )),
             )
+            .when_some(failed, |l, f| l.body(f))
             .buttons(sheet_actions(
                 "invite",
                 s::INVITE_CREATE,
@@ -1037,8 +1192,6 @@ pub struct BotForm {
     /// The character picked by hand; until then [`default_character`] for the typed name.
     character: Option<CharacterId>,
     status: Status,
-    /// The refusal in `status` was shown in an alert.
-    alerted: bool,
     created: Option<BotCreated>,
     _subscriptions: Vec<Subscription>,
 }
@@ -1063,16 +1216,24 @@ impl BotForm {
         };
         let name = input(s::BOT_NAME_PLACEHOLDER, window, cx);
         // The roster's character follows the name as it is typed.
-        let subscriptions = vec![cx.subscribe(&name, |_, _, e: &InputEvent, cx| {
-            if matches!(e, InputEvent::Change) {
-                cx.notify();
-            }
-        })];
+        let role = input(s::ROLE_PLACEHOLDER, window, cx);
+        let runtime = input(s::RUNNER_RUNTIME_PLACEHOLDER, window, cx);
+        let notify =
+            |_: &mut Self, _: Entity<InputState>, e: &InputEvent, cx: &mut Context<Self>| {
+                if matches!(e, InputEvent::Change) {
+                    cx.notify();
+                }
+            };
+        let subscriptions = vec![
+            cx.subscribe(&name, notify),
+            cx.subscribe(&role, notify),
+            cx.subscribe(&runtime, notify),
+        ];
         Self {
             name,
-            role: input(s::ROLE_PLACEHOLDER, window, cx),
+            role,
             labels: input(s::RUNNER_LABELS_PLACEHOLDER, window, cx),
-            runtime: input(s::RUNNER_RUNTIME_PLACEHOLDER, window, cx),
+            runtime,
             repo: input(s::RUNNER_REPO_PLACEHOLDER, window, cx),
             branch: input(s::RUNNER_BRANCH_PLACEHOLDER, window, cx),
             services,
@@ -1080,7 +1241,6 @@ impl BotForm {
             known_runtimes: Vec::new(),
             character: None,
             status: Status::Idle,
-            alerted: false,
             created: None,
             _subscriptions: subscriptions,
         }
@@ -1164,7 +1324,6 @@ impl BotForm {
             None
         };
         let character = Some(self.chosen_character(cx));
-        self.alerted = false;
         let reply = self.services.provider.create_bot_member(
             name,
             (!role.is_empty()).then_some(role),
@@ -1212,16 +1371,36 @@ impl Render for BotForm {
                 .into_any_element();
         }
         let busy = self.status.busy();
-        alert_refusal(&self.status, &mut self.alerted, o::BOT_REFUSED, window, cx);
-        let (off, footnote) =
+        let (off, name_err, role_err) =
             name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
         // Work on the team's computers needs a runtime.
         let off = off || (self.runner && self.value(&self.runtime, cx).is_empty());
-        let (mode_page, pick_page, submit) = (cx.entity(), cx.entity(), cx.entity());
+        let (mode_page, pick_page, submit, retry) =
+            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let failed = refusal(
+            "bot-failed",
+            &self.status,
+            s::BOT_FAILED,
+            move |_, cx| retry.update(cx, |f, cx| f.submit(cx)),
+            cx,
+        );
         let mut form = sheet_form()
-            .child(field_row(s::NAME, "member-name", &self.name, cx))
-            .child(field_row(s::ROLE, "member-role", &self.role, cx))
-            .children(footnote.map(|f| sheet_footnote(f, cx)))
+            .child(field_row(
+                s::NAME,
+                "member-name",
+                &self.name,
+                name_err.is_some(),
+                cx,
+            ))
+            .children(name_err.map(|e| sheet_error(e, cx)))
+            .child(field_row(
+                s::ROLE,
+                "member-role",
+                &self.role,
+                role_err.is_some(),
+                cx,
+            ))
+            .children(role_err.map(|e| sheet_error(e, cx)))
             .child(choice_row(
                 s::BOT_MODE,
                 "bot-mode",
@@ -1278,7 +1457,7 @@ impl Render for BotForm {
                             }),
                         )
                     })
-                    .child(NativeTextField::new("member-runtime", &self.runtime).width(px(150.))),
+                    .child(NativeTextField::new("member-runtime", &self.runtime).full_width()),
                 cx,
             );
             form = form
@@ -1287,17 +1466,25 @@ impl Render for BotForm {
                     s::RUNNER_LABELS,
                     "member-labels",
                     &self.labels,
+                    false,
                     cx,
                 ))
-                .child(field_row(s::RUNNER_REPO, "member-repo", &self.repo, cx))
+                .child(field_row(
+                    s::RUNNER_REPO,
+                    "member-repo",
+                    &self.repo,
+                    false,
+                    cx,
+                ))
                 .child(field_row(
                     s::RUNNER_BRANCH,
                     "member-branch",
                     &self.branch,
+                    false,
                     cx,
                 ));
         }
-        let looks = sheet_form_row_top(
+        form = form.child(sheet_form_row_top(
             s::BOT_CHARACTER,
             character_picker(
                 "bot-character",
@@ -1312,19 +1499,17 @@ impl Render for BotForm {
                 cx,
             ),
             cx,
-        );
+        ));
         SheetLayout::new(s::ADD_AI_TITLE)
+            .explanation(s::ADD_AI_HINT)
             .body(
                 div()
                     .id("bot-form-body")
                     .max_h(px(420.))
                     .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(crate::ui::native::tokens::space::S16)
-                    .child(form)
-                    .child(looks),
+                    .child(form),
             )
+            .when_some(failed, |l, f| l.body(f))
             .buttons(sheet_actions(
                 "bot",
                 s::BOT_CREATE,
@@ -1340,7 +1525,7 @@ pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> En
     let form = cx.new(|cx| BotForm::new(services, window, cx));
     open_form_sheet(
         form.clone(),
-        SheetWidth::Form,
+        SheetWidth::List,
         px(660.),
         |f| (f.created.is_none()).then(|| f.name.clone()),
         |f, cx| f.submit(cx),
@@ -1399,12 +1584,24 @@ impl Render for CharacterForm {
                 move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
                 cx,
             ))
-            .when_some(widgets::native_status(&self.status, cx), |l, st| l.body(st))
+            .when_some(
+                match &self.status {
+                    Status::Failed(t) => Some(widgets::failed_alert(
+                        "character-failed",
+                        s::CHARACTER_FAILED,
+                        Some(t.clone()),
+                        None,
+                        cx,
+                    )),
+                    _ => None,
+                },
+                |l, f| l.body(f),
+            )
             .buttons([push_button(
                 "member-character-cancel",
                 common::CANCEL,
                 PushStyle::Outline,
-                PushSize::Large,
+                PushSize::Regular,
                 cx,
             )
             .on_click(|_, window, cx| window.close_dialog(cx))])
@@ -1422,7 +1619,7 @@ pub fn open_character(services: Services, member: &Member, window: &mut Window, 
     widgets::open_sheet(
         window,
         cx,
-        SheetWidth::Form,
+        SheetWidth::List,
         px(420.),
         move |dialog, _, _| dialog.child(form.clone()),
     );

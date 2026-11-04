@@ -1119,6 +1119,43 @@ pub fn failed_alert(
 
 // --- end v14/t4 settings sections ---
 
+// --- v14/t4 lists ---
+
+/// The rows of a settings list (2.8): 1 px separators between them, inset
+/// to the title x (16, or 16 + 28 media + 12 when the rows have media).
+pub fn item_rows(rows: Vec<AnyElement>, media: Pixels, cx: &App) -> Div {
+    use crate::ui::native::{metrics, native_colors, tokens};
+    let k = native_colors(cx);
+    let inset = if media > gpui::Pixels::ZERO {
+        metrics::FORM_ROW_INSET + media + tokens::space::S12
+    } else {
+        metrics::FORM_ROW_INSET
+    };
+    let mut list = div().w_full().flex().flex_col();
+    for (i, row) in rows.into_iter().enumerate() {
+        if i > 0 {
+            list = list.child(div().ml(inset).h(tokens::layout::HAIRLINE).bg(k.separator));
+        }
+        list = list.child(row);
+    }
+    list
+}
+
+/// A whole number with thousands separators (2.21): 1000000 → 1,000,000.
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+// --- end v14/t4 lists ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1154,6 +1191,14 @@ mod tests {
         ] {
             assert!(!error_text(e).is_empty());
         }
+    }
+
+    #[test]
+    fn numbers_get_thousands_separators() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(950), "950");
+        assert_eq!(grouped(1000), "1,000");
+        assert_eq!(grouped(1_000_000), "1,000,000");
     }
 
     #[test]
