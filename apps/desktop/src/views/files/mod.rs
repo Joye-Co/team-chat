@@ -26,9 +26,9 @@ pub const PREVIEW_MAX_H: Pixels = px(320.);
 pub const PREVIEW_MIN: Pixels = px(48.);
 /// Width of a file row in the timeline: the one measure (§4.4).
 pub const FILE_ROW_W: Pixels = px(620.);
-/// Height of a file row: 12 + 40 pt tile + 12 (fixed, so progress does not
+/// Height of a file row: 12 + two lines + 12 + the 4 pt bar room (fixed, so progress does not
 /// change the row height).
-pub const FILE_ROW_H: Pixels = px(64.);
+pub const FILE_ROW_H: Pixels = px(52.);
 /// Height of a 产出 or file row in the side panel (§7.11).
 pub const PANEL_ROW_H: Pixels = px(48.);
 
