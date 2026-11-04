@@ -75,6 +75,13 @@ pub(super) enum Item {
     },
     /// C: a member with nothing on (`away`: not online): one row each.
     Plain { member: Member, away: bool },
+    /// C: the collapsed tail of a section (`空闲 · 3`, `不在 · 2`): one
+    /// dimmed row that opens to its members.
+    MemberTail {
+        id: &'static str,
+        label: String,
+        open: bool,
+    },
 }
 
 impl Item {
@@ -247,10 +254,12 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
     sections(out)
 }
 
-/// C: one row per member (avatar 16 and a state dot) under the section
-/// headers 在做, 空闲 and 不在 (§9.1: real rows, never a comma list). A busy
-/// member opens to its 话题. Opens the first busy member when the user has
-/// not opened or closed one yet.
+/// C: one row per member under the group labels `AI 成员` and `同事`
+/// (COMPLETENESS.md §2.1, F33). A busy member opens to its 话题; its right
+/// column holds a StatusBadge (`等你 2`) or the count of its 话题, never
+/// text. The members with nothing on collapse into one tail item per group
+/// (`空闲 · 3` for AI members, `不在 · 2` for people who are away). Opens
+/// the first busy member when the user has not opened or closed one yet.
 pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) -> Vec<Entry> {
     let rows = model::member_rows(p, i.me.as_deref(), i.member_sort, side);
     let opened = i
@@ -264,9 +273,14 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         })
         .clone();
     let open = i.open.clone();
-    let (mut busy, mut idle, mut away): (Vec<Item>, Vec<Item>, Vec<Item>) =
-        (Vec::new(), Vec::new(), Vec::new());
+    let (mut bots, mut idle, mut people, mut away): (
+        Vec<Item>,
+        Vec<Item>,
+        Vec<Item>,
+        Vec<Item>,
+    ) = Default::default();
     for r in rows {
+        let bot = r.member.is_bot();
         if r.busy() {
             let expanded = opened.contains(&r.member.id);
             let topics: Vec<Item> = if expanded {
@@ -291,13 +305,19 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
             } else {
                 Vec::new()
             };
-            busy.push(Item::MemberHead {
+            let list = if bot { &mut bots } else { &mut people };
+            list.push(Item::MemberHead {
                 row: Box::new(r),
                 expanded,
             });
-            busy.extend(topics);
-        } else if r.member.is_bot() || r.member.online {
+            list.extend(topics);
+        } else if bot {
             idle.push(Item::Plain {
+                member: r.member,
+                away: false,
+            });
+        } else if r.member.online {
+            people.push(Item::Plain {
                 member: r.member,
                 away: false,
             });
@@ -309,18 +329,47 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         }
     }
     let mut out: Vec<Item> = Vec::new();
-    for (id, word, items) in [
-        ("rail-sec-busy", c::RAIL_WORKING, busy),
-        ("rail-sec-idle", c::RAIL_IDLE, idle),
-        ("rail-sec-away", c::RAIL_AWAY, away),
+    for (id, word, head, tail_id, tail_word, tail) in [
+        (
+            "rail-sec-ai",
+            c::RAIL_AI_MEMBERS,
+            bots,
+            "rail-tail-idle",
+            c::RAIL_IDLE,
+            idle,
+        ),
+        (
+            "rail-sec-people",
+            c::RAIL_PEOPLE,
+            people,
+            "rail-tail-away",
+            c::RAIL_AWAY,
+            away,
+        ),
     ] {
-        if items.is_empty() {
+        if head.is_empty() && tail.is_empty() {
             continue;
         }
         let folded = i.folded_groups.contains(id);
         out.push(Item::MemberSection { id, word, folded });
-        if !folded {
-            out.extend(items);
+        if folded {
+            continue;
+        }
+        out.extend(head);
+        if !tail.is_empty() {
+            // Tails start closed: the set holds the open ones.
+            let tail_open = i.folded_groups.contains(tail_id);
+            out.push(Item::MemberTail {
+                id: tail_id,
+                label: crate::copy::fill(
+                    c::RAIL_TAIL,
+                    &[("word", tail_word), ("n", &tail.len().to_string())],
+                ),
+                open: tail_open,
+            });
+            if tail_open {
+                out.extend(tail);
+            }
         }
     }
     out.into_iter()
@@ -446,34 +495,51 @@ impl RailView {
                 )
             }
             Item::Plain { member, away } => self.plain_member(member, *away, cx),
+            Item::MemberTail { id, label, open } => {
+                let id = *id;
+                let this = cx.entity().downgrade();
+                self.row(id, label.clone())
+                    .symbol(crate::ui::sf_symbols::Sf::More)
+                    .disclosure(*open)
+                    .dim(true)
+                    .on_click(move |_, _, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            if !this.folded_groups.remove(id) {
+                                this.folded_groups.insert(id.into());
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .into_any_element()
+            }
         }
     }
 
-    /// The row of a busy member in C: avatar 16, name, and a state dot at
-    /// the trailing edge (amber: something waits on me; blue: working). A
-    /// click opens or closes its 话题.
+    /// The row of a busy member in C: avatar 16, name, and one right
+    /// column item: `等你 2` as a StatusBadge when 话题 wait on me, else the
+    /// count of its 话题. The disclosure chevron shows when it is open, and
+    /// on hover. A click opens or closes its 话题.
     fn member_head(&self, r: &MemberRow, expanded: bool, cx: &mut Context<Self>) -> AnyElement {
         let k = crate::views::shell::chrome::colors(cx);
         let id = r.member.id.clone();
         let this = cx.entity().downgrade();
-        let dot = if r.waiting_on_me > 0 {
-            Some(k.amber)
-        } else if r.working {
-            Some(k.blue)
-        } else {
-            None
-        };
-        let _ = expanded;
         let mut row = self
             .row(
                 SharedString::from(format!("rail-member-{}", r.member.id)),
                 r.member.name.clone(),
             )
             .leading(MemberAvatar::new(Some(&r.member), ROW_AVATAR).on(k.sidebar))
-            .unread(r.waiting_on_me > 0);
-        if let Some(color) = dot {
-            row = row.trailing_dot(color);
-        }
+            .unread(r.waiting_on_me > 0)
+            .disclosure(expanded);
+        row = if r.waiting_on_me > 0 {
+            row.trailing_element(crate::ui::native::page::status_badge(
+                crate::ui::native::page::Status::NeedsYou,
+                crate::copy::fill(c::RAIL_WAITS_ON_YOU_N, &[("n", &r.waiting_on_me.to_string())]),
+                cx,
+            ))
+        } else {
+            row.count(r.topics.len() as u32)
+        };
         row.on_click(move |_, _, cx| {
             let id: MemberId = id.clone();
             let _ = this.update(cx, |this, cx| {
