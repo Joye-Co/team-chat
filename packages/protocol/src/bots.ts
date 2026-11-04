@@ -46,6 +46,10 @@ export const BotRun = z.object({
   kind: z.string().min(1).max(32).optional(),
   /** 1.1: the run this one retries (`POST /v1/runs/:id/retry`). */
   retryOf: Id.optional(),
+  /** 1.1 (排队): set while a `created` run with no `machineId` waits for a free machine. */
+  queuedAt: Millis.optional(),
+  /** 1.1 (排队): 1-based place among the bot's queued runs, oldest first; with `queuedAt`. */
+  queuePosition: z.int().positive().optional(),
 });
 export type BotRun = z.infer<typeof BotRun>;
 

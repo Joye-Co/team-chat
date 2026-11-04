@@ -204,6 +204,27 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub retry_of: Option<String>,
+    /// 1.1 (排队): set while a `created` run with no `machine_id` waits for a free machine.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub queued_at: Option<Millis>,
+    /// 1.1 (排队): 1-based place among the bot's queued runs, oldest first.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub queue_position: Option<u32>,
+}
+
+impl BotRun {
+    /// Waits for a free machine (排队).
+    pub fn is_queued(&self) -> bool {
+        self.queued_at.is_some() && self.machine_id.is_none() && self.status == RunStatus::Created
+    }
 }
 
 /// `BotRun.kind` of a read-only side chat run (单独问).

@@ -173,6 +173,11 @@ ALTER TABLE members ADD COLUMN character TEXT;
         name: "v11-3",
         sql: super::v11::MIGRATION_SQL_3,
     },
+    // 1.1: group purpose lines and desk notes.
+    Migration {
+        name: "v11-files-1",
+        sql: super::v11::MIGRATION_SQL_4,
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

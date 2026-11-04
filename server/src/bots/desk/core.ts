@@ -79,9 +79,18 @@ export type RunRow = {
   // desk-6 (1.1 retry)
   /** The run this one retries (`POST /v1/runs/:id/retry`), or null. */
   retry_of: string | null;
+  // desk-6-queue (1.1, GAPS SF-3)
+  /** Set while the run waits for a free machine (排队); null otherwise. */
+  queued_at: number | null;
 };
 
 export const ACTIVE = "ended_at IS NULL";
+/** Runs waiting for a free machine (排队): created, no machine yet, queued. */
+export const QUEUED = "ended_at IS NULL AND status = 'created' AND machine_id IS NULL AND queued_at IS NOT NULL";
+/** A queued run that gets no machine this long after it was queued fails. */
+export const QUEUE_MAX_MS = 60 * 60_000;
+/** How often the desk tries its queued runs again (machines free up in other desks too). */
+export const QUEUE_RETRY_MS = 15_000;
 /** A run still `created` with no machine this long after it was made failed to start. */
 export const START_STUCK_MS = 2 * 60_000;
 /** Follow-up runs in a row (leftover input after a run ended) before the bot stops chaining. */
@@ -270,6 +279,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "desk-6-retry",
           up: `ALTER TABLE runs ADD COLUMN retry_of TEXT;`,
         },
+        {
+          // 1.1 queue (GAPS SF-3): a run whose machines are all busy waits instead of failing.
+          // Old rows read as NULL (not queued).
+          name: "desk-6-queue",
+          up: `ALTER TABLE runs ADD COLUMN queued_at INTEGER;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -337,7 +352,20 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.paused_by) run.pausedBy = r.paused_by;
     if (r.kind) run.kind = r.kind;
     if (r.retry_of) run.retryOf = r.retry_of;
+    if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
+      run.queuedAt = r.queued_at;
+      run.queuePosition = this.queuePosition(r);
+    }
     return run;
+  }
+
+  /** 1-based place of a queued run among this bot's queued runs, oldest first. */
+  protected queuePosition(r: Pick<RunRow, "id" | "queued_at">): number {
+    return (
+      this.sql
+        .exec<{ n: number }>(`SELECT count(*) AS n FROM runs WHERE ${QUEUED} AND (queued_at < ? OR (queued_at = ? AND id < ?))`, r.queued_at, r.queued_at, r.id)
+        .one().n + 1
+    );
   }
 
   protected acceptanceOf(r: Pick<RunRow, "acceptance">): AcceptanceItem[] | null {

@@ -219,6 +219,32 @@ impl HttpClient {
         .await
     }
 
+    /// 1.1: sets the calling bot's desk note in a group (`""` clears it).
+    pub async fn put_desk_note(
+        &self,
+        group_id: &str,
+        text: &str,
+    ) -> ApiResult<crate::proto::PutDeskNoteResponse> {
+        let req = crate::proto::PutDeskNoteRequest {
+            group_id: group_id.to_string(),
+            text: text.to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(Method::PUT, "/v1/desk-note", Some(&req), true)
+            .await
+    }
+
+    /// 1.1: the newest desk note per bot member of a group.
+    pub async fn desk_notes(&self, group_id: &str) -> ApiResult<crate::proto::DeskNotesResponse> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/groups/{}/desk-notes", enc(group_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// 1.1: the page log of a 产出 (页面里的回应), newest first; `before` is an event id.
     pub async fn artifact_events(
         &self,

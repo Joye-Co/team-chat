@@ -1,0 +1,14 @@
+{
+  "kind": "DeskNotesResponse",
+  "valid": true,
+  "value": {
+    "notes": [
+      {
+        "memberId": "01JBX0BOT000000000000000AC",
+        "text": "今天先把 1.1 发出去",
+        "at": 1762128000000,
+        "seq": 73
+      }
+    ]
+  }
+}

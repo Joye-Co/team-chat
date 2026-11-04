@@ -276,3 +276,81 @@ describe("SF-4 post a side chat answer to its topic", () => {
     for (const x of [c, cb, cs]) x.close();
   });
 });
+
+describe("SF-3 queued runs (排队)", () => {
+  it("queue a run when the only machine is full, give its place, and start it when the slot frees", async () => {
+    const { Daemon, mention, world } = await import("./daemon");
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { labels: [], maxParallelRuns: 1 });
+    const { c } = await Client.connect(w.human.token);
+    const runs = (topicId: string) => c.events(w.gid).filter((e) => e.type === "run.updated" && e.data.run.topicId === topicId).map((e) => e.data.run);
+    const t1 = await mention(c, w, "@dev 第一件事");
+    const first = await d.next((f) => f.t === "run.assign" && f.topicId === t1);
+    d.send({ t: "run.accept", runId: first.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === first.runId && e.data.run.status === "running");
+    const t2 = await mention(c, w, "@dev 第二件事");
+    const q2 = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === t2 && e.data.run.queuePosition !== undefined)).data.run;
+    expect(q2).toMatchObject({ status: "created", queuePosition: 1 });
+    expect(q2.machineId).toBeUndefined();
+    expect(q2.queuedAt).toBeGreaterThan(0);
+    const t3 = await mention(c, w, "@dev 第三件事");
+    const q3 = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === t3 && e.data.run.queuePosition !== undefined)).data.run;
+    expect(q3.queuePosition).toBe(2);
+    // Nothing went to the full machine.
+    expect(d.frames.filter((f) => f.t === "run.assign").length).toBe(1);
+    // The first run ends: the oldest queued run gets the machine, the next one moves up.
+    const seq = d.done(first.runId, { status: "succeeded", exitCode: 0, resultText: "好了", summary: "好了" });
+    await d.acked(first.runId, seq);
+    const second = await d.next((f) => f.t === "run.assign" && f.topicId === t2, 20_000);
+    expect(second.runId).toBe(q2.id);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === q3.id && e.data.run.queuePosition === 1, 20_000);
+    const placed = runs(t2).at(-1);
+    expect(placed.queuePosition).toBeUndefined();
+    expect(placed.queuedAt).toBeUndefined();
+    expect(placed.machineId).toBe(w.machineId);
+    c.close();
+    d.close();
+  }, 40_000);
+
+  it("still fail at once when no machine could ever take the run", async () => {
+    const { mention, world } = await import("./daemon");
+    const w = await world();
+    const { c } = await Client.connect(w.human.token);
+    const t = await mention(c, w);
+    const ended = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === t && e.data.run.status === "failed")).data.run;
+    expect(ended.queuePosition).toBeUndefined();
+    c.close();
+  });
+});
+
+describe("SF-3 desk notes", () => {
+  it("let a bot set, read and clear its desk note, synced through the group log", async () => {
+    const owner = await createMember({ level: "owner" });
+    const jojo = await createMember({ kind: "bot", name: "jojo" });
+    const gid = await createGroup(owner, [jojo.id]);
+    const { c } = await Client.connect(owner.token);
+    const put = (token: string, body: unknown) => api("/v1/desk-note", { method: "PUT", token, body });
+    const r = await put(jojo.token, { groupId: gid, text: "  今天先把 1.1 发出去\n" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.seq).toBeGreaterThan(0);
+    const ev = await c.waitEvent((e) => e.type === "desk.noted");
+    expect(ev).toMatchObject({ groupId: gid, actorId: jojo.id, seq: r.body.seq, data: { text: "今天先把 1.1 发出去" } });
+    // Same text again stores nothing.
+    expect((await put(jojo.token, { groupId: gid, text: "今天先把 1.1 发出去" })).body).toEqual({ seq: null });
+    const list = await api(`/v1/groups/${gid}/desk-notes`, { token: owner.token });
+    expect(list.body).toEqual({ notes: [{ memberId: jojo.id, text: "今天先把 1.1 发出去", at: ev.at, seq: ev.seq }] });
+    // A catching-up client gets it from the log.
+    const page = await c.request({ t: "fetch", groupId: gid, afterSeq: 0 });
+    expect(page.events.filter((e: any) => e.type === "desk.noted")).toHaveLength(1);
+    // People do not set desk notes; notes are short; outsiders get nothing.
+    expect((await put(owner.token, { groupId: gid, text: "x" })).status).toBe(403);
+    expect((await put(jojo.token, { groupId: gid, text: "长".repeat(141) })).status).toBe(400);
+    const other = await createMember({ kind: "bot" });
+    expect((await put(other.token, { groupId: gid, text: "x" })).status).toBe(404);
+    // Clear.
+    expect((await put(jojo.token, { groupId: gid, text: "" })).status).toBe(200);
+    await c.waitEvent((e) => e.type === "desk.noted" && e.data.text === "");
+    expect((await api(`/v1/groups/${gid}/desk-notes`, { token: owner.token })).body).toEqual({ notes: [] });
+    c.close();
+  });
+});

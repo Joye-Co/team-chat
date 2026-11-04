@@ -1,0 +1,9 @@
+{
+  "kind": "PutDeskNoteRequest",
+  "valid": true,
+  "description": "clears the note",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "text": ""
+  }
+}

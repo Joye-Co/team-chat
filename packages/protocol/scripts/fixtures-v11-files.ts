@@ -77,6 +77,18 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
   ok("entities/topic-link-pr-merge-failed.json", "TopicLink", { ...prLink, merge: { queuedAt: T0, error: "merge conflict" } });
   ok("events/topic.linked-merge-failed.json", "Event", { ...base, seq: 72, actorId: ID.bot, type: "topic.linked", data: { topicId: ID.topic, link: { ...prLink, merge: { queuedAt: T0, error: "checks failed" } } } });
 
+  // SF-3: desk notes and queued runs (排队).
+  ok("http/put-desk-note-request.json", "PutDeskNoteRequest", { groupId: ID.general, text: "今天先把 1.1 发出去" });
+  ok("http/put-desk-note-request-clear.json", "PutDeskNoteRequest", { groupId: ID.general, text: "" }, "clears the note");
+  ok("http/put-desk-note-response.json", "PutDeskNoteResponse", { seq: 73 });
+  ok("http/put-desk-note-response-same.json", "PutDeskNoteResponse", { seq: null }, "same text, nothing stored");
+  ok("http/desk-notes-response.json", "DeskNotesResponse", { notes: [{ memberId: ID.bot, text: "今天先把 1.1 发出去", at: T0, seq: 73 }] });
+  ok("events/desk.noted.json", "Event", { ...base, seq: 73, actorId: ID.bot, type: "desk.noted", data: { text: "今天先把 1.1 发出去" } });
+  ok("events/desk.noted-cleared.json", "Event", { ...base, seq: 74, actorId: ID.bot, type: "desk.noted", data: { text: "" } });
+  ok("entities/bot-run-queued.json", "BotRun", {
+    id: "01JC0RUN00000000000000QUE2", botId: ID.bot, groupId: ID.general, topicId: ID.topic, status: "created", requestedBy: ID.alice, createdAt: T0, updatedAt: T0, queuedAt: T0, queuePosition: 1,
+  }, "1.1: created, no machine, waiting for a free one");
+
   // SF-7: a table is at most 200 MB.
   const table = { kind: "table", mime: "text/csv", bytes: 120_000, rows: 124, cols: 6, preview: "ready" };
   const createCsv = { groupId: ID.general, topicId: ID.topic, title: "报名表", kind: "file", entry: "a.csv", files: [{ path: "a.csv", fileId: FILE }], media: table };

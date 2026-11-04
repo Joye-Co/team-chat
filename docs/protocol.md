@@ -722,7 +722,8 @@ bot) turns @mentions into runs and run progress into topic messages.
 RunStatus = "created" | "running" | "waiting" | "blocked" | "done" | "failed" | "cancelled"
 BotRun = { id, botId, groupId, topicId, machineId?, status: RunStatus, requestedBy?,
            createdAt, startedAt?, endedAt?, updatedAt, summary? /* <= 280 */,
-           plan?: RunPlanItem[] /* the latest plan; absent = none */ }
+           plan?: RunPlanItem[] /* the latest plan; absent = none */,
+           queuedAt?, queuePosition? /* 1.1, 排队 */ }
 RunPlanState = "done" | "current" | "waiting" | "pending"
 RunPlanItem = { text /* 1..200 code points */, state: RunPlanState,
                 startedAt? /* 1.1, ms: became current */, endedAt? /* 1.1, ms: became done */,
@@ -792,6 +793,14 @@ Rules:
   10 minutes (the daemon's own `status: stalled` report marks it blocked at once and does not
   count as progress). A blocked run that sends events again goes back to `running`. A run that
   never reaches a machine ends as `failed` after 2 minutes.
+- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), the run
+  waits instead of failing: it stays `created` with no `machineId` and gets `queuedAt` and
+  `queuePosition` (1-based among the bot's queued runs, oldest first), stored with `run.updated`.
+  When a run of the bot ends, and every 15 s, the oldest queued run gets a free machine; the
+  runs behind it get a `run.updated` with their new place. A queued run is not failed by the
+  2-minute rule; it fails with the "no free machine" note after 60 minutes. With no machine
+  that could ever take it (labels, runtime, health), the run fails at once as before. Readers:
+  "created with no `machineId`" and `queuedAt` = 排队 at `queuePosition`.
 - Input left over when a run ends starts a follow-up run, at most 5 in a row; then the bot
   posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the
   machine gets `run.cancel`, the run ends as `cancelled` at once, the bot posts one note and the
@@ -1017,6 +1026,22 @@ Rules:
   a resend with the same `clientMsgId` is a duplicate as usual.
 - Clients list the side chats of a topic by `contextOf` and hide side chat topics from the DM's
   normal topic list.
+
+## Desk notes
+
+Module: `desk.ts` / `desk.rs` (1.1). A desk note is a bot member's one-line priority for the
+首页 desk ("今天先把 1.1 发出去"). It is kept in the group log, so every client syncs it.
+
+```ts
+PUT /v1/desk-note  PutDeskNoteRequest { groupId, text /* trimmed: 0..140 code points, "" clears */ }
+                   -> PutDeskNoteResponse { seq: number | null /* null: same text, nothing stored */ }
+desk.noted (stored event) data: { text }       // actorId = the bot
+GET /v1/groups/:id/desk-notes -> DeskNotesResponse { notes: { memberId, text, at, seq }[] /* newest first */ }
+```
+
+Rules: only a bot member of the group sets its own note (`forbidden` for people, `not_found`
+outside the group). The text is normalized like a group name. Readers keep the newest
+`desk.noted` per bot and group; `""` removes it. 1.0.x clients skip the event.
 
 ## Run fields, pause and resume
 

@@ -87,6 +87,9 @@ pub enum EventData {
     /// 1.1: a decision recorded by hand (记一条).
     #[serde(rename = "decision.recorded")]
     DecisionRecorded(DecisionRecordedData),
+    /// 1.1: a bot member set its desk note (首页).
+    #[serde(rename = "desk.noted")]
+    DeskNoted(crate::desk::DeskNotedData),
 }
 
 impl EventData {
@@ -110,6 +113,7 @@ impl EventData {
             Self::CardRetracted(_) => "card.retracted",
             Self::ArtifactPreviewReady(_) => "artifact.previewReady",
             Self::DecisionRecorded(_) => "decision.recorded",
+            Self::DeskNoted(_) => "desk.noted",
         }
     }
 }

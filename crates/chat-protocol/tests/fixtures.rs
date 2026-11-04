@@ -64,7 +64,8 @@ check!(
     PutArtifactDataRequest,
     RecordDecisionRequest,
     PutArtifactMediaRequest,
-    FileRef
+    FileRef,
+    PutDeskNoteRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -116,6 +117,9 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("FileResponse", plain::<FileResponse>),
     ("UploadPartResponse", plain::<UploadPartResponse>),
     ("ArtifactEventsResponse", plain::<ArtifactEventsResponse>),
+    ("PutDeskNoteRequest", validated::<PutDeskNoteRequest>),
+    ("PutDeskNoteResponse", plain::<PutDeskNoteResponse>),
+    ("DeskNotesResponse", plain::<DeskNotesResponse>),
     ("Artifact", plain::<Artifact>),
     ("ArtifactVersion", plain::<ArtifactVersion>),
     ("CreateArtifactRequest", validated::<CreateArtifactRequest>),

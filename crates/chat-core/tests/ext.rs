@@ -1055,6 +1055,8 @@ async fn diagnostics_collect_redact_gzip_and_upload() {
 
 fn bot_run(id: &str, topic: &str, status: RunStatus, updated: u64) -> BotRun {
     BotRun {
+        queue_position: None,
+        queued_at: None,
         usage: None,
         duration_ms: None,
         result_message_id: None,

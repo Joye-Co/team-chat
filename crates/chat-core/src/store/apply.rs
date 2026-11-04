@@ -258,9 +258,10 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
         .unwrap_or(0);
     tx.execute(
         "INSERT INTO groups (id, kind, name, member_ids, created_by, created_at, last_seq, read_seq, unread, mentions,
-                             summary_seq, muted, notify)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?7, ?11, ?12)
+                             summary_seq, muted, notify, purpose)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?7, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, member_ids = excluded.member_ids,
+           purpose = excluded.purpose,
            created_by = excluded.created_by, created_at = excluded.created_at,
            last_seq = MAX(groups.last_seq, excluded.last_seq), read_seq = excluded.read_seq,
            unread = excluded.unread, mentions = excluded.mentions, summary_seq = excluded.summary_seq,
@@ -280,7 +281,8 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
             match &s.notify {
                 Some(n) => Some(enum_str(n)?),
                 None => None,
-            }
+            },
+            g.purpose,
         ],
     )?;
     if let Some(states) = &s.topics {
@@ -671,7 +673,18 @@ fn apply_one(
                 "UPDATE groups SET name = ?2 WHERE id = ?1",
                 params![gid, d.name],
             )?;
+            if let Some(p) = &d.purpose {
+                tx.execute(
+                    "UPDATE groups SET purpose = ?2 WHERE id = ?1",
+                    params![gid, (!p.is_empty()).then_some(p)],
+                )?;
+            }
             out.group_changed = true;
+        }
+        EventData::DeskNoted(d) => {
+            super::v11::apply_desk_note(tx, gid, &ev.actor_id, &d.text, ev.at, ev.seq)?;
+            out.group_changed = true;
+            out.other_events.push(ev.clone());
         }
         EventData::GroupMemberAdded(GroupMemberChangeData { member_id })
         | EventData::GroupMemberRemoved(GroupMemberChangeData { member_id }) => {

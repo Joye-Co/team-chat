@@ -329,14 +329,14 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
 }
 
 pub(crate) const GROUP_COLS: &str = "id, kind, name, member_ids, created_by, created_at, last_seq, read_seq, \
-     unread, mentions, last_activity_at, muted, notify";
+     unread, mentions, last_activity_at, muted, notify, purpose";
 
 pub(crate) fn group_from_row(r: &Row<'_>) -> rusqlite::Result<GroupRow> {
     let ids: String = r.get(3)?;
     let notify: Option<String> = r.get(12)?;
     Ok(GroupRow {
         group: Group {
-            purpose: None,
+            purpose: r.get(13)?,
             id: r.get(0)?,
             kind: enum_from(r.get(1)?)?,
             name: r.get(2)?,

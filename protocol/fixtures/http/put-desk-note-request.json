@@ -1,0 +1,8 @@
+{
+  "kind": "PutDeskNoteRequest",
+  "valid": true,
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "text": "今天先把 1.1 发出去"
+  }
+}

@@ -45,6 +45,7 @@ import {
   PartRef,
 } from "./card2.ts";
 import { ArtifactPreviewReadyEvent, MediaInfo } from "./media.ts";
+import { DeskNotedEvent, DeskNotesResponse, PutDeskNoteRequest, PutDeskNoteResponse } from "./desk.ts";
 import { TopicLink, TopicLinkedEvent } from "./links.ts";
 import { CharacterId } from "./characters.ts";
 import {
@@ -115,6 +116,7 @@ export * from "./card.ts";
 export * from "./card2.ts";
 export * from "./diagram.ts";
 export * from "./media.ts";
+export * from "./desk.ts";
 export * from "./links.ts";
 export * from "./message.ts";
 export * from "./files.ts";
@@ -318,6 +320,7 @@ export const Event = z.discriminatedUnion("type", [
   CardRetractedEvent,
   ArtifactPreviewReadyEvent,
   DecisionRecordedEvent,
+  DeskNotedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -694,6 +697,9 @@ export const schemas = {
   FileResponse,
   UploadPartResponse,
   ArtifactEventsResponse,
+  PutDeskNoteRequest,
+  PutDeskNoteResponse,
+  DeskNotesResponse,
   Artifact,
   ArtifactVersion,
   CreateArtifactRequest,

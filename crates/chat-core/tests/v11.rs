@@ -69,6 +69,8 @@ fn answered(seq: u64, actor: &str, message_id: &str, rev: u32) -> Event {
 
 fn run(id: &str, status: RunStatus, created: u64) -> BotRun {
     BotRun {
+        queue_position: None,
+        queued_at: None,
         id: id.into(),
         bot_id: BOT.into(),
         group_id: G1.into(),

@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub use ext::{ArtifactRow, CardActionRow, TodoReason, TodoRow};
 pub use migrations::Migration;
 pub use rows::*;
-pub use v11::{CardAnswerRow, DecisionRow, Refetch};
+pub use v11::{CardAnswerRow, DecisionRow, DeskNoteRow, Refetch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

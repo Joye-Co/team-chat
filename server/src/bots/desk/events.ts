@@ -388,6 +388,9 @@ export abstract class DeskEvents extends DeskRuns {
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
     await this.topic(r, topicStatus);
+    // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
+    // runs' turns and must not wait inside this run's turn.
+    void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
   }
 
   /**

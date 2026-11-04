@@ -4,12 +4,12 @@ import { type BotRunner, RUN_KIND_ASIDE, type RunAssignFrame, type TopicContext 
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
-import { LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, cut, hasFeature, pickMachine } from "../dispatch";
+import { LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, candidates, cut, hasFeature, pickMachine } from "../dispatch";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
 import { loadMachines, loadRunner } from "../store";
-import { DeskCore, type RunRow } from "./core";
+import { DeskCore, QUEUED, type RunRow } from "./core";
 
 /** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
 export interface RunRequest {
@@ -68,8 +68,11 @@ export abstract class DeskRuns extends DeskCore {
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
 
-        const machine = this.pick(r, runner, await loadMachines(this.env));
-        if (!machine) {
+        const machines = await loadMachines(this.env);
+        const machine = this.pick(r, runner, machines);
+        // Every machine that could take it is busy: the run waits (排队) instead of failing.
+        const busy = !machine && this.couldTake(r, runner, machines);
+        if (!machine && !busy) {
           const why = kind ? TEXT.noAsideMachine : TEXT.noMachine;
           return this.end(r, "failed", why, "blocked", why);
         }
@@ -81,6 +84,14 @@ export abstract class DeskRuns extends DeskCore {
         if (m.refs && m.refs.length > 0) {
           this.seeRefs(runId, [...claim.messages.map((x) => x.id), ...m.refs.map((x) => x.messageId)]);
         }
+        if (!machine) {
+          this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
+          r.queued_at = Date.now();
+          this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", r.queued_at, r.id);
+          await this.setStatus(r, "created");
+          await this.scheduleStall();
+          return;
+        }
         await this.assign(r, runner, machine, prompt);
       } catch (err) {
         // A run that never reached a machine must not block the topic.
@@ -91,6 +102,50 @@ export abstract class DeskRuns extends DeskCore {
       }
       await this.scheduleStall();
     });
+  }
+
+  /** A machine would take the run but has no free slot (`maxParallelRuns`). */
+  protected couldTake(r: RunRow, runner: BotRunner, machines: MachineView[]): boolean {
+    const roomy = machines.map((x) => (x.info ? { ...x, info: { ...x.info, maxParallelRuns: Number.MAX_SAFE_INTEGER } } : x));
+    const usable = r.kind === RUN_KIND_ASIDE ? roomy.filter((x) => hasFeature(x, "aside")) : roomy;
+    return candidates(usable, runner, Date.now()).length > 0;
+  }
+
+  /**
+   * Gives queued runs (排队) a machine, oldest first, while machines have free slots. Called
+   * when a run of this bot ends and by the alarm (slots also free up in other bots' desks).
+   */
+  protected async dispatchQueued(): Promise<void> {
+    const queued = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} ORDER BY queued_at, id`).toArray();
+    if (queued.length === 0) return;
+    const runner = await loadRunner(this.env.DB, this.botId as string);
+    if (!runner?.enabled) return;
+    let changed = false;
+    for (const { id } of queued) {
+      const placed = await this.serial(id, async () => {
+        const r = this.run(id);
+        if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || !r.queued_at) return false;
+        const prompt = this.meta(`prompt:${id}`);
+        const machine = prompt === null ? null : this.pick(r, runner, await loadMachines(this.env), JSON.parse(r.excluded) as string[]);
+        if (!machine || prompt === null) return null;
+        await this.assign(r, runner, machine, prompt);
+        this.sql.exec("UPDATE runs SET queued_at = NULL WHERE id = ?", id);
+        r.queued_at = null;
+        await this.setStatus(r, "created");
+        return true;
+      });
+      if (placed === null) break; // No free machine: the rest keep waiting in order.
+      changed ||= placed;
+    }
+    // The runs still waiting moved up: tell clients their new place.
+    if (changed) {
+      for (const { id } of this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED}`).toArray()) {
+        await this.serial(id, async () => {
+          const r = this.run(id);
+          if (r && r.queued_at && r.ended_at === null && !r.machine_id) await this.setStatus(r, "created");
+        });
+      }
+    }
   }
 
   /** The best machine for the run; an aside run needs a daemon that runs it read-only. */
