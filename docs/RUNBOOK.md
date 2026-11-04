@@ -263,6 +263,11 @@ The cron `0 3 * * *` on `chat-api-*` writes to the env's own bucket:
 idempotent: run the same command again after a failure. The target must run the same or a newer
 server version, with its D1 migrations applied.
 
+Last real-archive check: 2026-11-04. Staging's archive (`lastRun` 2026-11-04 03:02 UTC, complete,
+0 failed) was copied with `restore.ts fetch --from staging` (165 objects) and restored with
+`restore.ts env --from-dir` into an empty local `wrangler dev`: 418 D1 rows, 18 groups,
+1,568 events, 0 failures.
+
 **One group** (its room lost or damaged; its D1 row and members exist in the target):
 
 1. If the room still has data, it cannot be imported over: use point-in-time recovery, or copy
@@ -379,6 +384,7 @@ curl -s -X POST -H @<(printf 'authorization: Bearer %s' "$(cat $S)") \
   `MONITOR_ADMIN_SECRET` is not set (the route is off); `429` one test per minute; `503 no_sink`
   the chosen env failed its check (the reason is in `message`); `502 post_failed`.
 - Check the card in `运维` of that env, and that the people on call got a mention notification.
+- Last run: 2026-11-04, `{"sink":"staging"}` from the deployed Worker answered `200`.
 - First time: `(umask 077; openssl rand -base64 33 | tr -d '\n=' | tr '+/' '-_' > $S)`, then
   `cd ops/monitor && bunx wrangler secret put MONITOR_ADMIN_SECRET < $S`. Rotate the same way.
 - First run: 2026-11-02 23:34 UTC, to staging, card posted in `运维` with one
