@@ -367,6 +367,26 @@ export const ArtifactReplyTransient = z.object({
 });
 
 /** `GET /v1/artifacts/:id/versions/:v/data` (group members). */
+/** 1.1: a stored page event of a 产出 (页面里的回应), as `GET /v1/artifacts/:id/events` lists it. */
+export const ArtifactPageEvent = z.object({
+  eventId: Id,
+  artifactId: Id,
+  version: z.int().positive(),
+  name: ArtifactEventName,
+  kind: ArtifactEventKind,
+  /** Missing on events stored before 1.1 kept payloads. */
+  payload: z.json().optional(),
+  actorId: Id,
+  at: Millis,
+  /** The version's bot answered the ask (`artifact.reply`). */
+  replied: z.boolean().optional(),
+});
+export type ArtifactPageEvent = z.infer<typeof ArtifactPageEvent>;
+/** `GET /v1/artifacts/:id/events?before=<eventId>&limit=` (1.1): newest first, `limit` 1..200 (default 100). */
+export const ArtifactEventsResponse = z.object({ events: z.array(ArtifactPageEvent), hasMore: z.boolean() });
+export type ArtifactEventsResponse = z.infer<typeof ArtifactEventsResponse>;
+export const MAX_ARTIFACT_EVENTS_PAGE = 200;
+
 export const ArtifactDataResponse = z.object({ data: z.json().nullable(), dataRev: Count, updatedAt: Millis });
 export type ArtifactDataResponse = z.infer<typeof ArtifactDataResponse>;
 /** `PUT /v1/artifacts/:id/versions/:v/data` (the version's creator bot). Response `ArtifactDataAck`. */

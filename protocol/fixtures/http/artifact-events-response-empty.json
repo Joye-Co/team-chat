@@ -1,0 +1,8 @@
+{
+  "kind": "ArtifactEventsResponse",
+  "valid": true,
+  "value": {
+    "events": [],
+    "hasMore": false
+  }
+}

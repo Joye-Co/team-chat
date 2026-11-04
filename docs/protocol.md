@@ -1066,6 +1066,19 @@ Page events are **not stored** in the group log (they are transient and audited;
 pre-release type `artifact.evented` is gone). The bridge frames, transients and data routes are
 in [Interaction loop](#interaction-loop-tccard21).
 
+The group room keeps a **page log** of each 产出 (页面里的回应) for 180 days, so every computer of
+every member sees it after a restart:
+
+```ts
+GET /v1/artifacts/:id/events?before=<eventId>&limit=<1..200, default 100>
+  -> ArtifactEventsResponse { events: ArtifactPageEvent[] /* newest first */, hasMore }
+ArtifactPageEvent = { eventId, artifactId, version, name, kind: "emit" | "ask", payload?: JSON,
+                      actorId, at, replied?: true }
+```
+
+Any member of the 产出's group may read it (`not_found` otherwise). `payload` is missing on
+events stored before the page log kept payloads.
+
 Rules:
 
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller

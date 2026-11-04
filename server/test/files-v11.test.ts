@@ -127,3 +127,41 @@ describe("SF-1 multipart upload", () => {
     await send();
   });
 });
+
+describe("SF-2 page log", () => {
+  it("store page events with payloads and list them to every member, newest first", async () => {
+    const owner = await createMember({ level: "owner", name: "Joye" });
+    const alice = await createMember({ name: "Alice" });
+    const bot = await createMember({ kind: "bot", name: "ledger" });
+    const outsider = await createMember();
+    const gid = await createGroup(owner, [alice.id, bot.id]);
+    const { c: ca } = await Client.connect(alice.token, { features: ["interact/1"] });
+    const topicId = (await ca.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "做个看板" })).topic.id;
+    const html = await upload(bot, gid, "index.html", "text/html", new TextEncoder().encode("<p>hi</p>"));
+    const made = await api("/v1/artifacts", {
+      token: bot.token,
+      body: { groupId: gid, topicId, title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: html }], events: [{ name: "pick" }, { name: "ask.total", kind: "ask" }] },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const id = made.body.artifact.id as string;
+    const first = await ca.ok({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { channel: "bili" }, clientEventId: clientMsgId() });
+    const second = await ca.ok({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { channel: "xhs" } });
+    ca.close();
+    // Another member on another computer, after a restart: the log comes from the server.
+    const list = await api(`/v1/artifacts/${id}/events`, { token: owner.token });
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    expect(list.body.hasMore).toBe(false);
+    expect(list.body.events.map((e: any) => [e.eventId, e.payload])).toEqual([
+      [second.eventId, { channel: "xhs" }],
+      [first.eventId, { channel: "bili" }],
+    ]);
+    expect(list.body.events[0]).toMatchObject({ artifactId: id, version: 1, name: "pick", kind: "emit", actorId: alice.id });
+    const page = await api(`/v1/artifacts/${id}/events?limit=1`, { token: alice.token });
+    expect(page.body.events.map((e: any) => e.eventId)).toEqual([second.eventId]);
+    expect(page.body.hasMore).toBe(true);
+    const older = await api(`/v1/artifacts/${id}/events?limit=1&before=${second.eventId}`, { token: alice.token });
+    expect(older.body).toMatchObject({ events: [{ eventId: first.eventId }], hasMore: false });
+    expect((await api(`/v1/artifacts/${id}/events`, { token: outsider.token })).status).toBe(404);
+    expect((await api(`/v1/artifacts/${id}/events?limit=500`, { token: owner.token })).status).toBe(400);
+  });
+});

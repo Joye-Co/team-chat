@@ -75,6 +75,7 @@ import {
   PutArtifactMediaRequest,
   PutArtifactMediaResponse,
   UploadPartResponse,
+  ArtifactEventsResponse,
 } from "./files.ts";
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
 import { BlockRef, BlockRefInput, editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
@@ -688,6 +689,7 @@ export const schemas = {
   CreateFileResponse,
   FileResponse,
   UploadPartResponse,
+  ArtifactEventsResponse,
   Artifact,
   ArtifactVersion,
   CreateArtifactRequest,

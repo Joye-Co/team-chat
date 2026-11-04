@@ -692,3 +692,13 @@ registerAfterCommit(async (event, h) => {
   await h.env.FILES.delete(rows.map((r) => `files/${h.groupId}/${r.file_id}`));
   for (const r of rows) h.sql.exec("DELETE FROM file_deletions WHERE file_id = ?", r.file_id);
 });
+
+// 1.1: page events stay in a page log (页面里的回应) with their payload, so every computer
+// of the group sees them after a restart (GAPS SF-2). Rows from before keep a null payload.
+registerRoomMigration({
+  name: "files-6-page-log",
+  up: `
+    ALTER TABLE page_events ADD COLUMN payload TEXT;
+    CREATE INDEX page_events_artifact ON page_events(artifact_id, at);
+  `,
+});

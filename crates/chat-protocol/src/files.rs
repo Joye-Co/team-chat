@@ -906,6 +906,44 @@ pub struct ArtifactReplyTransient {
     pub error: Option<ArtifactReplyError>,
 }
 
+/// 1.1: a stored page event of a 产出 (页面里的回应), as `GET /v1/artifacts/:id/events` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactPageEvent {
+    pub event_id: String,
+    pub artifact_id: String,
+    pub version: u32,
+    pub name: String,
+    pub kind: ArtifactEventKind,
+    /// Missing on events stored before 1.1 kept payloads.
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub payload: Option<Value>,
+    pub actor_id: String,
+    pub at: Millis,
+    /// The version's bot answered the ask.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub replied: Option<bool>,
+}
+
+/// `GET /v1/artifacts/:id/events?before=<eventId>&limit=` (1.1): newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactEventsResponse {
+    pub events: Vec<ArtifactPageEvent>,
+    pub has_more: bool,
+}
+
+/// Most events one `GET /v1/artifacts/:id/events` returns.
+pub const MAX_ARTIFACT_EVENTS_PAGE: u32 = 200;
+
 /// `GET /v1/artifacts/:id/versions/:v/data` (group members).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

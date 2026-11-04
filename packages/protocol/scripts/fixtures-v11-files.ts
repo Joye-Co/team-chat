@@ -21,6 +21,18 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
   });
   ok("http/upload-part-response.json", "UploadPartResponse", { part: 2, size: 52_428_800 });
 
+  // SF-2: the page log of a 产出.
+  const ART = "01JC0ART00000000000000OCT3";
+  ok("http/artifact-events-response.json", "ArtifactEventsResponse", {
+    events: [
+      { eventId: "01JC0EV0000000000000000002", artifactId: ART, version: 2, name: "pick", kind: "emit", payload: { channel: "bili" }, actorId: ID.owner, at: T0 + 60_000 },
+      { eventId: "01JC0EV0000000000000000001", artifactId: ART, version: 1, name: "ask.total", kind: "ask", payload: { month: "2026-10" }, actorId: ID.alice, at: T0, replied: true },
+      { eventId: "01JC0EV0000000000000000000", artifactId: ART, version: 1, name: "pick", kind: "emit", actorId: ID.alice, at: T0 - 1 },
+    ],
+    hasMore: true,
+  }, "newest first; the last one is from before payloads were kept");
+  ok("http/artifact-events-response-empty.json", "ArtifactEventsResponse", { events: [], hasMore: false });
+
   // SF-7: a table is at most 200 MB.
   const table = { kind: "table", mime: "text/csv", bytes: 120_000, rows: 124, cols: 6, preview: "ready" };
   const createCsv = { groupId: ID.general, topicId: ID.topic, title: "报名表", kind: "file", entry: "a.csv", files: [{ path: "a.csv", fileId: FILE }], media: table };

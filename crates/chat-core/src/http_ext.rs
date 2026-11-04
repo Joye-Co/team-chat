@@ -197,6 +197,24 @@ impl HttpClient {
         .await
     }
 
+    /// 1.1: the page log of a 产出 (页面里的回应), newest first; `before` is an event id.
+    pub async fn artifact_events(
+        &self,
+        artifact_id: &str,
+        before: Option<&str>,
+        limit: u32,
+    ) -> ApiResult<crate::proto::ArtifactEventsResponse> {
+        let mut path = format!(
+            "/v1/artifacts/{}/events?limit={}",
+            enc(artifact_id),
+            limit.clamp(1, crate::proto::MAX_ARTIFACT_EVENTS_PAGE)
+        );
+        if let Some(b) = before {
+            path.push_str(&format!("&before={}", enc(b)));
+        }
+        self.call::<(), _>(Method::GET, &path, None, true).await
+    }
+
     pub async fn artifact(&self, artifact_id: &str) -> ApiResult<ArtifactResponse> {
         self.call::<(), _>(
             Method::GET,
