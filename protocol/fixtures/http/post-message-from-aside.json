@@ -1,0 +1,14 @@
+{
+  "kind": "PostMessageRequest",
+  "valid": true,
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "建议：重连后按 seq 补发。",
+    "fromAside": {
+      "groupId": "01JBX0DM00000000000000000B",
+      "topicId": "01JC0SIDE00000000000000AS1",
+      "messageId": "01JC0MSG000000000000ANSWR1"
+    }
+  }
+}

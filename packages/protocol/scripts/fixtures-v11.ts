@@ -197,6 +197,7 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
     pausedBy: ID.owner,
   };
   ok("entities/bot-run-v11.json", "BotRun", run, "usage, durationMs, resultMessageId, acceptance and pausedBy");
+  ok("entities/bot-run-retry.json", "BotRun", { ...run, id: "01JBX0RUN000000000000000AY", status: "running", retryOf: run.id, acceptance: [], pausedBy: undefined }, "a run that retries another (POST /v1/runs/:id/retry)");
   ok("entities/bot-run-aside.json", "BotRun", { ...run, id: "01JBX0RUN000000000000000AX", groupId: X.dm, topicId: X.side, kind: "aside", acceptance: [], usage: { inputTokens: 1, outputTokens: 2 } }, "a side chat run");
   bad("entities/bot-run-bad-acceptance.json", "BotRun", { ...run, acceptance: [{ text: "x", state: "met" }] }, "unknown acceptance state");
   ok("events/run.updated-v11.json", "Event", { ...base, actorId: ID.bot, type: "run.updated", data: { run } });

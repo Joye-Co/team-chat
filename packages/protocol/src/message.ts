@@ -40,6 +40,8 @@ export const FileRef = z.object({
   sha256: Sha256,
   /** 1.1: what the file is, for inline previews (computed by the sender). */
   media: MediaInfo.optional(),
+  /** 1.1: the frame of a 产出 version this file was taken from (把这一帧发到话题), `t` in seconds. */
+  source: z.object({ artifactId: Id, version: z.int().positive(), t: z.number().nonnegative() }).optional(),
 });
 export type FileRef = z.infer<typeof FileRef>;
 
@@ -91,6 +93,11 @@ const blockRefFields = {
   messageId: Id.optional(),
   /** A 产出 version (same group). */
   artifact: z.object({ artifactId: Id, version: z.int().positive() }).optional(),
+  /**
+   * 1.1: the group of the source when it is not this group: a side chat (单独问) quoting a
+   * message or 产出 of the group it is about. The sender must be a member of both.
+   */
+  sourceGroupId: Id.optional(),
   /** The Card v2 `rev` the sender saw. */
   cardRev: CardRev.optional(),
   blockId: BlockRefId,

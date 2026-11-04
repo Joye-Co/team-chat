@@ -618,7 +618,7 @@ impl TopicRail {
     }
 
     pub(super) fn native_cost(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let cost = d.cost.clone()?;
+        let cost = d.cost?;
         if cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }

@@ -21,6 +21,12 @@ export interface BotStateData {
   artifacts?: Record<string, CardRef>;
   /** 1.1: side chat topics (单独问) by topic id: the topic each one reads, up to which seq. */
   asides?: Record<string, AsideRef>;
+  /**
+   * 1.1: DM groups by id, read for side chat topics from their start up to this seq. A side chat
+   * opened before the cursor (a first start that skipped history, or state of an older SDK) is
+   * found this way; later ones arrive as events.
+   */
+  asideScan?: Record<string, number>;
 }
 
 /** A side chat topic in a DM: `groupId`/`topicId`/`uptoSeq` name the topic it is about. */
@@ -76,6 +82,7 @@ export class FileStateStore implements StateStore {
       cards: raw.cards && typeof raw.cards === "object" ? raw.cards : {},
       artifacts: raw.artifacts && typeof raw.artifacts === "object" ? raw.artifacts : {},
       asides: raw.asides && typeof raw.asides === "object" ? raw.asides : {},
+      asideScan: raw.asideScan && typeof raw.asideScan === "object" ? raw.asideScan : {},
     };
   }
 

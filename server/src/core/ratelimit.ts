@@ -20,6 +20,10 @@ export class TokenBucket {
     this.tokens -= cost;
     return true;
   }
+  /** Milliseconds until `cost` tokens are there (0 = now). Call after a failed `take`. */
+  waitMs(cost = 1): number {
+    return this.tokens >= cost ? 0 : ((cost - this.tokens) / this.rate) * 1000;
+  }
 }
 
 /** Limits per member, enforced in that member's gateway (shared by all its sockets). */

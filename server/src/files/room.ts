@@ -4,12 +4,14 @@
 import {
   type Artifact,
   type ArtifactEventDecl,
+  type ArtifactPreview,
   type ArtifactFile,
   type ArtifactKind,
   type ArtifactVersion,
   type FileRef,
   MEDIA_LIMITS,
   MediaInfo,
+  mediaFileProblem,
   mediaProblem,
 } from "@chat/protocol";
 import { ApiError } from "../core/errors";
@@ -161,6 +163,7 @@ export type VersionRow = {
   events?: string | null;
   media?: string | null;
   data_rev?: number;
+  preview?: string | null;
 };
 
 export interface RegisterFileArgs {
@@ -188,6 +191,8 @@ export interface VersionInput {
   media?: MediaInfo;
   /** 1.1: the first data snapshot. */
   data?: unknown;
+  /** 1.1: the author's preview card (GAPS SF-11). */
+  preview?: ArtifactPreview;
 }
 
 export function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
@@ -237,6 +242,7 @@ export function toVersion(r: VersionRow): ArtifactVersion {
   if (r.events) v.events = JSON.parse(r.events) as ArtifactEventDecl[];
   if (r.media) v.media = JSON.parse(r.media) as MediaInfo;
   if (r.data_rev) v.dataRev = r.data_rev;
+  if (r.preview) v.preview = JSON.parse(r.preview) as ArtifactPreview;
   return v;
 }
 
@@ -246,12 +252,17 @@ export function versionRow(room: RoomContext, artifactId: string, version: numbe
     .toArray()[0] as VersionRow | undefined;
 }
 
+/** 产出 file paths the client reserves for the files it serves itself. */
+export const RESERVED_PATH_PREFIX = "__teamchat/";
+
 /** Checks a version's files against the room's ready files and returns them with size and mime. */
 function resolveVersionFiles(room: RoomContext, kind: ArtifactKind, input: VersionInput): ArtifactFile[] {
   const paths = new Set<string>();
   const files: ArtifactFile[] = [];
   for (const f of input.files) {
     if (paths.has(f.path)) throw new ApiError("invalid", "duplicate path in 产出 version");
+    // REFS §B: the client serves its own files (the diagram library) under this prefix.
+    if (f.path.startsWith(RESERVED_PATH_PREFIX)) throw new ApiError("invalid", `paths under ${RESERVED_PATH_PREFIX} are reserved`);
     paths.add(f.path);
     const rec = fileRecord(room, f.fileId);
     if (!rec) throw new ApiError("invalid", "file is not a ready file of this group");
@@ -292,6 +303,8 @@ export function checkMedia(room: RoomContext, raw: unknown): MediaInfo {
   for (const id of mediaFileIds(parsed.data)) {
     if (!fileRecord(room, id)) throw new ApiError("invalid", "media names a file that is not a ready file of this group");
   }
+  const fileProblem = mediaFileProblem(parsed.data, (id) => fileRecord(room, id));
+  if (fileProblem) throw new ApiError("too_large", `media: ${fileProblem}`);
   return parsed.data;
 }
 
@@ -305,8 +318,8 @@ function insertVersion(
   now: number,
 ): void {
   room.sql.exec(
-    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev, preview)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     artifactId,
     version,
     input.entry,
@@ -318,6 +331,7 @@ function insertVersion(
     input.events && input.events.length > 0 ? JSON.stringify(input.events) : null,
     input.media ? JSON.stringify(input.media) : null,
     input.data !== undefined ? 1 : 0,
+    input.preview ? JSON.stringify(input.preview) : null,
   );
   // A new version starts with the data of its request, or none (INTERACT §5.3).
   if (input.data !== undefined) {
@@ -490,6 +504,12 @@ function resolveAttachments(room: RoomContext, raw: unknown): FileRef[] {
     // 1.1: the sender's media metadata, checked against the limits and the group's files.
     const media = (item as { media?: unknown }).media;
     if (media !== undefined) ref.media = checkMedia(room, media);
+    // 1.1: 把这一帧发到话题: the frame's 产出 version is one of this group.
+    const source = (item as { source?: { artifactId: string; version: number; t: number } }).source;
+    if (source !== undefined) {
+      if (!versionRow(room, source.artifactId, source.version)) throw new ApiError("invalid", "attachment source is not a 产出 version of this group");
+      ref.source = { artifactId: source.artifactId, version: source.version, t: source.t };
+    }
     out.push(ref);
   }
   return out;
@@ -554,8 +574,8 @@ registerEventImporter((e, sql) => {
     a.updatedAt,
   );
   sql.exec(
-    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, preview)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.artifactId,
     v.version,
     v.entry,
@@ -566,6 +586,7 @@ registerEventImporter((e, sql) => {
     v.runId ?? null,
     v.events && v.events.length > 0 ? JSON.stringify(v.events) : null,
     v.media ? JSON.stringify(v.media) : null,
+    v.preview ? JSON.stringify(v.preview) : null,
   );
 });
 
@@ -677,4 +698,20 @@ registerAfterCommit(async (event, h) => {
   );
   await h.env.FILES.delete(rows.map((r) => `files/${h.groupId}/${r.file_id}`));
   for (const r of rows) h.sql.exec("DELETE FROM file_deletions WHERE file_id = ?", r.file_id);
+});
+
+// 1.1: page events stay in a page log (页面里的回应) with their payload, so every computer
+// of the group sees them after a restart (GAPS SF-2). Rows from before keep a null payload.
+registerRoomMigration({
+  name: "files-6-page-log",
+  up: `
+    ALTER TABLE page_events ADD COLUMN payload TEXT;
+    CREATE INDEX page_events_artifact ON page_events(artifact_id, at);
+  `,
+});
+
+// 1.1: the author's preview card of a version (GAPS SF-11). Old versions have none.
+registerRoomMigration({
+  name: "files-7-preview",
+  up: `ALTER TABLE artifact_versions ADD COLUMN preview TEXT;`,
 });

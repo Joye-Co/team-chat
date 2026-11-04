@@ -6,10 +6,14 @@
 // the run log and the uploaded raw session. Then 停止: a second run hangs in the fake CLI, a member
 // stops it through the client API (the chat-core `cancel_run` example), and the run must end as
 // cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
-// The first run also calls `chat-run card patch` (the fake CLI's word "chatrun"): the run log
-// must hold the `output` event with the token in its body redacted, and the socket must be gone
-// after the run. A server without `chat-run` support makes the command end with
-// "server too old" after 15 s; the report records which answer came.
+// Between them, an answer in the first topic after its CLI exited starts a run that resumes the
+// first run's CLI session (`--resume`), and a second bot on the fake Codex app-server uses
+// `chat-run` through the file transport (local runs only).
+// The first run also uses `chat-run` (the fake CLI's word "chatcard"): it reads `chat-run card
+// schema`, posts a card built from it, posts it again (a retry: the idempotency key must give the
+// same message, and the topic must hold the card once), and patches the posted card at its rev
+// (exit 0, the next rev). The run log must hold the `output` events with the token in the patch
+// body redacted, and the socket must be gone after the run.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // Against a deployed env (no wrangler; the owner token comes from a file, and the run makes its
@@ -177,6 +181,8 @@ async function runDaemonCheck(
   }
   const fake = join(ROOT, "apps/daemon/tests/fake/fake_claude.py");
   chmodSync(fake, 0o755);
+  const fakeCodex = join(ROOT, "apps/daemon/tests/fake/fake_codex.py");
+  chmodSync(fakeCodex, 0o755);
   const work = join(TMP, "work");
   const claudeHome = join(TMP, "claude-home");
   mkdirSync(claudeHome, { recursive: true });
@@ -196,6 +202,12 @@ async function runDaemonCheck(
       'kind = "claude"',
       `command = "${fake}"`,
       `env = { CLAUDE_CONFIG_DIR = "${claudeHome}" }`,
+      "",
+      "[runtimes.codex]",
+      'kind = "codex"',
+      `command = "${fakeCodex}"`,
+      'sandbox = "workspace-write"',
+      'approval_policy = "never"',
       "",
     ].join("\n"),
   );
@@ -221,14 +233,16 @@ async function runDaemonCheck(
   ws.send(JSON.stringify({ t: "hello", protocol: 1, client: { name: "e2e", version: "0" } }));
   await until("welcome", () => events.find((e) => e.frame?.t === "welcome"));
   ws.send(
-    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow chatrun", mentions: [bot.member.id] }),
+    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow chatcard", mentions: [bot.member.id] }),
   );
   const ack = await until("send ack", () => events.find((e) => e.frame?.rid === "r1"));
   if (!ack.frame.ok) throw new Error("send failed");
   const topicId = ack.frame.result.message.topicId as string;
   step(`mentioned the bot in topic ${topicId}`);
 
-  const botMsgs = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id).map((e) => e.data.message);
+  const allBotMsgs = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id).map((e) => e.data.message);
+  const CHAT_RUN_TITLE = "chat-run card";
+  const botMsgs = () => allBotMsgs().filter((m) => m.cardV2?.title !== CHAT_RUN_TITLE);
   const statuses = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).map((e) => e.data.status);
   const ackReaction = await until("acknowledgement", () =>
     events.find((e) => e.type === "reaction.changed" && e.actorId === bot.member.id && e.data.messageId === ack.frame.result.message.id && e.data.on),
@@ -247,26 +261,33 @@ async function runDaemonCheck(
   step("no progress message; done card posted; topic done");
 
   const log = await call("GET", `/v1/runs/${runId}/events`, { token: alice.token });
-  // chat-run: the output event is in the run log, redacted; the socket is gone.
-  const output = log.entries.find((e: any) => e.t === "run.event" && e.event.type === "output");
-  if (output?.event.op !== "card.patch") throw new Error("no chat-run output event in the run log");
+  // chat-run: the output events are in the run log, the patch body redacted; the socket is gone.
+  const outputs = log.entries.filter((e: any) => e.t === "run.event" && e.event.type === "output");
+  const output = outputs.find((e: any) => e.event.op === "card.patch");
+  if (!output || outputs.filter((e: any) => e.event.op === "card.post").length !== 2) throw new Error("no chat-run output events in the run log");
   const outputBody = JSON.stringify(output.event.body);
   if (outputBody.includes("tm_fakefakefakefakefakefake01") || !outputBody.includes("<redacted>")) throw new Error("output body not redacted");
   const runDir = join(work, "runs", runId);
-  const chatRun = JSON.parse(readFileSync(join(runDir, "work", "chatrun-1.json"), "utf8"));
-  if (!chatRun.socket || existsSync(chatRun.socket)) throw new Error("chat-run socket missing in the run or left after it");
-  if (chatRun.mode !== "0o600") throw new Error(`chat-run socket mode ${chatRun.mode}`);
-  const chatRunAnswer = JSON.parse(chatRun.out || "null");
-  // An old server answers with a reason ("server too old"); a 1.1 server runs the patch through
-  // the group room, which refuses the fake message id "M" as not_found.
-  const typed = chatRunAnswer?.error?.reason || chatRunAnswer?.error?.code === "not_found";
-  if (chatRun.code !== 0 && !typed) throw new Error(`chat-run failed without a reason: ${chatRun.err}`);
-  report.chatRun = { exitCode: chatRun.code, answer: chatRunAnswer };
-  step(`chat-run output in the run log, redacted; chat-run exit ${chatRun.code}`);
+  const chatRun = JSON.parse(readFileSync(join(runDir, "work", "chatcard-1.json"), "utf8"));
+  const sockets = readdirSync(runDir).filter((f) => f.endsWith(".sock"));
+  if (sockets.length > 0) throw new Error("chat-run socket left after the run");
+  // The card came from `chat-run card schema`; the post, its retry and the patch all worked.
+  if (!chatRun.kinds?.includes("text")) throw new Error(`chat-run card schema gave no block types: ${JSON.stringify(chatRun.kinds)}`);
+  const posted = chatRun.post.out;
+  if (chatRun.post.code !== 0 || !posted?.messageId) throw new Error(`chat-run card post failed: ${JSON.stringify(chatRun.post)}`);
+  if (chatRun.again.code !== 0 || chatRun.again.out?.messageId !== posted.messageId) throw new Error(`the retry posted another card: ${JSON.stringify(chatRun.again)}`);
+  const copies = allBotMsgs().filter((m) => m.cardV2?.title === CHAT_RUN_TITLE);
+  if (copies.length !== 1) throw new Error(`the topic holds the chat-run card ${copies.length} times`);
+  const rev = posted.message.cardV2.rev as number;
+  if (chatRun.patch.code !== 0 || chatRun.patch.out?.rev !== rev + 1) throw new Error(`chat-run card patch failed: ${JSON.stringify(chatRun.patch)}`);
+  report.chatRun = { post: posted.messageId, retry: chatRun.again.out.messageId, patchedRev: chatRun.patch.out.rev, blockTypes: chatRun.kinds.length };
+  step(`chat-run: card from the schema posted once (retry deduped), patched to rev ${chatRun.patch.out.rev}; outputs in the run log, redacted`);
   const session = await until("raw session uploaded", async () => {
     const res = await fetch(`${BASE}/v1/runs/${runId}/session`, { headers: { authorization: `Bearer ${owner}` } });
     return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;
   });
+  report.resume = await resumeCheck(groupId, topicId, runId, bot, work, events, ws);
+  if (!REMOTE) report.codex = await codexCheck(owner, groupId, work, events, ws);
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
   ws.close();
   report.cancel = stop;
@@ -290,6 +311,57 @@ async function runDaemonCheck(
   });
   if (!report.sessionIsGzip) throw new Error("session is not gzip");
   step("run log and raw session checked");
+}
+
+/**
+ * Resume: after the first run ended (its CLI exited), a member answers in the same topic. The
+ * next run goes to the same machine with `run.assign.resumeSessionId`, and the daemon starts the
+ * fake CLI with `--resume` of the first run's session.
+ */
+async function resumeCheck(groupId: string, topicId: string, firstRunId: string, bot: { member: { id: string } }, work: string, events: any[], ws: WebSocket) {
+  const argvOf = (runId: string) => JSON.parse(readFileSync(join(work, "runs", runId, "work", "argv.json"), "utf8")) as string[];
+  const first = argvOf(firstRunId);
+  const s1 = first[first.indexOf("--session-id") + 1];
+  if (!s1) throw new Error("the first run has no --session-id");
+  ws.send(JSON.stringify({ t: "send", rid: "r-resume", groupId, topicId, clientMsgId: crypto.randomUUID(), body: "@dev 再看一下", mentions: [bot.member.id] }));
+  const ack = await until("send ack (resume)", () => events.find((e) => e.frame?.rid === "r-resume"));
+  if (!ack.frame.ok) throw new Error("send failed");
+  const runsOf = () => events.filter((e) => e.type === "run.updated" && e.data.run.topicId === topicId && e.data.run.id !== firstRunId).map((e) => e.data.run);
+  const second = await until("second run done", () => runsOf().find((r: any) => r.status === "done"), 60_000);
+  const argv = argvOf(second.id);
+  const i = argv.indexOf("--resume");
+  if (i < 0 || argv[i + 1] !== s1 || argv.includes("--session-id")) throw new Error(`run 2 did not resume ${s1}: ${JSON.stringify(argv)}`);
+  step(`answer after the CLI exited: run ${second.id} resumed session ${s1}`);
+  return { firstRunId, secondRunId: second.id, sessionId: s1 };
+}
+
+/**
+ * The Codex file transport: a second bot runs the fake Codex app-server (sandbox
+ * workspace-write), whose `chat-run` uses the request folder `<work>/.chat-run-<run id>`
+ * instead of the socket. It posts a card from `chat-run card schema` (and its retry, deduped) and
+ * patches it; the folder is gone after the run and the topic is done.
+ */
+async function codexCheck(owner: string, groupId: string, work: string, events: any[], ws: WebSocket) {
+  const cx = await call("POST", "/v1/bots", { token: owner, body: { name: "cx", role: "开发" } });
+  await call("PUT", `/v1/bots/${cx.member.id}/runner`, { token: owner, body: { runtime: "codex", labels: [LABEL] } });
+  ws.send(JSON.stringify({ t: "send", rid: "r-codex", groupId, clientMsgId: crypto.randomUUID(), body: "@cx chatcard", mentions: [cx.member.id] }));
+  const ack = await until("send ack (codex)", () => events.find((e) => e.frame?.rid === "r-codex"));
+  if (!ack.frame.ok) throw new Error(`send failed: ${JSON.stringify(ack.frame.error)}`);
+  const topicId = ack.frame.result.message.topicId as string;
+  const run = await until("codex run done", () => events.find((e) => e.type === "run.updated" && e.data.run.topicId === topicId && ["done", "failed"].includes(e.data.run.status))?.data.run, 60_000);
+  if (run.status !== "done") throw new Error(`codex run ${run.status}`);
+  const runWork = join(work, "runs", run.id, "work");
+  const r = JSON.parse(readFileSync(join(runWork, "chatcard.json"), "utf8"));
+  if (r.socket || !r.dir?.endsWith(`.chat-run-${run.id}`)) throw new Error(`codex chat-run used no request folder: ${JSON.stringify({ dir: r.dir, socket: r.socket })}`);
+  if (existsSync(r.dir)) throw new Error("the request folder is left after the run");
+  const posted = r.post.out;
+  if (r.post.code !== 0 || !posted?.messageId) throw new Error(`codex chat-run card post failed: ${JSON.stringify(r.post)}`);
+  if (r.again.out?.messageId !== posted.messageId) throw new Error("the codex retry posted another card");
+  if (r.patch.code !== 0 || r.patch.out?.rev !== posted.message.cardV2.rev + 1) throw new Error(`codex chat-run card patch failed: ${JSON.stringify(r.patch)}`);
+  const cards = events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.cardV2?.title === "chat-run codex card");
+  if (cards.length !== 1) throw new Error(`the topic holds the codex card ${cards.length} times`);
+  step(`codex: chat-run through the request folder posted once (retry deduped) and patched to rev ${r.patch.out.rev}; folder removed`);
+  return { runId: run.id, topicId, patchedRev: r.patch.out.rev };
 }
 
 /** The first file named `name` under `dir`, at any depth. */

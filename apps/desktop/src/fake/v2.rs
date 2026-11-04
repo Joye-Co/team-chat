@@ -70,6 +70,8 @@ pub const T_WEEKLY: &str = "t-v2-weekly";
 
 pub const RUN_RECONNECT: &str = "run-v2-reconnect";
 pub const RUN_VIRTUAL: &str = "run-v2-virtual";
+/// Scout's check of the virtual list, beside Forge's run (`with_second_run`).
+pub const RUN_VIRTUAL_CHECK: &str = "run-v2-virtual-check";
 pub const RUN_V4: &str = "run-v2-v4";
 pub const RUN_WEEKLY: &str = "run-v2-weekly";
 
@@ -970,6 +972,31 @@ impl V2Samples {
         }
     }
 
+    /// The sample team with a second member at work in 开发 / 虚拟列表: Scout checks the
+    /// list while Forge builds it (two plan cards in one 话题, `topic-two-runs`).
+    pub fn with_second_run() -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            d.runs.push(run(RunSpec {
+                id: RUN_VIRTUAL_CHECK,
+                bot: SCOUT,
+                group: DEV,
+                topic: T_VIRTUAL,
+                status: RunStatus::Running,
+                by: ME,
+                started: at(9, 40),
+                ended: None,
+                machine: "云端",
+                plan: plan(&[
+                    ("读压测脚本", PlanState::Done),
+                    ("在三台电脑上跑一遍", PlanState::Current),
+                    ("写验收记录", PlanState::Pending),
+                ]),
+            }))
+        });
+        s
+    }
+
     fn with<R>(&self, f: impl FnOnce(&mut Data) -> R) -> R {
         f(&mut self.data.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -1413,7 +1440,16 @@ impl ChatProvider for V2Samples {
             },
         }
     }
-    fn send_side_chat(&self, group_id: &str, topic_id: &str, _member_id: &str, body: String) {
+    fn send_side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        _member_id: &str,
+        body: String,
+        refs: Vec<crate::data::DraftRef>,
+    ) {
+        // The server writes the chips' quote lines before the body; the fake does the same.
+        let body = crate::views::refs::side_chat_body(body.trim(), &refs);
         self.with(|d| {
             let n = d.side_chat.len() + 1;
             d.side_chat.push(SideChatMessage {
@@ -1497,16 +1533,17 @@ impl ChatProvider for V2Samples {
                 text: "一万条消息滚动不卡".into(),
                 met: Some(true),
                 evidence: Some("现在 57 fps".into()),
+                ..Default::default()
             },
             AcceptanceItem {
                 text: "内存不涨".into(),
                 met: Some(true),
                 evidence: Some("现在 212 MB".into()),
+                ..Default::default()
             },
             AcceptanceItem {
                 text: "跳到第 8,000 条后位置不跳".into(),
-                met: None,
-                evidence: None,
+                ..Default::default()
             },
         ]
     }
@@ -1553,6 +1590,7 @@ impl ChatProvider for V2Samples {
             stats.done_this_week = 6;
             stats.artifacts_this_week = 4;
             stats.cost_cents_this_week = Some(13_200);
+            stats.cost_currency = crate::data::v2::Currency::Cny;
             stats.reports_to = Some(TATA.into());
             stats.needs_approval = vec![
                 "合并到 main".into(),
@@ -1931,13 +1969,13 @@ impl ChatProvider for V2Samples {
                 .join("team-chat-v2-samples")
                 .join(artifact_id);
             let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join("预算.csv"), "渠道,预算\n小红书,6000\n");
+            let _ = std::fs::write(dir.join("预算.pdf"), "%PDF-1.4\n%%EOF\n");
             let (tx, rx) = futures::channel::oneshot::channel();
             let _ = tx.send(Ok(ArtifactFolder {
                 artifact_id: artifact_id.into(),
                 version: version.unwrap_or(1),
                 dir,
-                entry: "预算.csv".into(),
+                entry: "预算.pdf".into(),
                 is_page: false,
             }));
             return rx;

@@ -56,7 +56,7 @@ async fn mock() -> Mock {
             if s.peek(&mut head).await.is_err() {
                 continue;
             }
-            if &head == b"PUT" {
+            if &head == b"PUT" || &head == b"POS" {
                 let puts = puts2.clone();
                 tokio::spawn(handle_put(s, puts));
                 continue;
@@ -119,8 +119,30 @@ async fn handle_put(mut s: TcpStream, puts: Arc<Mutex<Vec<Put>>>) {
         headers,
         body: buf[header_end..header_end + len].to_vec(),
     });
+    // chat-run files and 产出 (machine routes) answer JSON; a session upload answers nothing.
+    let n = puts.lock().unwrap().len();
+    let last = puts
+        .lock()
+        .unwrap()
+        .last()
+        .map(|p| p.path.clone())
+        .unwrap_or_default();
+    let body = if last.ends_with("/files") {
+        format!(r#"{{"id":"F{n}","status":"ready"}}"#)
+    } else if last.contains("/artifacts") {
+        r#"{"artifact":{"id":"A1"},"version":{"artifactId":"A1","version":1,"runId":"a1"}}"#
+            .to_string()
+    } else {
+        String::new()
+    };
     let _ = s
-        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
         .await;
 }
 
@@ -186,6 +208,7 @@ async fn collect(ws: &mut Ws, run: &str, ack: bool, stop: impl Fn(&Up) -> bool) 
 fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Down {
     Down::RunAssign(RunAssign {
         kind: None,
+        resume_session_id: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
@@ -796,7 +819,8 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "aside",
                         "acceptance",
                         "interact",
-                        "output"
+                        "output",
+                        "resume"
                     ]
                     .map(String::from)[..]
                 )
@@ -974,6 +998,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
 
     // 3. Aside: Claude Code in plan mode with only the read tools, no MCP servers and no
     // settings files; no PTY aside; no unknown kinds.
+    // The user's settings.json: the run keeps only its env, apiKeyHelper and model.
+    std::fs::create_dir_all(tmp.path().join("claude")).unwrap();
+    std::fs::write(
+        tmp.path().join("claude/settings.json"),
+        r#"{"env":{"ASIDE_PROBE":"from-settings"},"apiKeyHelper":"/bin/echo key","model":"m1",
+            "hooks":{"PreToolUse":[]},"permissions":{"allow":["Bash"]}}"#,
+    )
+    .unwrap();
     let mut a = assign("s1", "fake", "what is the status", None);
     if let Down::RunAssign(r) = &mut a {
         r.kind = Some("aside".into());
@@ -983,7 +1015,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let fr = collect(&mut ws, "s1", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "succeeded");
     let argv: Vec<String> = serde_json::from_str(
-        &std::fs::read_to_string(tmp.path().join("work/runs/s1/work/argv.json")).unwrap(),
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/argv.json")).unwrap(),
     )
     .unwrap();
     let mode = argv.iter().position(|a| a == "--permission-mode").unwrap();
@@ -994,7 +1026,28 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let tools = argv.iter().position(|a| a == "--tools").unwrap();
     assert_eq!(argv[tools + 1], "Read,Grep,Glob");
     let sources = argv.iter().position(|a| a == "--setting-sources").unwrap();
-    assert_eq!(argv[sources + 1], "user");
+    assert_eq!(argv[sources + 1], "");
+    let seen: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/settings-seen.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(seen["probe"], "from-settings");
+    assert_eq!(
+        seen["settings"],
+        serde_json::json!({ "env": { "ASIDE_PROBE": "from-settings" }, "apiKeyHelper": "/bin/echo key", "model": "m1" })
+    );
+    // The checkout of a side chat run is read-only to its CLI (EACCES), and writable again after.
+    let write: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/aside-write.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(write["name"], "EACCES", "{write}");
+    let work = tmp.path().join("work/runs/s1/work");
+    assert!(std::fs::metadata(&work).unwrap().permissions().mode() & 0o200 != 0);
+    // The settings file (auth values) is gone after the run and never on the command line.
+    let settings = argv.iter().position(|a| a == "--settings").unwrap();
+    assert!(!Path::new(&argv[settings + 1]).exists());
+    assert!(!argv.iter().any(|a| a.contains("from-settings")));
     assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
     assert!(!argv.iter().any(|a| a == "acceptEdits"));
     for (run, runtime, kind, reason) in [
@@ -1155,6 +1208,82 @@ async fn pause_and_cancel_cover_tool_children() {
         .unwrap();
 }
 
+/// 1.1 `chat-run artifact create`: the daemon uploads each file of the folder from the run's
+/// working folder (text redacted) and makes the 产出 with the machine token; the CLI gets its id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_run_artifact_create_uploads_the_folder_and_makes_the_artifact() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+    send(&mut ws, &assign("a1", "fake", "artifact", None)).await;
+    let frames = collect(&mut ws, "a1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&frames).status, "succeeded");
+    let report = chat_run_report(&tmp.path().join("work/runs/a1/work"), 1).await;
+    assert_eq!(report["code"], 0, "{report}");
+    let out: serde_json::Value = serde_json::from_str(report["out"].as_str().unwrap()).unwrap();
+    assert_eq!(out["artifact"]["id"], "A1");
+    let puts = m.puts.lock().unwrap().clone();
+    let files: Vec<&Put> = puts
+        .iter()
+        .filter(|p| p.path == "/v1/machine/runs/a1/files")
+        .collect();
+    assert_eq!(files.len(), 2);
+    for p in &files {
+        assert_eq!(p.headers["authorization"], format!("Bearer {TOKEN}"));
+    }
+    let page = files
+        .iter()
+        .find(|p| p.headers["x-file-name"] == "index.html")
+        .unwrap();
+    assert_eq!(page.headers["content-type"], "text/html");
+    let text = String::from_utf8_lossy(&page.body);
+    assert!(
+        !text.contains("tm_fakefake") && text.contains("<redacted>"),
+        "{text}"
+    );
+    use sha2::Digest;
+    let sha: String = sha2::Sha256::digest(&page.body)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(page.headers["x-file-sha256"], sha);
+    let made = puts
+        .iter()
+        .find(|p| p.path == "/v1/machine/runs/a1/artifacts")
+        .expect("artifact create");
+    let body: serde_json::Value = serde_json::from_slice(&made.body).unwrap();
+    assert_eq!(body["title"], "看板");
+    assert_eq!(body["kind"], "html");
+    assert_eq!(body["entry"], "index.html");
+    let paths: Vec<&str> = body["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["app.js", "index.html"]);
+    assert!(
+        body["files"][0]["fileId"]
+            .as_str()
+            .unwrap()
+            .starts_with('F')
+    );
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 /// Waits for the fake CLI's `chatrun-<n>.json`.
 async fn chat_run_report(dir: &Path, n: u32) -> serde_json::Value {
     serde_json::from_str(&wait_file(&dir.join(format!("chatrun-{n}.json"))).await).unwrap()
@@ -1251,6 +1380,7 @@ async fn interaction_envelope_and_chat_run() {
             },
             event_id: Some("EV2".into()),
             block: Some(serde_json::json!({ "id": "check", "type": "decision" })),
+            tally: None,
         }),
     )
     .await;
@@ -1295,7 +1425,7 @@ async fn interaction_envelope_and_chat_run() {
     assert_eq!(done(&frames).status, "succeeded");
     assert!(!socket.exists(), "socket left after the run");
 
-    // 2. No run.output.result: chat-run gives up after 15 s with "server too old".
+    // 2. No run.output.result: chat-run gives up after 15 s with "unconfirmed" (retry is safe).
     send(&mut ws, &assign("c2", "fake", "chatrun", None)).await;
     let fr = collect(&mut ws, "c2", true, |f| matches!(f, Up::RunDone(_))).await;
     assert!(
@@ -1306,12 +1436,12 @@ async fn interaction_envelope_and_chat_run() {
     let r = chat_run_report(&tmp.path().join("work/runs/c2/work"), 1).await;
     assert_eq!(r["code"], 1, "{r}");
     let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
-    assert_eq!(err["error"]["reason"], "server.too_old");
+    assert_eq!(err["error"]["reason"], "output.unconfirmed");
     assert!(
         err["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("server too old")
+            .contains("may have been applied")
     );
 
     stop_tx.send(()).unwrap();
@@ -1398,7 +1528,7 @@ async fn codex_chat_run_uses_the_request_folder() {
 }
 
 /// `chat-run` while the daemon's link to the server is down: the output never reaches the
-/// server, so after 15 s `chat-run` says "not connected", not "server too old".
+/// server, so after 15 s `chat-run` says "not connected", not "unconfirmed".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chat_run_without_a_link_is_not_connected() {
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
@@ -1452,6 +1582,168 @@ async fn chat_run_without_a_link_is_not_connected() {
             .contains("the result is unknown"),
         "{err}"
     );
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// A follow-up run in the same topic continues the CLI session of the run before it: run 1
+/// reports its session, run 2 gets `run.assign.resumeSessionId` and starts the CLI with
+/// `--resume` of that session (the session file copied into its own project folder). The daemon
+/// reports feature "resume".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_follow_up_run_resumes_the_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(20), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match next(&mut ws).await {
+        Up::Hello { machine, .. } => {
+            assert!(
+                machine
+                    .features
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|f| f == "resume")
+            );
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("f1", "fake", "first question", None)).await;
+    let fr = collect(&mut ws, "f1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let s1 = done(&fr).session_id.expect("run 1 session");
+
+    // The CLI has exited; an answer in the topic starts run 2 with the session.
+    let mut a = assign("f2", "fake", "the answer", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some(s1.clone());
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "f2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+    assert_eq!(done(&fr).session_id.as_deref(), Some(s1.as_str()));
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/f2/work/argv.json")).unwrap(),
+    )
+    .unwrap();
+    let i = argv.iter().position(|a| a == "--resume").expect("--resume");
+    assert_eq!(argv[i + 1], s1);
+    assert!(!argv.iter().any(|a| a == "--session-id"));
+
+    // A session the CLI no longer has starts a new one.
+    let mut a = assign("f3", "fake", "again", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some("gone-session".into());
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "f3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+    assert_ne!(done(&fr).session_id.as_deref(), Some("gone-session"));
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/f3/work/argv.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(argv.iter().any(|a| a == "--session-id"));
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// A tool that daemonized (its parent exited, so it is no longer below the CLI) still stops on
+/// pause, continues on resume and is gone after cancel: the daemon finds it by the run's
+/// `CHAT_RUN_FOLDER` in its environment.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pause_and_cancel_cover_orphaned_tools() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("o1", "fake", "orphan", None)).await;
+    let dir = tmp.path().join("work/runs/o1/work");
+    wait_file(&dir.join("fake.pid")).await;
+    let orphan: i32 = wait_file(&dir.join("orphan.txt"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+    let _reap = Reap(vec![orphan]);
+    let ticks = dir.join("orphan.ticks");
+    wait_file(&ticks).await;
+
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "o1".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "o1", true, |f| is_paused(f, true)).await;
+    assert!(
+        proc_state(orphan).contains('T'),
+        "orphan not stopped: {}",
+        proc_state(orphan)
+    );
+    let before = file_len(&ticks);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(file_len(&ticks), before, "a stopped orphan made progress");
+
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "o1".into(),
+            note: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "o1", true, |f| is_paused(f, false)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        file_len(&ticks) > before,
+        "orphan did not tick after resume"
+    );
+
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "o1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "o1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    for _ in 0..100 {
+        if !alive(orphan) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!alive(orphan), "orphan left after cancel");
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

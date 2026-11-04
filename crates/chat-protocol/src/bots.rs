@@ -71,6 +71,28 @@ pub enum RunPlanState {
 pub struct RunPlanItem {
     pub text: String,
     pub state: RunPlanState,
+    /// 1.1: when the item became `current` (ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    /// 1.1: when the item became `done` (ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<u64>,
+    /// 1.1: how long the bot expects the item to take (ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_ms: Option<u64>,
+}
+
+impl RunPlanItem {
+    /// An item with only text and state.
+    pub fn new(text: impl Into<String>, state: RunPlanState) -> Self {
+        Self {
+            text: text.into(),
+            state,
+            started_at: None,
+            ended_at: None,
+            estimate_ms: None,
+        }
+    }
 }
 
 /// A plan has at most 30 items, each with 1..200 characters of text.
@@ -175,6 +197,34 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub kind: Option<String>,
+    /// 1.1: the run this one retries (`POST /v1/runs/:id/retry`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub retry_of: Option<String>,
+    /// 1.1 (排队): set while a `created` run with no `machine_id` waits for a free machine.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub queued_at: Option<Millis>,
+    /// 1.1 (排队): 1-based place among the bot's queued runs, oldest first.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub queue_position: Option<u32>,
+}
+
+impl BotRun {
+    /// Waits for a free machine (排队).
+    pub fn is_queued(&self) -> bool {
+        self.queued_at.is_some() && self.machine_id.is_none() && self.status == RunStatus::Created
+    }
 }
 
 /// `BotRun.kind` of a read-only side chat run (单独问).

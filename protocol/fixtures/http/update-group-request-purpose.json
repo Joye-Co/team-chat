@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateGroupRequest",
+  "valid": true,
+  "description": "1.1: purpose only",
+  "value": {
+    "purpose": "qqbot、夹夹和 TeamChat 的开发"
+  }
+}

@@ -68,12 +68,40 @@ answer in the group, use the `chat-run` command (on PATH): `chat-run card post -
 [--cause <eventId>]`, `chat-run card patch --message <messageId> --base-rev <rev> --ops ops.json \
 [--cause <eventId>]`, `chat-run resolve --event <eventId> --result ignored|failed [--note <text>]`, \
 `chat-run artifact data --artifact <id> --version <n> --file data.json [--cause <eventId>]`, \
-`chat-run artifact reply --event <eventId> --file reply.json` or `--decline <text>`. Each prints \
-the JSON result and exits 0, or prints the error with its reason and exits 1. `chat-run --help` \
-shows more.",
+`chat-run artifact reply --event <eventId> --file reply.json` or `--decline <text>`. To deliver a \
+page or a file as a 产出 (a deliverable people open in the group), write it in your working \
+folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--file <path>`; \
+`chat-run artifact version --artifact <id> --dir <folder>` adds a version); `chat-run file \
+upload --file <path>` uploads one file. Each prints the JSON result and exits 0, or prints the \
+error with its reason and exits 1. A card is a Card v2 \
+document `{{\"v\":2,\"rev\":1,\"intent\":\"done\"|\"working\"|\"ask\",\"title\":…,\"fallback\":…,\"blocks\":[…]}}`; block \
+types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help` shows more.",
         name = crate::product::name(),
         scheme = crate::product::url_scheme(),
+        blocks = block_types().join(", "),
     )
+}
+
+/// The JSON Schema of a Card v2 document (`protocol/schema/CardV2.schema.json`, made from the
+/// protocol package's Zod with `bun run gen:schema`): the shape; the server checks the write
+/// rules too.
+pub const CARD_SCHEMA: &str = include_str!("../../../protocol/schema/CardV2.schema.json");
+
+/// The block types of [`CARD_SCHEMA`], in catalog order.
+pub fn block_types() -> &'static [String] {
+    static TYPES: OnceLock<Vec<String>> = OnceLock::new();
+    TYPES.get_or_init(|| {
+        let v: Value = serde_json::from_str(CARD_SCHEMA).unwrap_or_default();
+        v["properties"]["blocks"]["items"]["oneOf"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|b| b["properties"]["type"]["const"].as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -94,9 +122,26 @@ struct Pending {
 pub struct Outputs {
     pending: Mutex<HashMap<String, Pending>>,
     next: AtomicU64,
+    /// What the daemon needs for the ops it answers itself (files and 产出).
+    local: OnceLock<Arc<crate::chat_run_files::Local>>,
+    /// The run id: part of each output's idempotency key.
+    run: String,
 }
 
 impl Outputs {
+    /// The outputs of run `run_id`.
+    pub fn new(run_id: &str) -> Outputs {
+        Outputs {
+            run: run_id.to_string(),
+            ..Outputs::default()
+        }
+    }
+
+    /// Lets the run's `chat-run` upload files and make 产出 (see [`crate::chat_run_files`]).
+    pub fn set_local(&self, local: crate::chat_run_files::Local) {
+        let _ = self.local.set(Arc::new(local));
+    }
+
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
         let id = format!("o{}", self.next.fetch_add(1, Ordering::Relaxed) + 1);
         let (tx, rx) = oneshot::channel();
@@ -257,7 +302,7 @@ fn spool_file(name: &str) -> bool {
 
 /// Removes the files of the file transport from `dir`, then `dir` when it is empty. Other
 /// files (and the folder that holds them) stay.
-fn remove_spool(dir: &Path) {
+pub fn remove_spool(dir: &Path) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
@@ -437,17 +482,49 @@ pub async fn handle(
         Ok(v) => v,
         Err(e) => return error("invalid", None, format!("request is not JSON: {e}")),
     };
-    let Some(op) = req["op"].as_str().filter(|o| OPS.contains(o)) else {
+    let local_op = req["op"]
+        .as_str()
+        .filter(|o| crate::chat_run_files::OPS.contains(o));
+    let Some(op) = req["op"]
+        .as_str()
+        .filter(|o| OPS.contains(o) || local_op.is_some())
+    else {
         return error(
             "invalid",
             None,
-            format!("op must be one of {}", OPS.join(", ")),
+            format!(
+                "op must be one of {}, {}",
+                OPS.join(", "),
+                crate::chat_run_files::OPS.join(", ")
+            ),
         );
     };
     let body = req.get("body").cloned().unwrap_or(Value::Null);
     if !body.is_object() {
         return error("invalid", None, "body must be a JSON object");
     }
+    // Files and 产出: the daemon answers them itself over HTTP.
+    if local_op.is_some() {
+        let Some(local) = outputs.local.get().cloned() else {
+            return error(
+                "unavailable",
+                None,
+                "this run cannot send files (no server connection is set up for it)",
+            );
+        };
+        let answer = crate::chat_run_files::handle(op, &body, &local).await;
+        eprintln!(
+            "{} chat-run {op}: {}",
+            crate::proto::now_ms(),
+            if answer["ok"] == json!(true) {
+                "ok".to_string()
+            } else {
+                safe_word(answer["error"]["code"].as_str().unwrap_or("failed"))
+            }
+        );
+        return answer;
+    }
+    let body = with_key(&outputs.run, op, body);
     let (output_id, rx) = outputs.add();
     emit(RunEvent::Output {
         output_id: output_id.clone(),
@@ -473,30 +550,77 @@ pub async fn handle(
                 }
             );
             if delivered {
-                // The server got the output and did not answer: it does not know `output`.
+                // The server got the output and its result did not come: the result can be
+                // lost with the link after the server applied it, or the server is too old to
+                // know `output`. The idempotency key makes a retry of the same command safe.
                 error(
                     "timeout",
-                    Some("server.too_old"),
+                    Some("output.unconfirmed"),
                     format!(
-                        "server too old: no answer in {secs} s (the server may not support \
-chat-run); the result is unknown"
+                        "unconfirmed: the server got this but its result did not come in {secs} \
+s; it may have been applied. Retrying the same command is safe: the server applies it once"
                     ),
                 )
             } else {
                 // No ack is not proof that the server never got it: the ack can be lost with
-                // the link. The result is unknown.
+                // the link. The result is unknown; the idempotency key makes a retry safe.
                 error(
                     "unavailable",
                     Some("server.not_connected"),
                     format!(
                         "not connected: the server did not confirm this in {secs} s (the \
-daemon's link to the server is down); the result is unknown: it may have been done, so check \
-before you try again"
+daemon's link to the server is down); the result is unknown: it may have been done. Retrying \
+the same command is safe: the server applies it once"
                     ),
                 )
             }
         }
     }
+}
+
+/// The body field that holds the idempotency key of `op` (the client key of the matching
+/// frame), or None for an op the server dedups by its event id.
+fn key_field(op: &str) -> Option<&'static str> {
+    match op {
+        output_op::CARD_POST => Some("clientMsgId"),
+        output_op::CARD_PATCH => Some("clientPatchId"),
+        output_op::ARTIFACT_DATA => Some("clientPushId"),
+        _ => None,
+    }
+}
+
+/// The idempotency key of one output: `k` + 40 hex of SHA-256 over the run id, the op and the
+/// body. The same command in the same run gets the same key, so a retry after a lost result is
+/// applied once; another run never gets it.
+pub fn idempotency_key(run_id: &str, op: &str, body: &Value) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    h.update(run_id.as_bytes());
+    h.update([0]);
+    h.update(op.as_bytes());
+    h.update([0]);
+    h.update(serde_json::to_vec(body).unwrap_or_default());
+    let hex: String = h
+        .finalize()
+        .iter()
+        .take(20)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("k{hex}")
+}
+
+/// `body` with the idempotency key of `op`, unless the CLI gave its own key.
+fn with_key(run_id: &str, op: &str, mut body: Value) -> Value {
+    if let Some(field) = key_field(op)
+        && body
+            .get(field)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+    {
+        let key = idempotency_key(run_id, op, &body);
+        body[field] = json!(key);
+    }
+    body
 }
 
 /// The daemon log names the op and the outcome only, never the body or the result.
@@ -542,15 +666,22 @@ fn result_json(r: RunOutputResult) -> Value {
 // ---------------------------------------------------------------------------------------------
 
 pub const USAGE: &str = "usage:
+  chat-run card schema
   chat-run card post --file card.json [--cause <eventId>]
   chat-run card patch --message <messageId> --base-rev <rev> --ops ops.json [--cause <eventId>]
   chat-run resolve --event <eventId> --result ignored|failed [--note <text>]
   chat-run artifact data --artifact <artifactId> --version <n> --file data.json [--base-data-rev <n>] [--cause <eventId>]
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
+  chat-run file upload --file <path> [--name <name>] [--mime <type>]
+  chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
+  chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
 
-card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); ops.json is a list of
-patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Each command waits up
-to 15 s and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
+card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
+prints its JSON Schema (no daemon needed). ops.json is a list of
+patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, folders and
+产出 come from the run's working folder only; a folder's entry is index.html unless --entry
+says otherwise. Each command waits up to 15 s (file upload and artifact create/version: 5
+minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
 sandbox.blocked.";
 
@@ -636,6 +767,25 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &args[2..],
             &["event", "file", "decline"],
         ),
+        ["file", "upload"] => (
+            crate::chat_run_files::FILE_UPLOAD,
+            &args[2..],
+            &["file", "name", "mime"],
+        ),
+        ["artifact", "create"] => (
+            crate::chat_run_files::ARTIFACT_CREATE,
+            &args[2..],
+            &[
+                "title", "dir", "file", "entry", "kind", "note", "events", "media", "data",
+            ],
+        ),
+        ["artifact", "version"] => (
+            crate::chat_run_files::ARTIFACT_VERSION,
+            &args[2..],
+            &[
+                "artifact", "dir", "file", "entry", "title", "note", "events", "media", "data",
+            ],
+        ),
         _ => return Err("unknown command".into()),
     };
     let f = Flags::parse(rest, allowed)?;
@@ -644,6 +794,45 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         body.insert(k.to_string(), v);
     };
     match op {
+        crate::chat_run_files::FILE_UPLOAD => {
+            put("path", json!(absolute(f.req("file")?)?));
+            for k in ["name", "mime"] {
+                if let Some(v) = f.opt(k) {
+                    put(k, json!(v));
+                }
+            }
+        }
+        crate::chat_run_files::ARTIFACT_CREATE | crate::chat_run_files::ARTIFACT_VERSION => {
+            if op == crate::chat_run_files::ARTIFACT_CREATE {
+                put("title", json!(f.req("title")?));
+                if let Some(k) = f.opt("kind") {
+                    if !matches!(k, "html" | "file") {
+                        return Err("--kind must be html or file".into());
+                    }
+                    put("kind", json!(k));
+                }
+            } else {
+                put("artifactId", json!(f.req("artifact")?));
+                if let Some(t) = f.opt("title") {
+                    put("title", json!(t));
+                }
+            }
+            match (f.opt("dir"), f.opt("file")) {
+                (Some(d), None) => put("dir", json!(absolute(d)?)),
+                (None, Some(p)) => put("file", json!(absolute(p)?)),
+                _ => return Err("give one of --dir and --file".into()),
+            }
+            for k in ["entry", "note"] {
+                if let Some(v) = f.opt(k) {
+                    put(k, json!(v));
+                }
+            }
+            for k in ["events", "media", "data"] {
+                if let Some(path) = f.opt(k) {
+                    put(k, read_json(path)?);
+                }
+            }
+        }
         output_op::CARD_POST => {
             let card = read_json(f.req("file")?)?;
             match card {
@@ -724,6 +913,13 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         }
     }
     Ok((op, Value::Object(body)))
+}
+
+/// `path` made absolute against the current folder (the daemon runs elsewhere).
+fn absolute(path: &str) -> Result<String, String> {
+    std::fs::canonicalize(path)
+        .map(|p| p.display().to_string())
+        .map_err(|e| format!("cannot read {path}: {e}"))
 }
 
 /// Sends one request to the run's socket and reads the answer line.
@@ -848,6 +1044,10 @@ pub fn main(args: Vec<String>) -> i32 {
         println!("{USAGE}");
         return if args.is_empty() { 1 } else { 0 };
     }
+    if args.len() == 2 && args[0] == "card" && args[1] == "schema" {
+        println!("{CARD_SCHEMA}");
+        return 0;
+    }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));
         1
@@ -860,8 +1060,12 @@ pub fn main(args: Vec<String>) -> i32 {
         }
     };
     let var = |k: &str| std::env::var_os(k).filter(|s| !s.is_empty());
-    // The daemon answers within TIMEOUT; the extra time covers a slow machine.
-    let wait = TIMEOUT + Duration::from_secs(5);
+    // The daemon answers within TIMEOUT (uploads: their own); the extra time covers a slow machine.
+    let wait = if crate::chat_run_files::OPS.contains(&op) {
+        crate::chat_run_files::TIMEOUT
+    } else {
+        TIMEOUT
+    } + Duration::from_secs(5);
     let answer = match (var(ENV_SOCKET), var(ENV_DIR)) {
         (Some(socket), _) => call(Path::new(&socket), op, body, wait),
         (None, Some(dir)) => call_files(Path::new(&dir), op, body, wait),
@@ -1005,8 +1209,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn no_result_in_15_s_after_the_server_got_it_is_server_too_old() {
-        let outputs = Outputs::default();
+    async fn no_result_in_15_s_after_the_server_got_it_is_output_unconfirmed() {
+        let outputs = Outputs::new("r1");
         let sent = Arc::new(Mutex::new(vec![]));
         let s2 = sent.clone();
         let emit = move |e: RunEvent| s2.lock().unwrap().push(e);
@@ -1033,13 +1237,10 @@ mod tests {
         assert!(start.elapsed() >= Duration::from_secs(15));
         assert_eq!(v["ok"], false);
         assert_eq!(v["error"]["code"], "timeout");
-        assert_eq!(v["error"]["reason"], "server.too_old");
-        assert!(
-            v["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("server too old")
-        );
+        assert_eq!(v["error"]["reason"], "output.unconfirmed");
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("may have been applied"), "{msg}");
+        assert!(msg.contains("retry") || msg.contains("Retrying"), "{msg}");
         assert!(matches!(&sent.lock().unwrap()[..],
             [RunEvent::Output { output_id, op, .. }] if output_id == "o1" && op == "interaction.resolve"));
         // A late result finds nothing waiting.
@@ -1080,6 +1281,113 @@ mod tests {
         assert!(msg.contains("may have been done"), "{msg}");
         assert!(!msg.contains("nothing was done"), "{msg}");
         assert!(!msg.contains("too old"), "{msg}");
+        assert!(msg.contains("Retrying the same command is safe"), "{msg}");
+    }
+
+    #[test]
+    fn the_card_schema_takes_every_valid_card_fixture_and_the_note_lists_its_blocks() {
+        let schema: Value = serde_json::from_str(CARD_SCHEMA).unwrap();
+        let v = jsonschema::validator_for(&schema).unwrap();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures/entities");
+        let mut checked = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let f: Value =
+                serde_json::from_str(&std::fs::read_to_string(e.unwrap().path()).unwrap()).unwrap();
+            if f["kind"] != "CardV2" || f["valid"] != true {
+                continue;
+            }
+            let errs: Vec<String> = v.iter_errors(&f["value"]).map(|e| e.to_string()).collect();
+            assert!(errs.is_empty(), "{}: {errs:?}", f["description"]);
+            checked += 1;
+        }
+        assert!(checked >= 10, "only {checked} fixtures");
+        // A shape error is refused.
+        assert!(!v.is_valid(&json!({ "v": 2, "title": "t", "blocks": [{ "type": "nope" }] })));
+        let types = block_types();
+        for t in [
+            "text",
+            "fields",
+            "table",
+            "decision",
+            "chart",
+            "questionnaire",
+        ] {
+            assert!(types.iter().any(|x| x == t), "{t}: {types:?}");
+        }
+        let n = note();
+        assert!(n.contains("chat-run card schema"), "{n}");
+        assert!(n.contains(&types.join(", ")), "{n}");
+    }
+
+    #[test]
+    fn a_retry_of_the_same_command_carries_the_same_idempotency_key() {
+        let post = json!({ "cardV2": { "v": 2, "title": "t", "blocks": [] } });
+        let a = with_key("r1", "card.post", post.clone());
+        let b = with_key("r1", "card.post", post.clone());
+        let key = a["clientMsgId"].as_str().unwrap();
+        assert_eq!(key.len(), 41);
+        assert!(key.len() <= 64);
+        assert_eq!(a, b);
+        // Another run or another card is another output.
+        assert_ne!(
+            with_key("r2", "card.post", post.clone())["clientMsgId"],
+            key
+        );
+        assert_ne!(
+            with_key(
+                "r1",
+                "card.post",
+                json!({ "cardV2": { "v": 2, "title": "u" } })
+            )["clientMsgId"],
+            key
+        );
+        let patch = with_key(
+            "r1",
+            "card.patch",
+            json!({ "messageId": "M", "baseRev": 1, "ops": [] }),
+        );
+        assert!(patch["clientPatchId"].as_str().unwrap().starts_with('k'));
+        let data = with_key(
+            "r1",
+            "artifact.data",
+            json!({ "artifactId": "A", "version": 1, "data": {} }),
+        );
+        assert!(data["clientPushId"].as_str().is_some());
+        // The CLI's own key stays; ops that the server dedups by event id get none.
+        let own = with_key(
+            "r1",
+            "card.patch",
+            json!({ "messageId": "M", "clientPatchId": "mine" }),
+        );
+        assert_eq!(own["clientPatchId"], "mine");
+        let res = with_key(
+            "r1",
+            "interaction.resolve",
+            json!({ "eventId": "E", "result": "ignored" }),
+        );
+        assert_eq!(res, json!({ "eventId": "E", "result": "ignored" }));
+    }
+
+    #[tokio::test]
+    async fn the_output_event_carries_the_key() {
+        let outputs = Outputs::new("r1");
+        let sent = Arc::new(Mutex::new(vec![]));
+        let s2 = sent.clone();
+        let emit = move |e: RunEvent| s2.lock().unwrap().push(e);
+        let line = br#"{"op":"card.post","body":{"cardV2":{"v":2,"title":"t","blocks":[]}}}"#;
+        let _ = handle(line, &outputs, &emit, Duration::from_millis(1)).await;
+        let _ = handle(line, &outputs, &emit, Duration::from_millis(1)).await;
+        let sent = sent.lock().unwrap();
+        let keys: Vec<Value> = sent
+            .iter()
+            .map(|e| match e {
+                RunEvent::Output { body, .. } => body["clientMsgId"].clone(),
+                _ => Value::Null,
+            })
+            .collect();
+        assert_eq!(keys.len(), 2);
+        assert!(keys[0].is_string());
+        assert_eq!(keys[0], keys[1]);
     }
 
     #[tokio::test]

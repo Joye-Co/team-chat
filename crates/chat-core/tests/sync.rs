@@ -240,6 +240,7 @@ async fn duplicate_ack_is_handled() {
         .outbox_push(&chat_core::OutboxItem {
             id: cmid.clone(),
             op: chat_core::OutboxOp::Send {
+                from_aside: None,
                 card_v2: None,
                 context: None,
                 cause_event_id: None,
@@ -714,7 +715,7 @@ async fn unknown_events_notify_flags_and_search() {
             None,
         );
         let g = s.groups.get_mut(G1).unwrap();
-        g.log.push(ev(seq, G1, ALICE, EventData::GroupUpdated(GroupUpdatedData { name: format!("group {G1}") })));
+        g.log.push(ev(seq, G1, ALICE, EventData::GroupUpdated(GroupUpdatedData { purpose: None, name: format!("group {G1}") })));
         s.hide_live.insert(seq + 1);
         let (m, _) = s.post(G1, ALICE, Some(&tid), None, "a1", "@me look", false);
         let event = s.groups[G1].log.last().unwrap().clone();

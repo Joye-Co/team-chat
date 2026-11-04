@@ -27,7 +27,7 @@ use crate::{
     data::{
         BotRunSummary, GroupKind, Member, PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
-        v2::MemberStats,
+        v2::{Currency, MemberStats},
     },
     ui::{
         native::{
@@ -162,8 +162,9 @@ fn count_word(n: usize) -> String {
         .unwrap_or_else(|| n.to_string())
 }
 
-fn money(cents: u64) -> String {
-    fill(c::MEMBERS_MONEY, &[("v", &(cents / 100).to_string())])
+/// Cents in the currency the data has, never converted (`$0.85`, `¥6.20`).
+fn money(cents: u64, currency: Currency) -> String {
+    crate::views::topic_rail::money_text(cents, currency)
 }
 
 /// The list pane (§9.5): its own toolbar row with the segmented filter.
@@ -696,16 +697,18 @@ impl MembersPage {
                 ),
             ],
         );
+        let currency = e.stats.cost_currency;
         let cost = e.stats.cost_cents_this_week.unwrap_or(0);
         let budget = e.extras.budget_cents.filter(|b| *b > 0);
         let cost_value = match budget {
             Some(b) => fill(
                 c::MEMBERS_COST_OF,
-                &[("cost", &money(cost)), ("limit", &money(b))],
+                &[("cost", &money(cost, currency)), ("limit", &money(b, currency))],
             ),
-            None => money(cost),
+            None => money(cost, currency),
         };
-        let cost_row = FormRow::new(c::MEMBERS_COST).control(
+        // No row when no run reported a cost: ¥0 or $0 would be a wrong number.
+        let cost_row = e.stats.cost_cents_this_week.map(|_| FormRow::new(c::MEMBERS_COST).control(
             div()
                 .flex()
                 .items_center()
@@ -723,12 +726,12 @@ impl MembersPage {
                         .text_color(k.secondary)
                         .child(cost_value),
                 ),
-        );
+        ));
         GroupedForm::new()
             .header(c::MEMBERS_THIS_WEEK)
             .row(FormRow::new(c::MEMBERS_DONE_TOPICS).value(done, cx))
             .row(FormRow::new(c::MEMBERS_OUTPUTS).value(outputs, cx))
-            .row(cost_row)
+            .rows(cost_row)
             .into_any_element()
     }
 
@@ -1058,6 +1061,14 @@ impl Render for MembersPage {
         let entry = selected
             .as_deref()
             .and_then(|id| entries.iter().find(|e| e.member.id == id));
+        crate::selftest::drawn::mark(
+            "members-page",
+            format!(
+                "entries={} detail={}",
+                entries.len(),
+                entry.map_or("", |e| e.member.name.as_str())
+            ),
+        );
         let detail = match entry {
             None => div()
                 .flex_1()

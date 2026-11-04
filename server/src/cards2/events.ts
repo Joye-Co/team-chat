@@ -13,6 +13,7 @@ import {
   type Expect,
   type PartRef,
   allBlocks,
+  draftContentText,
   takesInput,
 } from "@chat/protocol";
 import { auditStatement } from "../core/audit";
@@ -50,9 +51,16 @@ export type CardEventArgs = {
   inputs?: Record<string, unknown>;
   editedValues?: Record<string, string>;
   part?: PartRef;
+  /** sha256 (hex) of the draft text the answer approves. */
+  contentHash?: string;
 };
 
 type Block = CardV2Block;
+
+async function sha256Hex(text: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /** Answers: 1 per second per member and message. Live: 5/s (burst 10) per member and message, 120/min per member and group. */
 const ANSWER_INTERVAL_MS = 1000;
@@ -113,10 +121,10 @@ function mayEmit(b: Block | undefined, state: CardState, actor: Actor, surface: 
 /** The card, its state (made when an older card has none) and the message row. */
 export async function loadCard(room: RoomContext, messageId: string, dir: Directory) {
   const row = messageRow(room.sql, messageId);
-  if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found");
+  if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found", "card.block_gone");
   const ext = extOf(row);
   const card = ext.cardV2;
-  if (!card) throw new ApiError("not_found", "not a v2 card");
+  if (!card) throw new ApiError("not_found", "not a v2 card", "card.block_gone");
   const state = ext.cardState ?? (await stateForWrite(room, dir, card, undefined, row.author_id, row.topic_id, row.created_at, row.id));
   return { row, ext, card, state };
 }
@@ -291,9 +299,16 @@ async function cardEventLocked(room: RoomContext, actor: Actor, a: CardEventArgs
     if (poll && !poll.changeable && state.answers.some((x) => x.actorId === actor.id && x.askId === ask.id && x.retractedAt === undefined)) {
       throw new ApiError("conflict", "you voted already", "card.already_answered");
     }
+    // A draft answer approves one text: a client that saw another text is stale.
+    const submits = action !== undefined || block?.type === "questionnaire";
+    const draftText = submits ? draftContentText(card, inputSet(card, action, block), a.editedValues) : undefined;
+    const contentHash = draftText === undefined ? undefined : await sha256Hex(draftText);
+    if (a.contentHash !== undefined && a.contentHash !== contentHash) {
+      throw new ApiError("conflict", "the draft changed", "card.superseded");
+    }
     // The ask checks come first, so a second answer learns that the ask is answered.
     rateAnswer(`${room.groupId}:${actor.id}:${a.messageId}`, now);
-    return storeAnswer(room, actor, a, { row, ext, card, state, dir, now, block, action });
+    return storeAnswer(room, actor, a, { row, ext, card, state, dir, now, block, action, contentHash });
   }
   rateLive(room.groupId, actor.id, a.messageId, now);
   return liveEvent(room, actor, a, { row, card, now });
@@ -359,7 +374,7 @@ function storeAnswer(
   room: RoomContext,
   actor: Actor,
   a: CardEventArgs,
-  l: Loaded & { block?: Block; action?: CardV2Action },
+  l: Loaded & { block?: Block; action?: CardV2Action; contentHash?: string },
 ): Pending {
   const { row, card, now } = l;
   const ask = l.state.ask as NonNullable<CardState["ask"]>;
@@ -371,6 +386,7 @@ function storeAnswer(
   if (a.value !== undefined) entry.value = a.value as CardAnswer["value"];
   if (a.inputs !== undefined) entry.inputs = a.inputs as CardAnswer["inputs"];
   if (a.editedValues !== undefined) entry.edited = Object.keys(a.editedValues);
+  if (l.contentHash !== undefined) entry.contentHash = l.contentHash;
   const state: CardState = { ...l.state, answers: capAnswers([...l.state.answers, entry]) };
   const poll = pollOf(card);
   if (!poll) state.ask = { ...ask, status: "answered", answeredBy: actor.id, answeredAt: now };

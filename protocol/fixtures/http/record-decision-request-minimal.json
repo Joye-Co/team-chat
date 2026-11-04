@@ -1,0 +1,7 @@
+{
+  "kind": "RecordDecisionRequest",
+  "valid": true,
+  "value": {
+    "text": "用 Postgres。"
+  }
+}

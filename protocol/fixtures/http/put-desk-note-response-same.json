@@ -1,0 +1,8 @@
+{
+  "kind": "PutDeskNoteResponse",
+  "valid": true,
+  "description": "same text, nothing stored",
+  "value": {
+    "seq": null
+  }
+}

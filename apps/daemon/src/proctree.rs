@@ -5,6 +5,7 @@
 //! the run's tree.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 /// What one signal goes to: a process group whose leader is in the run's tree, or one process
 /// whose group leader is not. Each keeps the start time of its process (the group's leader),
@@ -172,6 +173,192 @@ pub fn targets(root: i32) -> Vec<Target> {
     out
 }
 
+/// The variable that marks every process of a run: the daemon gives the CLI
+/// `CHAT_RUN_FOLDER=<run folder>` (unique on the machine, unlike the run id across work roots),
+/// and its tools inherit it.
+pub const ENV_FOLDER: &str = "CHAT_RUN_FOLDER";
+
+fn marker(run_dir: &Path) -> Vec<u8> {
+    let mut m = format!("{ENV_FOLDER}=").into_bytes();
+    m.extend_from_slice(run_dir.as_os_str().as_encoded_bytes());
+    m
+}
+
+/// Processes of the run in `run_dir` found by their environment, also the ones that left the
+/// CLI's tree (a tool that daemonized, or whose parent exited, is re-parented to pid 1 or to a
+/// subreaper): processes of the daemon's own user whose environment holds
+/// `CHAT_RUN_FOLDER=<run_dir>`. Each is the group it leads, or the process.
+/// macOS does not show the environment of its own platform binaries (`/bin/sleep`), so such an
+/// orphan is not found there; tools a CLI starts from other paths (node, python, cargo) are.
+pub fn orphans(run_dir: &Path) -> Vec<Target> {
+    if run_dir.as_os_str().is_empty() {
+        return vec![];
+    }
+    let want = marker(run_dir);
+    // SAFETY: plain syscalls without arguments.
+    let (own_group, own_pid) = unsafe { (libc::getpgrp(), libc::getpid()) };
+    let mut out = vec![];
+    for pid in own_pids() {
+        if pid <= 1 || pid == own_pid || !environ(pid).contains(&want) {
+            continue;
+        }
+        let t = match pgid(pid) {
+            Some(g) if g == pid && g != own_group => Target::Group(g, start_time(g)),
+            _ => match start_time(pid) {
+                Some(start) => Target::Pid(pid, start),
+                None => continue,
+            },
+        };
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// The tool targets of a run: [`targets`] below the CLI `root` and the run's [`orphans`].
+pub fn run_targets(root: i32, run_dir: &Path) -> Vec<Target> {
+    let mut out = targets(root);
+    for t in orphans(run_dir) {
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// Pids of the daemon's own user.
+#[cfg(target_os = "macos")]
+fn own_pids() -> Vec<i32> {
+    let mut buf = vec![0i32; 4096];
+    let pids = loop {
+        let bytes = (buf.len() * std::mem::size_of::<i32>()) as libc::c_int;
+        // SAFETY: the buffer holds `bytes` bytes; libproc writes at most that many.
+        let n = unsafe { libc::proc_listallpids(buf.as_mut_ptr().cast(), bytes) };
+        if n <= 0 {
+            return vec![];
+        }
+        let n = n as usize;
+        if n < buf.len() {
+            buf.truncate(n);
+            break buf;
+        }
+        buf.resize(buf.len() * 2, 0);
+    };
+    // SAFETY: plain syscall without arguments.
+    let me = unsafe { libc::geteuid() };
+    pids.into_iter()
+        .filter(|&pid| pid > 1)
+        .filter(|&pid| {
+            // SAFETY: a plain C struct; zeroes are a valid value.
+            let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+            // SAFETY: the buffer holds `size` bytes; libproc writes at most that many.
+            let n = unsafe {
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    (&mut info as *mut libc::proc_bsdinfo).cast(),
+                    size,
+                )
+            };
+            n == size && info.pbi_uid == me
+        })
+        .collect()
+}
+
+/// Pids of the daemon's own user, from `/proc`.
+#[cfg(target_os = "linux")]
+fn own_pids() -> Vec<i32> {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: plain syscall without arguments.
+    let me = unsafe { libc::geteuid() };
+    let Ok(dir) = std::fs::read_dir("/proc") else {
+        return vec![];
+    };
+    dir.flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|&pid| {
+            pid > 1 && std::fs::metadata(format!("/proc/{pid}")).is_ok_and(|m| m.uid() == me)
+        })
+        .collect()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn own_pids() -> Vec<i32> {
+    vec![]
+}
+
+/// The environment of `pid` (each `NAME=value` entry), from `KERN_PROCARGS2`: argc, the exec
+/// path, padding, argc arguments, then the environment, each ending with NUL. Empty when the
+/// process is gone or belongs to another user.
+#[cfg(target_os = "macos")]
+fn environ(pid: i32) -> Vec<Vec<u8>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut size: libc::size_t = 0;
+    // SAFETY: a size query (null buffer) of a three-element MIB.
+    let ok = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ok != 0 || size < 4 {
+        return vec![];
+    }
+    let mut buf = vec![0u8; size];
+    // SAFETY: the buffer holds `size` bytes; the kernel writes at most that many.
+    let ok = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ok != 0 || size < 4 {
+        return vec![];
+    }
+    buf.truncate(size);
+    let argc = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]).max(0) as usize;
+    let mut parts = buf[4..].split(|b| *b == 0);
+    // The exec path, then NUL padding up to the arguments.
+    let _ = parts.next();
+    let mut rest: Vec<&[u8]> = parts.skip_while(|p| p.is_empty()).collect();
+    if rest.len() < argc {
+        return vec![];
+    }
+    rest.drain(..argc);
+    rest.into_iter()
+        .take_while(|p| !p.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn environ(pid: i32) -> Vec<Vec<u8>> {
+    std::fs::read(format!("/proc/{pid}/environ"))
+        .map(|b| {
+            b.split(|c| *c == 0)
+                .filter(|p| !p.is_empty())
+                .map(<[u8]>::to_vec)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn environ(_pid: i32) -> Vec<Vec<u8>> {
+    vec![]
+}
+
 fn pgid(pid: i32) -> Option<i32> {
     // SAFETY: plain syscall.
     let g = unsafe { libc::getpgid(pid) };
@@ -195,9 +382,10 @@ pub fn signal(targets: &[Target], sig: i32) {
     }
 }
 
-/// SIGSTOP the CLI's group `root`, then every group below it. Scans again until a scan finds
-/// nothing new, so a child started during the scan stops too. Adds what it stopped to `stopped`.
-pub fn stop(root: i32, stopped: &mut Vec<Target>) {
+/// SIGSTOP the CLI's group `root`, then every group below it and the run's orphans. Scans
+/// again until a scan finds nothing new, so a child started during the scan stops too. Adds
+/// what it stopped to `stopped`.
+pub fn stop(root: i32, run_dir: &Path, stopped: &mut Vec<Target>) {
     if root <= 1 {
         return;
     }
@@ -206,7 +394,7 @@ pub fn stop(root: i32, stopped: &mut Vec<Target>) {
         libc::kill(-root, libc::SIGSTOP);
     }
     for _ in 0..50 {
-        let new: Vec<Target> = targets(root)
+        let new: Vec<Target> = run_targets(root, run_dir)
             .into_iter()
             .filter(|t| !stopped.contains(t))
             .collect();
@@ -237,6 +425,70 @@ mod tests {
     fn alive(pid: i32) -> bool {
         // SAFETY: signal 0 only checks that the process exists.
         unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    /// A tool that daemonized (its parent exited, so pid 1 is its parent) is found by the run's
+    /// folder in its environment, and only for its own run.
+    #[test]
+    fn orphans_are_found_by_the_run_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("orphan.pid");
+        // macOS hides the environment of platform binaries (/bin/sleep): an ad-hoc signed copy
+        // stands for the tools a CLI starts (node, python, cargo).
+        let sleep = if cfg!(target_os = "macos") {
+            let copy = dir.path().join("sleep");
+            std::fs::copy("/bin/sleep", &copy).unwrap();
+            let signed = Command::new("codesign")
+                .args(["-s", "-", "-f"])
+                .arg(&copy)
+                .output()
+                .unwrap();
+            assert!(signed.status.success());
+            copy
+        } else {
+            std::path::PathBuf::from("sleep")
+        };
+        // sh starts sleep in the background and exits: sleep is re-parented to pid 1.
+        let status = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "{} 30 & echo $! > {}",
+                sleep.display(),
+                pidfile.display()
+            ))
+            .env(ENV_FOLDER, dir.path().join("runs/r1"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let _ = std::fs::remove_file(&pidfile);
+        let mut found = vec![];
+        for _ in 0..100 {
+            found = orphans(&dir.path().join("runs/r1"));
+            if !found.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let hit = |t: &Target| matches!(*t, Target::Pid(p, _) | Target::Group(p, _) if p == pid);
+        assert!(found.iter().any(hit), "{found:?}");
+        assert!(!orphans(&dir.path().join("runs/r2")).iter().any(hit));
+        assert!(
+            !orphans(&dir.path().join("runs/r")).iter().any(hit),
+            "a prefix is not the run"
+        );
+        signal(&found, libc::SIGKILL);
+        for _ in 0..100 {
+            if !alive(pid) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!alive(pid));
     }
 
     #[test]

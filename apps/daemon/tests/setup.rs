@@ -394,3 +394,71 @@ async fn mirror_runs_keep_their_branches() {
         "branch without own commits deleted"
     );
 }
+
+/// A daemon crash leaves `work/.chat-run-<run id>` (the Codex request folder) behind: the next
+/// start removes the transport's files and the folder of every run whose CLI is not running,
+/// and keeps other files, other folders and the folders of active runs.
+#[test]
+fn crash_leftover_request_folders_are_removed_at_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = Config::parse(&base_config(dir.path())).unwrap();
+    let runs = daemon::workspace::runs_dir(&cfg);
+    let spool = |run: &str| {
+        let s = daemon::chat_run::spool_dir(&runs.join(run).join("work"), run);
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join(".gitignore"), "*\n").unwrap();
+        std::fs::write(s.join("a1-1.req"), "{}").unwrap();
+        std::fs::write(s.join("a1-1.res.tmp"), "{}").unwrap();
+        s
+    };
+    let left = spool("dead1");
+    let kept_files = spool("dead2");
+    std::fs::write(kept_files.join("notes.md"), "not ours").unwrap();
+    let live = spool("live1");
+    // A folder of the repository with the same prefix but another run id stays.
+    let repo_dir = runs.join("dead1/work/.chat-run-other");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+
+    let removed = daemon::workspace::sweep_spools(&cfg, &["live1".to_string()]);
+    assert_eq!(removed, 1);
+    assert!(!left.exists());
+    assert_eq!(
+        std::fs::read_dir(&kept_files)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect::<Vec<_>>(),
+        ["notes.md"]
+    );
+    assert!(live.join("a1-1.req").exists());
+    assert!(repo_dir.exists());
+}
+
+/// A side chat run's checkout is read-only while it runs; a crash that leaves it so does not
+/// stop cleanup from removing the run.
+#[tokio::test]
+async fn read_only_checkout_and_its_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut text = base_config(dir.path());
+    text.push_str("keep_runs_hours = 0\n");
+    let cfg = Config::parse(&text).unwrap();
+    let (work, _) = daemon::workspace::prepare(&cfg, "ra1", None).await.unwrap();
+    std::fs::create_dir_all(work.join("src")).unwrap();
+    std::fs::write(work.join("src/a.rs"), "x").unwrap();
+    daemon::workspace::set_read_only(&work, true);
+    for p in [work.join("new.txt"), work.join("src/b.rs")] {
+        let e = std::fs::write(&p, "y").unwrap_err();
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "{}",
+            p.display()
+        );
+    }
+    assert!(std::fs::write(work.join("src/a.rs"), "y").is_err());
+    daemon::workspace::set_read_only(&work, false);
+    std::fs::write(work.join("src/a.rs"), "y").unwrap();
+    daemon::workspace::set_read_only(&work, true);
+    // Left read-only (a crash): cleanup still removes the run.
+    assert_eq!(daemon::workspace::cleanup(&cfg, &[]).await, 1);
+    assert!(!work.exists());
+}

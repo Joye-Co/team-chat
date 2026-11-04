@@ -231,8 +231,9 @@ pub struct Reaction {
     pub member_ids: Vec<MemberId>,
 }
 
-/// Largest file one message or 产出 can carry (`docs/protocol.md`).
-pub const MAX_FILE_BYTES: u64 = 100_000_000;
+/// Largest file one message or 产出 can carry (`docs/protocol.md`): 2 GB since 1.1, files over
+/// 100 MB upload in parts. Checked before the upload starts.
+pub const MAX_FILE_BYTES: u64 = chat_core::proto::MAX_UPLOAD_BYTES;
 
 /// A file attached to a message (the wire `FileRef`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1811,9 +1812,18 @@ pub trait ChatProvider: Send + Sync + 'static {
             messages: Vec::new(),
         }
     }
-    /// Asks `member_id` privately about a 话题 (it reads the 话题 up to now).
+    /// Asks `member_id` privately about a 话题 (it reads the 话题 up to now). `refs` are the
+    /// chips of the question (parts of the 话题's 群); their quote lines go before `body`.
     /// Emits `Change::Messages` for the 话题 when the aside changes.
-    fn send_side_chat(&self, _group_id: &str, _topic_id: &str, _member_id: &str, _body: String) {}
+    fn send_side_chat(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _member_id: &str,
+        _body: String,
+        _refs: Vec<DraftRef>,
+    ) {
+    }
     /// Posts the suggestion of an aside answer into the 话题 (only on press).
     fn post_side_chat_suggestion(
         &self,
@@ -2029,10 +2039,35 @@ pub trait ChatProvider: Send + Sync + 'static {
             return glance;
         }
         let ask = self.pinned_ask(group_id, topic_id);
-        let card = ask
-            .as_ref()
-            .and_then(|a| a.message_id.as_deref())
-            .and_then(|m| self.card(group_id, m));
+        let message_id = ask.as_ref().and_then(|a| a.message_id.clone());
+        // A v2 ask: the options of its first decision block.
+        let v2_options: Option<Vec<pages::ChoiceOption>> = message_id
+            .as_deref()
+            .and_then(|m| self.card_v2(group_id, m))
+            .and_then(|c| {
+                c.card.all_blocks().into_iter().find_map(|b| match b {
+                    cards_v2::CardV2Block::Decision { options, .. } => Some(
+                        options
+                            .iter()
+                            .take(2)
+                            .enumerate()
+                            .map(|(i, o)| pages::ChoiceOption {
+                                key: ((b'A' + i as u8) as char).to_string(),
+                                label: o.label.clone(),
+                                sketch: None,
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+            });
+        if let (Some(ask), Some(options)) = (ask.as_ref(), v2_options) {
+            if options.len() == 2 && ask.kind == v2::AskKind::Choice {
+                glance.preview = Some(pages::TopicPreview::Choice { options });
+            }
+            return glance;
+        }
+        let card = message_id.as_deref().and_then(|m| self.card(group_id, m));
         if let (Some(ask), Some(card)) = (ask, card) {
             let options: Vec<pages::ChoiceOption> = card
                 .actions

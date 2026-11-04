@@ -1,0 +1,32 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a role is at most 32 characters",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "ask",
+    "title": "合并 PR #61？",
+    "fallback": "Forge 改完了重连补发，请审一下。",
+    "ask": {
+      "from": [
+        "requester"
+      ]
+    },
+    "blocks": [
+      {
+        "type": "text",
+        "id": "why",
+        "text": "补发 3 条，没有重复。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "merge",
+        "label": "合并",
+        "role": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  }
+}

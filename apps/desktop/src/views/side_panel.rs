@@ -1,3 +1,6 @@
+//! Retired 1.0 view: the 1.1 话题 page has its rail (`views/topic_rail`). The timeline header
+//! shares `topic_member_ids`. Section numbers below are DESIGN v2.2's.
+//!
 //! The right panel of the open topic (DESIGN.md §8.1, GrokBot's right pane):
 //! a 92 pt header band (`话题详情` and close, then one context line), then
 //! flat sections: the bot's progress, 产出, 文件 and 成员. Empty sections are

@@ -22,6 +22,9 @@ export interface GroupRow {
   is_default: number;
   created_by: string;
   created_at: number;
+  /** 1.1 */
+  purpose?: string | null;
+  update_seq?: number;
 }
 
 export function toMember(row: MemberRow): Member {
@@ -107,5 +110,6 @@ export function viewGroup(
     memberIds,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    ...(row.purpose ? { purpose: row.purpose } : {}),
   };
 }

@@ -1,0 +1,26 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": false,
+  "description": "a figure label is at most 40 characters",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "看板",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "preview": {
+      "metrics": [
+        {
+          "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "value": "1"
+        }
+      ]
+    }
+  }
+}

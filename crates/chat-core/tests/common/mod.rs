@@ -19,6 +19,7 @@ pub fn member(id: &str, name: &str) -> Member {
 
 pub fn group(id: &str, members: &[&str]) -> Group {
     Group {
+        purpose: None,
         id: id.into(),
         kind: GroupKind::Group,
         name: format!("group {id}"),

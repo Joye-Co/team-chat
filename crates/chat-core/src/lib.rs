@@ -46,8 +46,9 @@ pub use http::{ApiError, HttpClient};
 pub use runs::{ProcessItem, ProcessView, TerminalLine, terminal_lines};
 pub use search::SearchError;
 pub use store::{
-    ArtifactRow, CardActionRow, CardAnswerRow, DecisionRow, GroupRow, LogEntry, Migration,
-    OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow, TopicRow,
+    ArtifactRow, CardActionRow, CardAnswerRow, DecisionRow, DeskNoteRow, GroupRow, LogEntry,
+    Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
+    TopicRow,
 };
 #[cfg(target_os = "macos")]
 pub use token::KeychainTokenStore;

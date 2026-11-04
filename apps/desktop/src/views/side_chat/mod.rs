@@ -120,8 +120,8 @@ impl SideChat {
         let Some((g, t, m)) = self.target(cx) else {
             return;
         };
-        // inc-refs: the chips travel as quote lines in front of the question (a side chat
-        // lives in the member's DM, where `blockRefs` to the 话题 are not accepted).
+        // inc-refs: the chips travel as `blockRefs` that name the 话题's 群 (`sourceGroupId`);
+        // the server writes their quote lines in front of the question.
         let key = (g.clone(), t.clone(), m.clone());
         let has_refs = crate::views::refs::hub(cx)
             .read(cx)
@@ -132,8 +132,9 @@ impl SideChat {
             return;
         }
         let refs = crate::views::refs::hub(cx).update(cx, |h, cx| h.take_side(&key, cx));
-        let body = crate::views::refs::side_chat_body(&body, &refs);
-        self.services.provider.send_side_chat(&g, &t, &m, body);
+        self.services
+            .provider
+            .send_side_chat(&g, &t, &m, body, refs);
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.scroll.scroll_to_bottom();
     }
@@ -786,6 +787,10 @@ impl Render for SideChat {
         let name = member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
         let me = self.services.me();
         let thread: SideChatThread = self.services.provider.side_chat(&g, &t, &m);
+        crate::selftest::drawn::mark(
+            "side-chat",
+            format!("{name} messages={}", thread.messages.len()),
+        );
 
         // Keep the newest message in view when the aside or its length changes.
         let shown = (m.clone(), thread.messages.len());

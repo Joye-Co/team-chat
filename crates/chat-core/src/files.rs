@@ -4,7 +4,10 @@
 //! [`crate::Client`] wrappers in `client_ext` do that.
 
 use crate::http::{ApiError, ApiResult, HttpClient, redact};
-use crate::proto::{CreateFileRequest, FileMeta, FileRef, FileStatus, MAX_FILE_BYTES};
+use crate::proto::{
+    CreateFileRequest, FileMeta, FileRef, FileStatus, MAX_FILE_BYTES, MAX_UPLOAD_BYTES,
+    MultipartUpload, UploadPartResponse,
+};
 use crate::store::Store;
 use futures_util::StreamExt;
 use reqwest::Method;
@@ -187,9 +190,10 @@ pub async fn upload_file(
         .clone()
         .unwrap_or_else(|| guess_mime(&name).to_string());
     let size = tokio::fs::metadata(&req.path).await?.len();
-    if size > MAX_FILE_BYTES {
+    // 1.1: up to 2 GB, refused before anything is hashed or sent. Over 100 MB uploads in parts.
+    if size > MAX_UPLOAD_BYTES {
         return Err(ApiError::Invalid(format!(
-            "file larger than {MAX_FILE_BYTES} bytes"
+            "file larger than {MAX_UPLOAD_BYTES} bytes"
         )));
     }
     let (width, height) = if mime.starts_with("image/") {
@@ -218,6 +222,14 @@ pub async fn upload_file(
             height,
         })
         .await?;
+    if size > MAX_FILE_BYTES {
+        let Some(mp) = created.multipart.as_ref() else {
+            return Err(ApiError::Invalid(format!(
+                "file larger than {MAX_FILE_BYTES} bytes"
+            )));
+        };
+        return upload_parts(http, &req.path, size, &sha256, mp, progress).await;
+    }
     if !http.same_origin(&created.upload_url) {
         return Err(ApiError::BadUrl);
     }
@@ -230,6 +242,88 @@ pub async fn upload_file(
         .timeout(TRANSFER_TIMEOUT)
         .body(body);
     let resp = http.send_checked(put).await?;
+    let meta: FileMeta = HttpClient::json(resp).await?;
+    if meta.status != FileStatus::Ready {
+        return Err(ApiError::Decode("upload did not finish the file".into()));
+    }
+    Ok(meta)
+}
+
+/// Tries per part of a multipart upload before the upload fails.
+const PART_TRIES: u32 = 3;
+
+/// Uploads a file over [`MAX_FILE_BYTES`] in parts, in order, each part tried up to
+/// [`PART_TRIES`] times, then completes it. The file is hashed again on the way; a file that
+/// changed fails with [`ApiError::Checksum`] before the last part is sent.
+async fn upload_parts(
+    http: &HttpClient,
+    path: &Path,
+    size: u64,
+    sha256: &str,
+    mp: &MultipartUpload,
+    progress: &ProgressFn,
+) -> ApiResult<FileMeta> {
+    if !http.same_origin(&mp.part_url) || !http.same_origin(&mp.complete_url) {
+        return Err(ApiError::BadUrl);
+    }
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hash = Sha256::new();
+    let mut done = 0u64;
+    for n in 1..=mp.parts {
+        let len = mp.part_size(size, n);
+        let mut buf = vec![0u8; len as usize];
+        file.read_exact(&mut buf)
+            .await
+            .map_err(|_| ApiError::Checksum)?;
+        hash.update(&buf);
+        if n == mp.parts {
+            let mut extra = [0u8; 1];
+            if file.read(&mut extra).await? != 0 || hex(&hash.clone().finalize()) != sha256 {
+                return Err(ApiError::Checksum);
+            }
+        }
+        let url = format!("{}/{n}", mp.part_url);
+        let mut tries = 0;
+        loop {
+            tries += 1;
+            let put = http
+                .authed(Method::PUT, &url)?
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                .header(reqwest::header::CONTENT_LENGTH, len)
+                .timeout(TRANSFER_TIMEOUT)
+                .body(buf.clone());
+            match http.send_checked(put).await {
+                Ok(resp) => {
+                    let _: UploadPartResponse = HttpClient::json(resp).await?;
+                    break;
+                }
+                Err(e)
+                    if tries < PART_TRIES
+                        && matches!(
+                            e,
+                            ApiError::Network(_)
+                                | ApiError::Server { status: 500.., .. }
+                                | ApiError::Unexpected { status: 500.. }
+                        ) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        done += len;
+        progress(Progress {
+            phase: Phase::Uploading,
+            done,
+            total: size,
+        });
+    }
+    let resp = http
+        .send_checked(
+            http.authed(Method::POST, &mp.complete_url)?
+                .timeout(TRANSFER_TIMEOUT),
+        )
+        .await?;
     let meta: FileMeta = HttpClient::json(resp).await?;
     if meta.status != FileStatus::Ready {
         return Err(ApiError::Decode("upload did not finish the file".into()));

@@ -692,6 +692,10 @@ impl Render for GroupPage {
         });
         let n = active.len();
         let on_me = active.iter().filter(|(s, ..)| *s == Standing::OnMe).count();
+        crate::selftest::drawn::mark(
+            "group-page",
+            format!("{g} active={n} on_me={on_me}"),
+        );
         let toolbar = self.toolbar(&g, window, cx);
         let topic_rows: Vec<AnyElement> = active
             .iter()

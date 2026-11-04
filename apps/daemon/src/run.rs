@@ -244,12 +244,26 @@ pub async fn supervise(ctx: RunCtx) {
                 message: None,
             });
             let aside = assign.kind.as_deref() == Some(KIND_ASIDE);
+            // A side chat run reads only: its checkout is read-only, not just its CLI's modes.
+            if aside {
+                workspace::set_read_only(&cwd, true);
+            }
             let mut env = build_env(&cfg, &rt, &assign);
+            // Marks the run's processes, also tools that leave the CLI's tree (proctree).
+            env.push((proctree::ENV_FOLDER.into(), dir.display().to_string()));
             // Lives until the CLI is done; dropping it removes the socket.
             let chat_run = if aside {
                 None
             } else {
                 let files = rt.kind == "codex";
+                // Files and 产出 go up over HTTP as the run's member, from its working folder.
+                outputs.set_local(crate::chat_run_files::Local {
+                    server_url: cfg.server_url.clone(),
+                    token: token.clone(),
+                    run_id: run_id.clone(),
+                    root: cwd.clone(),
+                    redactor: redactor.clone(),
+                });
                 start_chat_run(&dir, &cwd, files, &run_id, &out, outputs, &mut env)
             };
             let spec = RunSpec {
@@ -263,9 +277,17 @@ pub async fn supervise(ctx: RunCtx) {
                 env,
                 aside,
                 note: chat_run.as_ref().map(|_| crate::chat_run::note()),
+                resume_session_id: assign
+                    .resume_session_id
+                    .clone()
+                    .filter(|s| runtime::valid_session_id(s)),
             };
+            let work = spec.cwd.clone();
             let res = run_runtime(&cfg, &assign, spec, control_rx, &event).await;
             drop(chat_run);
+            if aside {
+                workspace::set_read_only(&work, false);
+            }
             res
         }
     };
@@ -415,7 +437,7 @@ async fn run_runtime(
         if let Some(p) = paused.as_mut().filter(|p| p.stopped.is_none())
             && let Some(pgid) = run_pgid(&run_dir)
         {
-            proctree::stop(pgid, &mut p.tools);
+            proctree::stop(pgid, &run_dir, &mut p.tools);
             p.stopped = Some(pgid);
         }
         let hold_until = gate
@@ -442,7 +464,7 @@ async fn run_runtime(
                         let pgid = run_pgid(&run_dir);
                         let mut tools = vec![];
                         if let Some(pgid) = pgid {
-                            proctree::stop(pgid, &mut tools);
+                            proctree::stop(pgid, &run_dir, &mut tools);
                         }
                         paused = Some(Paused { since: Instant::now(), stopped: pgid, tools });
                         for ev in gate.push(RunEvent::Paused { paused: true, by }) {

@@ -105,6 +105,13 @@ export const BlockId = ActionId;
 
 export const CardIntent = z.enum(["ask", "done", "working", "info"]);
 export type CardIntent = z.infer<typeof CardIntent>;
+/**
+ * 1.1: what the author's work on the card is doing now, set by the author (send, edit or a
+ * `card` patch; null clears it): `executing` (蓝 处理中) or `failed` (红 失败). Absent: the band
+ * follows `intent`.
+ */
+export const CardWorkStatus = z.enum(["executing", "failed"]);
+export type CardWorkStatus = z.infer<typeof CardWorkStatus>;
 
 // ---------------------------------------------------------------------------
 // Parts (引用提问 and part events)
@@ -376,6 +383,12 @@ export const DiffBlock = z.object({
   additions: Count.optional(),
   deletions: Count.optional(),
 });
+/** 1.1: test counts of an evidence line, from the run's output (read these, not the label). */
+export const EvidenceTests = z.object({ passed: Count, failed: Count, skipped: Count.optional() });
+export type EvidenceTests = z.infer<typeof EvidenceTests>;
+/** 1.1: a screen recording (录屏): a video file of the group, its length and a poster frame. */
+export const EvidenceRecording = z.object({ fileId: Id, durationMs: Count, posterFileId: Id.optional() });
+export type EvidenceRecording = z.infer<typeof EvidenceRecording>;
 export const EvidenceBlock = z.object({
   type: z.literal("evidence"),
   ...id,
@@ -385,6 +398,10 @@ export const EvidenceBlock = z.object({
   fileId: Id.optional(),
   url: WebUrl.optional(),
   artifact: ArtifactRef.optional(),
+  /** 1.1 */
+  tests: EvidenceTests.optional(),
+  /** 1.1: a 录屏 tile. */
+  recording: EvidenceRecording.optional(),
 });
 export const RefBlock = z.object({ type: z.literal("ref"), ...id, label: Short(200), target: RefTarget });
 
@@ -630,8 +647,22 @@ export const CARD_21_TYPES = new Set([
   "tabs",
   "questionnaire",
 ]);
-/** 2.1 leaves that need `fallbackText`. */
-const NEEDS_FALLBACK = new Set(["rank", "rating", "scale", "confirm", "imageChoice", "matrix", "slots", "poll", "buttons", "diagram", "embed"]);
+/** 2.1 leaves that need `fallbackText`, and the 2.1 containers that ask (compare, questionnaire). */
+const NEEDS_FALLBACK = new Set([
+  "rank",
+  "rating",
+  "scale",
+  "confirm",
+  "imageChoice",
+  "matrix",
+  "slots",
+  "poll",
+  "buttons",
+  "diagram",
+  "embed",
+  "compare",
+  "questionnaire",
+]);
 const CONTAINERS = new Set(["group", "stack", "row", "compare", "tabs", "questionnaire"]);
 
 export const CardActionKind = z.enum(["submit", "cancel", "link", "reject", "press"]);
@@ -651,8 +682,15 @@ export const CardV2Action = z.object({
   confirm: z.object({ title: Short(200), body: Text(1000).optional() }).optional(),
   /** 2.1, `submit` and `reject`: the input blocks whose values go in `inputs`. */
   inputs: z.array(BlockId).max(MAX_CARD_V2_INPUT_BLOCKS, LIMIT).optional(),
+  /**
+   * 1.1: what the action means to readers, as open text. Known: `ACTION_ROLE_APPROVE`, the
+   * action of a review ask that approves the change (merge). Unknown roles mean nothing.
+   */
+  role: z.string().min(1).max(32, LIMIT).optional(),
 });
 export type CardV2Action = z.infer<typeof CardV2Action>;
+/** `CardV2Action.role` of the action that approves a reviewed change (合并中 follows it). */
+export const ACTION_ROLE_APPROVE = "approve";
 
 /** The card as readers see it: shapes only, no write rules. */
 export const CardV2Shape = z.object({
@@ -662,6 +700,8 @@ export const CardV2Shape = z.object({
   /** 1 at first; every edit sends a higher rev. Answers name the rev they answer. */
   rev: CardRev,
   intent: CardIntent,
+  /** 1.1: the author's work state (`CardWorkStatus`); absent = follow `intent`. */
+  status: CardWorkStatus.optional(),
   title: Short(200),
   /** 2.1: one plain sentence under the title. */
   summary: Text(280).optional(),
@@ -1034,6 +1074,8 @@ const answerFields = {
   inputs: AnswerInputs.optional(),
   /** Edited text of `draft` blocks, by block id. */
   editedValues: AnswerEdits.optional(),
+  /** 1.1: sha256 (hex) of the draft text the answer approves (`draftContentHash`). */
+  contentHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 };
 const answerSize = (a: { inputs?: unknown; editedValues?: unknown }) =>
   utf8Bytes(JSON.stringify([a.inputs ?? null, a.editedValues ?? null])) <= MAX_CARD_ANSWER_BYTES;
@@ -1086,6 +1128,8 @@ export const CardEventFrame = z
     value: z.json().optional(),
     inputs: AnswerInputs.optional(),
     part: PartRef.optional(),
+    /** 1.1: sha256 (hex) of the draft text the answer approves (`draftContentHash`). */
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   })
   .refine((f) => (f.event === "answer.retract" ? f.blockId === undefined && f.actionId === undefined : (f.blockId === undefined) !== (f.actionId === undefined)), {
     message: "exactly one of blockId and actionId (neither for answer.retract)",
@@ -1147,6 +1191,8 @@ export const PatchOp = z.discriminatedUnion("op", [
       title: Short(200).optional(),
       summary: Text(280).optional(),
       intent: CardIntent.optional(),
+      /** 1.1: null clears it. */
+      status: CardWorkStatus.nullable().optional(),
       fallback: Text(4000).optional(),
       /** null closes the open ask. */
       ask: CardAsk.nullable().optional(),
@@ -1269,8 +1315,28 @@ export const CardState = z.object({
   emitters: z.record(BlockId, z.array(Id)).optional(),
   /** The event the newest rev answered. */
   lastCause: Cause.optional(),
+  /**
+   * 1.1, private cards: live answers of the current ask round. Viewers who do not get the
+   * answers (an anonymous questionnaire, a private poll) see this count.
+   */
+  answerCount: Count.optional(),
 });
 export type CardState = z.infer<typeof CardState>;
+
+/**
+ * The text a draft `contentHash` covers: the draft blocks an answer submits, in card order,
+ * each with its edited text when edited, joined with U+0000. `contentHash` is its sha256 (hex
+ * of the UTF-8 bytes).
+ */
+export function draftContentText(card: Pick<CardV2, "blocks">, ids: Iterable<string>, edited?: Record<string, string>): string | undefined {
+  const want = new Set(ids);
+  const texts: string[] = [];
+  for (const b of allBlocks(card)) {
+    if (b.type !== "draft" || !want.has(b.id)) continue;
+    texts.push(edited?.[b.id] ?? b.text);
+  }
+  return texts.length > 0 ? texts.join("\u0000") : undefined;
+}
 
 /** Transient (2.1, to the card's author): a live event of one of its cards. */
 export const CardEventTransient = z.object({
@@ -1325,7 +1391,50 @@ export const GroupDecision = z.object({
 });
 export type GroupDecision = z.infer<typeof GroupDecision>;
 
-export const DecisionsResponse = z.object({ decisions: z.array(GroupDecision), hasMore: z.boolean() });
+/** Max characters of a decision recorded by hand (记一条). */
+export const MAX_RECORDED_DECISION_CHARS = 1000;
+
+/**
+ * 1.1: a decision a member recorded by hand (记一条, `POST /v1/groups/:id/decisions`), stored
+ * as `decision.recorded` in the group log.
+ */
+export const RecordedDecision = z.object({
+  id: Id,
+  /** Seq of the `decision.recorded` event. */
+  seq: Seq,
+  /** The 话题 it was recorded in; null for the group. */
+  topicId: Id.nullable(),
+  text: z.string().min(1).max(MAX_RECORDED_DECISION_CHARS),
+  recordedBy: Id,
+  recordedAt: Millis,
+});
+export type RecordedDecision = z.infer<typeof RecordedDecision>;
+
+/** Body of `POST /v1/groups/:id/decisions`. */
+export const RecordDecisionRequest = z.object({
+  text: z
+    .string()
+    .max(MAX_RECORDED_DECISION_CHARS)
+    .refine((t) => t.trim().length > 0, { message: "text is required" }),
+  topicId: Id.optional(),
+});
+export type RecordDecisionRequest = z.infer<typeof RecordDecisionRequest>;
+export const RecordDecisionResponse = z.object({ decision: RecordedDecision });
+export type RecordDecisionResponse = z.infer<typeof RecordDecisionResponse>;
+
+/** Stored event: a decision recorded by hand. */
+export const DecisionRecordedEvent = z.object({
+  ...eventBase,
+  type: z.literal("decision.recorded"),
+  data: z.object({ decision: RecordedDecision }),
+});
+
+export const DecisionsResponse = z.object({
+  decisions: z.array(GroupDecision),
+  hasMore: z.boolean(),
+  /** 1.1: decisions recorded by hand with seq < beforeSeq, newest first (at most `limit`). */
+  recorded: z.array(RecordedDecision).optional(),
+});
 export type DecisionsResponse = z.infer<typeof DecisionsResponse>;
 
 // ---------------------------------------------------------------------------
