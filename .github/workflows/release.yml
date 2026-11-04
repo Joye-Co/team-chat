@@ -26,7 +26,7 @@ permissions:
 jobs:
   dmg:
     name: Build and attach the DMG
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     timeout-minutes: 45
     env:
       TAG: ${{ inputs.tag }}
