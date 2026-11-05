@@ -34,6 +34,9 @@ pub enum Start {
     /// The v2 sample team on a quiet day: nothing waits on me, nothing runs
     /// (desk track, `desk-empty`).
     V2Quiet,
+    /// The v2 sample team seen by a member who just joined (onboarding,
+    /// `fake::v2::V2Samples::newcomer`).
+    V2Newcomer,
     // --- provider track ---
     /// The real chat-core provider on a seeded cache, with no server
     /// (`provider::seeded`).
@@ -85,6 +88,13 @@ pub const SCENES: &[Scene] = &[
         about: "First 群 of the sidebar with its newest ordinary 话题 open",
         start: Start::SignedIn,
         setup: open_first_topic,
+        open: open_main,
+    },
+    Scene {
+        name: "main-sidebar-hidden",
+        about: "The main scene with the sidebar hidden: 显示侧栏 right after the traffic lights",
+        start: Start::SignedIn,
+        setup: open_first_topic_sidebar_hidden,
         open: open_main,
     },
     Scene {
@@ -418,7 +428,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "group-menu",
-        about: "The menu of a 群 row in the sidebar (right-click): 静音, 重命名群…, 添加成员, 离开群",
+        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::group_menu,
@@ -1263,6 +1273,11 @@ pub fn open_first_group(services: &Services, cx: &mut App) {
         let id = group.id.clone();
         services.nav.update(cx, |nav, cx| nav.open_group(id, cx));
     }
+}
+
+fn open_first_topic_sidebar_hidden(services: &Services, cx: &mut App) {
+    open_first_topic(services, cx);
+    services.nav.update(cx, |nav, cx| nav.toggle_sidebar(cx));
 }
 
 pub fn open_first_topic(services: &Services, cx: &mut App) {

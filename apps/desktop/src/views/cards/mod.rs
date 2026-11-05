@@ -62,9 +62,15 @@ impl MessageExtra for CardExtra {
         // fallback or the title.
         if let Some(v2) = ctx.provider.card_v2(&message.group_id, &message.id) {
             let body = message.body.trim();
+            let fallback = v2.card.fallback.trim();
+            // A long result's fallback is the body cut with `…`.
+            let cut_of_body = fallback
+                .strip_suffix('…')
+                .is_some_and(|head| !head.is_empty() && body.starts_with(head));
             return body.is_empty()
                 || body == v2.card.title.trim()
-                || body == v2.card.fallback.trim();
+                || body == fallback
+                || cut_of_body;
         }
         ctx.provider
             .card(&message.group_id, &message.id)

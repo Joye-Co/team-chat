@@ -1,4 +1,4 @@
-//! Per-topic read positions, unread and mention counts, and follow state
+//! Per-topic read positions, unread and mention counts, follow and mute state
 //! (docs/protocol.md, "Read positions per topic").
 
 use serde::{Deserialize, Serialize};
@@ -22,11 +22,22 @@ pub struct TopicState {
         skip_serializing_if = "Option::is_none"
     )]
     pub following: Option<bool>,
+    /// I muted this topic: only mentions notify. Absent means false.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub muted: Option<bool>,
 }
 
 impl TopicState {
     pub fn is_following(&self) -> bool {
         self.following.unwrap_or(false)
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.muted.unwrap_or(false)
     }
 }
 

@@ -34197,6 +34197,37 @@
         "eventId",
         "ok"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "string",
+          "const": "topic.mute"
+        },
+        "rid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "t",
+        "rid",
+        "groupId",
+        "topicId",
+        "muted"
+      ]
     }
   ],
   "$defs": {

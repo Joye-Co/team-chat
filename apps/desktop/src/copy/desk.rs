@@ -83,6 +83,11 @@ crate::copy! {
     DESK_EMPTY_TITLE = "都处理完了",
     DESK_EMPTY_BODY = "成员需要你拍板、开始干活或交付结果时，会出现在这里。",
     DESK_NEW_TOPIC = "开个话题",
+    // Onboarding: 首页 of a member no 话题 involves yet, instead of 都处理完了.
+    DESK_START_TITLE = "从这里开始",
+    DESK_START_BODY = "开个话题，@ 一位成员，他会接着做。\n其他群要管理员把你加进去。",
+    DESK_START_DM = "和 {name} 聊聊",
+    DESK_START_GROUP = "去{name}看看",
     DESK_SEE_ARTIFACTS = "看产出",
     DESK_RAIL_TITLE = "今天",
     DESK_RAIL_LINE = "排队的事和在用的电脑",

@@ -34,7 +34,6 @@ crate::copy! {
     MEMBERS_IN_GROUPS = "在{groups}{n}个群",
     MEMBERS_COUNT_WORDS = "零 一 两 三 四 五 六 七 八 九 十",
     MEMBERS_LIST_SEP = "、",
-    MEMBERS_PAUSE = "暂停",
     MEMBERS_NOW_COUNTS = "在做 {a} · 排队 {b}",
     MEMBERS_QUEUED = "排队",
     MEMBERS_TOPIC_META = "{group} · {name} 提出",

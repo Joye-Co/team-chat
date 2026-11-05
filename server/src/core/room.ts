@@ -53,6 +53,7 @@ import {
 } from "./registry";
 import {
   ROOM_MESSAGING_MIGRATION,
+  ROOM_TOPIC_MUTE_MIGRATION,
   type ReadTotals,
   advanceTopicRead,
   getPrefs,
@@ -129,7 +130,7 @@ export const ROOM_CORE_MIGRATIONS: MigrationStep[] = [
 ];
 
 export function roomMigrationSteps(): MigrationStep[] {
-  return [...ROOM_CORE_MIGRATIONS, ROOM_MESSAGING_MIGRATION, ...roomMigrations];
+  return [...ROOM_CORE_MIGRATIONS, ROOM_MESSAGING_MIGRATION, ROOM_TOPIC_MUTE_MIGRATION, ...roomMigrations];
 }
 
 type TopicRow = {

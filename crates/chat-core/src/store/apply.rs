@@ -98,7 +98,7 @@ impl Store {
         })
     }
 
-    /// Stores my state of one topic (the ack of `topic.follow`).
+    /// Stores my state of one topic (the ack of `topic.follow` or `topic.mute`).
     pub fn apply_topic_state(&self, group_id: &str, t: &TopicState) -> StoreResult<()> {
         self.with_writer(|tx| upsert_topic_state(tx, group_id, t))
     }
@@ -239,11 +239,11 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
 
 fn upsert_topic_state(tx: &Transaction<'_>, group_id: &str, t: &TopicState) -> StoreResult<()> {
     tx.execute(
-        "INSERT INTO read_cursors (group_id, topic_id, seq, synced, following) VALUES (?1, ?2, ?3, 1, ?4)
-         ON CONFLICT(group_id, topic_id) DO UPDATE SET following = excluded.following,
+        "INSERT INTO read_cursors (group_id, topic_id, seq, synced, following, muted) VALUES (?1, ?2, ?3, 1, ?4, ?5)
+         ON CONFLICT(group_id, topic_id) DO UPDATE SET following = excluded.following, muted = excluded.muted,
            synced = CASE WHEN excluded.seq >= read_cursors.seq THEN 1 ELSE read_cursors.synced END,
            seq = MAX(read_cursors.seq, excluded.seq)",
-        params![group_id, t.topic_id, t.read_seq, t.is_following()],
+        params![group_id, t.topic_id, t.read_seq, t.is_following(), t.is_muted()],
     )?;
     Ok(())
 }
@@ -290,7 +290,7 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
     )?;
     if let Some(states) = &s.topics {
         // Listed topics carry their state; a topic that is not listed has nothing
-        // unread up to lastSeq and is not followed.
+        // unread up to lastSeq and is neither followed nor muted.
         let listed: BTreeSet<&str> = states.iter().map(|t| t.topic_id.as_str()).collect();
         let cached: Vec<String> = {
             let mut st = tx.prepare("SELECT id FROM topics WHERE group_id = ?1")?;
@@ -310,6 +310,7 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
                     unread: 0,
                     mentions: 0,
                     following: None,
+                    muted: None,
                 },
             )?;
         }

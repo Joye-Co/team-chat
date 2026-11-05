@@ -1360,7 +1360,7 @@ impl ChatProvider for FakeProvider {
             }
             None
         });
-        // inc-refs: references to the deleted message show 原消息已删除.
+        // inc-refs: references to the deleted message show 原消息已撤回.
         if topic.is_some() {
             self.with(|s| {
                 let mut all: Vec<&mut Message> =
@@ -1936,6 +1936,14 @@ impl ChatProvider for FakeProvider {
 
     fn set_topic_following(&self, group_id: &str, topic_id: &str, follow: bool) {
         self.set_topic_following_fake(group_id, topic_id, follow);
+    }
+
+    fn topic_muted(&self, group_id: &str, topic_id: &str) -> bool {
+        self.topic_muted_fake(group_id, topic_id)
+    }
+
+    fn set_topic_muted(&self, group_id: &str, topic_id: &str, muted: bool) {
+        self.set_topic_muted_fake(group_id, topic_id, muted);
     }
 
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {

@@ -515,6 +515,19 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 json!({"t": "error", "error": {"code": code, "message": "no"}}),
             );
         }
+        "topic.mute" => {
+            let tid = v["topicId"].as_str().unwrap();
+            let read = s
+                .groups
+                .get(&gid)
+                .and_then(|g| g.topic_reads.get(tid).copied())
+                .unwrap_or(0);
+            let state = json!({"topicId": tid, "readSeq": read, "unread": 0, "mentions": 0, "muted": v["muted"]});
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": true, "result": state}),
+            );
+        }
         "card.action" => {
             let data: CardActionedData = serde_json::from_value(json!({
                 "messageId": v["messageId"], "actionId": v["actionId"]

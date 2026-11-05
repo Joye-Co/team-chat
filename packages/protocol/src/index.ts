@@ -85,7 +85,7 @@ import { eventFrameFields, groupSummaryPrefFields, MAX_WEEKLY_BUDGET_CENTS, Upda
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
-import { messageAsideFields, sendContextFields, TopicContext, TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
+import { messageAsideFields, sendContextFields, TopicContext, TopicFollowFrame, TopicMuteFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
 import { UpdateInfo } from "./updates.ts";
 import { DiagnosticsResponse } from "./diagnostics.ts";
 import { AuditResponse, AuditEntry } from "./audit.ts";
@@ -496,6 +496,7 @@ export const ClientFrame = z.discriminatedUnion("t", [
   InteractionResolveFrame,
   ArtifactDataFrame,
   ArtifactReplyFrame,
+  TopicMuteFrame,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 export type ClientFrameType = ClientFrame["t"];

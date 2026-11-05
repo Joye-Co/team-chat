@@ -72,12 +72,12 @@ impl RowMenu {
 /// leading and bottom edges, radius 18, `sidebar` fill, 0.5 pt `glassEdge`
 /// and the `float` shadow. Children go inside; the traffic lights sit in
 /// its top row.
-pub fn floating_sidebar(cx: &App) -> gpui::Div {
+pub fn floating_sidebar(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
         .m(metrics::SIDEBAR_INSET)
-        .w(metrics::SIDEBAR_WIDTH)
+        .w(width)
         .rounded(metrics::SIDEBAR_RADIUS)
         .bg(k.sidebar)
         .shadow(k.glass())
@@ -85,6 +85,9 @@ pub fn floating_sidebar(cx: &App) -> gpui::Div {
         .flex()
         .flex_col()
 }
+
+/// The `bell.slash` after a muted 群, 私聊 or 话题 title.
+const MUTED_SYMBOL: Pixels = px(11.);
 
 /// The hit width of a section header's chevron (the trailing 34 pt).
 const SECTION_CHEVRON_HIT: Pixels = px(34.);
@@ -108,6 +111,8 @@ pub struct SidebarSection {
     /// The 群's own chat (群聊) has messages I have not read: the label is
     /// 600 with the item's 8 dot, like an unread row (§2.12).
     unread: bool,
+    /// I muted this 群: a `bell.slash` after the label.
+    muted: bool,
 }
 
 impl SidebarSection {
@@ -122,11 +127,18 @@ impl SidebarSection {
             on_chevron: None,
             menu: None,
             unread: false,
+            muted: false,
         }
     }
 
     pub fn unread(mut self, unread: bool) -> Self {
         self.unread = unread;
+        self
+    }
+
+    /// I muted this 群: the label gets a `bell.slash` after it.
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
         self
     }
 
@@ -199,13 +211,22 @@ impl RenderOnce for SidebarSection {
                     .min_w_0()
                     .flex()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(px(4.))
                     .child(
                         TruncText::new(self.label)
                             .n_section()
                             .when(unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .text_color(label),
                     )
+                    .when(self.muted, |d| {
+                        d.child(div().flex_none().child(symbol(
+                            Sf::Muted,
+                            MUTED_SYMBOL,
+                            Weight::Regular,
+                            k.secondary,
+                            window,
+                        )))
+                    })
                     .when(unread, |d| {
                         d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
                     }),
@@ -331,6 +352,8 @@ pub struct SidebarRow {
     /// [`SidebarGroup`].
     media: Option<SidebarMedia>,
     menu: Option<RowMenu>,
+    /// I muted this 群, 私聊 or 话题: a `bell.slash` after the title.
+    muted: bool,
 }
 
 impl SidebarRow {
@@ -352,7 +375,14 @@ impl SidebarRow {
             right: RightColumn::None,
             media: None,
             menu: None,
+            muted: false,
         }
+    }
+
+    /// I muted what the row opens: a `bell.slash` after the title.
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
     }
 
     /// A right-click menu on the row; the row keeps its focus ring while
@@ -620,6 +650,19 @@ impl RenderOnce for SidebarRow {
                             .when(self.unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .text_color(text),
                     )
+                    .when(self.muted, |d| {
+                        d.child(div().flex_none().child(symbol(
+                            Sf::Muted,
+                            MUTED_SYMBOL,
+                            Weight::Regular,
+                            if self.selected {
+                                sel_symbol
+                            } else {
+                                k.secondary
+                            },
+                            window,
+                        )))
+                    })
                     .when(self.unread, |d| {
                         d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
                     }),
@@ -658,8 +701,8 @@ impl RenderOnce for SidebarRow {
 
 /// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
 /// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
-/// or workspace, or the offline state), `chevrons-up-down` 16 at the right.
-/// It opens account and Settings.
+/// or workspace, or the offline state), the 设置 gear 16 at the right. It
+/// opens and closes the settings window (the sidebar's only 设置 entry).
 #[derive(IntoElement)]
 pub struct SidebarFooter {
     id: ElementId,
@@ -743,7 +786,7 @@ impl RenderOnce for SidebarFooter {
                             ),
                     )
                     .child(symbol(
-                        Sf::Popup,
+                        Sf::Settings,
                         super::tokens::icon::MD,
                         Weight::Regular,
                         k.secondary,

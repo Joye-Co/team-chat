@@ -246,7 +246,8 @@ impl LivePane {
                     .flex_1()
                     .min_w(px(0.))
                     .flex()
-                    .flex_col()
+                    .items_center()
+                    .gap(gpui::px(8.))
                     // §2.2, A2-13: the pane names the pane; the computer
                     // is its description.
                     .child(

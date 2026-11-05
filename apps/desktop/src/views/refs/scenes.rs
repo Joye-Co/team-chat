@@ -59,7 +59,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "refs-sent",
-        about: "引用提问: my question with one reference above its body, Ledger's answer, and a message with three references (one source deleted: 原消息已删除)",
+        about: "引用提问: my question with one reference above its body, Ledger's answer, and a message with three references (one source deleted: 原消息已撤回)",
         start: Start::V2Refs,
         setup: |s, cx| {
             reset(cx);

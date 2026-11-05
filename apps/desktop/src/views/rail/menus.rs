@@ -28,22 +28,25 @@ pub(super) fn topic(
     topic_menu::build(menu, services, &topic.group_id, &fresh, window, cx)
 }
 
-/// The menu of a 群 header or a DM row: 静音 or 取消静音; for a 群 also
+/// The menu of a 群 header or a DM row: 静音 or 取消静音 and the 提醒
+/// submenu (this conversation's own notify level); for a 群 also
 /// 重命名群…, 添加成员 and, apart, 离开群 (it asks first).
-pub(super) fn group(menu: PopupMenu, services: &Services, group_id: &str) -> PopupMenu {
+pub(super) fn group(
+    menu: PopupMenu,
+    services: &Services,
+    group_id: &str,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
     let p = &services.provider;
     let Some(g) = p.groups().into_iter().find(|g| g.id == group_id) else {
         return menu;
     };
-    let muted = p.group_muted(&g.id);
-    let (s, id) = (services.clone(), g.id.clone());
-    let menu = menu.item(
-        PopupMenuItem::new(if muted { nav::UNMUTE } else { nav::MUTE })
-            .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
-    );
+    let menu = nav_views::notify::items(menu, services, &g.id, window, cx);
     if g.kind != GroupKind::Group {
         return menu;
     }
+    let menu = menu.separator();
     let (rename, add, leave) = (services.clone(), services.clone(), services.clone());
     let (g1, g2, g3) = (g.clone(), g.clone(), g);
     menu.item(

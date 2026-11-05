@@ -191,6 +191,11 @@ ALTER TABLE members ADD COLUMN reports_to TEXT;
 ALTER TABLE members ADD COLUMN weekly_budget_cents INTEGER;
 "#,
     },
+    // 1.1: my per-topic mute (topic.mute). Old rows read as 0: not muted.
+    Migration {
+        name: "topic-mute-1",
+        sql: "ALTER TABLE read_cursors ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;",
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

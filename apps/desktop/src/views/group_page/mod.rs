@@ -237,20 +237,28 @@ impl GroupPage {
             window,
             cx,
         )
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-            group_menu(menu, &services, &group_id)
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, window, cx| {
+            group_menu(menu, &services, &group_id, window, cx)
         });
         // §2.2: every toolbar control is h32 on one center line.
         // §2.14: no create button while the first sync runs or offline;
         // it stays in place, disabled at 50 %.
         let new_topic = crate::ui::native::disabled_push(
+            // A quiet muted-fill button with a plus, not the black primary:
+            // the page is for reading what runs, creating is one action of
+            // several (owner decision, v18).
             push_button(
                 "group-new-topic",
                 c::GROUP_PAGE_NEW_TOPIC,
-                PushStyle::Default,
+                PushStyle::Secondary,
                 PushSize::Regular,
                 cx,
-            ),
+            )
+            .icon(crate::ui::button_glyph(
+                Sym::Plus,
+                crate::theme::icon::HEADER,
+                crate::theme::size::ICON_BUTTON,
+            )),
             !ready,
             cx,
         )
@@ -323,7 +331,6 @@ impl GroupPage {
         t: &Topic,
         st: Standing,
         run: Option<&BotRunSummary>,
-        last: bool,
         cx: &App,
     ) -> AnyElement {
         let p = &self.services.provider;
@@ -420,7 +427,6 @@ impl GroupPage {
             second: Some(line(second).into_any_element()),
             status: Some(badge),
             time: Some(clock(time).into()),
-            separator: !last,
             ..page::PageRow::new(t.title.clone())
         }
         .render(
@@ -480,7 +486,6 @@ impl GroupPage {
         all.sort_by_key(|d| std::cmp::Reverse(d.at));
         let total = all.len();
         let done: Vec<_> = all.into_iter().take(5).collect();
-        let n = done.len();
         let rows = done
             .into_iter()
             .enumerate()
@@ -508,7 +513,6 @@ impl GroupPage {
                         cx,
                     )),
                     time: Some(kit::month_day(d.at).into()),
-                    separator: i + 1 < n,
                     ..page::PageRow::new(d.title.clone())
                 }
                 .render(SharedString::from(format!("group-done-{i}")), COLUMNS, cx)
@@ -537,7 +541,7 @@ impl GroupPage {
             .collect()
     }
 
-    /// The right pane (§2.5): the header band `群资料`, then 成员, 群里的决定,
+    /// The right pane (§2.5): the header band `群资料`, then 通知, 成员, 群里的决定,
     /// 最近的产出 and 在哪干活, each with a compact empty when it has nothing.
     /// `loading` draws skeleton rows instead.
     fn inspector(
@@ -562,10 +566,11 @@ impl GroupPage {
             .border_b_1()
             .border_color(k.separator)
             .flex()
-            .flex_col()
-            .justify_center()
+            .items_center()
+            .gap(tsp::S8)
             .child(
                 div()
+                    .flex_none()
                     .n_title3()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(k.label)
@@ -588,6 +593,16 @@ impl GroupPage {
             // Pull the first GroupLabel up so its ink starts at y 68 (B2):
             // the section's own 16 top sits under the header band.
             .child(div().flex_none().mt(-tsp::S12));
+
+        // 通知: how this 群 reminds me (静音, 提醒); it is this 群's own
+        // setting, so it sits here and not in the settings window.
+        if !loading && !failed {
+            col = col.child(crate::views::nav::notify::group_section(
+                &self.services,
+                g,
+                cx,
+            ));
+        }
 
         // 成员: the name keeps its room; the 岗位 truncates first, and both
         // show in full in the tooltip.
@@ -1027,8 +1042,6 @@ impl Render for GroupPage {
                         .flex_none()
                         .flex()
                         .rounded(page::m::FRAME_RADIUS)
-                        .border_1()
-                        .border_color(k.separator)
                         .child(page::page_empty(
                             Sym::Topic,
                             c::GROUP_PAGE_EMPTY_TITLE,
@@ -1070,10 +1083,7 @@ impl Render for GroupPage {
                     let topic_rows: Vec<AnyElement> = rows
                         .iter()
                         .take(shown)
-                        .enumerate()
-                        .map(|(i, (st, t, run))| {
-                            self.topic_row(t, *st, run.as_ref(), i + 1 == shown, cx)
-                        })
+                        .map(|(st, t, run)| self.topic_row(t, *st, run.as_ref(), cx))
                         .collect();
                     let slug = st.slug();
                     let footer = if total > ACTIVE_ROWS {
@@ -1178,31 +1188,25 @@ impl Render for GroupPage {
 
 /// The 群 commands of the toolbar's `ellipsis` pull-down: the same items as
 /// the 群's context menu in the sidebar (§7.3: every context-menu item also
-/// exists in the main UI). 静音 or 取消静音; for a 群 also 重命名群…,
-/// 添加成员… and, apart, 离开群… (it asks first).
+/// exists in the main UI). 静音 or 取消静音 and the 提醒 submenu; for a 群
+/// also 重命名群…, 添加成员… and, apart, 离开群… (it asks first).
 fn group_menu(
     menu: gpui_component::menu::PopupMenu,
     services: &Services,
     group_id: &str,
+    window: &mut Window,
+    cx: &mut gpui::Context<gpui_component::menu::PopupMenu>,
 ) -> gpui_component::menu::PopupMenu {
     use crate::views::nav as nav_views;
     let p = &services.provider;
     let Some(g) = p.groups().into_iter().find(|g| g.id == group_id) else {
         return menu;
     };
-    let muted = p.group_muted(&g.id);
-    let (s, id) = (services.clone(), g.id.clone());
-    let menu = menu.item(
-        PopupMenuItem::new(if muted {
-            nav_copy::UNMUTE
-        } else {
-            nav_copy::MUTE
-        })
-        .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
-    );
+    let menu = nav_views::notify::items(menu, services, &g.id, window, cx);
     if g.kind != crate::data::GroupKind::Group {
         return menu;
     }
+    let menu = menu.separator();
     let (rename, add, leave) = (services.clone(), services.clone(), services.clone());
     let purpose = services.clone();
     let (g1, g2, g3) = (g.clone(), g.clone(), g);

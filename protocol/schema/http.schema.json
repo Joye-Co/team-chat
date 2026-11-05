@@ -243,6 +243,9 @@
               },
               "following": {
                 "type": "boolean"
+              },
+              "muted": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -20171,6 +20174,9 @@
                 },
                 "following": {
                   "type": "boolean"
+                },
+                "muted": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -20344,6 +20350,9 @@
               },
               "following": {
                 "type": "boolean"
+              },
+              "muted": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -20425,6 +20434,9 @@
           "maximum": 9007199254740991
         },
         "following": {
+          "type": "boolean"
+        },
+        "muted": {
           "type": "boolean"
         }
       },

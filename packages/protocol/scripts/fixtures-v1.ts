@@ -70,6 +70,11 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   bad("server/reads-missing-topics.json", "ServerFrame", { t: "reads", groupId: ID.general, readSeq: 40, unread: 0, mentions: 0 }, "missing topics");
   ok("server/welcome-v1.json", "ServerFrame", { t: "welcome", protocol: 1, me: ownerFull, members: [ownerFull, aliceMinimal], groups: [summaryV1, { ...dmSummary, notify: "all" }], serverTime: T0 + 60_000 }, "group summaries with topic state and prefs");
   ok("server/ack-ok-topic-follow.json", "ServerFrame", { t: "ack", rid: "r23", ok: true, result: topicState }, "ack of topic.follow: result is a TopicState");
+  ok("client/topic.mute.json", "ClientFrame", { t: "topic.mute", rid: "r26", groupId: ID.general, topicId: ID.topic, muted: true });
+  ok("client/topic.mute-unmute.json", "ClientFrame", { t: "topic.mute", rid: "r27", groupId: ID.general, topicId: ID.topic, muted: false });
+  bad("client/topic.mute-missing-muted.json", "ClientFrame", { t: "topic.mute", rid: "r28", groupId: ID.general, topicId: ID.topic }, "missing muted");
+  ok("entities/topic-state-muted.json", "TopicState", { topicId: X.topic2, readSeq: 12, unread: 0, mentions: 0, muted: true }, "muted, not followed");
+  ok("server/ack-ok-topic-mute.json", "ServerFrame", { t: "ack", rid: "r26", ok: true, result: { ...topicState, muted: true } }, "ack of topic.mute: result is a TopicState");
 
   // -------------------------------------------------------------------------
   // 4. Cards (before messages, which embed them)
