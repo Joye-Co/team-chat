@@ -798,7 +798,9 @@ fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
 }
 
 /// The host base stylesheet in this theme's token values (see
-/// [`WebEmbedState::apply_base`]).
+/// [`WebEmbedState::apply_base`]). It only supplies defaults (owner decision
+/// O-4): its rules sit in the `tc-base` cascade layer, so any color or type
+/// a page that a member made sets for itself wins.
 fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
     let k = crate::ui::native::native_colors(cx);
     // The surface the page sits on: the background when it fills a content
@@ -872,7 +874,10 @@ s.textContent={css};{num}}})()",
 /// the top of the first block the frame edge would cut (a line of text, a
 /// table row, a small card, a chart, an image) down to the edge, so the page
 /// ends on whole blocks and never under a fade or mid-glyph (§2.21, A4); the
-/// frame's `展开` row follows. It keeps the id `__tc_fade` the self-tests read.
+/// frame's `展开` row follows. The frame ends 16 (the card gap) under the
+/// bottom of the last whole block, so the margin between blocks never shows
+/// as a blank band above the footer (A1). It keeps the id `__tc_fade` the
+/// self-tests read.
 fn fade_script(rgb: &str) -> String {
     format!(
         "(function(){{var d=document.getElementById('__tc_fade');\
@@ -885,7 +890,10 @@ if(/^(SVG|IMG|CANVAS|VIDEO|AUDIO|IFRAME|TR|LI|BUTTON|PRE|P|H1|H2|H3|H4|H5|H6|DT|
 if(r.height<=160){{var c=getComputedStyle(el);if(parseFloat(c.borderTopWidth)>0||parseFloat(c.borderBottomWidth)>0||\
 (c.backgroundColor&&c.backgroundColor!=='rgba(0, 0, 0, 0)'&&c.backgroundColor!=='transparent'))return true;}}return false;}};\
 var u=function(){{var e=document.scrollingElement||document.documentElement,h=window.innerHeight;\
-var more=e.scrollHeight-(window.scrollY+h)>1;if(!more){{d.style.opacity='0';d.style.height='0px';var b=document.body,bs=b?getComputedStyle(b):null;window.__tcEnd=b?Math.ceil(b.getBoundingClientRect().bottom+parseFloat(bs.marginBottom||0)):h;return;}}\
+var more=e.scrollHeight-(window.scrollY+h)>1;if(!more){{d.style.opacity='0';d.style.height='0px';var b=document.body,bs=b?getComputedStyle(b):null;var end=b?Math.ceil(b.getBoundingClientRect().bottom+parseFloat(bs.marginBottom||0)):h;\
+if(b){{var lw=-1,ds=b.getElementsByTagName('*');for(var i=0;i<ds.length;i++){{if(ds[i]===d)continue;var q=ds[i].getBoundingClientRect();\
+if(q.height>0&&q.width>0&&q.bottom>lw)lw=q.bottom;}}if(lw>0&&Math.ceil(lw+16)<end)end=Math.ceil(lw+16);}}\
+window.__tcEnd=end;return;}}\
 var cut=h,all=document.body?document.body.getElementsByTagName('*'):[];\
 for(var pass=0;pass<6;pass++){{var top=cut;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;\
 var r=el.getBoundingClientRect();if(r.height<=0||r.width<=0||r.top>=cut||r.bottom<=cut)continue;\
@@ -894,7 +902,10 @@ var hs=document.body?document.body.querySelectorAll('h1,h2,h3,h4,h5,h6,figcaptio
 for(var j=0;j<hs.length;j++){{var q=hs[j].getBoundingClientRect();if(q.height>0&&q.bottom<=cut&&q.bottom>lb){{lb=q.bottom;lh=q;}}}}\
 if(lh){{var after=false;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d||/^(H[1-6]|FIGCAPTION)$/.test(el.tagName.toUpperCase()))continue;\
 var r=el.getBoundingClientRect();if(r.height>0&&r.width>0&&r.top>=lb-1&&r.bottom<=cut&&atomic(el,r)){{after=true;break;}}}}if(!after)cut=lh.top;}}\
-if(cut<h*0.35)cut=h;window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
+if(cut<h*0.35)cut=h;\
+if(cut<h){{var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
+if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(lz>0&&lz+16<cut)cut=lz+16;}}\
+window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
 window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
 try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
 if(document.body)o.observe(document.body);}}catch(_){{}}\

@@ -95,6 +95,9 @@ struct Entry {
     ask: Option<String>,
     stats: MemberStats,
     extras: MemberExtras,
+    /// Open 话题 that wait on this member (`等小王回答`), newest first,
+    /// each with the state the sidebar shows for it (A5).
+    waits: Vec<(crate::data::Topic, crate::views::topic_page::StateLine)>,
 }
 
 impl MembersPage {
@@ -151,11 +154,31 @@ impl MembersPage {
                     .is_some_and(|me| crate::views::topic_page::ask_answered(p.as_ref(), me, a))
             })
             .collect();
+        let open: Vec<crate::data::Topic> = p
+            .groups()
+            .iter()
+            .flat_map(|g| p.topics(&g.id))
+            .filter(|t| t.status != crate::data::TopicStatus::Done && !t.waiting_on.is_empty())
+            .collect();
         let mut out: Vec<Entry> = p
             .members()
             .into_iter()
             .filter(|m| !m.deactivated)
             .map(|m| {
+                let mut waits: Vec<_> = open
+                    .iter()
+                    // Not on my own row: what waits on me is under 等你.
+                    .filter(|t| {
+                        me.as_deref() != Some(m.id.as_str())
+                            && t.waiting_on.iter().any(|w| w == &m.id)
+                    })
+                    .map(|t| {
+                        let state =
+                            crate::views::topic_page::topic_state(p.as_ref(), me.as_deref(), t);
+                        (t.clone(), state)
+                    })
+                    .collect();
+                waits.sort_by_key(|(t, _)| std::cmp::Reverse(t.last_activity_at));
                 let run = runs.iter().find(|r| r.bot_id == m.id).cloned();
                 let ask = asks
                     .iter()
@@ -180,6 +203,7 @@ impl MembersPage {
                     bucket,
                     run,
                     ask,
+                    waits,
                 }
             })
             .collect();
@@ -523,6 +547,19 @@ impl MembersPage {
                 }));
             }
         }
+        // A member nothing else marks shows what waits on it, in the
+        // sidebar's words (`等小王回答`, A5).
+        if badge.is_none()
+            && let Some((_, s)) = e.waits.first()
+        {
+            let text = if s.short.is_empty() {
+                &s.text
+            } else {
+                &s.short
+            };
+            badge =
+                Some(crate::ui::native::StatusBadge::new(s.badge, text.clone()).into_any_element());
+        }
         parts.retain(|p| !p.trim().is_empty());
         let mark = badge;
         let meta = parts.join(" · ");
@@ -854,21 +891,15 @@ impl MembersPage {
                 .and_then(|(g, t)| p.topic(g, t))
                 .map(|t| crate::views::topic_page::topic_state(p.as_ref(), me.as_deref(), &t))
                 .filter(|s| s.badge == crate::ui::native::BadgeState::NeedsYou);
-            let (glyph, tint, badge) = match state {
-                Some(s) => (
-                    Sym::NeedsYou,
-                    k.amber,
-                    crate::ui::native::StatusBadge::new(s.badge, s.text).into_any_element(),
-                ),
-                None => (
-                    Sym::Waiting,
-                    k.secondary,
-                    page::status_badge(Status::Queued, c::MEMBERS_QUEUED, cx),
-                ),
+            // D15: the state has one carrier, the badge; the media slot
+            // shows the neutral 话题 icon.
+            let badge = match state {
+                Some(s) => crate::ui::native::StatusBadge::new(s.badge, s.text).into_any_element(),
+                None => page::status_badge(Status::Queued, c::MEMBERS_QUEUED, cx),
             };
             let row = page::card_row(
                 SharedString::from(format!("member-queued-{i}")),
-                Some(page::row_icon(glyph, tint)),
+                Some(page::row_icon(Sym::Topic, k.secondary)),
                 q.title.clone(),
                 meta.map(Into::into),
                 Some(badge),
@@ -888,16 +919,63 @@ impl MembersPage {
                 None => row.into_any_element(),
             });
         }
+        // 话题 that wait on this member (a person's answer, a review), as
+        // the sidebar and 群 show them (A5).
+        let shown: Vec<&str> = e
+            .run
+            .iter()
+            .map(|r| r.topic_id.as_str())
+            .chain(
+                e.extras
+                    .queued
+                    .iter()
+                    .filter_map(|q| q.topic.as_ref().map(|(_, t)| t.as_str())),
+            )
+            .collect();
+        let waits: Vec<_> = e
+            .waits
+            .iter()
+            .filter(|(t, _)| !shown.contains(&t.id.as_str()))
+            .collect();
         // A person has no runs: the line they set (the one the list row
         // shows) is what they are doing now, so list and detail agree (A5).
         let said = e
             .extras
             .line
             .clone()
-            .filter(|l| !e.member.is_bot() && !l.trim().is_empty());
-        if rows_n == 0
-            && let Some(said) = said
-        {
+            .filter(|l| !e.member.is_bot() && !l.trim().is_empty() && rows_n == 0);
+        let nw = waits.len();
+        for (i, (t, s)) in waits.into_iter().enumerate() {
+            rows_n += 1;
+            let group = p
+                .groups()
+                .into_iter()
+                .find(|g| g.id == t.group_id)
+                .map(|g| g.name)
+                .unwrap_or_default();
+            let nav = self.services.nav.clone();
+            let (g, tid) = (t.group_id.clone(), t.id.clone());
+            body = body.child(
+                page::card_row(
+                    SharedString::from(format!("member-wait-{i}")),
+                    Some(page::row_icon(Sym::Topic, k.secondary)),
+                    crate::views::sidebar::topic_display_title(&t.title).0,
+                    Some(group.into()),
+                    Some(
+                        crate::ui::native::StatusBadge::new(s.badge, s.text.clone())
+                            .into_any_element(),
+                    ),
+                    i + 1 == nw && said.is_none(),
+                    cx,
+                )
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    let (g, t) = (g.clone(), tid.clone());
+                    nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                }),
+            );
+        }
+        if let Some(said) = said {
             body = body.child(page::card_row(
                 "member-now-said",
                 Some(page::row_icon(Sym::AskAside, k.secondary)),
@@ -929,7 +1007,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 这周 (card): three stats (完成的话题, 产出, 成本) and the 成本 Progress
+    /// 这周 (card): three stats (交付, 产出, 成本) and the 成本 Progress
     /// against the limit.
     fn week_section(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
@@ -1315,16 +1393,45 @@ impl MembersPage {
             Some(mc) => {
                 // §2.12: 在线 (dot) while it is on, 空闲 / 离线 (ring) when
                 // not in use; the run's own state is on its 话题.
-                let badge = if mc.busy {
-                    page::status_badge(Status::Online, c::MEMBERS_IN_USE, cx)
+                // B1-44: 未知电脑 (a run with no known computer) has no
+                // presence badge; one recipe with 首页 and 群: name over
+                // `{who} 在用`.
+                let known = e.stats.machine.is_some()
+                    || e.run.as_ref().is_some_and(|r| r.machine_name.is_some());
+                let badge = if !known {
+                    None
+                } else if mc.busy {
+                    Some(page::status_badge(Status::Online, c::MEMBERS_IN_USE, cx))
                 } else if mc.online {
-                    page::status_badge(Status::Offline, c::MEMBERS_MACHINE_IDLE, cx)
+                    Some(page::status_badge(
+                        Status::Offline,
+                        c::MEMBERS_MACHINE_IDLE,
+                        cx,
+                    ))
                 } else {
-                    page::status_badge(Status::Offline, c::MEMBERS_MACHINE_OFFLINE, cx)
+                    Some(page::status_badge(
+                        Status::Offline,
+                        c::MEMBERS_MACHINE_OFFLINE,
+                        cx,
+                    ))
                 };
-                let detail = mc
+                let users = mc.busy.then(|| {
+                    fill(
+                        c::MEMBERS_MACHINE_USERS,
+                        &[(
+                            "name",
+                            crate::ui::avatar::name_beside_avatar(&e.member.name),
+                        )],
+                    )
+                });
+                let disk = mc
                     .disk_used_pct
-                    .map(|pct| SharedString::from(format!("{} {pct}%", c::MEMBERS_DISK)));
+                    .map(|pct| format!("{} {pct}%", c::MEMBERS_DISK));
+                let detail = match (users, disk) {
+                    (Some(u), Some(d)) => Some(format!("{u} · {d}")),
+                    (u, d) => u.or(d),
+                }
+                .map(SharedString::from);
                 let open = e.run.clone().map(|r| {
                     let nav = self.services.nav.clone();
                     borderless_button(
@@ -1353,7 +1460,7 @@ impl MembersPage {
                             .flex()
                             .items_center()
                             .gap(tsp::S8)
-                            .child(badge)
+                            .children(badge)
                             .children(open)
                             .into_any_element(),
                     ),

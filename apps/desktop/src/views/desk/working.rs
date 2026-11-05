@@ -5,7 +5,7 @@
 
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement as _, Styled, div,
+    StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _,
 };
 
 use super::{DeskPage, model::Snapshot};
@@ -213,7 +213,12 @@ pub fn render(
             crate::data::ArtifactKind::File => Sym::File,
             _ => Sym::Document,
         };
-        let who = crate::views::shell::member_name(services, &a.created_by);
+        // X-01: no leading emoji in a meta line either.
+        let who = crate::ui::avatar::name_beside_avatar(&crate::views::shell::member_name(
+            services,
+            &a.created_by,
+        ))
+        .to_string();
         let tip = format!(
             "{} · {}",
             a.title,
@@ -263,7 +268,8 @@ pub fn render(
             .machine_name
             .clone()
             .unwrap_or_else(|| crate::copy::group_page::GROUP_PAGE_UNKNOWN_MACHINE.to_string());
-        let who = snap.name(&r.run.bot_id);
+        // X-01: no leading emoji beside the machine.
+        let who = snap.name_by_avatar(&r.run.bot_id);
         match machines.iter_mut().find(|(n, ..)| *n == name) {
             Some((_, names, _)) => {
                 if !names.contains(&who) {
@@ -302,6 +308,10 @@ pub fn render(
     for (i, (name, names, (g, t, run))) in machines.into_iter().enumerate() {
         let glyph = crate::views::group_page::kit::machine_sym(&name, None);
         let users = fill(c::DESK_MACHINE_USERS, &[("names", &names.join("、"))]);
+        // One machine recipe on 首页, 群 and 成员 (B1-44): name over
+        // `{who} 在用`, 在线 when the computer is known; 未知电脑 has no
+        // presence badge.
+        let known = name != crate::copy::group_page::GROUP_PAGE_UNKNOWN_MACHINE;
         let nav = services.nav.clone();
         where_ = where_.row(
             div()
@@ -321,6 +331,13 @@ pub fn render(
                         .child(line(name).n_body().text_color(k.label))
                         .child(line(users).n_subheadline().text_color(k.secondary)),
                 )
+                .when(known, |el| {
+                    el.child(page::status_badge(
+                        page::Status::Online,
+                        c::DESK_MACHINE_ONLINE,
+                        cx,
+                    ))
+                })
                 .on_click(move |_, _, cx| {
                     let (g, t, run) = (g.clone(), t.clone(), run.clone());
                     nav.update(cx, |nav, cx| {

@@ -1,4 +1,5 @@
-//! 做完了 rows (NATIVE.md §9.4): the result as the title and its proof as
+//! 今天交付 rows (NATIVE.md §9.4; O-2: a run result is 交付, 完成 is a
+//! done 话题): the result as the title and its proof as
 //! one `secondary` line of words, not chips.
 
 use crate::{
