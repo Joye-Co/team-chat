@@ -127,6 +127,11 @@ fn answered_topics(services: &Services, cx: &App) -> std::collections::HashSet<S
 }
 
 impl RailView {
+    /// The sidebar list's key focus (a region of the window, F6).
+    pub fn focus_handle(&self) -> gpui::FocusHandle {
+        self.focus.clone()
+    }
+
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(common::SEARCH_PLACEHOLDER));
