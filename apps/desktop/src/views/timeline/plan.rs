@@ -187,7 +187,12 @@ impl TimelineView {
         };
         // R2-05, A2-10: the title names the member and the step it is on;
         // with no plan, `Forge 在做` (never a bare `计划`).
-        let name = crate::copy::isolate(&bot.map(|m| m.name.clone()).unwrap_or_default());
+        // X-01: the title sits beside the member's avatar, so its name
+        // drops a leading emoji.
+        let name = crate::copy::isolate(
+            bot.map(|m| crate::ui::avatar::name_beside_avatar(&m.name))
+                .unwrap_or_default(),
+        );
         let doing = progress_of
             .and_then(|(_, _, now)| now)
             .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))

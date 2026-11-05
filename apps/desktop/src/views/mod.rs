@@ -76,6 +76,16 @@ pub fn count_badge(count: u32, mention: bool, _cx: &App) -> Option<Div> {
     })
 }
 
+/// A name set between Chinese words (T-09): a space on each side that
+/// ends in a Latin letter or digit (`等 Alex Chen 回答`), none beside a
+/// Chinese one (`等李雪回答`).
+pub fn spaced_name(name: &str) -> String {
+    let latin = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric());
+    let lead = if latin(name.chars().next()) { " " } else { "" };
+    let tail = if latin(name.chars().last()) { " " } else { "" };
+    format!("{lead}{name}{tail}")
+}
+
 /// The status chip text (docs/PRODUCT.md), or `None` for `open`.
 pub fn status_chip_text(topic: &Topic, me: Option<&str>, members: &[Member]) -> Option<String> {
     let waits_on_me = me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
@@ -91,12 +101,18 @@ pub fn status_chip_text(topic: &Topic, me: Option<&str>, members: &[Member]) -> 
         TopicStatus::Done => common::STATUS_DONE.to_string(),
         TopicStatus::WaitingAnswer if waits_on_me => common::STATUS_WAITING_ANSWER_ME.to_string(),
         TopicStatus::WaitingAnswer => match first_name {
-            Some(name) => fill(common::STATUS_WAITING_ANSWER_NAMED, &[("name", &name)]),
+            Some(name) => fill(
+                common::STATUS_WAITING_ANSWER_NAMED,
+                &[("name", &spaced_name(&name))],
+            ),
             None => common::STATUS_WAITING_ANSWER.to_string(),
         },
         TopicStatus::WaitingReview if waits_on_me => common::STATUS_WAITING_REVIEW_ME.to_string(),
         TopicStatus::WaitingReview => match first_name {
-            Some(name) => fill(common::STATUS_WAITING_REVIEW_NAMED, &[("name", &name)]),
+            Some(name) => fill(
+                common::STATUS_WAITING_REVIEW_NAMED,
+                &[("name", &spaced_name(&name))],
+            ),
             None => common::STATUS_WAITING_REVIEW.to_string(),
         },
     };
@@ -160,8 +176,10 @@ mod tests {
         );
         assert_eq!(
             status_chip_text(&topic, Some("m-alex"), &members).unwrap(),
-            "等Joye回答"
+            "等 Joye 回答"
         );
+        assert_eq!(spaced_name("李雪"), "李雪");
+        assert_eq!(spaced_name("Alex Chen"), " Alex Chen ");
         topic.waiting_on.clear();
         assert_eq!(
             status_chip_text(&topic, Some("m-alex"), &members).unwrap(),

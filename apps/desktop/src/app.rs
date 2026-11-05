@@ -46,6 +46,9 @@ gpui::actions!(
         MentionInComposer,
         FocusNext,
         FocusPrev,
+        // K-10: F6 / ⌥Tab jump between the window's regions.
+        FocusNextRegion,
+        FocusPrevRegion,
         // v2 shell (1.1.0)
         ToggleSideChat,
         ToggleTopicRail,
@@ -694,6 +697,34 @@ impl RootView {
     }
 }
 
+impl RootView {
+    /// K-10, E3: F6 / ⌥Tab move the focus to the next region of the window
+    /// (⇧ to the previous one): the sidebar, then on a 话题 page the thread
+    /// and its composer, so a list is a keystroke away, not 26 Tabs.
+    fn jump_region(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let mut regions = Vec::new();
+        if !self.services.nav.read(cx).sidebar_hidden {
+            regions.push(self.rail.read(cx).focus_handle());
+        }
+        if self.services.nav.read(cx).page() == Page::Topic {
+            regions.push(self.timeline.read(cx).focus_handle());
+            regions.push(self.composer.read(cx).input_focus(cx));
+        }
+        if regions.is_empty() {
+            return;
+        }
+        let current = regions.iter().position(|h| h.contains_focused(window, cx));
+        let n = regions.len() as isize;
+        let next = match current {
+            Some(i) => (i as isize + step).rem_euclid(n) as usize,
+            None if step < 0 => regions.len() - 1,
+            None => 0,
+        };
+        window.focus(&regions[next], cx);
+        cx.notify();
+    }
+}
+
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(hook) = self.first_frame.take() {
@@ -709,60 +740,67 @@ impl Render for RootView {
             .bg(k.bg)
             .text_color(k.ink);
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
-        let root = crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
-            .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
-                // v2: ⌘⌥I toggles the topic rail.
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
-            }))
-            .on_action(cx.listener(|this, _: &ToggleTopicRail, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
-            }))
-            .on_action(cx.listener(|this, _: &ToggleSideChat, _, cx| {
-                let member = this.services.provider.side_chat_default_member();
-                // inc-refs: ⌘; takes the 话题 composer's chips into 单独问.
-                crate::views::refs::carry_to_side_chat(&this.services, member.as_deref(), cx);
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.toggle_side_chat(member, cx));
-            }))
-            .on_action(cx.listener(|this, _: &OpenDesk, _, cx| {
-                this.services.nav.update(cx, |nav, cx| nav.open_desk(cx));
-            }))
-            .on_action(cx.listener(|this, _: &OpenMembers, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.open_members(None, cx));
-            }))
-            .on_action(cx.listener(|this, _: &OpenArtifacts, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.open_artifacts(cx));
-            }))
-            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
-            .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.toggle_sidebar(cx));
-            }))
-            .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
-                // v12/overlays: ⌘N opens the 新话题 sheet (NATIVE.md §7.1).
-                let group = this.services.nav.read(cx).current_group();
-                crate::views::nav::new_topic::open_new_topic(
-                    this.services.clone(),
-                    group,
-                    window,
-                    cx,
-                );
-            }))
-            .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
-                this.composer
-                    .update(cx, |composer, cx| composer.insert_text("@", window, cx));
-            }));
+        let root =
+            crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
+                .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
+                    // v2: ⌘⌥I toggles the topic rail.
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
+                }))
+                .on_action(cx.listener(|this, _: &ToggleTopicRail, _, cx| {
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
+                }))
+                .on_action(cx.listener(|this, _: &ToggleSideChat, _, cx| {
+                    let member = this.services.provider.side_chat_default_member();
+                    // inc-refs: ⌘; takes the 话题 composer's chips into 单独问.
+                    crate::views::refs::carry_to_side_chat(&this.services, member.as_deref(), cx);
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.toggle_side_chat(member, cx));
+                }))
+                .on_action(cx.listener(|this, _: &OpenDesk, _, cx| {
+                    this.services.nav.update(cx, |nav, cx| nav.open_desk(cx));
+                }))
+                .on_action(cx.listener(|this, _: &OpenMembers, _, cx| {
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.open_members(None, cx));
+                }))
+                .on_action(cx.listener(|this, _: &OpenArtifacts, _, cx| {
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.open_artifacts(cx));
+                }))
+                .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+                .on_action(cx.listener(|this, _: &FocusNextRegion, window, cx| {
+                    this.jump_region(1, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &FocusPrevRegion, window, cx| {
+                    this.jump_region(-1, window, cx)
+                }))
+                .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
+                .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.toggle_sidebar(cx));
+                }))
+                .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
+                    // v12/overlays: ⌘N opens the 新话题 sheet (NATIVE.md §7.1).
+                    let group = this.services.nav.read(cx).current_group();
+                    crate::views::nav::new_topic::open_new_topic(
+                        this.services.clone(),
+                        group,
+                        window,
+                        cx,
+                    );
+                }))
+                .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
+                    this.composer
+                        .update(cx, |composer, cx| composer.insert_text("@", window, cx));
+                }));
         if !matches!(
             self.services.provider.session(),
             SessionState::SignedIn { .. }
@@ -935,6 +973,10 @@ pub fn bind_view_keys(cx: &mut App) {
         // inputs keep their own Tab binding.
         KeyBinding::new("tab", FocusNext, None),
         KeyBinding::new("shift-tab", FocusPrev, None),
+        KeyBinding::new("f6", FocusNextRegion, None),
+        KeyBinding::new("shift-f6", FocusPrevRegion, None),
+        KeyBinding::new("alt-tab", FocusNextRegion, None),
+        KeyBinding::new("alt-shift-tab", FocusPrevRegion, None),
     ]);
     crate::views::topic_list::bind_keys(cx);
     // --- v12/behavior ---
@@ -1016,5 +1058,53 @@ mod tests {
                 "not the hidden login field"
             );
         });
+    }
+
+    /// K-10: F6 walks the regions (sidebar, thread, composer) and ⇧F6 walks
+    /// back, so a list is one keystroke away.
+    #[gpui::test]
+    fn f6_jumps_between_regions(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_view_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = crate::fake::FakeProvider::new();
+        let root = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let keep = root.clone();
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                services.nav.update(cx, |nav, cx| {
+                    nav.open_topic("g-dev".into(), "t-api".into(), cx)
+                });
+                cx.open_window(Default::default(), move |window, cx| {
+                    let view = cx.new(|cx| RootView::new(services, None, window, cx));
+                    *keep.borrow_mut() = Some(view.clone());
+                    cx.new(|cx| gpui_base::Root::new(view, window, cx))
+                })
+            })
+            .expect("the window opens");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        let view = root.borrow().clone().expect("the root view");
+        let (rail, thread, composer) = view.read_with(cx, |v, cx| {
+            (
+                v.rail.read(cx).focus_handle(),
+                v.timeline.read(cx).focus_handle(),
+                v.composer.read(cx).input_focus(cx),
+            )
+        });
+        let at = |h: &FocusHandle, cx: &mut VisualTestContext| {
+            cx.update(|window, cx| h.contains_focused(window, cx))
+        };
+        cx.simulate_keystrokes("f6");
+        assert!(at(&rail, cx), "F6 goes to the sidebar first");
+        cx.simulate_keystrokes("f6");
+        assert!(at(&thread, cx), "then the thread");
+        cx.simulate_keystrokes("f6");
+        assert!(at(&composer, cx), "then the composer");
+        cx.simulate_keystrokes("shift-f6");
+        assert!(at(&thread, cx), "shift-F6 goes back");
     }
 }

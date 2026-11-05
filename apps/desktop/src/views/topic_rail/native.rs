@@ -124,7 +124,7 @@ impl TopicRail {
             Some(s) => (s.badge, s.text.clone(), s.detail.clone()),
             None => (
                 BadgeState::Queued,
-                crate::copy::common::STATUS_OPEN.to_string(),
+                crate::copy::common::STATUS_QUEUED.to_string(),
                 None,
             ),
         };
@@ -180,7 +180,10 @@ impl TopicRail {
         cx: &App,
     ) -> AnyElement {
         let k = native_colors(cx);
-        let name = member.map(|m| m.name.clone()).unwrap_or_default();
+        // X-01, C5: beside its avatar a name drops its leading emoji.
+        let name = member
+            .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+            .unwrap_or_default();
         // R2-14, §2.21: the role truncates first, and goes when fewer than
         // 2 of its characters would fit (never a lone `…`).
         let room = VALUE_ROOM - if tail.is_some() { TAIL_ROOM } else { 0. };
@@ -506,9 +509,14 @@ impl TopicRail {
             );
         }
         for a in &d.artifacts {
+            // A2-21: the kind's own symbol (an image is not a document).
+            let sym = match a.kind {
+                crate::data::ArtifactKind::Image => Sym::Image,
+                _ => Sym::Document,
+            };
             section = section.row(
                 row(cx)
-                    .child(mark(Sym::Document, k.secondary))
+                    .child(mark(sym, k.secondary))
                     .child(
                         div()
                             .min_w_0()
@@ -669,8 +677,10 @@ impl TopicRail {
                                     } else {
                                         BadgeState::Offline
                                     },
+                                    // §2.12, A2-13: the machine at work
+                                    // says the working word, 在做.
                                     if busy {
-                                        c::MACHINE_BUSY
+                                        c::STATE_WORKING_SHORT
                                     } else {
                                         c::MACHINE_IDLE
                                     },
@@ -686,11 +696,8 @@ impl TopicRail {
         // One time source (T2-19, R2-04): while a member works, 用时 and 时间
         // are its run's, the numbers its working card shows, also before the
         // server reports a cost.
-        let active = d
-            .run
-            .as_ref()
-            .filter(|r| r.status.is_active())
-            .and_then(|r| r.started_at);
+        let run = d.run.as_ref().filter(|r| r.status.is_active());
+        let active = run.and_then(|r| r.started_at);
         let cost = match (d.cost, active) {
             (Some(cost), _) => cost,
             (None, Some(_)) => crate::data::v2::TopicCost {
@@ -705,16 +712,11 @@ impl TopicRail {
         if active.is_none() && cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }
-        let used = match active {
-            Some(at) => crate::views::timeline::plan::span_text(
-                crate::views::timeline::plan::TOOK,
-                crate::selftest::clock::now_ms() - at,
-            ),
-            None => crate::views::timeline::plan::span_text(
-                crate::views::timeline::plan::TOOK,
-                cost.duration_ms as i64,
-            ),
-        };
+        // P-01: a run at work reads the one clock of every page.
+        let ms = run
+            .and_then(|r| crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), r))
+            .unwrap_or(cost.duration_ms as i64);
+        let used = crate::views::timeline::plan::span_text(crate::views::timeline::plan::TOOK, ms);
         let mut section = self.section(COST, c::TOPIC_RAIL_COST, cx).row(label_value(
             c::INSPECTOR_TIME,
             used,
@@ -727,14 +729,39 @@ impl TopicRail {
                 cx,
             ));
         }
-        let range = match active {
-            Some(at) => Some((at, crate::selftest::clock::now_ms())),
-            None => cost.started_at.zip(cost.ended_at),
+        let when = match active {
+            Some(at) => Some(fill(c::INSPECTOR_WHEN_SINCE, &[("when", &when_start(at))])),
+            None => cost
+                .started_at
+                .zip(cost.ended_at)
+                .map(|(a, b)| when_range(a, b)),
         };
-        if let Some((a, b)) = range {
-            section = section.row(label_value(c::INSPECTOR_WHEN, when_range(a, b), cx));
+        if let Some(when) = when {
+            section = section.row(label_value(c::INSPECTOR_WHEN, when, cx));
         }
         Some(section.into_any_element())
+    }
+}
+
+/// When a run at work started: `今天 07:23`, `11-01 07:23`.
+fn when_start(at: crate::data::Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let Some(start) =
+        crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single())
+    else {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    };
+    let time = start.format("%H:%M").to_string();
+    if start.date_naive() == crate::selftest::clock::local_now().date_naive() {
+        fill(c::INSPECTOR_WHEN_VALUE, &[("range", &time)])
+    } else {
+        fill(
+            c::INSPECTOR_WHEN_DAY,
+            &[
+                ("day", &start.format("%m-%d").to_string()),
+                ("range", &time),
+            ],
+        )
     }
 }
 

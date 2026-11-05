@@ -407,15 +407,19 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
     }
     let members = p.members();
     let text = crate::views::status_chip_text(topic, me, &members)
-        .unwrap_or_else(|| cm::STATUS_OPEN.to_string());
+        .unwrap_or_else(|| cm::STATUS_QUEUED.to_string());
     let badge = match topic.status {
         TopicStatus::Blocked => BadgeState::Failed,
         TopicStatus::Done => BadgeState::Done,
         // Waiting on someone else, or not started: the clock, muted.
         _ => BadgeState::Queued,
     };
+    // §2.12, B1-25: waiting on someone else is a state too (等李雪回答,
+    // the clock, muted), so the sidebar shows it.
     let short = match topic.status {
-        TopicStatus::Blocked => text.clone(),
+        TopicStatus::Blocked | TopicStatus::WaitingAnswer | TopicStatus::WaitingReview => {
+            text.clone()
+        }
         _ => String::new(),
     };
     StateLine::plain(text, badge).short(short)
