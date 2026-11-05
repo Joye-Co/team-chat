@@ -9,7 +9,6 @@ use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Pixels,
     SharedString, Styled as _, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::menu::ContextMenuExt as _;
 
 use super::{
     RailView,
@@ -501,7 +500,11 @@ impl RailView {
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
                 let (menu_services, menu_id) = (self.services.clone(), id.clone());
-                let header = self.section_header_selected(
+                // A right click on the header opens the 群's menu (§7.3).
+                let menu = self.row_menu(move |menu, _, _| {
+                    super::menus::group(menu, &menu_services, &menu_id)
+                });
+                self.section_header_selected(
                     SharedString::from(format!("rail-group-{id}")),
                     name.clone(),
                     *folded,
@@ -519,15 +522,8 @@ impl RailView {
                         let g = open_id.clone();
                         nav.update(cx, |nav, cx| nav.open_group(g, cx))
                     })),
-                );
-                // A right click on the header opens the 群's menu (§7.3).
-                div()
-                    .id(SharedString::from(format!("rail-group-menu-{id}")))
-                    .child(header)
-                    .context_menu(move |menu, _, _| {
-                        super::menus::group(menu, &menu_services, &menu_id)
-                    })
-                    .into_any_element()
+                    Some(menu),
+                )
             }
             Item::DmHeader { folded } => {
                 let this = cx.entity().downgrade();
@@ -556,6 +552,9 @@ impl RailView {
             } => {
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
+                let (services, menu_id) = (self.services.clone(), id.clone());
+                let menu =
+                    self.row_menu(move |menu, _, _| super::menus::group(menu, &services, &menu_id));
                 let row = self
                     .row(
                         SharedString::from(format!("rail-dm-{id}")),
@@ -572,14 +571,11 @@ impl RailView {
                     .on_click(move |_, _, cx| {
                         let id = open_id.clone();
                         nav.update(cx, |nav, cx| nav.open_group(id, cx))
-                    });
+                    })
+                    .menu(menu);
                 div()
                     .id(SharedString::from(format!("rail-dm-row-{id}")))
                     .child(row)
-                    .context_menu({
-                        let (services, id) = (self.services.clone(), id.clone());
-                        move |menu, _, _| super::menus::group(menu, &services, &id)
-                    })
                     .into_any_element()
             }
             Item::BucketHeader { bucket, folded, .. } => {

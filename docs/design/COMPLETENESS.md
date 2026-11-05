@@ -235,7 +235,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 ### 2.2 Toolbar and pane headers
 
 - One header band h52 across the message column and the right pane. One 1 px border-b at y 52 from x 264 to 1440. Content scrolls under it; no fade.
-- Message column header: title 16 medium, subtitle 12 muted under it (or a breadcrumb in 14: ancestors muted, current foreground, chevron-right 16 muted separators). Status in the subtitle row is a StatusBadge, not colored text. Actions at the right: 32 ghost icon buttons, gap 8; a vertical separator h16, mx 8, before the right-pane toggle.
+- Message column header: title 16 medium, subtitle 12 muted under it (or a breadcrumb in 14: ancestors muted, current foreground, chevron-right 16 muted separators). Status in the subtitle row is a StatusBadge, not colored text; on a 话题 the badge stays under the title, at the start of the subtitle row (owner decision v17). Actions at the right: 32 ghost icon buttons, gap 8; a vertical separator h16, mx 8, before the right-pane toggle.
 - Right pane header: same h52 band. Pane name 16 medium ("话题信息", "群信息", "今天", "单独问 Ledger", "产出"), optional 12 muted description, actions as 32 ghost icon buttons (close at the far right). A pane that shows one item names the pane, never the item: the 产出 pane reads "产出" with "<title> · <kind> · v<n>" as its description. The first content row starts at y 52 + 16 = 68.
 - Page toolbars (Home, Artifacts, Members, Group): all controls h32 on one center line (y 26), gap 8: segmented h32, select h32, search field h32 w 200-250, icon buttons 32, primary sm action at the far right.
 - A filter row under the page header: h32, 16 below the header border, 16 above the list or table.
@@ -341,7 +341,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | merging | 正在合并 | loader (spinning) | info |
 | paused | 已暂停 | pause | muted |
 | waiting on someone else | 等李雪回答 / 等李雪审 / 等审 | clock | muted |
-| sending (my answer or message in flight) | 发送中 | loader (spinning) | muted |
+| sending (my answer or message in flight) | 发送中 | loader (spinning, `BadgeState::Stopping`, v17) | muted |
 | queued | 排队 (no sidebar badge, D16) | clock | muted |
 | done / merged / answered | 完成 (a done 话题, D17) / 已合并 / 已回答 | check-circle (filled) | success |
 | delivered (a run result, D17) | 已交付 | check-circle (filled) | success |
@@ -349,9 +349,9 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | abnormal | 异常 | alert-triangle (+ tooltip with the cause) | destructive |
 | online | 在线 | dot 8 | success |
 | offline / idle / away | 离线 / 空闲 / 不在 | dot 8 outline | muted |
-| deactivated | 已停用 | ban | muted |
+| deactivated (also an expired or superseded Card v2, v17) | 已停用 | ban | muted |
 
-- One mapping (owner decision v15, `topic_page::topic_state`): **在做** only while a member's run works (or waits on other members), with "n/m" when it has a plan, where n/m is done/total (steps done over all steps) in every badge, meta line and Progress bar (one count, `topic_page::plan_progress`); two or more members at work read "2 个成员在做", in the sidebar too. A 话题 marked in progress with no run is **排队** (clock, muted). Merging is **正在合并**; an answer or message in flight is **发送中** (v16); 进行中, 合并中, 排队中, 未开始 and 正在发送 are not used. The sidebar right column, title bar, inspector 状态, run log and Card v2 use these words.
+- One mapping (owner decision v15, `topic_page::topic_state`): **在做** only while a member's run works (or waits on other members), with "n/m" when it has a plan, where n/m is done/total (steps done over all steps) in every badge, meta line and Progress bar (one count, `topic_page::plan_progress`); two or more members at work read "2 个成员在做", in the sidebar too. A 话题 marked in progress with no run is **排队** (clock, muted). Merging is **正在合并**; an answer or message in flight is **发送中** (v16); 进行中, 合并中, 排队中, 未开始 and 正在发送 are not used. The sidebar right column, title bar, inspector 状态, run log and Card v2 use these words. Card v2 (owner decision v17): an expired or superseded card reads 已停用; a PR card that waits on my review reads 等你审.
 - Order (v16, T-03): a merge in progress first; then what waits on me: every open ask for me in the 话题 (`asks_for_me` less the asks my answer already reached, `topic_page::ask_answered`) reads 等你审 (a review, "等你审 PR #61" with its PR) or 等你回答 (any other ask), before any run; an ask I answered reads 已回答 until the server follows. Then stopping, at work or paused, a failed run, then the 话题's own status (等李雪回答 / 等审, clock, muted, also in the sidebar). Every page badge of a 话题 (群, 首页, 成员) shows these same words; a page never shortens 等李雪回答 to 等人 (v16). The inspector's 标记完成 follows this state.
 - One clock per run (v16, P-01): every elapsed time of a run (首页, 群, 成员, the live pane, the working card, the inspector 用时) comes from `topic_page::run_elapsed` (run start to its end, or to the provider's `clock_now`). A run still at work has a start, not a range ("今天 07:23 起").
 - No free colored dot, colored "!" circle or colored text as the only status carrier. The only free dot allowed: unread dot 8 (info) next to a title, and the presence dot on an avatar.
@@ -374,7 +374,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 - Alert in place of the failed content: radius 10, border, px 16, py 12, icon 16, gap-x 12, title 14 medium, description 14 muted, action at the right (outline sm "重试"). Destructive variant: icon and border tint destructive; the title stays foreground (owner decision v14: state color only on icons and badges).
 - Page failed state (owner decision v15): the Alert (icon, neutral title, cause, 重试) takes the place of the content, never drawn over pulsing skeletons and never next to them; the page toolbar keeps its place and layout (it never moves or jumps).
-- Run log failure: the same Alert in the pane, in place of the end step: the cause once (the time is the 用时 fact). Its actions are the pane footer (2.5, v16): 重试 (primary) over 查看日志 (outline), full width, so the pane ends with them and never in a blank band.
+- Run log failure: the same Alert in the pane, in place of the end step: the cause once (the time is the 用时 fact). Its actions are the pane footer (2.5, v16): 重试 (primary) over 查看日志 (outline), full width, so the pane ends with them and never in a blank band. The log is top-anchored like a page: a short log may leave whitespace between its last step and the footer (owner decision v17, process-failed).
 - Run failure in a thread: an Alert in place of the run card: title states the cause ("打包失败：找不到证书"), description, actions "重试" (primary sm) and "查看日志" (outline sm). The inspector 状态 row shows StatusBadge "失败".
 - Failed message: below the body, x = text column: destructive icon 16 + "没有发出" 12 in the foreground color (owner decision v16, D14: the state color on the icon only, like every other error) + ghost sm "重试" (rotate-ccw icon) + ghost sm "⋯" (删除, 复制). Retry is the same button in every place (members detail, files, messages).
 - Offline: a warning Alert docked above the composer (title "连接已断开", description "8 秒后重连", outline sm "立即重连"); a page with no composer shows the same Alert as the sidebar row above the footer (2.1, v17); the composer shows "消息会在连上后发出" 12 muted; the sidebar footer second line shows "离线" with a muted dot badge. One word for this state everywhere: page subtitles say "离线" too, never "未连接".
@@ -410,12 +410,14 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.19 Settings window (640 wide)
 
+- Height fits the tab, at most 760 (v17); a taller tab scrolls under the toolbar.
+
 - Toolbar tab strip unchanged; tab icons share an 18 x 18 ink box (the 机器 icon is 22 x 10 today).
 - Content x 24-616. First element 24 below the toolbar border.
 - A tab is a stack of sections: SectionHeader (2.3) then a GroupBox (2.8). Gap between sections 24. Every group has a header, except when it is the only group on the tab, and except the 账号 profile card (owner decision v16, C1-11), which opens the tab with no section header, like the macOS Apple Account header. Section actions ("添加电脑…", "邀请成员…") sit in the section header, not under the group.
 - Footnote text under a group: 12 muted, 8 below the group. Prefer the section description.
 - Rows: single-line h44, two-line h64. Separators in every list. Row actions are visible in the row (ghost 28 "⋯" with a DropdownMenu), never select-then-"−".
-- Machine and device rows: 28 icon box (radius 6, muted, 16 icon: laptop for Mac, server for Linux, cloud for 云端), title 14 medium, description 12 muted truncating, StatusBadge in the value column, "⋯".
+- Machine and device rows: 28 icon box (radius 6, muted, 16 icon: laptop for a Mac laptop, the outline display for a desktop Mac (v17), server for Linux, cloud for 云端), title 14 medium, description 12 muted truncating, StatusBadge in the value column, "⋯".
 - Developer view: DescriptionList with localized labels (连接, 服务器, 成员 ID), monospace 13 values, copy icon button 28.
 - Every list has a loading (2 skeleton rows at the row height), empty (compact or full Empty with the add action) and failed (Alert + Retry) state.
 

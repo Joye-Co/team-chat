@@ -6,10 +6,11 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Bounds, ClickEvent, Context, ElementId, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement as _,
+    Styled, Window, div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::menu::{ContextMenuExt as _, PopupMenu};
 
 use super::{
     badge::{BadgeState, StatusBadge},
@@ -25,6 +26,47 @@ use crate::{
 };
 
 type Click = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// Builds the context menu of a sidebar item.
+pub type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+
+/// A right-click menu on a sidebar item (NATIVE.md §7.3): the menu stays
+/// inside `limits` (the sidebar panel, in window coordinates), and while it
+/// is open the item it acts on keeps the row focus ring.
+#[derive(Clone)]
+pub struct RowMenu {
+    pub build: MenuBuilder,
+    pub limits: Option<Bounds<Pixels>>,
+}
+
+impl RowMenu {
+    pub fn new(
+        build: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+        limits: Option<Bounds<Pixels>>,
+    ) -> Self {
+        Self {
+            build: Rc::new(build),
+            limits,
+        }
+    }
+
+    /// Puts the menu on `trigger`, which must have the item's own id and
+    /// the item's shape (the ring follows its corners).
+    fn attach<E>(self, trigger: E, cx: &App) -> AnyElement
+    where
+        E: gpui::InteractiveElement + ParentElement + Styled + IntoElement + 'static,
+    {
+        let ring = super::focus::row_focus_ring(cx);
+        let build = self.build;
+        let menu = trigger
+            .context_menu(move |menu, window, cx| build(menu, window, cx))
+            .open_style(|s| s.shadow(ring));
+        match self.limits {
+            Some(limits) => menu.menu_limits(limits).into_any_element(),
+            None => menu.into_any_element(),
+        }
+    }
+}
 
 /// The floating sidebar panel (§2): inset 8 pt from the window's top,
 /// leading and bottom edges, radius 18, `sidebar` fill, 0.5 pt `glassEdge`
@@ -44,6 +86,9 @@ pub fn floating_sidebar(cx: &App) -> gpui::Div {
         .flex_col()
 }
 
+/// The hit width of a section header's chevron (the trailing 34 pt).
+const SECTION_CHEVRON_HIT: Pixels = px(34.);
+
 /// A section header (§9.1): Section style (11 pt semibold, `secondary`)
 /// with a disclosure chevron that shows on hover at the trailing edge.
 #[derive(IntoElement)]
@@ -57,6 +102,9 @@ pub struct SidebarSection {
     /// The section's own page is open (a 群 header on its 群 page): the
     /// label row takes the selected look (D10).
     selected: bool,
+    /// A click on the chevron runs this instead of `on_toggle`.
+    on_chevron: Option<Click>,
+    menu: Option<RowMenu>,
 }
 
 impl SidebarSection {
@@ -68,7 +116,22 @@ impl SidebarSection {
             on_toggle: None,
             show_chevron: false,
             selected: false,
+            on_chevron: None,
+            menu: None,
         }
+    }
+
+    /// A click on the chevron runs `f` (fold) while a click on the label
+    /// runs `on_toggle` (a 群 header opens its page).
+    pub fn on_chevron(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.on_chevron = Some(Rc::new(f));
+        self
+    }
+
+    /// A right-click menu on the label row.
+    pub fn menu(mut self, menu: RowMenu) -> Self {
+        self.menu = Some(menu);
+        self
     }
 
     /// T-12: the selected look (D10): the muted fill under the label row
@@ -106,6 +169,8 @@ impl RenderOnce for SidebarSection {
         let (_, sel_text) = k.selected_ink(emphasized(window));
         let label = if self.selected { sel_text } else { k.secondary };
         let row = div()
+            .id(ElementId::Name(format!("{group}-label").into()))
+            .relative()
             .size_full()
             .px(px(8.))
             .rounded(metrics::SIDEBAR_ROW_RADIUS)
@@ -131,7 +196,28 @@ impl RenderOnce for SidebarSection {
                         k.secondary,
                         window,
                     )),
-            );
+            )
+            // The chevron's own hit area folds the section, whatever the
+            // label opens.
+            .when_some(self.on_chevron, |d, f| {
+                d.child(
+                    div()
+                        .id(ElementId::Name(format!("{group}-fold").into()))
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .w(SECTION_CHEVRON_HIT)
+                        .on_click(move |e, window, cx| {
+                            cx.stop_propagation();
+                            f(e, window, cx)
+                        }),
+                )
+            });
+        let row = match self.menu {
+            Some(menu) => menu.attach(row, cx),
+            None => row.into_any_element(),
+        };
         div()
             .id(self.id)
             .group(group.clone())
@@ -217,6 +303,7 @@ pub struct SidebarRow {
     /// The media kind of the group the row sits in; set by
     /// [`SidebarGroup`].
     media: Option<SidebarMedia>,
+    menu: Option<RowMenu>,
 }
 
 impl SidebarRow {
@@ -237,7 +324,15 @@ impl SidebarRow {
             dim: false,
             right: RightColumn::None,
             media: None,
+            menu: None,
         }
+    }
+
+    /// A right-click menu on the row; the row keeps its focus ring while
+    /// the menu is open.
+    pub fn menu(mut self, menu: RowMenu) -> Self {
+        self.menu = Some(menu);
+        self
     }
 
     /// The right column: a count pill, a StatusBadge or a time (T1-08).
@@ -450,7 +545,7 @@ impl RenderOnce for SidebarRow {
             ),
             (None, el) => el,
         };
-        div()
+        let row = div()
             .id(self.id)
             .group(SIDEBAR_ROW_GROUP)
             .when(self.dim, |d| d.opacity(0.7))
@@ -526,7 +621,11 @@ impl RenderOnce for SidebarRow {
             .children(right)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
-            })
+            });
+        match self.menu {
+            Some(menu) => menu.attach(row, cx),
+            None => row.into_any_element(),
+        }
     }
 }
 

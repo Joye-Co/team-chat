@@ -103,6 +103,9 @@ pub struct RailView {
     search: Entity<InputState>,
     /// Draw the inactive-window look (the `window-inactive` scene).
     show_inactive: bool,
+    /// Where the sidebar was drawn last frame (window coordinates): its
+    /// context menus stay inside it (T-20).
+    panel_bounds: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -160,6 +163,7 @@ impl RailView {
             focus: cx.focus_handle(),
             search,
             show_inactive: false,
+            panel_bounds: Default::default(),
             show_all: false,
             folded_groups: HashSet::new(),
             chip: None,
@@ -557,8 +561,16 @@ impl Render for RailView {
             .size_full()
             .flex()
             .flex_col()
+            .relative()
             .track_focus(&self.focus)
             .key_context(KEY_CONTEXT)
+            // The sidebar's bounds, for its context menus (T-20).
+            .child({
+                let panel = self.panel_bounds.clone();
+                gpui::canvas(move |bounds, _, _| panel.set(Some(bounds)), |_, _, _, _| ())
+                    .absolute()
+                    .size_full()
+            })
             // R2-12 with the kit's FocusRow (R1-01): while a row has the
             // keyboard focus, ↑↓ move that focus and Enter / Space open the
             // row (the row's own keys); with the list itself focused, ↑↓

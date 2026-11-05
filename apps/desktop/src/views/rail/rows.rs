@@ -7,15 +7,15 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
+    SharedString, Styled, Window, div, px,
 };
 
-use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::menu::PopupMenu;
 
 use super::{RailView, modes::TopicItem};
 use crate::ui::native::{
     SidebarRow, SidebarSection,
-    sidebar::{RightColumn, SidebarMedia},
+    sidebar::{RightColumn, RowMenu, SidebarMedia},
 };
 
 /// A row's click handler.
@@ -25,9 +25,6 @@ pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 
 pub(super) const ROW_AVATAR: gpui::Pixels = px(16.);
 /// The indent of a 话题 under its member (mode C).
 pub(super) const NESTED_PAD: gpui::Pixels = px(18.);
-/// The room the disclosure chevron of a section header takes at its
-/// trailing edge (10 pt inset, 8 pt padding, the 11 pt chevron and air).
-const CHEVRON_HIT: gpui::Pixels = px(34.);
 
 /// How a 话题 row shows its leading slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,18 +92,19 @@ impl RailView {
             RightColumn::Status(line.badge, line.short.clone().into())
         });
         let _ = cx;
-        let row = row.on_click(move |_, _, cx| {
-            let (g, t) = (g.clone(), t.clone());
-            nav.update(cx, |nav, cx| nav.open_topic(g, t, cx))
-        });
+        let (services, menu_topic) = (self.services.clone(), topic.clone());
+        let row = row
+            .on_click(move |_, _, cx| {
+                let (g, t) = (g.clone(), t.clone());
+                nav.update(cx, |nav, cx| nav.open_topic(g, t, cx))
+            })
+            .menu(self.row_menu(move |menu, window, cx| {
+                super::menus::topic(menu, &services, &menu_topic, window, cx)
+            }));
         div()
             .id(SharedString::from(format!("rail-row-{key}-{}", topic.id)))
             .pl(*indent)
             .child(row)
-            .context_menu({
-                let (services, topic) = (self.services.clone(), topic.clone());
-                move |menu, window, cx| super::menus::topic(menu, &services, &topic, window, cx)
-            })
             .into_any_element()
     }
 
@@ -122,7 +120,7 @@ impl RailView {
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
     ) -> AnyElement {
-        self.section_header_selected(id, label, folded, false, fold, open)
+        self.section_header_selected(id, label, folded, false, fold, open, None)
     }
 
     /// [`Self::section_header`] with the selected look (T-12: the 群 header
@@ -135,34 +133,32 @@ impl RailView {
         selected: bool,
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
+        menu: Option<RowMenu>,
     ) -> AnyElement {
-        let id: ElementId = id.into();
         let fold = std::rc::Rc::new(fold);
         let chevron_fold = fold.clone();
-        let header = SidebarSection::new(id.clone(), label)
+        // The chevron folds the section, whatever the header opens.
+        let header = SidebarSection::new(id, label)
             .collapsed(folded)
             .selected(selected)
             .on_toggle(move |e, window, cx| match &open {
                 Some(open) => open(e, window, cx),
                 None => fold(e, window, cx),
-            });
-        div()
-            .relative()
-            .child(header)
-            // The chevron folds the section, whatever the header opens.
-            .child(
-                div()
-                    .id(ElementId::Name(format!("{id}-fold").into()))
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .right_0()
-                    .w(CHEVRON_HIT)
-                    .on_click(move |e, window, cx| {
-                        cx.stop_propagation();
-                        chevron_fold(e, window, cx)
-                    }),
-            )
-            .into_any_element()
+            })
+            .on_chevron(move |e, window, cx| chevron_fold(e, window, cx));
+        match menu {
+            Some(menu) => header.menu(menu),
+            None => header,
+        }
+        .into_any_element()
+    }
+
+    /// A right-click menu of a sidebar item: it stays inside the sidebar
+    /// panel, and the item keeps its ring while the menu is open (T-20).
+    pub(super) fn row_menu(
+        &self,
+        build: impl Fn(PopupMenu, &mut Window, &mut gpui::Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> RowMenu {
+        RowMenu::new(build, self.panel_bounds.get())
     }
 }

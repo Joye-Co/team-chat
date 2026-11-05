@@ -321,7 +321,7 @@ impl MediaThread {
     }
 
     fn state_detail(&self, a: &StateArt) -> ArtifactDetail {
-        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let made = self.version_times(a.id, 1)[0];
         let files = match &a.dir {
             Some(dir) => list(dir),
             None => vec![ArtifactVersionFile {
@@ -343,14 +343,14 @@ impl MediaThread {
                 version: 1,
                 size_bytes: Some(a.bytes),
                 created_by: a.author.into(),
-                updated_at: now - 120_000,
+                updated_at: made,
             },
             group_id: self.group_id.clone(),
             versions: vec![ArtifactVersionInfo {
                 version: 1,
                 note: None,
                 created_by: a.author.into(),
-                created_at: now - 1_000_000,
+                created_at: made,
                 entry: a.entry.clone(),
                 files,
             }],
@@ -359,6 +359,37 @@ impl MediaThread {
 
     fn mine(&self, g: &str, t: &str) -> bool {
         g == self.group_id && t == self.topic_id
+    }
+
+    /// The extras at the end of the thread, as [`Self::extra_messages`] posts them.
+    fn all_extras(&self) -> Vec<Extra> {
+        let states = self.states.iter().filter(|a| a.message).map(|a| Extra {
+            author: a.author.into(),
+            body: a.said.into(),
+            streaming: false,
+            artifact: Some(MediaKey::new(a.id, 1)),
+        });
+        self.extras.iter().cloned().chain(states).collect()
+    }
+
+    /// When the message at `i` among the extras was posted.
+    fn posted_at(now: Millis, i: usize) -> Millis {
+        now - 600_000 + i as i64 * 60_000
+    }
+
+    /// The time of each version of 产出 `id`, newest last (C-12, D2-26): the newest
+    /// is made when its message posts it, the ones before 20 minutes apart. The
+    /// version list, the inspector and the thread read these one times.
+    fn version_times(&self, id: &str, latest: u32) -> Vec<Millis> {
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let posted = self
+            .all_extras()
+            .iter()
+            .position(|x| x.artifact.as_ref().is_some_and(|k| k.artifact_id == id))
+            .map_or(now - 120_000, |i| Self::posted_at(now, i));
+        (1..=latest)
+            .map(|v| posted - (latest - v) as i64 * 20 * 60_000)
+            .collect()
     }
 
     fn extra_messages(&self) -> Vec<Message> {
@@ -386,18 +417,12 @@ impl MediaThread {
                 artifact_refs: Vec::new(),
                 reactions: Vec::new(),
             });
-        let states = self.states.iter().filter(|a| a.message).map(|a| Extra {
-            author: a.author.into(),
-            body: a.said.into(),
-            streaming: false,
-            artifact: Some(MediaKey::new(a.id, 1)),
-        });
-        let extras: Vec<Extra> = self.extras.iter().cloned().chain(states).collect();
+        let extras = self.all_extras();
         extras
             .iter()
             .enumerate()
             .map(|(i, x)| {
-                let at = now - 600_000 + i as i64 * 60_000;
+                let at = Self::posted_at(now, i);
                 Message {
                     id: format!("extra-{i}"),
                     client_msg_id: format!("c-extra-{i}"),
@@ -431,7 +456,7 @@ impl MediaThread {
 
     fn detail(&self, s: Sample, dir: &std::path::Path, entry: &str) -> ArtifactDetail {
         let key = s.key();
-        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let times = self.version_times(&key.artifact_id, key.version);
         let author = post(s).author.to_string();
         let files = list(dir);
         ArtifactDetail {
@@ -443,7 +468,7 @@ impl MediaThread {
                 version: key.version,
                 size_bytes: Some(files.iter().map(|f| f.size).sum()),
                 created_by: author.clone(),
-                updated_at: now - 120_000,
+                updated_at: times[times.len() - 1],
             },
             group_id: self.group_id.clone(),
             versions: (1..=key.version)
@@ -452,7 +477,7 @@ impl MediaThread {
                     version: v,
                     note: None,
                     created_by: author.clone(),
-                    created_at: now - 1_000_000 + v as i64,
+                    created_at: times[v as usize - 1],
                     entry: entry.to_string(),
                     files: files.clone(),
                 })

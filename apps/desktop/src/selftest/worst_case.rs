@@ -995,7 +995,18 @@ impl ChatProvider for WorstCase {
     /// long suggestion.
     fn side_chat(&self, group_id: &str, topic_id: &str, member_id: &str) -> v2::SideChatThread {
         let mut thread = self.inner.side_chat(group_id, topic_id, member_id);
+        let all = self.inner.all_artifacts();
         for m in &mut thread.messages {
+            // The `看了 …` line names a 产出 as every other view does (C-12).
+            for source in &mut m.sources {
+                if let v2::SideChatSource::Artifact { title, version } = source
+                    && let Some((_, a)) = all.iter().find(|(_, a)| &a.title == title)
+                    && let Some(d) = self.artifact(&a.id)
+                {
+                    *title = d.summary.title;
+                    *version = d.summary.version;
+                }
+            }
             m.body = format!("{}\n{}", m.body, PANES_LONG_TEXT);
             m.refs.push(
                 "apps/desktop/src/views/side_chat/very/deep/folder/reconnect_with_backoff_and_dedupe.rs".into(),

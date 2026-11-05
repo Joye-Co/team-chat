@@ -1646,10 +1646,12 @@ impl ArtifactPage {
                         .into_any_element();
                     let menu = {
                         let (services, art) = (self.services.clone(), a.clone());
-                        nk::borderless_button(
+                        // K-14: a row action is the sm (28) ghost icon button.
+                        nk::icon_button(
                             SharedString::from(format!("artifact-more-{}", a.id)),
                             crate::ui::sf_symbols::Sf::More,
                             c::ARTIFACTS_MORE,
+                            nk::IconSize::Small,
                             window,
                             cx,
                         )
