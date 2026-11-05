@@ -21,6 +21,9 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 | 话题 | `Topic` | One piece of work: discussion, progress, questions and 产出 hang under it. | thread, task, ticket, session |
 | 产出 | `Artifact`, `File` | What a topic produces: pages (HTML), files, decisions. | artifact, attachment |
 
+- Topic status, `waitingOn` and the members working on it follow the work (runs, cards, results);
+  nobody sets them by hand. The topic menu only has 重命名 and 关注 (Joye, 2026-11-05). Bots are
+  members: there is no 暂停 for a member; you tell it in the topic, and 停止 ends one run.
 - Topic status chips say who is waited on and for what:
 
   | `TopicStatus` | Chip when the viewer is in `waitingOn` | Chip otherwise |

@@ -156,11 +156,7 @@ crate::copy! {
     NOTIFY_MENTIONS = "仅 @我",
     NOTIFY_NONE = "不提醒",
     NO_GROUPS = "还没有加入群",
-    FOLLOWED_TOPICS = "关注的话题",
-    FOLLOWED_EMPTY = "还没有关注的话题。参与、被 @ 或被等待的话题会自动关注。",
-    UNFOLLOW = "取消关注",
     MUTE_GROUP = "静音这个群",
-    FOLLOW_TOPIC = "关注这个话题",
 
     // 通用
     ABOUT = "关于",
