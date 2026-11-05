@@ -1,0 +1,26 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "description": "the first message in a 群聊 creates it",
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "topic.created",
+    "data": {
+      "topic": {
+        "id": "main-01JBX0GENERAL000000000000A",
+        "groupId": "01JBX0GENERAL000000000000A",
+        "title": "全员",
+        "status": "open",
+        "createdBy": "01JBX0OWNER0000000000000AA",
+        "createdAt": 1762128000000,
+        "rootMessageId": "01JBX0MSG000000000000000AE",
+        "lastSeq": 42,
+        "messageCount": 0,
+        "main": true
+      }
+    }
+  }
+}

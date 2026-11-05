@@ -13,6 +13,7 @@
     "deploy:production": "bash ../scripts/deploy-server.sh production"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
     "@chat/protocol": "workspace:*",
     "@chat/search": "workspace:*",
     "zod": "^4.6.7"

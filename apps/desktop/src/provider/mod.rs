@@ -974,7 +974,12 @@ impl CoreProvider {
         jobs.append(&mut out);
         let mut out = jobs;
         match a.client.topics(group_id, TOPIC_LIMIT) {
-            Ok(rows) => out.extend(rows.iter().map(convert::topic)),
+            // The 群聊 is the 群's chat, not one of its 话题 (`ChatProvider::topic` finds it).
+            Ok(rows) => out.extend(
+                rows.iter()
+                    .filter(|r| !crate::data::is_main_topic(&r.topic.id))
+                    .map(convert::topic),
+            ),
             Err(e) => tracing::warn!(error = %e, "topics read failed"),
         }
         out
@@ -1365,6 +1370,7 @@ impl ChatProvider for CoreProvider {
             title,
             body: request.body,
             mentions: request.mentions,
+            reply_to: request.quote_of,
             ..Default::default()
         });
         match result {
@@ -1579,7 +1585,7 @@ impl ChatProvider for CoreProvider {
             request.title.clone(),
             request.body.clone(),
             request.mentions.clone(),
-            None,
+            request.quote_of.clone(),
         );
         job.unwrap_or_else(|| self.start_topic(request))
     }
@@ -1764,6 +1770,18 @@ impl ChatProvider for CoreProvider {
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
         self.create_bot_member_inner(name, role, character, runner)
+    }
+
+    fn bot_runner(&self, member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        self.bot_runner_inner(member_id)
+    }
+
+    fn update_bot_member(
+        &self,
+        member_id: &str,
+        edit: crate::data::BotMemberEdit,
+    ) -> AdminReply<()> {
+        self.update_bot_member_inner(member_id, edit)
     }
 
     fn set_member_character(

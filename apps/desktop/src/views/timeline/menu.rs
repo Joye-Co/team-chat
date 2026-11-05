@@ -1,6 +1,7 @@
 //! Extension point: the context menu of a message row, and in-place edit.
 //!
-//! Items: 复制 (the Markdown source), 复制链接 (a link with the product URL
+//! Items: 开个话题 (a message of the 群聊: opens the 开个话题 sheet quoting
+//! it), 复制 (the Markdown source), 复制链接 (a link with the product URL
 //! scheme), 编辑 (my sent messages), 撤回 (my own, within 24 hours of sending;
 //! asks first; nobody takes back someone else's message; the tombstone then
 //! offers 重新编辑), and 重试 for a failed send. Reply and reactions live on the hover
@@ -47,6 +48,17 @@ pub(super) fn build(
     let sent = !message.id.is_empty() && message.deleted_at.is_none();
     let failed = message.send_state == SendState::Failed;
     let m = message.clone();
+    // 1.1.1: a 话题 opens from a 群聊 message on demand.
+    let in_chat = sent && crate::data::is_main_topic(&m.topic_id);
+    let open_topic = {
+        let (view, m) = (view.clone(), m.clone());
+        PopupMenuItem::new(t::MENU_OPEN_TOPIC).on_click(move |_, window, cx| {
+            let Some(services) = view.upgrade().map(|v| v.read(cx).services.clone()) else {
+                return;
+            };
+            crate::views::nav::new_topic::open_new_topic_from(services, &m, window, cx);
+        })
+    };
     let edit = {
         let (view, m) = (view.clone(), m.clone());
         PopupMenuItem::new(t::EDIT).on_click(move |_, window, cx| {
@@ -76,7 +88,8 @@ pub(super) fn build(
             let _ = view.update(cx, |this, _| this.retry(&m));
         })
     };
-    menu.when(failed, |menu| menu.item(retry))
+    menu.when(in_chat, |menu| menu.item(open_topic))
+        .when(failed, |menu| menu.item(retry))
         .when(m.deleted_at.is_none(), |menu| menu.item(copy_text))
         .when(sent, |menu| menu.item(copy_link))
         .when(can_edit || can_recall, |menu| menu.separator())

@@ -754,6 +754,16 @@ impl CoreProvider {
         runner
     }
 
+    /// Puts a runner the user just saved (or removed) into the cache.
+    pub(super) fn remember_runner(&self, bot_id: &str, runner: Option<proto::BotRunner>) {
+        let generation = self.state().generation;
+        let mut cache = lock(&self.shared.snapshots.inner);
+        let inner = cache.for_generation(generation);
+        inner
+            .runners
+            .insert(bot_id.to_string(), (Instant::now(), runner));
+    }
+
     // --- the getters ---
 
     pub(super) fn member_stats_inner(&self, member_id: &str) -> Option<MemberStats> {

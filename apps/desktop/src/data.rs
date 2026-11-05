@@ -576,13 +576,53 @@ pub struct SendRequest {
 }
 
 /// The first message of a new topic.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct StartTopicRequest {
     pub group_id: GroupId,
     /// `None` uses the first line of `body`, cut to 80 characters.
     pub title: Option<String>,
     pub body: String,
     pub mentions: Vec<MemberId>,
+    /// 开个话题: the 群聊 message the first message quotes.
+    pub quote_of: Option<MessageId>,
+}
+
+/// The id of a 群's own chat, the 群聊 (docs/protocol.md, "群聊: the group's own
+/// chat"): a topic with a fixed id that exists once someone wrote there.
+pub fn main_topic_id(group_id: &str) -> TopicId {
+    chat_core::proto::main_topic_id(group_id)
+}
+
+/// Whether `topic_id` is a 群聊 (of any 群). Lists of 话题 leave it out.
+pub fn is_main_topic(topic_id: &str) -> bool {
+    chat_core::proto::is_main_topic_id(topic_id)
+}
+
+/// The topic `topic_id` of `group_id`; for the 群聊 before anyone wrote
+/// there, a blank one with its fixed id, so the 群 opens its chat at once.
+pub fn topic_or_chat(p: &dyn ChatProvider, group_id: &str, topic_id: &str) -> Option<Topic> {
+    if let Some(t) = p.topic(group_id, topic_id) {
+        return Some(t);
+    }
+    if topic_id != main_topic_id(group_id) || !p.groups().iter().any(|g| g.id == group_id) {
+        return None;
+    }
+    Some(Topic {
+        id: topic_id.to_string(),
+        group_id: group_id.to_string(),
+        title: String::new(),
+        status: TopicStatus::Open,
+        waiting_on: Vec::new(),
+        owner_id: None,
+        created_by: String::new(),
+        created_at: 0,
+        root_message_id: String::new(),
+        last_seq: 0,
+        last_activity_at: 0,
+        message_count: 0,
+        unread: 0,
+        mentions: 0,
+    })
 }
 
 /// A new 群 from the new-group dialog. I am added as a member by the server.
@@ -1101,6 +1141,30 @@ pub struct RunnerSetup {
     pub base_branch: Option<String>,
 }
 
+/// What a save of the AI member edit sheet changes; a `None` field stays as it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BotMemberEdit {
+    pub name: Option<String>,
+    /// `Some(None)` clears the 岗位.
+    pub role: Option<Option<String>>,
+    pub runner: Option<RunnerChange>,
+}
+
+impl BotMemberEdit {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none() && self.role.is_none() && self.runner.is_none()
+    }
+}
+
+/// A change of how a member works on a machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunnerChange {
+    /// `PUT /v1/bots/:id/runner`.
+    Set(RunnerSetup),
+    /// `DELETE /v1/bots/:id/runner`.
+    Remove,
+}
+
 /// A connected (or known) machine, for the 机器 page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MachineInfo {
@@ -1556,6 +1620,17 @@ pub trait ChatProvider: Send + Sync + 'static {
         _character: Option<CharacterId>,
         _runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: how a bot member works on a machine (`GET /v1/bots/:id/runner`);
+    /// `None` when it does not.
+    fn bot_runner(&self, _member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: saves an edit of a bot member: `PATCH /v1/members/:id` for the
+    /// name and 岗位, then `PUT` or `DELETE /v1/bots/:id/runner`. A `Set` keeps
+    /// the runner fields the sheet does not show. Emits `Change::Members`.
+    fn update_bot_member(&self, _member_id: &str, _edit: BotMemberEdit) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: changes a bot's character (`PATCH /v1/members/:id`, `character`).

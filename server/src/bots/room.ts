@@ -2,7 +2,7 @@
 // and the hand-off of human messages and card presses to the responsible bot's BotDesk. The
 // hand-off is written to an outbox in the same transaction as the event and delivered after
 // commit; a failed delivery is retried by the room alarm until the desk accepts it.
-import type { BlockRef, BotRun, CardV2, Event, Message, TopicContext } from "@chat/protocol";
+import { type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, type TopicContext } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type ArchivedEvent,
@@ -54,6 +54,18 @@ function claimedBot(sql: SqlStorage, topicId: string): string | null {
   );
 }
 
+/**
+ * The bot a card press in this topic goes to: the responsible bot, or in the 群聊 (which has
+ * none) the card's author when that bot has run there.
+ */
+function cardOwner(sql: SqlStorage, topicId: string, authorId: string): string | null {
+  if (!isMainTopicId(topicId)) return claimedBot(sql, topicId);
+  const ran = sql
+    .exec("SELECT 1 FROM events WHERE type = 'run.updated' AND topic_id = ? AND actor_id = ? LIMIT 1", topicId, authorId)
+    .toArray();
+  return ran.length > 0 ? authorId : null;
+}
+
 export interface ClaimResult {
   /** The topic's responsible bot after the claim (this bot, or the one that was first). */
   botId: string;
@@ -74,18 +86,24 @@ export interface SourceContext {
 /** Messages of a side chat's source topic given to the aside run. */
 export const SIDE_CHAT_CONTEXT_MESSAGES = 60;
 
-/** Makes the calling bot the topic's responsible bot unless another bot already is. */
+/**
+ * Makes the calling bot the topic's responsible bot unless another bot already is. The 群聊
+ * has no responsible bot: every bot it mentions may work there (docs/protocol.md, "群聊").
+ */
 registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
   const { topicId } = args as { topicId: string };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
   const topic = room.sql.exec<{ title: string; context: string | null }>("SELECT title, context FROM topics WHERE id = ?", topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
-  room.sql.exec(
-    "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
-    topicId,
-    actor.id,
-    Date.now(),
-  );
+  const main = isMainTopicId(topicId);
+  if (!main) {
+    room.sql.exec(
+      "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
+      topicId,
+      actor.id,
+      Date.now(),
+    );
+  }
   const messages = room.sql
     .exec<{ id: string; author_id: string; body: string }>(
       `SELECT id, author_id, body FROM messages WHERE topic_id = ? AND deleted_at IS NULL
@@ -96,7 +114,7 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .toArray()
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
-  const out: ClaimResult = { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
+  const out: ClaimResult = { botId: main ? actor.id : (claimedBot(room.sql, topicId) as string), title: topic.title, messages };
   // Only a DM topic can be a side chat (the room checks this when it stores the context).
   if (topic.context && room.groupKind === "dm") {
     out.contextOf = JSON.parse(topic.context) as TopicContext;
@@ -163,7 +181,7 @@ registerRoomRpc("bots.runUpdated", (room, actor, args) => {
 registerEventImporter((event, sql) => {
   if (event.type !== "run.updated") return;
   const run = (event.data as { run?: BotRun }).run;
-  if (!run?.topicId || !run.botId) return;
+  if (!run?.topicId || !run.botId || isMainTopicId(run.topicId)) return;
   sql.exec(
     "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
     run.topicId,
@@ -290,7 +308,7 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     const row = sql
       .exec<{ author_id: string; topic_id: string }>("SELECT author_id, topic_id FROM messages WHERE id = ?", messageId)
       .toArray()[0];
-    if (!row || claimedBot(sql, row.topic_id) !== row.author_id) return;
+    if (!row || cardOwner(sql, row.topic_id, row.author_id) !== row.author_id) return;
     const payload: OutboxCard = { botId: row.author_id, messageId, actionId, actorId: event.actorId };
     enqueue(sql, "card", row.topic_id, payload);
     return;

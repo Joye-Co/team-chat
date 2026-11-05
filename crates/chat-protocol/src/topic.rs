@@ -7,6 +7,21 @@ use serde::{Deserialize, Serialize};
 use crate::entities::Seq;
 use crate::limits::{Validation, ValidationError, check_id, check_ids};
 
+/// The 群聊 (1.1.1): every group has one chat topic with a fixed id, so a client can open and
+/// send into it before it exists; the server creates it with the first message sent there
+/// (docs/protocol.md, "群聊: the group's own chat").
+pub const MAIN_TOPIC_PREFIX: &str = "main-";
+
+/// The id of a group's 群聊 topic.
+pub fn main_topic_id(group_id: &str) -> String {
+    format!("{MAIN_TOPIC_PREFIX}{group_id}")
+}
+
+/// Whether `topic_id` names a 群聊 (of any group).
+pub fn is_main_topic_id(topic_id: &str) -> bool {
+    topic_id.starts_with(MAIN_TOPIC_PREFIX)
+}
+
 /// Max entries in `waitingOn`.
 pub const MAX_WAITING_ON: usize = 20;
 

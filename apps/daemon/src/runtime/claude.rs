@@ -448,15 +448,30 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
         spec.cfg
             .permission_mode
             .clone()
-            .unwrap_or_else(|| "acceptEdits".into()),
+            .unwrap_or_else(|| DEFAULT_PERMISSION_MODE.into()),
     );
-    if let Some(t) = &spec.cfg.allowed_tools {
-        args.push("--allowedTools".into());
-        args.push(t.clone());
-    }
+    // `-p` has no one to answer a permission prompt: a tool that needs approval is denied at
+    // once. So a run asks for nothing by default (`bypassPermissions`), and even a stricter
+    // configured mode keeps the shell, edits and the web; `chat-run` is always allowed, it is
+    // how the run posts cards and 产出.
+    args.push("--allowedTools".into());
+    args.push(match &spec.cfg.allowed_tools {
+        Some(t) => format!("{t} {CHAT_RUN_TOOL}"),
+        None => DEFAULT_ALLOWED_TOOLS.to_string(),
+    });
     args.extend(spec.cfg.args.iter().cloned());
     args
 }
+
+/// The permission mode of a run when `daemon.toml` sets none: everything allowed.
+pub const DEFAULT_PERMISSION_MODE: &str = "bypassPermissions";
+
+/// The tools a run may use without asking when `daemon.toml` sets no `allowed_tools`.
+pub const DEFAULT_ALLOWED_TOOLS: &str =
+    "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch TodoWrite Task";
+
+/// The `chat-run` command, allowed in every non-aside run.
+pub const CHAT_RUN_TOOL: &str = "Bash(chat-run:*)";
 
 /// Removes a file when dropped.
 struct RemoveOnDrop(PathBuf);

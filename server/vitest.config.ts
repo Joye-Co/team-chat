@@ -8,7 +8,7 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { ADMIN_SECRET: "test-admin-secret", HOOK_SECRET_KEY: "test-hook-secret-key-0123456789", TEST_MIGRATIONS: migrations },
+          bindings: { ADMIN_SECRET: "test-admin-secret", HOOK_SECRET_KEY: "test-hook-secret-key-0123456789", AUTOTITLE_FAKE: "[autotitle]", TEST_MIGRATIONS: migrations },
         },
       }),
     ],

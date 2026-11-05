@@ -448,6 +448,26 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
 pub fn pane_buttons(services: &Services, group_id: &str, topic_id: &str) -> Vec<TitleButton> {
     let p = &services.provider;
     let mut out = Vec::new();
+    // 1.1.1, the 群聊: 新话题 and the 群's 话题; a member's computer while
+    // one works here. No 单独问 and no inspector: it is a chat, not work.
+    if crate::data::is_main_topic(topic_id) {
+        out.push(TitleButton::of(TitleButtonKind::NewTopic, RightPane::None));
+        out.push(TitleButton::of(
+            TitleButtonKind::GroupTopics,
+            RightPane::None,
+        ));
+        if let Some(r) = p
+            .runs(group_id, topic_id)
+            .iter()
+            .find(|r| r.status.is_active())
+        {
+            out.push(TitleButton::of(
+                TitleButtonKind::Machine,
+                RightPane::Live(r.id.clone()),
+            ));
+        }
+        return out;
+    }
     if let Some(m) = p.side_chat_default_member() {
         out.push(TitleButton::of(
             TitleButtonKind::SideChat,
@@ -504,6 +524,18 @@ impl PageView for TopicPage {
             .and_then(|id| p.member(id))
             .map(crate::views::shell::title_bar::Peer);
         let group = group.map(|x| x.name);
+        // 1.1.1: the 群聊 is called by its 群 (a 私聊 by the peer) and has
+        // no state of its own; its purpose is the subtitle.
+        if crate::data::is_main_topic(&t) {
+            return TitleBarSpec {
+                title: group.unwrap_or_default(),
+                style: TitleStyle::Topic,
+                subtitle: p.group_purpose(&g),
+                peer,
+                buttons: toolbar_buttons(pane_buttons(&self.services, &g, &t)),
+                ..TitleBarSpec::default()
+            };
+        }
         let title = p
             .topic(&g, &t)
             .map(|x| crate::views::sidebar::topic_display_title(&x.title).0)

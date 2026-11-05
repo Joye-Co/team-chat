@@ -1079,7 +1079,14 @@ impl TimelineView {
             .groups()
             .into_iter()
             .find(|g| g.id == topic.group_id);
+        let chat = crate::data::is_main_topic(&topic.id);
         let who = match &group {
+            // The 群聊 has no starter: it says what it is for.
+            Some(g) if chat && g.dm_peer.is_none() => fill(
+                t::CHAT_START_GROUP,
+                &[("group", &crate::copy::isolate(&g.name))],
+            ),
+            _ if chat => t::CHAT_START_DM.to_string(),
             Some(g) if g.dm_peer.is_none() && !g.name.is_empty() => fill(
                 t::STARTED_IN,
                 &[
@@ -1092,14 +1099,21 @@ impl TimelineView {
                 &[("starter", &crate::copy::isolate(&starter))],
             ),
         };
-        let when = model::local_day(topic.created_at).map(|day| {
-            format!(
-                "{} {}",
-                model::day_label(day, crate::selftest::clock::local_now().date_naive()),
-                model::clock(topic.created_at)
-            )
-        });
-        let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
+        let when = (!chat)
+            .then_some(())
+            .and_then(|_| model::local_day(topic.created_at))
+            .map(|day| {
+                format!(
+                    "{} {}",
+                    model::day_label(day, crate::selftest::clock::local_now().date_naive()),
+                    model::clock(topic.created_at)
+                )
+            });
+        let (title, untitled) = match &group {
+            // The 群聊 is called by its 群 (a 私聊 by the peer's name).
+            Some(g) if chat => (g.name.clone(), false),
+            _ => crate::views::sidebar::topic_display_title(&topic.title),
+        };
         // A DM opens with the peer's avatar 40, a 群 话题 with the 40 icon
         // box (§2.17, T2-15).
         let peer = group
@@ -1219,7 +1233,24 @@ impl TimelineView {
             crate::app::RightPane::TopicRail
         );
         let nav = self.services.nav.clone();
-        let info = (!rail_open).then(|| {
+        // The 群聊 has no inspector; its start block offers 新话题 instead.
+        let chat = crate::data::is_main_topic(&topic.id);
+        let new_topic = chat.then(|| {
+            push_button(
+                "start-new-topic",
+                t::START_NEW_TOPIC,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Compose,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::NewTopic), cx))
+        });
+        let info = (!rail_open && !chat).then(|| {
             push_button(
                 "start-topic-info",
                 t::START_TOPIC_INFO,
@@ -1245,6 +1276,7 @@ impl TimelineView {
             .gap(space::S8)
             .child(assign)
             .children(add)
+            .children(new_topic)
             .children(info)
             .into_any_element()
     }

@@ -185,9 +185,10 @@ impl RailView {
             mode: nav.rail_mode,
             me: self.me(),
             open: nav.topic.clone(),
+            // The 群 is selected on its 群 page and in its 群聊.
             group_page: match (&nav.place, nav.page()) {
                 (Some(Place::Group(g)), Page::Group) => Some(g.clone()),
-                _ => None,
+                _ => nav.chat_open().cloned(),
             },
             show_all: self.show_all,
             chip: self.chip.clone(),
@@ -842,7 +843,7 @@ impl RailView {
                     }
                     modes::Item::Dm { id, .. } | modes::Item::GroupHeader { id, .. } => {
                         let id = id.clone();
-                        nav.update(cx, |nav, cx| nav.open_group(id, cx));
+                        nav.update(cx, |nav, cx| nav.open_group_chat(id, cx));
                     }
                     _ => {}
                 }

@@ -320,6 +320,8 @@ impl Navigation {
     /// anywhere, else none.
     pub fn visible_pane(&self) -> RightPane {
         match (&self.right_pane, self.page()) {
+            // The 群聊 has no inspector (负责, 计划 … are a 话题's).
+            (RightPane::TopicRail, Page::Topic) if self.chat_open().is_some() => RightPane::None,
             (pane, Page::Topic) => pane.clone(),
             (RightPane::Artifact { .. }, _) => self.right_pane.clone(),
             _ => RightPane::None,
@@ -369,6 +371,10 @@ impl Navigation {
         let Some(topic) = self.topic.clone() else {
             return;
         };
+        // The 群聊 is a conversation: a member's run there opens nothing.
+        if crate::data::is_main_topic(&topic.1) {
+            return;
+        }
         if self.header_hovered || self.side_panel_settled.contains(&topic) {
             return;
         }
@@ -400,6 +406,30 @@ impl Navigation {
             self.topic = None;
             cx.notify();
         }
+    }
+
+    /// Opens the 群's own chat, the 群聊 (1.1.1): what a click on a 群 or a
+    /// 私聊 in the sidebar opens. The 群 page with its 话题 lists is
+    /// [`Navigation::open_group`].
+    pub fn open_group_chat(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
+        let topic = crate::data::main_topic_id(&group_id);
+        self.open_topic(group_id, topic, cx);
+    }
+
+    /// The 群 page (its 话题 lists) also from its 群聊 or one of its 话题,
+    /// which [`Navigation::open_group`] leaves open.
+    pub fn open_group_page(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
+        self.place = Some(Place::Group(group_id));
+        self.topic = None;
+        cx.notify();
+    }
+
+    /// The 群 whose 群聊 is open.
+    pub fn chat_open(&self) -> Option<&GroupId> {
+        self.topic
+            .as_ref()
+            .filter(|(g, t)| *t == crate::data::main_topic_id(g))
+            .map(|(g, _)| g)
     }
 
     pub fn open_topic(&mut self, group_id: GroupId, topic_id: TopicId, cx: &mut Context<Self>) {
@@ -1334,5 +1364,33 @@ mod tests {
         assert!(at(&composer, cx), "then the composer");
         cx.simulate_keystrokes("shift-f6");
         assert!(at(&thread, cx), "shift-F6 goes back");
+    }
+
+    /// 1.1.1: a 群 opens its 群聊 (a 话题 page with no inspector); the 群
+    /// page with its 话题 lists stays one step away.
+    #[gpui::test]
+    fn a_group_opens_its_chat(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        cx.update(|cx| {
+            nav.update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx));
+            let n = nav.read(cx);
+            assert_eq!(n.page(), Page::Topic);
+            assert_eq!(n.chat_open().map(String::as_str), Some("g-dev"));
+            assert_eq!(n.current_group().as_deref(), Some("g-dev"));
+            // The default pane is the inspector; the 群聊 shows none.
+            assert_eq!(n.right_pane, RightPane::TopicRail);
+            assert_eq!(n.visible_pane(), RightPane::None);
+            nav.update(cx, |nav, cx| nav.open_group("g-dev".into(), cx));
+            assert_eq!(nav.read(cx).page(), Page::Topic, "same place: unchanged");
+            // `这个群的话题` in the 群聊's title bar.
+            nav.update(cx, |nav, cx| nav.open_group_page("g-dev".into(), cx));
+            assert_eq!(nav.read(cx).page(), Page::Group);
+            assert!(nav.read(cx).chat_open().is_none());
+            nav.update(cx, |nav, cx| {
+                nav.open_topic("g-dev".into(), "t-login".into(), cx)
+            });
+            assert!(nav.read(cx).chat_open().is_none());
+            assert_eq!(nav.read(cx).visible_pane(), RightPane::TopicRail);
+        });
     }
 }

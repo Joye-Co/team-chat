@@ -36,12 +36,14 @@ pub(super) struct Entry {
 
 /// What a row of a rail list shows.
 pub(super) enum Item {
-    /// A: `⌄ 开发`, which opens the 群 page.
+    /// A: `⌄ 开发`, which opens the 群's 群聊; `unread` when the 群聊 has
+    /// messages I have not read.
     GroupHeader {
         id: GroupId,
         name: String,
         folded: bool,
         selected: bool,
+        unread: bool,
         /// I muted the 群: a `bell.slash` after its name.
         muted: bool,
     },
@@ -212,15 +214,17 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
                 i.show_all || model::involves_me(p, me, t) || is_open(open, &t.group_id, &t.id)
             })
             .collect();
-        // Onboarding: every 群 I am in keeps its header, also with no 话题
-        // or none of mine, so a new member sees the 群 they joined.
+        // 1.1.1: every 群 I am in keeps its entry, which opens its 群聊, also
+        // with no 话题 or none of mine (onboarding: one row under it then).
+        let open_group = i.group_page.as_deref() == Some(g.id.as_str());
         let empty = topics.is_empty();
         let folded = i.folded_groups.contains(&g.id);
         let mut section = vec![Item::GroupHeader {
             id: g.id.clone(),
             name: g.name.clone(),
             folded,
-            selected: i.group_page.as_deref() == Some(g.id.as_str()),
+            selected: open_group,
+            unread: chat_unread(p, &g.id),
             muted: p.group_muted(&g.id),
         }];
         // T-13: 还没有话题 only once the server answered; while it syncs the
@@ -283,6 +287,12 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
 
 /// T-11: a DM row's state: the 话题 of the DM that waits on me, else its
 /// newest 话题 with a sidebar state; and whether any of its 话题 is unread.
+/// The 群's own chat (群聊) has messages I have not read.
+fn chat_unread(p: &dyn ChatProvider, group_id: &str) -> bool {
+    p.topic(group_id, &crate::data::main_topic_id(group_id))
+        .is_some_and(|t| t.unread > 0)
+}
+
 fn dm_state(
     p: &dyn ChatProvider,
     me: Option<&str>,
@@ -294,7 +304,7 @@ fn dm_state(
         .filter(model::listed)
         .collect();
     topics.sort_by_key(|t| std::cmp::Reverse(t.last_activity_at));
-    let unread = topics.iter().any(|t| t.unread > 0);
+    let unread = topics.iter().any(|t| t.unread > 0) || chat_unread(p, group_id);
     let lines: Vec<_> = topics
         .iter()
         .map(|t| crate::views::topic_page::topic_state(p, me, t))
@@ -507,6 +517,7 @@ impl RailView {
                 name,
                 folded,
                 selected,
+                unread,
                 muted,
             } => {
                 let fold_id = id.clone();
@@ -521,9 +532,7 @@ impl RailView {
                 self.section_header_selected(
                     SharedString::from(format!("rail-group-{id}")),
                     name.clone(),
-                    *folded,
-                    *selected,
-                    *muted,
+                    (*folded, *selected, *unread, *muted),
                     move |_, _, cx| {
                         let id = fold_id.clone();
                         let _ = this.update(cx, |this, cx| {
@@ -535,7 +544,7 @@ impl RailView {
                     },
                     Some(Box::new(move |_, _, cx| {
                         let g = open_id.clone();
-                        nav.update(cx, |nav, cx| nav.open_group(g, cx))
+                        nav.update(cx, |nav, cx| nav.open_group_chat(g, cx))
                     })),
                     Some(menu),
                 )
@@ -588,7 +597,7 @@ impl RailView {
                     })
                     .on_click(move |_, _, cx| {
                         let id = open_id.clone();
-                        nav.update(cx, |nav, cx| nav.open_group(id, cx))
+                        nav.update(cx, |nav, cx| nav.open_group_chat(id, cx))
                     })
                     .menu(menu);
                 div()

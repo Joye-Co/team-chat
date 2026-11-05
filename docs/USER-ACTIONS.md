@@ -103,11 +103,11 @@ but **disabled**, because its runtime is not chosen yet. Step 3.6 chooses it and
 
    [runtimes.claude]          # keep the one you chose in step 1 (or both)
    kind = "claude"
-   permission_mode = "acceptEdits"
+   permission_mode = "bypassPermissions"
 
    [runtimes.codex]
    kind = "codex"
-   sandbox = "workspace-write"
+   sandbox = "danger-full-access"
    approval_policy = "never"
    ```
 

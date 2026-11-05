@@ -23,7 +23,7 @@ mod focus;
 mod header;
 mod live;
 mod menu;
-mod model;
+pub(crate) mod model;
 pub mod plan;
 pub mod preview;
 mod row;
@@ -477,7 +477,7 @@ impl TimelineView {
             _ => self.me = None,
         }
         self.members = p.members();
-        self.topic = p.topic(&g, &tid);
+        self.topic = crate::data::topic_or_chat(p.as_ref(), &g, &tid);
         self.typing = p.typing(&g, &tid);
         self.runs = p.runs(&g, &tid);
         for run in &self.runs {
