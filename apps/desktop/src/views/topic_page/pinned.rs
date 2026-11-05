@@ -215,9 +215,23 @@ impl TopicPage {
             Pinned::Ask { ask } => ask.message_id.clone().map(|id| (id, false)),
             Pinned::Record { .. } => None,
         };
-        if card_id.is_some_and(|(id, review)| {
-            self.card_answers_here(g, &id, review) && self.timeline.read(cx).shows_card(&id)
-        }) {
+        let timeline = self.timeline.read(cx);
+        let hidden = match card_id {
+            Some((id, review)) => {
+                self.card_answers_here(g, &id, review) && timeline.shows_card(&id)
+            }
+            // T-10: a 话题-level ask (no card of its own) never pins while an
+            // ask card of this 话题 is on screen: that card is the question.
+            None => {
+                !matches!(state, Pinned::Record { .. })
+                    && self.services.me().is_some_and(|me| {
+                        timeline.cards_on_screen().any(|id| {
+                            crate::data::card_waits_on(&*self.services.provider, g, id, &me)
+                        })
+                    })
+            }
+        };
+        if hidden {
             return None;
         }
         let (g, t) = (g.to_string(), t.to_string());
