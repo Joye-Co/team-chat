@@ -938,7 +938,7 @@ const HOST_SCENES: &[Scene] = &[
         open: crate::views::artifacts::state_scenes::open_embed_states,
     },
     Scene {
-        name: "artifact-ref-toast",
+        name: "artifact-ref-chip",
         about: "就这里提问 on a page element: the chip goes into the 话题 composer; the chip is the confirmation, so no toast shows (NATIVE.md §7.4)",
         start: Start::V2Refs,
         setup: crate::views::artifacts::state_scenes::ref_toast_setup,
@@ -966,7 +966,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     if host_check(name) {
         return Some(host_preview::ready);
     }
-    if name == "artifact-ref-toast" {
+    if name == "artifact-ref-chip" {
         return Some(crate::views::artifacts::state_scenes::ref_toast_ready);
     }
     // --- end inc-host track ---
@@ -1011,7 +1011,7 @@ pub fn verify_check(name: &str) -> Option<Verify> {
     if host_check(name) {
         return Some(host_preview::verify);
     }
-    if name == "artifact-ref-toast" {
+    if name == "artifact-ref-chip" {
         return Some(crate::views::artifacts::state_scenes::ref_toast_verify);
     }
     // --- end inc-host track ---
