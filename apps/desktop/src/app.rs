@@ -259,6 +259,19 @@ pub struct SearchContext {
 }
 
 impl Navigation {
+    /// Forgets the place of another account (the window shows a different
+    /// account now); the window's own choices (sidebar, rail mode) stay.
+    pub fn reset_place(&mut self, cx: &mut Context<Self>) {
+        self.place = None;
+        self.topic = None;
+        self.focus = None;
+        self.side_panel_open = false;
+        self.side_panel_settled.clear();
+        self.side_panel_auto_at = None;
+        self.right_pane = RightPane::default();
+        cx.notify();
+    }
+
     pub fn new() -> Self {
         Self {
             place: None,
@@ -644,7 +657,18 @@ pub struct RootView {
     /// first Tab goes through the app's `FocusNext` handler (it is not a
     /// tab stop, so that Tab lands on the first control).
     focus: FocusHandle,
+    /// The account the window shows (server, member id): another account
+    /// signed in opens a fresh window for it.
+    account: Option<(String, String)>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The signed-in account: (server, member id).
+fn shown_account(services: &Services) -> Option<(String, String)> {
+    match services.provider.session() {
+        SessionState::SignedIn { me, server_url } => Some((server_url, me.id)),
+        _ => None,
+    }
 }
 
 impl RootView {
@@ -661,16 +685,25 @@ impl RootView {
         window.focus(&focus, cx);
         let mut subscriptions = vec![
             theme::follow_system(window, cx),
-            cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-                // Groups too: the first 群 replaces the welcome (§8.5).
-                // v12/fx-shell: Connection too: the toolbar subtitle says
-                // 连接已断开 · n 秒后重连 while it is down.
-                if changes
-                    .any(|c| matches!(c, Change::Session | Change::Groups | Change::Connection))
-                {
-                    cx.notify();
-                }
-            }),
+            cx.subscribe_in(
+                &services.hub,
+                window,
+                |this, _, changes: &Changes, window, cx| {
+                    if changes.any(|c| matches!(c, Change::Session))
+                        && this.account_changed(window, cx)
+                    {
+                        return;
+                    }
+                    // Groups too: the first 群 replaces the welcome (§8.5).
+                    // v12/fx-shell: Connection too: the toolbar subtitle says
+                    // 连接已断开 · n 秒后重连 while it is down.
+                    if changes
+                        .any(|c| matches!(c, Change::Session | Change::Groups | Change::Connection))
+                    {
+                        cx.notify();
+                    }
+                },
+            ),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
         // App-level banners (connection, update).
@@ -707,6 +740,7 @@ impl RootView {
         let pages = Pages::new(&services, timeline.clone(), composer.clone(), cx);
         let panes = Panes::new(&services, window, cx);
         let rail = cx.new(|cx| RailView::new(services.clone(), window, cx));
+        let services_for_account = services.clone();
         // --- v12/behavior ---
         subscriptions.extend(crate::views::nav::menus::watch_menu_state(
             &services, &rail, cx,
@@ -729,8 +763,34 @@ impl RootView {
             right_reveal: Reveal::default(),
             last_pane: RightPane::None,
             focus,
+            account: shown_account(&services_for_account),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Another account is shown now (switched in the account menu, or the
+    /// signed-out one gave its place to the next): the window opens again
+    /// on that account's saved place, so no view keeps the other account's
+    /// 群, 话题 or drafts. Returns true when it does.
+    fn account_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let now = shown_account(&self.services);
+        let changed = matches!((&self.account, &now), (Some(old), Some(new)) if old != new);
+        if now.is_some() {
+            self.account = now;
+        }
+        if !changed {
+            return false;
+        }
+        let services = self.services.clone();
+        window.defer(cx, move |window, cx| {
+            services.nav.update(cx, |nav, cx| nav.reset_place(cx));
+            crate::views::nav::restore(&services, cx);
+            match open_main_window(services, true, None, cx) {
+                Ok(_) => window.remove_window(),
+                Err(e) => eprintln!("failed to open the window: {e}"),
+            }
+        });
+        true
     }
 
     pub fn services(&self) -> &Services {

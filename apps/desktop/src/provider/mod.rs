@@ -132,6 +132,10 @@ struct Account {
     server_url: String,
     me: chat_core::proto::Member,
     dir: PathBuf,
+    /// The id of this account in `session.json`.
+    key: String,
+    /// The Keychain account of its token.
+    token_key: String,
 }
 
 #[derive(Default)]
@@ -158,6 +162,10 @@ struct State {
     acked: HashMap<String, String>,
     /// The place of the main window, kept in `ui-state.json`.
     navigation: Option<SavedNavigation>,
+    /// The accounts of `session.json`, as last written.
+    saved: session::SavedAccounts,
+    /// 添加账号… is open: the key of the account 取消 returns to.
+    adding: Option<String>,
 }
 
 struct Shared {
@@ -237,6 +245,7 @@ impl CoreProvider {
                 snapshots: snapshot::SnapshotCache::default(),
             }),
         });
+        provider.state().saved = session::load_accounts(&provider.shared.config.data_root);
         if provider.shared.config.restore {
             provider.restore();
         }
@@ -311,7 +320,7 @@ impl CoreProvider {
         };
         if unreadable && let Some(a) = self.account() {
             tracing::info!("reading the saved token again");
-            self.load_token(generation, a.server_url.clone(), a.client.clone());
+            self.load_token(generation, a.token_key.clone(), a.client.clone());
             return;
         }
         if let Some(a) = self.account() {
@@ -340,32 +349,143 @@ impl CoreProvider {
     // ------------------------------------------------------------------
 
     fn restore(&self) {
-        let root = self.shared.config.data_root.clone();
-        let Some(saved) = session::load_session(&root) else {
-            return;
+        let saved = {
+            let s = self.state();
+            // No active account (quit while one was added): the first one.
+            s.saved.active().or(s.saved.accounts.first()).cloned()
         };
+        if let Some(saved) = saved {
+            self.open_saved(saved);
+        }
+    }
+
+    /// Changes the saved accounts and writes `session.json`.
+    fn update_accounts<R>(&self, f: impl FnOnce(&mut session::SavedAccounts) -> R) -> R {
+        let (r, saved) = {
+            let mut s = self.state();
+            let r = f(&mut s.saved);
+            (r, s.saved.clone())
+        };
+        if let Err(e) = session::save_accounts(&self.shared.config.data_root, &saved) {
+            tracing::warn!(error = %e, "cannot save the accounts");
+        }
+        r
+    }
+
+    /// Opens a saved account from its cache and makes it the signed-in one,
+    /// in place of the account signed in now (stopped, still saved). The
+    /// token comes from the Keychain in the background.
+    fn open_saved(&self, saved: SavedSession) -> bool {
+        let root = self.shared.config.data_root.clone();
         let dir = session::account_dir(&root, &saved.server_url, &saved.member.id);
-        // The token comes from the Keychain in the background; the cache can
-        // be read at once.
         let client = match open_client(&saved.server_url, String::new(), &dir) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(error = %e, "cannot open the cache; signing out");
-                return;
+                tracing::warn!(error = %e, "cannot open the cache");
+                return false;
             }
         };
-        let generation = self.install(saved.clone(), client.clone(), dir);
-        self.load_token(generation, saved.server_url, client);
+        let previous = self.account();
+        if previous.is_some() {
+            self.persist_ui_state();
+        }
+        let key = saved.key();
+        self.update_accounts(|a| a.activate(&key));
+        let token_key = saved.token_key().to_string();
+        let generation = self.install(saved, client.clone(), dir);
+        if let Some(previous) = previous {
+            previous.client.stop();
+        }
+        self.load_token(generation, token_key, client);
+        true
+    }
+
+    /// The accounts signed in on this Mac, the active one marked.
+    pub fn accounts_inner(&self) -> Vec<crate::data::AccountEntry> {
+        let me = match self.session() {
+            SessionState::SignedIn { me, .. } => Some(me),
+            _ => None,
+        };
+        let s = self.state();
+        let active = s.account.as_ref().map(|a| a.key.clone());
+        s.saved
+            .accounts
+            .iter()
+            .map(|a| {
+                let key = a.key();
+                let is_active = active.as_deref() == Some(key.as_str());
+                let (name, role) = match &me {
+                    Some(me) if is_active => (me.name.clone(), me.role.clone()),
+                    _ => (a.member.name.clone(), a.member.role.clone().flatten()),
+                };
+                crate::data::AccountEntry {
+                    id: key,
+                    name,
+                    role: role.filter(|r| !r.trim().is_empty()),
+                    server_url: a.server_url.clone(),
+                    active: is_active,
+                }
+            })
+            .collect()
+    }
+
+    /// Switches the window to another saved account; the one signed in now
+    /// stays signed in.
+    pub fn switch_account_inner(&self, key: &str) {
+        let saved = {
+            let s = self.state();
+            if matches!(s.session, Some(SessionState::SigningIn))
+                || s.account.as_ref().is_some_and(|a| a.key == key)
+            {
+                return;
+            }
+            s.saved.get(key).cloned()
+        };
+        let Some(saved) = saved else {
+            return;
+        };
+        tracing::info!("switching account");
+        if self.open_saved(saved) {
+            self.state().adding = None;
+        }
+    }
+
+    /// 添加账号…: the login view shows; the account signed in now stays
+    /// saved (and active in `session.json`, so a restart opens it), and 取消
+    /// returns to it.
+    pub fn add_account_inner(&self) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        self.persist_ui_state();
+        self.state().adding = Some(a.key.clone());
+        self.take_account(None);
+    }
+
+    /// 取消 in the login view of 添加账号…: back to the account it left.
+    pub fn cancel_add_account_inner(&self) {
+        let Some(key) = self.state().adding.take() else {
+            return;
+        };
+        if matches!(self.state().session, Some(SessionState::SigningIn)) {
+            self.state().adding = Some(key);
+            return;
+        }
+        self.switch_account_inner(&key);
+    }
+
+    pub fn adding_account_inner(&self) -> bool {
+        self.state().adding.is_some()
     }
 
     /// Reads the saved token from the Keychain and starts `client` with it.
     /// A Keychain error keeps the session and the token: it is often a denied
     /// access prompt after an update, or a keychain that is still locked.
-    fn load_token(&self, generation: u64, server_url: String, client: Arc<Client>) {
+    fn load_token(&self, generation: u64, token_key: String, client: Arc<Client>) {
         let this = self.clone();
         let tokens = self.shared.config.tokens.clone();
         chat_core::background().spawn(async move {
-            let loaded = tokio_blocking(move || tokens.store(&server_url).load()).await;
+            let loaded = tokio_blocking(move || tokens.store(&token_key).load()).await;
             match loaded {
                 Ok(Some(token)) => {
                     let mut s = this.state();
@@ -415,8 +535,11 @@ impl CoreProvider {
                 server_url: saved.server_url.clone(),
                 me,
                 dir,
+                key: saved.key(),
+                token_key: saved.token_key().to_string(),
             }));
             s.session = None;
+            s.adding = None;
             s.connection = None;
             s.ever_connected = false;
             s.attempt = 0;
@@ -474,37 +597,53 @@ impl CoreProvider {
         account
     }
 
-    /// The server refused the token, or it is gone: sign out, keep the cache.
+    /// Forgets the signed-in account (`session.json` first, so a crash
+    /// cannot keep it) and moves to the next saved account, or signs out
+    /// when none is left. Returns the account that was forgotten.
+    fn forget_account(&self, error: Option<LoginError>) -> Option<Arc<Account>> {
+        let account = self.account()?;
+        let key = account.key.clone();
+        let next = self.update_accounts(|a| {
+            a.remove(&key);
+            a.accounts.first().cloned()
+        });
+        if let Some(next) = next
+            && self.open_saved(next)
+        {
+            return Some(account);
+        }
+        self.take_account(error)
+    }
+
+    /// The server refused the token, or it is gone: forget this account,
+    /// keep the cache.
     fn drop_session(&self, generation: u64, error: Option<LoginError>) {
         if self.state().generation != generation {
             return;
         }
-        let Some(account) = self.take_account(error) else {
+        let Some(account) = self.forget_account(error) else {
             return;
         };
-        let root = self.shared.config.data_root.clone();
         let tokens = self.shared.config.tokens.clone();
         std::thread::spawn(move || {
-            let _ = tokens.store(&account.server_url).clear();
-            session::forget_session(&root, &account.server_url);
+            let _ = tokens.store(&account.token_key).clear();
             drop(account);
         });
     }
 
-    /// Signs out: revokes this token on the server (best effort), deletes it
-    /// from the Keychain, and keeps or wipes the local cache.
+    /// Signs out of the signed-in account: revokes this token on the server
+    /// (best effort), deletes it from the Keychain, and keeps or wipes the
+    /// local cache. Another saved account takes its place; the others stay
+    /// signed in.
     pub fn sign_out_inner(&self, wipe_cache: bool) {
-        let Some(account) = self.take_account(None) else {
+        let Some(account) = self.forget_account(None) else {
             return;
         };
-        let root = self.shared.config.data_root.clone();
         let tokens = self.shared.config.tokens.clone();
         chat_core::background().spawn(async move {
-            // Forget locally first, so a crash during the revoke cannot keep the session.
-            session::forget_session(&root, &account.server_url);
-            let server = account.server_url.clone();
+            let token_key = account.token_key.clone();
             let token_store = tokens.clone();
-            let _ = tokio_blocking(move || token_store.store(&server).clear()).await;
+            let _ = tokio_blocking(move || token_store.store(&token_key).clear()).await;
             let http = account.client.http();
             match tokio::time::timeout(Duration::from_secs(5), http.revoke(None, false)).await {
                 Ok(Ok(_)) => tracing::info!("token revoked"),
@@ -523,25 +662,38 @@ impl CoreProvider {
         });
     }
 
-    /// Uses another server: keeps this server's session and token, then signs
-    /// in with the saved session of `server_url`, or shows the login window
-    /// for it.
+    /// Uses another server (the 服务器 menu): an account saved on it shows
+    /// at once; otherwise the login window opens for it, as 添加账号… does
+    /// (the account shown now stays signed in, and 取消 returns to it).
     fn switch_server_inner(&self, server_url: &str) {
         let Some(server_url) = session::normalize_server_url(server_url) else {
             return;
         };
-        let same = |a: &str| a.trim_end_matches('/') == server_url.trim_end_matches('/');
-        if self.account().is_some_and(|a| same(&a.server_url)) {
+        if self
+            .account()
+            .is_some_and(|a| session::same_server(&a.server_url, &server_url))
+        {
             return;
         }
-        let root = self.shared.config.data_root.clone();
-        let saved = session::set_current_server(&root, &server_url);
+        let saved = self
+            .state()
+            .saved
+            .on_server(&server_url)
+            .map(SavedSession::key);
         tracing::info!(signed_in = saved.is_some(), "switching servers");
-        // Not a sign-out: the old token stays in the Keychain.
-        drop(self.take_account(None));
-        if saved.is_some() {
-            self.restore();
+        if let Some(key) = saved {
+            self.switch_account_inner(&key);
+            return;
         }
+        if self.account().is_some() {
+            // The login window's server only: a restart opens the account
+            // shown now.
+            self.add_account_inner();
+            self.state().saved.current = Some(server_url);
+        } else {
+            self.update_accounts(|a| a.current = Some(server_url));
+        }
+        self.emit(vec![Change::Session]);
     }
 
     fn login_inner(&self, request: LoginRequest) {
@@ -593,20 +745,19 @@ impl CoreProvider {
         }
         let tokens = self.shared.config.tokens.clone();
         let root = self.shared.config.data_root.clone();
-        let saved = SavedSession {
-            server_url: server_url.to_string(),
-            member: me.clone(),
-        };
+        let mut accounts = self.state().saved.clone();
+        let saved = accounts.sign_in(SavedSession::new(server_url, me.clone()));
         let dir = session::account_dir(&root, server_url, &me.id);
         let (server, t) = (server_url.to_string(), token.clone());
-        let saved2 = saved.clone();
+        let token_key = saved.token_key().to_string();
         let dir2 = dir.clone();
+        let accounts2 = accounts.clone();
         let client = tokio_blocking(move || -> Result<Arc<Client>, LoginError> {
-            tokens.store(&server).save(&t).map_err(|e| {
+            tokens.store(&token_key).save(&t).map_err(|e| {
                 tracing::warn!(error = %e, "cannot save the token");
                 LoginError::Other
             })?;
-            session::save_session(&root, &saved2).map_err(|e| {
+            session::save_accounts(&root, &accounts2).map_err(|e| {
                 tracing::warn!(error = %e, "cannot save the session");
                 LoginError::Other
             })?;
@@ -619,6 +770,7 @@ impl CoreProvider {
         if self.state().generation != generation {
             return Ok(());
         }
+        self.state().saved = accounts;
         tracing::info!(member = %me.id, "signed in");
         self.install(saved, client.clone(), dir);
         client.start();
@@ -1075,11 +1227,11 @@ impl ChatProvider for CoreProvider {
         if let Some(a) = self.account() {
             return Some(a.server_url.clone());
         }
-        session::current_server(&self.shared.config.data_root)
+        self.state().saved.current.clone()
     }
 
     fn signed_in_servers(&self) -> Vec<String> {
-        session::signed_in_servers(&self.shared.config.data_root)
+        self.state().saved.servers()
     }
 
     fn switch_server(&self, server_url: &str) {
@@ -1112,6 +1264,26 @@ impl ChatProvider for CoreProvider {
 
     fn reconnect_now(&self) {
         self.reconnect_now_inner();
+    }
+
+    fn accounts(&self) -> Vec<crate::data::AccountEntry> {
+        self.accounts_inner()
+    }
+
+    fn switch_account(&self, id: &str) {
+        self.switch_account_inner(id);
+    }
+
+    fn add_account(&self) {
+        self.add_account_inner();
+    }
+
+    fn cancel_add_account(&self) {
+        self.cancel_add_account_inner();
+    }
+
+    fn adding_account(&self) -> bool {
+        self.adding_account_inner()
     }
 
     fn connection(&self) -> ConnectionState {

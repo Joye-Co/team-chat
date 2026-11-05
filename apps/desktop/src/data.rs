@@ -551,6 +551,18 @@ pub enum SessionState {
     },
 }
 
+/// An account signed in on this Mac (the sidebar's account menu).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountEntry {
+    /// The provider's id of the account (server and member).
+    pub id: String,
+    pub name: String,
+    pub role: Option<String>,
+    pub server_url: String,
+    /// The account the window shows.
+    pub active: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConnectionState {
     /// Not signed in, or stopped on purpose.
@@ -1357,6 +1369,35 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// (no sign-out): a server with a saved session signs in at once, any
     /// other one shows the login window for it. Emits `Change::Session`.
     fn switch_server(&self, _server_url: &str) {}
+
+    // --- accounts ---
+
+    /// Every account signed in on this Mac, the active one marked. A
+    /// provider with one account lists the signed-in one.
+    fn accounts(&self) -> Vec<AccountEntry> {
+        match self.session() {
+            SessionState::SignedIn { me, server_url } => vec![AccountEntry {
+                id: format!("{server_url}#{}", me.id),
+                name: me.name,
+                role: me.role.filter(|r| !r.trim().is_empty()),
+                server_url,
+                active: true,
+            }],
+            _ => Vec::new(),
+        }
+    }
+    /// Shows another signed-in account (from [`ChatProvider::accounts`]);
+    /// the one shown now stays signed in. Emits `Change::Session`.
+    fn switch_account(&self, _id: &str) {}
+    /// 添加账号…: the login view shows while the account signed in now stays
+    /// signed in; a sign-in adds the new account and shows it.
+    fn add_account(&self) {}
+    /// 取消 in the login view of 添加账号…: back to the account it left.
+    fn cancel_add_account(&self) {}
+    /// The login view shows for 添加账号… (it has 取消).
+    fn adding_account(&self) -> bool {
+        false
+    }
 
     // --- directory ---
 

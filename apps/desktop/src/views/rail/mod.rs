@@ -414,22 +414,20 @@ impl RailView {
             .into_any_element()
     }
 
-    /// The pinned user footer (F04): me, my role (or the server), the
-    /// offline state when the connection dropped; it opens Settings.
+    /// The pinned user footer (F04): me, my role, the offline state when
+    /// the connection dropped; it opens the account menu.
     fn footer(&self, cx: &App) -> Option<AnyElement> {
         use crate::{
             data::{ConnectionState, SessionState},
             ui::native::{BadgeState, SidebarFooter, StatusBadge},
         };
-        let SessionState::SignedIn { me, server_url } = self.services.provider.session() else {
+        let SessionState::SignedIn { me, .. } = self.services.provider.session() else {
             return None;
         };
         let avatar = crate::ui::MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::MD);
-        let footer =
-            SidebarFooter::new("rail-footer", avatar, me.name.clone()).on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
-            });
-        let _ = server_url;
+        let services = self.services.clone();
+        let footer = SidebarFooter::new("rail-footer", avatar, me.name.clone())
+            .menu(move |menu, _, cx| account_menu(menu, &services, cx));
         // §2.1: the second line is the role, never a server address.
         let role = me.role.clone().filter(|r| !r.trim().is_empty());
         let footer = match self.services.provider.connection() {
@@ -723,6 +721,76 @@ impl Render for RailView {
             // closes the settings window); no second 设置 row above it.
             .children(self.footer(cx))
     }
+}
+
+/// The account menu of the sidebar footer: every account signed in on this
+/// Mac (name over its server's host, a check on the one shown), then
+/// 添加账号… and 设置…, then 退出这个账号….
+fn account_menu(
+    mut menu: PopupMenu,
+    services: &Services,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    use crate::ui::native::{NativeType as _, native_colors};
+    let accounts = services.provider.accounts();
+    for account in accounts {
+        let k = native_colors(cx);
+        let host = crate::views::login::server_host(&account.server_url).to_string();
+        let name = SharedString::from(account.name.clone());
+        let line = SharedString::from(match &account.role {
+            Some(role) => format!("{role} · {host}"),
+            None => host,
+        });
+        let services = services.clone();
+        let id = account.id.clone();
+        menu = menu.item(
+            PopupMenuItem::element(move |_, _| {
+                div()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .py(space::S2)
+                    .child(
+                        crate::ui::truncate::TruncText::new(name.clone())
+                            .n_body()
+                            .text_color(k.label),
+                    )
+                    .child(
+                        crate::ui::truncate::TruncText::new(line.clone())
+                            .n_footnote()
+                            .text_color(k.secondary),
+                    )
+            })
+            .checked(account.active)
+            .on_click(move |_, _, _| services.provider.switch_account(&id)),
+        );
+    }
+    let add = services.clone();
+    let out = services.clone();
+    menu.separator()
+        .item(
+            PopupMenuItem::new(c::ACCOUNT_ADD).on_click(move |_, _, _| add.provider.add_account()),
+        )
+        .item(
+            PopupMenuItem::new(crate::copy::settings::MENU_SETTINGS).on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
+            }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new(c::ACCOUNT_SIGN_OUT).on_click(move |_, window, cx| {
+                let services = out.clone();
+                crate::views::nav::dialogs::destructive_alert(
+                    "account-sign-out",
+                    c::ACCOUNT_SIGN_OUT_TITLE.to_string(),
+                    c::ACCOUNT_SIGN_OUT_BODY.to_string(),
+                    c::ACCOUNT_SIGN_OUT_CONFIRM,
+                    move |_, _| services.provider.sign_out(false),
+                    window,
+                    cx,
+                );
+            }),
+        )
 }
 
 // --- v12/behavior ---

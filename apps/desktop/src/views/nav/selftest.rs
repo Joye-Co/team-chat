@@ -550,6 +550,71 @@ pub mod scenes {
         Ok(handle)
     }
 
+    /// The account menu of the sidebar footer, opened by a click on the
+    /// footer once it is drawn (the real pointer does not move).
+    pub fn account_menu(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        let mut options = crate::app::main_window_options(false, cx);
+        options.window_bounds = Some(gpui::WindowBounds::Windowed(
+            crate::selftest::scenes::capture_bounds(content, cx),
+        ));
+        options.window_min_size = None;
+        let (handle, _) = gpui_kit::open_window(options, cx, move |window, cx| {
+            gpui::AppContext::new(cx, |cx| {
+                crate::app::RootView::new(services, None, window, cx)
+            })
+        })
+        .map_err(|e| e.to_string())?;
+        handle
+            .update(cx, |_, window, _| click_footer_when_drawn(2, window))
+            .map_err(|e| e.to_string())?;
+        Ok(handle)
+    }
+
+    /// Clicks the sidebar footer after `frames` frames.
+    fn click_footer_when_drawn(frames: u32, window: &mut Window) {
+        window.on_next_frame(move |window, cx| {
+            if frames > 0 {
+                window.refresh();
+                return click_footer_when_drawn(frames - 1, window);
+            }
+            let size = window.viewport_size();
+            let position = gpui::point(gpui::px(80.), size.height - gpui::px(36.));
+            let modifiers = gpui::Modifiers::default();
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position,
+                    pressed_button: None,
+                    modifiers,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                    button: gpui::MouseButton::Left,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                    button: gpui::MouseButton::Left,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                }),
+                cx,
+            );
+            window.refresh();
+        });
+    }
+
     fn right_click_when_drawn(
         rail: gpui::Entity<crate::views::rail::RailView>,
         tries: u32,

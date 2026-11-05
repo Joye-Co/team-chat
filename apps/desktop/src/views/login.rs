@@ -639,7 +639,7 @@ impl LoginView {
         let open = cx.listener(|this, _, window, cx| this.open_server_field(window, cx));
         let email = link("login-email", l::EMAIL_SIGN_IN, cx)
             .on_click(cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)));
-        match custom {
+        let row = match custom {
             None => div()
                 .flex()
                 .items_center()
@@ -677,7 +677,25 @@ impl LoginView {
                 )
                 .child(div().ml(space::S12).child(email))
                 .into_any_element(),
+        };
+        // 添加账号…: 取消 goes back to the account that stays signed in.
+        if !self.services.provider.adding_account() {
+            return row;
         }
+        let services = self.services.clone();
+        div()
+            .max_w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(space::S16)
+            .child(row)
+            .child(
+                link("login-add-cancel", common::CANCEL, cx)
+                    .on_click(move |_, _, _| services.provider.cancel_add_account()),
+            )
+            .into_any_element()
     }
 }
 
@@ -766,6 +784,9 @@ impl Render for LoginView {
             (l::SERVER_TITLE, l::SERVER_LEAD.into())
         } else {
             match step {
+                Step::Invite if self.services.provider.adding_account() => {
+                    (l::ADD_TITLE, l::ADD_LEAD.into())
+                }
                 Step::Invite => (l::WELCOME, l::LEAD.into()),
                 Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into()),
                 Step::EmailCode => (
@@ -835,6 +856,19 @@ impl Render for LoginView {
             .bg(k.window)
             .on_action(cx.listener(|this, _: &UseOtherServer, window, cx| {
                 this.open_server_field(window, cx)
+            }))
+            .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
+                if e.keystroke.key != "escape" {
+                    return;
+                }
+                if this.server_open {
+                    this.close_server_field(window, cx);
+                } else if this.services.provider.adding_account() {
+                    this.services.provider.cancel_add_account();
+                } else {
+                    return;
+                }
+                cx.stop_propagation();
             }))
             .child(
                 div()

@@ -355,14 +355,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
         let _ = std::fs::write(std::path::PathBuf::from(marker), b"");
     }
 
-    provider.install(
-        SavedSession {
-            server_url: SERVER.into(),
-            member: me,
-        },
-        client,
-        dir,
-    );
+    provider.install(SavedSession::new(SERVER, me), client, dir);
     provider.state().connection = Some(ConnectionState::Online);
     provider
 }
