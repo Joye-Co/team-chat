@@ -183,8 +183,11 @@ pub fn short_time(now: crate::data::Millis, at: crate::data::Millis) -> String {
 /// The 进行中 rows shown before `看全部`.
 const ACTIVE_ROWS: usize = 8;
 /// The columns of the 群's lists: StatusBadge and time.
+/// The StatusBadge column of a 话题 row.
+const STATUS_COLUMN: gpui::Pixels = px(112.);
+
 const COLUMNS: page::Columns = page::Columns {
-    status: Some(px(112.)),
+    status: Some(STATUS_COLUMN),
     time: Some(page::m::TIME_COLUMN),
     actions: None,
 };
@@ -357,32 +360,16 @@ impl GroupPage {
                 }
                 (parts.join(" · "), unified)
             }
-            Standing::OnOthers => {
-                // The badge keeps a short state word; who it waits on goes
-                // to the meta line, so data never widens the status column.
-                let (text, who) = match t.waiting_on.as_slice() {
-                    [one] => (
-                        c::GROUP_PAGE_STATUS_WAITING_OTHER.to_string(),
-                        fill(
-                            c::GROUP_PAGE_STATUS_WAITING,
-                            &[("name", &member_name(&self.services, one))],
-                        ),
-                    ),
-                    many => {
-                        let n = fill(
-                            c::GROUP_PAGE_STATUS_WAITING_MANY,
-                            &[("n", &many.len().to_string())],
-                        );
-                        (n.clone(), n)
-                    }
-                };
-                let mut parts = vec![who];
-                parts.extend(glance.state_note.clone());
-                (
-                    parts.join(" · "),
-                    page::status_badge(Status::Waiting, text, cx),
-                )
-            }
+            // The same words as the sidebar (`topic_state`): 等小王回答, the
+            // clock, muted. A long name cuts with "…" (whole in a tooltip),
+            // so data never widens the status column. The meta line names the
+            // owner, as on every row.
+            Standing::OnOthers => (
+                with_note(owner_name.clone()),
+                crate::ui::native::StatusBadge::new(state.badge, state.text.clone())
+                    .max_w(STATUS_COLUMN)
+                    .into_any_element(),
+            ),
             Standing::Stuck | Standing::Other => (asker(), unified),
         };
         // Owner decision v16: the leading media is the member (the status
@@ -404,7 +391,6 @@ impl GroupPage {
             .map(|r| r.id.clone());
         let menu_nav = self.services.nav.clone();
         let (mg, mt) = (gid.clone(), tid.clone());
-        let title = t.title.clone();
         page::PageRow {
             media: Some(media),
             second: Some(line(second).into_any_element()),
@@ -418,9 +404,7 @@ impl GroupPage {
             COLUMNS,
             cx,
         )
-        .tooltip(move |window, cx| {
-            gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
-        })
+        // The title (TruncText) shows the whole title only when it is cut.
         .on_click(move |_, _, cx| {
             let (gid, tid, live) = (gid.clone(), tid.clone(), live.clone());
             nav.update(cx, |nav, cx| {
@@ -468,7 +452,6 @@ impl GroupPage {
                     .to_string(),
                 ];
                 rest.extend(d.note.clone());
-                let title = d.title.clone();
                 page::PageRow {
                     // Owner decision v16: the member, not a second status.
                     media: Some(match p.member(&d.member_id) {
@@ -486,9 +469,6 @@ impl GroupPage {
                     ..page::PageRow::new(d.title.clone())
                 }
                 .render(SharedString::from(format!("group-done-{i}")), COLUMNS, cx)
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
-                })
                 .on_click(move |_, _, cx| {
                     let (gid, tid) = (gid.clone(), tid.clone());
                     nav.update(cx, |nav, cx| nav.open_topic(gid, tid, cx))
