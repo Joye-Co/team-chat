@@ -558,8 +558,23 @@ pub fn chip_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button
 /// [`super::FocusRow`], muted at 50 % (§2.6 v15, review 3 C1-07).
 pub fn row_button(id: impl Into<ElementId>, cx: &App) -> Button {
     let k = native_colors(cx);
+    row_button_with(id, k.fill.opacity(0.5), cx)
+}
+
+/// [`row_button`] inside a GroupBox (a Settings navigation row, a theme
+/// tile). The group fill is `sidebar`, one level from `muted`, so muted at
+/// 50 % does not show there (250 → 247 in light, review 4 K-13). The hover
+/// is `pressed` at 50 %: 250 → 240 in light, 23 → 44 in dark, a step of
+/// more than 8 levels; pressed stays the full `pressed`.
+pub fn group_row_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    let k = native_colors(cx);
+    row_button_with(id, k.pressed.opacity(0.5), cx)
+}
+
+fn row_button_with(id: impl Into<ElementId>, hover: Hsla, cx: &App) -> Button {
+    let k = native_colors(cx);
     let l = Look {
-        hover: k.fill.opacity(0.5),
+        hover,
         ..look(PushStyle::Ghost, &k)
     };
     Button::new(id)
