@@ -12,15 +12,15 @@ use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, IntoElement, ParentElement,
     Pixels, Render, Size, Styled, Window, WindowBounds, div, px,
 };
-use gpui_component::input::InputState;
+use gpui_component::input::{InputState, TextareaState};
 
 use super::{
     buttons::{
         PushSize, PushStyle, borderless_button, borderless_text, disabled_push, popup_button,
         pull_down, push_button,
     },
-    fields::{FieldSize, NativeTextField, SearchField},
-    form::{FormRow, GroupedForm, InlineValueField},
+    fields::{FieldSize, NativeTextArea, NativeTextField, SearchField},
+    form::{FormRow, GroupedForm},
     inspector::{CompactRow, InspectorSection, inspector_column, label_value},
     menu::{MenuRow, menu_separator, menu_surface, popover_surface},
     segmented::{Segment, Segmented},
@@ -113,6 +113,7 @@ pub struct NativeKit {
     code: Entity<InputState>,
     inline_name: Entity<InputState>,
     inline_role: Entity<InputState>,
+    body: Entity<TextareaState>,
     sheet_name: Entity<InputState>,
     sheet_role: Entity<InputState>,
 }
@@ -126,17 +127,32 @@ impl NativeKit {
                     .default_value(value)
             })
         };
+        let search = input(crate::copy::common::SEARCH_PLACEHOLDER, "");
+        let search_text = input(crate::copy::common::SEARCH_PLACEHOLDER, t::TOPIC_B);
+        let name = input(t::NAME_PLACEHOLDER, t::NAME_VALUE);
+        let name_empty = input(t::NAME_PLACEHOLDER, "");
+        let code = input(t::CODE_PLACEHOLDER, "");
+        let inline_name = input(t::NAME_PLACEHOLDER, t::NAME_VALUE);
+        let inline_role = input(t::ROLE, t::ROLE_VALUE);
+        let sheet_name = input(t::NAME_PLACEHOLDER, t::NAME_VALUE);
+        let sheet_role = input(t::ROLE, t::ROLE_VALUE);
+        let body = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(t::TEXTAREA_PLACEHOLDER)
+                .default_value(t::TEXTAREA_VALUE)
+        });
         Self {
             page,
-            search: input(crate::copy::common::SEARCH_PLACEHOLDER, ""),
-            search_text: input(crate::copy::common::SEARCH_PLACEHOLDER, t::TOPIC_B),
-            name: input(t::NAME_PLACEHOLDER, t::NAME_VALUE),
-            name_empty: input(t::NAME_PLACEHOLDER, ""),
-            code: input(t::CODE_PLACEHOLDER, ""),
-            inline_name: input(t::NAME_PLACEHOLDER, t::NAME_VALUE),
-            inline_role: input(t::ROLE, t::ROLE_VALUE),
-            sheet_name: input(t::NAME_PLACEHOLDER, t::NAME_VALUE),
-            sheet_role: input(t::ROLE, t::ROLE_VALUE),
+            search,
+            search_text,
+            name,
+            name_empty,
+            code,
+            inline_name,
+            inline_role,
+            body,
+            sheet_name,
+            sheet_role,
         }
     }
 }
@@ -163,6 +179,15 @@ fn sample(label: &'static str, el: impl IntoElement, k: &NativeColors) -> gpui::
         .gap(px(4.))
         .child(caption(label, k))
         .child(el)
+}
+
+/// A gallery row with its label in the left column, centered on the row.
+fn label_row(label: &'static str, row: gpui::Div, k: &NativeColors) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .child(caption(label, k).flex_none().w(SIZE_LABEL))
+        .child(row)
 }
 
 /// The width of a row label in the button gallery.
@@ -277,9 +302,10 @@ impl NativeKit {
                     )),
                 &k,
             ))
-            .child(
+            .child(size_row(
+                t::ROW_MENUS,
+                PushSize::Regular,
                 hstack()
-                    .pl(SIZE_LABEL)
                     .child(popup_button(
                         "kb-pop",
                         t::ON_LAUNCH_HOME,
@@ -300,7 +326,8 @@ impl NativeKit {
                             .bg(k.fill_hover),
                     )
                     .child(borderless_text("kb-edit", t::EDIT, cx)),
-            )
+                &k,
+            ))
             .into_any_element()
     }
 
@@ -349,7 +376,8 @@ impl NativeKit {
                         &k,
                     )),
             )
-            .child(
+            .child(label_row(
+                t::ROW_CHECKBOX,
                 hstack()
                     .gap(px(16.))
                     .child(NativeCheckbox::new("kc-1", true).label(t::LAUNCH_AT_LOGIN))
@@ -361,8 +389,10 @@ impl NativeKit {
                             .disabled(true)
                             .label(t::SOUND),
                     ),
-            )
-            .child(
+                &k,
+            ))
+            .child(label_row(
+                t::ROW_RADIO,
                 hstack()
                     .gap(px(16.))
                     .child(NativeRadio::new("kr-1", true).label(t::ALL_MESSAGES))
@@ -372,8 +402,10 @@ impl NativeKit {
                             .disabled(true)
                             .label(t::SOUND),
                     ),
-            )
-            .child(
+                &k,
+            ))
+            .child(label_row(
+                t::ROW_SEGMENTED,
                 hstack()
                     .child(Segmented::new(
                         "kseg-1",
@@ -391,7 +423,8 @@ impl NativeKit {
                         .selected(1)
                         .toolbar(),
                     ),
-            )
+                &k,
+            ))
             .into_any_element()
     }
 
@@ -474,14 +507,20 @@ impl NativeKit {
             )
             .child(
                 GroupedForm::new()
-                    .row(FormRow::new(t::NAME).control(InlineValueField::new(
-                        "kform-name",
-                        &self.inline_name,
-                        t::NAME_VALUE,
-                    )))
+                    // An inline field is the standard Input sm h28 (§2.8),
+                    // not a borderless value (review 4 K-18).
+                    .row(
+                        FormRow::new(t::NAME).control(
+                            NativeTextField::new("kform-name", &self.inline_name)
+                                .size(FieldSize::Small)
+                                .width(px(160.)),
+                        ),
+                    )
                     .row(
                         FormRow::new(t::ROLE).control(
-                            InlineValueField::new("kform-role", &self.inline_role, t::ROLE_VALUE)
+                            NativeTextField::new("kform-role", &self.inline_role)
+                                .size(FieldSize::Small)
+                                .width(px(160.))
                                 .show_focus(true),
                         ),
                     ),
@@ -502,6 +541,16 @@ impl NativeKit {
                             .control(device_value("kform-more-b", t::LAST_SEEN, window, cx)),
                     ),
             )
+            .into_any_element()
+    }
+
+    /// The multi-line field: a value longer than one line shows its
+    /// wrapped lines (review 4 K-12).
+    fn textarea(&self, cx: &mut App) -> AnyElement {
+        let k = native_colors(cx);
+        section(t::SEC_TEXTAREA, &k)
+            .w(px(440.))
+            .child(NativeTextArea::new("kf-area", &self.body).rows(3))
             .into_any_element()
     }
 
@@ -537,7 +586,14 @@ impl NativeKit {
                                     .child(self.controls(cx))
                                     .child(self.fields(cx)),
                             )
-                            .child(self.form(window, cx)),
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(24.))
+                                    .child(self.form(window, cx))
+                                    .child(self.textarea(cx)),
+                            ),
                     ),
             )
             .into_any_element()
@@ -646,7 +702,7 @@ impl NativeKit {
                 .flex_col()
                 .gap(px(2.))
                 .child(caption(t::ROW_SELECTION_ACTIVE, &k).pl(px(16.)))
-                .child(row("kl-1", t::TOPIC_A, cx).selected(true))
+                .child(row("kl-1", t::TOPIC_A, cx).selected(true).inactive(false))
                 .child(caption(t::STATE_FOCUSED, &k).pl(px(16.)).pt(px(6.)))
                 // Keyboard focus is the ring, never the selected fill
                 // (E3, R1-01); the scene draws it without a key press.
@@ -659,7 +715,8 @@ impl NativeKit {
                 .child(
                     row("kl-3", t::TOPIC_C, cx)
                         .selected(true)
-                        .list_focused(false),
+                        .list_focused(false)
+                        .inactive(false),
                 )
                 .child(
                     caption(t::ROW_SELECTION_INACTIVE, &k)
@@ -684,7 +741,12 @@ impl NativeKit {
                 // D12: one Progress (and its steps variant), no colored bars.
                 .child(super::progress(0.62, cx))
                 .child(super::progress_steps(3, 5, cx))
-                .child(hstack().child(crate::ui::motion::spinner())),
+                .child(
+                    hstack()
+                        .gap(px(8.))
+                        .child(crate::ui::motion::spinner())
+                        .child(caption(t::STATE_LOADING, &k)),
+                ),
         );
         // A sheet attached under the toolbar of a dimmed window.
         let app_icon = div()
@@ -998,7 +1060,7 @@ impl NativeKit {
                         )),
                 ),
         );
-        // A page table with its footer: the count, 第 2 / 3 页 and the four
+        // A page table with its footer: the count, 第 3 / 3 页 and the four
         // page buttons (§2.7).
         let page_table = section(t::SEC_TABLE, &k).child({
             use super::page::{Col, Pager, frame, table_footer};
@@ -1021,21 +1083,31 @@ impl NativeKit {
                     },
                 ]
             };
-            let page_rows = vec![(
-                vec![cell(t::TOPIC_A), cell(t::VERSION_3), cell(t::TIME_A)],
-                Some(
-                    Box::new(|_: &gpui::ClickEvent, _: &mut Window, _: &mut App| {})
-                        as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>,
-                ),
-            )];
+            // The last page of 23 at 10 a page: 3 rows (review 4 K-18).
+            let page_rows = [
+                (t::TOPIC_A, t::VERSION_3, t::TIME_A),
+                (t::TOPIC_B, t::VERSION_1, t::TIME_A),
+                (t::TOPIC_C, t::VERSION_1, t::TIME_B),
+            ]
+            .into_iter()
+            .map(|(name, version, time)| {
+                (
+                    vec![cell(name), cell(version), cell(time)],
+                    Some(
+                        Box::new(|_: &gpui::ClickEvent, _: &mut Window, _: &mut App| {})
+                            as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>,
+                    ),
+                )
+            })
+            .collect();
             div().flex().flex_col().gap(space::S16).child(
                 frame(cx)
                     .child(super::page::table("k3-page", &page_cols(), page_rows, cx))
                     .child(table_footer(
                         "k3-page-footer",
-                        t::TABLE_COUNT,
+                        t::TABLE_COUNT_PAGED,
                         Pager {
-                            page: 2,
+                            page: 3,
                             pages: 3,
                             go: Some(std::rc::Rc::new(|_, _, _| {})),
                             per_page: 10,

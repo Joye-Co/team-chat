@@ -49,9 +49,9 @@ pub use blocks::{
 #[allow(unused_imports)]
 pub use buttons::{
     Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
-    borderless_variant, chip_button, disabled_push, ghost_button, icon_button, icon_button_bare,
-    icon_button_styled, icon_button_sym, loading_push, popup_button, pull_down, push_button,
-    row_button, screen_button, select_button, square_button, square_pair, tile_button,
+    borderless_variant, chip_button, disabled_push, ghost_button, group_row_button, icon_button,
+    icon_button_bare, icon_button_styled, icon_button_sym, loading_push, popup_button, pull_down,
+    push_button, row_button, screen_button, select_button, square_button, square_pair, tile_button,
     toolbar_item, toolbar_item_sym, toolbar_tab,
 };
 #[allow(unused_imports)]
@@ -64,7 +64,7 @@ pub use fields::{FieldSize, NativeTextArea, NativeTextField, SearchField, field_
 #[allow(unused_imports)]
 pub use focus::{Arrows, FocusRow, row_focus_ring};
 #[allow(unused_imports)]
-pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_state};
+pub use form::{FormRow, GroupedForm, inline_commit, inline_state};
 #[allow(unused_imports)]
 pub use inspector::{
     CompactRow, InspectorSection, determinate_bar, inspector_column, label_value, label_value_with,

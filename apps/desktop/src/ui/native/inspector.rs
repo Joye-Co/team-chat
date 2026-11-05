@@ -304,8 +304,12 @@ impl RenderOnce for CompactRow {
             .gap(px(8.))
             .n_body()
             .text_color(sel.map(|s| s.1).unwrap_or(k.label))
+            // Selected: muted + 500 (§2.6). In a window in the back the
+            // weight drops to regular, so the two selections differ (review
+            // 4 K-18).
             .when_some(sel, |d, (fill, _)| {
-                d.bg(fill).font_weight(crate::theme::MEDIUM_WEIGHT)
+                d.bg(fill)
+                    .when(active, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
             })
             .when(self.on_click.is_some(), |d| d.focus_row(self.selected, cx))
             .when(self.show_focus, |d| d.shadow(super::row_focus_ring(cx)))
