@@ -351,12 +351,9 @@ impl GroupPage {
                             .find(|s| s.state == PlanState::Current)
                             .map(|s| s.text.clone()),
                     );
-                    // One clock (A5): the run's start on the provider's clock,
-                    // as on 首页 and 成员.
-                    parts.push(kit::elapsed(
-                        p.clock_now(),
-                        r.started_at.unwrap_or(r.created_at),
-                    ));
+                    // One clock (A5, `run_elapsed`): as on 首页, 成员 and the
+                    // live pane.
+                    parts.extend(crate::views::topic_page::run_elapsed_text(p.as_ref(), r));
                 }
                 (parts.join(" · "), unified)
             }

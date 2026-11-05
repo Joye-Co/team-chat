@@ -21,7 +21,6 @@ use super::{
     ask::{QuickAnswer, quick_answer},
     done::proof_line,
     model::{AskCard, RunCard, Snapshot},
-    working::elapsed,
 };
 use crate::{
     app::{RightPane, Services},
@@ -283,9 +282,12 @@ pub fn run_row(
     let mut rest = vec![snap.name_by_avatar(&r.run.bot_id)];
     rest.extend(r.current_text());
     let started = r.run.started_at.unwrap_or(r.run.created_at);
-    // One clock (A5): the run's start on the provider's clock, as on 群
-    // and 成员; the time column is the same start.
-    rest.extend(elapsed(services.provider.clock_now(), started));
+    // One clock (A5, `run_elapsed`): the run's start on the provider's
+    // clock, as on 群, 成员 and the live pane; the time column is that start.
+    rest.extend(crate::views::topic_page::run_elapsed_text(
+        services.provider.as_ref(),
+        &r.run,
+    ));
     let status = if m > 0 {
         fill(
             c::DESK_STATUS_WORKING,

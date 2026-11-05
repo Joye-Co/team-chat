@@ -18,7 +18,6 @@ use crate::ui::{
 use crate::{
     app::{RightPane, Services},
     copy::{desk as c, fill},
-    data::Millis,
     ui::{
         MemberAvatar,
         native::{
@@ -29,20 +28,6 @@ use crate::{
     },
     views::{group_page::rows::line, shell::clock},
 };
-
-/// `已 3 分钟` since `since`, on the provider's clock `now` (the one clock
-/// of every page, A5).
-pub fn elapsed(now: Millis, since: Millis) -> Option<String> {
-    let mins = (now - since) / 60_000;
-    if mins < 0 {
-        return None;
-    }
-    Some(if mins < 60 {
-        fill(c::DESK_ELAPSED_MINUTES, &[("n", &mins.max(1).to_string())])
-    } else {
-        fill(c::DESK_ELAPSED_HOURS, &[("n", &(mins / 60).to_string())])
-    })
-}
 
 /// The pane (§2.5): a header band (`今天` and its close button) on the
 /// toolbar row, then 这周 (DescriptionList), 排队, 最近的产出 and 在哪干活,

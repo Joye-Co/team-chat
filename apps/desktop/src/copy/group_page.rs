@@ -38,8 +38,6 @@ crate::copy! {
     GROUP_PAGE_OUTPUTS = "产出",
     GROUP_PAGE_SETTINGS = "群设置",
     GROUP_PAGE_ELAPSED = "{step} · {time}",
-    ELAPSED_MINUTES = "已 {n} 分钟",
-    ELAPSED_HOURS = "已 {n} 小时",
     GROUP_PAGE_ARTIFACT_META = "v{v} · {kind} · {name}",
     GROUP_PAGE_KIND_PAGE = "网页",
     GROUP_PAGE_KIND_FILE = "文档",

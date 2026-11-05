@@ -770,9 +770,8 @@ impl MembersPage {
                 .map(|b| member_name(&self.services, b))
                 .unwrap_or_default();
             let current = r.plan.iter().position(|s| s.state == PlanState::Current);
-            // One clock (A5): the run's start on the provider's clock, as
-            // on 首页 and 群.
-            let since = r.started_at.unwrap_or(r.created_at);
+            // One clock (A5, `run_elapsed`): as on 首页, 群 and the live pane.
+            let used = crate::views::topic_page::run_elapsed_text(p.as_ref(), r);
             let (badge, value) = match kit::plan_progress(&r.plan) {
                 Some((n, m)) => (
                     fill(
@@ -818,7 +817,7 @@ impl MembersPage {
                             .n_callout()
                             .n_figures()
                             .text_color(k.secondary)
-                            .child(kit::elapsed(p.clock_now(), since))
+                            .children(used)
                             .into_any_element(),
                     ),
                     e.extras.queued.is_empty(),

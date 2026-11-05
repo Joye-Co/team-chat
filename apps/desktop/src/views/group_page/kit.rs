@@ -11,7 +11,7 @@ use gpui::{
 
 use crate::{
     app::Services,
-    copy::{common, fill, group_page as c},
+    copy::{common, group_page as c},
     data::{ArtifactSummary, Millis, PlanItem, PlanState, v2::ScreenLineKind},
     theme::{self, Type as _, space},
     ui::{self, Sym},
@@ -240,16 +240,6 @@ pub fn line_counts(additions: u32, deletions: u32, cx: &App) -> Div {
         .mono()
         .child(div().text_color(k.ok_ink).child(format!("+{additions}")))
         .child(div().text_color(k.bad_ink).child(format!("−{deletions}")))
-}
-
-/// `已 3 分钟` / `已 2 小时` from `since` to `now`.
-pub fn elapsed(now: Millis, since: Millis) -> String {
-    let minutes = ((now - since).max(0) / 60_000) as u64;
-    if minutes < 60 {
-        fill(c::ELAPSED_MINUTES, &[("n", &minutes.max(1).to_string())])
-    } else {
-        fill(c::ELAPSED_HOURS, &[("n", &(minutes / 60).to_string())])
-    }
 }
 
 /// A date as the week lists print it: `11-03`.

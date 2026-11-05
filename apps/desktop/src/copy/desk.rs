@@ -46,8 +46,6 @@ crate::copy! {
     DESK_KIND_DECISION = "决定",
     // 正在做.
     DESK_LIVE = "实时",
-    DESK_ELAPSED_MINUTES = "已 {n} 分钟",
-    DESK_ELAPSED_HOURS = "已 {n} 小时",
     DESK_HIDE_SIDE = "收起右栏",
     DESK_SHOW_SIDE = "展开右栏",
     // --- pages track (v12 native) ---
