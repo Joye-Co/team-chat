@@ -25,7 +25,7 @@ env:
 jobs:
   changes:
     name: Detect changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -89,7 +89,7 @@ jobs:
     name: Packages (bun)
     needs: changes
     if: needs.changes.outputs.packages == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,7 +106,7 @@ jobs:
     name: Server (Workers)
     needs: changes
     if: needs.changes.outputs.server == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,7 +123,7 @@ jobs:
     name: Rust (protocol, core, daemon)
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -139,7 +139,7 @@ jobs:
     name: Daemon local e2e (Linux, fake Claude and Codex)
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.server == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,7 +163,7 @@ jobs:
     name: Ops (monitor, restore)
     needs: changes
     if: needs.changes.outputs.ops == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,8 +182,8 @@ jobs:
     name: Desktop tests (macOS)
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    runs-on: blacksmith-6vcpu-macos-15
-    timeout-minutes: 45
+    runs-on: macos-15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml
@@ -198,7 +198,7 @@ jobs:
     name: Rust fmt and clippy (report only)
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Report only until main is clean: fmt and clippy fail on main today. Remove this line then.
     continue-on-error: true
@@ -219,8 +219,8 @@ jobs:
     name: Desktop DMG (macOS)
     # Only on manual runs: a release build of the DMG is slow and costly.
     if: github.event_name == 'workflow_dispatch' && inputs.desktop
-    runs-on: blacksmith-6vcpu-macos-15
-    timeout-minutes: 45
+    runs-on: macos-15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml

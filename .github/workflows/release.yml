@@ -26,8 +26,8 @@ permissions:
 jobs:
   dmg:
     name: Build and attach the DMG
-    runs-on: blacksmith-6vcpu-macos-15
-    timeout-minutes: 45
+    runs-on: macos-15
+    timeout-minutes: 90
     env:
       TAG: ${{ inputs.tag }}
       GH_TOKEN: ${{ github.token }}
