@@ -3,6 +3,51 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.0 (unreleased)
+
+Notes: [docs/releases/1.2.0.md](docs/releases/1.2.0.md). The server deploys first, from the
+commit that will be tagged, with `DEPLOY_VERSION=1.2.0` (`bun run deploy:e2e`, `deploy:staging`,
+`deploy:production`), then `scripts/release.sh` makes the app, the machine daemon and the tag.
+1.1.0 clients and daemons keep working against the 1.2.0 server.
+
+D1 migrations, both new tables only: `0009_email_sign_in` (`member_emails`, `email_codes`,
+`email_outbox`) and `0009_ai_service` (`ai_service`). Room Durable Objects add the named
+migration `messaging-2` (`topic_states.muted`, old rows read as not muted) on first access. No
+Durable Object class change. New Worker config in staging and production: the `send_email`
+binding `EMAIL` and the var `EMAIL_FROM = login@mail.joyehuang.dev` (Cloudflare Email Service).
+No new Worker secret: the AI 服务 key is encrypted with `HOOK_SECRET_KEY`; the
+`ANTHROPIC_API_KEY` secret from #54 is no longer read.
+
+Owner actions after the release: install the 1.2.0 daemon on the Mac mini (new runner permission
+defaults), and set the AI 服务 in 设置 › 通用 (without it, a new 话题 keeps its first line as the
+title).
+
+- Email code sign-in (#52, #56): `POST /v1/auth/email/code`, `POST /v1/auth/email/sign-in` and
+  `/v1/me/email`; 6-digit codes stored as SHA-256, single use, 10 minutes, 5 tries, rate limited.
+  The first sign-in is still an invite code. Debug builds use their own data folder and Keychain
+  service (`<bundle id>.dev`) and leave the installed app's sign-in alone; one session per server
+  and a 服务器 menu.
+- Several signed-in accounts with an account menu in the sidebar footer (#53).
+- AI 服务 (#55): owner-only `GET/PUT/DELETE /v1/settings/ai` and `POST /v1/settings/ai/test`
+  (DeepSeek, Anthropic, OpenAI-compatible); AI 话题 titles (#54, `server/src/autotitle/`) use it.
+- 群聊 (#54): every 群 and DM has a 群聊 with the fixed id `main-<groupId>` (`Topic.main`, new
+  optional field); 开个话题 on a message quotes it. The new-话题 sheets have no title field.
+- Runners (#54): Claude Code runs with `bypassPermissions` and always allows `Bash(chat-run:*)`;
+  Codex runs with `danger-full-access` and no approvals; asides stay read-only. The server strips
+  the `acceptance` block from a posted result.
+- Notification settings live on the 群 and 话题 pages (#50); new frame `topic.mute`,
+  `TopicState.muted`; a muted 话题 notifies only on mentions.
+- First run for a new member (#51): every 群 shows in the sidebar, 首页 shows 从这里开始, the
+  first invite redemption makes a DM with Jojo (or the oldest bot), a 新建 menu, and 交给 in the
+  new-话题 sheet.
+- Message actions (#45): avatar click quotes and @s, 回复 works, R and double-click reply, 撤回
+  own messages within 24 hours with 重新编辑, frequent emoji first; `bun run dev:desktop`.
+- Shell (#46, #47, #48): one-line headers in a 64 pt band, fewer borders, a quiet 新话题 button,
+  hide, resize and slide the sidebar, the settings gear in the sidebar footer, the profile avatar
+  shows, no member 暂停 and no hand-set 话题 status.
+- CI and the release workflow run on GitHub-hosted runners (#49); the staging smoke warms up and
+  keeps every sample (#44).
+
 ## 1.1.0 (2026-11-05)
 
 Notes: [docs/releases/1.1.0.md](docs/releases/1.1.0.md). `scripts/release.sh` writes the date in
