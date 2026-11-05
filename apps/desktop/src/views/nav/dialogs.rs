@@ -24,7 +24,7 @@ use crate::{
         native::{
             AlertLayout, NativeCheckbox, NativeTextField, NativeType as _, PushStyle, SearchField,
             SheetLayout, SheetWidth, alert_button, disabled_push, metrics, native_colors,
-            native_sheet, overlays::app_icon, sheet_buttons,
+            native_sheet, native_sheet_keyboard, overlays::app_icon, sheet_buttons,
         },
     },
 };
@@ -100,18 +100,7 @@ pub fn sheet_form_row(
     control: impl IntoElement,
     cx: &App,
 ) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), false, false, cx)
-}
-
-/// A [`sheet_form_row`] whose field is invalid: the label turns
-/// destructive (the field draws its own destructive border and ring).
-pub fn sheet_form_row_invalid(
-    label: impl Into<gpui::SharedString>,
-    control: impl IntoElement,
-    invalid: bool,
-    cx: &App,
-) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), false, invalid, cx)
+    form_row(label.into(), control.into_any_element(), false, cx)
 }
 
 /// A full-width row (a textarea, a list, a grid): the label at the same x
@@ -121,21 +110,22 @@ pub fn sheet_form_row_top(
     control: impl IntoElement,
     cx: &App,
 ) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), true, false, cx)
+    form_row(label.into(), control.into_any_element(), true, cx)
 }
 
 fn form_row(
     label: gpui::SharedString,
     control: gpui::AnyElement,
     top: bool,
-    invalid: bool,
     cx: &App,
 ) -> gpui::Div {
     let k = native_colors(cx);
     let label = div()
         .flex_none()
         .n_body()
-        .text_color(if invalid { k.red } else { k.label })
+        // An invalid field keeps a foreground label: its border, ring and
+        // the footer message carry the error (§2.8 v15, review 3 K-03).
+        .text_color(k.label)
         .overflow_hidden()
         .whitespace_nowrap()
         .text_ellipsis()
@@ -316,7 +306,8 @@ impl MemberPicker {
         let k = native_colors(cx);
         let filled = highlighted || (chosen && mode == PickMode::One);
         let surface = if filled { k.selection } else { k.content };
-        let name: gpui::SharedString = m.name.clone().into();
+        // Beside the avatar a leading emoji is left out (X-01).
+        let name: gpui::SharedString = ui::avatar::name_beside_avatar(&m.name).to_string().into();
         let tip = name.clone();
         div()
             .id(id.clone())
@@ -397,6 +388,10 @@ impl gpui::RenderOnce for MemberPicker {
         let k = native_colors(cx);
         let empty = self.rows.is_empty();
         let list_h = PICK_ROW * PICK_VISIBLE + space::S4 * 2. + layout::BORDER * 2.;
+        // While the list scrolls its scrollbar shows at rest: the rows end
+        // before its 12 track, so the thumb never covers a highlighted row
+        // (review 3 K-08).
+        let scrolls = self.rows.len() as f32 > PICK_VISIBLE;
         let focused = self
             .list_focus
             .as_ref()
@@ -436,6 +431,7 @@ impl gpui::RenderOnce for MemberPicker {
                             .id(gpui::SharedString::from(format!("{}-members", self.id)))
                             .size_full()
                             .p(space::S4)
+                            .when(scrolls, |d| d.pr(space::S12))
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
                             .flex()
@@ -902,12 +898,11 @@ impl Render for NewGroupForm {
             .status(status);
         if new_group {
             layout = layout.body(
-                sheet_form().child(sheet_form_row_invalid(
+                sheet_form().child(sheet_form_row(
                     o::GROUP_NAME,
                     NativeTextField::new("new-group-name", &self.name)
                         .full_width()
                         .error(name_problem.is_some()),
-                    name_problem.is_some(),
                     cx,
                 )),
             );
@@ -947,14 +942,31 @@ fn open_sheet<V: gpui::Render>(
     window: &mut Window,
     cx: &mut App,
 ) {
+    open_sheet_as(view, focus, width, false, window, cx);
+}
+
+/// [`open_sheet`]; `keyboard` when a key binding (⌘⇧N) opens it: the sheet
+/// shows at once, with no slide, as ⌘N's 新话题 does (review-animations 9,
+/// review 3 K-08).
+fn open_sheet_as<V: gpui::Render>(
+    view: Entity<V>,
+    focus: gpui::FocusHandle,
+    width: SheetWidth,
+    keyboard: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
         if first.replace(false) {
             focus.focus(window, cx);
         }
-        native_sheet(dialog, width, cx)
-            .px(px(0.))
-            .child(view.clone())
+        let dialog = if keyboard {
+            native_sheet_keyboard(dialog, width, cx)
+        } else {
+            native_sheet(dialog, width, cx)
+        };
+        dialog.px(px(0.)).child(view.clone())
     });
 }
 
@@ -990,11 +1002,12 @@ pub fn open_add_members(
     open_sheet(form, focus, SheetWidth::List, window, cx);
 }
 
-/// Opens the new-group sheet.
+/// Opens the new-group sheet. Every path to it is the `NewGroup` action
+/// (⌘⇧N and the rail button), so it opens at once like ⌘N.
 pub fn open_new_group(services: Services, window: &mut Window, cx: &mut App) {
     let form = cx.new(|cx| NewGroupForm::new(services, FormMode::NewGroup, window, cx));
     let focus = form.read(cx).name.read(cx).focus_handle(cx);
-    open_sheet(form, focus, SheetWidth::List, window, cx);
+    open_sheet_as(form, focus, SheetWidth::List, true, window, cx);
 }
 
 /// The sheet that starts a DM: a search field over a list of members;
@@ -1050,10 +1063,11 @@ impl DmPicker {
             .collect()
     }
 
+    /// ↑/↓ stop at the ends, as in every member picker (§2.9 one
+    /// component, review 3 K-08).
     fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let n = self.shown(cx).len() as isize;
-        if n > 0 {
-            self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+        if let Some(ix) = pick_step(Some(self.active), delta, self.shown(cx).len()) {
+            self.active = ix;
             cx.notify();
         }
     }

@@ -227,7 +227,12 @@ impl NativeKit {
                         PushStyle::Default,
                         PushSize::Small,
                         cx,
-                    ))
+                    )),
+            )
+            // One size per row (review 3 K-11): sm (h28) above, lg (h36)
+            // below.
+            .child(
+                hstack()
                     .child(push_button(
                         "kb-l1",
                         t::CANCEL,
