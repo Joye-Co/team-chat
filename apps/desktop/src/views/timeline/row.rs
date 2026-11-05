@@ -7,8 +7,8 @@
 //! meta line.
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    AnyElement, App, Context, ElementId, InteractiveElement as _, IntoElement, ParentElement,
+    Pixels, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
@@ -549,9 +549,25 @@ impl TimelineView {
                 })
                 .into_any_element()
         } else {
+            // A click on someone else's avatar @s them in the composer, as in
+            // Feishu; the avatar keeps the row's message menu off it.
+            let mention = author
+                .as_ref()
+                .filter(|a| self.me.as_deref() != Some(a.id.as_str()))
+                .map(|a| (a.id.clone(), a.name.clone()));
             div()
+                .id(ElementId::Name(format!("avatar-{key}").into()))
                 .w(gutter_w)
                 .flex_none()
+                .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .when_some(mention, |el, (id, name)| {
+                    let tip: SharedString = fill(t::AVATAR_MENTION_TIP, &[("name", &name)]).into();
+                    el.cursor_pointer()
+                        .tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| this.mention(&id, cx)))
+                })
                 .child(if v2 {
                     // v2: tiles and circles only; presence lives in the rail.
                     ui::MemberAvatar::new(author.as_ref(), gutter_w)
@@ -664,8 +680,8 @@ impl TimelineView {
 
     /// The hover toolbar (§7.5): a level-1 capsule 18 pt above the row, at
     /// the right edge of the content box: add reaction (the emoji picker),
-    /// reply (quotes into the composer), copy as quote and more (the row
-    /// menu).
+    /// reply (a quote chip in the composer) and more (the row menu, which
+    /// holds only what the toolbar does not).
     fn render_hover_toolbar(
         &self,
         message: &Message,
@@ -708,14 +724,6 @@ impl TimelineView {
                             move |this, _, _, cx| this.quote(&m, cx)
                         })),
                 )
-            })
-            .child({
-                let quoted = quote_markdown(&message.body);
-                tool("copy-quote", Sym::Quote)
-                    .named(t::COPY_QUOTE)
-                    .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(quoted.clone()))
-                    })
             })
             .child(
                 tool("more", Sym::More)
@@ -1345,20 +1353,6 @@ fn editing_is_none(view: &TimelineView, key: &str) -> bool {
     view.editing.as_ref().is_none_or(|e| e.key != key)
 }
 
-/// A message as a Markdown quote, for 复制为引用.
-fn quote_markdown(body: &str) -> String {
-    body.lines()
-        .map(|l| {
-            if l.is_empty() {
-                ">".to_string()
-            } else {
-                format!("> {l}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// The date divider (§7.5): `12/16 500 text-3` centered between two 0.5 pt
 /// `sep` lines across the content box; 16 pt above, 4 below.
 fn date_divider(at: crate::data::Millis, cx: &App) -> impl IntoElement {
@@ -1399,16 +1393,6 @@ fn new_messages_divider(cx: &App) -> impl IntoElement {
         .text_color(n.secondary)
         .child(div().flex_1().h(theme::HAIRLINE).bg(colors.sep))
         .child(t::NEW_MESSAGES)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::quote_markdown;
-
-    #[test]
-    fn quotes_every_line() {
-        assert_eq!(quote_markdown("a\n\nb"), "> a\n>\n> b");
-    }
 }
 
 /// Opacity of the start block's parts while row 0 scrolls out at the top.

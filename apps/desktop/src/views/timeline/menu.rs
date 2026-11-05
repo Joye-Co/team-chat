@@ -1,8 +1,9 @@
 //! Extension point: the context menu of a message row, and in-place edit.
 //!
-//! Items: 引用回复 (emits `TimelineEvent::Quote`), 编辑 (my sent messages),
-//! 删除 (mine, or any for an owner; asks first), 复制 (the Markdown source),
-//! 复制链接 (a link with the product URL scheme), and 重试 for a failed send.
+//! Items: 复制 (the Markdown source), 复制链接 (a link with the product URL
+//! scheme), 编辑 (my sent messages), 删除 (mine, or any for an owner; asks
+//! first), and 重试 for a failed send. Reply and reactions live on the hover
+//! toolbar only, so no action shows twice on a hovered row.
 //! To add an item, add it in [`build`]; anything that changes data calls the
 //! provider.
 
@@ -45,12 +46,6 @@ pub(super) fn build(
     let sent = !message.id.is_empty() && message.deleted_at.is_none();
     let failed = message.send_state == SendState::Failed;
     let m = message.clone();
-    let quote = {
-        let (view, m) = (view.clone(), m.clone());
-        PopupMenuItem::new(t::MENU_QUOTE).on_click(move |_, _, cx| {
-            let _ = view.update(cx, |this, cx| this.quote(&m, cx));
-        })
-    };
     let edit = {
         let (view, m) = (view.clone(), m.clone());
         PopupMenuItem::new(t::EDIT).on_click(move |_, window, cx| {
@@ -80,8 +75,7 @@ pub(super) fn build(
             let _ = view.update(cx, |this, _| this.retry(&m));
         })
     };
-    menu.when(sent, |menu| menu.item(quote))
-        .when(failed, |menu| menu.item(retry))
+    menu.when(failed, |menu| menu.item(retry))
         .when(m.deleted_at.is_none(), |menu| menu.item(copy_text))
         .when(sent, |menu| menu.item(copy_link))
         .when(can_edit || can_delete, |menu| menu.separator())

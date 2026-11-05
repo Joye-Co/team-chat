@@ -608,3 +608,46 @@ fn a_composer_on_screen_lifts_the_toasts(cx: &mut TestAppContext) {
     });
     assert_eq!(after, px(16.));
 }
+
+#[gpui::test]
+fn avatar_click_mentions_after_a_space_and_sends_the_id(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, Some(TOPIC));
+    cx.simulate_input("看下");
+    h.view.update_in(cx, |this, window, cx| {
+        this.mention_member("m-coder", window, cx)
+    });
+    assert_eq!(h.text(cx), "看下 @Forge ");
+    // Twice is two mentions in the text but one id.
+    h.view.update_in(cx, |this, window, cx| {
+        this.mention_member("m-coder", window, cx)
+    });
+    cx.simulate_input("好");
+    cx.simulate_keystrokes("enter");
+    let sent = h.last(TOPIC);
+    assert_eq!(sent.body, "看下 @Forge @Forge 好");
+    assert_eq!(sent.mentions, vec!["m-coder".to_string()]);
+}
+
+#[gpui::test]
+fn reply_quotes_a_message_of_the_open_topic_only(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, Some(TOPIC));
+    let target = h
+        .provider
+        .messages(GROUP, TOPIC, usize::MAX / 2)
+        .messages
+        .last()
+        .cloned()
+        .expect("the fake topic has messages");
+    h.view.update_in(cx, |this, window, cx| {
+        this.quote_message(GROUP, "t-other", target.id.clone(), window, cx)
+    });
+    assert!(h.view.update(cx, |this, _| this.quote.is_none()));
+    h.view.update_in(cx, |this, window, cx| {
+        this.quote_message(GROUP, TOPIC, target.id.clone(), window, cx)
+    });
+    assert!(h.view.update(cx, |this, _| this.quote.is_some()));
+    cx.simulate_input("同意");
+    cx.simulate_keystrokes("enter");
+    let sent = h.last(TOPIC);
+    assert_eq!(sent.quote_of.as_deref(), Some(target.id.as_str()));
+}

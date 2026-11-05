@@ -72,13 +72,15 @@ const STREAM_REFRESH: Duration = Duration::from_millis(100);
 /// Events for other views.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TimelineEvent {
-    /// The user chose 引用回复 on a message: the composer should quote it
-    /// (`SendRequest::quote_of`).
+    /// The user chose 回复 on a message (the hover toolbar, or R on the
+    /// keyboard row): the composer should quote it (`SendRequest::quote_of`).
     Quote {
         group_id: GroupId,
         topic_id: TopicId,
         message_id: MessageId,
     },
+    /// The user clicked a sender's avatar: the composer should @ them.
+    Mention { member_id: crate::data::MemberId },
 }
 
 /// A message being edited in place.
@@ -662,6 +664,36 @@ impl TimelineView {
         });
     }
 
+    /// Asks the composer to @ `member_id` (a click on their avatar).
+    fn mention(&mut self, member_id: &str, cx: &mut Context<Self>) {
+        if self.me.as_deref() == Some(member_id) {
+            return;
+        }
+        cx.emit(TimelineEvent::Mention {
+            member_id: member_id.to_string(),
+        });
+    }
+
+    /// R on the keyboard row: reply to it. Returns true when it did.
+    fn reply_to_keyboard_row(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.keyboard_row {
+            return false;
+        }
+        let Some(message) = self
+            .hovered
+            .as_deref()
+            .and_then(|k| self.row_index(k))
+            .map(|ix| self.messages[ix].clone())
+        else {
+            return false;
+        };
+        let replyable = !message.id.is_empty() && message.deleted_at.is_none();
+        if replyable {
+            self.quote(&message, cx);
+        }
+        replyable
+    }
+
     fn row_index(&self, key: &str) -> Option<usize> {
         self.messages.iter().rposition(|m| model::key(m) == key)
     }
@@ -705,7 +737,9 @@ impl TimelineView {
 /// The key context of the thread.
 const KEY_CONTEXT: &str = "Timeline";
 
-/// ↑↓ in a focused thread (call once at start-up).
+/// ↑↓ in a focused thread (call once at start-up). R on the row they
+/// reached replies to it (`on_key_down` in render, so it never takes an "r"
+/// typed in the in-place editor).
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         gpui::KeyBinding::new("up", crate::views::rail::SelectPrevious, Some(KEY_CONTEXT)),
@@ -934,6 +968,16 @@ impl Render for TimelineView {
                     this.move_keyboard_row(1, cx)
                 }),
             )
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                let k = &event.keystroke;
+                if k.key == "r"
+                    && !k.modifiers.modified()
+                    && this.key_focus.is_focused(window)
+                    && this.reply_to_keyboard_row(cx)
+                {
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()

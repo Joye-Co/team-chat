@@ -619,7 +619,7 @@ impl RootView {
         // the focus itself (the login field) still wins.
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
                 // Groups too: the first 群 replaces the welcome (§8.5).
@@ -639,11 +639,29 @@ impl RootView {
         crate::views::banners::register(update_banner.clone(), banner.clone(), cx);
         let timeline = cx.new(|cx| TimelineView::new(services.clone(), cx));
         let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
+        // 回复 and a click on an avatar land in the composer.
+        let composer_for_timeline = composer.clone();
+        subscriptions.push(cx.subscribe_in(
+            &timeline,
+            window,
+            move |_, _, event: &crate::views::timeline::TimelineEvent, window, cx| {
+                use crate::views::timeline::TimelineEvent;
+                composer_for_timeline.update(cx, |composer, cx| match event {
+                    TimelineEvent::Quote {
+                        group_id,
+                        topic_id,
+                        message_id,
+                    } => composer.quote_message(group_id, topic_id, message_id.clone(), window, cx),
+                    TimelineEvent::Mention { member_id } => {
+                        composer.mention_member(member_id, window, cx)
+                    }
+                });
+            },
+        ));
         let pages = Pages::new(&services, timeline.clone(), composer.clone(), cx);
         let panes = Panes::new(&services, window, cx);
         let rail = cx.new(|cx| RailView::new(services.clone(), window, cx));
         // --- v12/behavior ---
-        let mut subscriptions = subscriptions;
         subscriptions.extend(crate::views::nav::menus::watch_menu_state(
             &services, &rail, cx,
         ));
