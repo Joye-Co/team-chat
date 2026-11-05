@@ -1,0 +1,13 @@
+{
+  "kind": "AiServiceConfig",
+  "valid": true,
+  "description": "OpenAI-compatible with its base URL",
+  "value": {
+    "provider": "openai-compatible",
+    "model": "qwen-turbo",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "keySet": true,
+    "keyHint": "a1b2",
+    "updatedAt": 1762128000000
+  }
+}

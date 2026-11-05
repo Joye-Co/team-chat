@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateAiServiceRequest",
+  "valid": true,
+  "value": {
+    "provider": "anthropic",
+    "model": "claude-haiku-5-5",
+    "apiKey": "sk-ant-test-0000"
+  }
+}

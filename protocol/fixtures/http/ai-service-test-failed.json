@@ -1,0 +1,10 @@
+{
+  "kind": "AiServiceTestResult",
+  "valid": true,
+  "description": "the provider's error",
+  "value": {
+    "ok": false,
+    "error": "401 Authentication Fails (auth header format should be Bearer sk-...)",
+    "latencyMs": 230
+  }
+}

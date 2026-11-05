@@ -1,5 +1,5 @@
 //! Settings: notification preferences by event with quiet hours and a daily digest, the team's
-//! approval rules for AI members, and my signed-in devices (docs/protocol.md, "Settings").
+//! approval rules for AI members, the team's AI 服务 and my signed-in devices (docs/protocol.md, "Settings").
 
 use serde::{Deserialize, Serialize};
 
@@ -436,6 +436,134 @@ impl UpdateApprovalPolicyRequest {
         }
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// AI 服务: the team's model provider (owner only)
+// ---------------------------------------------------------------------------
+
+/// Who answers the server's own model calls (AI 话题标题). A value this version does not know
+/// reads as `Unknown`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AiProvider {
+    #[serde(rename = "anthropic")]
+    Anthropic,
+    #[serde(rename = "deepseek")]
+    Deepseek,
+    #[serde(rename = "openai-compatible")]
+    OpenaiCompatible,
+    #[serde(other)]
+    Unknown,
+}
+
+impl AiProvider {
+    /// The model suggested when the owner picks this provider.
+    pub fn default_model(self) -> &'static str {
+        match self {
+            AiProvider::Anthropic => "claude-haiku-5-5",
+            AiProvider::Deepseek => "deepseek-chat",
+            AiProvider::OpenaiCompatible | AiProvider::Unknown => "",
+        }
+    }
+}
+
+/// Printable ASCII without spaces.
+fn is_token(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| (0x21..=0x7e).contains(&b))
+}
+
+fn check_model(m: &str) -> Validation {
+    if m.len() > 128 || !is_token(m) {
+        return invalid("model", "1..128 printable characters, no spaces");
+    }
+    Ok(())
+}
+
+fn check_base_url(u: &str) -> Validation {
+    if u.len() > 256 || !u.starts_with("https://") || !is_token(&u["https://".len()..]) {
+        return invalid("baseUrl", "https URL, at most 256 characters");
+    }
+    Ok(())
+}
+
+/// `GET /v1/settings/ai` (owner). Never carries the key.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceConfig {
+    /// `None` = not set up.
+    pub provider: Option<AiProvider>,
+    /// "" when not set up.
+    pub model: String,
+    /// Only for `openai-compatible`.
+    pub base_url: Option<String>,
+    pub key_set: bool,
+    /// The key's last 4 characters.
+    pub key_hint: Option<String>,
+    /// 0 = never changed.
+    pub updated_at: Millis,
+}
+
+impl AiServiceConfig {
+    pub fn validate(&self) -> Validation {
+        if self.model.len() > 128 {
+            return invalid("model", "at most 128 characters");
+        }
+        if let Some(u) = &self.base_url {
+            check_base_url(u)?;
+        }
+        if self.key_hint.as_ref().is_some_and(|h| h.chars().count() > 4) {
+            return invalid("keyHint", "at most 4 characters");
+        }
+        Ok(())
+    }
+}
+
+/// `PUT /v1/settings/ai` (owner) and `POST /v1/settings/ai/test`. Without `api_key` the saved
+/// key is used (allowed only while the provider stays the same).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAiServiceRequest {
+    pub provider: AiProvider,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+pub type TestAiServiceRequest = UpdateAiServiceRequest;
+
+impl UpdateAiServiceRequest {
+    pub fn validate(&self) -> Validation {
+        if self.provider == AiProvider::Unknown {
+            return invalid("provider", "anthropic, deepseek or openai-compatible");
+        }
+        check_model(&self.model)?;
+        match &self.base_url {
+            Some(u) => check_base_url(u)?,
+            None if self.provider == AiProvider::OpenaiCompatible => {
+                return invalid("baseUrl", "openai-compatible needs baseUrl");
+            }
+            None => {}
+        }
+        if let Some(k) = &self.api_key
+            && (k.len() < 8 || k.len() > 512 || !is_token(k))
+        {
+            return invalid("apiKey", "8..512 printable characters, no spaces");
+        }
+        Ok(())
+    }
+}
+
+/// The answer of 测试连接.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceTestResult {
+    pub ok: bool,
+    /// The provider's error, when not ok. Plain text, may be English.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub latency_ms: u64,
 }
 
 // ---------------------------------------------------------------------------

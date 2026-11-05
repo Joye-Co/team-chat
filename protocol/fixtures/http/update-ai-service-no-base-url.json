@@ -1,0 +1,10 @@
+{
+  "kind": "UpdateAiServiceRequest",
+  "valid": false,
+  "description": "openai-compatible needs baseUrl",
+  "value": {
+    "provider": "openai-compatible",
+    "model": "m",
+    "apiKey": "sk-test-0000"
+  }
+}

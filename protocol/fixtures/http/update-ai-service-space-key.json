@@ -1,0 +1,10 @@
+{
+  "kind": "UpdateAiServiceRequest",
+  "valid": false,
+  "description": "space in key",
+  "value": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "apiKey": "sk test 0000"
+  }
+}

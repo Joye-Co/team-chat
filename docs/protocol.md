@@ -133,7 +133,8 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
   //   the fixed id mainTopicId(groupId), see "群聊: the group's own chat");
   //   title defaults to the first line of body, cut to 80 characters (an empty body with
   //   replyTo: the quoted message's first line); when no title was sent, the server may
-  //   later replace that default once with an AI title (topic.updated with title), unless
+  //   later replace that default once with an AI title (topic.updated with title; needs the
+  //   team's AI 服务, see "AI 服务"), unless
   //   someone changed the title first
   // ack.result = { message: Message, topic?: Topic, duplicate?: boolean }
 { t: "edit", rid, groupId, messageId, body, streaming?: boolean }      // author only
@@ -1561,6 +1562,50 @@ Rules:
   the requester. With `"requester"` the released rule stays: the requester or an owner.
 - The server cannot tell which action an approval is for, so `approver` is one value for all
   actions.
+
+## AI 服务 (the team's model provider)
+
+The server makes a few model calls of its own (today: the AI title of a new 话题). An owner
+picks who answers them and pays with the team's own API key, in 设置 › 通用 › AI 服务. One
+deployment is one team, so there is one config.
+
+```ts
+AiProvider = "anthropic" | "deepseek" | "openai-compatible"   // open: Rust reads unknown as Unknown
+AiServiceConfig = { provider: AiProvider | null,   // null = not set up
+                    model: string,                 // "" when not set up, <= 128
+                    baseUrl: string | null,        // openai-compatible only; https, <= 256
+                    keySet: boolean,
+                    keyHint: string | null,        // the key's last 4 characters; never the key
+                    updatedAt: number }            // 0 = never changed
+UpdateAiServiceRequest = { provider, model /* 1..128 printable, no spaces */,
+                           baseUrl?: string | null /* required for openai-compatible */,
+                           apiKey?: string /* 8..512 printable; omitted = keep the saved key */ }
+TestAiServiceRequest = UpdateAiServiceRequest
+AiServiceTestResult = { ok: boolean, error?: string /* the provider's, <= 500 */, latencyMs: number }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/settings/ai` | owner | | `AiServiceConfig` |
+| `PUT /v1/settings/ai` | owner | `UpdateAiServiceRequest` | `AiServiceConfig`; audited as `settings.ai` (provider, model, base URL and whether the key changed; never the key) |
+| `DELETE /v1/settings/ai` | owner | | `AiServiceConfig` (not set up); audited as `settings.ai` |
+| `POST /v1/settings/ai/test` | owner | `TestAiServiceRequest` | `AiServiceTestResult`: one tiny call with these values, nothing saved |
+
+Rules:
+
+- D1 `ai_service` (migration 0009) holds one row, scope `*`. The key is encrypted at rest with
+  AES-GCM under the Worker secret `HOOK_SECRET_KEY` (the same secret as integration hook
+  secrets), with the scope as additional data. Without that secret, `PUT` and `test` are
+  `internal`.
+- `PUT` without `apiKey` keeps the saved key only when the provider is the saved one; otherwise
+  it is `bad_request`. The first `PUT` needs `apiKey`. `test` without `apiKey` uses the saved key
+  under the same rule.
+- Calls: `anthropic` through the Messages API; `deepseek` (`https://api.deepseek.com`) and
+  `openai-compatible` (`baseUrl`) through `POST <base>/chat/completions` with
+  `Authorization: Bearer <key>`. A provider error (status, message) is `ok: false` in `test`,
+  never an HTTP error of ours. Each call times out after 20 s.
+- Suggested models: `deepseek-chat` for DeepSeek, `claude-haiku-5-5` for Anthropic.
+- Not set up: a topic keeps its first line as its title.
 
 ## Devices
 

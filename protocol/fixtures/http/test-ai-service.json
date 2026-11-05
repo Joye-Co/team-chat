@@ -1,0 +1,10 @@
+{
+  "kind": "TestAiServiceRequest",
+  "valid": true,
+  "value": {
+    "provider": "openai-compatible",
+    "model": "qwen-turbo",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "apiKey": "sk-test-0000"
+  }
+}

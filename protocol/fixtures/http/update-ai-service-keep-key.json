@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateAiServiceRequest",
+  "valid": true,
+  "description": "the saved key stays",
+  "value": {
+    "provider": "deepseek",
+    "model": "deepseek-reasoner"
+  }
+}

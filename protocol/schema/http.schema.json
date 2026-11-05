@@ -59325,6 +59325,172 @@
         }
       }
     },
+    "AiServiceConfig": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "anthropic",
+                "deepseek",
+                "openai-compatible"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^https:\\/\\/[\\x21-\\x7e]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keySet": {
+          "type": "boolean"
+        },
+        "keyHint": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "baseUrl",
+        "keySet",
+        "keyHint",
+        "updatedAt"
+      ]
+    },
+    "UpdateAiServiceRequest": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "deepseek",
+            "openai-compatible"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[\\x21-\\x7e]+$"
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^https:\\/\\/[\\x21-\\x7e]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apiKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 512,
+          "pattern": "^[\\x21-\\x7e]+$"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ]
+    },
+    "TestAiServiceRequest": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "deepseek",
+            "openai-compatible"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[\\x21-\\x7e]+$"
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^https:\\/\\/[\\x21-\\x7e]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apiKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 512,
+          "pattern": "^[\\x21-\\x7e]+$"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ]
+    },
+    "AiServiceTestResult": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "latencyMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "ok",
+        "latencyMs"
+      ]
+    },
     "Device": {
       "type": "object",
       "properties": {

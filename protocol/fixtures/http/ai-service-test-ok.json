@@ -1,0 +1,8 @@
+{
+  "kind": "AiServiceTestResult",
+  "valid": true,
+  "value": {
+    "ok": true,
+    "latencyMs": 412
+  }
+}
