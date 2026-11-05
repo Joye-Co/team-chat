@@ -222,7 +222,11 @@ RunEvent =
 - `approval.request` comes from CLIs that ask (Codex with `approval_policy` other than
   `never`, ACP `session/request_permission`). The server answers `run.approval`; the daemon
   answers the CLI and emits `approval.resolved`. Claude Code runs with a fixed
-  `permission_mode` and does not ask.
+  `permission_mode` and does not ask: `-p` denies any tool that needs approval, so the daemon
+  always passes `--allowedTools` — `allowed_tools` plus `Bash(chat-run:*)`, or without
+  `allowed_tools` the shell, edit, web, todo and task tools. A Codex run with sandbox
+  `workspace-write` gets `-c sandbox_workspace_write.network_access=true` unless the configured
+  args set `network_access` themselves.
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
   SIGTERM to the CLI's whole process group and to the tool groups below it (see **pause**),
   SIGKILL after 3 s, and ends with

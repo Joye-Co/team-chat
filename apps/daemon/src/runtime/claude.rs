@@ -450,13 +450,25 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
             .clone()
             .unwrap_or_else(|| "acceptEdits".into()),
     );
-    if let Some(t) = &spec.cfg.allowed_tools {
-        args.push("--allowedTools".into());
-        args.push(t.clone());
-    }
+    // `-p` has no one to answer a permission prompt: a tool that needs approval is denied at
+    // once. Without `allowed_tools` the run may use the shell, edits and the web (as Codex with
+    // `workspace-write` and approval `never`); `chat-run` is always allowed, it is how the run
+    // posts cards and 产出.
+    args.push("--allowedTools".into());
+    args.push(match &spec.cfg.allowed_tools {
+        Some(t) => format!("{t} {CHAT_RUN_TOOL}"),
+        None => DEFAULT_ALLOWED_TOOLS.to_string(),
+    });
     args.extend(spec.cfg.args.iter().cloned());
     args
 }
+
+/// The tools a run may use without asking when `daemon.toml` sets no `allowed_tools`.
+pub const DEFAULT_ALLOWED_TOOLS: &str =
+    "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch TodoWrite Task";
+
+/// The `chat-run` command, allowed in every non-aside run.
+pub const CHAT_RUN_TOOL: &str = "Bash(chat-run:*)";
 
 /// Removes a file when dropped.
 struct RemoveOnDrop(PathBuf);
