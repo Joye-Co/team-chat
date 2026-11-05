@@ -212,7 +212,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
         validated::<UpdateApprovalPolicyRequest>,
     ),
     ("AiServiceConfig", validated::<AiServiceConfig>),
-    ("UpdateAiServiceRequest", validated::<UpdateAiServiceRequest>),
+    (
+        "UpdateAiServiceRequest",
+        validated::<UpdateAiServiceRequest>,
+    ),
     ("TestAiServiceRequest", validated::<TestAiServiceRequest>),
     ("AiServiceTestResult", plain::<AiServiceTestResult>),
     ("Device", plain::<Device>),

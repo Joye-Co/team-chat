@@ -511,7 +511,11 @@ impl AiServiceConfig {
         if let Some(u) = &self.base_url {
             check_base_url(u)?;
         }
-        if self.key_hint.as_ref().is_some_and(|h| h.chars().count() > 4) {
+        if self
+            .key_hint
+            .as_ref()
+            .is_some_and(|h| h.chars().count() > 4)
+        {
             return invalid("keyHint", "at most 4 characters");
         }
         Ok(())
