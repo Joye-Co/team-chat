@@ -467,9 +467,6 @@ pub enum PendTone {
     Quiet,
     /// Red 失败: the step was not sent, or the author cannot take it now.
     Bad,
-    /// 已停用, the muted ban: the author said the block takes no action (`expect.mode:
-    /// none`); nothing failed and nothing is left to retry (D1-70).
-    Off,
 }
 
 /// The band while my newest event on the card waits (INTERACT §4.4), for the emitter only.
@@ -493,7 +490,9 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
         // The author has it: waiting on someone else is the muted clock (§2.12).
         S::Wait | S::Slow => (words, String::new(), PendTone::Quiet),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
-        S::Refused => (c::BAND_EXPIRED.to_string(), words, PendTone::Off),
+        // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
+        // failed and nothing is left to retry, so the band is the muted clock (D1-70).
+        S::Refused => (words, String::new(), PendTone::Quiet),
         S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
     })
 }

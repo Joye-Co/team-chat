@@ -433,8 +433,8 @@ pub fn stage_words(stage: Stage, name: &str) -> String {
         Stage::OfflineLive => c::OFFLINE_LIVE,
         Stage::OfflineAnswer => c::OFFLINE_ANSWER,
         Stage::Busy => c::BUSY,
-        // The author said the block takes no action (`expect.mode: none`, INTERACT §6.2).
-        Stage::Refused => c::REFUSED,
+        // The ack of a short-run limit is `expect.mode: none` too: say so (INTERACT §6.2).
+        Stage::Refused => c::BUSY,
     };
     fill(t, &[("name", name)])
 }

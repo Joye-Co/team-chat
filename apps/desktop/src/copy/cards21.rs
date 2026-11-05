@@ -118,7 +118,6 @@ crate::copy! {
     OFFLINE_LIVE = "{name} 不在线，这一步没有发出",
     OFFLINE_ANSWER = "{name} 不在线，回来后会看到",
     BUSY = "{name} 现在接不了，稍后再试",
-    REFUSED = "{name} 说这一块只能看",
     CONFLICT_TOAST = "这是最新的一版",
     CONFLICT_TITLE = "卡片刚更新了",
     CONFLICT_DETAIL = "你答的时候成员改了这张卡，留下了还能用的选择。",
