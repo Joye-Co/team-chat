@@ -45,6 +45,9 @@ use crate::{
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
+/// The widest header badge of a v1 card (§2.21: the label cuts, the badge stays in the card).
+const BADGE_MAX: gpui::Pixels = gpui::px(240.);
+
 /// The timeline extra that draws card messages.
 pub struct CardExtra;
 
@@ -222,7 +225,9 @@ pub fn render_card(
                 div()
                     .flex()
                     .mb(space::S8)
-                    .child(ui::native::StatusBadge::new(badge, label))
+                    // A member's own status words cut with "…" and a tooltip, so a
+                    // long one never runs to the card edge (F3, A1-22).
+                    .child(ui::native::StatusBadge::new(badge, label).max_w(BADGE_MAX))
             })
     };
     // A title is one line of text: line breaks and runs of spaces collapse,

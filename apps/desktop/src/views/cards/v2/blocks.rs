@@ -607,7 +607,7 @@ pub(crate) fn list_with(
                         .items_center()
                         .gap(space::S8)
                         .child(div().min_w(px(0.)).text_color(text).child(it.text.clone()))
-                        .children(parts.and_then(|(p, _)| p.button(pick, cx))),
+                        .children(parts.and_then(|(p, w)| p.button(pick, w, cx))),
                 );
             match parts {
                 Some((p, w)) => p.wrap_own(pick, row, w, cx),
@@ -870,6 +870,21 @@ pub(crate) fn choice_row(
         })
 }
 
+/// `text` laid out left to right, as every line of this interface: a label that starts
+/// with a right-to-left run (an Arabic name) keeps its run order inside, and a cut puts the
+/// "…" at the line's end, never at its start (F3, D1-81).
+pub(crate) fn ltr_line(text: &str) -> String {
+    let rtl_first = text
+        .chars()
+        .find(|c| c.is_alphabetic())
+        .is_some_and(|c| matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF));
+    if rtl_first {
+        format!("\u{200E}{text}")
+    } else {
+        text.to_string()
+    }
+}
+
 /// The title of an option row: the label, then `推荐` as `secondary` text
 /// right after it, never a capsule (NATIVE.md rule 4).
 pub(crate) fn option_title(label: &str, recommended: bool, cx: &App) -> Div {
@@ -881,7 +896,7 @@ pub(crate) fn option_title(label: &str, recommended: bool, cx: &App) -> Div {
         .gap(space::S6)
         .n_body()
         .text_color(n.label)
-        .child(ui::truncate::TruncText::new(label.to_string()))
+        .child(ui::truncate::TruncText::new(ltr_line(label)))
         .when(recommended, |el| {
             el.child(
                 div()
@@ -1845,7 +1860,7 @@ fn plan(
         .flex_col()
         .children(items.iter().enumerate().map(|(i, it)| {
             let pick = Pick::Step(i);
-            let ask = parts.as_ref().and_then(|(p, _)| p.button(pick, cx));
+            let ask = parts.as_ref().and_then(|(p, w)| p.button(pick, w, cx));
             let current = it.state == RunPlanState::Current && !current_seen;
             if current {
                 current_seen = true;
@@ -2588,31 +2603,12 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     if !(done || change) || matches!(ctx.state, CardState::Superseded | CardState::Expired) {
         return None;
     }
-    let k = theme::colors(cx);
     let a = ctx.answerer();
     let (author, name) = (ctx.msg.author_id.clone(), ctx.author.clone());
+    // The §2.15 Alert (neutral, info icon, the action at the right), like 读不懂.
     Some(
-        small(div())
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .h(crate::ui::native::tokens::height::FOOTER_ROW)
-            .pl(space::S12)
-            .pr(space::S4)
-            .rounded(theme::radius::MD)
-            .bg(ui::native::native_colors(cx).sheet)
-            .border_1()
-            .border_color(k.line)
-            .text_color(k.ink_2)
-            .child(ui::icon(Sym::Info, px(14.), k.ink_3))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .one_line()
-                    .child(c::EVIDENCE_NONE),
-            )
-            .child(
+        ui::native::Alert::new(Sym::Info, c::EVIDENCE_NONE)
+            .action(
                 super::button(
                     ctx.id("ask-evidence"),
                     fill(c::EVIDENCE_ASK, &[("name", &ctx.author)]),
@@ -2813,14 +2809,25 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     // The 话题's state in the §2.12 words of every other view
                     // (`topic_page::topic_state`: asks first, 在做 only with a run), once in
                     // the badge; the line under the title names the 群 only (D1-66).
+                    // The badge holds the state words only (`在做 1/4`, never cut): the
+                    // member's name that leads the sentence stays out of it (D1-79).
                     let state = topic
                         .as_ref()
                         .map(|t| crate::views::topic_page::topic_state(p.as_ref(), ctx.me.as_deref(), t));
+                    let words = state.as_ref().map(|s| {
+                        s.name
+                            .as_deref()
+                            .and_then(|n| s.text.strip_prefix(n))
+                            .map(str::trim_start)
+                            .filter(|w| !w.is_empty())
+                            .unwrap_or(&s.text)
+                            .to_string()
+                    });
                     (
                         ref_tile(Sym::List, false, cx),
                         topic.map(|t| t.title).unwrap_or_else(|| label.clone()),
                         group,
-                        state.as_ref().map(|s| s.text.clone()),
+                        words,
                         state.map(|s| s.badge),
                     )
                 }

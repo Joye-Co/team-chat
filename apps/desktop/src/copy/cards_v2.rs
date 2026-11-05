@@ -6,9 +6,9 @@ crate::copy! {
     CARD_DONE = "完成",
     CARD_WORKING = "正在做",
     CARD_ANSWERED = "{name} 选了「{choice}」 · {time}",
-    CARD_WAITING_ON = "等 {name} 拍板",
     CARD_SUPERSEDED = "这一版作废了",
-    CARD_EXPIRED = "已过期",
+    // §2.12 deactivated: an expired or superseded card; the detail says why.
+    CARD_EXPIRED = "已停用",
     CARD_UNDO = "撤回",
 
     // The status strip: the state, who and when.
@@ -17,10 +17,7 @@ crate::copy! {
     STRIP_WAITS_CHOOSE = "{name} 在等你 · 选好再提交",
     STRIP_WAITS_APPROVE = "{name} 在等你批准",
     STRIP_WAITS_CONFIRM = "{name} 在等你确认",
-    STRIP_FILL = "等你填",
-    STRIP_FILL_READY = "等你提交",
     STRIP_FILL_READY_DETAIL = "都填好了",
-    STRIP_EDITING = "等你改完",
     STRIP_WAITING_ON_DETAIL = "只有被问的人能选",
     STRIP_SENDING = "发送中",
     STRIP_SENDING_DETAIL = "发给 {name}",
@@ -50,7 +47,7 @@ crate::copy! {
     REF_CHECK_FAILED = "检查没过",
     STRIP_EXPIRED_DETAIL = "{time} 截止",
     STRIP_ASK_AGAIN = "重新问",
-    STRIP_SUPERSEDED = "这一版已作废",
+    STRIP_SUPERSEDED = "已停用",
     STRIP_SUPERSEDED_DETAIL = "{name} 改了卡片",
     STRIP_SUPERSEDED_DRAFT = "{name} 改了草稿",
     STRIP_SEE_NEW = "看新版",

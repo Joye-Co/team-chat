@@ -4,13 +4,13 @@
 crate::copy! {
     // Status band words (CARD21 §2).
     BAND_YOU = "等你",
-    BAND_WAITING_ON = "等 {name}",
-    BAND_WAITING_MANY = "等 {n} 位成员",
+    BAND_WAITING_ON = "等{name}回答",
+    BAND_WAITING_MANY = "等 {n} 位成员回答",
     BAND_WORKING = "在做",
     BAND_DONE = "完成",
     BAND_FAILED = "失败",
-    BAND_VOID = "已作废",
-    BAND_EXPIRED = "已过期",
+    BAND_VOID = "已停用",
+    BAND_EXPIRED = "已停用",
     BAND_DEADLINE = "{time} 前",
     BAND_CLOSES = "{time} 截止",
     BAND_TODAY = "今天 {time}",
@@ -164,7 +164,7 @@ crate::copy! {
 
     // The compose and interact galleries (screenshot scenes).
     G_TITLE = "生成式界面 · 组合和选择题",
-    G_SUBTITLE = "一张卡里的块可以自由组合：上下叠、并排、分组、对比、问卷、标签页（并排和每次操作的回传见「每次操作都回到成员」）。选择题从 2 种扩到 9 种。每张卡顶上有一条状态带，不读内容也知道在等谁、做到哪一步。",
+    G_SUBTITLE = "一张卡里的块可以自由组合：上下叠、并排、分组、对比、问卷、标签页（并排和每次操作的回传见「每次操作都回到成员」）。选择题从 2 种扩到 9 种。每张卡顶上有一条状态带，不读内容也知道在等谁、做到了哪里。",
     G_S_COMPOSE = "组合",
     G_S_COMPOSE_NOTE = "常见的几种组合：问卷、对比、分组、指标加图加批准。成员只定放哪些块、怎么组合，样子由 {product} 定；需要一起提交的块共用一个提交。",
     G_S_CHOICE = "选择题",

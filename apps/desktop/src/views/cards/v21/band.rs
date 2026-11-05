@@ -296,7 +296,10 @@ pub fn words(ctx: &Ctx, base: (String, String)) -> (String, String) {
             let label = if n > 2 {
                 fill(c::BAND_WAITING_MANY, &[("n", &n.to_string())])
             } else {
-                fill(c::BAND_WAITING_ON, &[("name", &list)])
+                fill(
+                    c::BAND_WAITING_ON,
+                    &[("name", &crate::views::spaced_name(&list))],
+                )
             };
             let questions = ctx.card.blocks.iter().find_map(|b| match b {
                 CardV2Block::Questionnaire { children, .. } => Some(children.len()),
@@ -487,7 +490,10 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
         // The author has it: waiting on someone else is the muted clock (§2.12).
         S::Wait | S::Slow => (words, String::new(), PendTone::Quiet),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
-        S::OfflineLive | S::Busy | S::Refused => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
+        // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
+        // failed and nothing is left to retry, so the band is the muted clock (D1-70).
+        S::Refused => (words, String::new(), PendTone::Quiet),
+        S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
     })
 }
 

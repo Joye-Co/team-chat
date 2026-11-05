@@ -14,7 +14,9 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 2;
+pub const RENDERER_VERSION: u32 = 3;
+/// The width of a Gantt chart: the content width of a card (D2-30).
+const GANTT_WIDTH: u32 = 600;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
 pub const ARTIFACT_ID: &str = "teamchat-diagram";
 /// The bundled library: `mermaid` 12.2.0 from npm, `dist/mermaid.min.js`, MIT
@@ -193,7 +195,13 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
         "class": { "useMaxWidth": false, "htmlLabels": false },
         "state": { "useMaxWidth": false },
         "er": { "useMaxWidth": false },
-        "gantt": { "useMaxWidth": false, "axisFormat": "%m-%d", "barHeight": 22, "barGap": 6 },
+        // One card wide (640 less the 16 insets), 12 px text, and room at the right for the
+        // last tick's date only; the page crops the height to the rows and the axis.
+        "gantt": {
+            "useMaxWidth": false, "useWidth": GANTT_WIDTH, "axisFormat": "%m-%d",
+            "barHeight": 22, "barGap": 6, "rightPadding": 24, "fontSize": 12,
+            "sectionFontSize": 12
+        },
         "timeline": { "useMaxWidth": false, "disableMulticolor": true },
         "maxTextSize": MAX_SOURCE_BYTES,
         "maxEdges": MAX_EDGES,
@@ -222,7 +230,7 @@ fn theme_css(t: &ThemeVars) -> String {
          .node rect, .node polygon, rect.actor, rect.task, rect.note, .cluster rect {{ rx: 6px; ry: 6px; }}\
          .node rect, .node polygon, .node circle, rect.actor, rect.task {{ stroke-width: 1px; }}\
          .grid .tick line {{ stroke: {line}; opacity: 1; }} .grid path {{ stroke-width: 0; }}\
-         .grid .tick text {{ fill: {ink3}; }} .today {{ display: none; }}\
+         .grid .tick text {{ fill: {ink3}; font-size: 12px; }} .today {{ display: none; }}\
          text, tspan {{ font-family: {font}; }}",
         line = t.line,
         ink3 = t.ink_3,

@@ -657,9 +657,14 @@ fn reply_link(ctx: &Ctx, block: &str, reply: &str, cx: &mut App) -> AnyElement {
                 cx,
             )
             .text_color(k.ink)
+            // The ↓ sits in the button's icon slot, part of the one target (D1-70).
+            .icon(crate::ui::icons::button_sym(
+                ui::Sym::ArrowDown,
+                crate::ui::icons::SymSize::for_slot(crate::ui::native::tokens::icon::MD),
+                ui::native::PushSize::Small.height(),
+            ))
             .on_click(move |_, window, cx| a.open_message(&reply, window, cx)),
         )
-        .child(ui::icon(ui::Sym::ArrowDown, px(12.), k.ink_2))
         .into_any_element()
 }
 
@@ -768,7 +773,10 @@ pub fn decorate(
             ),
             super::band::Mark::Waiting(names) => (
                 crate::ui::native::BadgeState::Queued,
-                fill(c::BAND_WAITING_ON, &[("name", &names)]),
+                fill(
+                    c::BAND_WAITING_ON,
+                    &[("name", &crate::views::spaced_name(&names))],
+                ),
             ),
         };
         col = col.child(

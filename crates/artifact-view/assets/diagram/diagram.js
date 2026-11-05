@@ -181,6 +181,15 @@
       var svg = out.querySelector('svg');
       if (!svg) return fail(reqId, 'internal', 'no svg');
       sanitize(svg);
+      // A Gantt chart keeps a fixed 50 px band above its rows: crop the height to what is
+      // drawn (rows and the axis under them), 8 px clear, so the chart hugs its rows.
+      if (type === 'gantt') {
+        var gb = svg.getBBox();
+        var gv = svg.viewBox && svg.viewBox.baseVal;
+        if (gv && gv.width && gb.height > 0) {
+          svg.setAttribute('viewBox', [gv.x, gb.y - 8, gv.width, gb.height + 16].join(' '));
+        }
+      }
       var vb = svg.viewBox && svg.viewBox.baseVal;
       var w = vb && vb.width ? vb.width : svg.getBBox().width;
       var h = vb && vb.height ? vb.height : svg.getBBox().height;
