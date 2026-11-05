@@ -768,7 +768,10 @@ pub fn decorate(
             ),
             super::band::Mark::Waiting(names) => (
                 crate::ui::native::BadgeState::Queued,
-                fill(c::BAND_WAITING_ON, &[("name", &names)]),
+                fill(
+                    c::BAND_WAITING_ON,
+                    &[("name", &crate::views::spaced_name(&names))],
+                ),
             ),
         };
         col = col.child(

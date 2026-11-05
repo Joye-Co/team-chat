@@ -4,13 +4,13 @@
 crate::copy! {
     // Status band words (CARD21 §2).
     BAND_YOU = "等你",
-    BAND_WAITING_ON = "等 {name}",
-    BAND_WAITING_MANY = "等 {n} 位成员",
+    BAND_WAITING_ON = "等{name}回答",
+    BAND_WAITING_MANY = "等 {n} 位成员回答",
     BAND_WORKING = "在做",
     BAND_DONE = "完成",
     BAND_FAILED = "失败",
-    BAND_VOID = "已作废",
-    BAND_EXPIRED = "已过期",
+    BAND_VOID = "已停用",
+    BAND_EXPIRED = "已停用",
     BAND_DEADLINE = "{time} 前",
     BAND_CLOSES = "{time} 截止",
     BAND_TODAY = "今天 {time}",

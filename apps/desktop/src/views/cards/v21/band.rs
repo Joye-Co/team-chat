@@ -296,7 +296,10 @@ pub fn words(ctx: &Ctx, base: (String, String)) -> (String, String) {
             let label = if n > 2 {
                 fill(c::BAND_WAITING_MANY, &[("n", &n.to_string())])
             } else {
-                fill(c::BAND_WAITING_ON, &[("name", &list)])
+                fill(
+                    c::BAND_WAITING_ON,
+                    &[("name", &crate::views::spaced_name(&list))],
+                )
             };
             let questions = ctx.card.blocks.iter().find_map(|b| match b {
                 CardV2Block::Questionnaire { children, .. } => Some(children.len()),
