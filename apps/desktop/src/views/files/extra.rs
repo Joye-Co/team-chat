@@ -91,7 +91,17 @@ impl MessageExtra for AttachmentsExtra {
                             cx,
                         ));
                     }
-                    None => files = files.child(upload_row(file, state, id, cx)),
+                    None => {
+                        // A1-14: an upload can be cancelled like a download:
+                        // the message's send is dropped.
+                        let (provider, g, c) = (
+                            ctx.provider.clone(),
+                            message.group_id.clone(),
+                            message.client_msg_id.clone(),
+                        );
+                        let cancel = move || provider.discard_send(&g, &c);
+                        files = files.child(upload_row(file, state, id, cancel, cx))
+                    }
                 }
                 n_files += 1;
             } else if file.is_image() && file.size <= THUMB_SOURCE_MAX_BYTES {
@@ -382,8 +392,14 @@ fn upload_row(
     file: &FileAttachment,
     state: TransferState,
     id: impl Fn(&str) -> ElementId,
+    cancel: impl Fn() + 'static,
     cx: &App,
 ) -> AnyElement {
+    // A1-14: one meta for every file row: `<kind> · <size> · <state>`.
+    let plain = fill(
+        f::META,
+        &[("kind", kind_word(file)), ("size", &size_text(file.size))],
+    );
     let (meta, progress) = match state {
         TransferState::Failed(e) => (
             div()
@@ -392,17 +408,38 @@ fn upload_row(
                 .into_any_element(),
             None,
         ),
-        TransferState::Queued => (div().child(f::QUEUED).into_any_element(), Some(0.)),
+        TransferState::Queued => (
+            div()
+                .child(format!("{plain} · {}", f::QUEUED))
+                .into_any_element(),
+            Some(0.),
+        ),
         s => (
             div()
                 .tnum()
-                .child(fill(f::UPLOADING, &[("p", &format!("{:.0}", s.percent()))]))
+                .child(format!(
+                    "{plain} · {}",
+                    fill(f::UPLOADING, &[("p", &format!("{:.0}", s.percent()))])
+                ))
                 .into_any_element(),
             Some(s.percent()),
         ),
     };
+    let actions = if progress.is_some() {
+        vec![
+            row_button(id("cancel"), Sym::Close, f::CANCEL_UPLOAD)
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    cancel();
+                })
+                .into_any_element(),
+        ]
+    } else {
+        Vec::new()
+    };
+    let pinned = !actions.is_empty();
     let group = group_name(&id);
-    row_frame(group, file, false, meta, progress, Vec::new(), false, cx).into_any_element()
+    row_frame(group, file, false, meta, progress, actions, pinned, cx).into_any_element()
 }
 
 fn group_name(id: &impl Fn(&str) -> ElementId) -> SharedString {

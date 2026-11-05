@@ -1345,6 +1345,13 @@ pub fn floor_frame(cx: &mut gpui::App) {
     }
 }
 
+impl ComposerView {
+    /// The text field's focus (a region of the window, F6).
+    pub fn input_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        self.input.focus_handle(cx)
+    }
+}
+
 impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let working = self.working_member();
