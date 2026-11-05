@@ -52,7 +52,9 @@
       "name": "chat-api-staging",
       "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
       "triggers": { "crons": ["0 3 * * *"] },
-      "vars": { "ENVIRONMENT": "staging", "VERSION": "0.0.0-staging" },
+      "vars": { "ENVIRONMENT": "staging", "VERSION": "0.0.0-staging", "EMAIL_FROM": "login@mail.joyehuang.dev" },
+      // Email sign-in codes (Cloudflare Email Service; mail.joyehuang.dev is onboarded for sending).
+      "send_email": [{ "name": "EMAIL" }],
       "d1_databases": [
         { "binding": "DB", "database_name": "chat-staging", "database_id": "95271ff5-2e69-4ce7-ba26-bbbdfe29f760", "migrations_dir": "migrations" }
       ],
@@ -70,7 +72,9 @@
       "name": "chat-api-prod",
       "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
       "triggers": { "crons": ["0 3 * * *"] },
-      "vars": { "ENVIRONMENT": "production", "VERSION": "0.0.0" },
+      "vars": { "ENVIRONMENT": "production", "VERSION": "0.0.0", "EMAIL_FROM": "login@mail.joyehuang.dev" },
+      // Email sign-in codes (Cloudflare Email Service; mail.joyehuang.dev is onboarded for sending).
+      "send_email": [{ "name": "EMAIL" }],
       "d1_databases": [
         { "binding": "DB", "database_name": "chat-prod", "database_id": "6785a4f4-5089-4410-8d30-d38d5cadc413", "migrations_dir": "migrations" }
       ],
