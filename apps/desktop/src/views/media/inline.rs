@@ -632,7 +632,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .relative()
                 .group(group.clone())
                 .flex_1()
-                .min_w(px(0.))
+                .min_w_0()
                 .flex()
                 .flex_col()
                 .gap(space::S4)
@@ -743,14 +743,7 @@ pub fn waveform(
             off
         };
         // The bars share the row's width (no void after the last, §2.4).
-        row = row.child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .h(px(h))
-                .rounded(px(1.))
-                .bg(color),
-        );
+        row = row.child(div().flex_1().min_w_0().h(px(h)).rounded(px(1.)).bg(color));
     }
     row
 }

@@ -828,7 +828,7 @@ fn lightbox(
                 .child(
                     div()
                         .flex_1()
-                        .min_w(px(0.))
+                        .min_w_0()
                         .h_full()
                         .py(space::S4)
                         .flex()
@@ -1827,7 +1827,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         .child(
             div()
                 .flex_1()
-                .min_h(px(0.))
+                .min_h_0()
                 .pt(space::S8)
                 .pb(space::S12)
                 .flex()
