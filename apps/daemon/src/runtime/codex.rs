@@ -548,7 +548,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     }
 }
 
-/// `thread/start` approval policy and sandbox. A side chat run (`spec.aside`) is read-only
+/// `thread/start` approval policy and sandbox: by default approval `never` and sandbox
+/// `danger-full-access` (a run can do anything; nobody is there to approve). A side chat run (`spec.aside`) is read-only
 /// whatever `daemon.toml` says: sandbox `read-only`, approval policy `never` (nothing to ask).
 pub fn thread_policy(spec: &RunSpec) -> (String, String) {
     if spec.aside {
@@ -562,7 +563,7 @@ pub fn thread_policy(spec: &RunSpec) -> (String, String) {
         spec.cfg
             .sandbox
             .clone()
-            .unwrap_or_else(|| "workspace-write".into()),
+            .unwrap_or_else(|| "danger-full-access".into()),
     )
 }
 

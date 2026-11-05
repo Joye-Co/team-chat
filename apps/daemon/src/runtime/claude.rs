@@ -448,12 +448,12 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
         spec.cfg
             .permission_mode
             .clone()
-            .unwrap_or_else(|| "acceptEdits".into()),
+            .unwrap_or_else(|| DEFAULT_PERMISSION_MODE.into()),
     );
     // `-p` has no one to answer a permission prompt: a tool that needs approval is denied at
-    // once. Without `allowed_tools` the run may use the shell, edits and the web (as Codex with
-    // `workspace-write` and approval `never`); `chat-run` is always allowed, it is how the run
-    // posts cards and 产出.
+    // once. So a run asks for nothing by default (`bypassPermissions`), and even a stricter
+    // configured mode keeps the shell, edits and the web; `chat-run` is always allowed, it is
+    // how the run posts cards and 产出.
     args.push("--allowedTools".into());
     args.push(match &spec.cfg.allowed_tools {
         Some(t) => format!("{t} {CHAT_RUN_TOOL}"),
@@ -462,6 +462,9 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
     args.extend(spec.cfg.args.iter().cloned());
     args
 }
+
+/// The permission mode of a run when `daemon.toml` sets none: everything allowed.
+pub const DEFAULT_PERMISSION_MODE: &str = "bypassPermissions";
 
 /// The tools a run may use without asking when `daemon.toml` sets no `allowed_tools`.
 pub const DEFAULT_ALLOWED_TOOLS: &str =

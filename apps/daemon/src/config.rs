@@ -94,10 +94,10 @@ pub struct RuntimeConfig {
     /// codex: approval policy ("never", "on-request", "untrusted"). Default "never".
     #[serde(default)]
     pub approval_policy: Option<String>,
-    /// codex: sandbox ("read-only", "workspace-write", "danger-full-access"). Default "workspace-write".
+    /// codex: sandbox ("read-only", "workspace-write", "danger-full-access"). Default "danger-full-access".
     #[serde(default)]
     pub sandbox: Option<String>,
-    /// claude: permission mode. Default "acceptEdits".
+    /// claude: permission mode. Default "bypassPermissions".
     #[serde(default)]
     pub permission_mode: Option<String>,
     /// claude: --allowedTools value.
@@ -290,12 +290,12 @@ env_passthrough = []                # e.g. ["GITHUB_TOKEN"]; assignments pick fr
 
 [runtimes.codex]
 kind = "codex"
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 approval_policy = "never"
 
 [runtimes.claude]
 kind = "claude"
-permission_mode = "acceptEdits"
+permission_mode = "bypassPermissions"
 
 # [runtimes.gemini]
 # kind = "acp"
