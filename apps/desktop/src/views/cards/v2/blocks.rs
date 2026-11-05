@@ -840,7 +840,11 @@ pub(crate) fn choice_row(
         .rounded(m::OPTION_RADIUS)
         .bg(n.fill)
         .border_1()
-        .border_color(if picked { n.label } else { gpui::transparent_black() })
+        .border_color(if picked {
+            n.label
+        } else {
+            gpui::transparent_black()
+        })
         // A tab stop with Enter / Space and ↑ ↓, and the focus ring apart
         // from the picked fill (E3, R1 FocusRow); the hover below keeps its
         // border step.
@@ -848,9 +852,7 @@ pub(crate) fn choice_row(
         .when(enabled, |el| {
             el.focus_row_with(true, ui::native::Arrows::Vertical, cx)
         })
-        .when(enabled && !picked, |el| {
-            el.hover(move |s| s.bg(hover))
-        })
+        .when(enabled && !picked, |el| el.hover(move |s| s.bg(hover)))
         .when(!enabled, |el| el.opacity(0.5))
         .flex()
         .items_center()

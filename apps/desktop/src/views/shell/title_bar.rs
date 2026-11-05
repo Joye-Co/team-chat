@@ -335,7 +335,12 @@ fn heading_with(
         .flex()
         .items_center()
         .gap(space::S12)
-        .child(div().flex_shrink_0().max_w(gpui::relative(0.7)).child(title))
+        .child(
+            div()
+                .flex_shrink_0()
+                .max_w(gpui::relative(0.7))
+                .child(title),
+        )
         .children(sub_el.map(|s| div().flex_1().min_w(px(0.)).child(s)))
         .into_any_element();
     (el, title_layout, sub_layout)
