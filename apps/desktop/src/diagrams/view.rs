@@ -109,6 +109,8 @@ struct Ui {
     focus: FocusHandle,
     focused: Option<usize>,
     hovered: Option<usize>,
+    /// The sideways scroll of a diagram wider than the card.
+    scroll: gpui::ScrollHandle,
 }
 
 /// The inline element for a diagram.
@@ -124,6 +126,7 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
             focus: cx.focus_handle().tab_stop(true),
             focused: None,
             hovered: None,
+            scroll: gpui::ScrollHandle::new(),
         },
     );
     let normalized = normalize::normalize(&spec.source);
@@ -507,7 +510,11 @@ fn image_with_hits(
                             .h(px(oh + 4.))
                             .rounded(radius::MD)
                             .when(hover_line, |d| d.border_1().border_color(n.secondary))
-                            .when(focused == Some(i), |d| d.shadow(vec![ring_shadow(n.focus)])),
+                            // A ring line, not a shadow: a shadow under a clear box
+                            // would fill the node (E3).
+                            .when(focused == Some(i), |d| {
+                                d.child(crate::views::refs::keyboard::ring(radius::MD, cx))
+                            }),
                     )
                 })
                 .on_hover(move |on, _, cx| {
@@ -532,35 +539,42 @@ fn image_with_hits(
                 })
                 // inc-refs: 问这里 outside the node's top edge, never over the node's
                 // border or a connector beside it.
-                .when(hovered == Some(i) && refs_on, |el| {
-                    el.child(
-                        div()
-                            .absolute()
-                            .bottom_full()
-                            .right(px(0.))
-                            .pb(space::S4)
-                            .child(
-                                crate::views::refs::affordance::ask_button(
-                                    ElementId::Name(format!("dask-{id}-{i}").into()),
-                                    cx,
-                                )
-                                .on_click(move |_, window, cx| {
-                                    cx.stop_propagation();
-                                    super::on_node_ref(
-                                        ask_origin.clone(),
-                                        &ask_id,
-                                        &ask_label,
-                                        window,
+                // C-03: keyboard focus on a node shows it too.
+                .when(
+                    (hovered == Some(i) || focused == Some(i)) && refs_on,
+                    |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .bottom_full()
+                                .right(px(0.))
+                                .pb(space::S4)
+                                .child(
+                                    crate::views::refs::affordance::ask_button(
+                                        ElementId::Name(format!("dask-{id}-{i}").into()),
                                         cx,
                                     )
-                                }),
-                            ),
-                    )
-                }),
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            super::on_node_ref(
+                                                ask_origin.clone(),
+                                                &ask_id,
+                                                &ask_label,
+                                                window,
+                                                cx,
+                                            )
+                                        },
+                                    ),
+                                ),
+                        )
+                    },
+                ),
         );
     }
     let toggle = ui.clone();
     let scrolls = fit.w > avail + 0.5;
+    let scroll = ui.read(cx).scroll.clone();
     div()
         .w_full()
         .flex()
@@ -575,7 +589,10 @@ fn image_with_hits(
                         .w_full()
                         .flex()
                         .when(!scrolls, |d| d.justify_center())
-                        .when(scrolls, |d| d.overflow_x_scroll())
+                        // Room under the drawing for the scrollbar, so it never covers it.
+                        .when(scrolls, |d| {
+                            d.overflow_x_scroll().track_scroll(&scroll).pb(space::S16)
+                        })
                         .child(
                             div()
                                 .flex_none()
@@ -586,21 +603,14 @@ fn image_with_hits(
                                 .child(layer),
                         ),
                 )
-                // A wider diagram fades at the right edge: there is more to scroll to,
-                // never a hard cut mid-glyph (§2.21).
+                // A wider diagram scrolls sideways with a scrollbar that always shows
+                // (C-05): no fade over the drawing, and the cut edge reads as "more".
                 .when(scrolls, |d| {
                     d.child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .bottom_0()
-                            .right_0()
-                            .w(space::S24)
-                            .bg(gpui::linear_gradient(
-                                90.,
-                                gpui::linear_color_stop(n.content.opacity(0.), 0.),
-                                gpui::linear_color_stop(n.content, 1.),
-                            )),
+                        div().absolute().inset_0().child(
+                            gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                                .mode(gpui_component::scroll::ScrollbarMode::Always),
+                        ),
                     )
                 }),
         )

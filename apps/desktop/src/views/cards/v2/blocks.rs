@@ -21,7 +21,6 @@ use crate::ui::native::FocusRow as _;
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
-        TopicStatus,
         card::{CardField, CardListItem, CardListStatus, LinkTarget},
         cards_v2::{
             CardIntent, CardV2, CardV2Block, DecisionOption, EvidenceState, InputKind, InputOption,
@@ -336,12 +335,13 @@ fn fields_grid(fields: &[CardField], cx: &App) -> AnyElement {
                         .text_color(k.ink_3)
                         .child(f.label.clone()),
                 )
+                // A DescriptionList value is one line, cut with "…" and a tooltip
+                // (§2.5, C-09), never wrapped mid-phrase.
                 .child(
-                    div()
+                    ui::truncate::TruncText::new(f.value.clone())
                         .flex_1()
                         .min_w(px(0.))
-                        .text_color(k.ink)
-                        .child(f.value.clone()),
+                        .text_color(k.ink),
                 )
         }))
         .into_any_element()
@@ -651,7 +651,7 @@ fn code(text: &str, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .rounded(theme::radius::MD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .px(space::S12)
@@ -1178,6 +1178,7 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
 /// sides, the 3 pt focus ring; `red` edge on an error.
 pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
     let n = ui::native::native_colors(cx);
+    let (edge, shadows) = ui::native::field_edge(&n, focused, error);
     // In-card fields are sm h28 (§1.8, F51); a multi-line area keeps its height.
     let h = if height <= m::OPTION {
         crate::ui::native::tokens::height::SM
@@ -1190,10 +1191,12 @@ pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &A
         .min_w(px(0.))
         .px(ui::native::metrics::FIELD_PAD)
         .rounded(ui::native::metrics::FIELD_RADIUS)
-        .bg(n.content)
+        // The kit field recipe (`field_edge`, K-02): the same fill, edge and rings as the
+        // card's textarea and every sheet field.
+        .bg(n.control)
         .border_1()
-        .border_color(if error { n.red } else { n.separator })
-        .when(focused && !error, |el| el.shadow(n.focus_ring()))
+        .border_color(edge)
+        .shadow(shadows)
         .flex()
         .items_center()
         .gap(space::S6)
@@ -1233,6 +1236,38 @@ pub(crate) fn line_input(
             window,
             cx,
         ),
+    }
+}
+
+/// A multi-line card field: the kit textarea (K-02, C-09) over three lines, so its
+/// edge, fill, ring and text inset match the single-line field; a single-line field
+/// keeps the field box.
+pub(crate) fn area_field(
+    field: &Field,
+    id: &str,
+    focused: bool,
+    error: bool,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    match field {
+        Field::Area(s) => {
+            ui::native::NativeTextArea::new(SharedString::from(format!("area-{id}")), s)
+                .rows(3)
+                .error(error)
+                .disabled(disabled)
+                .show_focus(focused)
+                .into_any_element()
+        }
+        Field::Line(_) => field_box(focused, error, m::OPTION, cx)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .child(line_input(field, disabled, window, cx)),
+            )
+            .into_any_element(),
     }
 }
 
@@ -1311,13 +1346,14 @@ pub(crate) fn form_grid(
                 .when(top, |el| el.items_start())
                 .when(!top, |el| el.items_center())
                 .gap(space::S12)
-                // FormRow (§2.8, D8): the label left-aligned in a 112 column,
-                // the control fills the value column.
+                // FormRow (§2.8, D8): the label left-aligned in a 112 column (gap
+                // included, so the field starts 112 in as in the sheets), the
+                // control fills the value column.
                 .child(
                     div()
                         .n_body()
                         .flex_none()
-                        .w(m::FORM_LABEL)
+                        .w(m::FORM_LABEL - space::S12)
                         .one_line()
                         .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
                         .text_color(k.ink)
@@ -1471,16 +1507,7 @@ pub(crate) fn input_control(
                 .form
                 .update(cx, |f, cx| f.field(id, placeholder, true, window, cx));
             let focused = field.is_focused(window, cx);
-            field_box(focused || lead, invalid, px(88.), cx)
-                .items_start()
-                .py(space::S8)
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .child(line_input(&field, !live, window, cx)),
-                )
-                .into_any_element()
+            area_field(&field, id, focused || lead, invalid, !live, window, cx)
         }
         InputKind::Date
         | InputKind::Number
@@ -1554,7 +1581,11 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
             if !editable {
                 continue;
             }
-            let multi = text.contains('\n') || text.chars().count() > 40;
+            // A title (the first of several drafts) or a field capped at 40
+            // characters stays one line h28 whatever its text (C-04, E5).
+            let short =
+                (ix == 0 && drafts.len() > 1) || limit(ctx.card, id).is_some_and(|l| l <= 40);
+            let multi = !short && (text.contains('\n') || text.chars().count() > 40);
             let field = ctx
                 .form
                 .update(cx, |f, cx| f.field(id, None, multi, window, cx));
@@ -1596,16 +1627,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                                     .child(counter),
                             ),
                     )
-                    .child(
-                        field_box(focused, over, if multi { px(88.) } else { m::OPTION }, cx)
-                            .when(multi, |el| el.items_start().py(space::S8))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.))
-                                    .child(line_input(&field, false, window, cx)),
-                            ),
-                    )
+                    .child(area_field(&field, id, focused, over, false, window, cx))
                     .into_any_element(),
             );
         }
@@ -1694,6 +1716,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(k.ink)
                 .line_clamp(2)
+                .text_ellipsis()
                 .child(t)
         } else {
             div()
@@ -1711,7 +1734,10 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .child(
                     small(div())
                         .text_color(k.ink_2)
+                        // The sixth line ends in "…" on a whole glyph (§2.4 draft
+                        // well), never cut sideways at the well's edge.
                         .line_clamp(DRAFT_LINES)
+                        .text_ellipsis()
                         .child(t),
                 )
         });
@@ -1722,7 +1748,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         .gap(space::S14)
         .p(space::S12)
         .rounded(theme::radius::FIELD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .children(thumbs)
@@ -2005,13 +2031,23 @@ pub(crate) fn metrics_with(
                     ""
                 };
                 let mut s = format!("{sign}{}", fmt_number(d.abs()));
-                if let Some(u) = unit.as_deref().filter(|u| *u == "%") {
-                    s.push_str(u);
+                // The unit stays with its number (C-09): `+12%`, `−0.3 秒`.
+                match unit.as_deref() {
+                    Some("%") => s.push('%'),
+                    Some(u) if !u.is_empty() => {
+                        s.push(' ');
+                        s.push_str(u);
+                    }
+                    _ => {}
                 }
                 s
             });
             let mut tail = Vec::new();
-            if let Some(n) = note {
+            // A note that only repeats the unit says nothing more.
+            if let Some(n) = note
+                .as_ref()
+                .filter(|n| Some(n.as_str()) != unit.as_deref())
+            {
                 tail.push(n.clone());
             }
             if matches!(better, Some(MetricBetter::Down)) && d.is_some() {
@@ -2172,7 +2208,8 @@ fn diff(
                     Some(old - 1),
                     None,
                     Some(mix(k.bad, k.bg, m::DIFF_FILL)),
-                    k.bad_ink,
+                    // The tint carries the state; the sign stays muted (§1.3, C-09).
+                    k.ink_3,
                 )
             }
             "+" => {
@@ -2182,7 +2219,7 @@ fn diff(
                     None,
                     Some(new - 1),
                     Some(mix(k.ok, k.bg, m::DIFF_FILL)),
-                    k.ok_ink,
+                    k.ink_3,
                 )
             }
             _ => {
@@ -2238,7 +2275,7 @@ fn diff(
     // A `sunken` well with its own 1 px line (§1.7: a fill step alone is not an edge).
     div()
         .rounded(theme::radius::MD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .overflow_hidden()
@@ -2563,7 +2600,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .pl(space::S12)
             .pr(space::S4)
             .rounded(theme::radius::MD)
-            .bg(k.sunken)
+            .bg(ui::native::native_colors(cx).sheet)
             .border_1()
             .border_color(k.line)
             .text_color(k.ink_2)
@@ -2673,10 +2710,21 @@ fn pr_state(raw: &str) -> PrState {
                     PrTone::Plain => 4,
                 })
                 .unwrap_or(PrTone::Plain);
-            return PrState {
-                text: raw.to_string(),
-                tone,
+            // The badge says the §2.12 word of its state (C-09): 等你审 for a review that
+            // waits on me, 在做 n/m for checks that run; other free text shows as it is.
+            let count = raw
+                .split_whitespace()
+                .last()
+                .filter(|w| is_count(w))
+                .and_then(|w| w.split_once('/'));
+            let text = match (tone, count) {
+                (PrTone::Waits, _) => common::STATUS_WAITING_REVIEW_ME.to_string(),
+                (PrTone::Running, Some((n, total))) if !raw.contains(rail::CHANGES_MERGING) => {
+                    fill(c::STRIP_WORKING_COUNT, &[("n", n), ("total", total)])
+                }
+                _ => raw.to_string(),
             };
+            return PrState { text, tone };
         }
     };
     PrState {
@@ -2762,30 +2810,18 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         .find(|g| &g.id == group_id)
                         .map(|g| g.name)
                         .unwrap_or_default();
-                    let status = topic
+                    // The 话题's state in the §2.12 words of every other view
+                    // (`topic_page::topic_state`: asks first, 在做 only with a run), once in
+                    // the badge; the line under the title names the 群 only (D1-66).
+                    let state = topic
                         .as_ref()
-                        .map(|t| crate::views::topic_menu::status_label(t.status).to_string())
-                        .unwrap_or_default();
-                    let run = p
-                        .runs(group_id, topic_id)
-                        .into_iter()
-                        .max_by_key(|r| r.updated_at)
-                        .filter(|r| !r.plan.is_empty() && topic.as_ref().is_some_and(|t| t.status != TopicStatus::Done))
-                        .map(|r| {
-                            let done = r.plan.iter().filter(|x| x.state == crate::data::PlanState::Done).count();
-                            // One count rule everywhere: steps done of all, with
-                            // its word (§2.12: 在做 3/5).
-                            fill(
-                                c::STRIP_WORKING_COUNT,
-                                &[("n", &done.to_string()), ("total", &r.plan.len().to_string())],
-                            )
-                        });
+                        .map(|t| crate::views::topic_page::topic_state(p.as_ref(), ctx.me.as_deref(), t));
                     (
                         ref_tile(Sym::List, false, cx),
                         topic.map(|t| t.title).unwrap_or_else(|| label.clone()),
-                        fill(c::REF_TOPIC_LINE, &[("group", &group), ("status", &status)]),
-                        run,
-                        Some(BadgeState::Working),
+                        group,
+                        state.as_ref().map(|s| s.text.clone()),
+                        state.map(|s| s.badge),
                     )
                 }
                 RefTarget::Member { member_id } => {
@@ -2929,7 +2965,7 @@ const REFS_CAP: usize = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::copy::topic_rail as rail;
+    use crate::copy::{common, topic_rail as rail};
 
     #[test]
     fn a_current_plan_step_says_how_long_it_runs() {
@@ -2974,6 +3010,9 @@ mod tests {
         assert_eq!(pr_state("1 项检查没过").tone, PrTone::Bad);
         assert_eq!(pr_state("检查 2/3").tone, PrTone::Running);
         assert_eq!(pr_state("你好").tone, PrTone::Plain);
+        // §2.12 words on the badge.
+        assert_eq!(pr_state("需要你审").text, common::STATUS_WAITING_REVIEW_ME);
+        assert_eq!(pr_state("检查 2/3").text, "在做 2/3");
         // Free text shows unchanged.
         assert_eq!(pr_state("已合并 11-02").text, "已合并 11-02");
         assert_eq!(pr_state("reopened").text, "reopened");

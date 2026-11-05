@@ -175,16 +175,19 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::V2 => fake::v2::V2Samples::new(),
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
         Start::V2TwoRuns => fake::v2::V2Samples::with_second_run(),
+        Start::V2Gallery => fake::v2::V2Samples::with_release_run(),
         // --- v13/ux-pages ---
         Start::V2Unsynced => page_states::Unsynced::new(
             fake::v2::V2Samples::new(),
             crate::data::ConnectionState::Connecting,
         ),
+        // Worst: a long wait before the next try (C-07), so the failed pages' cause line
+        // carries worst data too.
         Start::V2Unreachable => page_states::Unsynced::new(
             fake::v2::V2Samples::new(),
             crate::data::ConnectionState::Reconnecting {
-                attempt: 3,
-                retry_in_ms: 8_000,
+                attempt: if worst_case { 99 } else { 3 },
+                retry_in_ms: if worst_case { 3_599_000 } else { 8_000 },
             },
         ),
         Start::V2Bare => page_states::Unsynced::new(
@@ -324,6 +327,34 @@ async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
             };
             shots.push(entry);
         }
+        // Acceptance (review 3 §4): every state scene differs from the scene it
+        // starts from, so a hover or focus that draws nothing fails the run.
+        let suffix = if options.worst_case { "-worst" } else { "" };
+        for scene in &options.scenes {
+            let Some(base) = states::base(scene.name) else {
+                continue;
+            };
+            if !options.scenes.iter().any(|s| s.name == base) {
+                continue;
+            }
+            let file = |name: &str| {
+                options
+                    .dir
+                    .join(format!("{name}-{}{suffix}.png", mode.name()))
+            };
+            match capture::same_pixels(&file(scene.name), &file(base)) {
+                Ok(false) => {}
+                Ok(true) => {
+                    all_ok = false;
+                    eprintln!("{}: FAILED: draws the same pixels as {base}", scene.name);
+                    shots.push(
+                        serde_json::json!({ "scene": scene.name, "theme": mode.name(),
+                        "ok": false, "error": format!("same pixels as {base}") }),
+                    );
+                }
+                Err(error) => eprintln!("{}: cannot compare with {base}: {error}", scene.name),
+            }
+        }
     }
     cx.update(|cx| cx.set_window_appearance(None));
     let manifest = serde_json::json!({
@@ -427,7 +458,9 @@ async fn shoot(
             match next_frame(handle, cx).await {
                 Ok(()) => {
                     frames += 1;
-                    if frames == 1 {
+                    // A scene with native or async content presses its keys once
+                    // that content is ready (below), so a key reaches it.
+                    if frames == 1 && scenes::ready_check(scene.name).is_none() {
                         press_keys(handle, scene.name, cx);
                     }
                 }
@@ -453,6 +486,8 @@ async fn shoot(
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
+            press_keys(handle, scene.name, cx);
+            let _ = next_frame(handle, cx).await;
             cx.background_executor().timer(options.settle).await;
         }
         // A hover or focus scene waits for its delay (tooltips, hover pills).

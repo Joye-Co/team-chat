@@ -20,8 +20,11 @@ pub(crate) fn open_gallery(
     let mut options = main_window_options(false, cx);
     options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
-    gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|_| CardsGallery::new(services, start))
+    gpui_kit::open_window(options, cx, move |window, cx| {
+        let view = cx.new(|cx| CardsGallery::new(services, start, cx));
+        let focus = view.read(cx).focus.clone();
+        window.focus(&focus, cx);
+        view
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())
@@ -32,7 +35,7 @@ macro_rules! gallery_scene {
         Scene {
             name: $name,
             about: $about,
-            start: Start::V2,
+            start: Start::V2Gallery,
             setup: |_, _| {},
             open: |s, c, cx| open_gallery(s, c, $section, cx),
         }

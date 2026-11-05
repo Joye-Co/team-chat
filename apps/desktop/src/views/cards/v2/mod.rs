@@ -299,7 +299,8 @@ pub fn render(
     };
     record(&ctx);
     Some(match mode {
-        CardMode::Line => line::overview(&ctx, cx),
+        // A card at work is the one WorkingCard in the overview too (C-04).
+        CardMode::Line => working(&ctx, window, cx).unwrap_or_else(|| line::overview(&ctx, cx)),
         CardMode::Notification => line::notification(&ctx, window, cx),
         _ => full(&ctx, window, cx),
     })
@@ -762,7 +763,18 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
                 } else {
                     c::STRIP_WAITS_APPROVE
                 };
-                (c::CARD_NEEDS_YOU.into(), fill(detail, &[("name", author)]))
+                // The §2.12 word of the ask (T, `topic_page::ask_words`): 等你审 for a
+                // review, 等你回答 for any other ask.
+                let word = ctx
+                    .env
+                    .provider
+                    .asks_for_me()
+                    .into_iter()
+                    .find(|a| a.message_id.as_deref() == Some(ctx.msg.message_id.as_str()))
+                    .map_or(c::CARD_NEEDS_YOU, |a| {
+                        crate::views::topic_page::ask_words(a.kind)
+                    });
+                (word.into(), fill(detail, &[("name", author)]))
             }
         }
         CardState::WaitingOn => {
@@ -1438,7 +1450,7 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     let CardState::Executing { answer, progress } = ctx.state else {
         return None;
     };
-    if progress.waiting || !matches!(ctx.mode, CardMode::Topic | CardMode::Desk) {
+    if progress.waiting || !matches!(ctx.mode, CardMode::Topic | CardMode::Desk | CardMode::Line) {
         return None;
     }
     let n = ui::native::native_colors(cx);
@@ -1463,7 +1475,10 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         c::STRIP_WORKING.to_string()
     };
     let bar = (progress.total > 0).then_some((progress.done, progress.done, progress.total));
-    let body = if super::v21::is_21(ctx.card) {
+    // The overview shows the title only; the full card adds its blocks.
+    let body = if ctx.mode == CardMode::Line {
+        Vec::new()
+    } else if super::v21::is_21(ctx.card) {
         super::v21::body(ctx, window, cx)
     } else {
         blocks::body(ctx, window, cx)

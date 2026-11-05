@@ -105,7 +105,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "refs-card-step",
-        about: "引用提问 on Card v2 parts: the pointer rests on step 3 改去重 of Forge's done plan; the row lights up and 问这里 follows its text; the evidence strip below has a part per proof",
+        about: "引用提问 on Card v2 parts: the pointer rests on step 3 (按 seq 去重…) of Forge's done plan; the row lights up and 问这里 follows its text; the evidence strip below has a part per proof",
         start: Start::V2RefParts,
         setup: |s, cx| {
             reset(cx);
@@ -179,7 +179,7 @@ pub fn open_too_many(
     let handle = open_main(services, content, cx)?;
     handle
         .update(cx, |_, window, cx| {
-            window.push_notification(super::too_many_toast().notification(), cx)
+            window.push_notification(super::too_many_toast(|_, _| {}).notification(), cx)
         })
         .map_err(|e| e.to_string())?;
     Ok(handle)

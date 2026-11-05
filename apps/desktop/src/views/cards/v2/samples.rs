@@ -17,9 +17,9 @@ use crate::{
         },
     },
     fake::v2::{
-        ALL, ART_REPORT, DEV, FORGE, GROWTH, JOJO, LEDGER, ME, OPS, POCKET, RUN_VIRTUAL, SCOUT,
-        T_INVITE, T_PROMO, T_RECONNECT, T_RELEASE, T_REPORT, T_STAGING, T_V4, T_VIRTUAL, T_WEEKLY,
-        TARO, WATCH, at,
+        ALL, ART_REPORT, DEV, FORGE, GROWTH, JOJO, LEDGER, ME, OPS, POCKET, RUN_RECONNECT,
+        RUN_RELEASE, RUN_VIRTUAL, SCOUT, T_INVITE, T_PROMO, T_RECONNECT, T_RELEASE, T_REPORT,
+        T_STAGING, T_V4, T_VIRTUAL, T_WEEKLY, TARO, WATCH, at,
     },
 };
 
@@ -192,8 +192,12 @@ pub(crate) fn worsen(v: &mut serde_json::Value) {
                 if kind.as_deref() == Some("plan")
                     && let Some(Value::Array(items)) = o.get_mut("items")
                 {
-                    for it in items.iter_mut() {
-                        it["text"] = Value::from(WORST_LONG);
+                    // The worst steps of the runs (C-07): a card's plan reads like the
+                    // inspector's plan of the same run.
+                    for (j, it) in items.iter_mut().enumerate() {
+                        if let Some(t) = crate::selftest::worst_case::worst_plan_step(j) {
+                            it["text"] = Value::from(t);
+                        }
                     }
                 }
                 for (_, x) in o.iter_mut() {
@@ -463,7 +467,7 @@ fn all() -> Vec<Sample> {
             "v": 2, "rev": 2, "intent": "working", "title": "正在发布 qqbot v2.14",
             "fallback": "正在发布 qqbot v2.14",
             "blocks": [
-                { "type": "plan", "id": "steps", "items": [
+                { "type": "plan", "id": "steps", "runId": RUN_RELEASE, "items": [
                     { "text": "构建镜像", "state": "done" },
                     { "text": "逐个重启各群", "state": "current" },
                     { "text": "盯 15 分钟告警", "state": "pending" }
@@ -601,15 +605,19 @@ fn all() -> Vec<Sample> {
         DEV,
         T_RECONNECT,
         FORGE,
-        at(9, 10),
-        Some(at(9, 51)),
+        at(9, 14),
+        Some(at(9, 55)),
+        // One plan source (C-07): the steps and times of Forge's run RUN_RECONNECT, which
+        // the 话题 inspector shows.
         json!({
             "v": 2, "rev": 6, "intent": "done", "title": "断线重连后消息重复",
             "fallback": "5 步都做完了",
-            "blocks": [{ "type": "plan", "id": "plan", "items": [
-                { "text": "复现", "state": "done" }, { "text": "找原因", "state": "done" },
-                { "text": "改去重", "state": "done" }, { "text": "补测试", "state": "done" },
-                { "text": "提 PR", "state": "done" }
+            "blocks": [{ "type": "plan", "id": "plan", "runId": RUN_RECONNECT, "items": [
+                { "text": "复现重复消息", "state": "done" },
+                { "text": "找到重复的原因", "state": "done" },
+                { "text": "按 seq 去重并从确认处续传", "state": "done" },
+                { "text": "改成指数退避", "state": "done" },
+                { "text": "提 PR #61", "state": "done" }
             ]}]
         }),
     ));
@@ -717,7 +725,7 @@ fn all() -> Vec<Sample> {
             "fallback": "这周的 PR",
             "blocks": [
                 { "type": "ref", "id": "p61", "label": "重连后按 seq 去重", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3/3 项检查通过", "state": "需要你审" } },
+                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3/3 项检查通过", "state": "等你审" } },
                 { "type": "ref", "id": "p62", "label": "话题列表虚拟滚动", "target": { "kind": "pr",
                   "url": "https://github.com/example/qqbot/pull/62", "number": 62, "repo": "开发 · Forge", "state": "检查 2/3" } },
                 { "type": "ref", "id": "p59", "label": "话题加载提速", "target": { "kind": "pr",
@@ -822,7 +830,7 @@ fn all() -> Vec<Sample> {
             "fallback": "今天要看的四样",
             "blocks": [
                 { "type": "ref", "id": "pr", "label": "重连后按 seq 去重", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3 项检查通过", "state": "需要你审" } },
+                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3 项检查通过", "state": "等你审" } },
                 { "type": "ref", "id": "art", "label": "10 月数据月报", "target": { "kind": "artifact",
                   "artifactId": ART_REPORT, "version": 2 } },
                 { "type": "ref", "id": "topic", "label": "夹夹 4.0 需求", "target": { "kind": "topic",

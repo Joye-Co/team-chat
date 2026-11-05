@@ -119,7 +119,6 @@ crate::copy! {
     REFS_ALL = "看全部 {count} 个",
     REFS_FEWER = "收起",
     REF_ARTIFACT_NEWER = "有新版本 v{version}",
-    REF_TOPIC_LINE = "{group} · {status}",
     REF_MEMBER_LINE = "{role}",
     REF_OPEN = "打开",
 
@@ -154,7 +153,7 @@ crate::copy! {
     GALLERY_STATES = "状态一览",
     GALLERY_STATES_NOTE = "每张卡最上面是一条状态条：符号、状态、谁和什么时候，右边最多一个操作。颜色只来自状态。",
     GALLERY_S_CHOICE = "选择",
-    GALLERY_S_CHOICE_NOTE = "一个问题，2–6 个选项，推荐项写明理由。两个短选项横排成一行按钮，三个以上竖排并在底栏提交。",
+    GALLERY_S_CHOICE_NOTE = "一个问题，2–6 个选项，推荐项写明理由。每个选项占一整行：两个选项点一下就算答了，三个以上在底栏提交。",
     GALLERY_S_APPROVE = "批准",
     GALLERY_S_APPROVE_NOTE = "做不能撤回或影响所有人的事之前先问。按下批准后再确认一次；发布到生产要输入名字。",
     GALLERY_S_DRAFT = "草稿",

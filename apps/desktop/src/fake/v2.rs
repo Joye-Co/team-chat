@@ -73,6 +73,9 @@ pub const RUN_VIRTUAL: &str = "run-v2-virtual";
 /// Scout's check of the virtual list, beside Forge's run (`with_second_run`).
 pub const RUN_VIRTUAL_CHECK: &str = "run-v2-virtual-check";
 pub const RUN_V4: &str = "run-v2-v4";
+/// Watch's release of qqbot v2.14 that I approved (the Card v2 gallery only,
+/// `with_release_run`).
+pub const RUN_RELEASE: &str = "run-v2-release";
 pub const RUN_WEEKLY: &str = "run-v2-weekly";
 
 pub const ART_RECONNECT: &str = "art-v2-reconnect-report";
@@ -972,6 +975,32 @@ impl V2Samples {
         }
     }
 
+    /// The sample team as the Card v2 gallery shows it: Watch's release that I approved
+    /// runs, so its 发布中 card offers 停止… (C-04). Only the gallery uses it: in the
+    /// other scenes the release still waits for my approval.
+    pub fn with_release_run() -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            d.runs.push(run(RunSpec {
+                id: RUN_RELEASE,
+                bot: WATCH,
+                group: OPS,
+                topic: T_RELEASE,
+                status: RunStatus::Running,
+                by: ME,
+                started: at(10, 16),
+                ended: None,
+                machine: "云端",
+                plan: plan(&[
+                    ("构建镜像", PlanState::Done),
+                    ("逐个重启各群", PlanState::Current),
+                    ("盯 15 分钟告警", PlanState::Pending),
+                ]),
+            }))
+        });
+        s
+    }
+
     /// The sample team with a second member at work in 开发 / 虚拟列表: Scout checks the
     /// list while Forge builds it (two plan cards in one 话题, `topic-two-runs`).
     pub fn with_second_run() -> Arc<Self> {
@@ -1821,7 +1850,9 @@ impl ChatProvider for V2Samples {
     // --- pages track: the 群, 成员 and 产出 pages ---
 
     fn clock_now(&self) -> Millis {
-        pages_samples::NOW()
+        // One clock (T, P-01): the self-test's pinned now, so a working card, its step
+        // times and the pages agree.
+        crate::selftest::clock::now_ms()
     }
     fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
         pages_samples::topic_glance(group_id, topic_id)

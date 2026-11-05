@@ -158,10 +158,10 @@ fn button(
     let id = ElementId::Name(part_id(message, format_args!("action-{}", action.id)).into());
     let kind = match action.style.unwrap_or_default() {
         ActionStyle::Primary => ui::native::PushStyle::Default,
-        // Every other action is a standard push button (NATIVE.md §5.2).
+        // Every other action is an outline button, as in Card v2 (§2.4, C-09).
         ActionStyle::Default => {
             let _ = quiet;
-            ui::native::PushStyle::Secondary
+            ui::native::PushStyle::Outline
         }
         ActionStyle::Danger => ui::native::PushStyle::Destructive,
     };
@@ -190,11 +190,11 @@ fn button(
     .into_any_element()
 }
 
-/// One answer of an ask card (§7.10): a Regular standard push button with
-/// no letter badge, stacked one under another; the chosen answer leads with
-/// a checkmark (NATIVE.md §5.2, rule 4). A press answers.
+/// One answer of an ask card: the Card v2 choice row (§2.17, C-08), full width h40 with
+/// its letter, so Card v1 and v2 choices look alike. The chosen answer is the selected
+/// row; while a press is in flight the other rows wait at 50 %. A press answers.
 fn option_row(
-    _ix: usize,
+    ix: usize,
     action: &CardAction,
     message: &Message,
     provider: &Arc<dyn ChatProvider>,
@@ -202,31 +202,28 @@ fn option_row(
     mine: Option<&str>,
     cx: &App,
 ) -> AnyElement {
-    use crate::ui::native as nk;
-    let n = nk::native_colors(cx);
-    let id = ElementId::Name(part_id(message, format_args!("option-{}", action.id)).into());
+    use gpui::StatefulInteractiveElement as _;
+    let id = part_id(message, format_args!("option-{}", action.id));
     let chosen = mine == Some(action.id.as_str()) || sending == Some(action.id.as_str());
     let blocked = sending.is_some();
     let press = press_of(action, message, provider);
-    let b = nk::push_button(id, "", nk::PushStyle::Outline, nk::PushSize::Regular, cx).child(
-        div()
-            .flex()
-            .items_center()
-            .gap(space::S4)
-            .when(chosen, |el| {
-                el.child(crate::ui::Sym::Check.inline().text_color(n.label))
-            })
-            .child(action.label.clone()),
+    let row = crate::views::cards::v2::blocks::choice_row(
+        id.into(),
+        ix,
+        &action.label,
+        None,
+        false,
+        chosen,
+        false,
+        !blocked || chosen,
+        cx,
     );
-    let b = nk::disabled_push(b, blocked && !chosen, cx);
-    div()
-        .flex()
-        .child(if blocked {
-            b
-        } else {
-            b.on_click(move |_, window, cx| press.run(window, cx))
-        })
-        .into_any_element()
+    if blocked {
+        row.into_any_element()
+    } else {
+        row.on_click(move |_, window, cx| press.run(window, cx))
+            .into_any_element()
+    }
 }
 
 /// Everything a button needs to send its action.

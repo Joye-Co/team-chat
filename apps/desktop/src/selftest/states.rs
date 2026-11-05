@@ -160,7 +160,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-card-option-hover",
         about: "Card v2 13: the pointer on choice row B of the long choice (hover: muted at 50%)",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |_, _| {},
         open: |s, c, cx| {
             crate::views::cards::v2::scenes::open_gallery(
@@ -174,7 +174,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-card-button-hover",
         about: "Card v2 13: the pointer on 重试 of the card that cannot be read (outline sm hover)",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |_, _| {},
         open: |s, c, cx| {
             crate::views::cards::v2::scenes::open_gallery(
@@ -188,7 +188,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-card-tooltip",
         about: "Card v2 13: the pointer on the cut label of option G: the full text in a tooltip (§2.21)",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |_, _| {},
         open: |s, c, cx| {
             crate::views::cards::v2::scenes::open_gallery(
@@ -227,7 +227,7 @@ pub const SCENES: &[Scene] = &[
     Scene {
         name: "state-focus-card-option",
         about: "cards-v2-choice after Tab reaches an option row: the focus ring on the option, apart from the picked one",
-        start: Start::V2,
+        start: Start::V2Gallery,
         setup: |s, cx| (like("cards-v2-choice").setup)(s, cx),
         open: |s, c, cx| (like("cards-v2-choice").open)(s, c, cx),
     },
@@ -239,7 +239,69 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| (like("new-group").open)(s, c, cx),
     },
     // --- end v15/r5-cards ---
+    // --- v16/c-cards: hover and focus on a page row, a 产出 row and a Settings row (E2, E3) ---
+    Scene {
+        name: "state-hover-page-row",
+        about: "group-v2 with the pointer on a 话题 row: the ListRow hover, muted at 50 % (§2.6)",
+        start: Start::V2,
+        setup: |s, cx| (like("group-v2").setup)(s, cx),
+        open: |s, c, cx| (like("group-v2").open)(s, c, cx),
+    },
+    Scene {
+        name: "state-hover-artifact-row",
+        about: "artifacts-v2 with the pointer on a 产出 row: the table row hover (§2.7)",
+        start: Start::V2,
+        setup: |s, cx| (like("artifacts-v2").setup)(s, cx),
+        open: |s, c, cx| (like("artifacts-v2").open)(s, c, cx),
+    },
+    Scene {
+        name: "state-focus-artifact-row",
+        about: "artifacts-v2 after Tab reaches the 产出 table: the focus ring on a row",
+        start: Start::V2,
+        setup: |s, cx| (like("artifacts-v2").setup)(s, cx),
+        open: |s, c, cx| (like("artifacts-v2").open)(s, c, cx),
+    },
+    Scene {
+        name: "state-hover-settings-row",
+        about: "settings-notifications-end with the pointer on the 按群设置 navigation row (§2.8)",
+        start: Start::SignedIn,
+        setup: |s, cx| (like("settings-notifications-end").setup)(s, cx),
+        open: |s, c, cx| (like("settings-notifications-end").open)(s, c, cx),
+    },
+    Scene {
+        name: "state-focus-diagram-node",
+        about: "diagram-viewer after Tab Tab: the second node's focus ring and its 问这里 (E3, C-03)",
+        start: Start::SignedIn,
+        setup: |s, cx| (like("diagram-viewer").setup)(s, cx),
+        open: |s, c, cx| (like("diagram-viewer").open)(s, c, cx),
+    },
+    // --- end v16/c-cards ---
 ];
+
+/// The scene each state scene starts from: its capture must differ from that
+/// scene's (review 3 §4, checked after every run that captures both).
+const BASES: &[(&str, &str)] = &[
+    ("state-hover-message", "main"),
+    ("state-hover-code", "process"),
+    ("state-card-option-hover", "cards-v2-states"),
+    ("state-card-button-hover", "cards-v2-states"),
+    ("state-card-tooltip", "cards-v2-states"),
+    ("state-hover-sidebar", "desk"),
+    ("state-key-sidebar", "desk"),
+    ("state-focus-page-list", "group-v2"),
+    ("state-focus-card-option", "cards-v2-choice"),
+    ("state-focus-picker", "new-group"),
+    ("state-hover-page-row", "group-v2"),
+    ("state-hover-artifact-row", "artifacts-v2"),
+    ("state-focus-artifact-row", "artifacts-v2"),
+    ("state-hover-settings-row", "settings-notifications-end"),
+    ("state-focus-diagram-node", "diagram-viewer"),
+];
+
+/// The base scene of state scene `name`.
+pub fn base(name: &str) -> Option<&'static str> {
+    BASES.iter().find(|(n, _)| *n == name).map(|(_, b)| *b)
+}
 
 /// The scene a hover or focus scene starts from: the same setup and window,
 /// so the capture differs from that scene only by the pointer or the keys.
@@ -254,16 +316,12 @@ fn like(name: &str) -> &'static Scene {
 mod tests {
     use super::*;
 
-    /// A derived scene starts from the same data as the scene it copies.
+    /// Every state scene names its base, and starts from the same data.
     #[test]
-    fn derived_scenes_start_like_their_base() {
-        for (name, base) in [
-            ("state-focus-page-list", "group-v2"),
-            ("state-focus-card-option", "cards-v2-choice"),
-            ("state-focus-picker", "new-group"),
-        ] {
-            let scene = SCENES.iter().find(|s| s.name == name).expect(name);
-            assert_eq!(scene.start, like(base).start, "{name}");
+    fn state_scenes_start_like_their_base() {
+        for scene in SCENES.iter().filter(|s| s.name.starts_with("state-")) {
+            let base = base(scene.name).unwrap_or_else(|| panic!("{} has no base", scene.name));
+            assert_eq!(scene.start, like(base).start, "{}", scene.name);
         }
     }
 }

@@ -24,7 +24,8 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
         .flex()
         .flex_col()
         .p(inset)
-        .gap(space::S8)
+        // The compact gap between the header row and the title (§2.4: 16, D1-73).
+        .gap(ui::native::cards::card::STACK)
         .children(strip(ctx, cx))
         .child(
             div()
@@ -193,7 +194,11 @@ pub fn plan_row(
     let k = theme::colors(cx);
     let p = state::progress(&msg.card);
     let member = env.provider.member(&msg.author_id);
-    let name = member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+    // X-01: the row shows the avatar; a leading emoji in the name would read as a second one.
+    let name = member
+        .as_ref()
+        .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+        .unwrap_or_default();
     let working = msg.card.intent == CardIntent::Working;
     let id = format!("cv2-plan-{message_id}");
     let (text, meta_text, action, glyph) = if working {

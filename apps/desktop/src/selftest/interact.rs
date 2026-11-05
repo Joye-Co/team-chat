@@ -44,7 +44,8 @@ const fn keys(keys: &'static [&'static str]) -> Steps {
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
     ("state-hover-message", hover(600., 315., 600)),
-    ("state-hover-code", hover(690., 424., 400)),
+    // The 问这里 slot left of the copy button in the code block's top strip.
+    ("state-hover-code", hover(905., 410., 400)),
     // --- end t5 ---
     // --- t5-cards ---
     ("state-card-option-hover", hover(1011., 290., 400)),
@@ -75,6 +76,17 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-focus-card-option", keys(&["tab", "down"])),
     ("state-focus-picker", keys(&["tab", "tab", "down"])),
     // --- end v15/r5-cards ---
+    // --- v16/c-cards ---
+    ("state-hover-page-row", hover(535., 201., 300)),
+    ("state-hover-artifact-row", hover(893., 189., 300)),
+    // The last tab stops are the last row's "⋯", then the row itself.
+    (
+        "state-focus-artifact-row",
+        keys(&["shift-tab", "shift-tab"]),
+    ),
+    ("state-hover-settings-row", hover(320., 673., 300)),
+    ("state-focus-diagram-node", keys(&["tab", "tab"])),
+    // --- end v16/c-cards ---
 ];
 
 /// The steps of scene `name`, if it has any.

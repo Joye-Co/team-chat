@@ -269,3 +269,14 @@ pub fn png_size(png: &Path) -> Option<(u32, u32)> {
     let h = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
     Some((w, h))
 }
+
+/// Whether two captures hold the same pixels (the state-scene check).
+pub fn same_pixels(a: &Path, b: &Path) -> Result<bool, String> {
+    let read = |p: &Path| {
+        image::open(p)
+            .map(|i| i.to_rgba8())
+            .map_err(|e| format!("{}: {e}", p.display()))
+    };
+    let (a, b) = (read(a)?, read(b)?);
+    Ok(a.dimensions() == b.dimensions() && a.as_raw() == b.as_raw())
+}

@@ -46,6 +46,9 @@ pub enum Start {
     /// (`fake::v2::refs_samples::with_card_parts`).
     V2RefParts,
     // --- end inc-refs ---
+    /// The v2 sample team as the Card v2 gallery shows it: the release I approved
+    /// runs (`fake::v2::V2Samples::with_release_run`).
+    V2Gallery,
     /// The v2 sample team with a second member at work in 开发 / 虚拟列表
     /// (`fake::v2::V2Samples::with_second_run`).
     V2TwoRuns,
@@ -875,7 +878,15 @@ fn core_checks(name: &str) -> Option<Checks> {
             )
         },
         "core-side-chat" => |s, _| one("side-chat", &[format!("{} messages=0", forge_name(s))]),
-        "core-artifact" => |_, _| one("artifact-page", &["重连测试报告 v2"]),
+        // The name comes from the provider: `--worst-case` renames every 产出 (C-07).
+        "core-artifact" => |s, _| {
+            let title = s
+                .provider
+                .artifact(crate::provider::seeded::ARTIFACT)
+                .map(|d| d.summary.title)
+                .unwrap_or_default();
+            one("artifact-page", &[format!("{title} v2")])
+        },
         _ => return None,
     })
 }
@@ -928,7 +939,7 @@ const HOST_SCENES: &[Scene] = &[
     },
     Scene {
         name: "artifact-ref-toast",
-        about: "就这里提问 on a page element: the chip goes into the 话题 composer and the toast says 已放进话题的输入框",
+        about: "就这里提问 on a page element: the chip goes into the 话题 composer; the chip is the confirmation, so no toast shows (NATIVE.md §7.4)",
         start: Start::V2Refs,
         setup: crate::views::artifacts::state_scenes::ref_toast_setup,
         open: crate::views::artifacts::state_scenes::open_ref_toast,
@@ -1032,7 +1043,9 @@ fn diagram_ready(name: &str) -> Option<fn(&App) -> bool> {
     match name {
         "diagram-inline" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Inline, cx)),
         "diagram-error" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Error, cx)),
-        "diagram-viewer" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx)),
+        "diagram-viewer" | "state-focus-diagram-node" => {
+            Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx))
+        }
         // --- t5-media ---
         "diagram-loading" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Loading, cx)),
         // --- end t5-media ---
