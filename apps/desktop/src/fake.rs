@@ -329,8 +329,9 @@ impl State {
             cs::GROUP,
             cs::TOPIC,
             cs::TOPIC_TITLE,
-            TopicStatus::InProgress,
-            &[],
+            // The sample cards ask me to review and to answer (T: the 话题 reads 等你…).
+            TopicStatus::WaitingReview,
+            &[ME],
             None,
             &messages,
             0,

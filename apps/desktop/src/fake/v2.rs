@@ -1850,7 +1850,9 @@ impl ChatProvider for V2Samples {
     // --- pages track: the 群, 成员 and 产出 pages ---
 
     fn clock_now(&self) -> Millis {
-        pages_samples::NOW()
+        // One clock (T, P-01): the self-test's pinned now, so a working card, its step
+        // times and the pages agree.
+        crate::selftest::clock::now_ms()
     }
     fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
         pages_samples::topic_glance(group_id, topic_id)

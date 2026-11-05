@@ -763,7 +763,18 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
                 } else {
                     c::STRIP_WAITS_APPROVE
                 };
-                (c::CARD_NEEDS_YOU.into(), fill(detail, &[("name", author)]))
+                // The §2.12 word of the ask (T, `topic_page::ask_words`): 等你审 for a
+                // review, 等你回答 for any other ask.
+                let word = ctx
+                    .env
+                    .provider
+                    .asks_for_me()
+                    .into_iter()
+                    .find(|a| a.message_id.as_deref() == Some(ctx.msg.message_id.as_str()))
+                    .map_or(c::CARD_NEEDS_YOU, |a| {
+                        crate::views::topic_page::ask_words(a.kind)
+                    });
+                (word.into(), fill(detail, &[("name", author)]))
             }
         }
         CardState::WaitingOn => {

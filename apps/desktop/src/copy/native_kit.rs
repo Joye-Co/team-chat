@@ -3,6 +3,13 @@
 
 crate::copy! {
     MINUS_SIGN = "−",
+    // Row labels of the kit scenes (review 3 K-11), for track K.
+    ROW_SIZE_REGULAR = "常规尺寸",
+    ROW_SIZE_SMALL = "小尺寸",
+    ROW_SIZE_LARGE = "大尺寸",
+    ROW_SELECTION_ACTIVE = "窗口在前时的选中",
+    ROW_SELECTION_INACTIVE = "窗口在后时的选中",
+    ROW_SIDEBAR = "侧栏行",
     // Completeness kit (native-kit-3)
     SEC_BADGES = "标记",
     SEC_STATUS = "状态",
