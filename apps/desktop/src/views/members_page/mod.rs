@@ -929,7 +929,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 这周 (card): three stats (完成的话题, 产出, 成本) and the 成本 Progress
+    /// 这周 (card): three stats (交付, 产出, 成本) and the 成本 Progress
     /// against the limit.
     fn week_section(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);

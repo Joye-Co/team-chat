@@ -1,7 +1,7 @@
 //! 首页 (COMPLETENESS.md §2.18): the toolbar row (title 首页, subtitle
 //! `3 件事等你拍板`, from the same needs-you query as the sidebar count),
-//! then Jojo's priority as an Alert, a KPI row (等你, 在做, 今天完成, 排队)
-//! and one section per queue (需要你拍板, 正在做, 做完了), each a framed
+//! then Jojo's priority as an Alert, a KPI row (等你, 在做, 今天交付, 排队)
+//! and one section per queue (需要你拍板, 正在做, 今天交付), each a framed
 //! list with fixed columns. The right pane holds only what the list does
 //! not show (排队, 在哪干活). Every state is drawn: loading (skeletons),
 //! failed (Alert with 重试), empty (Empty state) and long lists (看全部).
@@ -321,7 +321,7 @@ impl DeskPage {
         page::frame(cx).children(shown).child(footer)
     }
 
-    /// The KPI row (§2.4): 等你, 在做, 今天完成, 排队.
+    /// The KPI row (§2.4): 等你, 在做, 今天交付, 排队.
     fn kpis(&self, snap: &Snapshot, waiting: usize, cx: &App) -> gpui::Div {
         let k = native_colors(cx);
         let earliest = snap

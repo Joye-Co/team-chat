@@ -38,7 +38,7 @@ crate::copy! {
     MEMBERS_NOW_COUNTS = "在做 {a} · 排队 {b}",
     MEMBERS_QUEUED = "排队",
     MEMBERS_TOPIC_META = "{group} · {name} 提出",
-    MEMBERS_DONE_TOPICS = "完成的话题",
+    MEMBERS_DONE_TOPICS = "交付",
     MEMBERS_AVERAGE = "平均 {n} 分钟",
     MEMBERS_OUTPUTS = "产出",
     MEMBERS_OUTPUT_KINDS = "{prs} PR · {pages} 网页",
