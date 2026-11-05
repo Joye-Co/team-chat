@@ -81,11 +81,19 @@ Done for staging and production on 2026-11-03 (bot `监测`, ops group `运维`,
 
 ## Quality smoke
 
-`bun scripts/staging-smoke.ts [--env staging] [--upload-mb 100]` measures the V1 bar of
+`bun scripts/staging-smoke.ts [--env staging] [--upload-mb 100] [--samples 50] [--warmup 2]`
+measures the V1 bar of
 [docs/PRODUCT.md](PRODUCT.md#v1-production-use-by-5-people-and-5-bots) against a deployed env with
 the owner token and a bot token (it uses one group named `smoke`, made once). Report:
-`.tmp/staging-smoke/report.json` (or `--out <folder>`), no tokens. Run it after each staging
-deploy, before production. `--base http://127.0.0.1:<port>` with `--owner-token` and `--bot-token`
+`.tmp/staging-smoke/report.json` (or `--out <folder>`), no tokens; each timed check lists every
+sample in `samples` (ms). Run it after each staging deploy, before production, and run the
+read-only WebSocket check first
+(`bun scripts/ws-check.ts https://chat-api-staging.huangdeshiou.workers.dev ~/.config/team-chat/staging/owner-token`):
+it fetches every group, so each room starts and runs its new named migrations before the smoke
+measures it. The first access to a room after a deploy is slow (1.1.0 on staging, 2026-11-05:
+search p95 418 ms on the first smoke after the deploy, 88–114 ms after). Each timed loop also
+starts with `--warmup` untimed rounds. After a production deploy, run `ws-check` against
+production at once for the same reason. `--base http://127.0.0.1:<port>` with `--owner-token` and `--bot-token`
 files runs it against a local `wrangler dev`.
 
 | Check | Bar | Staging, 2026-11-04 (server 1.0.0) |
