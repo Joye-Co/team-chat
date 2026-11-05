@@ -34,6 +34,9 @@ pub enum Start {
     /// The v2 sample team on a quiet day: nothing waits on me, nothing runs
     /// (desk track, `desk-empty`).
     V2Quiet,
+    /// The v2 sample team seen by a member who just joined (onboarding,
+    /// `fake::v2::V2Samples::newcomer`).
+    V2Newcomer,
     // --- provider track ---
     /// The real chat-core provider on a seeded cache, with no server
     /// (`provider::seeded`).
