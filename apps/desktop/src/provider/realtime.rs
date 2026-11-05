@@ -112,6 +112,23 @@ impl CoreProvider {
         }
     }
 
+    pub(super) fn topic_muted_inner(&self, topic_id: &str) -> bool {
+        self.topic_row(topic_id).is_some_and(|row| row.muted)
+    }
+
+    pub(super) fn set_topic_muted_inner(&self, topic_id: &str, muted: bool) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() {
+            return;
+        }
+        if let Err(e) = a.client.mute_topic(&real, muted) {
+            tracing::warn!(error = %e, "mute refused");
+        }
+    }
+
     pub(super) fn set_topic_owner_inner(&self, topic_id: &str, owner: Option<String>) {
         let Some(a) = self.account() else {
             return;

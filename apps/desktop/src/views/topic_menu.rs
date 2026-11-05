@@ -211,6 +211,7 @@ pub fn build(
     let me = services.me();
     let members = group_members(services, group_id);
     let following = services.provider.topic_following(group_id, &topic.id);
+    let muted = services.provider.topic_muted(group_id, &topic.id);
 
     let (s, g, tp) = (services.clone(), group_id.to_string(), topic.clone());
     menu = menu
@@ -291,9 +292,18 @@ pub fn build(
 
     menu = menu.separator();
     let (s, g, t) = (services.clone(), group_id.to_string(), topic.id.clone());
-    menu.item(
+    let menu = menu.item(
         PopupMenuItem::new(if following { r::UNFOLLOW } else { r::FOLLOW })
             .on_click(move |_, _, _| s.provider.set_topic_following(&g, &t, !following)),
+    );
+    let (s, g, t) = (services.clone(), group_id.to_string(), topic.id.clone());
+    menu.item(
+        PopupMenuItem::new(if muted {
+            r::TOPIC_UNMUTE
+        } else {
+            r::TOPIC_MUTE
+        })
+        .on_click(move |_, _, _| s.provider.set_topic_muted(&g, &t, !muted)),
     )
 }
 

@@ -1475,6 +1475,13 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Follows or unfollows a topic. Emits `Change::Topics`.
     fn set_topic_following(&self, _group_id: &str, _topic_id: &str, _follow: bool) {}
+    /// I muted this topic (话题静音): only mentions of me in it notify, like a
+    /// muted 群. Independent of following.
+    fn topic_muted(&self, _group_id: &str, _topic_id: &str) -> bool {
+        false
+    }
+    /// Mutes or unmutes a topic for me. Emits `Change::Topics`.
+    fn set_topic_muted(&self, _group_id: &str, _topic_id: &str, _muted: bool) {}
     /// Sets or clears the one responsible member. Emits `Change::Topics`.
     fn set_topic_owner(&self, _group_id: &str, _topic_id: &str, _owner: Option<MemberId>) {}
 

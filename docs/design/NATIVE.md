@@ -303,7 +303,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 - Layout: title (Title 2) top-leading at 24 pt insets, optional one-line explanation (Body,
   `secondary`), the form, then buttons at the bottom trailing edge: `取消` then the default
   button, 12 pt apart, 20 pt from the edges. Escape = 取消, Return = default.
-- Used for: 新话题, 新群, 改名, 添加成员, 编辑资料, 交代给成员, 按群设置通知.
+- Used for: 新话题, 新群, 改名, 添加成员, 编辑资料, 交代给成员.
 
 ### 7.2 Alerts
 - For confirmations and errors that block: app icon 48 pt, title (Title 2 at 13 pt bold in the
@@ -324,6 +324,14 @@ shape. The text inside every control is Body 13 pt unless noted.
   `third_party/gpui-component`), so `PopupMenu`, dropdown menus and context menus all draw it.
 - Context menus on every row, message, card, member, 产出 and file. Show no keyboard shortcuts
   in context menus. Every context-menu item also exists in the main UI or the menu bar.
+- A setting of one object lives on that object, never in the settings window. The right pane
+  of a 群 page (群资料) opens with a 通知 section: 静音 (switch) and 提醒 (pop-up 所有消息 /
+  只有 @我, off while muted, a footnote says muted 群 still remind on @我). The 话题 inspector
+  has a 通知 section after 状态: 关注 and 静音 (switches) and a footnote. The same commands are
+  in the context menus: a 群 or 私聊 row and the 群 page's ⋯ menu carry 静音 / 取消静音 and
+  a 提醒 submenu; a 话题 row carries 关注 / 取消关注 and 静音话题 / 取消静音. A muted 群,
+  私聊 or 话题 shows `bell.slash` (11 pt, `secondary`) after its name in the sidebar. The
+  settings window holds only what applies everywhere.
 - Popovers: radius 12, `sheet` fill, `float` shadow, an arrow pointing at the control; close on
   outside click. One at a time.
 
@@ -350,7 +358,7 @@ Panes:
 | --- | --- |
 | 通用 | 启动时 (pop-up: 打开首页 / 打开上次的话题), 登录时启动 (switch), 菜单栏里显示 (switch), 声音 (switch). |
 | 账号 | Header row: avatar 64, name (Title 3), 岗位 · team (`secondary`), trailing `编辑…` → sheet (avatar, name and 岗位 as standalone fields, jojo character choice for AI members only). Group 登录的设备: rows with `laptopcomputer` / `display` / `iphone`, name, `这台 Mac` or last seen; selection plus `−` square button below the group signs a device out (alert). Bottom-leading `退出登录…` push button → alert with checkbox `同时删除这台 Mac 上的聊天记录和下载的产出`. |
-| 通知 | Group 提醒我 (mini switches): 需要我拍板的事, 我交代的事做完了, 成员卡住或出错, 有人 @我, 每日摘要 (with time pop-up). Group 勿扰: switch + 从/到 time pop-ups. `按群设置…` → sheet with a table (群, pop-up 全部 / 只有 @我 / 不提醒). |
+| 通知 | Global settings only. Group 提醒我 (mini switches): 需要我拍板的事, 我交代的事做完了, 成员卡住或出错, 有人 @我, 每日摘要 (with time pop-up). Group 勿扰: switch + 从/到 time pop-ups. No per-群 list: how one 群 or 私聊 reminds me is set on that conversation (§7.3). |
 | 成员 | Team admin (owners only): 邀请成员…, 添加 AI 成员…, rows of members with 级别 pop-ups; group 默认规则 for AI members (who approves 合并到 main, 发布到生产, 单次花费超过 ¥…). |
 | 机器 | Where AI members work, on demand. Group 团队的电脑 (rows: symbol, name, 在线 / 空闲 dot, who uses it, version); group 云端 (cloud agents and our containers; shows 还没有 when none). `+`/`−` square buttons under each group. Never say that members run only on local computers. |
 | 外观 | 外观 three image tiles 浅色 / 深色 / 自动 (System Settings style), 消息文字大小 slider (A … A). |

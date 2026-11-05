@@ -74,7 +74,12 @@ impl RailView {
                 title,
             )
             .selected(*selected)
-            .unread(unread);
+            .unread(unread)
+            .muted(
+                self.services
+                    .provider
+                    .topic_muted(&topic.group_id, &topic.id),
+            );
         // §2.1: inside one group every item has a 16 media or none has; the
         // 话题 under a member (indented) get the 话题 symbol, as the member
         // rows of that group have avatars.
@@ -120,17 +125,19 @@ impl RailView {
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
     ) -> AnyElement {
-        self.section_header_selected(id, label, folded, false, fold, open, None)
+        self.section_header_selected(id, label, folded, false, false, fold, open, None)
     }
 
     /// [`Self::section_header`] with the selected look (T-12: the 群 header
-    /// while its 群 page is open).
+    /// while its 群 page is open) and the muted mark.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn section_header_selected(
         &self,
         id: impl Into<ElementId>,
         label: String,
         folded: bool,
         selected: bool,
+        muted: bool,
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
         menu: Option<RowMenu>,
@@ -141,6 +148,7 @@ impl RailView {
         let header = SidebarSection::new(id, label)
             .collapsed(folded)
             .selected(selected)
+            .muted(muted)
             .on_toggle(move |e, window, cx| match &open {
                 Some(open) => open(e, window, cx),
                 None => fold(e, window, cx),

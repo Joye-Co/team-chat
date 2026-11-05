@@ -674,6 +674,9 @@ impl ChatProvider for TopicSamples {
     fn topic_following(&self, group_id: &str, topic_id: &str) -> bool {
         self.inner.topic_following(group_id, topic_id)
     }
+    fn topic_muted(&self, group_id: &str, topic_id: &str) -> bool {
+        self.inner.topic_muted(group_id, topic_id)
+    }
     fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
         if self.mine(group_id, topic_id) {
             let mut runs: Vec<BotRunSummary> = self

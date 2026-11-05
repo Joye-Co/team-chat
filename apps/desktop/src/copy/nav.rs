@@ -29,6 +29,16 @@ crate::copy! {
     MUTE = "静音",
     UNMUTE = "取消静音",
     MUTED = "已静音",
+    // the 提醒 submenu of a 群 or 私聊 (how this one conversation reminds me)
+    NOTIFY_LEVEL = "提醒",
+    NOTIFY_ALL = "所有消息",
+    NOTIFY_MENTIONS = "只有 @我",
+    // the 通知 section of a 群 / 话题 page's right pane
+    NOTIFY_SECTION = "通知",
+    FOLLOW_ROW = "关注",
+    FOLLOW_HINT = "关注的话题有结果、等你处理时会提醒你。",
+    GROUP_MUTED_HINT = "已静音：只在有人 @我 时提醒。",
+    TOPIC_MUTED_HINT = "已静音：这个话题只在有人 @我 时提醒。",
     LEAVE_GROUP = "离开群…",
     LEAVE_CONFIRM_TITLE = "离开「{name}」？",
     LEAVE_CONFIRM_BODY = "离开后不再收到这个群的消息。\n要回来，需要成员重新邀请你。",

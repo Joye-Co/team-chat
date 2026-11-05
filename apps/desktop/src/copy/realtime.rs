@@ -14,6 +14,8 @@ crate::copy! {
     FOLLOW = "关注话题",
     UNFOLLOW = "取消关注",
     FOLLOWING = "已关注",
+    TOPIC_MUTE = "静音话题",
+    TOPIC_UNMUTE = "取消静音",
     JUMP_UNREAD = "{n} 条未读",
     TOPIC_TYPING = "{name} 正在输入…",
     TOPIC_TYPING_MANY = "{n} 人正在输入…",
