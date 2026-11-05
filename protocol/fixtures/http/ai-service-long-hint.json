@@ -1,0 +1,13 @@
+{
+  "kind": "AiServiceConfig",
+  "valid": false,
+  "description": "the hint is at most 4 characters",
+  "value": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "baseUrl": null,
+    "keySet": true,
+    "keyHint": "sk-a1b2",
+    "updatedAt": 1762128000000
+  }
+}

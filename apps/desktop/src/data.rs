@@ -2561,6 +2561,19 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn set_approval_defaults(&self, _defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// 通用 › AI 服务, owners only: the team's provider and model, never the key
+    /// (`GET /v1/settings/ai`).
+    fn ai_service(&self) -> AdminReply<AiServiceSettings> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 通用 › AI 服务 保存 (`PUT /v1/settings/ai`); answers with what the server stored.
+    fn set_ai_service(&self, _draft: AiServiceDraft) -> AdminReply<AiServiceSettings> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 通用 › AI 服务 测试连接 (`POST /v1/settings/ai/test`): nothing is saved.
+    fn test_ai_service(&self, _draft: AiServiceDraft) -> AdminReply<AiTestOutcome> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// 账号 › 登录的设备: my signed-in devices (`GET /v1/me/devices`), newest use first.
     fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
         reply_now(Err(AdminError::Unsupported))
@@ -2741,6 +2754,106 @@ impl Default for ApprovalDefaults {
             approver: ApproverRole::Requester,
         }
     }
+}
+
+/// 通用 › AI 服务: who answers the server's own model calls (AI 话题标题).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AiProviderKind {
+    Deepseek,
+    Anthropic,
+    /// Any provider with an OpenAI-style `/chat/completions` API at its own address.
+    OpenaiCompatible,
+}
+
+impl AiProviderKind {
+    /// In the order of the 服务商 menu: the cheapest first.
+    pub const ALL: [AiProviderKind; 3] = [
+        AiProviderKind::Deepseek,
+        AiProviderKind::Anthropic,
+        AiProviderKind::OpenaiCompatible,
+    ];
+
+    /// The model put in the field when the owner picks this provider.
+    pub fn default_model(self) -> &'static str {
+        match self {
+            AiProviderKind::Deepseek => "deepseek-chat",
+            AiProviderKind::Anthropic => "claude-haiku-5-5",
+            AiProviderKind::OpenaiCompatible => "",
+        }
+    }
+
+    /// True when the provider needs its own 接口地址.
+    pub fn needs_base_url(self) -> bool {
+        self == AiProviderKind::OpenaiCompatible
+    }
+}
+
+/// The team's AI 服务 as the server keeps it. The key itself never reaches the client.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AiServiceSettings {
+    /// `None` = not set up: topics keep their first line as the title.
+    pub provider: Option<AiProviderKind>,
+    pub model: String,
+    pub base_url: Option<String>,
+    /// The key's last 4 characters; `None` when no key is saved.
+    pub key_hint: Option<String>,
+}
+
+/// What the owner typed, for 测试连接 and 保存. `api_key: None` keeps the saved key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiServiceDraft {
+    pub provider: AiProviderKind,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+}
+
+/// Why a draft cannot be sent yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiDraftProblem {
+    ModelRequired,
+    ModelInvalid,
+    BaseUrlInvalid,
+    KeyRequired,
+    KeyInvalid,
+}
+
+impl AiServiceDraft {
+    /// The same rules as the server (docs/protocol.md, "AI 服务"). Without a new key the saved
+    /// one is used, which works only while the provider stays the same.
+    pub fn check(&self, saved: &AiServiceSettings) -> Result<(), AiDraftProblem> {
+        let token = |s: &str| !s.is_empty() && s.bytes().all(|b| (0x21..=0x7e).contains(&b));
+        if self.model.is_empty() {
+            return Err(AiDraftProblem::ModelRequired);
+        }
+        if self.model.len() > 128 || !token(&self.model) {
+            return Err(AiDraftProblem::ModelInvalid);
+        }
+        if self.provider.needs_base_url() {
+            let ok = self.base_url.as_deref().is_some_and(|u| {
+                u.len() <= 256 && u.starts_with("https://") && token(&u["https://".len()..])
+            });
+            if !ok {
+                return Err(AiDraftProblem::BaseUrlInvalid);
+            }
+        }
+        match &self.api_key {
+            Some(k) if k.len() < 8 || k.len() > 512 || !token(k) => Err(AiDraftProblem::KeyInvalid),
+            Some(_) => Ok(()),
+            None if saved.key_hint.is_some() && saved.provider == Some(self.provider) => Ok(()),
+            None => Err(AiDraftProblem::KeyRequired),
+        }
+    }
+}
+
+/// The answer of 测试连接.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AiTestOutcome {
+    Ok {
+        latency_ms: u64,
+    },
+    /// The provider's own error text (status and message), shown as it came.
+    Failed(String),
 }
 
 /// The SF Symbol of a 登录的设备 row.

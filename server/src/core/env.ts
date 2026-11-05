@@ -9,8 +9,8 @@ export interface Env {
   ENVIRONMENT: string;
   VERSION: string;
   ADMIN_SECRET?: string;
-  /** Claude API key (Worker secret): topics without a title get one from Claude (autotitle). */
-  ANTHROPIC_API_KEY?: string;
+  /** Encrypts integration hook secrets and the AI 服务 key at rest (Worker secret). */
+  HOOK_SECRET_KEY?: string;
   /** Tests only: bodies containing this marker get a fake AI title. */
   AUTOTITLE_FAKE?: string;
 }

@@ -722,6 +722,47 @@ pub fn open_notifications_end(
     Ok(handle)
 }
 
+/// 通用 › AI 服务 after 测试连接 with the saved DeepSeek key: 连接正常.
+pub fn open_ai_service(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::General, cx)?;
+    after_fit(handle, cx, move |_, cx| {
+        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        ai.update(cx, |p, cx| p.test(cx));
+    });
+    Ok(handle)
+}
+
+/// 通用 › AI 服务 switched to OpenAI 兼容 with a key the provider refuses: the
+/// 连接失败 Alert with the provider's words.
+pub fn open_ai_service_failed(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::General, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        ai.update(cx, |p, cx| {
+            p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
+            p.fill_for_test(
+                "qwen-turbo",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "sk-bad-0000-test",
+                window,
+                cx,
+            );
+            p.test(cx);
+        });
+        // The Alert is under the fold: show the pane's end.
+        view.read(cx).scroll_to_end();
+    });
+    Ok(handle)
+}
+
 /// The 编辑资料 sheet over 账号.
 pub fn open_edit_profile(
     services: Services,

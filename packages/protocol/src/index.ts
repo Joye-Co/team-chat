@@ -108,6 +108,8 @@ import {
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
 import {
+  AiServiceConfig,
+  AiServiceTestResult,
   ApprovalPolicy,
   Device,
   DevicesResponse,
@@ -119,6 +121,8 @@ import {
   VerifyEmailRequest,
   eventFrameSettingsFields,
   NotifySettings,
+  TestAiServiceRequest,
+  UpdateAiServiceRequest,
   UpdateApprovalPolicyRequest,
   UpdateNotifySettingsRequest,
 } from "./settings.ts";
@@ -793,6 +797,10 @@ export const schemas = {
   UpdateNotifySettingsRequest,
   ApprovalPolicy,
   UpdateApprovalPolicyRequest,
+  AiServiceConfig,
+  UpdateAiServiceRequest,
+  TestAiServiceRequest,
+  AiServiceTestResult,
   Device,
   DevicesResponse,
   EmailCodeRequest,

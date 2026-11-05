@@ -1,0 +1,13 @@
+{
+  "kind": "AiServiceConfig",
+  "valid": true,
+  "description": "not set up",
+  "value": {
+    "provider": null,
+    "model": "",
+    "baseUrl": null,
+    "keySet": false,
+    "keyHint": null,
+    "updatedAt": 0
+  }
+}

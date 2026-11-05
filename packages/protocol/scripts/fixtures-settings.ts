@@ -1,4 +1,4 @@
-// Settings fixtures: notification settings, digest, the approval policy, devices. Called by gen-fixtures.ts.
+// Settings fixtures: notification settings, digest, the approval policy, AI 服务, devices. Called by gen-fixtures.ts.
 type Obj = Record<string, unknown>;
 export type SettingsCtx = {
   ok: (path: string, kind: string, value: unknown, description?: string) => void;
@@ -58,6 +58,20 @@ export function addSettingsFixtures({ ok, bad, T0, ID, base }: SettingsCtx) {
   ok("http/update-approval-policy-empty.json", "UpdateApprovalPolicyRequest", {}, "no change");
   ok("http/update-approval-policy.json", "UpdateApprovalPolicyRequest", { maxSpendCny: 100, approver: "requester" });
   bad("http/update-approval-policy-fraction.json", "UpdateApprovalPolicyRequest", { maxSpendCny: 20.5 }, "whole yuan only");
+
+  const ai = { provider: "deepseek", model: "deepseek-chat", baseUrl: null, keySet: true, keyHint: "a1b2", updatedAt: T0 };
+  ok("http/ai-service.json", "AiServiceConfig", ai);
+  ok("http/ai-service-unset.json", "AiServiceConfig", { provider: null, model: "", baseUrl: null, keySet: false, keyHint: null, updatedAt: 0 }, "not set up");
+  ok("http/ai-service-compatible.json", "AiServiceConfig", { ...ai, provider: "openai-compatible", model: "qwen-turbo", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" }, "OpenAI-compatible with its base URL");
+  bad("http/ai-service-long-hint.json", "AiServiceConfig", { ...ai, keyHint: "sk-a1b2" }, "the hint is at most 4 characters");
+  ok("http/update-ai-service.json", "UpdateAiServiceRequest", { provider: "anthropic", model: "claude-haiku-5-5", apiKey: "sk-ant-test-0000" });
+  ok("http/update-ai-service-keep-key.json", "UpdateAiServiceRequest", { provider: "deepseek", model: "deepseek-reasoner" }, "the saved key stays");
+  bad("http/update-ai-service-no-base-url.json", "UpdateAiServiceRequest", { provider: "openai-compatible", model: "m", apiKey: "sk-test-0000" }, "openai-compatible needs baseUrl");
+  bad("http/update-ai-service-http.json", "UpdateAiServiceRequest", { provider: "openai-compatible", model: "m", baseUrl: "http://example.com/v1" }, "https only");
+  bad("http/update-ai-service-space-key.json", "UpdateAiServiceRequest", { provider: "deepseek", model: "deepseek-chat", apiKey: "sk test 0000" }, "space in key");
+  ok("http/test-ai-service.json", "TestAiServiceRequest", { provider: "openai-compatible", model: "qwen-turbo", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey: "sk-test-0000" });
+  ok("http/ai-service-test-ok.json", "AiServiceTestResult", { ok: true, latencyMs: 412 });
+  ok("http/ai-service-test-failed.json", "AiServiceTestResult", { ok: false, error: "401 Authentication Fails (auth header format should be Bearer sk-...)", latencyMs: 230 }, "the provider's error");
 
   const device = { id: "01JBX0TOKEN0000000000000AH", name: "Joye 的 MacBook Pro", createdAt: T0, lastUsedAt: T0 + 60_000, current: true };
   ok("http/device.json", "Device", device);

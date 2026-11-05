@@ -1,0 +1,12 @@
+{
+  "kind": "AiServiceConfig",
+  "valid": true,
+  "value": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "baseUrl": null,
+    "keySet": true,
+    "keyHint": "a1b2",
+    "updatedAt": 1762128000000
+  }
+}

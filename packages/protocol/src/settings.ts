@@ -1,5 +1,5 @@
 // 1.1 settings: notification preferences by event with quiet hours and a daily digest, the team's
-// approval rules for AI members, and my signed-in devices. See docs/protocol.md, "Settings".
+// approval rules for AI members, the team's AI 服务 and my signed-in devices. See docs/protocol.md, "Settings".
 import { z } from "zod";
 import { Count, Id, Millis } from "./common.ts";
 
@@ -134,6 +134,79 @@ export const UpdateApprovalPolicyRequest = z.object({
   approver: Approver.optional(),
 });
 export type UpdateApprovalPolicyRequest = z.infer<typeof UpdateApprovalPolicyRequest>;
+
+// ---------------------------------------------------------------------------
+// AI 服务: the team's model provider (owner only)
+// ---------------------------------------------------------------------------
+
+/** Who answers the server's own model calls (AI 话题标题). Open: Rust reads an unknown one as `Unknown`. */
+export const AiProvider = z.enum(["anthropic", "deepseek", "openai-compatible"]);
+export type AiProvider = z.infer<typeof AiProvider>;
+
+/** Printable ASCII without spaces. */
+const Token = /^[\x21-\x7e]+$/;
+/** A model id as the provider names it: `deepseek-chat`, `claude-haiku-5-5`, `vendor/model`. */
+export const AiModel = z.string().min(1).max(128).regex(Token);
+/** The API root of an OpenAI-compatible provider; `/chat/completions` is added to it. https only. */
+export const AiBaseUrl = z.string().max(256).regex(/^https:\/\/[\x21-\x7e]+$/, "https URL");
+/** An API key. Sent only to the server; never returned. */
+export const AiApiKey = z.string().min(8).max(512).regex(Token);
+
+/** `GET /v1/settings/ai` (owner). Never carries the key: only whether one is set and its last 4 characters. */
+export const AiServiceConfig = z.object({
+  /** null = not set up: topics keep their first line as the title. */
+  provider: AiProvider.nullable(),
+  /** "" when not set up. */
+  model: z.string().max(128),
+  /** Only for `openai-compatible`; null otherwise. */
+  baseUrl: AiBaseUrl.nullable(),
+  keySet: z.boolean(),
+  /** The key's last 4 characters, null when no key is set. */
+  keyHint: z.string().max(4).nullable(),
+  /** 0 = never changed. */
+  updatedAt: Millis,
+});
+export type AiServiceConfig = z.infer<typeof AiServiceConfig>;
+
+const needsBaseUrl = (v: { provider: AiProvider; baseUrl?: string | null }, ctx: z.RefinementCtx) => {
+  if (v.provider === "openai-compatible" && !v.baseUrl) ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "openai-compatible needs baseUrl" });
+};
+
+/**
+ * `PUT /v1/settings/ai` (owner): replaces the config. Without `apiKey` the saved key stays, which
+ * is allowed only while the provider stays the same. Response: `AiServiceConfig`.
+ */
+export const UpdateAiServiceRequest = z
+  .object({
+    provider: AiProvider,
+    model: AiModel,
+    baseUrl: AiBaseUrl.nullable().optional(),
+    apiKey: AiApiKey.optional(),
+  })
+  .superRefine(needsBaseUrl);
+export type UpdateAiServiceRequest = z.infer<typeof UpdateAiServiceRequest>;
+
+/**
+ * `POST /v1/settings/ai/test` (owner): one tiny call with these values, not saved. Without
+ * `apiKey` the saved key is used when the provider is the saved one. Response: `AiServiceTestResult`.
+ */
+export const TestAiServiceRequest = UpdateAiServiceRequest;
+export type TestAiServiceRequest = UpdateAiServiceRequest;
+
+export const AiServiceTestResult = z.object({
+  ok: z.boolean(),
+  /** The provider's error (status and message), when not ok. Plain text, may be English. */
+  error: z.string().max(500).optional(),
+  latencyMs: z.int().min(0),
+});
+export type AiServiceTestResult = z.infer<typeof AiServiceTestResult>;
+
+/** Model suggested for each provider when the owner picks it (cheap and good at short titles). */
+export const DEFAULT_AI_MODELS: Record<AiProvider, string> = {
+  anthropic: "claude-haiku-5-5",
+  deepseek: "deepseek-chat",
+  "openai-compatible": "",
+};
 
 // ---------------------------------------------------------------------------
 // Devices

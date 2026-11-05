@@ -1,0 +1,10 @@
+{
+  "kind": "UpdateAiServiceRequest",
+  "valid": false,
+  "description": "https only",
+  "value": {
+    "provider": "openai-compatible",
+    "model": "m",
+    "baseUrl": "http://example.com/v1"
+  }
+}

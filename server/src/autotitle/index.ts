@@ -1,16 +1,15 @@
-// AI topic titles: a topic started without a title gets one from Claude, written after the
-// first message is in. The first line stays the title until then, and a title someone set in
-// the meantime is never replaced. Needs the Worker secret ANTHROPIC_API_KEY; without it topics
-// keep the first line.
-import Anthropic from "@anthropic-ai/sdk";
+// AI topic titles: a topic started without a title gets one from the team's model, written
+// after the first message is in. The first line stays the title until then, and a title someone
+// set in the meantime is never replaced. Needs the team's AI 服务 (src/aiservice, set by an owner
+// in 设置); without it topics keep the first line.
 import { MAX_TITLE_CHARS, isMainTopicId } from "@chat/protocol";
+import { type ModelConfig, callModel } from "../aiservice/providers";
+import { loadModelConfig } from "../aiservice/store";
 import type { Env } from "../core/env";
 import { registerAfterCommit, registerRoomRpc } from "../core/registry";
 import { roomStub } from "../core/env";
 import { defaultTitle, startTitle } from "../core/room";
 
-/** The model that names topics. */
-export const TITLE_MODEL = "claude-opus-5-5";
 const APPLY_RPC = "autotitle.apply";
 
 export interface TitleInput {
@@ -27,7 +26,7 @@ const SYSTEM = [
   "Say what the topic is about or what has to be done, not who said it.",
 ].join("\n");
 
-/** The text Claude reads: the quoted message, then the first message. */
+/** The text the model reads: the quoted message, then the first message. */
 export function titlePrompt(input: TitleInput): string {
   const parts: string[] = [];
   if (input.quote) parts.push(`The topic was opened from this chat message:\n${input.quote}`);
@@ -51,29 +50,20 @@ export function cleanTitle(text: string): string | null {
   return [...t].slice(0, MAX_TITLE_CHARS).join("");
 }
 
-/** Asks Claude for a title; null when there is no key or the call fails or refuses. */
-export async function generateTitle(env: Env, input: TitleInput): Promise<string | null> {
+/** Asks the team's model for a title; null when it is not set up or the call fails or refuses. */
+export async function generateTitle(env: Env, input: TitleInput, cfg: ModelConfig | null): Promise<string | null> {
   // Tests: a body with the AUTOTITLE_FAKE marker gets a made-up title, no network.
   if (env.AUTOTITLE_FAKE && `${input.body}${input.quote ?? ""}`.includes(env.AUTOTITLE_FAKE)) return cleanTitle(`AI ${defaultTitle(input.quote ?? input.body)}`);
-  if (!env.ANTHROPIC_API_KEY) return null;
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 30_000 });
-  const response = await client.messages.create({
-    model: TITLE_MODEL,
-    max_tokens: 1024,
-    output_config: { effort: "low" },
-    system: SYSTEM,
-    messages: [{ role: "user", content: titlePrompt(input) }],
-  });
-  if (response.stop_reason === "refusal") return null;
-  const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-  return cleanTitle(text);
+  if (!cfg) return null;
+  const result = await callModel(cfg, { system: SYSTEM, prompt: titlePrompt(input), maxTokens: 1024 });
+  if (!result.ok) throw new Error(result.error);
+  return cleanTitle(result.text);
 }
 
 registerAfterCommit(async (event, h) => {
   if (event.type !== "topic.created") return;
   const topic = (event.data as { topic: { id: string; title: string; main?: boolean; rootMessageId: string } }).topic;
   if (topic.main || isMainTopicId(topic.id)) return;
-  if (!h.env.ANTHROPIC_API_KEY && !h.env.AUTOTITLE_FAKE) return;
   const root = h.sql
     .exec<{ body: string; ext: string | null }>("SELECT body, ext FROM messages WHERE id = ?", topic.rootMessageId)
     .toArray()[0];
@@ -81,9 +71,16 @@ registerAfterCommit(async (event, h) => {
   const ext = root.ext ? (JSON.parse(root.ext) as { replyTo?: { excerpt?: string } }) : {};
   // A title given at creation stays: only the first-line default is replaced.
   if (topic.title !== startTitle(root.body, ext.replyTo?.excerpt)) return;
+  let cfg: ModelConfig | null = null;
+  try {
+    cfg = await loadModelConfig(h.env);
+  } catch (err) {
+    h.log.warn("ai service unreadable", { err });
+  }
+  if (!cfg && !h.env.AUTOTITLE_FAKE) return;
   let title: string | null = null;
   try {
-    title = await generateTitle(h.env, { body: root.body, quote: ext.replyTo?.excerpt });
+    title = await generateTitle(h.env, { body: root.body, quote: ext.replyTo?.excerpt }, cfg);
   } catch (err) {
     h.log.warn("topic title failed", { topicId: topic.id, err });
     return;

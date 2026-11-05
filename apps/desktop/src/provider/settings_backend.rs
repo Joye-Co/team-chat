@@ -14,8 +14,9 @@ use chat_core::{
 
 use super::{CoreProvider, settings::api_error};
 use crate::data::{
-    AdminError, AdminReply, ApprovalDefaults, ApproverRole, ClockTime, DeviceInfo, DeviceKind,
-    NotifyPreferences, reply_now,
+    AdminError, AdminReply, AiProviderKind, AiServiceDraft, AiServiceSettings, AiTestOutcome,
+    ApprovalDefaults, ApproverRole, ClockTime, DeviceInfo, DeviceKind, NotifyPreferences,
+    reply_now,
 };
 
 /// This Mac's IANA time zone, from `TZ` or the `/etc/localtime` link
@@ -120,6 +121,42 @@ pub(super) fn defaults_request(d: &ApprovalDefaults) -> UpdateApprovalPolicyRequ
     }
 }
 
+pub(super) fn ai_from(c: &proto::AiServiceConfig) -> AiServiceSettings {
+    let provider = c.provider.and_then(|p| match p {
+        proto::AiProvider::Deepseek => Some(AiProviderKind::Deepseek),
+        proto::AiProvider::Anthropic => Some(AiProviderKind::Anthropic),
+        proto::AiProvider::OpenaiCompatible => Some(AiProviderKind::OpenaiCompatible),
+        // A provider this version does not know reads as not set up; saving replaces it.
+        proto::AiProvider::Unknown => None,
+    });
+    AiServiceSettings {
+        provider,
+        model: if provider.is_some() {
+            c.model.clone()
+        } else {
+            String::new()
+        },
+        base_url: c.base_url.clone(),
+        key_hint: c
+            .key_hint
+            .clone()
+            .filter(|_| c.key_set && provider.is_some()),
+    }
+}
+
+pub(super) fn ai_request(d: &AiServiceDraft) -> proto::UpdateAiServiceRequest {
+    proto::UpdateAiServiceRequest {
+        provider: match d.provider {
+            AiProviderKind::Deepseek => proto::AiProvider::Deepseek,
+            AiProviderKind::Anthropic => proto::AiProvider::Anthropic,
+            AiProviderKind::OpenaiCompatible => proto::AiProvider::OpenaiCompatible,
+        },
+        model: d.model.clone(),
+        base_url: d.base_url.clone().filter(|_| d.provider.needs_base_url()),
+        api_key: d.api_key.clone(),
+    }
+}
+
 pub(super) fn device(d: &proto::Device) -> DeviceInfo {
     DeviceInfo {
         id: d.id.clone(),
@@ -200,6 +237,50 @@ impl CoreProvider {
         })
     }
 
+    pub(super) fn ai_service_inner(&self) -> AdminReply<AiServiceSettings> {
+        self.sb_request(|client| async move {
+            let c = client
+                .http()
+                .ai_service()
+                .await
+                .map_err(|e| read_error(&e))?;
+            Ok(ai_from(&c))
+        })
+    }
+
+    pub(super) fn set_ai_service_inner(
+        &self,
+        draft: AiServiceDraft,
+    ) -> AdminReply<AiServiceSettings> {
+        let req = ai_request(&draft);
+        self.sb_request(move |client| async move {
+            let c = client
+                .http()
+                .update_ai_service(&req)
+                .await
+                .map_err(|e| read_error(&e))?;
+            Ok(ai_from(&c))
+        })
+    }
+
+    pub(super) fn test_ai_service_inner(&self, draft: AiServiceDraft) -> AdminReply<AiTestOutcome> {
+        let req = ai_request(&draft);
+        self.sb_request(move |client| async move {
+            let r = client
+                .http()
+                .test_ai_service(&req)
+                .await
+                .map_err(|e| read_error(&e))?;
+            Ok(if r.ok {
+                AiTestOutcome::Ok {
+                    latency_ms: r.latency_ms,
+                }
+            } else {
+                AiTestOutcome::Failed(r.error.unwrap_or_default())
+            })
+        })
+    }
+
     pub(super) fn devices_inner(&self) -> AdminReply<Vec<DeviceInfo>> {
         self.sb_request(|client| async move {
             let r = client.http().devices().await.map_err(|e| read_error(&e))?;
@@ -277,6 +358,68 @@ mod tests {
             ..ApprovalDefaults::default()
         };
         assert!(defaults_request(&over).validate().is_err());
+    }
+
+    #[test]
+    fn ai_service_reads_without_the_key_and_sends_only_what_the_provider_needs() {
+        let stored = proto::AiServiceConfig {
+            provider: Some(proto::AiProvider::Deepseek),
+            model: "deepseek-chat".into(),
+            base_url: None,
+            key_set: true,
+            key_hint: Some("a1b2".into()),
+            updated_at: 1,
+        };
+        let s = ai_from(&stored);
+        assert_eq!(s.provider, Some(AiProviderKind::Deepseek));
+        assert_eq!(s.key_hint.as_deref(), Some("a1b2"));
+        let unknown = proto::AiServiceConfig {
+            provider: Some(proto::AiProvider::Unknown),
+            ..stored.clone()
+        };
+        assert_eq!(ai_from(&unknown), AiServiceSettings::default());
+        assert_eq!(
+            ai_from(&proto::AiServiceConfig::default()),
+            AiServiceSettings::default()
+        );
+
+        // The saved key works for the same provider only.
+        let keep = AiServiceDraft {
+            provider: AiProviderKind::Deepseek,
+            model: "deepseek-chat".into(),
+            base_url: Some("https://ignored.example".into()),
+            api_key: None,
+        };
+        assert_eq!(keep.check(&s), Ok(()));
+        let req = ai_request(&keep);
+        assert!(req.validate().is_ok());
+        assert_eq!((req.base_url, req.api_key), (None, None));
+        let switch = AiServiceDraft {
+            provider: AiProviderKind::Anthropic,
+            ..keep.clone()
+        };
+        assert_eq!(
+            switch.check(&s),
+            Err(crate::data::AiDraftProblem::KeyRequired)
+        );
+        let compat = AiServiceDraft {
+            provider: AiProviderKind::OpenaiCompatible,
+            base_url: Some("http://x".into()),
+            api_key: Some("sk-test-0000".into()),
+            ..keep.clone()
+        };
+        assert_eq!(
+            compat.check(&s),
+            Err(crate::data::AiDraftProblem::BaseUrlInvalid)
+        );
+        let spaced = AiServiceDraft {
+            api_key: Some("sk test 0000".into()),
+            ..keep
+        };
+        assert_eq!(
+            spaced.check(&s),
+            Err(crate::data::AiDraftProblem::KeyInvalid)
+        );
     }
 
     #[test]
