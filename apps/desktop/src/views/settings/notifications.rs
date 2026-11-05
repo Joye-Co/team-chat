@@ -234,7 +234,13 @@ impl NotificationsPage {
                         .flatten();
                     let page = this.clone();
                     let gid = g.id.clone();
-                    let name: SharedString = squash(&g.name).into();
+                    // A DM row leads with the peer's avatar: a leading
+                    // emoji is left out (X-01).
+                    let name: SharedString = if peer.is_some() {
+                        squash(crate::ui::avatar::name_beside_avatar(&g.name)).into()
+                    } else {
+                        squash(&g.name).into()
+                    };
                     let twin =
                         g.kind != GroupKind::Dm && seen.get(name.as_ref()).is_some_and(|n| *n > 1);
                     let lead = match peer {

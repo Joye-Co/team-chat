@@ -16,7 +16,7 @@ use gpui_component::{
 
 use super::widgets::{self, Status, answer};
 use crate::ui::native::sheet::sheet_status_error;
-use crate::views::nav::dialogs::{sheet_form, sheet_form_row_invalid};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::{Changes, Services},
     copy::{common, fill, settings as s},
@@ -106,8 +106,8 @@ pub struct AccountPage {
 
 impl AccountPage {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder(s::NAME));
-        let role = cx.new(|cx| InputState::new(window, cx).placeholder(s::ROLE));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(s::NAME_PLACEHOLDER));
+        let role = cx.new(|cx| InputState::new(window, cx).placeholder(s::ROLE_PLACEHOLDER));
         let subscriptions = vec![
             cx.subscribe_in(
                 &services.hub,
@@ -514,12 +514,8 @@ impl AccountPage {
                 let avatar_note = match &page.avatar {
                     Status::Idle => None,
                     Status::Busy(t) | Status::Done(t) => Some(widgets::quiet(t.clone(), cx)),
-                    Status::Failed(t) => Some(
-                        div()
-                            .n_subheadline()
-                            .text_color(native_colors(cx).red)
-                            .child(t.clone()),
-                    ),
+                    // Foreground text after a red icon (§2.8 v15, K-03).
+                    Status::Failed(t) => Some(crate::ui::native::sheet_status_error(t.clone(), cx)),
                 };
                 let photo = div()
                     .w_full()
@@ -554,7 +550,7 @@ impl AccountPage {
                     );
                 // A long name or role ends with "…" at rest (C1-02).
                 let fields = sheet_form()
-                    .child(sheet_form_row_invalid(
+                    .child(sheet_form_row(
                         s::NAME,
                         widgets::field_at_rest(
                             "profile-name-rest",
@@ -565,10 +561,9 @@ impl AccountPage {
                             window,
                             cx,
                         ),
-                        bad(Field::Name),
                         cx,
                     ))
-                    .child(sheet_form_row_invalid(
+                    .child(sheet_form_row(
                         s::ROLE,
                         widgets::field_at_rest(
                             "profile-role-rest",
@@ -579,7 +574,6 @@ impl AccountPage {
                             window,
                             cx,
                         ),
-                        bad(Field::Role),
                         cx,
                     ));
                 let failed = match &page.save {
@@ -655,7 +649,13 @@ impl AccountPage {
         let me = self.me();
         let name = me
             .as_ref()
-            .map(|m| m.name.split_whitespace().collect::<Vec<_>>().join(" "))
+            .map(|m| {
+                // Beside the avatar a leading emoji is left out (X-01).
+                crate::ui::avatar::name_beside_avatar(&m.name)
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
             .unwrap_or_default();
         let role = me
             .as_ref()
