@@ -742,6 +742,11 @@ impl TimelineView {
     pub fn shows_card(&self, id: &str) -> bool {
         self.cards_shown.contains(id)
     }
+
+    /// The message ids of the card rows painted last frame.
+    pub fn cards_on_screen(&self) -> impl Iterator<Item = &str> {
+        self.cards_shown.iter().map(String::as_str)
+    }
 }
 
 impl Render for TimelineView {
