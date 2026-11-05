@@ -159,7 +159,7 @@ Elevation has 3 levels: content (none, xs, sm), float (md), modal (lg).
 
 | Control | Size | Detail |
 |---|---|---|
-| Button default | h32, px16 (px12 with icon), radius 8, 14 medium, icon 16, gap 8 | Variants: default (primary), outline, secondary (muted fill), ghost, destructive (red fill, white text), link |
+| Button default | h32, px16 (px12 with icon), radius 8, 14 medium, icon 16, gap 8 | Variants: default (primary), outline, secondary (muted fill), ghost, destructive (red fill, white text), link. Outline hover (v16, K-04): `control_hover` = accent in light; in dark the input token at 50 % over the card fill, so the step over the dark control fill is visible |
 | Button sm | h28, px12 | In form rows, table cells, card footers in dense cards |
 | Button lg | h36, px24 | Login, empty-state CTA in a full page, composer Send |
 | Icon button | 32 (sm 28), radius 8, icon 16 | Ghost in toolbars and rows |
@@ -406,7 +406,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 - Toolbar tab strip unchanged; tab icons share an 18 x 18 ink box (the 机器 icon is 22 x 10 today).
 - Content x 24-616. First element 24 below the toolbar border.
-- A tab is a stack of sections: SectionHeader (2.3) then a GroupBox (2.8). Gap between sections 24. Every group has a header, except when it is the only group on the tab. Section actions ("添加电脑…", "邀请成员…") sit in the section header, not under the group.
+- A tab is a stack of sections: SectionHeader (2.3) then a GroupBox (2.8). Gap between sections 24. Every group has a header, except when it is the only group on the tab, and except the 账号 profile card (owner decision v16, C1-11), which opens the tab with no section header, like the macOS Apple Account header. Section actions ("添加电脑…", "邀请成员…") sit in the section header, not under the group.
 - Footnote text under a group: 12 muted, 8 below the group. Prefer the section description.
 - Rows: single-line h44, two-line h64. Separators in every list. Row actions are visible in the row (ghost 28 "⋯" with a DropdownMenu), never select-then-"−".
 - Machine and device rows: 28 icon box (radius 6, muted, 16 icon: laptop for Mac, server for Linux, cloud for 云端), title 14 medium, description 12 muted truncating, StatusBadge in the value column, "⋯".
@@ -646,7 +646,7 @@ Run every check on the light, dark and worst-case 1x PNG of a scene before the s
 ### E. States
 - E1. Every list, table, pane and card region has a loading (skeleton at the real row height), empty (Empty component) and error (Alert with Retry) design, captured as its own scene.
 - E2. Each named state capture differs from its base screen in the state region (`diff.py` npx > 0) and shows an element named for the state.
-- E3. Every control shows default, hover, focus (3 px ring), disabled (50%), loading (spinner, width kept) and, for fields, error. [visual; hover and focus are not in the current capture set]
+- E3. Every control shows default, hover, focus (3 px ring), disabled (50%), loading (spinner, width kept) and, for fields, error. F6 / ⌥Tab (⇧ back) move the focus between the window's regions: sidebar, thread, composer (v16, K-10). [visual; hover and focus are not in the current capture set]
 - E4. A disabled primary differs from Cancel (outline vs primary at 50%).
 - E5. Sheet height does not change when an error appears.
 
