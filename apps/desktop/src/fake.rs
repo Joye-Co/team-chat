@@ -957,6 +957,7 @@ impl ChatProvider for FakeProvider {
                 "WRONG-CODE-0000" | "0000-0000" | "0000-0000-0000"
             ),
             Credential::Token(token) => token.len() > 3,
+            Credential::EmailCode { code, .. } => code != "000000",
         };
         // A `.invalid` host (RFC 2606) never answers: the login-unreachable scene.
         let unreachable = request.server_url.contains(".invalid");

@@ -331,6 +331,13 @@ pub async fn sign_in(
                 .map_err(|e| login_error(&e))?;
             Ok((r.token, r.member))
         }
+        Credential::EmailCode { email, code } => {
+            let r = http
+                .email_sign_in(email, code, device_name)
+                .await
+                .map_err(|e| login_error(&e))?;
+            Ok((r.token, r.member))
+        }
         Credential::Token(token) => {
             let token = token.trim().to_string();
             let me = http

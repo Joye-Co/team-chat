@@ -23,6 +23,7 @@ mod card_events;
 pub mod convert;
 // Desk track (1.1.0 首页).
 mod desk;
+mod email;
 pub mod files;
 #[cfg(test)]
 mod files_live;
@@ -1078,6 +1079,26 @@ impl ChatProvider for CoreProvider {
 
     fn switch_server(&self, server_url: &str) {
         self.switch_server_inner(server_url);
+    }
+
+    fn request_sign_in_code(&self, server_url: &str, email: &str) -> crate::data::EmailReply<()> {
+        self.request_sign_in_code_inner(server_url, email)
+    }
+
+    fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
+        self.my_email_inner()
+    }
+
+    fn add_email_code(&self, email: &str) -> crate::data::EmailReply<()> {
+        self.add_email_code_inner(email)
+    }
+
+    fn verify_email(&self, email: &str, code: &str) -> crate::data::EmailReply<String> {
+        self.verify_email_inner(email, code)
+    }
+
+    fn remove_email(&self) -> crate::data::EmailReply<()> {
+        self.remove_email_inner()
     }
 
     fn sign_out(&self, wipe_cache: bool) {

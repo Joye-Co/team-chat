@@ -489,6 +489,8 @@ pub enum Credential {
     InviteCode(String),
     /// A pasted `tc_...` token.
     Token(String),
+    /// The 6-digit code sent to my sign-in email.
+    EmailCode { email: String, code: String },
 }
 
 impl Credential {
@@ -510,6 +512,7 @@ impl fmt::Debug for Credential {
         match self {
             Credential::InviteCode(_) => f.write_str("InviteCode(<redacted>)"),
             Credential::Token(_) => f.write_str("Token(<redacted>)"),
+            Credential::EmailCode { .. } => f.write_str("EmailCode(<redacted>)"),
         }
     }
 }
@@ -1033,6 +1036,34 @@ pub enum AdminError {
 /// (`cx.spawn`); dropping the sender means [`AdminError::Other`].
 pub type AdminReply<T> = futures::channel::oneshot::Receiver<Result<T, AdminError>>;
 
+/// Why an email sign-in request failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmailError {
+    /// Not signed in, or the server cannot be reached.
+    Offline,
+    /// Not an email address.
+    BadAddress,
+    /// The code is wrong, used or expired.
+    WrongCode,
+    /// Another member signs in with this email.
+    Taken,
+    /// Too many codes or tries; try again later.
+    RateLimited,
+    /// The server has no mail set up for email sign-in.
+    NotSetUp,
+    Other,
+}
+
+/// The answer to an email sign-in request (see [`AdminReply`]).
+pub type EmailReply<T> = futures::channel::oneshot::Receiver<Result<T, EmailError>>;
+
+/// An [`EmailReply`] that is already answered.
+pub fn email_reply_now<T>(result: Result<T, EmailError>) -> EmailReply<T> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    let _ = tx.send(result);
+    rx
+}
+
 /// An [`AdminReply`] that is already answered.
 pub fn reply_now<T>(result: Result<T, AdminError>) -> AdminReply<T> {
     let (tx, rx) = futures::channel::oneshot::channel();
@@ -1235,6 +1266,28 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// The servers this Mac has a saved session on.
     fn signed_in_servers(&self) -> Vec<String> {
         Vec::new()
+    }
+    /// 登录 › 用邮箱登录: sends a 6-digit code to `email` on `server_url`
+    /// (no session needed). The answer does not tell whether the address
+    /// belongs to a member. Sign in with [`Credential::EmailCode`].
+    fn request_sign_in_code(&self, _server_url: &str, _email: &str) -> EmailReply<()> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// 账号 › 登录邮箱: my sign-in email, if I added one.
+    fn my_email(&self) -> EmailReply<Option<String>> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// 账号 › 登录邮箱: sends a code to `email` before it becomes my sign-in email.
+    fn add_email_code(&self, _email: &str) -> EmailReply<()> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// 账号 › 登录邮箱: confirms the code; answers the saved address.
+    fn verify_email(&self, _email: &str, _code: &str) -> EmailReply<String> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// 账号 › 登录邮箱: removes my sign-in email.
+    fn remove_email(&self) -> EmailReply<()> {
+        email_reply_now(Err(EmailError::NotSetUp))
     }
     /// Uses another server. The session of the server in use stays saved
     /// (no sign-out): a server with a saved session signs in at once, any
