@@ -2588,31 +2588,12 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     if !(done || change) || matches!(ctx.state, CardState::Superseded | CardState::Expired) {
         return None;
     }
-    let k = theme::colors(cx);
     let a = ctx.answerer();
     let (author, name) = (ctx.msg.author_id.clone(), ctx.author.clone());
+    // The §2.15 Alert (neutral, info icon, the action at the right), like 读不懂.
     Some(
-        small(div())
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .h(crate::ui::native::tokens::height::FOOTER_ROW)
-            .pl(space::S12)
-            .pr(space::S4)
-            .rounded(theme::radius::MD)
-            .bg(ui::native::native_colors(cx).sheet)
-            .border_1()
-            .border_color(k.line)
-            .text_color(k.ink_2)
-            .child(ui::icon(Sym::Info, px(14.), k.ink_3))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .one_line()
-                    .child(c::EVIDENCE_NONE),
-            )
-            .child(
+        ui::native::Alert::new(Sym::Info, c::EVIDENCE_NONE)
+            .action(
                 super::button(
                     ctx.id("ask-evidence"),
                     fill(c::EVIDENCE_ASK, &[("name", &ctx.author)]),
