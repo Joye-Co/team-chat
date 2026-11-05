@@ -39,6 +39,9 @@ pub struct AskCard {
     pub answered: Option<Recorded>,
     /// Changed files of the 话题's PR, for a review footer.
     pub files: Option<u32>,
+    /// The badge words, as on 群 and in the 话题 (§2.12): `等你审 PR #61`
+    /// for a review, `等你回答` for any other ask.
+    pub words: String,
 }
 
 /// An answer the provider knows about.
@@ -190,12 +193,26 @@ impl Snapshot {
                     .then(|| p.topic_changes(&item.group_id, &item.topic_id))
                     .flatten()
                     .map(|c| c.files);
+                // One mapping with `topic_page::topic_state`: the pinned ask
+                // knows a v1 approval that is the PR's review.
+                let kind = p
+                    .pinned_ask(&item.group_id, &item.topic_id)
+                    .filter(|x| x.message_id == item.message_id)
+                    .map_or(item.kind, |x| x.kind);
+                let words = match p.topic_changes(&item.group_id, &item.topic_id) {
+                    Some(ch) if kind == AskKind::Review => crate::copy::fill(
+                        crate::copy::topic_rail::STATE_REVIEW,
+                        &[("n", &ch.number.to_string())],
+                    ),
+                    _ => crate::views::topic_page::ask_words(kind).to_string(),
+                };
                 AskCard {
                     item,
                     card,
                     card_v2,
                     answered,
                     files,
+                    words,
                 }
             })
             .collect();
