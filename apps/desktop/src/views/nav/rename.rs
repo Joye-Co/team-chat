@@ -119,14 +119,21 @@ impl Render for RenameGroupForm {
         let typed = self.name.read(cx).value().to_string();
         let ready = !self.busy && can_save(&self.current, &typed);
         let [cancel, save] = sheet_buttons("rename-group", common::CANCEL, common::SAVE, cx);
-        let problem = name_problem(&typed)
+        // Only a problem with the typed name marks the field; a refusal by
+        // the server (offline, no right) is about the request, not the
+        // value, so it shows in the footer alone (review 4 K-16).
+        let invalid = name_problem(&typed);
+        let marked = invalid.is_some();
+        let problem = invalid
             .or_else(|| self.refusal.map(|e| refusal_text(e).to_string()))
             .map(SharedString::from);
         rename_sheet(
             nav::RENAME_GROUP_TITLE,
             o::RENAME_GROUP_EXPLANATION,
             o::GROUP_NAME,
-            NativeTextField::new("rename-group-name", &self.name).full_width(),
+            NativeTextField::new("rename-group-name", &self.name)
+                .full_width()
+                .error(marked),
             problem,
             cancel.on_click(|_, window, cx| window.close_dialog(cx)),
             disabled_push(save, !ready, cx)
@@ -139,9 +146,9 @@ impl Render for RenameGroupForm {
 
 /// The rename sheet (2.9) of a 群 or a 话题: the title, one line that says
 /// who sees the change, the labelled field in a group box, then 取消 and
-/// 保存. A `footnote` is a field error: the field and its label turn
-/// destructive and the text sits in the footer's left slot, so the sheet
-/// keeps its height.
+/// 保存. A `footnote` sits in the footer's left slot (foreground text, a
+/// destructive icon), so the sheet keeps its height. The caller marks the
+/// field invalid only when the footnote is about its value.
 #[allow(clippy::too_many_arguments)]
 pub fn rename_sheet(
     title: &'static str,
@@ -153,10 +160,9 @@ pub fn rename_sheet(
     save: gpui_component::button::Button,
     cx: &App,
 ) -> SheetLayout {
-    let invalid = footnote.is_some();
     SheetLayout::new(title)
         .explanation(explanation)
-        .body(sheet_form().child(sheet_form_row(label, field.full_width().error(invalid), cx)))
+        .body(sheet_form().child(sheet_form_row(label, field.full_width(), cx)))
         // The error sits in the footer's left slot (2.8, 2.9).
         .when_some(footnote, |l, e| {
             l.status(crate::ui::native::sheet::sheet_status_error(e, cx))

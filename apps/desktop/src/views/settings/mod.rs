@@ -142,7 +142,7 @@ const TRAFFIC_LIGHTS: (gpui::Pixels, gpui::Pixels) = (px(13.), px(10.));
 /// Window width (§8) and the height range the pane may make it.
 pub const WINDOW_WIDTH: gpui::Pixels = px(640.);
 pub const MIN_HEIGHT: gpui::Pixels = px(240.);
-pub const MAX_HEIGHT: gpui::Pixels = px(720.);
+pub const MAX_HEIGHT: gpui::Pixels = px(760.);
 
 pub struct SettingsView {
     page: Page,

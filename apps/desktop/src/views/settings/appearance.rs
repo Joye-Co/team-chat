@@ -150,7 +150,7 @@ impl Render for AppearancePage {
                 };
                 // A ghost button: a Tab stop with the focus ring, Space and
                 // Return choose, muted on hover (E3, C1-05).
-                crate::ui::native::row_button(
+                crate::ui::native::group_row_button(
                     SharedString::from(format!("appearance-theme-{}", choice.slug())),
                     cx,
                 )

@@ -7,8 +7,8 @@ use gpui::{
     Anchor, AnyElement, App, Bounds, Context, DismissEvent, Element, ElementId, Entity,
     FocusHandle, Focusable, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent,
-    ParentElement, Pixels, Point, Position, Style, StyleRefinement, Styled, Subscription,
-    TouchPhase, Window, anchored, deferred, div, px,
+    ParentElement, Pixels, Point, Position, Refineable as _, Style, StyleRefinement, Styled,
+    Subscription, TouchPhase, Window, anchored, deferred, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{input::AnyInputState, menu::PopupMenu, root::WindowState};
@@ -50,6 +50,10 @@ pub struct ContextMenu<E: ParentElement + Styled + Sized> {
     // This is not in use, just for style refinement forwarding.
     _ignore_style: StyleRefinement,
     anchor: Anchor,
+    /// Window bounds the open menu stays inside, besides the window.
+    limits: Option<Bounds<Pixels>>,
+    /// Laid over the trigger's style while its menu is open.
+    open_style: Option<StyleRefinement>,
 }
 
 impl<E: ParentElement + Styled> ContextMenu<E> {
@@ -61,7 +65,25 @@ impl<E: ParentElement + Styled> ContextMenu<E> {
             menu: None,
             anchor: Anchor::TopLeft,
             _ignore_style: StyleRefinement::default(),
+            limits: None,
+            open_style: None,
         }
+    }
+
+    /// Keeps the open menu inside `bounds` (window coordinates) as well as
+    /// inside the window, 8 from their edges: a menu opened in a sidebar
+    /// stays within the sidebar.
+    pub fn menu_limits(mut self, bounds: Bounds<Pixels>) -> Self {
+        self.limits = Some(bounds);
+        self
+    }
+
+    /// Styles the trigger while its menu is open, so the row the menu acts
+    /// on keeps a mark. Give each trigger its own element id: triggers that
+    /// share one share the open state.
+    pub fn open_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.open_style = Some(f(StyleRefinement::default()));
+        self
     }
 
     /// Build the context menu using the given builder function.
@@ -173,6 +195,7 @@ struct DeferredMenu {
     menu_view: Entity<PopupMenu>,
     position: Point<Pixels>,
     anchor: Anchor,
+    limits: Option<Bounds<Pixels>>,
     menu: Option<AnyElement>,
 }
 
@@ -190,6 +213,7 @@ impl DeferredMenu {
                         anchored()
                             .position(self.position)
                             .snap_to_window_with_margin(px(8.))
+                            .when_some(self.limits, |a, l| a.limits(l))
                             .anchor(self.anchor)
                             .child(self.menu_view.clone()),
                     ),
@@ -289,6 +313,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
         cx: &mut App,
     ) -> (gpui::LayoutId, Self::RequestLayoutState) {
         let anchor = self.anchor;
+        let limits = self.limits;
 
         self.with_element_state(
             id.unwrap(),
@@ -313,15 +338,16 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                         menu_view,
                         position,
                         anchor,
+                        limits,
                         menu: None,
                     });
+                let shows = menu_element.is_some();
 
-                let mut element = this
-                    .element
-                    .take()
-                    .expect("Element should exists.")
-                    .children(menu_element)
-                    .into_any_element();
+                let mut element = this.element.take().expect("Element should exists.");
+                if shows && let Some(open_style) = &this.open_style {
+                    element.style().refine(open_style);
+                }
+                let mut element = element.children(menu_element).into_any_element();
 
                 let layout_id = element.request_layout(window, cx);
 

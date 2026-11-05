@@ -20,6 +20,7 @@ pub struct Anchored {
     anchor_position: Option<Point<Pixels>>,
     position_mode: AnchoredPositionMode,
     offset: Option<Point<Pixels>>,
+    limits: Option<Bounds<Pixels>>,
 }
 
 /// anchored gives you an element that will avoid overflowing the window bounds.
@@ -32,6 +33,7 @@ pub fn anchored() -> Anchored {
         anchor_position: None,
         position_mode: AnchoredPositionMode::Window,
         offset: None,
+        limits: None,
     }
 }
 
@@ -67,6 +69,14 @@ impl Anchored {
     /// Snap to window edge instead of switching anchor corner when an overflow would occur.
     pub fn snap_to_window(mut self) -> Self {
         self.fit_mode = AnchoredFitMode::SnapToWindow;
+        self
+    }
+
+    /// Keeps the element inside `bounds` (window coordinates) as well as
+    /// inside the window: a menu opened in a sidebar stays within the
+    /// sidebar's edge.
+    pub fn limits(mut self, bounds: Bounds<Pixels>) -> Self {
+        self.limits = Some(bounds);
         self
     }
 
@@ -147,10 +157,15 @@ impl Element for Anchored {
             self.offset,
         );
 
-        let limits = Bounds {
+        let window_limits = Bounds {
             origin: Point::default(),
             size: window.viewport_size(),
         };
+        let limits = self
+            .limits
+            .map(|l| l.intersect(&window_limits))
+            .filter(|l| !l.is_empty())
+            .unwrap_or(window_limits);
 
         if self.fit_mode == AnchoredFitMode::SwitchAnchor {
             let mut anchor = self.anchor;

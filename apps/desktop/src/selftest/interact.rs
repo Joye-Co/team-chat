@@ -79,12 +79,14 @@ const STEPS: &[(&str, Steps)] = &[
     // --- v16/c-cards ---
     ("state-hover-page-row", hover(535., 201., 300)),
     ("state-hover-artifact-row", hover(893., 189., 300)),
-    // The last tab stops are the last row's "⋯", then the row itself.
+    // ⇧Tab ×2 reaches the last row's "⋯"; ↑ ×3 walks to the first row and
+    // ↓ to the second. The arrows step row to row, never to a "⋯" (K-14):
+    // with a "⋯" in the arrow order the ring would land on row 2's "⋯".
     (
         "state-focus-artifact-row",
-        keys(&["shift-tab", "shift-tab"]),
+        keys(&["shift-tab", "shift-tab", "up", "up", "up", "down"]),
     ),
-    ("state-hover-settings-row", hover(320., 673., 300)),
+    ("state-hover-settings-row", hover(320., 713., 300)),
     ("state-focus-diagram-node", keys(&["tab", "tab"])),
     // --- end v16/c-cards ---
     // --- v16/tail2 ---

@@ -401,7 +401,7 @@ pub fn nav_row(
     let k = native_colors(cx);
     // A ghost button across the row: a Tab stop with the focus ring, Space
     // and Return open it, muted on hover (E3, C1-05).
-    crate::ui::native::row_button(id, cx)
+    crate::ui::native::group_row_button(id, cx)
         .h(metrics::FORM_ROW)
         .px(metrics::FORM_ROW_INSET)
         .accessibility_label(label)

@@ -91,7 +91,7 @@ concepts! {
     Hourglass = "hourglass";
     // Machines (§6).
     /// A team computer.
-    Computer = "desktopcomputer";
+    Computer = "display";
     Laptop = "laptopcomputer";
     /// Mac mini, and the 机器 settings tab.
     MacMini = "macmini";

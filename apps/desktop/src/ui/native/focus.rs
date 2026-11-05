@@ -77,6 +77,12 @@ pub trait FocusRow: Sized {
     /// Hover only (muted 50 %, at once) for a row that is not a control of
     /// its own.
     fn row_hover(self, selected: bool, cx: &App) -> Self;
+
+    /// The ring of a row inside a list or table frame (§2.6, §2.7): rounded
+    /// to the frame's inner radius, so on the first and last row it follows
+    /// the frame's corners, not a square corner inside them (review 4
+    /// K-17). Call it after [`FocusRow::focus_row`].
+    fn framed_ring(self, cx: &App) -> Self;
 }
 
 impl FocusRow for Stateful<Div> {
@@ -99,6 +105,12 @@ impl FocusRow for Stateful<Div> {
         let hover = native_colors(cx).fill.opacity(0.5);
         self.when(!selected, |d| d.hover(move |s| s.bg(hover)))
     }
+
+    fn framed_ring(self, cx: &App) -> Self {
+        let ring = row_focus_ring(cx);
+        let radius = super::page::m::FRAME_RADIUS - metrics::HAIRLINE;
+        self.focus_visible(move |s| s.shadow(ring).rounded(radius))
+    }
 }
 
 /// `Some(true)` for the next row, `Some(false)` for the previous one.
@@ -113,11 +125,44 @@ fn step(e: &KeyDownEvent, arrows: Arrows) -> Option<bool> {
     }
 }
 
+/// Moves to the next or previous row. A control inside a row (a table
+/// row's "⋯") is a Tab stop, not an arrow stop (review 4 K-14): ↓ passes
+/// the stops inside the row it leaves, and ↑ lands on the row that holds
+/// the stop it reaches, not on that stop.
 fn move_focus(next: bool, window: &mut Window, cx: &mut App) {
+    // A row holds a few controls; the bound only guards a cycle.
+    const MAX_INNER: usize = 8;
+    let Some(from) = window.focused(cx) else {
+        if next {
+            window.focus_next(cx);
+        } else {
+            window.focus_prev(cx);
+        }
+        return;
+    };
     if next {
         window.focus_next(cx);
+        for _ in 0..MAX_INNER {
+            match window.focused(cx) {
+                Some(now) if now != from && from.contains(&now, window) => window.focus_next(cx),
+                _ => break,
+            }
+        }
     } else {
         window.focus_prev(cx);
+        let Some(mut now) = window.focused(cx) else {
+            return;
+        };
+        for _ in 0..MAX_INNER {
+            window.focus_prev(cx);
+            match window.focused(cx) {
+                Some(outer) if outer != now && outer.contains(&now, window) => now = outer,
+                _ => {
+                    window.focus(&now, cx);
+                    break;
+                }
+            }
+        }
     }
 }
 

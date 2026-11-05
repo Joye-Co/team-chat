@@ -126,7 +126,8 @@ pub enum BadgeState {
     NeedsYou,
     /// 在做 3/5: a spinning loader, info.
     Working,
-    /// 停止中: a loader, muted.
+    /// 停止中, and 发送中 (an answer in flight, §2.12: muted, review 4
+    /// X-02): a loader, muted.
     Stopping,
     /// 排队: clock, muted.
     Queued,

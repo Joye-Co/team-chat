@@ -207,6 +207,9 @@ fn shadow_sm(k: &super::NativeColors) -> Vec<gpui::BoxShadow> {
     }]
 }
 
+/// The hover group of a [`PageRow`].
+const ROW_GROUP: &str = "page-row";
+
 /// The fixed right columns of one list (§2.6): every row of a list passes
 /// the same value, so its status, time and actions sit at one x.
 #[derive(Clone, Copy, Debug, Default)]
@@ -264,7 +267,25 @@ impl PageRow {
             .when(self.selected, |d| d.bg(k.fill))
             // Every page row opens something: a tab stop with the focus
             // ring, Enter / Space run the caller's click, ↑ / ↓ walk the list.
-            .focus_row(self.selected, cx)
+            // The hover is a layer of its own (below), so `selected` here.
+            .focus_row(true, cx)
+            .framed_ring(cx)
+            .group(ROW_GROUP)
+            // Hover, muted 50 %, starts under the 1 px line the row above
+            // draws in this row's first pixel line, so it never tints that
+            // separator (review 4 K-17).
+            .when(!self.selected, |d| {
+                let hover = k.fill.opacity(0.5);
+                d.child(
+                    div()
+                        .absolute()
+                        .top(super::metrics::HAIRLINE)
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .group_hover(ROW_GROUP, move |s| s.bg(hover)),
+                )
+            })
             .when(self.dim, |d| d.opacity(0.7))
             .children(self.media.map(|m| div().flex_none().child(m)))
             .child(
@@ -1324,7 +1345,7 @@ pub fn table(
             .when(ri + 1 < total, |d| d.border_b_1().border_color(k.separator))
             .map(|d| {
                 if click.is_some() {
-                    d.focus_row(false, cx)
+                    d.focus_row(false, cx).framed_ring(cx)
                 } else {
                     d.row_hover(false, cx)
                 }

@@ -10,6 +10,16 @@ crate::copy! {
     ROW_SELECTION_ACTIVE = "窗口在前时的选中",
     ROW_SELECTION_INACTIVE = "窗口在后时的选中",
     ROW_SIDEBAR = "侧栏行",
+    // Row labels added in review 4 (K-18).
+    ROW_MENUS = "菜单和图标",
+    ROW_CHECKBOX = "勾选框",
+    ROW_RADIO = "单选",
+    ROW_SEGMENTED = "分段",
+    SEC_TEXTAREA = "多行输入",
+    TEXTAREA_VALUE = "以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。",
+    TEXTAREA_PLACEHOLDER = "写下要发出去的内容",
+    // 23 at 10 a page: the last page holds 3 rows (review 4 K-18).
+    TABLE_COUNT_PAGED = "23 个产出",
     // Completeness kit (native-kit-3)
     SEC_BADGES = "标记",
     SEC_STATUS = "状态",

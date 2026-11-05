@@ -1244,6 +1244,8 @@ pub struct Window {
     pub(crate) root: Option<AnyView>,
     pub(crate) element_id_stack: ElementIdStack,
     pub(crate) text_style_stack: Vec<TextStyleRefinement>,
+    /// The priority of the deferred draw being prepainted, 0 outside one.
+    deferred_priority: usize,
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
@@ -2152,6 +2154,7 @@ impl Window {
             root: None,
             element_id_stack: ElementIdStack::default(),
             text_style_stack: Vec::new(),
+            deferred_priority: 0,
             rendered_entity_stack: Vec::new(),
             element_offset_stack: Vec::new(),
             content_mask_stack: Vec::new(),
@@ -3913,6 +3916,7 @@ impl Window {
             traversal_order.sort_by_key(|ix| self.next_frame.deferred_draws[*ix].priority);
 
             for deferred_draw_ix in traversal_order {
+                self.deferred_priority = self.next_frame.deferred_draws[deferred_draw_ix].priority;
                 let (element, parent_node, current_view, rem_size, absolute_offset, prepaint_range) = {
                     let deferred_draw = &mut self.next_frame.deferred_draws[deferred_draw_ix];
                     self.element_id_stack
@@ -3950,6 +3954,7 @@ impl Window {
 
             self.element_id_stack.clear();
             self.text_style_stack.clear();
+            self.deferred_priority = 0;
             round_start = round_end;
         }
     }
@@ -4509,6 +4514,13 @@ impl Window {
         } else {
             f(self)
         }
+    }
+
+    /// The priority of the deferred draw whose element is being prepainted,
+    /// or 0 in the main tree. A draw deferred with it from inside a popup
+    /// paints after that popup, not under it.
+    pub fn deferred_priority(&self) -> usize {
+        self.deferred_priority
     }
 
     /// Defers the drawing of the given element, scheduling it to be painted on top of the currently-drawn tree
