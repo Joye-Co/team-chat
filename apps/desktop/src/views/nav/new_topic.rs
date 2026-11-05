@@ -21,8 +21,8 @@ use crate::{
     copy::{common, overlays as o},
     data::{GroupId, StartTopicRequest},
     ui::native::{
-        NativeTextArea, NativeTextField, PushSize, SheetLayout, SheetWidth, disabled_push,
-        native_sheet_keyboard, popup_button, sheet_buttons,
+        NativeTextArea, NativeTextField, PushSize, PushStyle, SheetLayout, SheetWidth,
+        disabled_push, native_sheet_keyboard, popup_button, push_button, sheet_buttons,
     },
     views::rail::model as rail_model,
 };
@@ -56,6 +56,34 @@ pub fn mentioned(services: &Services, group_id: &str, body: &str) -> Vec<String>
         .into_iter()
         .filter(|m| ids.contains(&m.id) && body.contains(&format!("@{}", m.name)))
         .map(|m| m.id)
+        .collect()
+}
+
+/// At most this many members show in the 交给 row.
+const HAND_TO_MAX: usize = 5;
+
+/// Who the 交给 row offers in `group_id` (onboarding: a new member does not know the
+/// names to @): the members of the 群 but me, bots first (they take work), each once.
+pub fn hand_to(services: &Services, group_id: &str) -> Vec<(String, String)> {
+    let me = services.me();
+    let ids = services
+        .provider
+        .groups()
+        .into_iter()
+        .find(|g| g.id == group_id)
+        .map(|g| g.member_ids)
+        .unwrap_or_default();
+    let mut members: Vec<_> = services
+        .provider
+        .members()
+        .into_iter()
+        .filter(|m| ids.contains(&m.id) && Some(&m.id) != me.as_ref() && !m.deactivated)
+        .collect();
+    members.sort_by_key(|m| !m.is_bot());
+    members
+        .into_iter()
+        .take(HAND_TO_MAX)
+        .map(|m| (m.id, m.name))
         .collect()
 }
 
@@ -179,6 +207,46 @@ impl Render for NewTopicSheet {
         // The §2.8 textarea: the 标题 field's edge, fill and ring over four
         // lines (review 3 K-02).
         let body_field = NativeTextArea::new("new-topic-body", &self.body).rows(4);
+        // 交给: one small button per member of the 群; a click leads the
+        // first message with @名字 (once).
+        let hand_to = self
+            .group
+            .as_deref()
+            .map(|g| hand_to(&self.services, g))
+            .unwrap_or_default();
+        let hand_row = (!hand_to.is_empty()).then(|| {
+            let buttons = hand_to.into_iter().map(|(id, name)| {
+                let body = self.body.clone();
+                let mention = format!("@{name}");
+                push_button(
+                    SharedString::from(format!("new-topic-hand-{id}")),
+                    mention.clone(),
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    let mention = mention.clone();
+                    body.update(cx, |b, cx| {
+                        let text = b.value().to_string();
+                        let next = if text.contains(&mention) {
+                            text
+                        } else {
+                            format!("{mention} {}", text.trim_start())
+                        };
+                        let end = next.len();
+                        b.set_value(next, window, cx);
+                        b.set_selected_range(end..end, cx);
+                        b.focus(window, cx);
+                    });
+                })
+            });
+            sheet_form_row(
+                o::NEW_TOPIC_HAND_TO,
+                div().flex().flex_wrap().gap(px(6.)).children(buttons),
+                cx,
+            )
+        });
         let [cancel, start] = sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
         div()
             .key_context(CONTEXT)
@@ -195,7 +263,8 @@ impl Render for NewTopicSheet {
                                 NativeTextField::new("new-topic-title", &self.title).full_width(),
                                 cx,
                             ))
-                            .child(sheet_form_row_top(o::NEW_TOPIC_BODY, body_field, cx)),
+                            .child(sheet_form_row_top(o::NEW_TOPIC_BODY, body_field, cx))
+                            .children(hand_row),
                     )
                     .buttons([
                         cancel.on_click(|_, window, cx| window.close_dialog(cx)),

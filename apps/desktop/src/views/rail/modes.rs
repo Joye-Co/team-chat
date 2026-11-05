@@ -78,6 +78,12 @@ pub(super) enum Item {
     NoTopics {
         id: GroupId,
     },
+    /// A: a 群 whose `n` 话题 all leave me out (我参与的): one row that opens
+    /// the 群.
+    OtherTopics {
+        id: GroupId,
+        n: usize,
+    },
     /// A: an open 群 with no cached 话题 while the first sync runs: sidebar
     /// item skeletons (§2.14, T-13).
     Syncing {
@@ -198,19 +204,16 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
     let mut out: Vec<Vec<Item>> = Vec::new();
     let groups = p.groups();
     for g in groups.iter().filter(|g| g.kind == GroupKind::Group) {
-        let topics: Vec<_> = p
-            .topics(&g.id)
+        let listed: Vec<_> = p.topics(&g.id).into_iter().filter(model::listed).collect();
+        let all = listed.len();
+        let topics: Vec<_> = listed
             .into_iter()
-            .filter(model::listed)
             .filter(|t| {
                 i.show_all || model::involves_me(p, me, t) || is_open(open, &t.group_id, &t.id)
             })
             .collect();
-        // B1-31: the open 群 keeps its entry (selected) also with no 话题.
-        let open_group = i.group_page.as_deref() == Some(g.id.as_str());
-        if topics.is_empty() && !i.show_all && !open_group {
-            continue;
-        }
+        // Onboarding: every 群 I am in keeps its header, also with no 话题
+        // or none of mine, so a new member sees the 群 they joined.
         let empty = topics.is_empty();
         let folded = i.folded_groups.contains(&g.id);
         let mut section = vec![Item::GroupHeader {
@@ -224,6 +227,10 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
         // open 群 shows sidebar skeleton rows, and nothing while unreachable.
         if !folded && empty {
             match i.sync {
+                Sync::Synced if all > 0 => section.push(Item::OtherTopics {
+                    id: g.id.clone(),
+                    n: all,
+                }),
                 Sync::Synced => section.push(Item::NoTopics { id: g.id.clone() }),
                 Sync::Syncing => section.push(Item::Syncing { id: g.id.clone() }),
                 Sync::Unreachable => {}
@@ -657,6 +664,21 @@ impl RailView {
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
                 .into_any_element(),
+            Item::OtherTopics { id, n } => {
+                let nav = self.services.nav.clone();
+                let open_id = id.clone();
+                self.row(
+                    SharedString::from(format!("rail-other-topics-{id}")),
+                    crate::copy::fill(c::RAIL_OTHER_TOPICS, &[("n", &n.to_string())]),
+                )
+                .symbol(crate::ui::sf_symbols::Sf::More)
+                .dim(true)
+                .on_click(move |_, _, cx| {
+                    let g = open_id.clone();
+                    nav.update(cx, |nav, cx| nav.open_group(g, cx))
+                })
+                .into_any_element()
+            }
             Item::Syncing { id } => div()
                 .id(SharedString::from(format!("rail-syncing-{id}")))
                 .child(
@@ -778,5 +800,82 @@ impl RailView {
             nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
         })
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fake::v2::{self as d, V2Samples};
+
+    fn inputs(me: &str, show_all: bool) -> Inputs {
+        Inputs {
+            sync: Sync::Synced,
+            mode: RailMode::Work,
+            me: Some(me.into()),
+            open: None,
+            group_page: None,
+            show_all,
+            chip: None,
+            member_sort: model::MemberSort::Busy,
+            folded_groups: Default::default(),
+            folded_buckets: Default::default(),
+            open_members: None,
+        }
+    }
+
+    /// Onboarding: a member no 话题 involves yet still sees every 群 they are in, each with
+    /// one row that opens it, never an empty sidebar.
+    #[test]
+    fn a_new_member_sees_every_group_they_are_in() {
+        let p = V2Samples::new();
+        // Someone new follows nothing yet.
+        for g in p.groups() {
+            for t in p.topics(&g.id) {
+                p.set_topic_following(&g.id, &t.id, false);
+            }
+        }
+        let entries = work(p.as_ref(), &inputs("someone-new", false));
+        let headers: Vec<_> = entries
+            .iter()
+            .filter_map(|e| match &e.item {
+                Item::GroupHeader { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let groups: Vec<_> = model::groups(p.as_ref())
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(headers, groups);
+        // Under each header: its 话题 of mine, else one row (还没有话题 or N 个话题).
+        for (ix, e) in entries.iter().enumerate() {
+            if matches!(e.item, Item::GroupHeader { .. }) {
+                assert!(matches!(
+                    entries.get(ix + 1).map(|e| &e.item),
+                    Some(Item::Topic(_) | Item::OtherTopics { .. } | Item::NoTopics { .. })
+                ));
+            }
+        }
+        // A 群 with 话题 that all leave me out folds them into one row.
+        assert!(
+            entries
+                .iter()
+                .any(|e| matches!(e.item, Item::OtherTopics { n, .. } if n > 0))
+        );
+    }
+
+    /// 我参与的 still lists only my 话题; 全部话题 lists them all.
+    #[test]
+    fn my_topics_and_all_topics_still_differ() {
+        let p = V2Samples::new();
+        let count = |all| {
+            work(p.as_ref(), &inputs(d::ME, all))
+                .iter()
+                .filter(|e| matches!(e.item, Item::Topic(_)))
+                .count()
+        };
+        assert!(count(false) > 0);
+        assert!(count(true) >= count(false));
     }
 }

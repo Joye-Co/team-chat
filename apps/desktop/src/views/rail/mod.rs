@@ -549,12 +549,29 @@ impl Render for RailView {
         let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
         let first_sync = syncing;
         // §2.14, A1-13: no create button while the first sync runs.
+        // 新建 (onboarding): 新话题, 新建群 and 发起私聊 in one pull-down, so a
+        // new member finds where a 群 or a 私聊 starts without the menu bar.
+        // ⌘N still starts a 话题 directly.
         let new_topic = crate::ui::native::disabled_push(
-            self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx),
+            self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx),
             first_sync,
             cx,
         )
-        .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx));
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
+            let go = |label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
+                PopupMenuItem::new(label)
+                    .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
+            };
+            menu.min_w(px(180.))
+                .item(go(c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
+                .separator()
+                .item(go(c::RAIL_NEW_GROUP, || {
+                    Box::new(crate::views::nav::NewGroup)
+                }))
+                .item(go(c::RAIL_START_DM, || {
+                    Box::new(crate::views::nav::StartDm)
+                }))
+        });
         let sidebar_fill = crate::views::shell::chrome::colors(cx).sidebar;
         div()
             .id("rail")

@@ -10,6 +10,9 @@ crate::copy! {
     NEW_TOPIC_NAME_PLACEHOLDER = "可以不填，默认取第一行",
     NEW_TOPIC_BODY = "第一条消息",
     NEW_TOPIC_BODY_PLACEHOLDER = "说清楚要什么，或 @ 成员交代…",
+    // Onboarding: who in the 群 can take the 话题; a click puts @名字 in the
+    // first message.
+    NEW_TOPIC_HAND_TO = "交给",
     NEW_TOPIC_CREATE = "开始",
     NEW_GROUP_EXPLANATION = "名称和成员之后都可以改。",
     GROUP_NAME = "名称",

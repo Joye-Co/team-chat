@@ -368,6 +368,34 @@ impl V2Samples {
         })
     }
 
+    /// Onboarding (`desk-first-run`, `rail-first-run`): a member who just joined. Only in
+    /// 全员 (its 话题 are Jojo's, none mine, none followed) and the 私聊 with Jojo the
+    /// server opened on joining; a quiet day.
+    pub fn newcomer() -> Arc<Self> {
+        let mut data = Self::data();
+        data.groups.retain(|g| g.id == ALL || g.id == DM_JOJO);
+        data.topics.retain(|t| t.group_id == ALL);
+        for t in &mut data.topics {
+            t.created_by = JOJO.into();
+            t.owner_id = Some(JOJO.into());
+            t.waiting_on.clear();
+            data.unfollowed.insert(t.id.clone());
+        }
+        let topics: std::collections::HashSet<_> =
+            data.topics.iter().map(|t| t.id.clone()).collect();
+        data.runs.retain(|r| topics.contains(&r.topic_id));
+        Arc::new(Self {
+            inner: FakeProvider::new(),
+            members: members(),
+            data: Mutex::new(data),
+            subscribers: Mutex::new(Vec::new()),
+            quiet: true,
+            desk: Mutex::default(),
+            cards_v2: Default::default(),
+            refs: Default::default(),
+        })
+    }
+
     fn data() -> Data {
         use TopicStatus as S;
         let dev_members = [
