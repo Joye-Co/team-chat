@@ -1,0 +1,7 @@
+{
+  "kind": "MyEmailResponse",
+  "valid": true,
+  "value": {
+    "email": "joye@example.com"
+  }
+}

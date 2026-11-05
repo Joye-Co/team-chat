@@ -48,12 +48,7 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             update_item(),
             MenuItem::separator(),
             MenuItem::action(settings::MENU_SETTINGS, OpenSettings),
-            // v12/fx-overlays: the login window's 使用其他服务器… (as Mail's
-            // 添加账户…); off while no login window has the focus.
-            MenuItem::action(
-                crate::copy::login::OTHER_SERVER,
-                crate::views::login::UseOtherServer,
-            ),
+            server_menu(),
             MenuItem::separator(),
             MenuItem::action(product(nav::MENU_HIDE), Hide),
             MenuItem::action(nav::MENU_HIDE_OTHERS, HideOthers),
@@ -123,6 +118,7 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
     ]);
+    install_server_actions(cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -231,6 +227,90 @@ pub fn refresh_menus(cx: &mut App) {
 }
 
 // --- end v12/fx-overlays ---
+
+gpui::actions!(nav_menu, [UseProductionServer, UseStagingServer]);
+
+thread_local! {
+    /// The server in use, for the check marks of the 服务器 submenu.
+    static CURRENT_SERVER: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn same_server(a: &str, b: &str) -> bool {
+    !a.is_empty() && a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+/// The app menu's 服务器 submenu: 正式服务器 and 测试服务器 with a check on
+/// the one in use (a session per server stays saved, so switching back
+/// needs no new login), another server's host when that one is in use, and
+/// the login window's 使用其他服务器… (as Mail's 添加账户…; off while no
+/// login window has the focus).
+fn server_menu() -> MenuItem {
+    use crate::copy::login as l;
+    let (production, staging) = (env!("PRODUCT_PRODUCTION_URL"), env!("PRODUCT_STAGING_URL"));
+    let current = CURRENT_SERVER
+        .with(|c| c.borrow().clone())
+        .unwrap_or_default();
+    let mut items = Vec::new();
+    if !production.is_empty() {
+        items.push(
+            MenuItem::action(l::SERVER_PRODUCTION, UseProductionServer)
+                .checked(same_server(production, &current)),
+        );
+    }
+    if !staging.is_empty() {
+        items.push(
+            MenuItem::action(l::SERVER_STAGING, UseStagingServer)
+                .checked(same_server(staging, &current)),
+        );
+    }
+    if !current.is_empty() && !same_server(production, &current) && !same_server(staging, &current)
+    {
+        let host = crate::views::login::server_host(&current).to_string();
+        items.push(
+            MenuItem::action(host, crate::views::login::UseOtherServer)
+                .checked(true)
+                .disabled(true),
+        );
+    }
+    items.push(MenuItem::separator());
+    items.push(MenuItem::action(
+        l::OTHER_SERVER,
+        crate::views::login::UseOtherServer,
+    ));
+    MenuItem::submenu(Menu::new(l::MENU_SERVER).items(items))
+}
+
+/// Switches to `url` and keeps the 服务器 check marks in step.
+fn switch_server(url: &str, cx: &mut App) {
+    if url.is_empty() {
+        return;
+    }
+    let Some(nav) = cx.try_global::<super::NavGlobal>() else {
+        return;
+    };
+    nav.services.provider.switch_server(url);
+    refresh_server_menu(cx);
+}
+
+/// Sets the menus again when the server in use changed (the app calls this
+/// on every session change).
+pub fn refresh_server_menu(cx: &mut App) {
+    let Some(nav) = cx.try_global::<super::NavGlobal>() else {
+        return;
+    };
+    let current = nav.services.provider.current_server();
+    let changed = CURRENT_SERVER.with(|c| c.replace(current.clone()) != current);
+    if changed {
+        cx.set_menus(app_menus_with(LAST_STATE.with(|s| s.get())));
+    }
+}
+
+/// Handles 正式服务器 and 测试服务器 from any window.
+fn install_server_actions(cx: &mut App) {
+    cx.on_action(|_: &UseProductionServer, cx| switch_server(env!("PRODUCT_PRODUCTION_URL"), cx));
+    cx.on_action(|_: &UseStagingServer, cx| switch_server(env!("PRODUCT_STAGING_URL"), cx));
+}
 
 /// The menu state of the main window now.
 fn menu_state(

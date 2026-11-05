@@ -6,8 +6,9 @@ use reqwest::Method;
 use crate::client::{Client, ClientError};
 use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::{
-    ApprovalPolicy, DevicesResponse, NotifySettings, RevokeTokensResponse,
-    UpdateApprovalPolicyRequest, UpdateNotifySettingsRequest,
+    ApprovalPolicy, DevicesResponse, EmailCodeRequest, EmailCodeResponse, EmailSignInRequest,
+    MyEmailResponse, NotifySettings, RedeemResponse, RevokeTokensResponse,
+    UpdateApprovalPolicyRequest, UpdateNotifySettingsRequest, VerifyEmailRequest,
 };
 
 type Handle<T> = tokio::task::JoinHandle<Result<T, ClientError>>;
@@ -63,6 +64,67 @@ impl HttpClient {
             )
             .await?;
         Ok(r.revoked)
+    }
+
+    // --- email sign-in (docs/protocol.md, "Email sign-in") ---
+
+    /// Asks for a sign-in code at `email`. No token needed; the answer is the
+    /// same whether or not the address belongs to a member.
+    pub async fn email_sign_in_code(&self, email: &str) -> ApiResult<EmailCodeResponse> {
+        let req = EmailCodeRequest {
+            email: email.trim().to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(Method::POST, "/v1/auth/email/code", Some(&req), false)
+            .await
+    }
+
+    /// Signs in with the code sent to `email`: a new token for that member.
+    pub async fn email_sign_in(
+        &self,
+        email: &str,
+        code: &str,
+        device_name: &str,
+    ) -> ApiResult<RedeemResponse> {
+        let req = EmailSignInRequest {
+            email: email.trim().to_string(),
+            code: code.trim().to_string(),
+            device_name: device_name.to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(Method::POST, "/v1/auth/email/sign-in", Some(&req), false)
+            .await
+    }
+
+    pub async fn my_email(&self) -> ApiResult<MyEmailResponse> {
+        self.call::<(), _>(Method::GET, "/v1/me/email", None, true)
+            .await
+    }
+
+    /// Sends a code to `email` before it becomes my sign-in email.
+    pub async fn add_email_code(&self, email: &str) -> ApiResult<EmailCodeResponse> {
+        let req = EmailCodeRequest {
+            email: email.trim().to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(Method::POST, "/v1/me/email/code", Some(&req), true)
+            .await
+    }
+
+    /// Confirms the code and makes `email` my sign-in email.
+    pub async fn verify_email(&self, email: &str, code: &str) -> ApiResult<MyEmailResponse> {
+        let req = VerifyEmailRequest {
+            email: email.trim().to_string(),
+            code: code.trim().to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(Method::POST, "/v1/me/email", Some(&req), true)
+            .await
+    }
+
+    pub async fn remove_email(&self) -> ApiResult<MyEmailResponse> {
+        self.call::<(), _>(Method::DELETE, "/v1/me/email", None, true)
+            .await
     }
 }
 

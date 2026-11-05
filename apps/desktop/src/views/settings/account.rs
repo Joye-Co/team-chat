@@ -20,13 +20,14 @@ use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::{Changes, Services},
     copy::{common, fill, settings as s},
-    data::{Change, DeviceInfo, DeviceKind, Member, SessionState},
+    data::{Change, DeviceInfo, DeviceKind, EmailError, Member, SessionState},
     ui::{
         self, Sym,
         native::{
-            AlertLayout, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _, PushSize,
-            PushStyle, SectionTitle, SheetLayout, SheetWidth, alert_button, disabled_push, metrics,
-            native_colors, page::outline_badge, push_button, tokens,
+            AlertLayout, CodeInput, CodeInputEvent, GroupedForm, NativeCheckbox, NativeTextField,
+            NativeType as _, PushSize, PushStyle, SectionTitle, SheetLayout, SheetWidth,
+            alert_button, disabled_push, metrics, native_colors, page::outline_badge, push_button,
+            tokens,
         },
     },
     views::topic_list::relative_time,
@@ -101,13 +102,41 @@ pub struct AccountPage {
     wipe: bool,
     /// The scroll of the capped device list.
     devices_scroll: gpui::ScrollHandle,
+    /// 登录邮箱: `None` until loaded; `Some(None)` when I have none.
+    email: Option<Option<String>>,
+    email_status: Status,
+    /// The 设置登录邮箱 sheet: the address field, the code slots, the
+    /// address the code went to, and the last refusal.
+    email_input: Entity<InputState>,
+    email_code: Entity<CodeInput>,
+    email_sent_to: Option<String>,
+    email_busy: bool,
+    email_error: Option<EmailError>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The text of a refused email request in 账号.
+fn email_error_text(e: EmailError) -> &'static str {
+    match e {
+        EmailError::BadAddress => s::EMAIL_BAD_ADDRESS,
+        EmailError::WrongCode => s::EMAIL_WRONG_CODE,
+        EmailError::Taken => s::EMAIL_TAKEN,
+        EmailError::RateLimited => s::EMAIL_RATE,
+        EmailError::NotSetUp => s::EMAIL_NOT_SET_UP,
+        EmailError::Offline => s::ERROR_OFFLINE,
+        EmailError::Other => s::ERROR_OTHER,
+    }
 }
 
 impl AccountPage {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(s::NAME_PLACEHOLDER));
         let role = cx.new(|cx| InputState::new(window, cx).placeholder(s::ROLE_PLACEHOLDER));
+        let email_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(crate::copy::login::EMAIL_PLACEHOLDER)
+        });
+        let email_code =
+            cx.new(|cx| CodeInput::new(crate::views::login::EMAIL_CODE_LEN, 3, window, cx));
         let subscriptions = vec![
             cx.subscribe_in(
                 &services.hub,
@@ -117,6 +146,29 @@ impl AccountPage {
                         this.fill_from_me(window, cx);
                         cx.notify();
                     }
+                },
+            ),
+            cx.subscribe_in(
+                &email_input,
+                window,
+                |this, _, e: &InputEvent, window, cx| match e {
+                    InputEvent::PressEnter { .. } => this.send_email_code(window, cx),
+                    InputEvent::Change => {
+                        this.email_error = None;
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            ),
+            cx.subscribe_in(
+                &email_code,
+                window,
+                |this, _, e: &CodeInputEvent, window, cx| {
+                    this.email_error = None;
+                    if matches!(e, CodeInputEvent::Submit) || this.email_digits(cx).len() == 6 {
+                        this.verify_email(window, cx);
+                    }
+                    cx.notify();
                 },
             ),
             cx.subscribe_in(&name, window, Self::on_input),
@@ -136,10 +188,307 @@ impl AccountPage {
             failed_device: None,
             wipe: false,
             devices_scroll: gpui::ScrollHandle::new(),
+            email: None,
+            email_status: Status::Idle,
+            email_input,
+            email_code,
+            email_sent_to: None,
+            email_busy: false,
+            email_error: None,
             _subscriptions: subscriptions,
         };
         this.fill_from_me(window, cx);
         this
+    }
+
+    // --- 登录邮箱 ---
+
+    /// Loads my sign-in email.
+    pub fn refresh_email(&mut self, cx: &mut Context<Self>) {
+        let reply = self.services.provider.my_email();
+        cx.spawn(async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(EmailError::Other));
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(email) => {
+                        this.email = Some(email);
+                        this.email_status = Status::Idle;
+                    }
+                    Err(e) => this.email_status = Status::Failed(email_error_text(e).into()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn email_digits(&self, cx: &App) -> String {
+        self.email_code
+            .read(cx)
+            .value(cx)
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect()
+    }
+
+    /// 发送验证码 in the sheet.
+    fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.email_busy {
+            return;
+        }
+        let email = self.email_input.read(cx).value().trim().to_lowercase();
+        if !chat_core::proto::is_email_address(&email) {
+            self.email_error = Some(EmailError::BadAddress);
+            cx.notify();
+            return;
+        }
+        self.email_busy = true;
+        self.email_error = None;
+        let reply = self.services.provider.add_email_code(&email);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(EmailError::Other));
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.email_busy = false;
+                match result {
+                    Ok(()) => {
+                        this.email_sent_to = Some(email);
+                        this.email_code
+                            .update(cx, |c, cx| c.set_value("", window, cx));
+                        let code = this.email_code.clone();
+                        let handle = code.read(cx).focus_handle(cx);
+                        handle.focus(window, cx);
+                    }
+                    Err(e) => this.email_error = Some(e),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// 完成 (or the sixth digit): confirms the code; the sheet closes.
+    fn verify_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(email) = self.email_sent_to.clone() else {
+            return;
+        };
+        let code = self.email_digits(cx);
+        if self.email_busy || code.len() != 6 {
+            return;
+        }
+        self.email_busy = true;
+        let reply = self.services.provider.verify_email(&email, &code);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(EmailError::Other));
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.email_busy = false;
+                match result {
+                    Ok(saved) => {
+                        this.email = Some(Some(saved));
+                        this.email_sent_to = None;
+                        window.close_dialog(cx);
+                    }
+                    Err(e) => {
+                        this.email_error = Some(e);
+                        this.email_code.update(cx, |c, cx| c.select_all(window, cx));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn remove_email(&mut self, cx: &mut Context<Self>) {
+        let reply = self.services.provider.remove_email();
+        cx.spawn(async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(EmailError::Other));
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.email = Some(None),
+                    Err(e) => this.email_status = Status::Failed(email_error_text(e).into()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 添加… / 更改… : the 设置登录邮箱 sheet (the address, 发送验证码, then
+    /// the six code slots; 取消 and 完成).
+    pub fn open_email_sheet(this: Entity<Self>, window: &mut Window, cx: &mut App) {
+        this.update(cx, |p, cx| {
+            p.email_sent_to = None;
+            p.email_error = None;
+            p.email_busy = false;
+            let current = p.email.clone().flatten().unwrap_or_default();
+            p.email_input
+                .update(cx, |st, cx| st.set_value(current, window, cx));
+            cx.notify();
+        });
+        let first = std::cell::Cell::new(true);
+        widgets::open_sheet(
+            window,
+            cx,
+            SheetWidth::Form,
+            px(500.),
+            move |dialog, window, cx| {
+                if first.replace(false) {
+                    let handle = this.read(cx).email_input.read(cx).focus_handle(cx);
+                    handle.focus(window, cx);
+                }
+                let page = this.read(cx);
+                let busy = page.email_busy;
+                let sent = page.email_sent_to.clone();
+                let error = page.email_error.map(email_error_text);
+                let send = this.clone();
+                let mut fields = sheet_form().child(sheet_form_row(
+                    s::EMAIL_FIELD,
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap(tokens::space::S8)
+                        .child(
+                            div().flex_1().min_w(px(0.)).child(
+                                NativeTextField::new("email-field", &page.email_input)
+                                    .full_width()
+                                    .error(error.is_some() && sent.is_none()),
+                            ),
+                        )
+                        .child(
+                            disabled_push(
+                                push_button(
+                                    "email-send",
+                                    if sent.is_some() {
+                                        s::EMAIL_RESEND
+                                    } else {
+                                        s::EMAIL_SEND
+                                    },
+                                    PushStyle::Outline,
+                                    PushSize::Regular,
+                                    cx,
+                                ),
+                                busy,
+                                cx,
+                            )
+                            .on_click(move |_, window, cx| {
+                                send.update(cx, |p, cx| p.send_email_code(window, cx))
+                            }),
+                        ),
+                    cx,
+                ));
+                if let Some(to) = &sent {
+                    fields = fields.child(sheet_form_row(
+                        s::EMAIL_CODE_FIELD,
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap(tokens::space::S8)
+                            .child(page.email_code.clone())
+                            .child(widgets::quiet(fill(s::EMAIL_SENT, &[("email", to)]), cx)),
+                        cx,
+                    ));
+                }
+                let ready = sent.is_some() && page.email_digits(cx).len() == 6 && !busy;
+                let (ok, done) = (this.clone(), this.clone());
+                dialog
+                    .on_ok(move |_, window, cx| {
+                        ok.update(cx, |p, cx| p.verify_email(window, cx));
+                        false
+                    })
+                    .on_cancel(|_, _, _| true)
+                    .child(
+                        SheetLayout::new(s::EMAIL_SHEET_TITLE)
+                            .explanation(s::EMAIL_SHEET_HINT)
+                            .body(fields)
+                            .when_some(error, |l, e| l.status(sheet_status_error(e, cx)))
+                            .buttons([
+                                push_button(
+                                    "email-cancel",
+                                    common::CANCEL,
+                                    PushStyle::Outline,
+                                    PushSize::Regular,
+                                    cx,
+                                )
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                                disabled_push(
+                                    push_button(
+                                        "email-done",
+                                        s::DONE,
+                                        PushStyle::Default,
+                                        PushSize::Regular,
+                                        cx,
+                                    ),
+                                    !ready,
+                                    cx,
+                                )
+                                .on_click(move |_, window, cx| {
+                                    done.update(cx, |p, cx| p.verify_email(window, cx))
+                                }),
+                            ]),
+                    )
+            },
+        );
+    }
+
+    /// 登录邮箱: my address (or 还没有添加) with 添加… / 更改…, and "⋯" ›
+    /// 移除登录邮箱; a failed load shows the Alert with 重试.
+    fn email_section(&self, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+        let header = SectionTitle::new(s::EMAIL).description(s::EMAIL_HINT);
+        let body: gpui::AnyElement = match (&self.email, &self.email_status) {
+            (None, Status::Failed(t)) => widgets::failed_alert(
+                "email-failed",
+                s::EMAIL_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("email-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh_email(cx))),
+                ),
+                cx,
+            ),
+            (None, _) => GroupedForm::new()
+                .row(widgets::list_loading("email-loading", 1, false, cx))
+                .into_any_element(),
+            (Some(email), _) => {
+                let page = cx.entity();
+                let has = email.is_some();
+                let edit = push_button(
+                    "email-edit",
+                    if has { s::EMAIL_CHANGE } else { s::EMAIL_ADD },
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click({
+                    let page = page.clone();
+                    move |_, window, cx| Self::open_email_sheet(page.clone(), window, cx)
+                });
+                let mut row = widgets::ItemRow::new(
+                    "email-row",
+                    email.clone().unwrap_or_else(|| s::EMAIL_NONE.to_string()),
+                )
+                .media(widgets::icon_box_28(Sym::Mention, cx))
+                .muted(!has)
+                .value(edit);
+                if has {
+                    let more = widgets::more_button("email-more", window, cx).dropdown_menu(
+                        move |menu, _, _| {
+                            let page = page.clone();
+                            menu.item(PopupMenuItem::new(s::EMAIL_REMOVE_ITEM).on_click(
+                                move |_, _, cx| page.update(cx, |p, cx| p.remove_email(cx)),
+                            ))
+                        },
+                    );
+                    row = row.menu(more);
+                }
+                GroupedForm::new().row(row).into_any_element()
+            }
+        };
+        widgets::section(header, body)
     }
 
     fn on_input(
@@ -837,6 +1186,7 @@ impl Render for AccountPage {
         let sign_out_page = cx.entity();
         widgets::pane()
             .child(GroupedForm::new().row(self.header(cx)))
+            .child(self.email_section(window, cx))
             .child(self.devices_section(window, cx))
             .child(
                 div().flex().child(

@@ -1013,6 +1013,7 @@ impl ChatProvider for FakeProvider {
                 "WRONG-CODE-0000" | "0000-0000" | "0000-0000-0000"
             ),
             Credential::Token(token) => token.len() > 3,
+            Credential::EmailCode { code, .. } => code != "000000",
         };
         // A `.invalid` host (RFC 2606) never answers: the login-unreachable scene.
         let unreachable = request.server_url.contains(".invalid");
@@ -1912,6 +1913,27 @@ impl ChatProvider for FakeProvider {
         self.sign_out_device_fake(device_id)
     }
     // --- end settings-backend track ---
+
+    // Email sign-in: every address gets a code; 000000 is the wrong one.
+    fn request_sign_in_code(&self, _server_url: &str, _email: &str) -> crate::data::EmailReply<()> {
+        crate::data::email_reply_now(Ok(()))
+    }
+    fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
+        crate::data::email_reply_now(Ok(Some("joye@example.com".into())))
+    }
+    fn add_email_code(&self, _email: &str) -> crate::data::EmailReply<()> {
+        crate::data::email_reply_now(Ok(()))
+    }
+    fn verify_email(&self, email: &str, code: &str) -> crate::data::EmailReply<String> {
+        crate::data::email_reply_now(if code == "000000" {
+            Err(crate::data::EmailError::WrongCode)
+        } else {
+            Ok(email.to_string())
+        })
+    }
+    fn remove_email(&self) -> crate::data::EmailReply<()> {
+        crate::data::email_reply_now(Ok(()))
+    }
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_fake(name, labels)

@@ -23,6 +23,7 @@ mod card_events;
 pub mod convert;
 // Desk track (1.1.0 首页).
 mod desk;
+mod email;
 pub mod files;
 #[cfg(test)]
 mod files_live;
@@ -485,7 +486,7 @@ impl CoreProvider {
         let tokens = self.shared.config.tokens.clone();
         std::thread::spawn(move || {
             let _ = tokens.store(&account.server_url).clear();
-            session::clear_session(&root);
+            session::forget_session(&root, &account.server_url);
             drop(account);
         });
     }
@@ -500,7 +501,7 @@ impl CoreProvider {
         let tokens = self.shared.config.tokens.clone();
         chat_core::background().spawn(async move {
             // Forget locally first, so a crash during the revoke cannot keep the session.
-            session::clear_session(&root);
+            session::forget_session(&root, &account.server_url);
             let server = account.server_url.clone();
             let token_store = tokens.clone();
             let _ = tokio_blocking(move || token_store.store(&server).clear()).await;
@@ -520,6 +521,27 @@ impl CoreProvider {
                 }
             }
         });
+    }
+
+    /// Uses another server: keeps this server's session and token, then signs
+    /// in with the saved session of `server_url`, or shows the login window
+    /// for it.
+    fn switch_server_inner(&self, server_url: &str) {
+        let Some(server_url) = session::normalize_server_url(server_url) else {
+            return;
+        };
+        let same = |a: &str| a.trim_end_matches('/') == server_url.trim_end_matches('/');
+        if self.account().is_some_and(|a| same(&a.server_url)) {
+            return;
+        }
+        let root = self.shared.config.data_root.clone();
+        let saved = session::set_current_server(&root, &server_url);
+        tracing::info!(signed_in = saved.is_some(), "switching servers");
+        // Not a sign-out: the old token stays in the Keychain.
+        drop(self.take_account(None));
+        if saved.is_some() {
+            self.restore();
+        }
     }
 
     fn login_inner(&self, request: LoginRequest) {
@@ -1047,6 +1069,41 @@ impl ChatProvider for CoreProvider {
 
     fn logout(&self) {
         self.sign_out_inner(false);
+    }
+
+    fn current_server(&self) -> Option<String> {
+        if let Some(a) = self.account() {
+            return Some(a.server_url.clone());
+        }
+        session::current_server(&self.shared.config.data_root)
+    }
+
+    fn signed_in_servers(&self) -> Vec<String> {
+        session::signed_in_servers(&self.shared.config.data_root)
+    }
+
+    fn switch_server(&self, server_url: &str) {
+        self.switch_server_inner(server_url);
+    }
+
+    fn request_sign_in_code(&self, server_url: &str, email: &str) -> crate::data::EmailReply<()> {
+        self.request_sign_in_code_inner(server_url, email)
+    }
+
+    fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
+        self.my_email_inner()
+    }
+
+    fn add_email_code(&self, email: &str) -> crate::data::EmailReply<()> {
+        self.add_email_code_inner(email)
+    }
+
+    fn verify_email(&self, email: &str, code: &str) -> crate::data::EmailReply<String> {
+        self.verify_email_inner(email, code)
+    }
+
+    fn remove_email(&self) -> crate::data::EmailReply<()> {
+        self.remove_email_inner()
     }
 
     fn sign_out(&self, wipe_cache: bool) {
