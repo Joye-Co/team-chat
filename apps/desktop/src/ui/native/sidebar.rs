@@ -72,12 +72,12 @@ impl RowMenu {
 /// leading and bottom edges, radius 18, `sidebar` fill, 0.5 pt `glassEdge`
 /// and the `float` shadow. Children go inside; the traffic lights sit in
 /// its top row.
-pub fn floating_sidebar(cx: &App) -> gpui::Div {
+pub fn floating_sidebar(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
         .m(metrics::SIDEBAR_INSET)
-        .w(metrics::SIDEBAR_WIDTH)
+        .w(width)
         .rounded(metrics::SIDEBAR_RADIUS)
         .bg(k.sidebar)
         .shadow(k.glass())

@@ -117,6 +117,8 @@ crate::copy! {
     MENU_FULL_SCREEN = "切换全屏幕",
     // --- v12/behavior ---
     MENU_SIDEBAR = "侧栏",
+    SIDEBAR_HIDE = "隐藏侧栏",
+    SIDEBAR_SHOW = "显示侧栏",
     // --- end v12/behavior ---
     // menu bar item
     STATUS_ITEM_UNREAD = "{n} 条未读",
