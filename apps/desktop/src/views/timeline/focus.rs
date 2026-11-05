@@ -52,10 +52,9 @@ impl FocusState {
     }
 }
 
-/// The room above a revealed hit: none. The hit's own row starts with its
-/// group gap, and a gap here would leave a sliver of the row above it
-/// under the search bar (§2.17, F15).
-const PLACE_GAP: gpui::Pixels = gpui::Pixels::ZERO;
+/// The room above a revealed hit (§2.17, A1-01): the sticky date pill
+/// (2 + 24) and a 6 gap, so the pill never covers the hit's author row.
+const PLACE_GAP: gpui::Pixels = crate::theme::space::S32;
 /// Frames to wait for the list to lay out the revealed row.
 const PLACE_TRIES: u8 = 8;
 

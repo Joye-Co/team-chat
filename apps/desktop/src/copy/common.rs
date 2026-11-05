@@ -29,7 +29,6 @@ crate::copy! {
     COUNT_CAP = "99+",
     STATUS_BLOCKED = "卡住了",
     STATUS_DONE = "完成",
-    STATUS_OPEN = "未开始",
     CANCEL = "取消",
     SAVE = "保存",
     CLOSE = "关闭",

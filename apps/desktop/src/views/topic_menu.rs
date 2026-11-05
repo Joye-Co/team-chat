@@ -121,7 +121,7 @@ pub fn open_rename(
 /// The menu label of a status (the chip text without a name).
 pub fn status_label(status: TopicStatus) -> &'static str {
     match status {
-        TopicStatus::Open => common::STATUS_OPEN,
+        TopicStatus::Open => common::STATUS_QUEUED,
         TopicStatus::InProgress => common::STATUS_IN_PROGRESS,
         TopicStatus::WaitingAnswer => common::STATUS_WAITING_ANSWER,
         TopicStatus::WaitingReview => common::STATUS_WAITING_REVIEW,

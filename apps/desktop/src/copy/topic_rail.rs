@@ -37,7 +37,6 @@ crate::copy! {
     CHANGES_CLOSED = "已关闭",
     CHANGES_LINE = "#{n} +{add} −{del} · {files} 个文件",
     CHECKS_LINE = "{passed}/{total} 项检查通过 · {state}",
-    MACHINE_BUSY = "在用",
     MACHINE_IDLE = "空闲",
     COST_TIME = "用时 {time}",
     MINUTES = "{n} 分钟",
@@ -154,6 +153,8 @@ crate::copy! {
     INSPECTOR_WHEN_VALUE = "今天 {range}",
     INSPECTOR_WHEN_DAY = "{day} {range}",
     INSPECTOR_WHEN_SPAN = "{start} – {end}",
+    // A2-21: a run still at work has a start, not a range.
+    INSPECTOR_WHEN_SINCE = "{when} 起",
     INSPECTOR_FILES = "{n} 个文件",
     OPEN_OUTPUT = "打开产出",
     OPEN_CHANGES = "看改动",

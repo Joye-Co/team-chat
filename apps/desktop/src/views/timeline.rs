@@ -958,6 +958,11 @@ const STICKY_TOP: Pixels = space::S2;
 const STICKY_H: Pixels = space::S24;
 
 impl TimelineView {
+    /// The thread's key focus (a region of the window, F6).
+    pub fn focus_handle(&self) -> gpui::FocusHandle {
+        self.key_focus.clone()
+    }
+
     /// The first row on screen starts `offset` into row `ix`: its day label
     /// is gone under the pill's place (or the row has none, so the label of
     /// its day is above it).

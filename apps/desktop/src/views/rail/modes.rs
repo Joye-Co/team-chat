@@ -68,6 +68,10 @@ pub(super) enum Item {
         count: usize,
     },
     Topic(Box<TopicItem>),
+    /// A: the muted row of an open 群 with no 话题 (B1-31).
+    NoTopics {
+        id: GroupId,
+    },
     /// C: a member and its state.
     MemberHead {
         row: Box<MemberRow>,
@@ -170,9 +174,12 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
                 i.show_all || model::involves_me(p, me, t) || is_open(open, &t.group_id, &t.id)
             })
             .collect();
-        if topics.is_empty() && !i.show_all {
+        // B1-31: the open 群 keeps its entry (selected) also with no 话题.
+        let open_group = i.group_page.as_deref() == Some(g.id.as_str());
+        if topics.is_empty() && !i.show_all && !open_group {
             continue;
         }
+        let empty = topics.is_empty();
         let folded = i.folded_groups.contains(&g.id);
         let mut section = vec![Item::GroupHeader {
             id: g.id.clone(),
@@ -180,6 +187,9 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
             folded,
             selected: i.group_page.as_deref() == Some(g.id.as_str()),
         }];
+        if !folded && empty {
+            section.push(Item::NoTopics { id: g.id.clone() });
+        }
         if !folded {
             for t in topics {
                 let (state, meta) = model::row_state(p, me, &t);
@@ -232,11 +242,20 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
         let folded = i.folded_buckets.contains(&bucket);
         // §2.1: a folded section is one dimmed "More" row with its count
         // (`做完了 · 今天 · 2`), never a label with no rows under it.
+        // B1-25: under its own label, so it never reads as part of the
+        // section above.
         if folded {
-            out.push(vec![Item::BucketTail {
-                bucket,
-                count: topics.len(),
-            }]);
+            out.push(vec![
+                Item::BucketHeader {
+                    bucket,
+                    count: topics.len(),
+                    folded,
+                },
+                Item::BucketTail {
+                    bucket,
+                    count: topics.len(),
+                },
+            ]);
             continue;
         }
         let mut section = vec![Item::BucketHeader {
@@ -509,10 +528,7 @@ impl RailView {
                 let this = cx.entity().downgrade();
                 self.row(
                     SharedString::from(format!("rail-bucket-tail-{bucket:?}")),
-                    crate::copy::fill(
-                        c::RAIL_TAIL,
-                        &[("word", bucket.label()), ("n", &count.to_string())],
-                    ),
+                    crate::copy::fill(c::RAIL_FOLDED_N, &[("n", &count.to_string())]),
                 )
                 .symbol(crate::ui::sf_symbols::Sf::More)
                 .disclosure(false)
@@ -546,6 +562,14 @@ impl RailView {
                 )
             }
             Item::Plain { member, away } => self.plain_member(member, *away, cx),
+            Item::NoTopics { id } => self
+                .row(
+                    SharedString::from(format!("rail-no-topics-{id}")),
+                    c::RAIL_NO_TOPICS.to_string(),
+                )
+                .media_kind(crate::ui::native::sidebar::SidebarMedia::None)
+                .dim(true)
+                .into_any_element(),
             Item::MemberTail { id, label, open } => {
                 let id = *id;
                 let this = cx.entity().downgrade();
