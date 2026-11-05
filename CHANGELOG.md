@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.1.0 (unreleased)
+## 1.1.0 (2026-11-05)
 
 Notes: [docs/releases/1.1.0.md](docs/releases/1.1.0.md). `scripts/release.sh` writes the date in
 the release commit. The server deploys first, from the commit that will be tagged, with
