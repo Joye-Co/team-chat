@@ -474,7 +474,7 @@ impl TimelineView {
             }
         }
         self.members = p.members();
-        self.topic = p.topic(&g, &tid);
+        self.topic = crate::data::topic_or_chat(p.as_ref(), &g, &tid);
         self.typing = p.typing(&g, &tid);
         self.runs = p.runs(&g, &tid);
         for run in &self.runs {

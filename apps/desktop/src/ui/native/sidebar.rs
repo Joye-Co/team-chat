@@ -105,6 +105,9 @@ pub struct SidebarSection {
     /// A click on the chevron runs this instead of `on_toggle`.
     on_chevron: Option<Click>,
     menu: Option<RowMenu>,
+    /// The 群's own chat (群聊) has messages I have not read: the label is
+    /// 600 with the item's 8 dot, like an unread row (§2.12).
+    unread: bool,
 }
 
 impl SidebarSection {
@@ -118,7 +121,13 @@ impl SidebarSection {
             selected: false,
             on_chevron: None,
             menu: None,
+            unread: false,
         }
+    }
+
+    pub fn unread(mut self, unread: bool) -> Self {
+        self.unread = unread;
+        self
     }
 
     /// A click on the chevron runs `f` (fold) while a click on the label
@@ -167,7 +176,14 @@ impl RenderOnce for SidebarSection {
             Sf::ChevronDown
         };
         let (_, sel_text) = k.selected_ink(emphasized(window));
-        let label = if self.selected { sel_text } else { k.secondary };
+        let label = if self.selected {
+            sel_text
+        } else if self.unread {
+            k.label
+        } else {
+            k.secondary
+        };
+        let unread = self.unread;
         let row = div()
             .id(ElementId::Name(format!("{group}-label").into()))
             .relative()
@@ -178,10 +194,21 @@ impl RenderOnce for SidebarSection {
             .flex()
             .items_center()
             .child(
-                TruncText::new(self.label)
+                div()
                     .flex_1()
-                    .n_section()
-                    .text_color(label),
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        TruncText::new(self.label)
+                            .n_section()
+                            .when(unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
+                            .text_color(label),
+                    )
+                    .when(unread, |d| {
+                        d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
+                    }),
             )
             .child(
                 div()

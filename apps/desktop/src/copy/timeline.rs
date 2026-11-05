@@ -80,4 +80,10 @@ crate::copy! {
     THREAD_EMPTY = "还没有消息，说点什么开始吧",
     // §2.4 working card: the member and the step it is on.
     PLAN_DOING_NAMED = "{name} 正在做：{step}",
+    // 1.1.1: the 群's own chat. Its start block says what it is for; a
+    // message's menu opens a 话题 from it.
+    CHAT_START_GROUP = "在 {group} 里直接聊；要做一件事时，开个话题",
+    CHAT_START_DM = "在这里直接聊；要做一件事时，开个话题",
+    START_NEW_TOPIC = "新话题",
+    MENU_OPEN_TOPIC = "开个话题",
 }

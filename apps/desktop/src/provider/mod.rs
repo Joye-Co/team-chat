@@ -974,7 +974,12 @@ impl CoreProvider {
         jobs.append(&mut out);
         let mut out = jobs;
         match a.client.topics(group_id, TOPIC_LIMIT) {
-            Ok(rows) => out.extend(rows.iter().map(convert::topic)),
+            // The 群聊 is the 群's chat, not one of its 话题 (`ChatProvider::topic` finds it).
+            Ok(rows) => out.extend(
+                rows.iter()
+                    .filter(|r| !crate::data::is_main_topic(&r.topic.id))
+                    .map(convert::topic),
+            ),
             Err(e) => tracing::warn!(error = %e, "topics read failed"),
         }
         out
@@ -1360,6 +1365,7 @@ impl ChatProvider for CoreProvider {
             title,
             body: request.body,
             mentions: request.mentions,
+            reply_to: request.quote_of,
             ..Default::default()
         });
         match result {
@@ -1574,7 +1580,7 @@ impl ChatProvider for CoreProvider {
             request.title.clone(),
             request.body.clone(),
             request.mentions.clone(),
-            None,
+            request.quote_of.clone(),
         );
         job.unwrap_or_else(|| self.start_topic(request))
     }

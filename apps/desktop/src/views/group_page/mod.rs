@@ -1,4 +1,7 @@
-//! 群 page (NATIVE.md §1, §9.4 lists, §9.3 inspector): the toolbar row says
+//! 群 page (NATIVE.md §1, §9.4 lists, §9.3 inspector). 1.1.1: a click on a
+//! 群 opens its 群聊 (the 话题 page of the 群's chat); this page is the
+//! secondary view of its 话题, opened from the 群聊's `这个群的话题`, with a
+//! `回到群里聊` item back. The toolbar row says
 //! the 群's name and purpose; the content is a Mail-like list of 进行中 and
 //! 最近完成 话题 (a 话题 starts from `square.and.pencil` in the toolbar or
 //! the sidebar, or ⌘N, which open the 新话题 sheet preset to this 群; there
@@ -221,6 +224,8 @@ impl GroupPage {
             .join(" · ");
         let active = emphasized(window);
         let nav = self.services.nav.clone();
+        let chat_nav = self.services.nav.clone();
+        let chat_group = g.to_string();
         let services = self.services.clone();
         let group_id = g.to_string();
         let more = toolbar_item(
@@ -257,6 +262,19 @@ impl GroupPage {
                 ToolbarRow::new(group.map(|x| x.name).unwrap_or_default())
                     .subtitle(subtitle)
                     .leading_inset(rows::toolbar_leading(&self.services, cx))
+                    .group(ToolbarGroup::new([toolbar_item(
+                        "group-chat",
+                        Sf::ChevronLeft,
+                        c::GROUP_PAGE_BACK_TO_CHAT,
+                        ToolbarItemKind::Plain,
+                        active,
+                        window,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        let g = chat_group.clone();
+                        chat_nav.update(cx, |n, cx| n.open_group_chat(g, cx))
+                    })]))
                     .group(ToolbarGroup::new([toolbar_item(
                         "group-outputs",
                         Sf::Outputs,

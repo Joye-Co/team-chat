@@ -11,6 +11,10 @@ crate::copy! {
     NEW_TOPIC_BODY = "第一条消息",
     NEW_TOPIC_BODY_PLACEHOLDER = "说清楚要什么，或 @ 成员交代…",
     NEW_TOPIC_CREATE = "开始",
+    // 1.1.1 开个话题: the sheet opened from a message of the 群聊.
+    NEW_TOPIC_FROM_TITLE = "开个话题",
+    NEW_TOPIC_FROM_EXPLANATION = "第一条消息会引用群里的这条，在话题里接着做。",
+    NEW_TOPIC_QUOTE = "引用",
     NEW_GROUP_EXPLANATION = "名称和成员之后都可以改。",
     GROUP_NAME = "名称",
     MEMBERS = "成员",

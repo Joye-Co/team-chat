@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
-    Render, SharedString, Styled, Subscription, Window, div, px,
+    Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -59,12 +59,23 @@ pub fn mentioned(services: &Services, group_id: &str, body: &str) -> Vec<String>
         .collect()
 }
 
+/// 开个话题: the 群聊 message the new 话题 starts from.
+#[derive(Clone, Debug)]
+struct QuoteFrom {
+    message_id: String,
+    /// The author and the first line, as the sheet shows them.
+    line: String,
+}
+
 pub struct NewTopicSheet {
     services: Services,
     groups: Vec<(GroupId, String)>,
     group: Option<GroupId>,
     title: Entity<InputState>,
     body: Entity<TextareaState>,
+    /// Set when the sheet opened from a 群聊 message: the 群 is fixed and
+    /// the first message quotes it.
+    quote: Option<QuoteFrom>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -109,6 +120,7 @@ impl NewTopicSheet {
             group,
             title,
             body,
+            quote: None,
             _subscriptions: subscriptions,
         }
     }
@@ -130,6 +142,7 @@ impl NewTopicSheet {
             title,
             body,
             mentions,
+            quote_of: self.quote.as_ref().map(|q| q.message_id.clone()),
         });
         window.close_dialog(cx);
         // The new 话题 is the newest one in the 群.
@@ -151,7 +164,13 @@ impl Render for NewTopicSheet {
             .map(|(_, n)| n.clone())
             .unwrap_or_default()
             .into();
-        let groups = self.groups.clone();
+        // 开个话题 stays in the quoted message's 群: the pop-up offers only it.
+        let groups: Vec<_> = self
+            .groups
+            .iter()
+            .filter(|(id, _)| self.quote.is_none() || Some(id) == self.group.as_ref())
+            .cloned()
+            .collect();
         let current = self.group.clone();
         let this = cx.entity().downgrade();
         let group_tip = group_name.clone();
@@ -180,16 +199,45 @@ impl Render for NewTopicSheet {
         // lines (review 3 K-02).
         let body_field = NativeTextArea::new("new-topic-body", &self.body).rows(4);
         let [cancel, start] = sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
+        // 开个话题: the quoted 群聊 message, one muted line under its label.
+        let quote_row = self.quote.as_ref().map(|q| {
+            let k = crate::ui::native::native_colors(cx);
+            let line: SharedString = q.line.clone().into();
+            sheet_form_row(
+                o::NEW_TOPIC_QUOTE,
+                div()
+                    .id("new-topic-quote")
+                    .w(form_field_width(SheetWidth::Form))
+                    .pl(crate::theme::space::S8)
+                    .border_l_2()
+                    .border_color(k.separator)
+                    .text_color(k.secondary)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(line.clone())
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(line.clone()).build(window, cx)
+                    }),
+                cx,
+            )
+        });
+        let (sheet_title, explanation) = if self.quote.is_some() {
+            (o::NEW_TOPIC_FROM_TITLE, o::NEW_TOPIC_FROM_EXPLANATION)
+        } else {
+            (o::NEW_TOPIC_TITLE, o::NEW_TOPIC_EXPLANATION)
+        };
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &StartTopic, window, cx| this.submit(window, cx)))
             .w_full()
             .child(
-                SheetLayout::new(o::NEW_TOPIC_TITLE)
-                    .explanation(o::NEW_TOPIC_EXPLANATION)
+                SheetLayout::new(sheet_title)
+                    .explanation(explanation)
                     .body(
                         sheet_form()
                             .child(sheet_form_row(o::NEW_TOPIC_GROUP, group_popup, cx))
+                            .children(quote_row)
                             .child(sheet_form_row(
                                 o::NEW_TOPIC_NAME,
                                 NativeTextField::new("new-topic-title", &self.title).full_width(),
@@ -215,6 +263,72 @@ pub fn open_new_topic(
     cx: &mut App,
 ) -> Entity<NewTopicSheet> {
     let sheet = cx.new(|cx| NewTopicSheet::new(services, group, window, cx));
+    present(sheet, window, cx)
+}
+
+/// 开个话题 (1.1.1): the sheet for a 话题 that starts from a 群聊 message.
+/// The 群 is the message's, the 标题 defaults to its first line, and the
+/// first message quotes it.
+pub fn open_new_topic_from(
+    services: Services,
+    message: &crate::data::Message,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<NewTopicSheet> {
+    let author = services
+        .provider
+        .member(&message.author_id)
+        .map(|m| m.name)
+        .unwrap_or_default();
+    let first = message
+        .body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default()
+        .to_string();
+    let title: String = first
+        .chars()
+        .take(chat_core::proto::DEFAULT_TITLE_CHARS)
+        .collect();
+    let quote = QuoteFrom {
+        message_id: message.id.clone(),
+        line: if author.is_empty() {
+            first.clone()
+        } else {
+            format!("{author}：{first}")
+        },
+    };
+    let group_id = message.group_id.clone();
+    // A 私聊 is not in the sheet's 群 list; its 话题 still start there.
+    let dm_name = services
+        .provider
+        .groups()
+        .into_iter()
+        .find(|g| g.id == group_id)
+        .map(|g| g.name);
+    let sheet = cx.new(|cx| {
+        let mut sheet = NewTopicSheet::new(services, Some(group_id.clone()), window, cx);
+        if !sheet.groups.iter().any(|(id, _)| *id == group_id) {
+            sheet
+                .groups
+                .push((group_id.clone(), dm_name.unwrap_or_default()));
+        }
+        sheet.group = Some(group_id);
+        sheet.quote = Some(quote);
+        sheet
+            .title
+            .update(cx, |t, cx| t.set_value(title, window, cx));
+        sheet
+    });
+    present(sheet, window, cx)
+}
+
+fn present(
+    sheet: Entity<NewTopicSheet>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<NewTopicSheet> {
     let first = Cell::new(true);
     let view = sheet.clone();
     window.open_dialog(cx, move |dialog, window, cx| {

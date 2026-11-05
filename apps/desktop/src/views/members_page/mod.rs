@@ -1782,7 +1782,7 @@ impl MembersPage {
                         let g = g.clone();
                         match t.clone() {
                             Some(t) => nav.update(cx, |n, cx| n.open_topic(g, t, cx)),
-                            None => nav.update(cx, |n, cx| n.open_group(g, cx)),
+                            None => nav.update(cx, |n, cx| n.open_group_chat(g, cx)),
                         }
                     })
                 }))

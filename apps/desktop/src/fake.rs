@@ -450,6 +450,61 @@ impl State {
             Some(ALEX),
         );
 
+        // The 群聊 of 产品研发 and of the 私聊 with Forge (1.1.1): plain chat;
+        // a 话题 opens from a message when it turns into work.
+        let dev_chat = crate::data::main_topic_id("g-dev");
+        self.add_topic(
+            "g-dev",
+            &dev_chat,
+            "产品研发",
+            Open,
+            &[],
+            None,
+            &[
+                (XIAOWANG, "大家早，下午 3 点对一下 1.1.1 的发布？", 7 * HOUR),
+                (
+                    LIXUE,
+                    "可以，我先把设计稿的改动列出来。",
+                    7 * HOUR - 4 * MIN,
+                ),
+                (
+                    ME,
+                    "好。@Jojo 帮我看下 staging 昨晚的报错有没有变多",
+                    6 * HOUR,
+                ),
+                (
+                    DEPLOY,
+                    "看了：昨晚 12 条，比前天少 5 条，都是重连超时，没有新的。",
+                    6 * HOUR - 3 * MIN,
+                ),
+                (
+                    ALEX,
+                    "重连超时那几条我想单独查一下，可能和睡眠唤醒有关。",
+                    40 * MIN,
+                ),
+                (CHENCHEN, "下午的会我晚 10 分钟到 🙏", 12 * MIN),
+            ],
+            1,
+        );
+        let forge_chat = crate::data::main_topic_id("d-coder");
+        self.add_topic(
+            "d-coder",
+            &forge_chat,
+            "",
+            Open,
+            &[],
+            None,
+            &[
+                (ME, "今天的构建为什么慢了一倍？", 2 * HOUR),
+                (
+                    CODER,
+                    "依赖缓存昨晚被清掉了，第一次全量编译。之后会回到 4 分钟左右。",
+                    2 * HOUR - 2 * MIN,
+                ),
+            ],
+            0,
+        );
+
         self.add_topic(
             "g-dev",
             "t-login",
@@ -938,7 +993,8 @@ fn sorted_topics(state: &State, group_id: &str) -> Vec<Topic> {
     let mut topics: Vec<Topic> = state
         .topics
         .iter()
-        .filter(|t| t.group_id == group_id)
+        // The 群聊 is the 群's chat, not one of its 话题.
+        .filter(|t| t.group_id == group_id && !crate::data::is_main_topic(&t.id))
         .cloned()
         .collect();
     topics.sort_by_key(|a| std::cmp::Reverse(a.last_activity_at));
@@ -1008,6 +1064,15 @@ impl ChatProvider for FakeProvider {
 
     fn topics(&self, group_id: &str) -> Vec<Topic> {
         self.with(|s| sorted_topics(s, group_id))
+    }
+
+    fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
+        self.with(|s| {
+            s.topics
+                .iter()
+                .find(|t| t.id == topic_id && t.group_id == group_id)
+                .cloned()
+        })
     }
 
     fn todo(&self) -> Vec<TodoItem> {
@@ -1094,11 +1159,33 @@ impl ChatProvider for FakeProvider {
 
     fn send(&self, request: SendRequest) -> ClientMsgId {
         let id = self.with(|s| {
-            if !s
+            let known = s
                 .topics
                 .iter()
-                .any(|t| t.id == request.topic_id && t.group_id == request.group_id)
+                .any(|t| t.id == request.topic_id && t.group_id == request.group_id);
+            // The 群聊 starts with its first message, as on the server.
+            if !known
+                && request.topic_id == crate::data::main_topic_id(&request.group_id)
+                && s.groups.iter().any(|g| g.id == request.group_id)
             {
+                let at = now_ms();
+                s.topics.push(Topic {
+                    id: request.topic_id.clone(),
+                    group_id: request.group_id.clone(),
+                    title: String::new(),
+                    status: TopicStatus::Open,
+                    waiting_on: Vec::new(),
+                    owner_id: None,
+                    created_by: ME.into(),
+                    created_at: at,
+                    root_message_id: String::new(),
+                    last_seq: 0,
+                    last_activity_at: at,
+                    message_count: 0,
+                    unread: 0,
+                    mentions: 0,
+                });
+            } else if !known {
                 return String::new();
             }
             let at = now_ms();
@@ -1176,6 +1263,8 @@ impl ChatProvider for FakeProvider {
                 at,
                 SendState::Sent,
             );
+            // 开个话题: the first message quotes the 群聊 message.
+            s.last_message_mut(&request.group_id, &topic_id).quote_of = request.quote_of.clone();
             (msg.client_msg_id, topic_id)
         });
         if !topic_id.is_empty() {
@@ -1976,6 +2065,51 @@ mod tests {
         );
     }
 
+    /// 1.1.1: a 群's chat (群聊) is not one of its 话题, still opens by its
+    /// fixed id, starts with its first message, and 开个话题 quotes it.
+    #[test]
+    fn the_group_chat_is_not_a_topic_and_topics_open_from_it() {
+        let p = FakeProvider::new();
+        let dev = crate::data::main_topic_id("g-dev");
+        assert!(p.topics("g-dev").iter().all(|t| t.id != dev));
+        assert!(p.topic("g-dev", &dev).is_some());
+        let said = p.messages("g-dev", &dev, 50).messages;
+        assert!(!said.is_empty());
+
+        // A 群 nobody wrote in yet: a blank 群聊 opens, the first message makes it.
+        let ops = crate::data::main_topic_id("g-ops");
+        assert!(p.topic("g-ops", &ops).is_none());
+        let blank = crate::data::topic_or_chat(p.as_ref(), "g-ops", &ops).expect("blank 群聊");
+        assert_eq!(blank.message_count, 0);
+        assert!(crate::data::topic_or_chat(p.as_ref(), "g-ops", "t-nope").is_none());
+        let cid = p.send(SendRequest {
+            group_id: "g-ops".into(),
+            topic_id: ops.clone(),
+            body: "早".into(),
+            mentions: Vec::new(),
+            quote_of: None,
+        });
+        assert!(!cid.is_empty());
+        assert_eq!(p.messages("g-ops", &ops, 10).messages.len(), 1);
+        assert!(p.topics("g-ops").iter().all(|t| t.id != ops));
+
+        // 开个话题 from a 群聊 message: a new 话题 whose first message quotes it.
+        let source = said.last().unwrap().id.clone();
+        let before = p.topics("g-dev").len();
+        p.start_topic(StartTopicRequest {
+            group_id: "g-dev".into(),
+            title: Some("查重连超时".into()),
+            body: "接着群里这条查".into(),
+            mentions: Vec::new(),
+            quote_of: Some(source.clone()),
+        });
+        let topics = p.topics("g-dev");
+        assert_eq!(topics.len(), before + 1);
+        let opened = topics.iter().find(|t| t.title == "查重连超时").unwrap();
+        let first = p.messages("g-dev", &opened.id, 10).messages;
+        assert_eq!(first[0].quote_of.as_deref(), Some(source.as_str()));
+    }
+
     /// T-10: the card sample 话题 asks through its cards, each with its message and author,
     /// so the pinned banner gives way to the card and never names the 话题's creator.
     #[test]
@@ -2005,6 +2139,7 @@ mod tests {
         let p = FakeProvider::new();
         let mut rx = p.subscribe();
         let id = p.start_topic(StartTopicRequest {
+            quote_of: None,
             group_id: "g-dev".into(),
             title: None,
             body: "新话题标题\n正文".into(),

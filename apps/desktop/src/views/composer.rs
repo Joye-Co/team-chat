@@ -447,6 +447,22 @@ impl ComposerView {
             return c::PLACEHOLDER_EDIT.to_string();
         }
         match &key.topic_id {
+            // 1.1.1: the 群聊, before and after its first message.
+            Some(t) if crate::data::is_main_topic(t) => {
+                match provider.groups().into_iter().find(|g| g.id == key.group_id) {
+                    Some(g) if g.dm_peer.is_none() => fill(
+                        crate::copy::topic_rail::CHAT_COMPOSER_PLACEHOLDER,
+                        &[(
+                            "group",
+                            &crate::ui::emoji::clip_units(
+                                &crate::views::sidebar::topic_line(&g.name),
+                                PLACEHOLDER_GROUP_UNITS,
+                            ),
+                        )],
+                    ),
+                    _ => crate::copy::topic_rail::CHAT_COMPOSER_PLACEHOLDER_DM.to_string(),
+                }
+            }
             Some(t) => match provider.topic(&key.group_id, t) {
                 Some(_) if self.v2 && self.working_member().is_some() => {
                     crate::copy::topic_rail::COMPOSER_INTERJECT.to_string()
@@ -944,6 +960,7 @@ impl ComposerView {
                 let group_id = key.group_id.clone();
                 provider.start_topic_with_files(
                     StartTopicRequest {
+                        quote_of,
                         group_id: group_id.clone(),
                         title,
                         body,

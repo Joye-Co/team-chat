@@ -461,6 +461,7 @@ impl AskPalette {
         };
         let provider = self.services.provider.clone();
         provider.start_topic(StartTopicRequest {
+            quote_of: None,
             group_id: group_id.clone(),
             title: Some(task.clone()),
             body: format!("@{} {task}", member.name),

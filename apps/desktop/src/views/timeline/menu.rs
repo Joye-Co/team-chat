@@ -1,6 +1,7 @@
 //! Extension point: the context menu of a message row, and in-place edit.
 //!
-//! Items: 引用回复 (emits `TimelineEvent::Quote`), 编辑 (my sent messages),
+//! Items: 引用回复 (emits `TimelineEvent::Quote`), 开个话题 (a message of the
+//! 群聊: opens the 新话题 sheet quoting it), 编辑 (my sent messages),
 //! 删除 (mine, or any for an owner; asks first), 复制 (the Markdown source),
 //! 复制链接 (a link with the product URL scheme), and 重试 for a failed send.
 //! To add an item, add it in [`build`]; anything that changes data calls the
@@ -51,6 +52,17 @@ pub(super) fn build(
             let _ = view.update(cx, |this, cx| this.quote(&m, cx));
         })
     };
+    // 1.1.1: a 话题 opens from a 群聊 message on demand.
+    let in_chat = sent && crate::data::is_main_topic(&m.topic_id);
+    let open_topic = {
+        let (view, m) = (view.clone(), m.clone());
+        PopupMenuItem::new(t::MENU_OPEN_TOPIC).on_click(move |_, window, cx| {
+            let Some(services) = view.upgrade().map(|v| v.read(cx).services.clone()) else {
+                return;
+            };
+            crate::views::nav::new_topic::open_new_topic_from(services, &m, window, cx);
+        })
+    };
     let edit = {
         let (view, m) = (view.clone(), m.clone());
         PopupMenuItem::new(t::EDIT).on_click(move |_, window, cx| {
@@ -81,6 +93,7 @@ pub(super) fn build(
         })
     };
     menu.when(sent, |menu| menu.item(quote))
+        .when(in_chat, |menu| menu.item(open_topic))
         .when(failed, |menu| menu.item(retry))
         .when(m.deleted_at.is_none(), |menu| menu.item(copy_text))
         .when(sent, |menu| menu.item(copy_link))
