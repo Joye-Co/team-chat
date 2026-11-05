@@ -19,8 +19,9 @@ crate::copy! {
     ARTIFACT_OLD_VERSION = "你在看旧版本",
     ARTIFACT_OLD_VERSION_LINE = "v{v} · {time} · {note}",
     ARTIFACT_BACK_TO = "回到 v{v}",
-    ARTIFACT_TOPIC_DONE = "{group} · 做完了 {time}",
-    ARTIFACT_TOPIC_ACTIVE = "{group} · {state}",
+    // The tail after the 群 name; the name cuts first (§2.21).
+    ARTIFACT_TOPIC_DONE = " · 完成 {time}",
+    ARTIFACT_TOPIC_ACTIVE = " · {state}",
     ARTIFACT_DECISION_META = "{name} · {time} · {group}",
     ARTIFACT_LIST_META = "v{v} · {kind} · {name}",
     ARTIFACT_SHARE_TEXT = "「{title}」v{v}",

@@ -75,6 +75,8 @@ pub fn row(
 ) -> gpui::Stateful<Div> {
     use crate::ui::native::{BadgeState, StatusBadge};
     let n = crate::ui::native::native_colors(cx);
+    // D15: the state has one carrier, the badge (上传中, 生成预览中); the
+    // meta says only the facts (size, 已上传).
     let meta: String = match status {
         Status::Uploading { done, total } => {
             let p = if *total > 0 { done * 100 / total } else { 0 };

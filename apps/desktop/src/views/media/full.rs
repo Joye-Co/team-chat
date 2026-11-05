@@ -1659,18 +1659,24 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .overflow_scroll()
         .track_scroll(&pages)
         .bg(k.code_bg)
-        .py(space::S16)
+        .p(space::S16)
         .flex()
         .flex_col()
         .items_center()
         .gap(space::S16);
     for page in &p.images {
-        let h = page_w * page.height as f32 / page.width.max(1) as f32;
+        let ratio = page.width.max(1) as f32 / page.height.max(1) as f32;
+        // D2-33: at 100 % and below the page fits the width inside a 16
+        // gutter on the muted backdrop; zoomed in, it keeps its own width
+        // and the pane scrolls.
+        let sized = if zoom <= 1. {
+            div().flex_none().w_full().max_w(px(page_w))
+        } else {
+            div().flex_none().w(px(page_w))
+        };
         doc = doc.child(
-            div()
-                .flex_none()
-                .w(px(page_w))
-                .h(px(h))
+            sized
+                .aspect_ratio(ratio)
                 .bg(gpui::white())
                 .border_1()
                 .border_color(k.border)

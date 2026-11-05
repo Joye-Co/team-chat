@@ -190,17 +190,20 @@ impl Render for PlanForm {
                 c::MEMBERS_PLAN_LIMIT,
                 // The limit is in US dollars: the unit sits in the field, so a cost
                 // in another currency is never read against it.
-                // §2.8 number field: w 112, the value right-aligned.
-                NativeTextField::new("member-plan-limit", &self.limit)
-                    .width(crate::ui::native::metrics::LABEL_COLUMN)
-                    .align(gpui::TextAlign::Right)
-                    .trailing({
-                        use crate::ui::native::NativeType as _;
-                        gpui::div()
-                            .n_callout()
-                            .text_color(crate::ui::native::native_colors(cx).secondary)
-                            .child(c::MEMBERS_PLAN_LIMIT_UNIT)
-                    }),
+                // §2.8 number field: w 112, the value right-aligned, the
+                // field at the right edge of the value column (B1-36).
+                gpui::div().w(field_w).flex().justify_end().child(
+                    NativeTextField::new("member-plan-limit", &self.limit)
+                        .width(crate::ui::native::metrics::LABEL_COLUMN)
+                        .align(gpui::TextAlign::Right)
+                        .trailing({
+                            use crate::ui::native::NativeType as _;
+                            gpui::div()
+                                .n_callout()
+                                .text_color(crate::ui::native::native_colors(cx).secondary)
+                                .child(c::MEMBERS_PLAN_LIMIT_UNIT)
+                        }),
+                ),
                 cx,
             ));
             if invalid {

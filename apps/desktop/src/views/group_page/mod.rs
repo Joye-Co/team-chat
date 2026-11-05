@@ -335,7 +335,13 @@ impl GroupPage {
         let asker = || {
             with_note(fill(
                 c::GROUP_PAGE_ASKED_BY,
-                &[("name", &member_name(&self.services, &t.created_by))],
+                &[(
+                    "name",
+                    crate::ui::avatar::name_beside_avatar(&member_name(
+                        &self.services,
+                        &t.created_by,
+                    )),
+                )],
             ))
         };
         let (second, badge): (String, AnyElement) = match st {
@@ -711,7 +717,10 @@ impl GroupPage {
                             .text_color(k.secondary)
                             .child(format!(
                                 "{} · {date}",
-                                who.map(|m| m.name).unwrap_or_default()
+                                who.map(
+                                    |m| crate::ui::avatar::name_beside_avatar(&m.name).to_string()
+                                )
+                                .unwrap_or_default()
                             )),
                     )
                     .tooltip({
@@ -779,7 +788,13 @@ impl GroupPage {
                                     &[
                                         ("v", &a.version.to_string()),
                                         ("kind", kind_label(a.kind)),
-                                        ("name", &member_name(&self.services, &a.created_by)),
+                                        (
+                                            "name",
+                                            crate::ui::avatar::name_beside_avatar(&member_name(
+                                                &self.services,
+                                                &a.created_by,
+                                            )),
+                                        ),
                                     ],
                                 ))
                                 .n_subheadline()
@@ -840,7 +855,13 @@ impl GroupPage {
                 ));
             }
             Some(run) => {
-                let who = member_name(&self.services, &run.bot_id);
+                let who = crate::ui::avatar::name_beside_avatar(&member_name(
+                    &self.services,
+                    &run.bot_id,
+                ))
+                .to_string();
+                let users = fill(c::GROUP_PAGE_MACHINE_USERS, &[("names", &who)]);
+                let known = run.machine_name.is_some();
                 let step = run
                     .plan
                     .iter()
@@ -889,11 +910,18 @@ impl GroupPage {
                                     .flex()
                                     .flex_col()
                                     .child(line(name).n_body().text_color(k.label))
-                                    .child(line(step).n_subheadline().text_color(k.secondary)),
+                                    .child(line(users).n_subheadline().text_color(k.secondary)),
                             )
-                            // §2.12: a computer is 在线 (the run's own
-                            // state is on its 话题 row).
-                            .child(page::status_badge(Status::Online, c::GROUP_PAGE_IN_USE, cx))
+                            // §2.12: a known computer is 在线 (the run's own
+                            // state is on its 话题 row); 未知电脑 has no
+                            // presence badge (B1-44, one recipe with 首页).
+                            .when(known, |el| {
+                                el.child(page::status_badge(
+                                    Status::Online,
+                                    c::GROUP_PAGE_IN_USE,
+                                    cx,
+                                ))
+                            })
                             .tooltip(move |window, cx| {
                                 gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                             }),

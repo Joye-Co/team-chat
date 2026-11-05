@@ -69,11 +69,10 @@ crate::copy! {
     DESK_KPI_WORKING_NONE = "现在没有在干活的",
     DESK_KPI_DONE_FOOT = "最近 {time}",
     DESK_KPI_DONE_NONE = "今天还没有",
-    DESK_KPI_QUEUE_FOOT = "最早 {time} 开始排队",
+    DESK_KPI_QUEUE_FOOT = "最早 {time}",
     DESK_KPI_QUEUE_NONE = "没有排队的事",
     DESK_NOTE_TITLE = "{name} 的提醒",
     DESK_NOTE_REPLY = "回复",
-    DESK_STATUS_WAITING = "等你",
     DESK_STATUS_ANSWERED = "已回答",
     DESK_STATUS_WORKING = "在做 {n}/{m}",
     DESK_STATUS_STARTED = "在做",
@@ -91,6 +90,7 @@ crate::copy! {
     DESK_QUEUE_EMPTY = "没有排队的事",
     DESK_WHERE_EMPTY = "现在没有电脑在干活",
     DESK_MACHINE_USERS = "{names} 在用",
+    DESK_MACHINE_ONLINE = "在线",
     // --- end v13/ux-pages ---
     // --- v14/t3-pages ---
     DESK_STATUS_DONE = "已交付",
