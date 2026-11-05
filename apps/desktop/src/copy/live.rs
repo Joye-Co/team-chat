@@ -36,7 +36,6 @@ crate::copy! {
     LIVE_ACCEPTANCE_COUNT = "{met}/{total} 达标",
     LIVE_ACCEPTANCE_FROM_NAME = "来自 {name} 的要求",
     LIVE_ACCEPTANCE_DOT = "·",
-    LIVE_CHECKING = "检查中",
     LIVE_MET = "达标",
     LIVE_NOT_MET = "没达标",
     LIVE_EVIDENCE_LINK = "链接",

@@ -122,11 +122,26 @@ impl RailView {
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
     ) -> AnyElement {
+        self.section_header_selected(id, label, folded, false, fold, open)
+    }
+
+    /// [`Self::section_header`] with the selected look (T-12: the 群 header
+    /// while its 群 page is open).
+    pub(super) fn section_header_selected(
+        &self,
+        id: impl Into<ElementId>,
+        label: String,
+        folded: bool,
+        selected: bool,
+        fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        open: Option<ClickHandler>,
+    ) -> AnyElement {
         let id: ElementId = id.into();
         let fold = std::rc::Rc::new(fold);
         let chevron_fold = fold.clone();
         let header = SidebarSection::new(id.clone(), label)
             .collapsed(folded)
+            .selected(selected)
             .on_toggle(move |e, window, cx| match &open {
                 Some(open) => open(e, window, cx),
                 None => fold(e, window, cx),

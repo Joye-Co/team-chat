@@ -816,8 +816,10 @@ impl MembersPage {
                 .map(|b| member_name(&self.services, b))
                 .unwrap_or_default();
             let current = r.plan.iter().position(|s| s.state == PlanState::Current);
-            // One clock (A5, `run_elapsed`): as on 首页, 群 and the live pane.
-            let used = crate::views::topic_page::run_elapsed_text(p.as_ref(), r);
+            // The step row says the step's own time (`已 12 分钟`), as the
+            // live pane's plan does; the run's `已用 …` (one clock,
+            // `run_elapsed`) is not a step time.
+            let used = crate::views::topic_page::step_elapsed_text(p.as_ref(), r);
             let (badge, value) = match kit::plan_progress(&r.plan) {
                 Some((n, m)) => (
                     fill(

@@ -227,7 +227,7 @@ fn file_icon(file: &FileAttachment) -> Sym {
 }
 
 /// The type word of a file in its meta line (`网页 · 18 KB`).
-fn kind_word(file: &FileAttachment) -> &'static str {
+pub fn kind_word(file: &FileAttachment) -> &'static str {
     if file.is_image() {
         f::KIND_IMAGE
     } else if super::is_html(&file.name) {

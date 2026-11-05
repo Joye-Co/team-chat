@@ -26,7 +26,7 @@ use crate::{
         },
         sf_symbols::Sym,
     },
-    views::{group_page::rows::line, shell::clock},
+    views::group_page::rows::line,
 };
 
 /// The pane (§2.5): a header band (`今天` and its close button) on the
@@ -152,6 +152,11 @@ pub fn render(
             cx,
         ));
     }
+    // A1-24: one time format for the column.
+    let times = crate::views::shell::column_clocks(
+        &snap.queue.iter().filter_map(|q| q.at).collect::<Vec<_>>(),
+    );
+    let mut times = times.into_iter();
     for (i, q) in snap.queue.iter().enumerate().filter(|_| !failed) {
         let member = snap.member(&q.member_id);
         let full = format!("{} {}", snap.name_by_avatar(&q.member_id), q.title);
@@ -166,13 +171,13 @@ pub fn render(
                 .n_body()
                 .child(MemberAvatar::new(member.as_ref(), tsp::S16))
                 .child(line(full.clone()).flex_1().text_color(k.label))
-                .children(q.at.map(|at| {
+                .children(q.at.and_then(|_| times.next()).map(|t| {
                     div()
                         .flex_none()
                         .n_subheadline()
                         .n_figures()
                         .text_color(k.secondary)
-                        .child(clock(at))
+                        .child(t)
                 }))
                 .tooltip(move |window, cx| {
                     gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)

@@ -35,11 +35,19 @@ pub fn validate_title(title: &str) -> Result<String, &'static str> {
     Ok(t.chars().take(MAX_TITLE_CHARS).collect())
 }
 
+/// 保存 is on for a valid title that differs from the current one (T-19:
+/// the same rule as 重命名群, `nav::rename::can_save`).
+pub fn can_save_title(current: &str, typed: &str) -> bool {
+    validate_title(typed).is_ok_and(|t| t != current.trim())
+}
+
 /// The body of the rename dialog: one field, Enter or 保存 renames.
 struct RenameForm {
     services: Services,
     group_id: String,
     topic_id: String,
+    /// The title when the dialog opened.
+    current: String,
     title: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
@@ -47,7 +55,11 @@ struct RenameForm {
 impl RenameForm {
     /// An empty title only turns 保存 off (no error text, NATIVE.md §7.4).
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Ok(title) = validate_title(&self.title.read(cx).value()) {
+        let typed = self.title.read(cx).value();
+        if !can_save_title(&self.current, &typed) {
+            return;
+        }
+        if let Ok(title) = validate_title(&typed) {
             self.services
                 .provider
                 .rename_topic(&self.group_id, &self.topic_id, title);
@@ -58,7 +70,7 @@ impl RenameForm {
 
 impl Render for RenameForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let filled = !self.title.read(cx).value().trim().is_empty();
+        let can_save = can_save_title(&self.current, &self.title.read(cx).value());
         let [cancel, save] = sheet_buttons("rename-topic", common::CANCEL, common::SAVE, cx);
         crate::views::nav::rename::rename_sheet(
             r::RENAME_TITLE,
@@ -69,7 +81,7 @@ impl Render for RenameForm {
             ),
             None,
             cancel.on_click(|_, window, cx| window.close_dialog(cx)),
-            disabled_push(save, !filled, cx)
+            disabled_push(save, !can_save, cx)
                 .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
             cx,
         )
@@ -87,7 +99,7 @@ pub fn open_rename(
     let current = topic.title.clone();
     let (group_id, topic_id) = (group_id.to_string(), topic.id.clone());
     let form = cx.new(|cx| {
-        let title = cx.new(|cx| InputState::new(window, cx).default_value(current));
+        let title = cx.new(|cx| InputState::new(window, cx).default_value(current.clone()));
         let subscriptions = vec![cx.subscribe_in(
             &title,
             window,
@@ -101,6 +113,7 @@ pub fn open_rename(
             services,
             group_id,
             topic_id,
+            current,
             title,
             _subscriptions: subscriptions,
         }
@@ -305,6 +318,14 @@ pub fn header_label(text: impl Into<SharedString>, cx: &App) -> impl IntoElement
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_needs_a_changed_title() {
+        assert!(!can_save_title("V1 性能压测", "V1 性能压测"));
+        assert!(!can_save_title("V1 性能压测", " V1 性能压测 "));
+        assert!(!can_save_title("V1 性能压测", "  "));
+        assert!(can_save_title("V1 性能压测", "V1 性能压测：一万条"));
+    }
 
     #[test]
     fn titles_are_trimmed_and_cut() {

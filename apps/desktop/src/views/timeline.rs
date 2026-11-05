@@ -198,6 +198,10 @@ pub struct TimelineView {
     /// T-01: where each drawn row's own date label sits (`row.rs`), so the
     /// sticky date pill shows only once that label has gone under it.
     date_marks: Rc<std::cell::RefCell<DateMarks>>,
+    /// T-15: the row whose own date label the sticky pill stands for this
+    /// frame; its divider is not drawn, so no slice of it shows above the
+    /// pill.
+    sticky_row: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -332,6 +336,7 @@ impl TimelineView {
             cards_drawn: Default::default(),
             divider_painted: false,
             date_marks: Default::default(),
+            sticky_row: None,
             _subscriptions: subscriptions,
         };
         let open = this.services.nav.read(cx).topic.clone();
@@ -868,35 +873,36 @@ impl Render for TimelineView {
         let sticky_date = (self.v2 && jump_unread.is_none())
             .then(|| self.list.logical_scroll_top())
             .filter(|top| self.date_label_gone(top.item_ix, top.offset_in_item))
-            .and_then(|top| self.messages.get(top.item_ix))
-            .map(|m| {
-                use crate::ui::native::{NativeType as _, native_colors};
-                let n = native_colors(cx);
-                div()
-                    .absolute()
-                    .top(STICKY_TOP)
-                    .left_0()
-                    .right_0()
-                    .pl(v2::LEADING)
-                    .pr(v2::SIDE)
-                    .flex()
-                    .justify_center()
-                    // P-02: a native page under the pill is cut below it, so
-                    // the pill stays on top (`web_embed::clip_band`).
-                    .child(crate::ui::web_embed::clip_band())
-                    .child(
-                        ui::float_surface(cx)
-                            .h(STICKY_H)
-                            .px(space::S12)
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .n_section()
-                            .n_figures()
-                            .text_color(n.secondary)
-                            .child(v2::date_label(m.created_at)),
-                    )
-            });
+            .and_then(|top| self.messages.get(top.item_ix));
+        self.sticky_row = sticky_date.map(|m| model::key(m).to_string());
+        let sticky_date = sticky_date.map(|m| {
+            use crate::ui::native::{NativeType as _, native_colors};
+            let n = native_colors(cx);
+            div()
+                .absolute()
+                .top(STICKY_TOP)
+                .left_0()
+                .right_0()
+                .pl(v2::LEADING)
+                .pr(v2::SIDE)
+                .flex()
+                .justify_center()
+                // P-02: a native page under the pill is cut below it, so
+                // the pill stays on top (`web_embed::clip_band`).
+                .child(crate::ui::web_embed::clip_band())
+                .child(
+                    ui::float_surface(cx)
+                        .h(STICKY_H)
+                        .px(space::S12)
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .n_section()
+                        .n_figures()
+                        .text_color(n.secondary)
+                        .child(v2::date_label(m.created_at)),
+                )
+        });
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge
         // fades over 24 so its last row is never a hard mid-glyph cut.

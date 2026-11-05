@@ -139,6 +139,24 @@ pub fn run_elapsed_text(p: &dyn ChatProvider, run: &BotRunSummary) -> Option<Str
     run_elapsed(p, run).map(|ms| plan::span_text(plan::USED, ms))
 }
 
+/// How long the run's current step has run, in words (`已 12 分钟`): the
+/// step's own time, from its start on the provider's clock. `None` when no
+/// step is current or its start is not known. A step row shows this, never
+/// the run's [`run_elapsed`] (which reads `已用 …`).
+pub fn step_elapsed_text(p: &dyn ChatProvider, run: &BotRunSummary) -> Option<String> {
+    let i = run
+        .plan
+        .iter()
+        .position(|s| s.state == PlanState::Current)?;
+    let start = *p.run_step_times(&run.id).get(i)?;
+    crate::views::shell::known(start)?;
+    let minutes = ((p.clock_now() - start).max(0) / 60_000).to_string();
+    Some(crate::copy::fill(
+        crate::copy::topic_rail::STEP_SO_FAR,
+        &[("n", &minutes)],
+    ))
+}
+
 /// The run a member works on in this 话题 now: active and not waiting for
 /// a person (an answer or a review is said elsewhere), the latest first.
 pub fn working_run(runs: &[BotRunSummary]) -> Option<&BotRunSummary> {
