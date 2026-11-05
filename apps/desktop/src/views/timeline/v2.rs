@@ -660,10 +660,11 @@ impl TimelineView {
             .w_full()
             .text_color(n.label)
         });
-        // §2.4 card header slot: the StatusBadge before the title.
+        // §2.4 card header slot: the StatusBadge before the title, in the
+        // §2.12 word (X-02: 完成, never 做完了).
         let state = div().flex().child(crate::ui::native::StatusBadge::new(
             crate::ui::native::BadgeState::Done,
-            c::DONE_MARK,
+            crate::copy::common::STATUS_DONE,
         ));
         // §2.4 compact in-thread card: the one width, radius 14, a 1 px
         // border, the card fill, shadow-sm, p 16.
@@ -754,9 +755,14 @@ impl TimelineView {
                 .gap(space::S8)
                 .children(message.attachments.iter().enumerate().map(|(i, file)| {
                     let video = file.mime.starts_with("video/") || file.mime.starts_with("audio/");
+                    // T-20, §2.17: one meta recipe for every file item,
+                    // `<kind> · <size>` (a transfer adds its state).
+                    let kind = crate::views::files::extra::kind_word(file);
                     let meta = match p.media_duration(file) {
-                        Some(ms) => format!("{} · {}", media_time(ms), size_text(file.size)),
-                        None => size_text(file.size),
+                        Some(ms) => {
+                            format!("{kind} · {} · {}", media_time(ms), size_text(file.size))
+                        }
+                        None => format!("{kind} · {}", size_text(file.size)),
                     };
                     // R2-10: the one file item (`files::extra`): the 32
                     // media box, a play symbol for video and audio; a video

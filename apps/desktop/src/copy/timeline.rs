@@ -69,6 +69,7 @@ crate::copy! {
     PLAN_DOING = "正在做：{step}",
     PLAN_VIEW = "查看",
     PLAN_FOOTER = "{used} · {time} 开始",
+    PLAN_FOOTER_SINCE = "{used} · {since}",
     RUN_FAILED_TITLE_NO_CAUSE = "{name} 没做完",
     RUN_FAILED_DETAIL = "{name} {time} 停在「{step}」。看看日志，处理好后让它再试一次。",
     RUN_FAILED_DETAIL_NO_STEP = "{name} {time} 停下了。看看日志，处理好后让它再试一次。",

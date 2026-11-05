@@ -743,7 +743,7 @@ impl TopicRail {
             ));
         }
         let when = match active {
-            Some(at) => Some(fill(c::INSPECTOR_WHEN_SINCE, &[("when", &when_start(at))])),
+            Some(at) => Some(run_since(at)),
             None => cost
                 .started_at
                 .zip(cost.ended_at)
@@ -754,6 +754,12 @@ impl TopicRail {
         }
         Some(section.into_any_element())
     }
+}
+
+/// When a run at work started, in the one form of every place (T-20, §2.12
+/// one clock): `今天 07:23 起`, `11-01 07:23 起`.
+pub fn run_since(at: crate::data::Millis) -> String {
+    fill(c::INSPECTOR_WHEN_SINCE, &[("when", &when_start(at))])
 }
 
 /// When a run at work started: `今天 07:23`, `11-01 07:23`.
