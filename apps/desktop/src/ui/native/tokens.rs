@@ -926,6 +926,21 @@ pub mod metrics {
     pub const SEARCH: Pixels = height::DEFAULT;
     pub const SEARCH_SYMBOL: Pixels = px(16.);
 
+    // One-time code (§2.20): bordered slots 40 x 44, radius 8, in groups
+    // with a dash between them.
+    pub const CODE_SLOT: (Pixels, Pixels) = (px(40.), px(44.));
+    pub const CODE_SLOT_RADIUS: Pixels = radius::CONTROL;
+    pub const CODE_SLOT_GAP: Pixels = space::S6;
+    /// The space between two groups; the dash sits in its middle.
+    pub const CODE_GROUP_GAP: Pixels = px(20.);
+    pub const CODE_DASH: (Pixels, Pixels) = (px(8.), px(2.));
+    pub const CODE_CARET: (Pixels, Pixels) = (px(2.), px(20.));
+    /// The 3 px ring of the active slot: foreground at 15 %.
+    pub const CODE_RING_OPACITY: f32 = 0.15;
+    /// A disabled primary button before its form is complete: primary at
+    /// 30 %, light, never a mid gray (§2.20).
+    pub const PRIMARY_WAITING_OPACITY: f32 = 0.3;
+
     // Progress (D12)
     pub const BAR: Pixels = height::PROGRESS;
     pub const BAR_RADIUS: Pixels = px(2.);

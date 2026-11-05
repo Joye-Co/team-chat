@@ -1,20 +1,22 @@
 //! The login window (COMPLETENESS 2.20): a small window of its own (480 x
-//! 520, not resizable) with one centered card 400 wide: the app icon 48, the
-//! 24 hero title, a one-sentence description, the labelled h36 field across
-//! the card, the error (12 destructive) or the custom server under it, the
-//! full-width `继续` (lg) and a 14 muted link row (`使用其他服务器…`, also in
-//! the app menu). Nothing sits at the window corners. A refused code or an
-//! unreachable server marks the field and says why under it; no alert. A
-//! pasted login credential (`tc_…`) or a legacy 12-character code is accepted
-//! in the same place and shows as one locked field. The server URL defaults to
-//! the production URL from product.json, then staging.
+//! 480, not resizable) whose surface is the window itself, no card. One
+//! centered column: the app icon 56, the title, one muted line, the invite
+//! code as eight one-time-code slots (4 – 4, `CodeInput`), the error under
+//! the slots (a destructive icon and neutral text), the full-width `继续`
+//! (lg; primary at 30 % until all eight slots are filled; a spinner and
+//! `正在验证…` while the code is checked) and a small ghost link
+//! `使用其他服务器…` (also in the app menu). A custom server shows its host
+//! with `更改` in that link row. The server step uses the same column. A
+//! refused code stays in the slots, selected, with the error border; no
+//! alert. A pasted login credential (`tc_…`) or a legacy 12-character code
+//! is accepted in the same place and shows as one locked line. The server
+//! URL defaults to the production URL from product.json, then staging.
 
 use gpui::{
     AppContext, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div, px,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{InputEvent, InputState};
 
 use crate::{
     app::{Changes, Services},
@@ -23,10 +25,12 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            FieldSize, NativeTextField, NativeType as _, PushSize, PushStyle, borderless_text,
-            disabled_push, metrics, native_colors,
+            CodeInput, CodeInputEvent, FieldSize, NativeTextField, NativeType as _, PushSize,
+            PushStyle, borderless_text,
+            code_input::code_chars,
+            code_input_width, loading_push, native_colors,
             overlays::{app_icon, spot},
-            push_button,
+            push_button, waiting_push,
         },
         sf_symbols::SymSize,
     },
@@ -48,19 +52,22 @@ pub const CODE_LEN: usize = 8;
 pub const LEGACY_CODE_LEN: usize = 12;
 /// Characters per group of a code (`XXXX-XXXX`).
 const GROUP: usize = 4;
-/// The login card (2.20): 400 wide.
-const CARD_WIDTH: gpui::Pixels = px(400.);
 /// The login window: small, fixed, not resizable.
 pub const WINDOW_SIZE: gpui::Size<gpui::Pixels> = gpui::Size {
     width: px(480.),
-    height: px(520.),
+    height: px(480.),
 };
 
 gpui::actions!(login, [UseOtherServer]);
 
+/// The login column: as wide as the eight code slots.
+fn column_width() -> gpui::Pixels {
+    code_input_width(CODE_LEN, GROUP)
+}
+
 /// What the code field holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CodeInput {
+pub enum CodeEntry {
     /// The invite code characters typed so far, upper case, at most 8.
     Code(String),
     /// A pasted 12-character code of the earlier format, upper case.
@@ -69,27 +76,19 @@ pub enum CodeInput {
     Token(String),
 }
 
-/// The letters and digits of a code, upper case (dashes and spaces dropped).
-fn code_chars(text: &str) -> String {
-    text.chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .collect()
-}
-
-impl CodeInput {
+impl CodeEntry {
     /// Reads the field: a `tc_` credential, a pasted legacy code of exactly
     /// 12 characters, or the first 8 letters and digits of an invite code.
     pub fn parse(text: &str) -> Self {
         let text = text.trim();
         if text.starts_with("tc_") {
-            return CodeInput::Token(text.to_string());
+            return CodeEntry::Token(text.to_string());
         }
         let chars = code_chars(text);
         if chars.len() == LEGACY_CODE_LEN {
-            return CodeInput::Legacy(chars);
+            return CodeEntry::Legacy(chars);
         }
-        CodeInput::Code(chars.chars().take(CODE_LEN).collect())
+        CodeEntry::Code(chars.chars().take(CODE_LEN).collect())
     }
 
     /// The credential to send, once the field is complete.
@@ -103,24 +102,28 @@ impl CodeInput {
             Credential::InviteCode(groups.join("-"))
         };
         match self {
-            CodeInput::Token(t) => Credential::from_input(t),
-            CodeInput::Legacy(c) => Some(grouped(c)),
-            CodeInput::Code(c) if c.chars().count() == CODE_LEN => Some(grouped(c)),
-            CodeInput::Code(_) => None,
+            CodeEntry::Token(t) => Credential::from_input(t),
+            CodeEntry::Legacy(c) => Some(grouped(c)),
+            CodeEntry::Code(c) if c.chars().count() == CODE_LEN => Some(grouped(c)),
+            CodeEntry::Code(_) => None,
         }
     }
 
-    /// The field text to keep when typing went past 8 characters: typing
-    /// stops at the eighth box, so only a paste reaches a legacy code.
-    fn clamped(text: &str) -> Option<String> {
-        let trimmed = text.trim();
-        if trimmed.starts_with("tc_") {
-            return None;
+    /// The locked line of a value kept whole (the secret is never drawn).
+    fn locked(&self) -> Option<SharedString> {
+        match self {
+            CodeEntry::Token(_) => Some(l::CODE_TOKEN.into()),
+            CodeEntry::Legacy(_) => Some(l::CODE_LEGACY.into()),
+            CodeEntry::Code(_) => None,
         }
-        let chars = code_chars(trimmed);
-        (chars.len() > CODE_LEN && chars.len() != LEGACY_CODE_LEN)
-            .then(|| chars.chars().take(CODE_LEN).collect())
     }
+}
+
+/// A paste the slots keep whole: a login credential, or a code of the
+/// earlier 12-character format. Typing stops at the eighth slot, so only a
+/// paste reaches them.
+fn keeps_whole(text: &str) -> bool {
+    !matches!(CodeEntry::parse(text), CodeEntry::Code(_))
 }
 
 /// The host part of a server URL, for the server line (`team.joye.co`).
@@ -135,15 +138,12 @@ pub fn server_host(url: &str) -> &str {
 pub struct LoginView {
     services: Services,
     server: Entity<InputState>,
-    code: Entity<InputState>,
+    code: Entity<CodeInput>,
     /// The server field is open (`更改`, or after an unreachable server).
     server_open: bool,
     /// Drawn inside a main window (signed out there): a sign-out moves to
     /// the login window.
     embedded: bool,
-    /// The wrong code after a failed try: the next typed character or paste
-    /// starts a new code from box 1, Backspace edits it from the end.
-    rejected: Option<String>,
     /// The last refusal, shown under the field until the field changes.
     error: Option<LoginError>,
     /// The field text the refusal was about.
@@ -157,7 +157,7 @@ impl LoginView {
     /// One of the login fields has the keyboard focus (it took it when the
     /// view was made, drawn or not).
     pub fn has_focus(&self, window: &Window, cx: &gpui::App) -> bool {
-        self.code.read(cx).focus_handle(cx).is_focused(window)
+        self.code.read(cx).is_focused(window, cx)
             || self.server.read(cx).focus_handle(cx).is_focused(window)
     }
 
@@ -167,33 +167,20 @@ impl LoginView {
                 .placeholder(l::SERVER_PLACEHOLDER)
                 .default_value(default_server_url())
         });
-        let code = cx.new(|cx| InputState::new(window, cx).placeholder(l::CODE_PLACEHOLDER));
-        // The first box has the caret when the view opens.
+        let code = cx.new(|cx| CodeInput::new(CODE_LEN, GROUP, window, cx).keep_raw(keeps_whole));
+        // The first slot has the caret when the view opens.
         code.read(cx).focus_handle(cx).focus(window, cx);
         let subscriptions = vec![
             cx.subscribe_in(
                 &code,
                 window,
-                |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::PressEnter { .. } => this.submit(window, cx),
-                    InputEvent::Change => {
-                        let mut value = this.code.read(cx).value().to_string();
-                        if let Some(old) = this.rejected.take()
-                            && value.len() > old.len()
-                            && let Some(fresh) = value.strip_prefix(old.as_str())
-                        {
-                            value = fresh.to_string();
-                            this.code
-                                .update(cx, |st, cx| st.set_value(value.clone(), window, cx));
-                        }
-                        if let Some(kept) = CodeInput::clamped(&value) {
-                            this.code
-                                .update(cx, |st, cx| st.set_value(kept, window, cx));
-                        }
+                |this, _, event: &CodeInputEvent, window, cx| match event {
+                    CodeInputEvent::Submit => this.submit(window, cx),
+                    CodeInputEvent::Change => {
                         this.clear_stale_error(cx);
+                        this.sync_code(cx);
                         cx.notify();
                     }
-                    _ => cx.notify(),
                 },
             ),
             cx.subscribe_in(
@@ -223,11 +210,11 @@ impl LoginView {
                             this.server_open = true;
                             this.server.read(cx).focus_handle(cx).focus(window, cx);
                         }
-                        // A wrong code stays in the boxes with the caret
-                        // after it (§8.3).
+                        // A wrong code stays in the slots, selected: the
+                        // next character typed starts a new code (§8.3).
                         SessionState::SignedOut {
                             last_error: Some(LoginError::BadCredential),
-                        } => this.reject_code(window, cx),
+                        } => this.code.update(cx, |c, cx| c.select_all(window, cx)),
                         _ => {}
                     }
                     // A refusal marks the field and says why under it.
@@ -238,6 +225,7 @@ impl LoginView {
                         this.error = Some(e);
                         this.error_for = this.field_text(cx);
                     }
+                    this.sync_code(cx);
                     if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
                         move_to_login_window(this.services.clone(), window, cx);
                     }
@@ -251,24 +239,11 @@ impl LoginView {
             code,
             server_open: false,
             embedded: true,
-            rejected: None,
             error: None,
             error_for: String::new(),
             preview_busy: false,
             _subscriptions: subscriptions,
         }
-    }
-
-    /// Keeps a wrong code in the boxes, focused, with the caret after its
-    /// last character; the next character typed or pasted starts a new code.
-    fn reject_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let value = self.code.read(cx).value().to_string();
-        let end = value.len();
-        self.code.update(cx, |st, cx| {
-            st.focus(window, cx);
-            st.set_selected_range(end..end, cx);
-        });
-        self.rejected = Some(value);
     }
 
     /// Opens the server field and moves the focus into it with the whole
@@ -280,6 +255,7 @@ impl LoginView {
             st.focus(window, cx);
             st.set_selected_range(0..end, cx);
         });
+        self.sync_code(cx);
         cx.notify();
     }
 
@@ -288,7 +264,7 @@ impl LoginView {
         if self.server_open {
             self.server.read(cx).value().to_string()
         } else {
-            self.code.read(cx).value().to_string()
+            self.code.read(cx).value(cx).to_string()
         }
     }
 
@@ -299,6 +275,16 @@ impl LoginView {
         }
     }
 
+    /// Hands the code slots their locked line and error border.
+    fn sync_code(&mut self, cx: &mut Context<Self>) {
+        let locked = self.input(cx).locked();
+        let error = self.error.is_some() && !self.server_open;
+        self.code.update(cx, |c, cx| {
+            c.set_locked(locked, cx);
+            c.set_error(error, cx);
+        });
+    }
+
     /// Draws the signing-in state with `code` typed, for a screenshot scene.
     pub fn preview_signing_in(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.preview(code, false, window, cx);
@@ -306,12 +292,12 @@ impl LoginView {
         cx.notify();
     }
 
-    fn input(&self, cx: &gpui::App) -> CodeInput {
-        CodeInput::parse(&self.code.read(cx).value())
+    fn input(&self, cx: &gpui::App) -> CodeEntry {
+        CodeEntry::parse(&self.code.read(cx).value(cx))
     }
 
     /// Fills the form for a screenshot scene: the code typed so far, the
-    /// server field open or not, and focus in the code boxes.
+    /// server field open or not, and focus in the code slots.
     pub fn preview(
         &mut self,
         code: &str,
@@ -319,8 +305,7 @@ impl LoginView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.code
-            .update(cx, |st, cx| st.set_value(code.to_string(), window, cx));
+        self.code.update(cx, |c, cx| c.set_value(code, window, cx));
         // An open server field has the focus and its URL selected, as after
         // `使用其他服务器`.
         if server_open {
@@ -328,6 +313,7 @@ impl LoginView {
         } else {
             self.server_open = false;
             self.code.read(cx).focus_handle(cx).focus(window, cx);
+            self.sync_code(cx);
             cx.notify();
         }
     }
@@ -345,14 +331,16 @@ impl LoginView {
             self.open_server_field(window, cx);
             return;
         }
+        // A new try takes the last refusal away until the server answers.
+        self.error = None;
+        self.sync_code(cx);
         self.services.provider.login(LoginRequest {
             server_url,
             credential,
             device_name: crate::provider::session::device_name(),
         });
-        // A wrong code stays in the boxes so it can be checked (§8.3); the
+        // A wrong code stays in the slots so it can be checked (§8.3); the
         // field lives only in this view and is never logged.
-        let _ = window;
         cx.notify();
     }
 
@@ -369,63 +357,6 @@ impl LoginView {
         self.submit(window, cx);
     }
 
-    /// The code field: a 28 pt standalone field (§5.6). A pasted credential
-    /// or legacy code shows as a locked line (the secret is never drawn);
-    /// the real input sits on top of it so paste and Backspace still work.
-    fn render_code_field(
-        &self,
-        input: &CodeInput,
-        focused: bool,
-        error: bool,
-        cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
-        let k = native_colors(cx);
-        let locked = match input {
-            CodeInput::Token(_) => Some(l::CODE_TOKEN),
-            CodeInput::Legacy(_) => Some(l::CODE_LEGACY),
-            CodeInput::Code(_) => None,
-        };
-        match locked {
-            None => NativeTextField::new("login-code", &self.code)
-                .size(FieldSize::Large)
-                .full_width()
-                .error(error)
-                .into_any_element(),
-            Some(text) => {
-                let (edge, shadows) = crate::ui::native::fields::field_edge(&k, focused, error);
-                div()
-                    .id("login-code")
-                    .relative()
-                    .w_full()
-                    .h(metrics::FIELD_LARGE)
-                    .px(metrics::FIELD_PAD)
-                    .rounded(metrics::FIELD_RADIUS)
-                    // The fill of every field (§2.22: dark 37, review 4
-                    // K-16), locked or not; the lock and muted text say it
-                    // is read-only.
-                    .bg(k.control)
-                    .border_1()
-                    .border_color(edge)
-                    .shadow(shadows)
-                    .flex()
-                    .items_center()
-                    .gap(crate::ui::native::tokens::space::S6)
-                    .n_body()
-                    .text_color(k.secondary)
-                    .child(Sym::Lock.icon(SymSize::INLINE).text_color(k.secondary))
-                    .child(text)
-                    .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .opacity(0.)
-                            .child(Input::new(&self.code).appearance(false).h_full()),
-                    )
-                    .into_any_element()
-            }
-        }
-    }
-
     /// 继续: on the code step it joins; on the server step it goes back to
     /// the code, or joins when the code is complete.
     fn continue_(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -439,23 +370,78 @@ impl LoginView {
     fn close_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.server_open = false;
         self.code.read(cx).focus_handle(cx).focus(window, cx);
+        self.sync_code(cx);
         cx.notify();
+    }
+
+    /// The link row under 继续: on the code step `使用其他服务器…`, or a
+    /// custom server's host with `更改`; on the server step `取消`.
+    fn render_link_row(
+        &self,
+        server_step: bool,
+        custom: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        use crate::ui::native::tokens::space;
+        let k = native_colors(cx);
+        let link = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+            borderless_text(id, label, cx)
+                .text_color(k.secondary)
+                .font_weight(gpui::FontWeight::NORMAL)
+        };
+        if server_step {
+            return link("login-server-cancel", common::CANCEL, cx)
+                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
+                .into_any_element();
+        }
+        let open = cx.listener(|this, _, window, cx| this.open_server_field(window, cx));
+        match custom {
+            None => link("login-server-other", l::OTHER_SERVER, cx)
+                .on_click(open)
+                .into_any_element(),
+            // A long host is cut in the middle (both ends name it), with the
+            // full host in a tooltip (2.21).
+            Some(host) => div()
+                .max_w_full()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(space::S4)
+                .n_body()
+                .text_color(k.secondary)
+                .child(
+                    Sym::MacMini
+                        .icon(SymSize::INLINE_SMALL)
+                        .text_color(k.secondary),
+                )
+                .child(
+                    crate::ui::truncate::TruncText::new(host)
+                        .id("login-host")
+                        .middle()
+                        .min_w_0(),
+                )
+                .child(
+                    link("login-server-change", l::CHANGE_SERVER, cx)
+                        .text_color(k.label)
+                        .on_click(open),
+                )
+                .into_any_element(),
+        }
     }
 }
 
 impl Render for LoginView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        use crate::ui::native::tokens::{radius, shadow, space};
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ui::native::tokens::space;
         let k = native_colors(cx);
         let session = self.services.provider.session();
         let signing_in = self.preview_busy || matches!(session, SessionState::SigningIn);
-        let input = self.input(cx);
-        let complete = input.credential().is_some();
-        let focused = self.code.read(cx).focus_handle(cx).is_focused(window);
+        let complete = self.input(cx).credential().is_some();
         let server_url = self.server.read(cx).value().to_string();
-        let host: SharedString = server_host(&server_url).to_string().into();
-        let custom =
-            server_url.trim().trim_end_matches('/') != default_server_url().trim_end_matches('/');
+        let custom = (server_url.trim().trim_end_matches('/')
+            != default_server_url().trim_end_matches('/'))
+        .then(|| SharedString::from(server_host(&server_url).to_string()));
         // One field at a time: the server, or the invite code.
         let server_step = self.server_open;
         let error = self.error.filter(|_| !signing_in);
@@ -466,44 +452,16 @@ impl Render for LoginView {
                 .error(error.is_some())
                 .into_any_element()
         } else {
-            self.render_code_field(&input, focused, error.is_some(), cx)
+            self.code.clone().into_any_element()
         };
-        // Under the field: the error, or on the code step the custom
-        // server, quietly. The slot keeps its height, so nothing moves.
-        let under: Option<gpui::AnyElement> = match error {
-            // A field error (owner decision v15): neutral 12 text after a
-            // 16 destructive icon, as in every sheet footer.
-            Some(e) => Some(
-                crate::ui::native::sheet::sheet_status_error(error_text(e), cx)
-                    .id("login-error")
-                    .w_full()
-                    .into_any_element(),
-            ),
-            None => (!server_step && custom).then(|| {
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(space::S4)
-                    .n_subheadline()
-                    .text_color(k.secondary)
-                    .child(
-                        Sym::MacMini
-                            .icon(SymSize::INLINE_SMALL)
-                            .text_color(k.secondary),
-                    )
-                    // A long host is cut in the middle (both ends name it),
-                    // with the full host in a tooltip (2.21).
-                    .child(
-                        crate::ui::truncate::TruncText::new(host)
-                            .id("login-host")
-                            .middle()
-                            .flex_1(),
-                    )
-                    .into_any_element()
-            }),
-        };
+        // Under the field: the error (owner decision v15: neutral 12 text
+        // after a 16 destructive icon, as in every sheet footer). The slot
+        // keeps its height, so nothing moves.
+        let under = error.map(|e| {
+            crate::ui::native::sheet::sheet_status_error(error_text(e), cx)
+                .id("login-error")
+                .max_w_full()
+        });
         let ready = if server_step {
             !server_url.trim().is_empty()
         } else {
@@ -521,65 +479,70 @@ impl Render for LoginView {
             cx,
         )
         .w_full();
-        // Busy: a 16 spinner before 正在验证…, at the same width.
-        let go = disabled_push(go, !ready && !signing_in, cx)
-            .when(signing_in, |b| b.icon(gpui_component::IconName::Loader))
-            .loading(signing_in)
-            .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
-        // The link row: the way to the server step, or back from it.
-        let link = if server_step {
-            borderless_text("login-server-cancel", common::CANCEL, cx)
-                .text_color(k.secondary)
-                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
+        // Busy: a 16 spinner before 正在验证…, at the same width, solid.
+        let go = loading_push(
+            waiting_push(go, !ready && !signing_in),
+            signing_in,
+            PushSize::Large,
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
+        let link = self.render_link_row(server_step, custom.filter(|_| !server_step), cx);
+        let (title, description) = if server_step {
+            (l::SERVER_TITLE, l::SERVER_LEAD)
         } else {
-            borderless_text("login-server-other", l::OTHER_SERVER, cx)
-                .text_color(k.secondary)
-                .on_click(cx.listener(|this, _, window, cx| this.open_server_field(window, cx)))
+            (l::WELCOME, l::LEAD)
         };
-        let (title, description, label) = if server_step {
-            (l::SERVER_TITLE, l::SERVER_LEAD, l::SERVER_LABEL)
-        } else {
-            (l::WELCOME, l::LEAD, l::CODE_LABEL)
-        };
-        let card = div()
-            .w(CARD_WIDTH)
-            .p(space::S24)
-            .rounded(radius::CARD)
-            .border_1()
-            .border_color(k.separator)
-            .bg(k.sheet)
-            .shadow(shadow::sm())
+        let column = div()
+            .w(column_width())
             .flex()
             .flex_col()
-            .gap(space::S16)
+            .items_center()
             .child(app_icon(spot::LOGIN_ICON))
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S4)
-                    .child(div().n_large_title().text_color(k.label).child(title))
-                    .child(div().n_body().text_color(k.secondary).child(description)),
+                    .mt(space::S16)
+                    .n_title2()
+                    .text_color(k.label)
+                    .text_center()
+                    .child(title),
             )
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S8)
-                    .child(div().n_headline().text_color(k.label).child(label))
-                    .child(field)
-                    .child(
-                        div()
-                            .h(crate::ui::native::tokens::text::META.1)
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .children(under),
-                    ),
+                    .mt(space::S4)
+                    .n_body()
+                    .text_color(k.secondary)
+                    .text_center()
+                    .child(description),
             )
-            .child(go)
-            .child(div().flex().justify_center().child(link));
+            .child(
+                div()
+                    .mt(space::S24)
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .child(field),
+            )
+            .child(
+                div()
+                    .mt(space::S8)
+                    .h(crate::ui::native::tokens::text::META.1)
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .children(under),
+            )
+            .child(div().mt(space::S16).w_full().child(go))
+            .child(
+                div()
+                    .mt(space::S12)
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .justify_center()
+                    .child(link),
+            );
         div()
             .size_full()
             .relative()
@@ -593,7 +556,7 @@ impl Render for LoginView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(card),
+                    .child(column),
             )
             // The top band drags the window, as a title bar does.
             .child(
@@ -756,38 +719,38 @@ mod tests {
     #[test]
     fn code_input_reads_codes_and_tokens() {
         for pasted in ["K7QM-2X9A", "K7QM2X9A", "k7qm-2x9a", " k7qm 2x9a "] {
-            assert_eq!(CodeInput::parse(pasted), CodeInput::Code("K7QM2X9A".into()));
+            assert_eq!(CodeEntry::parse(pasted), CodeEntry::Code("K7QM2X9A".into()));
             assert_eq!(
-                CodeInput::parse(pasted).credential(),
+                CodeEntry::parse(pasted).credential(),
                 Some(Credential::InviteCode("K7QM-2X9A".into()))
             );
         }
-        assert_eq!(CodeInput::parse("K7QM-2X").credential(), None);
+        assert_eq!(CodeEntry::parse("K7QM-2X").credential(), None);
         assert_eq!(
-            CodeInput::parse("K7QM2X9AB"),
-            CodeInput::Code("K7QM2X9A".into())
+            CodeEntry::parse("K7QM2X9AB"),
+            CodeEntry::Code("K7QM2X9A".into())
         );
         // A legacy 12-character code is one locked field and still signs in.
         assert_eq!(
-            CodeInput::parse(" k7qm-2x9a bc3d "),
-            CodeInput::Legacy("K7QM2X9ABC3D".into())
+            CodeEntry::parse(" k7qm-2x9a bc3d "),
+            CodeEntry::Legacy("K7QM2X9ABC3D".into())
         );
         assert_eq!(
-            CodeInput::parse("k7qm2x9abc3d").credential(),
+            CodeEntry::parse("k7qm2x9abc3d").credential(),
             Some(Credential::InviteCode("K7QM-2X9A-BC3D".into()))
         );
         assert!(matches!(
-            CodeInput::parse(" tc_abc ").credential(),
+            CodeEntry::parse(" tc_abc ").credential(),
             Some(Credential::Token(_))
         ));
     }
 
     #[test]
-    fn typing_stops_at_the_eighth_box() {
-        assert_eq!(CodeInput::clamped("K7QM2X9A"), None);
-        assert_eq!(CodeInput::clamped("K7QM2X9AB"), Some("K7QM2X9A".into()));
-        assert_eq!(CodeInput::clamped("K7QM-2X9A-BC3D"), None);
-        assert_eq!(CodeInput::clamped("tc_abcdefghijklmnop"), None);
+    fn only_a_credential_or_a_legacy_code_is_kept_whole() {
+        assert!(!keeps_whole("K7QM2X9A"));
+        assert!(!keeps_whole("K7QM2X9AB"));
+        assert!(keeps_whole("K7QM-2X9A-BC3D"));
+        assert!(keeps_whole("tc_abcdefghijklmnop"));
     }
 
     #[test]

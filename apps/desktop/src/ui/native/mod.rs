@@ -13,6 +13,7 @@
 //! | [`focus`] | COMPLETENESS §2.6, E3 | the focusable row: tab stop, arrows, focus ring, hover |
 //! | [`form`] | §5.6, §8 | grouped forms, form rows, inline value field |
 //! | [`fields`] | §5.6 | standalone text field, search field |
+//! | [`code_input`] | COMPLETENESS §2.20 | one-time code slots (InputOTP) |
 //! | [`toggles`] | §5.4 | switch, checkbox, radio |
 //! | [`segmented`] | §5.5 | segmented control |
 //! | [`menu`] | §7.3 | menu surface and rows, popover surface |
@@ -23,6 +24,7 @@
 pub mod badge;
 pub mod blocks;
 pub mod buttons;
+pub mod code_input;
 pub mod feedback;
 pub mod fields;
 pub mod focus;
@@ -52,8 +54,10 @@ pub use buttons::{
     borderless_variant, chip_button, disabled_push, ghost_button, group_row_button, icon_button,
     icon_button_bare, icon_button_styled, icon_button_sym, loading_push, popup_button, pull_down,
     push_button, row_button, screen_button, select_button, square_button, square_pair, tile_button,
-    toolbar_item, toolbar_item_sym, toolbar_tab,
+    toolbar_item, toolbar_item_sym, toolbar_tab, waiting_push,
 };
+#[allow(unused_imports)]
+pub use code_input::{CodeInput, CodeInputEvent, code_input_width};
 #[allow(unused_imports)]
 pub use feedback::{
     Alert, AlertTone, Bone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps,

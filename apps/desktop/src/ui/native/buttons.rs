@@ -210,6 +210,14 @@ pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
     b.disabled(disabled).when(disabled, |b| b.opacity(0.5))
 }
 
+/// The primary of a short form that is not complete yet (the login, §2.20):
+/// inert, primary at 30 %, so it reads light and turns solid once the form
+/// is filled. Use [`disabled_push`] for any other disabled button.
+pub fn waiting_push(b: Button, waiting: bool) -> Button {
+    b.disabled(waiting)
+        .when(waiting, |b| b.opacity(metrics::PRIMARY_WAITING_OPACITY))
+}
+
 /// A loading button (§1.8): a 16 spinner in the icon slot, the label and
 /// the width kept, inert while loading. Use it for any button that waits.
 pub fn loading_push(b: Button, loading: bool, size: PushSize) -> Button {
