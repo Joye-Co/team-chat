@@ -129,8 +129,12 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
 { t: "hello", protocol: 1, client: { name: string, version: string }, cursors?: Record<string, number> }
   // first frame on every connection; cursors = last applied seq per group id
 { t: "send", rid, groupId, topicId?: string, title?: string, clientMsgId, body, mentions?: string[], streaming?: boolean }
-  // without topicId: start a new topic whose root is this message;
-  //   title defaults to the first line of body, cut to 80 characters
+  // without topicId: start a new topic whose root is this message (1.1.1: the 群聊 has
+  //   the fixed id mainTopicId(groupId), see "群聊: the group's own chat");
+  //   title defaults to the first line of body, cut to 80 characters (an empty body with
+  //   replyTo: the quoted message's first line); when no title was sent, the server may
+  //   later replace that default once with an AI title (topic.updated with title), unless
+  //   someone changed the title first
   // ack.result = { message: Message, topic?: Topic, duplicate?: boolean }
 { t: "edit", rid, groupId, messageId, body, streaming?: boolean }      // author only
 { t: "delta", groupId, messageId, append }                            // streaming author only, no ack
@@ -239,6 +243,10 @@ log records `group.memberAdded` / `group.memberRemoved`.
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
   `ADMIN_SECRET` Worker secret. It also makes the default group, called "全员" (environments
   bootstrapped before this change called it "General" until it was renamed).
+- First redeem of a new member: the member joins every default group and, when it is a human,
+  gets a DM with the default bot (the active bot named Jojo, else the oldest active bot), made
+  exactly as `POST /v1/dms` makes one (`dm.create` audited by the new member). No bot, no DM; a
+  failure here never fails the redeem. A sign-in code of an existing member opens nothing.
 
 # V1 extensions
 
@@ -1050,6 +1058,37 @@ Rules:
 - Clients list the side chats of a topic by `contextOf` and hide side chat topics from the DM's
   normal topic list.
 
+## 群聊: the group's own chat
+
+Module: `topic.ts` / `topic.rs`. 1.1.1. Every group and DM has one chat timeline, the 群聊, where
+members talk without starting a 话题. It is a topic with a fixed id, so clients open it, read its
+history and send into it before it exists.
+
+```ts
+mainTopicId(groupId) = "main-" + groupId     // MAIN_TOPIC_PREFIX = "main-"
+Topic += { main?: boolean }                   // true on the 群聊; absent = false
+```
+
+Rules:
+
+- A `send` with `topicId = mainTopicId(groupId)` posts into the 群聊. When it does not exist yet,
+  the server creates it in the same commit: `topic.created` (with `main: true`, status `open`,
+  `ownerId` null, the title the group's name, or `""` in a DM, and this message as its root),
+  then `message.created`; `ack.result.topic` carries the new topic. Any other id with the
+  `main-` prefix gets `not_found`. A `send` without `topicId` still starts a new topic, so old
+  clients keep working; they show the 群聊 as one more topic.
+- 开个话题 (open a topic from a 群聊 message) is a `send` without `topicId` whose `replyTo` names
+  that message: the new topic's root quotes it. No new frame.
+- `history`, `typing` and `read` with the 群聊 id work before it exists (an empty page; nothing
+  to read).
+- The 群聊 is a chat, not a piece of work: `topic.update` on it changes nothing and answers the
+  topic as it is (bots that report a run's status keep working); a card ask in it does not set
+  its status or `waitingOn`; posting or being mentioned in it does not auto-follow it.
+- Bots: a message in the 群聊 goes only to the bot it mentions (in a DM with a bot, to that bot).
+  No bot becomes the 群聊's responsible member, so each @mention can go to a different bot; a
+  bot with an active run there takes a later mention as a follow-up of that run. A card press in
+  the 群聊 goes to the card's author when that bot has run there.
+
 ## Desk notes
 
 Module: `desk.ts` / `desk.rs` (1.1). A desk note is a bot member's one-line priority for the
@@ -1549,3 +1588,40 @@ DevicesResponse = { devices: Device[] }   // newest use first, at most 100
 
 `lastUsedAt` is updated at most once a minute per token. The name is what the client sent at
 sign in; clients pick the device symbol from it.
+
+## Email sign-in
+
+A member who added a sign-in email can sign in on any Mac with a 6-digit code sent to it; the
+first sign-in is still an invite code. Each member has at most one sign-in email, and one email
+belongs to at most one member (compared in lower case).
+
+```ts
+EmailAddress = string            // trimmed, lower case, name@host.tld, <= 254
+EmailCodeRequest = { email }
+EmailCodeResponse = { sent: true, expiresAt }
+EmailSignInRequest = { email, code /* 6 digits */, deviceName /* 1..128 */ }
+VerifyEmailRequest = { email, code }
+MyEmailResponse = { email: EmailAddress | null }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `POST /v1/auth/email/code` | anyone | `EmailCodeResponse`; sends a sign-in code when the email belongs to an active member, and answers the same either way (no account lookup) |
+| `POST /v1/auth/email/sign-in` | anyone | `RedeemResponse`: one more token for that member (audited as `email.sign_in`); a wrong, used or expired code is `unauthorized` |
+| `GET /v1/me/email` | member | `MyEmailResponse` |
+| `POST /v1/me/email/code` | member | `EmailCodeResponse`; sends a code to the new address. An address another member uses is `conflict` |
+| `POST /v1/me/email` | member | `MyEmailResponse`; confirms the code and makes the address my sign-in email (audited as `email.set`) |
+| `DELETE /v1/me/email` | member | `MyEmailResponse` with `null` (audited as `email.remove`) |
+
+Rules:
+
+- A code is 6 random digits, stored as a SHA-256 digest, single use, and expires after 10
+  minutes. A new code for the same address and purpose replaces the old one. After 5 wrong tries
+  a code stops working.
+- Sending allows 5 codes per address per hour and 20 per client IP per hour; checking allows 10
+  tries per client IP per minute. Over a limit the answer is 429 `rate_limited`.
+- The Worker sends mail through the `EMAIL` binding (Cloudflare Email Service) from `EMAIL_FROM`.
+  Without both, the code routes answer 400 `invalid` with reason `email.not_configured`, except
+  when `ENVIRONMENT` is `local` or `e2e`: there the code goes to the `email_outbox` D1 table
+  instead (read by tests with `GET /v1/admin/email-outbox?email=…` and the `x-admin-secret`
+  header), and is never sent or logged.

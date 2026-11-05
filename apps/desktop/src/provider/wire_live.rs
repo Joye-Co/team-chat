@@ -86,6 +86,7 @@ fn signed_in(url: &str, token: &str, out: &str, name: &str) -> std::sync::Arc<Co
 /// Starts a 话题 that mentions Jojo and waits for its run.
 fn mention(p: &CoreProvider, g: &str, jojo: &str, title: &str, body: &str) -> (String, String) {
     p.start_topic(StartTopicRequest {
+        quote_of: None,
         group_id: g.to_string(),
         title: Some(title.to_string()),
         body: format!("@Jojo {body}"),

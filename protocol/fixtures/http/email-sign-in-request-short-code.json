@@ -1,0 +1,10 @@
+{
+  "kind": "EmailSignInRequest",
+  "valid": false,
+  "description": "code is six digits",
+  "value": {
+    "email": "joye@example.com",
+    "code": "4281",
+    "deviceName": "Mac"
+  }
+}

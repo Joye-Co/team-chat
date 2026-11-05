@@ -13,6 +13,7 @@ import {
   type TopicStatus,
   cardV2ToV1,
   childIds,
+  isMainTopicId,
   pressableAsV1,
   takesInput,
 } from "@chat/protocol";
@@ -386,6 +387,8 @@ registerTopicStatusFilter((sql, topicId, next) => {
 
 /** Puts the topic in step with its open blocking asks after a card write (the rule above). */
 export function refreshTopicWaiting(room: RoomContext, tx: RoomTx, topicId: string, actorId: string): void {
+  // The 群聊 is a chat: a card ask there waits on people through the card only.
+  if (isMainTopicId(topicId)) return;
   const topic = room.sql
     .exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM topics WHERE id = ?", topicId)
     .toArray()[0];

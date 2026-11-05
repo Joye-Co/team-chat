@@ -1243,7 +1243,7 @@ fn leave(services: &Services, group_id: &str, cx: &mut App) {
             .find(|g| g.id != group_id)
             .map(|g| g.id);
         services.nav.update(cx, |nav, cx| match next {
-            Some(g) => nav.open_group(g, cx),
+            Some(g) => nav.open_group_chat(g, cx),
             None => {
                 nav.place = None;
                 nav.topic = None;

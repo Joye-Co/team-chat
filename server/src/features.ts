@@ -11,3 +11,5 @@ import "./cards2";
 import "./sidechat";
 import "./settings";
 import "./desknote";
+import "./email";
+import "./autotitle";

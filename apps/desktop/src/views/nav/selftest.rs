@@ -375,6 +375,32 @@ pub mod scenes {
     }
     // --- end v12/overlays ---
 
+    /// 1.1.1 开个话题: the sheet over the open 群聊, from its newest message
+    /// of someone else.
+    pub fn new_topic_from(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let Some((g, t)) = services.nav.read(cx).topic.clone() else {
+                return;
+            };
+            let me = services.me();
+            let Some(m) = services
+                .provider
+                .messages(&g, &t, 50)
+                .messages
+                .into_iter()
+                .rev()
+                .find(|m| Some(&m.author_id) != me.as_ref())
+            else {
+                return;
+            };
+            super::super::new_topic::open_new_topic_from(services, &m, window, cx);
+        })
+    }
+
     /// The new-group sheet.
     pub fn new_group(
         services: Services,

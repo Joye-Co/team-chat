@@ -371,6 +371,9 @@
             "topicId",
             "uptoSeq"
           ]
+        },
+        "main": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -19091,6 +19094,9 @@
                 "topicId",
                 "uptoSeq"
               ]
+            },
+            "main": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -59420,6 +59426,99 @@
       },
       "required": [
         "devices"
+      ]
+    },
+    "EmailCodeRequest": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 254,
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+        }
+      },
+      "required": [
+        "email"
+      ]
+    },
+    "EmailCodeResponse": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "boolean",
+          "const": true
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "sent",
+        "expiresAt"
+      ]
+    },
+    "EmailSignInRequest": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 254,
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$"
+        },
+        "deviceName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "email",
+        "code",
+        "deviceName"
+      ]
+    },
+    "VerifyEmailRequest": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 254,
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$"
+        }
+      },
+      "required": [
+        "email",
+        "code"
+      ]
+    },
+    "MyEmailResponse": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 254,
+              "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "email"
       ]
     },
     "PutArtifactMediaRequest": {

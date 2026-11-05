@@ -112,8 +112,12 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         if changes.any(|c| matches!(c, Change::Groups)) {
             open_pending(cx);
         }
+        if changes.any(|c| matches!(c, Change::Session)) {
+            menus::refresh_server_menu(cx);
+        }
     })
     .detach();
+    menus::refresh_server_menu(cx);
 
     cx.on_action(|_: &QuickSwitch, cx| {
         in_main_window(cx, |window, cx| {
@@ -349,7 +353,9 @@ pub fn open_topic(group_id: GroupId, topic_id: TopicId, cx: &mut App) {
 pub fn open_dm_with(member_id: MemberId, cx: &mut App) {
     let services = services_of(cx);
     if let Some(g) = dm_with(&services.provider.groups(), &member_id) {
-        services.nav.update(cx, |nav, cx| nav.open_group(g, cx));
+        services
+            .nav
+            .update(cx, |nav, cx| nav.open_group_chat(g, cx));
         return;
     }
     cx.global_mut::<NavGlobal>().pending = Some(Pending::Dm(member_id.clone()));
@@ -416,7 +422,9 @@ fn open_pending(cx: &mut App) {
             .map(|g| g.id.clone()),
     };
     match found {
-        Some(g) => services.nav.update(cx, |nav, cx| nav.open_group(g, cx)),
+        Some(g) => services
+            .nav
+            .update(cx, |nav, cx| nav.open_group_chat(g, cx)),
         None => cx.global_mut::<NavGlobal>().pending = Some(pending),
     }
 }
@@ -426,7 +434,7 @@ fn open_group_at(index: usize, cx: &mut App) {
     if let Some(group) = services.provider.groups().into_iter().nth(index) {
         services
             .nav
-            .update(cx, |nav, cx| nav.open_group(group.id, cx));
+            .update(cx, |nav, cx| nav.open_group_chat(group.id, cx));
     }
 }
 

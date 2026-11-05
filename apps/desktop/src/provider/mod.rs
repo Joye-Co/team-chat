@@ -23,6 +23,7 @@ mod card_events;
 pub mod convert;
 // Desk track (1.1.0 首页).
 mod desk;
+mod email;
 pub mod files;
 #[cfg(test)]
 mod files_live;
@@ -389,7 +390,7 @@ impl CoreProvider {
             self.persist_ui_state();
         }
         let key = saved.key();
-        self.update_accounts(|a| a.active = Some(key));
+        self.update_accounts(|a| a.activate(&key));
         let token_key = saved.token_key().to_string();
         let generation = self.install(saved, client.clone(), dir);
         if let Some(previous) = previous {
@@ -659,6 +660,40 @@ impl CoreProvider {
                 }
             }
         });
+    }
+
+    /// Uses another server (the 服务器 menu): an account saved on it shows
+    /// at once; otherwise the login window opens for it, as 添加账号… does
+    /// (the account shown now stays signed in, and 取消 returns to it).
+    fn switch_server_inner(&self, server_url: &str) {
+        let Some(server_url) = session::normalize_server_url(server_url) else {
+            return;
+        };
+        if self
+            .account()
+            .is_some_and(|a| session::same_server(&a.server_url, &server_url))
+        {
+            return;
+        }
+        let saved = self
+            .state()
+            .saved
+            .on_server(&server_url)
+            .map(SavedSession::key);
+        tracing::info!(signed_in = saved.is_some(), "switching servers");
+        if let Some(key) = saved {
+            self.switch_account_inner(&key);
+            return;
+        }
+        if self.account().is_some() {
+            // The login window's server only: a restart opens the account
+            // shown now.
+            self.add_account_inner();
+            self.state().saved.current = Some(server_url);
+        } else {
+            self.update_accounts(|a| a.current = Some(server_url));
+        }
+        self.emit(vec![Change::Session]);
     }
 
     fn login_inner(&self, request: LoginRequest) {
@@ -1113,7 +1148,12 @@ impl CoreProvider {
         jobs.append(&mut out);
         let mut out = jobs;
         match a.client.topics(group_id, TOPIC_LIMIT) {
-            Ok(rows) => out.extend(rows.iter().map(convert::topic)),
+            // The 群聊 is the 群's chat, not one of its 话题 (`ChatProvider::topic` finds it).
+            Ok(rows) => out.extend(
+                rows.iter()
+                    .filter(|r| !crate::data::is_main_topic(&r.topic.id))
+                    .map(convert::topic),
+            ),
             Err(e) => tracing::warn!(error = %e, "topics read failed"),
         }
         out
@@ -1181,6 +1221,41 @@ impl ChatProvider for CoreProvider {
 
     fn logout(&self) {
         self.sign_out_inner(false);
+    }
+
+    fn current_server(&self) -> Option<String> {
+        if let Some(a) = self.account() {
+            return Some(a.server_url.clone());
+        }
+        self.state().saved.current.clone()
+    }
+
+    fn signed_in_servers(&self) -> Vec<String> {
+        self.state().saved.servers()
+    }
+
+    fn switch_server(&self, server_url: &str) {
+        self.switch_server_inner(server_url);
+    }
+
+    fn request_sign_in_code(&self, server_url: &str, email: &str) -> crate::data::EmailReply<()> {
+        self.request_sign_in_code_inner(server_url, email)
+    }
+
+    fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
+        self.my_email_inner()
+    }
+
+    fn add_email_code(&self, email: &str) -> crate::data::EmailReply<()> {
+        self.add_email_code_inner(email)
+    }
+
+    fn verify_email(&self, email: &str, code: &str) -> crate::data::EmailReply<String> {
+        self.verify_email_inner(email, code)
+    }
+
+    fn remove_email(&self) -> crate::data::EmailReply<()> {
+        self.remove_email_inner()
     }
 
     fn sign_out(&self, wipe_cache: bool) {
@@ -1524,6 +1599,7 @@ impl ChatProvider for CoreProvider {
             title,
             body: request.body,
             mentions: request.mentions,
+            reply_to: request.quote_of,
             ..Default::default()
         });
         match result {
@@ -1738,7 +1814,7 @@ impl ChatProvider for CoreProvider {
             request.title.clone(),
             request.body.clone(),
             request.mentions.clone(),
-            None,
+            request.quote_of.clone(),
         );
         job.unwrap_or_else(|| self.start_topic(request))
     }
@@ -1923,6 +1999,18 @@ impl ChatProvider for CoreProvider {
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
         self.create_bot_member_inner(name, role, character, runner)
+    }
+
+    fn bot_runner(&self, member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        self.bot_runner_inner(member_id)
+    }
+
+    fn update_bot_member(
+        &self,
+        member_id: &str,
+        edit: crate::data::BotMemberEdit,
+    ) -> AdminReply<()> {
+        self.update_bot_member_inner(member_id, edit)
     }
 
     fn set_member_character(

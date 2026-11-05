@@ -4,13 +4,23 @@
 crate::copy! {
     // --- v12/overlays: sheets ---
     NEW_TOPIC_TITLE = "新话题",
-    NEW_TOPIC_EXPLANATION = "写下要做的事；在第一条消息里 @ 成员，就交给了他。",
+    NEW_TOPIC_EXPLANATION = "写下要做的事，标题由 AI 起；@ 成员就交给他。",
     NEW_TOPIC_GROUP = "群",
     NEW_TOPIC_NAME = "标题",
     NEW_TOPIC_NAME_PLACEHOLDER = "可以不填，默认取第一行",
     NEW_TOPIC_BODY = "第一条消息",
     NEW_TOPIC_BODY_PLACEHOLDER = "说清楚要什么，或 @ 成员交代…",
+    // Onboarding: who in the 群 can take the 话题; a click puts @名字 in the
+    // first message.
+    NEW_TOPIC_HAND_TO = "交给",
     NEW_TOPIC_CREATE = "开始",
+    // 1.1.1 开个话题: the sheet opened from a message of the 群聊.
+    NEW_TOPIC_FROM_TITLE = "开个话题",
+    NEW_TOPIC_FROM_EXPLANATION = "从「{group}」里的这条消息单开一个话题，标题由 AI 起。",
+    NEW_TOPIC_QUOTE = "引用",
+    NEW_TOPIC_FROM_NOTE = "补充说明",
+    NEW_TOPIC_FROM_NOTE_PLACEHOLDER = "可以不填；@ 成员就交给他",
+    NEW_TOPIC_FROM_CREATE = "开话题",
     NEW_GROUP_EXPLANATION = "名称和成员之后都可以改。",
     GROUP_NAME = "名称",
     MEMBERS = "成员",

@@ -173,6 +173,17 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   ok("events/topic.updated-context.json", "Event", { ...base, groupId: X.dm, type: "topic.updated", data: { topicId: X.side, contextOf: { ...context, uptoSeq: 60 } } });
 
   // -------------------------------------------------------------------------
+  // 群聊 (1.1.1): the group's own chat, a topic with a fixed id and main: true
+  // -------------------------------------------------------------------------
+  const mainId = `main-${ID.general}`;
+  const mainTopic = { ...topic, id: mainId, title: "全员", status: "open", main: true };
+  ok("entities/topic-main.json", "Topic", mainTopic, "the 群聊 of a group");
+  bad("entities/topic-main-not-boolean.json", "Topic", { ...mainTopic, main: "yes" }, "main is a boolean");
+  ok("events/topic.created-main.json", "Event", { ...base, type: "topic.created", data: { topic: { ...mainTopic, messageCount: 0 } } }, "the first message in a 群聊 creates it");
+  ok("client/send-main.json", "ClientFrame", { t: "send", rid: "r99", groupId: ID.general, topicId: mainId, clientMsgId: "c99", body: "大家早，今天先对一下发布" }, "a plain message in the 群聊");
+  ok("client/send-new-topic-from-message.json", "ClientFrame", { t: "send", rid: "r100", groupId: ID.general, title: "发布检查清单", clientMsgId: "c100", body: "从群里这条开个话题", replyTo: { messageId: ID.msg } }, "开个话题: a new topic whose first message quotes a 群聊 message");
+
+  // -------------------------------------------------------------------------
   // Runs: usage, duration, result, acceptance, pause, kind
   // -------------------------------------------------------------------------
   const run = {

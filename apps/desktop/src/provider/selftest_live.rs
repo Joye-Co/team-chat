@@ -265,6 +265,7 @@ async fn drive(
     let stamp = chat_core::new_id();
     let t_topic = Instant::now();
     let cid1 = provider.start_topic(StartTopicRequest {
+        quote_of: None,
         group_id: group.id.clone(),
         title: None,
         body: format!("selftest-live topic {stamp}"),
@@ -392,7 +393,7 @@ async fn restore_and_sign_out(
     p2.sign_out(true);
     let signed_out = matches!(p2.session(), SessionState::SignedOut { .. });
     wait_for(cx, deadline, |_| {
-        (!account.exists() && !super::session::session_path(&root).exists()).then_some(())
+        (!account.exists() && super::session::load_session(&root).is_none()).then_some(())
     })
     .await
     .ok_or(("sign out wipes the cache", json.clone()))?;

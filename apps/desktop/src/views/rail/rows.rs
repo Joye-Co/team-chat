@@ -125,19 +125,18 @@ impl RailView {
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
     ) -> AnyElement {
-        self.section_header_selected(id, label, folded, false, false, fold, open, None)
+        self.section_header_selected(id, label, (folded, false, false, false), fold, open, None)
     }
 
     /// [`Self::section_header`] with the selected look (T-12: the 群 header
     /// while its 群 page is open) and the muted mark.
-    #[allow(clippy::too_many_arguments)]
+    /// `look`: folded, selected, unread (the 群's 群聊 has unread messages)
+    /// and muted.
     pub(super) fn section_header_selected(
         &self,
         id: impl Into<ElementId>,
         label: String,
-        folded: bool,
-        selected: bool,
-        muted: bool,
+        (folded, selected, unread, muted): (bool, bool, bool, bool),
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
         menu: Option<RowMenu>,
@@ -148,6 +147,7 @@ impl RailView {
         let header = SidebarSection::new(id, label)
             .collapsed(folded)
             .selected(selected)
+            .unread(unread && !selected)
             .muted(muted)
             .on_toggle(move |e, window, cx| match &open {
                 Some(open) => open(e, window, cx),

@@ -1,16 +1,22 @@
 //! Where the provider keeps its files, the saved session, token storage and
 //! the sign-in calls.
 //!
-//! Layout under the data root (`~/Library/Application Support/<bundle id>`):
-//! - `session.json`: the accounts signed in on this Mac (server and member
-//!   of each, no secret) and the active one.
+//! Layout under the data root (`~/Library/Application Support/<app id>`):
+//! - `sessions.json`: the accounts signed in on this Mac (server and member
+//!   of each, no secret), the active one and the server in use. Switching
+//!   keeps the others signed in. An older `session.json` (one session) is
+//!   read once and moved into it.
 //! - `accounts/<server>/<member id>/cache.sqlite3`: the chat-core cache of one
 //!   account, so two accounts never share a cache.
 //! - `logs/`: chat-core and app logs (secrets are never logged).
 //!
-//! Each token lives in the macOS Keychain (service = bundle id, account =
+//! Each token lives in the macOS Keychain (service = app id, account =
 //! server URL, or `<server url>#<member id>` for a second member on one
 //! server; see [`SavedSession::token_key`]). Self-tests use a memory store.
+//!
+//! The app id is the bundle id for a release build and `<bundle id>.dev` for
+//! a debug build, so a build from a worktree never reads, replaces or signs
+//! out the installed app's sessions and tokens.
 
 use std::{
     path::{Path, PathBuf},
@@ -53,10 +59,9 @@ impl TokenStorage {
     pub fn store(&self, server_url: &str) -> Box<dyn TokenStore> {
         match self {
             #[cfg(target_os = "macos")]
-            TokenStorage::Keychain => Box::new(chat_core::KeychainTokenStore::new(
-                env!("PRODUCT_BUNDLE_ID"),
-                server_url,
-            )),
+            TokenStorage::Keychain => {
+                Box::new(chat_core::KeychainTokenStore::new(app_id(), server_url))
+            }
             #[cfg(not(target_os = "macos"))]
             TokenStorage::Keychain => Box::new(chat_core::FileTokenStore::new(
                 default_data_root().join("token"),
@@ -129,13 +134,22 @@ impl TokenStore for FailingTokenStore {
     }
 }
 
-/// `~/Library/Application Support/<bundle id>`.
+/// The bundle id for a release build, `<bundle id>.dev` for a debug build:
+/// the data folder and the Keychain service of this build.
+pub const fn app_id() -> &'static str {
+    if cfg!(debug_assertions) {
+        concat!(env!("PRODUCT_BUNDLE_ID"), ".dev")
+    } else {
+        env!("PRODUCT_BUNDLE_ID")
+    }
+}
+
+/// `~/Library/Application Support/<app id>`.
 pub fn default_data_root() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    home.join("Library/Application Support")
-        .join(env!("PRODUCT_BUNDLE_ID"))
+    home.join("Library/Application Support").join(app_id())
 }
 
 /// The cache directory of one account.
@@ -160,7 +174,7 @@ pub fn account_dir(root: &Path, server_url: &str, member_id: &str) -> PathBuf {
         .join(safe(member_id))
 }
 
-/// One saved account in `session.json`. No secret.
+/// One signed-in member on one server. No secret.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSession {
@@ -199,13 +213,19 @@ pub fn account_key(server_url: &str, member_id: &str) -> String {
     format!("{}#{member_id}", server_url.trim_end_matches('/'))
 }
 
-/// Every account signed in on this Mac and the one the window shows.
+pub fn same_server(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+/// Every account signed in on this Mac, the one the window shows and the
+/// server in use.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SavedAccounts {
     pub accounts: Vec<SavedSession>,
-    /// The key of the active account; `None` while adding an account with
-    /// none chosen, or when signed out.
+    /// The key of the active account; `None` when signed out.
     pub active: Option<String>,
+    /// The server in use, signed in or not (the login window's server).
+    pub current: Option<String>,
 }
 
 impl SavedAccounts {
@@ -216,6 +236,21 @@ impl SavedAccounts {
     /// The account to restore at start.
     pub fn active(&self) -> Option<&SavedSession> {
         self.active.as_deref().and_then(|k| self.get(k))
+    }
+
+    /// The first account signed in on `server_url`.
+    pub fn on_server(&self, server_url: &str) -> Option<&SavedSession> {
+        self.accounts
+            .iter()
+            .find(|a| same_server(&a.server_url, server_url))
+    }
+
+    /// Makes `key` the active account and its server the one in use.
+    pub fn activate(&mut self, key: &str) {
+        if let Some(server) = self.get(key).map(|a| a.server_url.clone()) {
+            self.active = Some(key.to_string());
+            self.current = Some(server);
+        }
     }
 
     /// Adds `session` or updates the saved one of the same server and
@@ -237,11 +272,12 @@ impl SavedAccounts {
             Some(slot) => *slot = session.clone(),
             None => self.accounts.push(session.clone()),
         }
-        self.active = Some(key);
+        self.activate(&key);
         session
     }
 
-    /// Forgets one account; the active one leaves no account active.
+    /// Forgets one account; the active one leaves no account active (the
+    /// server in use stays).
     pub fn remove(&mut self, key: &str) -> Option<SavedSession> {
         let i = self.accounts.iter().position(|a| a.key() == key)?;
         if self.active.as_deref() == Some(key) {
@@ -249,76 +285,111 @@ impl SavedAccounts {
         }
         Some(self.accounts.remove(i))
     }
+
+    /// The servers with a saved account, each once.
+    pub fn servers(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for a in &self.accounts {
+            if !out.iter().any(|s| same_server(s, &a.server_url)) {
+                out.push(a.server_url.clone());
+            }
+        }
+        out
+    }
 }
 
-/// `session.json` on disk. The active account is also written at the top
-/// level (`serverUrl`, `member`), the single-session format of earlier
-/// builds, so an older build still opens the active account.
+/// `sessions.json` on disk: `current` and `sessions` are the per-server
+/// format of the first build with several servers (which reads its session
+/// of `current` and ignores the rest); `active` names the account the
+/// window shows when one server has several.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionFile {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    server_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    member: Option<proto::Member>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    accounts: Option<Vec<SavedSession>>,
+struct SessionsFile {
+    #[serde(default)]
+    current: Option<String>,
+    #[serde(default)]
+    sessions: Vec<SavedSession>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     active: Option<String>,
 }
 
-pub fn session_path(root: &Path) -> PathBuf {
+/// `sessions.json`.
+pub fn sessions_path(root: &Path) -> PathBuf {
+    root.join("sessions.json")
+}
+
+/// The single session of builds before `sessions.json`.
+fn legacy_session_path(root: &Path) -> PathBuf {
     root.join("session.json")
 }
 
-/// Reads the saved accounts. A file of the single-session format becomes a
-/// list of that one account, active, its token still under the server URL.
+/// Reads the saved accounts. Without `sessions.json`, an older
+/// `session.json` (one session) is that one account, active, its token
+/// still under the server URL.
 pub fn load_accounts(root: &Path) -> SavedAccounts {
-    let Ok(text) = std::fs::read_to_string(session_path(root)) else {
-        return SavedAccounts::default();
-    };
-    let Ok(file) = serde_json::from_str::<SessionFile>(&text) else {
-        tracing::warn!("session.json cannot be read");
-        return SavedAccounts::default();
-    };
-    match (file.accounts, file.server_url, file.member) {
-        (Some(accounts), _, _) => {
-            let active = file
-                .active
-                .filter(|k| accounts.iter().any(|a| &a.key() == k));
-            SavedAccounts { accounts, active }
-        }
-        (None, Some(server_url), Some(member)) => {
-            let one = SavedSession::new(server_url, member);
+    if let Ok(text) = std::fs::read_to_string(sessions_path(root)) {
+        let Ok(file) = serde_json::from_str::<SessionsFile>(&text) else {
+            tracing::warn!("sessions.json cannot be read");
+            return SavedAccounts::default();
+        };
+        let mut accounts = SavedAccounts {
+            accounts: file.sessions,
+            active: None,
+            current: file.current,
+        };
+        // The named account, or the first one on the server in use.
+        let active = file
+            .active
+            .filter(|k| accounts.get(k).is_some())
+            .or_else(|| {
+                let current = accounts.current.clone()?;
+                accounts.on_server(&current).map(SavedSession::key)
+            });
+        accounts.active = active;
+        return accounts;
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Legacy {
+        server_url: String,
+        member: proto::Member,
+    }
+    std::fs::read_to_string(legacy_session_path(root))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Legacy>(&text).ok())
+        .map(|s| {
+            let one = SavedSession::new(s.server_url, s.member);
             SavedAccounts {
                 active: Some(one.key()),
+                current: Some(one.server_url.clone()),
                 accounts: vec![one],
             }
-        }
-        _ => SavedAccounts::default(),
-    }
+        })
+        .unwrap_or_default()
 }
 
-/// Writes the accounts (atomically); no account left removes the file.
+/// Writes the accounts (atomically) and removes an older `session.json`.
 pub fn save_accounts(root: &Path, accounts: &SavedAccounts) -> std::io::Result<()> {
-    let path = session_path(root);
-    if accounts.accounts.is_empty() {
-        return match std::fs::remove_file(&path) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
-        };
-    }
     std::fs::create_dir_all(root)?;
-    let active = accounts.active();
-    let file = SessionFile {
-        server_url: active.map(|a| a.server_url.clone()),
-        member: active.map(|a| a.member.clone()),
-        accounts: Some(accounts.accounts.clone()),
+    let file = SessionsFile {
+        current: accounts
+            .active()
+            .map(|a| a.server_url.clone())
+            .or_else(|| accounts.current.clone()),
+        sessions: accounts.accounts.clone(),
         active: accounts.active.clone(),
     };
+    let path = sessions_path(root);
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(&file)?)?;
-    std::fs::rename(tmp, path)
+    std::fs::rename(tmp, path)?;
+    let _ = std::fs::remove_file(legacy_session_path(root));
+    Ok(())
+}
+
+/// The active account.
+pub fn load_session(root: &Path) -> Option<SavedSession> {
+    load_accounts(root).active().cloned()
 }
 
 /// Saves `session` as a signed-in account and makes it active. Returns it
@@ -406,6 +477,13 @@ pub async fn sign_in(
                 .map_err(|e| login_error(&e))?;
             Ok((r.token, r.member))
         }
+        Credential::EmailCode { email, code } => {
+            let r = http
+                .email_sign_in(email, code, device_name)
+                .await
+                .map_err(|e| login_error(&e))?;
+            Ok((r.token, r.member))
+        }
         Credential::Token(token) => {
             let token = token.trim().to_string();
             let me = http
@@ -447,6 +525,52 @@ mod tests {
                 .to_string_lossy()
                 .contains("/../")
         );
+    }
+
+    #[test]
+    fn each_server_keeps_its_own_session() {
+        let root = temp_root("sessions");
+        // A session.json of an older build is the current session.
+        let prod = SavedSession::new("https://prod.dev", member("m1", "A"));
+        std::fs::write(
+            legacy_session_path(&root),
+            serde_json::to_vec(&serde_json::json!({
+                "serverUrl": prod.server_url, "member": prod.member
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_session(&root), Some(prod.clone()));
+
+        // Signing in on staging keeps production signed in.
+        let staging = SavedSession::new("https://staging.dev", member("m2", "B"));
+        save_session(&root, &staging).unwrap();
+        assert!(!legacy_session_path(&root).exists());
+        assert_eq!(load_session(&root), Some(staging.clone()));
+        let mut all = load_accounts(&root);
+        assert_eq!(all.servers().len(), 2);
+
+        // Switching back finds the production session.
+        let key = all.on_server("https://prod.dev/").unwrap().key();
+        all.activate(&key);
+        save_accounts(&root, &all).unwrap();
+        assert_eq!(load_session(&root), Some(prod.clone()));
+
+        // Forgetting production leaves staging alone, and production stays
+        // the server in use for the login window.
+        all.remove(&key);
+        save_accounts(&root, &all).unwrap();
+        let all = load_accounts(&root);
+        assert_eq!(all.active(), None);
+        assert_eq!(all.current.as_deref(), Some("https://prod.dev"));
+        assert_eq!(all.servers(), vec!["https://staging.dev".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_debug_build_has_its_own_app_id() {
+        assert_eq!(app_id(), concat!(env!("PRODUCT_BUNDLE_ID"), ".dev"));
+        assert!(default_data_root().ends_with(app_id()));
     }
 
     #[test]
@@ -508,7 +632,7 @@ mod tests {
             p.connection() == ConnectionState::TokenUnreadable
         });
         assert!(matches!(p.session(), SessionState::SignedIn { .. }));
-        assert!(session_path(&root).exists());
+        assert!(load_session(&root).is_some());
         assert!(slot.lock().unwrap().is_some());
 
         // The prompt is allowed on retry: the client starts.
@@ -541,7 +665,7 @@ mod tests {
         let root = temp_root("session-migrate");
         // The format of every build before several accounts.
         std::fs::write(
-            session_path(&root),
+            legacy_session_path(&root),
             serde_json::to_vec(&serde_json::json!({
                 "serverUrl": "https://team.example.com",
                 "member": { "id": "m1", "kind": "human", "name": "Joye", "level": "owner" }
@@ -557,19 +681,19 @@ mod tests {
         // Its token is still the one saved under the server URL.
         assert_eq!(active.token_key(), "https://team.example.com");
 
-        // Written again, the file still opens in an older build: the active
-        // account is at the top level too.
+        // Written again as sessions.json, in the per-server format a build
+        // with one session per server reads: `current` and its session.
         save_accounts(&root, &accounts).unwrap();
+        assert!(!legacy_session_path(&root).exists());
         #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Old {
-            server_url: String,
-            member: proto::Member,
+        struct PerServer {
+            current: Option<String>,
+            sessions: Vec<SavedSession>,
         }
-        let old: Old =
-            serde_json::from_str(&std::fs::read_to_string(session_path(&root)).unwrap()).unwrap();
-        assert_eq!(old.server_url, "https://team.example.com");
-        assert_eq!(old.member.id, "m1");
+        let file: PerServer =
+            serde_json::from_str(&std::fs::read_to_string(sessions_path(&root)).unwrap()).unwrap();
+        assert_eq!(file.current.as_deref(), Some("https://team.example.com"));
+        assert_eq!(file.sessions[0].member.id, "m1");
         assert_eq!(load_accounts(&root), accounts);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -610,16 +734,17 @@ mod tests {
     }
 
     #[test]
-    fn no_account_left_removes_the_file() {
+    fn no_account_left_keeps_the_server_in_use() {
         let root = temp_root("session-empty");
         let mut a = SavedAccounts::default();
         let one = a.sign_in(SavedSession::new("https://x.dev", member("m1", "A")));
         save_accounts(&root, &a).unwrap();
-        assert!(session_path(&root).exists());
         a.remove(&one.key());
         save_accounts(&root, &a).unwrap();
-        assert!(!session_path(&root).exists());
-        assert_eq!(load_accounts(&root), SavedAccounts::default());
+        let back = load_accounts(&root);
+        assert!(back.accounts.is_empty());
+        assert_eq!(back.active, None);
+        assert_eq!(back.current.as_deref(), Some("https://x.dev"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -635,7 +760,7 @@ mod tests {
         let prod = "http://127.0.0.1:9";
         let local = "http://127.0.0.1:10";
         std::fs::write(
-            session_path(&root),
+            legacy_session_path(&root),
             serde_json::to_vec(&serde_json::json!({
                 "serverUrl": prod,
                 "member": { "id": "m1", "kind": "human", "name": "Joye", "level": "owner" }
@@ -646,7 +771,7 @@ mod tests {
         let mut accounts = load_accounts(&root);
         accounts.sign_in(SavedSession::new(local, member("l1", "Local")));
         // The production account stays the one shown.
-        accounts.active = Some(account_key(prod, "m1"));
+        accounts.activate(&account_key(prod, "m1"));
         save_accounts(&root, &accounts).unwrap();
         let tokens = Arc::new(Mutex::new(std::collections::HashMap::from([
             (prod.to_string(), "prod-token".to_string()),

@@ -52,6 +52,10 @@ pub enum TitleButtonKind {
     Changes,
     /// The inspector toggle (`sidebar.trailing`).
     Rail,
+    /// 1.1.1, the 群聊: opens the 新话题 sheet for this 群 (no pane).
+    NewTopic,
+    /// 1.1.1, the 群聊: opens the 群 page with its 话题 lists (no pane).
+    GroupTopics,
 }
 
 impl TitleButtonKind {
@@ -63,6 +67,8 @@ impl TitleButtonKind {
             TitleButtonKind::Machine => Sf::Computer,
             TitleButtonKind::Changes => Sf::Changes,
             TitleButtonKind::Rail => Sf::PaneRight,
+            TitleButtonKind::NewTopic => Sf::NewTopic,
+            TitleButtonKind::GroupTopics => Sf::Group,
         }
     }
 
@@ -73,6 +79,8 @@ impl TitleButtonKind {
             TitleButtonKind::Machine => c::TITLE_MACHINE,
             TitleButtonKind::Changes => c::TITLE_CHANGES,
             TitleButtonKind::Rail => c::TITLE_TOGGLE_RAIL,
+            TitleButtonKind::NewTopic => c::TITLE_NEW_TOPIC,
+            TitleButtonKind::GroupTopics => c::TITLE_GROUP_TOPICS,
         }
     }
 
@@ -83,6 +91,8 @@ impl TitleButtonKind {
             TitleButtonKind::Machine => "machine",
             TitleButtonKind::Changes => "changes",
             TitleButtonKind::Rail => "rail",
+            TitleButtonKind::NewTopic => "new-topic",
+            TitleButtonKind::GroupTopics => "group-topics",
         }
     }
 
@@ -412,6 +422,7 @@ pub fn render(
             .map(|b| {
                 let shown = open.same_kind(&b.pane) && *open != RightPane::None;
                 let pane = b.pane.clone();
+                let kind = b.kind;
                 let nav = services.nav.clone();
                 toolbar_item(
                     gpui::SharedString::from(format!("toolbar-{}", b.kind.slug())),
@@ -426,10 +437,22 @@ pub fn render(
                     window,
                     cx,
                 )
-                .on_click(move |_, _, cx| {
+                .on_click(move |_, window, cx| {
                     cx.stop_propagation();
-                    let pane = pane.clone();
-                    nav.update(cx, |nav, cx| nav.toggle_pane(pane, cx));
+                    match kind {
+                        TitleButtonKind::NewTopic => {
+                            window.dispatch_action(Box::new(crate::app::NewTopic), cx)
+                        }
+                        TitleButtonKind::GroupTopics => nav.update(cx, |nav, cx| {
+                            if let Some(g) = nav.current_group() {
+                                nav.open_group_page(g, cx);
+                            }
+                        }),
+                        _ => {
+                            let pane = pane.clone();
+                            nav.update(cx, |nav, cx| nav.toggle_pane(pane, cx));
+                        }
+                    }
                 })
             })
             .collect();

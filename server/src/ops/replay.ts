@@ -2,6 +2,7 @@
 // events, exactly as the room's write paths in server/src/core/room.ts build them. Keep in step.
 // Membership is not replayed: on restore the room takes its members from D1, which is restored
 // first. Feature modules register their own importers for their tables and event types.
+import { isMainTopicId } from "@chat/protocol";
 import { type ArchivedEvent, registerEventImporter } from "../core/registry";
 import { scrubDeletedMessage } from "../core/scrub";
 import { setFollowing } from "../core/topicstate";
@@ -128,7 +129,10 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
       for (const id of new Set(mentions)) {
         sql.exec("INSERT OR IGNORE INTO mentions (member_id, seq, message_id) VALUES (?, ?, ?)", id, e.seq, m.id as string);
       }
-      for (const id of new Set([m.authorId as string, ...mentions])) setFollowing(sql, id, m.topicId as string, true);
+      // The room does not auto-follow the 群聊.
+      if (!isMainTopicId(m.topicId as string)) {
+        for (const id of new Set([m.authorId as string, ...mentions])) setFollowing(sql, id, m.topicId as string, true);
+      }
       sql.exec(
         "UPDATE topics SET last_message_at = ? WHERE id = ? AND root_message_id != ?",
         m.createdAt as number,

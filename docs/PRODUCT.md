@@ -7,8 +7,8 @@ When this file and the snapshot disagree, this file wins for V1.
 
 A macOS work chat for one small team: Joye, 4 to 10 interns, and about 5 bots. People and bots
 are equal members. Development, product and other work are discussed, assigned and delivered
-here, so the team stops using Feishu and Slack. Every message belongs to a topic, like a Feishu
-topic group.
+here, so the team stops using Feishu and Slack. Each 群 is a chat first (its 群聊); a topic opens
+from it when a piece of work needs its own thread, like a Feishu topic in a group chat.
 
 ## Interface words
 
@@ -98,7 +98,11 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   it continue from that step; 停止 cancels the run.
 - **⌘K 交代或搜索**: one field to hand work to a member (交给 <member> starts a topic addressed to
   it in the chosen 群; ⌘↵ hands it to Jojo) or to find 话题, 产出 and 成员.
-- **群**: a composer to start a topic, the topics 进行中 with live previews, 最近完成, and a rail with
+- **群**: opening a 群 (or a 私聊) shows its 群聊: one chat timeline with the composer at the
+  bottom, where plain messages stay and @mentioning a member hands it work whose result comes back
+  there. The title bar has 新话题 and 这个群的话题; a message's menu has 开个话题, which starts a 话题
+  whose first message quotes it. 这个群的话题 opens the 群 page: the topics 进行中 with live previews,
+  最近完成, 新话题, 回到群里聊, and a rail with
   群里的决定 (recorded from answered decisions, or added with 记一条), 最近的产出 and the 电脑 in use.
 - **成员**: every member with filters (全部, 在做事, 等人); a member's page shows 现在, 这周 (topics,
   产出, cost), 最近交付, 需要批准的事, 能用的工具, 电脑 and 最近的问题. Changing a member opens the settings
@@ -150,8 +154,11 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 
 ## Behavior
 
-- Starting to write in a 群 without picking a topic starts a new topic; its title defaults to
-  the first line of the message.
+- Writing in a 群 (or a 私聊) posts into its 群聊 and does not start a topic. A topic starts only
+  on purpose: 新话题, or 开个话题 on a 群聊 message (its first message quotes that message); its
+  title defaults to the first line. The 群聊 has no status, owner or 关注; an @mentioned member
+  works and answers in it, each mention to the member it names. The sidebar's 群 header opens the
+  群聊 (bold with a dot while it has unread messages) and its 话题 list under it.
 - Long content goes into 产出; the topic keeps the conclusion and a link.
 - Notifications are quiet by default: only when I am @mentioned, when a topic waits on me
   (需要你拍板), or when a topic I follow gets a result (做完了, status 完成 or a new 产出).
@@ -171,8 +178,10 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - Permissions: levels `owner` (Joye and the bots at Joye's level) and `member` (interns and
   their bots). Clients and bots use the same API. Every write is audited with who asked, who
   did it, which credential, and what changed.
-- Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. Email or OAuth
-  sign-in is later.
+- Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. After that a
+  member can add a sign-in email in 账号 and sign in on any Mac with a 6-digit code sent there.
+  The app keeps one session per server (正式服务器, 测试服务器 or another), so switching servers
+  from the app menu does not sign out. OAuth sign-in is later.
 - Distribution: a DMG signed with the team's own certificate (not notarized). GitHub Releases keeps every build; the server also serves the
   latest DMG to holders of an invite code and to members, and the app updates itself from it.
 

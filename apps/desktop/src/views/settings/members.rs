@@ -22,14 +22,14 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_top};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus},
     copy::{common, fill, settings as s},
     data::{
-        ApprovalDefaults, ApproverRole, BotCreated, Change, InviteCreated, InviteRequest, Member,
-        MemberKind, MemberLevel, RunnerSetup,
+        ApprovalDefaults, ApproverRole, BotCreated, BotMemberEdit, Change, InviteCreated,
+        InviteRequest, Member, MemberKind, MemberLevel, RunnerChange, RunnerSetup,
     },
     theme,
     ui::{
@@ -38,7 +38,7 @@ use crate::{
             AlertLayout, BadgeState, FormRow, GroupedForm, NativeSwitch, NativeTextField,
             NativeType as _, PushSize, PushStyle, SearchField, SectionTitle, SheetLayout,
             SheetWidth, StatusBadge, alert_button, disabled_push, inline_commit, metrics,
-            native_colors, page::outline_badge, pull_down, push_button, tokens,
+            native_colors, page::outline_badge, push_button, tokens,
         },
     },
 };
@@ -412,7 +412,7 @@ impl MembersPage {
             // Keep the "⋯" column so the selects line up.
             return row.menu(div().size(tokens::height::SM)).into_any_element();
         }
-        // "⋯": 更换形象… for an AI member, 停用…; or 恢复.
+        // "⋯": 编辑… and 更换形象… for an AI member, 停用…; or 恢复.
         let member = m.clone();
         let deactivated = m.deactivated;
         let more = widgets::more_button(
@@ -430,8 +430,13 @@ impl MembersPage {
                 }));
             }
             let menu = if member.is_bot() {
+                let (edit_page, edit_member) = (page.clone(), member.clone());
                 let (page, member) = (page.clone(), member.clone());
-                menu.item(
+                menu.item(PopupMenuItem::new(s::EDIT).on_click(move |_, window, cx| {
+                    let services = edit_page.read(cx).services.clone();
+                    open_edit_bot(services, &edit_member, window, cx);
+                }))
+                .item(
                     PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(move |_, window, cx| {
                         let services = page.read(cx).services.clone();
                         open_character(services, &member, window, cx);
@@ -1246,8 +1251,73 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
 
 // --- AI member ---
 
+/// A runner as the sheet compares it: trimmed, no empty labels, repo or
+/// branch.
+fn clean_runner(r: &RunnerSetup) -> RunnerSetup {
+    let text = |t: &Option<String>| {
+        t.as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+    };
+    RunnerSetup {
+        runtime: r.runtime.trim().to_string(),
+        labels: r
+            .labels
+            .iter()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+        repo: text(&r.repo),
+        base_branch: text(&r.base_branch),
+    }
+}
+
+/// What a save of the edit sheet sends: the name and 岗位 only when they
+/// changed, the runner set when it changed and removed when it was switched
+/// off.
+pub fn bot_edit(
+    before_name: &str,
+    before_role: Option<&str>,
+    before_runner: Option<&RunnerSetup>,
+    name: &str,
+    role: &str,
+    runner: Option<&RunnerSetup>,
+) -> BotMemberEdit {
+    let name = name.trim();
+    let role = Some(role.trim()).filter(|r| !r.is_empty());
+    let before_role = before_role.map(str::trim).filter(|r| !r.is_empty());
+    let runner = match (before_runner.map(clean_runner), runner.map(clean_runner)) {
+        (Some(_), None) => Some(RunnerChange::Remove),
+        (before, Some(after)) if before.as_ref() != Some(&after) => Some(RunnerChange::Set(after)),
+        _ => None,
+    };
+    BotMemberEdit {
+        name: (name != before_name.trim()).then(|| name.to_string()),
+        role: (role != before_role).then(|| role.map(str::to_string)),
+        runner,
+    }
+}
+
+/// The runner of the member being edited, as it loads.
+#[derive(Clone, Debug, PartialEq)]
+enum RunnerLoad {
+    Loading,
+    Failed(SharedString),
+    Loaded(Option<RunnerSetup>),
+}
+
+/// The AI member the sheet edits, as it was when the sheet opened.
+struct BotEditing {
+    member_id: String,
+    name: String,
+    role: Option<String>,
+    runner: RunnerLoad,
+}
+
 /// The 添加 AI 成员 sheet: name and 岗位, the look, then either an outside
-/// credential (shown once) or work on the team's computers.
+/// credential (shown once) or work on the team's computers. The same sheet
+/// edits an AI member: name, 岗位 and how it works.
 pub struct BotForm {
     services: Services,
     name: Entity<InputState>,
@@ -1263,6 +1333,10 @@ pub struct BotForm {
     character: Option<CharacterId>,
     status: Status,
     created: Option<BotCreated>,
+    /// Set when the sheet edits an existing AI member.
+    editing: Option<BotEditing>,
+    /// The window the sheet is in: a saved edit closes it.
+    window: gpui::AnyWindowHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1312,8 +1386,175 @@ impl BotForm {
             character: None,
             status: Status::Idle,
             created: None,
+            editing: None,
+            window: window.window_handle(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Turns the sheet into the edit sheet of `member` and loads its runner.
+    fn edit(&mut self, member: &Member, window: &mut Window, cx: &mut Context<Self>) {
+        let role = member.role.clone().unwrap_or_default();
+        self.name
+            .update(cx, |st, cx| st.set_value(member.name.clone(), window, cx));
+        self.role
+            .update(cx, |st, cx| st.set_value(role, window, cx));
+        self.editing = Some(BotEditing {
+            member_id: member.id.clone(),
+            name: member.name.clone(),
+            role: member.role.clone(),
+            runner: RunnerLoad::Loading,
+        });
+        self.load_runner(window, cx);
+    }
+
+    /// Whether the sheet edits an existing member.
+    pub fn editing(&self) -> bool {
+        self.editing.is_some()
+    }
+
+    /// Whether the edited member's runner is in.
+    pub fn runner_loaded(&self) -> bool {
+        self.editing
+            .as_ref()
+            .is_some_and(|e| matches!(e.runner, RunnerLoad::Loaded(_)))
+    }
+
+    fn load_runner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = self.editing.as_mut() else {
+            return;
+        };
+        editing.runner = RunnerLoad::Loading;
+        let reply = self.services.provider.bot_runner(&editing.member_id);
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = answer(reply).await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(runner) => {
+                        this.fill_runner(runner.as_ref(), window, cx);
+                        if let Some(e) = this.editing.as_mut() {
+                            e.runner = RunnerLoad::Loaded(runner);
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(editing) = this.editing.as_mut() {
+                            editing.runner = RunnerLoad::Failed(widgets::error_text(e).into());
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn fill_runner(
+        &mut self,
+        r: Option<&RunnerSetup>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.runner = r.is_some();
+        let Some(r) = r else { return };
+        let set = |input: &Entity<InputState>, text: String, window: &mut Window, cx: &mut App| {
+            input.update(cx, |st, cx| st.set_value(text, window, cx));
+        };
+        set(&self.runtime, r.runtime.clone(), window, cx);
+        set(&self.labels, r.labels.join(", "), window, cx);
+        set(&self.repo, r.repo.clone().unwrap_or_default(), window, cx);
+        set(
+            &self.branch,
+            r.base_branch.clone().unwrap_or_default(),
+            window,
+            cx,
+        );
+    }
+
+    /// The runner the fields describe; `None` when the member does not work
+    /// on a machine.
+    fn runner_fields(&self, cx: &App) -> Option<RunnerSetup> {
+        if !self.runner {
+            return None;
+        }
+        let repo = self.value(&self.repo, cx);
+        let branch = self.value(&self.branch, cx);
+        Some(RunnerSetup {
+            runtime: self.value(&self.runtime, cx),
+            labels: widgets::split_labels(&self.value(&self.labels, cx)),
+            repo: (!repo.is_empty()).then_some(repo),
+            base_branch: (!branch.is_empty()).then_some(branch),
+        })
+    }
+
+    /// What saving the edit sheet now would change; `None` until the runner
+    /// is in.
+    fn pending_edit(&self, cx: &App) -> Option<BotMemberEdit> {
+        let e = self.editing.as_ref()?;
+        let RunnerLoad::Loaded(before) = &e.runner else {
+            return None;
+        };
+        Some(bot_edit(
+            &e.name,
+            e.role.as_deref(),
+            before.as_ref(),
+            &self.value(&self.name, cx),
+            &self.value(&self.role, cx),
+            self.runner_fields(cx).as_ref(),
+        ))
+    }
+
+    /// Saves the edit sheet; a saved edit closes it.
+    fn save(&mut self, cx: &mut Context<Self>) {
+        if self.status.busy() {
+            return;
+        }
+        let name = self.value(&self.name, cx);
+        let role = self.value(&self.role, cx);
+        if name.is_empty() {
+            self.status = Status::Failed(s::NAME_REQUIRED.into());
+            cx.notify();
+            return;
+        }
+        if let Err(e) = widgets::check_len(&name, 64).and(widgets::check_len(&role, 64)) {
+            self.status = Status::Failed(e.into());
+            cx.notify();
+            return;
+        }
+        if self.runner && self.value(&self.runtime, cx).is_empty() {
+            self.status = Status::Failed(s::RUNNER_RUNTIME_REQUIRED.into());
+            cx.notify();
+            return;
+        }
+        let Some(edit) = self.pending_edit(cx) else {
+            return;
+        };
+        let Some(id) = self.editing.as_ref().map(|e| e.member_id.clone()) else {
+            return;
+        };
+        let handle = self.window;
+        if edit.is_empty() {
+            let _ = handle.update(cx, |_, window, cx| window.close_dialog(cx));
+            return;
+        }
+        let reply = self.services.provider.update_bot_member(&id, edit);
+        self.status = Status::Busy(s::SAVING.into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = answer(reply).await;
+            let saved = result.is_ok();
+            let _ = this.update(cx, |this, cx| {
+                this.status = match result {
+                    Ok(()) => Status::Idle,
+                    Err(e) => Status::from_error(e),
+                };
+                cx.notify();
+            });
+            if saved {
+                let _ = handle.update(cx, |_, window, cx| window.close_dialog(cx));
+            }
+        })
+        .detach();
     }
 
     /// The character the new member gets: picked by hand, or
@@ -1360,6 +1601,9 @@ impl BotForm {
     }
 
     pub fn submit(&mut self, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return self.save(cx);
+        }
         if self.status.busy() || self.created.is_some() {
             return;
         }
@@ -1375,24 +1619,12 @@ impl BotForm {
             cx.notify();
             return;
         }
-        let runner = if self.runner {
-            let runtime = self.value(&self.runtime, cx);
-            if runtime.is_empty() {
-                self.status = Status::Failed(s::RUNNER_RUNTIME_REQUIRED.into());
-                cx.notify();
-                return;
-            }
-            let repo = self.value(&self.repo, cx);
-            let branch = self.value(&self.branch, cx);
-            Some(RunnerSetup {
-                runtime,
-                labels: widgets::split_labels(&self.value(&self.labels, cx)),
-                repo: (!repo.is_empty()).then_some(repo),
-                base_branch: (!branch.is_empty()).then_some(branch),
-            })
-        } else {
-            None
-        };
+        let runner = self.runner_fields(cx);
+        if runner.as_ref().is_some_and(|r| r.runtime.is_empty()) {
+            self.status = Status::Failed(s::RUNNER_RUNTIME_REQUIRED.into());
+            cx.notify();
+            return;
+        }
         let character = Some(self.chosen_character(cx));
         let reply = self.services.provider.create_bot_member(
             name,
@@ -1445,138 +1677,228 @@ impl Render for BotForm {
             name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
         // Work on the team's computers needs a runtime.
         let off = off || (self.runner && self.value(&self.runtime, cx).is_empty());
+        // Editing: the runner loads first; saving needs it in and a change.
+        let load = self.editing.as_ref().map(|e| e.runner.clone());
+        let runner_ready = !matches!(load, Some(RunnerLoad::Loading | RunnerLoad::Failed(_)));
+        let was_runner = matches!(&load, Some(RunnerLoad::Loaded(Some(_))));
+        let off =
+            off || (self.editing.is_some() && self.pending_edit(cx).is_none_or(|e| e.is_empty()));
         let (mode_page, pick_page, submit, retry) =
             (cx.entity(), cx.entity(), cx.entity(), cx.entity());
         let failed = refusal(
             "bot-failed",
             &self.status,
-            s::BOT_FAILED,
+            if self.editing.is_some() {
+                s::BOT_EDIT_FAILED
+            } else {
+                s::BOT_FAILED
+            },
             move |_, cx| retry.update(cx, |f, cx| f.submit(cx)),
             cx,
         );
-        let mut form = sheet_form()
-            .child(field_row(
-                s::NAME,
-                "member-name",
-                &self.name,
-                name_err.is_some(),
-                cx,
-            ))
-            .child(field_row(
-                s::ROLE,
-                "member-role",
-                &self.role,
-                role_err.is_some(),
-                cx,
-            ))
-            .child(choice_row(
-                s::BOT_MODE,
-                "bot-mode",
-                [s::BOT_MODE_EXTERNAL, s::BOT_MODE_RUNNER],
-                self.runner,
-                busy,
-                move |runner, _, cx| {
-                    mode_page.update(cx, |f, cx| {
-                        f.runner = runner;
-                        f.status = Status::Idle;
-                        cx.notify();
-                    })
-                },
-                window,
-                cx,
-            ));
-        form = form.child(sheet_footnote(
-            if self.runner {
-                s::BOT_MODE_RUNNER_HINT
-            } else {
-                s::BOT_MODE_EXTERNAL_HINT
-            },
-            cx,
-        ));
-        if self.runner {
-            let runtime = sheet_form_row(
-                s::RUNNER_RUNTIME,
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(crate::ui::native::tokens::space::S6)
-                    .when(!self.known_runtimes.is_empty(), |d| {
-                        let known = self.known_runtimes.clone();
-                        let input = self.runtime.clone();
-                        d.child(
-                            pull_down(
-                                "known-runtime",
-                                s::RUNNER_RUNTIME_KNOWN.trim_end_matches('：'),
-                                PushSize::Regular,
-                                window,
-                                cx,
-                            )
-                            .dropdown_menu(move |menu, _, _| {
-                                known.iter().fold(menu, |menu, rt| {
-                                    let (rt, input) = (rt.clone(), input.clone());
-                                    menu.item(PopupMenuItem::new(rt.clone()).on_click(
-                                        move |_, window, cx| {
-                                            input.update(cx, |st, cx| {
-                                                st.set_value(rt.clone(), window, cx)
-                                            })
-                                        },
-                                    ))
-                                })
-                            }),
-                        )
-                    })
-                    .child(NativeTextField::new("member-runtime", &self.runtime).full_width()),
-                cx,
+        use crate::ui::native::{Segment, Segmented, tokens::NativeType as _};
+        let k = crate::ui::native::native_colors(cx);
+        // A small label over each block of the sheet (2.3, sheet size).
+        let section = |text: &'static str| {
+            div()
+                .pb(tokens::space::S8)
+                .n_subheadline()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.secondary)
+                .child(text)
+        };
+        let mut body = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(tokens::space::S16)
+            .child(
+                sheet_form()
+                    .child(field_row(
+                        s::NAME,
+                        "member-name",
+                        &self.name,
+                        name_err.is_some(),
+                        cx,
+                    ))
+                    .child(field_row(
+                        s::ROLE,
+                        "member-role",
+                        &self.role,
+                        role_err.is_some(),
+                        cx,
+                    )),
             );
-            form = form
-                .child(runtime)
-                .child(field_row(
-                    s::RUNNER_LABELS,
-                    "member-labels",
-                    &self.labels,
-                    false,
-                    cx,
-                ))
-                .child(field_row(
-                    s::RUNNER_REPO,
-                    "member-repo",
-                    &self.repo,
-                    false,
-                    cx,
-                ))
-                .child(field_row(
-                    s::RUNNER_BRANCH,
-                    "member-branch",
-                    &self.branch,
-                    false,
+        match &load {
+            Some(RunnerLoad::Loading) => {
+                body = body.child(widgets::list_loading("bot-runner-loading", 2, false, cx));
+            }
+            Some(RunnerLoad::Failed(text)) => {
+                let again = cx.entity();
+                body = body.child(widgets::failed_alert(
+                    "bot-runner-failed",
+                    s::BOT_RUNNER_LOAD_FAILED,
+                    Some(text.clone()),
+                    Some(widgets::retry_button("bot-runner-retry", cx).on_click(
+                        move |_, window, cx| again.update(cx, |f, cx| f.load_runner(window, cx)),
+                    )),
                     cx,
                 ));
+            }
+            _ => {}
         }
-        form = form.child(sheet_form_row_top(
-            s::BOT_CHARACTER,
-            character_picker(
-                "bot-character",
-                Some(self.chosen_character(cx)),
-                busy,
-                move |c, _, cx| {
-                    pick_page.update(cx, |f, cx| {
-                        f.character = Some(c);
-                        cx.notify();
+        if runner_ready {
+            // 工作方式: two choices side by side, the one in effect raised,
+            // and one line on what it means under them.
+            let hint = if self.runner {
+                s::BOT_MODE_RUNNER_HINT
+            } else if was_runner {
+                s::BOT_EDIT_EXTERNAL_HINT
+            } else {
+                s::BOT_MODE_EXTERNAL_HINT
+            };
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section(s::BOT_MODE))
+                    .child(
+                        div().flex().child(
+                            Segmented::new(
+                                "bot-mode",
+                                [
+                                    Segment::Label(s::BOT_MODE_RUNNER.into()),
+                                    Segment::Label(s::BOT_MODE_EXTERNAL.into()),
+                                ],
+                            )
+                            .selected(if self.runner { 0 } else { 1 })
+                            .disabled(busy)
+                            .on_change(move |ix, _, cx| {
+                                mode_page.update(cx, |f, cx| {
+                                    f.runner = ix == 0;
+                                    f.status = Status::Idle;
+                                    cx.notify();
+                                })
+                            }),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .pt(tokens::space::S8)
+                            .n_subheadline()
+                            .text_color(k.secondary)
+                            .child(hint),
+                    ),
+            );
+        }
+        if runner_ready && self.runner {
+            // 运行方式: picked from what the team's computers have; typed only
+            // when no computer has reported yet.
+            let current = self.value(&self.runtime, cx);
+            let mut known = self.known_runtimes.clone();
+            if !current.is_empty() && !known.contains(&current) {
+                known.insert(0, current.clone());
+            }
+            let runtime: gpui::AnyElement = if known.is_empty() {
+                NativeTextField::new("member-runtime", &self.runtime)
+                    .full_width()
+                    .into_any_element()
+            } else {
+                let input = self.runtime.clone();
+                let shown = if current.is_empty() {
+                    s::RUNNER_RUNTIME_PICK.to_string()
+                } else {
+                    current.clone()
+                };
+                widgets::popup_fixed("member-runtime", shown, SELECT_WIDTH, window, cx)
+                    .dropdown_menu(move |menu, _, _| {
+                        known.iter().fold(menu, |menu, rt| {
+                            let (rt, input) = (rt.clone(), input.clone());
+                            menu.item(
+                                PopupMenuItem::new(rt.clone())
+                                    .checked(rt == current)
+                                    .on_click(move |_, window, cx| {
+                                        input.update(cx, |st, cx| {
+                                            st.set_value(rt.clone(), window, cx)
+                                        })
+                                    }),
+                            )
+                        })
                     })
-                },
-                window,
-                cx,
+                    .into_any_element()
+            };
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section(s::RUNNER_SECTION))
+                    .child(
+                        sheet_form()
+                            .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
+                            .child(field_row(
+                                s::RUNNER_LABELS,
+                                "member-labels",
+                                &self.labels,
+                                false,
+                                cx,
+                            ))
+                            .child(field_row(
+                                s::RUNNER_REPO,
+                                "member-repo",
+                                &self.repo,
+                                false,
+                                cx,
+                            ))
+                            .child(field_row(
+                                s::RUNNER_BRANCH,
+                                "member-branch",
+                                &self.branch,
+                                false,
+                                cx,
+                            )),
+                    ),
+            );
+        }
+        // The look of an existing member changes in its own sheet (更换形象…).
+        if self.editing.is_none() {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section(s::BOT_CHARACTER))
+                    .child(sheet_form().child(div().p(tokens::space::S12).child(
+                        character_picker(
+                            "bot-character",
+                            Some(self.chosen_character(cx)),
+                            busy,
+                            move |c, _, cx| {
+                                pick_page.update(cx, |f, cx| {
+                                    f.character = Some(c);
+                                    cx.notify();
+                                })
+                            },
+                            window,
+                            cx,
+                        ),
+                    ))),
+            );
+        }
+        let (title, explanation, default) = match &self.editing {
+            Some(e) => (
+                fill(s::EDIT_AI_TITLE, &[("name", &one_line(&e.name))]),
+                s::EDIT_AI_HINT,
+                common::SAVE,
             ),
-            cx,
-        ));
-        SheetLayout::new(s::ADD_AI_TITLE)
-            .explanation(s::ADD_AI_HINT)
+            None => (s::ADD_AI_TITLE.to_string(), s::ADD_AI_HINT, s::BOT_CREATE),
+        };
+        SheetLayout::new(title)
+            .explanation(explanation)
             .body(
                 div()
                     .id("bot-form-body")
-                    .max_h(px(420.))
+                    .max_h(px(460.))
                     .overflow_y_scroll()
-                    .child(form),
+                    .child(body),
             )
             .when_some(failed, |l, f| l.body(f))
             .when_some(name_err.clone().or(role_err.clone()), |l, e| {
@@ -1584,7 +1906,7 @@ impl Render for BotForm {
             })
             .buttons(sheet_actions(
                 "bot",
-                s::BOT_CREATE,
+                default,
                 busy || off,
                 move |_, cx| submit.update(cx, |f, cx| f.submit(cx)),
                 cx,
@@ -1595,6 +1917,26 @@ impl Render for BotForm {
 
 pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> Entity<BotForm> {
     let form = cx.new(|cx| BotForm::new(services, window, cx));
+    open_bot_sheet(form, window, cx)
+}
+
+/// The edit sheet of an AI member: the 添加 sheet with its name, 岗位 and
+/// how it works filled in.
+pub fn open_edit_bot(
+    services: Services,
+    member: &Member,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<BotForm> {
+    let form = cx.new(|cx| {
+        let mut form = BotForm::new(services, window, cx);
+        form.edit(member, window, cx);
+        form
+    });
+    open_bot_sheet(form, window, cx)
+}
+
+fn open_bot_sheet(form: Entity<BotForm>, window: &mut Window, cx: &mut App) -> Entity<BotForm> {
     open_form_sheet(
         form.clone(),
         SheetWidth::List,
@@ -1837,5 +2179,71 @@ mod tests {
         assert_eq!(parse_spend("0"), Err(()));
         assert_eq!(parse_spend("1000001"), Err(()));
         assert_eq!(parse_spend("12.5"), Err(()));
+    }
+
+    fn rs(runtime: &str, labels: &[&str], repo: Option<&str>) -> RunnerSetup {
+        RunnerSetup {
+            runtime: runtime.into(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+            repo: repo.map(str::to_string),
+            base_branch: None,
+        }
+    }
+
+    #[test]
+    fn an_unchanged_edit_sends_nothing() {
+        let before = rs("main", &["mac"], Some("/srv/app"));
+        // Spaces and an empty 岗位 field are no change.
+        let after = rs(" main ", &["mac", " "], Some("/srv/app "));
+        let edit = bot_edit("跑腿", None, Some(&before), " 跑腿 ", " ", Some(&after));
+        assert!(edit.is_empty(), "{edit:?}");
+        assert!(bot_edit("助手", Some("测试"), None, "助手", "测试", None).is_empty());
+    }
+
+    #[test]
+    fn an_edit_sends_only_what_changed() {
+        let before = rs("main", &["mac"], None);
+        let edit = bot_edit(
+            "跑腿",
+            Some("测试"),
+            Some(&before),
+            "跑腿二号",
+            "测试",
+            Some(&before),
+        );
+        assert_eq!(
+            edit,
+            BotMemberEdit {
+                name: Some("跑腿二号".into()),
+                ..Default::default()
+            }
+        );
+        // Emptying the 岗位 clears it.
+        let edit = bot_edit(
+            "跑腿",
+            Some("测试"),
+            Some(&before),
+            "跑腿",
+            "",
+            Some(&before),
+        );
+        assert_eq!(edit.role, Some(None));
+        assert_eq!((edit.name, edit.runner), (None, None));
+        // A new label replaces the runner, cleaned.
+        let after = rs("main", &["mac", " office "], None);
+        let edit = bot_edit("跑腿", None, Some(&before), "跑腿", "", Some(&after));
+        assert_eq!(
+            edit.runner,
+            Some(RunnerChange::Set(rs("main", &["mac", "office"], None)))
+        );
+    }
+
+    #[test]
+    fn switching_the_runner_sets_or_removes_it() {
+        let runner = rs("main", &[], None);
+        let on = bot_edit("助手", None, None, "助手", "", Some(&runner));
+        assert_eq!(on.runner, Some(RunnerChange::Set(runner.clone())));
+        let off = bot_edit("助手", None, Some(&runner), "助手", "", None);
+        assert_eq!(off.runner, Some(RunnerChange::Remove));
     }
 }
