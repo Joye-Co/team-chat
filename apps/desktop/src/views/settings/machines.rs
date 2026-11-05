@@ -23,7 +23,7 @@ use super::{
     widgets::{self, Status, answer},
 };
 use crate::ui::native::sheet::sheet_status_error;
-use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_invalid};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::Services,
     copy::{common, fill, settings as s},
@@ -508,12 +508,11 @@ impl Render for MachineForm {
             .explanation(s::COMPUTER_ADD_HINT)
             .body(
                 sheet_form()
-                    .child(sheet_form_row_invalid(
+                    .child(sheet_form_row(
                         s::MACHINE_NAME,
                         NativeTextField::new("machine-name", &self.name)
                             .full_width()
                             .error(problem.is_some()),
-                        problem.is_some(),
                         cx,
                     ))
                     .child(sheet_form_row(

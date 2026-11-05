@@ -876,6 +876,19 @@ pub fn open_notify_groups(
     Ok(handle)
 }
 
+/// The longest member name and the longest 岗位 of the seeded members: the
+/// worst values a sheet field can hold.
+fn longest_member(services: &Services) -> (String, String) {
+    let members = services.provider.members();
+    let longest = |it: &mut dyn Iterator<Item = String>| {
+        it.max_by_key(|s| s.chars().count()).unwrap_or_default()
+    };
+    (
+        longest(&mut members.iter().map(|m| m.name.clone())),
+        longest(&mut members.iter().filter_map(|m| m.role.clone())),
+    )
+}
+
 /// A settings pane with one of its sheets open, for a scene.
 fn open_with_dialog(
     services: Services,
@@ -898,7 +911,16 @@ pub fn open_invite_dialog(
         services,
         Page::Members,
         |s, w, cx| {
-            super::members::open_invite(s, w, cx);
+            // Worst data: the longest name and 岗位 of the seeded members
+            // in the fields (review 3 C1-12).
+            let worst = crate::selftest::worst_case().then(|| longest_member(&s));
+            let form = super::members::open_invite(s, w, cx);
+            if let Some((name, role)) = worst {
+                form.update(cx, |f, cx| {
+                    f.fill(&name, w, cx);
+                    f.fill_role(&role, w, cx);
+                });
+            }
         },
         cx,
     )
@@ -914,7 +936,11 @@ pub fn open_bot_dialog(
         services,
         Page::Members,
         |s, w, cx| {
-            super::members::open_add_bot(s, w, cx);
+            let worst = crate::selftest::worst_case().then(|| longest_member(&s).0);
+            let form = super::members::open_add_bot(s, w, cx);
+            if let Some(name) = worst {
+                form.update(cx, |f, cx| f.fill(&name, None, w, cx));
+            }
         },
         cx,
     )

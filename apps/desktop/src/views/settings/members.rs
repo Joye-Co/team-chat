@@ -22,9 +22,7 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{
-    sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_invalid, sheet_form_row_top,
-};
+use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_top};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus, status::StatusBoard},
@@ -90,10 +88,10 @@ const SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDTH;
 /// The spend limit field (2.8 number field).
 const SPEND_WIDTH: gpui::Pixels = metrics::LABEL_COLUMN;
 
-/// The spend limit as the field shows it: "¥1,000,000", or empty (不限).
+/// The spend limit as the field shows it: "1,000,000" (the "¥" is the
+/// field's prefix), or empty (不限).
 fn spend_text(n: Option<u32>) -> String {
-    n.map(|n| fill(s::RULES_SPEND_VALUE, &[("n", &widgets::grouped(n.into()))]))
-        .unwrap_or_default()
+    n.map(|n| widgets::grouped(n.into())).unwrap_or_default()
 }
 
 pub struct MembersPage {
@@ -308,7 +306,8 @@ impl MembersPage {
         let is_me = me == Some(m.id.as_str());
         let id = m.id.clone();
         let page = cx.entity();
-        // An AI member's live state wins over presence: 工作中, 等人回答.
+        // An AI member's live state wins over presence (§2.12 words): 在做,
+        // 等人回答, 异常.
         let live = if m.is_bot() {
             StatusBoard::status(cx, m)
         } else {
@@ -398,7 +397,8 @@ impl MembersPage {
         };
         let row = widgets::ItemRow::new(
             ElementId::Name(format!("member-{id}").into()),
-            one_line(&m.name),
+            // Beside the avatar a leading emoji is left out (X-01).
+            one_line(crate::ui::avatar::name_beside_avatar(&m.name)),
         )
         .media(
             ui::MemberAvatar::new(Some(m), tokens::avatar::MD)
@@ -497,8 +497,21 @@ impl MembersPage {
         };
         let spend_bad =
             matches!(&self.rules_status, Status::Failed(t) if t.as_ref() == s::SPEND_INVALID);
+        // 2.8 number field: "¥" at x + 12, the amount right-aligned in
+        // tabular figures (review 3 C1-08). No prefix on the empty 不限.
+        let has_spend = !self.spend.read(cx).value().trim().is_empty();
         let spend = NativeTextField::new("rules-spend", &self.spend)
             .width(SPEND_WIDTH)
+            .align(gpui::TextAlign::Right)
+            .when(has_spend, |f| {
+                f.leading(
+                    div()
+                        .flex_none()
+                        .n_body()
+                        .text_color(native_colors(cx).secondary)
+                        .child(s::RULES_SPEND_PREFIX),
+                )
+            })
             .disabled(!owner)
             .error(spend_bad);
         let approver_text = |a: ApproverRole| match a {
@@ -546,11 +559,7 @@ impl MembersPage {
                 |r, v| r.deploy_prod = v,
             ))
             // At rest the amount is right-aligned (2.8 number field).
-            .row(FormRow::new(s::RULES_SPEND).control(if owner {
-                widgets::number_at_rest("rules-spend-rest", spend, &self.spend, window, cx)
-            } else {
-                spend.into_any_element()
-            }))
+            .row(FormRow::new(s::RULES_SPEND).control(spend))
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
         // Alert under the group.
@@ -739,10 +748,9 @@ fn field_row(
     invalid: bool,
     cx: &App,
 ) -> gpui::Div {
-    sheet_form_row_invalid(
+    sheet_form_row(
         label,
         NativeTextField::new(id, state).full_width().error(invalid),
-        invalid,
         cx,
     )
 }
@@ -895,7 +903,30 @@ pub fn character_picker(
                 }
                 random_pick(c, window, cx)
             });
-    div()
+    // ← → ↑ ↓ walk the tiles (§2.9 grid, review 3 C1-10): a key on a
+    // focused tile bubbles here and moves the focus, ↑ / ↓ by a row.
+    let walk = |e: &gpui::KeyDownEvent, window: &mut Window, cx: &mut App| {
+        if e.keystroke.modifiers.modified() {
+            return;
+        }
+        let (next, steps) = match e.keystroke.key.as_str() {
+            "right" => (true, 1),
+            "left" => (false, 1),
+            "down" => (true, PICKER_COLUMNS as usize),
+            "up" => (false, PICKER_COLUMNS as usize),
+            _ => return,
+        };
+        for _ in 0..steps {
+            if next {
+                window.focus_next(cx);
+            } else {
+                window.focus_prev(cx);
+            }
+        }
+        cx.stop_propagation();
+    };
+    // Centered in its column, so the void is shared by both sides.
+    let grid = div()
         .w(cell * PICKER_COLUMNS + gap * (PICKER_COLUMNS - 1.))
         .flex()
         .flex_wrap()
@@ -917,7 +948,13 @@ pub fn character_picker(
             ))
             .on_click(move |_, window, cx| pick(c, window, cx))
         }))
-        .child(random)
+        .child(random);
+    div()
+        .w_full()
+        .flex()
+        .justify_center()
+        .on_key_down(walk)
+        .child(grid)
 }
 
 /// The look a new bot gets until one is picked by hand: the roster's character for `name`,
@@ -982,6 +1019,12 @@ impl InviteForm {
     pub fn fill(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.name
             .update(cx, |st, cx| st.set_value(name.to_string(), window, cx));
+    }
+
+    /// Types `role` into 岗位 (self-test scenes).
+    pub fn fill_role(&mut self, role: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.role
+            .update(cx, |st, cx| st.set_value(role.to_string(), window, cx));
     }
 
     pub fn submit(&mut self, cx: &mut Context<Self>) {

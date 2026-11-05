@@ -373,7 +373,8 @@ pub fn status_line(id: impl Into<ElementId>, status: &Status, cx: &App) -> Optio
         Status::Idle => return None,
         Status::Busy(text) => (text.clone(), k.text_3, false),
         Status::Done(text) => (text.clone(), k.text_3, false),
-        Status::Failed(text) => (text.clone(), k.danger_text, true),
+        // Foreground text with the red icon, never red text (§2.8 v15).
+        Status::Failed(text) => (text.clone(), k.text_1, true),
     };
     let busy = status.busy();
     let gate = crate::ui::motion::busy_gate(id, busy, move |shown| {
@@ -392,8 +393,12 @@ pub fn status_line(id: impl Into<ElementId>, status: &Status, cx: &App) -> Optio
         } else if busy {
             div().into_any_element()
         } else if failed {
-            line(text, color)
-                .child(crate::ui::icon(Sym::Alert, theme::icon::CHIP, k.danger))
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .child(crate::ui::icon(Sym::Failed, theme::icon::ROW, k.danger))
+                .child(line(text, color))
                 .into_any_element()
         } else {
             line(text, color).into_any_element()
@@ -606,15 +611,18 @@ pub fn pane() -> Div {
         .gap(metrics::GROUP_GAP)
 }
 
-/// A quiet line under a group or in a sheet (Subheadline): `secondary`, or
-/// `red` when the request failed. `None` when idle.
+/// A quiet line under a group or in a sheet (Subheadline): `secondary`; a
+/// failed request is foreground text after a 16 red icon, never red text
+/// (§2.8 v15, review 3 K-03). `None` when idle.
 pub fn native_status(status: &Status, cx: &App) -> Option<Div> {
     use crate::ui::native::{NativeType as _, native_colors};
     let k = native_colors(cx);
     let (text, color) = match status {
         Status::Idle => return None,
         Status::Busy(t) | Status::Done(t) => (t.clone(), k.secondary),
-        Status::Failed(t) => (t.clone(), k.red),
+        Status::Failed(t) => {
+            return Some(crate::ui::native::sheet_status_error(t.clone(), cx).px(px(2.)));
+        }
     };
     Some(
         div()
@@ -646,27 +654,13 @@ pub fn field_at_rest(
     window: &Window,
     cx: &App,
 ) -> AnyElement {
-    rest_cover(id, field, state, false, window, cx)
-}
-
-/// A number field at rest (2.8): the value right-aligned in tabular
-/// figures. While it is focused the input shows alone. Pass a disabled
-/// field as it is: it draws at half opacity, which a cover cannot match.
-pub fn number_at_rest(
-    id: &'static str,
-    field: impl IntoElement,
-    state: &gpui::Entity<gpui_component::input::InputState>,
-    window: &Window,
-    cx: &App,
-) -> AnyElement {
-    rest_cover(id, field, state, true, window, cx)
+    rest_cover(id, field, state, window, cx)
 }
 
 fn rest_cover(
     id: &'static str,
     field: impl IntoElement,
     state: &gpui::Entity<gpui_component::input::InputState>,
-    number: bool,
     window: &Window,
     cx: &App,
 ) -> AnyElement {
@@ -684,7 +678,7 @@ fn rest_cover(
     div()
         .id(id)
         .relative()
-        .when(!number, |d| d.w_full())
+        .w_full()
         .child(field)
         .child(
             div()
@@ -699,14 +693,12 @@ fn rest_cover(
                 .bg(k.control)
                 .flex()
                 .items_center()
-                .when(number, |d| d.justify_end())
                 .cursor_text()
                 .on_click(move |_, window, cx| focus.focus(window, cx))
                 .child(
                     crate::ui::truncate::TruncText::new(value)
                         .id(SharedString::from(format!("{id}-rest")))
-                        .when(!number, |t| t.flex_1())
-                        .when(number, |t| t.n_figures())
+                        .flex_1()
                         .n_body()
                         .text_color(k.label),
                 ),
