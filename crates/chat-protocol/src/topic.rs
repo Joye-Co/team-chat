@@ -1,5 +1,5 @@
-//! Topic extensions: `waitingOn`, the responsible member, last activity and following
-//! (docs/protocol.md, "Topics: waitingOn, owner, follow"). The fields live on
+//! Topic extensions: `waitingOn`, the responsible member, last activity, following and muting
+//! (docs/protocol.md, "Topics: waitingOn, owner, follow, mute"). The fields live on
 //! [`crate::Topic`], [`crate::TopicUpdateFrame`] and [`crate::TopicUpdatedData`].
 
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,25 @@ pub struct TopicFollowFrame {
 }
 
 impl TopicFollowFrame {
+    pub fn validate(&self) -> Validation {
+        check_id("rid", &self.rid)?;
+        check_id("groupId", &self.group_id)?;
+        check_id("topicId", &self.topic_id)
+    }
+}
+
+/// `{ t: "topic.mute" }`: mute or unmute a topic for me; in a muted topic only mentions
+/// notify. `ack.result` is a [`crate::TopicState`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicMuteFrame {
+    pub rid: String,
+    pub group_id: String,
+    pub topic_id: String,
+    pub muted: bool,
+}
+
+impl TopicMuteFrame {
     pub fn validate(&self) -> Validation {
         check_id("rid", &self.rid)?;
         check_id("groupId", &self.group_id)?;

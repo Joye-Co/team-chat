@@ -250,7 +250,7 @@ default value. Unless a rule says otherwise, a frame that breaks a rule gets `ac
 `ok: false` and code `invalid` (bad value), `forbidden` (not allowed), `not_found` (unknown id or
 not a member of the group) or `too_large`.
 
-## Topics: waitingOn, owner, follow
+## Topics: waitingOn, owner, follow, mute
 
 Module: `topic.ts` / `topic.rs`.
 
@@ -265,6 +265,7 @@ Topic += {
 topic.updated data += { waitingOn?: string[], ownerId?: string | null, lastMessageAt?: number }
   // present = changed to this value
 { t: "topic.follow", rid, groupId, topicId, follow: boolean }   // ack.result = TopicState
+{ t: "topic.mute", rid, groupId, topicId, muted: boolean }      // ack.result = TopicState
 ```
 
 Rules:
@@ -281,6 +282,10 @@ Rules:
   sends a `reads` frame to my other connections. Auto-follow: the server sets `following` to true
   when I create the topic, post in it, am mentioned in it, am added to its `waitingOn`, or become
   its owner. An explicit unfollow stays until the next of these.
+- `topic.mute` sets my mute state for one topic (话题静音); the server answers with my
+  `TopicState` and sends a `reads` frame to my other connections, as for `topic.follow`. In a
+  muted topic only mentions of me notify (see Notifications). Muting does not change `following`,
+  and auto-follow does not unmute: a mute stays until I unmute.
 
 ## Read positions per topic
 
@@ -293,6 +298,7 @@ TopicState = {
   unread: number        // unread messages in this topic not written by me
   mentions: number      // of those, the ones that mention me
   following?: boolean   // absent = false
+  muted?: boolean       // absent = false
 }
 GroupSummary += { topics?: TopicState[] }
 { t: "read", groupId, seq, topicId?: string }                       // client, no ack
@@ -311,9 +317,9 @@ Rules:
 - `GroupSummary.unread` and `.mentions` are group totals: the sums over all topics.
   `GroupSummary.readSeq` is the group cursor.
 - `GroupSummary.topics` (in `welcome`, `directory` and `GET /v1/groups`) lists every topic with
-  `unread > 0`, `mentions > 0` or `following`. A topic that is not listed has no unread
-  messages, no mentions and is not followed.
-- After a `read` or `topic.follow` changes my state, the server sends `reads` to every connection
+  `unread > 0`, `mentions > 0`, `following` or `muted`. A topic that is not listed has no
+  unread messages, no mentions and is neither followed nor muted.
+- After a `read`, `topic.follow` or `topic.mute` changes my state, the server sends `reads` to every connection
   of mine (all devices, the sender too). `topics` holds only the topics that changed; for a
   group-wide read it may be empty, and the client then sets every topic's unread and mentions to
   0 for topics with `lastSeq <= readSeq`. The totals in `reads` are always the new group totals.
@@ -595,8 +601,9 @@ NotifyReason = "mention" | "waiting" | "result" | "message"
 ```
 
 The server sets `notify` per receiving member on live `event` frames only (never on `page`).
-No notification for an event whose `actorId` is me or when my level is `none`. In a muted group
-only rule 1 (`mention`) applies. Otherwise, the first rule that matches wins:
+No notification for an event whose `actorId` is me or when my level is `none`. In a muted group,
+and in a topic I muted (`topic.mute`), only rule 1 (`mention`) applies. Otherwise, the first rule
+that matches wins:
 
 1. `mention`: `message.created` that mentions me.
 2. `waiting`: `topic.updated` whose `waitingOn` now includes me and did not before.
@@ -1454,7 +1461,7 @@ block.
 
 Additive, as in 1.1. Module: `settings.ts` / `settings.rs`; server feature `server/src/settings/`.
 The settings window (设置: panes 账号, 通知, 成员) reads and writes these; clients keep only
-sound, badge and window choices locally. Per-group levels (按群设置) stay
+sound, badge and window choices locally. Per-group levels (set from the 群's own menu) stay
 `PATCH /v1/groups/:id/prefs` (see Notifications).
 
 ## Notification settings
@@ -1490,7 +1497,7 @@ Rules:
   "Notifications" stays the first step and its `notify` values do not change; the room adds
   `notifyEvent` for `mention`, `waiting` and `result`, and one new case with reason `message`
   (so 1.0.x and 1.1 clients show a plain notification): `blocked` when a topic I follow gets
-  status `blocked` (not muted, level not `none`, not my own change).
+  status `blocked` (group and topic not muted, level not `none`, not my own change).
 - The gateway removes `notify` and `notifyEvent` when the event's switch is off and inside quiet
   hours. A `notify` without `notifyEvent` follows only quiet hours. Quiet hours that cross
   midnight work; equal start and end mean none. The event itself is always delivered.
