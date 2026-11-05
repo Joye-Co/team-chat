@@ -1525,11 +1525,12 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         .and_then(|r| r.started_at)
         .or(answer.as_ref().map(|a| a.at))
         .unwrap_or(ctx.msg.created_at);
+    // The start in the thread's and the inspector's words (`今天 10:18 起`, T-20).
     let used = fill(
-        tl::PLAN_FOOTER,
+        tl::PLAN_FOOTER_SINCE,
         &[
             ("used", &span_text(USED, ctx.env.now() - started)),
-            ("time", &crate::views::shell::clock(started)),
+            ("since", &crate::views::topic_rail::run_since(started)),
         ],
     );
     let a = ctx.answerer();
