@@ -37,6 +37,9 @@ crate::copy! {
     // --- v13/ux-pages ---
     RAIL_AI_MEMBERS = "AI 成员",
     RAIL_TAIL = "{word} · {n}",
+    // B1-25: the one row of a folded section, under its own label.
+    RAIL_FOLDED_N = "{n} 个话题",
+    RAIL_NO_TOPICS = "还没有话题",
     RAIL_WAITS_ON_YOU_N = "等你 {n}",
     // --- end v13/ux-pages ---
     RAIL_NAMES_SEP = "、",
