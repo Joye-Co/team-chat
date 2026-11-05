@@ -354,6 +354,11 @@ fn recorded(
 ) -> Option<Recorded> {
     let me = me?;
     let p = &services.provider;
+    // One rule with the sidebar and the 话题 (`topic_page::ask_answered`):
+    // only an answer on its way or one to the card's current rev counts.
+    if !crate::views::topic_page::ask_answered(p.as_ref(), me, item) {
+        return None;
+    }
     if let Some(v2) = card_v2 {
         // My answer on its way first, then the one the server stored.
         if let Some(pending) = p

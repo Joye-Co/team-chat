@@ -141,7 +141,16 @@ impl MembersPage {
         let p = &self.services.provider;
         let me = self.services.me();
         let runs = p.active_runs();
-        let asks = p.asks_for_me();
+        // An ask I answered (at the provider) no longer waits on me
+        // (`topic_page::ask_answered`, as the sidebar and 首页).
+        let asks: Vec<_> = p
+            .asks_for_me()
+            .into_iter()
+            .filter(|a| {
+                !me.as_deref()
+                    .is_some_and(|me| crate::views::topic_page::ask_answered(p.as_ref(), me, a))
+            })
+            .collect();
         let mut out: Vec<Entry> = p
             .members()
             .into_iter()
