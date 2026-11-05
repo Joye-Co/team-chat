@@ -553,15 +553,24 @@ pub fn chip_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button
         .n_section()
 }
 
-/// A ghost button around custom content (an "add member" row in a list):
-/// full width, radius 8, `accent` on hover.
+/// A ghost button around custom content (an "add member" row, a Settings
+/// navigation row): full width, radius 8, and the row hover of
+/// [`super::FocusRow`], muted at 50 % (§2.6 v15, review 3 C1-07).
 pub fn row_button(id: impl Into<ElementId>, cx: &App) -> Button {
-    let b = Button::new(id)
+    let k = native_colors(cx);
+    let l = Look {
+        hover: k.fill.opacity(0.5),
+        ..look(PushStyle::Ghost, &k)
+    };
+    Button::new(id)
         .with_size(gpui_component::Size::Medium)
         .w_full()
         .rounded(metrics::BUTTON_REGULAR_RADIUS)
-        .n_body();
-    styled(b, PushStyle::Ghost, cx)
+        .n_body()
+        .custom(variant(l, cx))
+        .bg(l.fill)
+        .text_color(l.text)
+        .border_0()
 }
 
 /// A square tile in a picker grid (avatar grid): ghost at rest; selected

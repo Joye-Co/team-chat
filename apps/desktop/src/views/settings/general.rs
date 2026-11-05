@@ -592,16 +592,13 @@ impl Render for GeneralPage {
                 SessionState::SignedIn { me, .. } => me.id,
                 _ => String::new(),
             };
-            for (id, label, value) in [
-                ("dev-server", dev::LABEL_SERVER, server.clone()),
-                ("dev-member", dev::LABEL_MEMBER_ID, me),
-            ] {
-                dev_group = dev_group.row(dev_row(
-                    label,
-                    dev_value_with_copy(id, value, window, cx),
-                    cx,
-                ));
-            }
+            // 服务器 is already in 版本与服务器 with its copy button: one
+            // place per fact on a screen (A5, review 3 C1-06).
+            dev_group = dev_group.row(dev_row(
+                dev::LABEL_MEMBER_ID,
+                dev_value_with_copy("dev-member", me, window, cx),
+                cx,
+            ));
         }
         let page = cx.entity();
         let diagnostics = disabled_push(

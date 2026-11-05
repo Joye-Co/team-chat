@@ -78,6 +78,7 @@ pub struct NativeTextField {
     disabled: bool,
     error: bool,
     focused: Option<bool>,
+    leading: Option<AnyElement>,
     trailing: Option<AnyElement>,
     align: TextAlign,
 }
@@ -92,6 +93,7 @@ impl NativeTextField {
             disabled: false,
             error: false,
             focused: None,
+            leading: None,
             trailing: None,
             align: TextAlign::Left,
         }
@@ -133,6 +135,13 @@ impl NativeTextField {
     /// Draws the focus ring whatever the focus (self-test scenes).
     pub fn show_focus(mut self, focused: bool) -> Self {
         self.focused = Some(focused);
+        self
+    }
+
+    /// A leading element inside the field at x + 12: the "¥" of a number
+    /// field (§2.8), 8 before the value.
+    pub fn leading(mut self, el: impl IntoElement) -> Self {
+        self.leading = Some(el.into_any_element());
         self
     }
 
@@ -178,6 +187,7 @@ impl RenderOnce for NativeTextField {
             .items_center()
             .gap(space::S8)
             .cursor_text()
+            .children(self.leading)
             .child(
                 // The text clips at the 12 px padding, never at the border
                 // (T1-12). At rest a value longer than the field ends in
@@ -214,10 +224,93 @@ impl RenderOnce for NativeTextField {
                                 .text_color(k.label)
                                 .when(self.align == TextAlign::Right, |t| t.text_right()),
                         )
-                    })),
+                    }))
+                    // Focused, a value longer than the field fades out at
+                    // the edge it runs past, never a glyph cut at the
+                    // 12 px text edge (break-ui, review 3 K-07). Painted
+                    // after the input's prepaint, so it reads this frame's
+                    // scroll offset and caret.
+                    .when(focused, |d| {
+                        let state = self.state.clone();
+                        let fill = k.control;
+                        d.child(
+                            gpui::canvas(
+                                |_, _, _| (),
+                                move |bounds, _, window, cx| {
+                                    let (left, right) =
+                                        overflow_edges(&state, bounds.size.width, window, cx);
+                                    for (on, at_left) in [(left, true), (right, false)] {
+                                        if on {
+                                            window.paint_quad(edge_fade(bounds, fill, at_left));
+                                        }
+                                    }
+                                },
+                            )
+                            .absolute()
+                            .inset_0(),
+                        )
+                    }),
             )
             .children(self.trailing)
     }
+}
+
+/// The edges a focused single-line value runs past in a text box `room`
+/// wide, from this frame's scroll offset: (left, right). When the end of the
+/// value (and a caret there) is in view, the right edge is not faded.
+fn overflow_edges(
+    state: &Entity<InputState>,
+    room: Pixels,
+    window: &Window,
+    cx: &App,
+) -> (bool, bool) {
+    let state = state.read(cx);
+    if state.presentation().is_masked() {
+        return (false, false);
+    }
+    let value = state.value();
+    if value.is_empty() {
+        return (false, false);
+    }
+    let style = window.text_style();
+    let run = gpui::TextRun {
+        len: value.len(),
+        font: style.font(),
+        color: style.color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let width = window
+        .text_system()
+        .shape_line(value.clone(), text::UI.0, &[run], None)
+        .width;
+    let offset = state.scroll_offset().x;
+    let left = offset < px(-0.5);
+    let right = width + offset > room + px(0.5);
+    (left, right)
+}
+
+/// A 12 fade from the field fill over one edge of the text box `bounds`.
+fn edge_fade(bounds: gpui::Bounds<Pixels>, fill: Hsla, left: bool) -> gpui::PaintQuad {
+    let w = metrics::FIELD_PAD;
+    let (x, from, to) = if left {
+        (bounds.origin.x, fill, fill.opacity(0.))
+    } else {
+        (
+            bounds.origin.x + bounds.size.width - w,
+            fill.opacity(0.),
+            fill,
+        )
+    };
+    gpui::fill(
+        gpui::Bounds::new(point(x, bounds.origin.y), gpui::size(w, bounds.size.height)),
+        gpui::linear_gradient(
+            90.,
+            gpui::linear_color_stop(from, 0.),
+            gpui::linear_color_stop(to, 1.),
+        ),
+    )
 }
 
 /// A multi-line field (§1.8, §2.8 Textarea): the Input recipe over

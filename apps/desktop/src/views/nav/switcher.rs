@@ -217,7 +217,8 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
         .filter(|m| Some(m.id.as_str()) != me && !m.deactivated && !has_dm(&m.id))
         .map(|m| Entry {
             target: Target::Member(m.id.clone()),
-            label: m.name.clone(),
+            // The row shows the avatar: a leading emoji is left out (X-01).
+            label: crate::ui::avatar::name_beside_avatar(&m.name).to_string(),
             detail: m.role.clone(),
             member: Some(m.clone()),
             topic: None,
@@ -653,7 +654,11 @@ impl Switcher {
                 .n_headline()
                 .text_color(ink)
                 .one_line()
-                .child(author.map(|a| a.name.clone()).unwrap_or_default()),
+                .child(
+                    author
+                        .map(|a| crate::ui::avatar::name_beside_avatar(&a.name).to_string())
+                        .unwrap_or_default(),
+                ),
         )
         .child(
             palette::title(

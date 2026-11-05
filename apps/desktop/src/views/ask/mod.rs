@@ -565,14 +565,16 @@ impl AskPalette {
         let active = ix == self.active;
         let (_, ink2) = spotlight_ink(active, cx);
         // The helper reads 交给 <name> 安排 unless the query names it.
+        // The row leads with the avatar: a leading emoji is left out (X-01).
+        let name = crate::ui::avatar::name_beside_avatar(&member.name);
         let (title, detail) = if *helper && !*named {
             (
-                fill(c::ASK_GIVE_TO_JOJO, &[("name", &member.name)]),
-                fill(c::ASK_GIVE_JOJO_DETAIL, &[("name", &member.name)]),
+                fill(c::ASK_GIVE_TO_JOJO, &[("name", name)]),
+                fill(c::ASK_GIVE_JOJO_DETAIL, &[("name", name)]),
             )
         } else {
             (
-                fill(c::ASK_GIVE_TO, &[("name", &member.name)]),
+                fill(c::ASK_GIVE_TO, &[("name", name)]),
                 fill(c::ASK_GIVE_DETAIL, &[("work", task)]),
             )
         };
