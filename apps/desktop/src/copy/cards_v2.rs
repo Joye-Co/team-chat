@@ -3,7 +3,8 @@
 crate::copy! {
     // Kept from the foundation stub (other tracks may read them).
     CARD_NEEDS_YOU = "等你回答",
-    CARD_DONE = "完成",
+    // A run result is 已交付 (D17); 完成 is a done 话题 (review 5 X-03).
+    CARD_DELIVERED = "已交付",
     CARD_WORKING = "正在做",
     CARD_ANSWERED = "{name} 选了「{choice}」 · {time}",
     CARD_SUPERSEDED = "这一版作废了",
@@ -138,7 +139,7 @@ crate::copy! {
     GALLERY_COLORS = "状态只用一种标记",
     GALLERY_COLOR_YOU = "等你：只给被等的人看",
     GALLERY_COLOR_LIVE = "在做：只用于进行中的工作",
-    GALLERY_COLOR_OK = "完成：做完了，或已经回答、确认、发布",
+    GALLERY_COLOR_OK = "已交付：做完了，或已经回答、确认、发布",
     GALLERY_COLOR_BAD = "失败：卡住了或检查没过",
     GALLERY_COLOR_REST = "排队：其余状态用灰色图标",
     GALLERY_DONTS = "成员不能做的事",
@@ -176,9 +177,9 @@ crate::copy! {
     GALLERY_PENDING = "等你",
     GALLERY_WAITING = "等别人",
     GALLERY_WORKING = "在做",
-    GALLERY_DONE = "已完成",
+    GALLERY_DONE = "已交付",
     GALLERY_FAILED = "失败",
-    GALLERY_EXPIRED = "已过期",
+    GALLERY_EXPIRED = "已停用",
     GALLERY_SUPERSEDED = "已作废",
     GALLERY_QUICK = "待选",
     GALLERY_MANY = "三个以上",

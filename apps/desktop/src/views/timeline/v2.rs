@@ -661,10 +661,11 @@ impl TimelineView {
             .text_color(n.label)
         });
         // §2.4 card header slot: the StatusBadge before the title, in the
-        // §2.12 word (X-02: 完成, never 做完了).
+        // §2.12 word: a run result is 已交付 (D17, review 5 X-03); 完成 is a
+        // done 话题.
         let state = div().flex().child(crate::ui::native::StatusBadge::new(
             crate::ui::native::BadgeState::Done,
-            crate::copy::common::STATUS_DONE,
+            crate::copy::common::STATUS_DELIVERED,
         ));
         // §2.4 compact in-thread card: the one width, radius 14, a 1 px
         // border, the card fill, shadow-sm, p 16.

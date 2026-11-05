@@ -29,6 +29,8 @@ crate::copy! {
     COUNT_CAP = "99+",
     STATUS_BLOCKED = "卡住了",
     STATUS_DONE = "完成",
+    // A run result (D17); 完成 is a done 话题 (review 5 X-03).
+    STATUS_DELIVERED = "已交付",
     CANCEL = "取消",
     SAVE = "保存",
     CLOSE = "关闭",

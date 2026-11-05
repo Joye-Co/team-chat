@@ -7,7 +7,7 @@ crate::copy! {
     BAND_WAITING_ON = "等{name}回答",
     BAND_WAITING_MANY = "等 {n} 位成员回答",
     BAND_WORKING = "在做",
-    BAND_DONE = "完成",
+    BAND_DONE = "已交付",
     BAND_FAILED = "失败",
     BAND_VOID = "已停用",
     BAND_EXPIRED = "已停用",
