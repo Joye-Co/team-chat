@@ -53,6 +53,14 @@ fn can_withdraw(mine: bool, state: ChangeState, queued: bool) -> bool {
     mine && queued && state != ChangeState::Merged
 }
 
+/// A name in the banner's text (T-20, X-01): no leading emoji, as beside an
+/// avatar, and an RTL name isolated so it cannot turn the line around.
+fn banner_name(services: &crate::app::Services, id: &str) -> String {
+    crate::copy::isolate(crate::ui::avatar::name_beside_avatar(&member_name(
+        services, id,
+    )))
+}
+
 /// `刚刚` within a minute, else the clock; `None` for a missing time
 /// (never `01-01`).
 fn when(at: Millis) -> Option<String> {
@@ -74,7 +82,7 @@ impl TopicPage {
         let merger = topic
             .as_ref()
             .and_then(|x| x.owner_id.clone())
-            .map(|id| member_name(&self.services, &id))
+            .map(|id| banner_name(&self.services, &id))
             .unwrap_or_default();
         if let (Some((by, at)), Some(ch)) = (p.changes_approval(g, t), changes.as_ref())
             && matches!(ch.state, ChangeState::Merging | ChangeState::Merged)
@@ -86,7 +94,7 @@ impl TopicPage {
                 _ => fill(
                     c::APPROVED_BY,
                     &[
-                        ("who", &member_name(&self.services, &by)),
+                        ("who", &banner_name(&self.services, &by)),
                         ("name", &merger),
                     ],
                 ),
@@ -215,9 +223,23 @@ impl TopicPage {
             Pinned::Ask { ask } => ask.message_id.clone().map(|id| (id, false)),
             Pinned::Record { .. } => None,
         };
-        if card_id.is_some_and(|(id, review)| {
-            self.card_answers_here(g, &id, review) && self.timeline.read(cx).shows_card(&id)
-        }) {
+        let timeline = self.timeline.read(cx);
+        let hidden = match card_id {
+            Some((id, review)) => {
+                self.card_answers_here(g, &id, review) && timeline.shows_card(&id)
+            }
+            // T-10: a 话题-level ask (no card of its own) never pins while an
+            // ask card of this 话题 is on screen: that card is the question.
+            None => {
+                !matches!(state, Pinned::Record { .. })
+                    && self.services.me().is_some_and(|me| {
+                        timeline.cards_on_screen().any(|id| {
+                            crate::data::card_waits_on(&*self.services.provider, g, id, &me)
+                        })
+                    })
+            }
+        };
+        if hidden {
             return None;
         }
         let (g, t) = (g.to_string(), t.to_string());
@@ -304,7 +326,7 @@ impl TopicPage {
             Pinned::Ask { ask } => {
                 let from = fill(
                     c::ASK_FROM,
-                    &[("name", &member_name(&self.services, &ask.from))],
+                    &[("name", &banner_name(&self.services, &ask.from))],
                 );
                 let line = match when(ask.at) {
                     Some(at) => format!("{from} · {at}"),

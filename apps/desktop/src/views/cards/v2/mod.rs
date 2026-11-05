@@ -1591,7 +1591,7 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
 }
 
 fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
-    super::v21::interact::conflict_toast(ctx, cx);
+    super::v21::interact::conflict_toast(ctx, window, cx);
     if let Some(card) = working(ctx, window, cx) {
         return card;
     }

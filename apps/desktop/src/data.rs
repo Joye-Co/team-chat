@@ -1684,12 +1684,33 @@ pub trait ChatProvider: Send + Sync + 'static {
             .collect()
     }
     /// The newest open ask for me in one 话题: the pinned decision card above
-    /// the composer.
+    /// the composer. A 话题-level ask (no card) takes the 话题's newest open
+    /// ask card when there is one, so the banner names that card's question
+    /// and asker (T-10), not the 话题 creator.
     fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<v2::AskItem> {
-        self.asks_for_me()
+        let ask = self
+            .asks_for_me()
             .into_iter()
             .filter(|a| a.group_id == group_id && a.topic_id == topic_id)
-            .max_by_key(|a| a.at)
+            .max_by_key(|a| a.at)?;
+        if ask.message_id.is_some() {
+            return Some(ask);
+        }
+        Some(match open_ask_card(self, group_id, topic_id) {
+            Some(m) => v2::AskItem {
+                title: self
+                    .card_v2(group_id, &m.id)
+                    .map(|c| c.card.title.clone())
+                    .or_else(|| self.card(group_id, &m.id).map(|c| c.title.clone()))
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or(ask.title),
+                message_id: Some(m.id),
+                from: m.author_id,
+                at: m.created_at,
+                ..ask
+            },
+            None => ask,
+        })
     }
     /// 做完了 today, newest first. The default lists 话题 marked done since
     /// local midnight, with the proof of each 话题's newest result
@@ -2413,6 +2434,61 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>>;
 }
 
+/// Messages scanned for the open ask card of a 话题.
+const ASK_CARD_SCAN: usize = 50;
+
+/// The newest card in a 话题 that still waits on my answer
+/// ([`card_waits_on`]), never my own card.
+pub fn open_ask_card<P: ChatProvider + ?Sized>(
+    p: &P,
+    group_id: &str,
+    topic_id: &str,
+) -> Option<Message> {
+    let me = my_id(p)?;
+    p.messages(group_id, topic_id, ASK_CARD_SCAN)
+        .messages
+        .into_iter()
+        .rev()
+        .filter(|m| m.deleted_at.is_none() && m.author_id != me)
+        .find(|m| card_waits_on(p, group_id, &m.id, &me))
+}
+
+/// The card of message `message_id` waits on `me`: a v2 card with an ask that
+/// `me` has not answered at its rev, or a v1 card with buttons that `me` has
+/// not pressed.
+pub fn card_waits_on<P: ChatProvider + ?Sized>(
+    p: &P,
+    group_id: &str,
+    message_id: &str,
+    me: &str,
+) -> bool {
+    match p.card_v2(group_id, message_id) {
+        Some(c) => {
+            c.card.ask.is_some()
+                && !p
+                    .card_v2_answers(group_id, message_id)
+                    .iter()
+                    .any(|a| a.actor_id == me && a.rev == c.card.rev)
+        }
+        None => {
+            p.card(group_id, message_id)
+                .is_some_and(|c| c.actions.as_ref().is_some_and(|a| !a.is_empty()))
+                && !p
+                    .card_presses(group_id, message_id)
+                    .iter()
+                    .any(|x| x.actor_id == me)
+        }
+    }
+}
+
+/// My member id, when signed in.
+fn my_id<P: ChatProvider + ?Sized>(p: &P) -> Option<MemberId> {
+    match p.session() {
+        SessionState::SignedIn { me, .. } => Some(me.id),
+        _ => None,
+    }
+}
+
 // --- settings-backend track: view types of 设置 › 账号 (devices), 通知 and 成员 (approval rules) ---
 
 /// A wall-clock time in this Mac's time zone (the 每日摘要 and 勿扰 time pop-ups).
@@ -2585,3 +2661,36 @@ impl DeviceKind {
 }
 
 // --- end settings-backend track ---
+
+#[cfg(test)]
+mod pinned_ask_tests {
+    use super::*;
+    use crate::views::cards::samples as cs;
+
+    /// T-10: a 话题-level ask takes the newest open card's question and asker,
+    /// not the 话题 creator; a pressed card no longer counts.
+    #[test]
+    fn topic_ask_names_the_newest_open_card() {
+        let p = crate::fake::FakeProvider::new();
+        let ask = p
+            .pinned_ask(cs::GROUP, cs::TOPIC)
+            .expect("the cards 话题 waits on me");
+        let card = open_ask_card(&*p, cs::GROUP, cs::TOPIC).expect("an open ask card");
+        assert_eq!(ask.message_id.as_deref(), Some(card.id.as_str()));
+        assert_eq!(ask.from, card.author_id);
+        assert_eq!(ask.at, card.created_at);
+        let title = p.card(cs::GROUP, &card.id).map(|c| c.title.clone());
+        assert_eq!(Some(ask.title), title);
+        let newest = p.messages(cs::GROUP, cs::TOPIC, 50).messages;
+        assert_eq!(newest.last().map(|m| &m.id), Some(&card.id));
+
+        let me = my_id(&*p).expect("signed in");
+        assert!(card_waits_on(&*p, cs::GROUP, &card.id, &me));
+        p.press_card_action(cs::GROUP, cs::TOPIC, &card.id, "staging-now");
+        assert!(!card_waits_on(&*p, cs::GROUP, &card.id, &me));
+        let next = p
+            .pinned_ask(cs::GROUP, cs::TOPIC)
+            .expect("an older card still waits");
+        assert_ne!(next.message_id.as_deref(), Some(card.id.as_str()));
+    }
+}

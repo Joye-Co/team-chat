@@ -131,6 +131,38 @@ pub fn clock_at(at: crate::data::Millis, now: chrono::DateTime<chrono::Local>) -
     }
 }
 
+/// The times of one column in one format (A1-24, F2): `HH:MM` when all are
+/// today, `MM-DD` when all are this year, else `YYYY-MM-DD`. A missing time
+/// reads `未知`.
+pub fn column_clocks(ats: &[crate::data::Millis]) -> Vec<String> {
+    column_clocks_at(ats, crate::selftest::clock::local_now())
+}
+
+/// [`column_clocks`] against a given "now" (tests).
+pub fn column_clocks_at(
+    ats: &[crate::data::Millis],
+    now: chrono::DateTime<chrono::Local>,
+) -> Vec<String> {
+    use chrono::{Datelike as _, Local, TimeZone as _};
+    let local = |at| known(at).and_then(|at| Local.timestamp_millis_opt(at).single());
+    let days: Vec<_> = ats.iter().map(|&at| local(at)).collect();
+    let today = now.date_naive();
+    let known_days = || days.iter().flatten();
+    let format = if known_days().all(|d| d.date_naive() == today) {
+        "%H:%M"
+    } else if known_days().all(|d| d.year() == now.year()) {
+        "%m-%d"
+    } else {
+        "%Y-%m-%d"
+    };
+    days.iter()
+        .map(|d| match d {
+            Some(d) => d.format(format).to_string(),
+            None => crate::copy::common::TIME_UNKNOWN.to_string(),
+        })
+        .collect()
+}
+
 /// A day as [`clock`] prints it without the time: `11-01`, `2025-11-01`
 /// in another year, `未知` for a missing time.
 pub fn day(at: crate::data::Millis) -> String {
@@ -225,6 +257,27 @@ pub fn topic_path(services: &crate::app::Services, group_id: &str, topic_id: &st
 mod tests {
     use super::*;
     use chrono::{Local, TimeZone as _};
+
+    #[test]
+    fn a_column_of_times_has_one_format() {
+        let now = Local.with_ymd_and_hms(2026, 11, 3, 12, 0, 0).unwrap();
+        let ms = |y, m, d| {
+            Local
+                .with_ymd_and_hms(y, m, d, 10, 21, 0)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let today = ms(2026, 11, 3);
+        assert_eq!(column_clocks_at(&[today, today], now), ["10:21", "10:21"]);
+        assert_eq!(
+            column_clocks_at(&[today, ms(2026, 10, 22)], now),
+            ["11-03", "10-22"]
+        );
+        assert_eq!(
+            column_clocks_at(&[today, ms(2026, 10, 22), ms(2023, 11, 4)], now),
+            ["2026-11-03", "2026-10-22", "2023-11-04"]
+        );
+    }
 
     #[test]
     fn clock_never_prints_epoch_and_adds_the_year() {

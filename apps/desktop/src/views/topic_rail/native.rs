@@ -20,7 +20,7 @@ use crate::{
     ui::{
         self, Sym, SymSize,
         native::{
-            BadgeState, EmptyLine, InspectorSection, NativeType as _, StatusBadge,
+            BadgeState, EmptyLine, FocusRow as _, InspectorSection, NativeType as _, StatusBadge,
             badge::state_mark, borderless_button, label_value, native_colors, progress,
             tokens::radius,
         },
@@ -502,6 +502,8 @@ impl TopicRail {
                     .border_color(k.separator)
                     .bg(k.fill)
                     .overflow_hidden()
+                    // T-16, E3: a tab stop that Enter / Space opens.
+                    .focus_row(false, cx)
                     .child(preview_thumbnail(&preview, cx))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.open_pane(pane.clone(), cx)
@@ -518,15 +520,25 @@ impl TopicRail {
                 crate::data::ArtifactKind::Image => Sym::Image,
                 _ => Sym::Document,
             };
+            // T-16, E3, F3: a row opens its 产出 (a tab stop), and a cut
+            // title shows whole in a tooltip.
+            let open = RightPane::Artifact {
+                id: a.id.clone(),
+                version: None,
+            };
             section = section.row(
                 row(cx)
+                    .id(SharedString::from(format!("rail-output-{}", a.id)))
+                    .rounded(radius::CONTROL)
+                    .focus_row(false, cx)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.open_pane(open.clone(), cx)
+                    }))
                     .child(mark(sym, k.secondary))
                     .child(
-                        div()
-                            .min_w_0()
-                            .flex_shrink(1.)
-                            .one_line()
-                            .child(a.title.clone()),
+                        crate::ui::truncate::TruncText::new(a.title.clone())
+                            .id(SharedString::from(format!("rail-output-title-{}", a.id)))
+                            .flex_shrink(1.),
                     )
                     .child(div().flex_1())
                     .child(
@@ -731,7 +743,7 @@ impl TopicRail {
             ));
         }
         let when = match active {
-            Some(at) => Some(fill(c::INSPECTOR_WHEN_SINCE, &[("when", &when_start(at))])),
+            Some(at) => Some(run_since(at)),
             None => cost
                 .started_at
                 .zip(cost.ended_at)
@@ -742,6 +754,12 @@ impl TopicRail {
         }
         Some(section.into_any_element())
     }
+}
+
+/// When a run at work started, in the one form of every place (T-20, §2.12
+/// one clock): `今天 07:23 起`, `11-01 07:23 起`.
+pub fn run_since(at: crate::data::Millis) -> String {
+    fill(c::INSPECTOR_WHEN_SINCE, &[("when", &when_start(at))])
 }
 
 /// When a run at work started: `今天 07:23`, `11-01 07:23`.

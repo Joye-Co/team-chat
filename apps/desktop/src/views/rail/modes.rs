@@ -20,7 +20,7 @@ use crate::{
     app::RailMode,
     copy::rail as c,
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic},
-    ui::MemberAvatar,
+    ui::{MemberAvatar, native::sidebar::RightColumn},
 };
 
 type Open<'a> = Option<&'a (String, String)>;
@@ -48,12 +48,15 @@ pub(super) enum Item {
     DmHeader {
         folded: bool,
     },
-    /// A: a DM.
+    /// A: a DM. T-11: the member-row right column: the state of its 话题
+    /// that waits on me (else its newest stateful 话题), and the unread dot.
     Dm {
         id: GroupId,
         name: String,
         peer: Option<Member>,
         selected: bool,
+        line: Option<crate::views::topic_page::StateLine>,
+        unread: bool,
     },
     /// B: `⌄ • 需要你 4`.
     BucketHeader {
@@ -61,7 +64,7 @@ pub(super) enum Item {
         count: usize,
         folded: bool,
     },
-    /// B: a folded bucket as one dimmed row (`做完了 · 今天 · 2`) that
+    /// B: a folded bucket as one dimmed row (`完成 · 今天 · 2`) that
     /// opens it.
     BucketTail {
         bucket: Bucket,
@@ -70,6 +73,11 @@ pub(super) enum Item {
     Topic(Box<TopicItem>),
     /// A: the muted row of an open 群 with no 话题 (B1-31).
     NoTopics {
+        id: GroupId,
+    },
+    /// A: an open 群 with no cached 话题 while the first sync runs: sidebar
+    /// item skeletons (§2.14, T-13).
+    Syncing {
         id: GroupId,
     },
     /// C: a member and its state.
@@ -122,9 +130,30 @@ pub(super) struct TopicItem {
     pub line: crate::views::topic_page::StateLine,
 }
 
+/// Where the first sync stands (T-13), from the connection state: the
+/// sidebar says 还没有话题 only for a 群 the server has answered for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Sync {
+    Synced,
+    Syncing,
+    Unreachable,
+}
+
+impl Sync {
+    pub fn of(state: &crate::data::ConnectionState) -> Self {
+        use crate::data::ConnectionState as S;
+        match state {
+            S::Online | S::Offline => Sync::Synced,
+            S::Connecting => Sync::Syncing,
+            S::Reconnecting { .. } | S::TokenUnreadable => Sync::Unreachable,
+        }
+    }
+}
+
 /// What the lists depend on besides the provider.
 #[derive(Clone, PartialEq)]
 pub(super) struct Inputs {
+    pub sync: Sync,
     pub mode: RailMode,
     pub me: Option<MemberId>,
     pub open: Option<(String, String)>,
@@ -187,8 +216,14 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
             folded,
             selected: i.group_page.as_deref() == Some(g.id.as_str()),
         }];
+        // T-13: 还没有话题 only once the server answered; while it syncs the
+        // open 群 shows sidebar skeleton rows, and nothing while unreachable.
         if !folded && empty {
-            section.push(Item::NoTopics { id: g.id.clone() });
+            match i.sync {
+                Sync::Synced => section.push(Item::NoTopics { id: g.id.clone() }),
+                Sync::Syncing => section.push(Item::Syncing { id: g.id.clone() }),
+                Sync::Unreachable => {}
+            }
         }
         if !folded {
             for t in topics {
@@ -216,12 +251,16 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
         let mut section = vec![Item::DmHeader { folded }];
         if !folded {
             for g in dms {
+                let selected = i.group_page.as_deref() == Some(g.id.as_str())
+                    || open.is_some_and(|(og, _)| og == &g.id);
+                let (line, unread) = dm_state(p, me, &g.id);
                 section.push(Item::Dm {
                     id: g.id.clone(),
                     name: g.name.clone(),
                     peer: g.dm_peer.as_deref().and_then(|m| p.member(m)),
-                    selected: i.group_page.as_deref() == Some(g.id.as_str())
-                        || open.is_some_and(|(og, _)| og == &g.id),
+                    selected,
+                    line,
+                    unread: unread && !selected,
                 });
             }
         }
@@ -230,7 +269,34 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
     sections(out)
 }
 
-/// B: 需要你 / 在做 / 等别人 / 做完了 · 今天, of the chosen 群.
+/// T-11: a DM row's state: the 话题 of the DM that waits on me, else its
+/// newest 话题 with a sidebar state; and whether any of its 话题 is unread.
+fn dm_state(
+    p: &dyn ChatProvider,
+    me: Option<&str>,
+    group_id: &str,
+) -> (Option<crate::views::topic_page::StateLine>, bool) {
+    let mut topics: Vec<Topic> = p
+        .topics(group_id)
+        .into_iter()
+        .filter(model::listed)
+        .collect();
+    topics.sort_by_key(|t| std::cmp::Reverse(t.last_activity_at));
+    let unread = topics.iter().any(|t| t.unread > 0);
+    let lines: Vec<_> = topics
+        .iter()
+        .map(|t| crate::views::topic_page::topic_state(p, me, t))
+        .filter(|l| !l.short.is_empty())
+        .collect();
+    let line = lines
+        .iter()
+        .find(|l| l.badge == crate::ui::native::BadgeState::NeedsYou)
+        .or(lines.first())
+        .cloned();
+    (line, unread)
+}
+
+/// B: 需要你 / 在做 / 等别人 / 完成 · 今天, of the chosen 群.
 pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> Vec<Entry> {
     let me = i.me.as_deref();
     let names = model::groups(p);
@@ -241,7 +307,7 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
         }
         let folded = i.folded_buckets.contains(&bucket);
         // §2.1: a folded section is one dimmed "More" row with its count
-        // (`做完了 · 今天 · 2`), never a label with no rows under it.
+        // (`完成 · 今天 · 2`), never a label with no rows under it.
         // B1-25: under its own label, so it never reads as part of the
         // section above.
         if folded {
@@ -425,17 +491,21 @@ impl RailView {
     pub(super) fn item(&self, item: &Item, cx: &mut Context<Self>) -> AnyElement {
         match item {
             Item::GroupHeader {
-                id, name, folded, ..
+                id,
+                name,
+                folded,
+                selected,
             } => {
                 let fold_id = id.clone();
                 let this = cx.entity().downgrade();
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
                 let (menu_services, menu_id) = (self.services.clone(), id.clone());
-                let header = self.section_header(
+                let header = self.section_header_selected(
                     SharedString::from(format!("rail-group-{id}")),
                     name.clone(),
                     *folded,
+                    *selected,
                     move |_, _, cx| {
                         let id = fold_id.clone();
                         let _ = this.update(cx, |this, cx| {
@@ -481,6 +551,8 @@ impl RailView {
                 name,
                 peer,
                 selected,
+                line,
+                unread,
             } => {
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
@@ -492,6 +564,11 @@ impl RailView {
                     )
                     .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
                     .selected(*selected)
+                    .unread(*unread)
+                    .right(match line {
+                        Some(l) => RightColumn::Status(l.badge, l.short.clone().into()),
+                        None => RightColumn::None,
+                    })
                     .on_click(move |_, _, cx| {
                         let id = open_id.clone();
                         nav.update(cx, |nav, cx| nav.open_group(id, cx))
@@ -562,13 +639,26 @@ impl RailView {
                 )
             }
             Item::Plain { member, away } => self.plain_member(member, *away, cx),
-            Item::NoTopics { id } => self
-                .row(
-                    SharedString::from(format!("rail-no-topics-{id}")),
-                    c::RAIL_NO_TOPICS.to_string(),
+            // B1-51: the compact Empty line in the muted token, at a row's
+            // place and inset.
+            Item::NoTopics { id } => div()
+                .id(SharedString::from(format!("rail-no-topics-{id}")))
+                .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
+                .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
+                .pl(crate::ui::native::tokens::space::S8)
+                .flex()
+                .items_center()
+                .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
+                .into_any_element(),
+            Item::Syncing { id } => div()
+                .id(SharedString::from(format!("rail-syncing-{id}")))
+                .child(
+                    crate::ui::native::skeleton_rows(
+                        crate::ui::native::SkeletonKind::SidebarItem,
+                        3,
+                    )
+                    .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET),
                 )
-                .media_kind(crate::ui::native::sidebar::SidebarMedia::None)
-                .dim(true)
                 .into_any_element(),
             Item::MemberTail { id, label, open } => {
                 let id = *id;
@@ -603,8 +693,7 @@ impl RailView {
                 SharedString::from(format!("rail-member-{}", r.member.id)),
                 crate::ui::avatar::name_beside_avatar(&r.member.name).to_string(),
             )
-            .leading(MemberAvatar::new(Some(&r.member), ROW_AVATAR).on(k.sidebar))
-            .unread(r.waiting_on_me > 0);
+            .leading(MemberAvatar::new(Some(&r.member), ROW_AVATAR).on(k.sidebar));
         // R2-11, §2.1: one right-column kind in the group: a StatusBadge on
         // every busy member (`等你 2`, else `在做 3`). An open member keeps its
         // badge (its 话题 under it show that it is open); a closed one shows
@@ -615,7 +704,7 @@ impl RailView {
         // B1-24, §2.12: 在做 only while the member's run works; a busy
         // member with no run says the state of its newest 话题 (等X, 排队).
         let badge = if r.waiting_on_me > 0 {
-            crate::ui::native::StatusBadge::new(
+            (
                 crate::ui::native::BadgeState::NeedsYou,
                 crate::copy::fill(
                     c::RAIL_WAITS_ON_YOU_N,
@@ -627,7 +716,7 @@ impl RailView {
                 || c::RAIL_WORKING.to_string(),
                 |n| crate::copy::fill(c::RAIL_WORKING_N, &[("n", n)]),
             );
-            crate::ui::native::StatusBadge::new(crate::ui::native::BadgeState::Working, text)
+            (crate::ui::native::BadgeState::Working, text)
         } else {
             let line = r.topics.first().map(|mt| {
                 crate::views::topic_page::topic_state(
@@ -636,7 +725,7 @@ impl RailView {
                     &mt.topic,
                 )
             });
-            let (state, text) = line.map_or(
+            line.map_or(
                 (
                     crate::ui::native::BadgeState::Queued,
                     crate::copy::common::STATUS_QUEUED.to_string(),
@@ -645,10 +734,11 @@ impl RailView {
                     let text = if l.short.is_empty() { l.text } else { l.short };
                     (l.badge, text)
                 },
-            );
-            crate::ui::native::StatusBadge::new(state, text)
+            )
         };
-        row = row.trailing_element(badge);
+        // T-18, F3: the kit's capped right column, as on a 话题 row: a long
+        // badge cuts with "…" (tooltip), and the name keeps its room.
+        row = row.right(RightColumn::Status(badge.0, badge.1.into()));
         row.on_click(move |_, _, cx| {
             let id: MemberId = id.clone();
             let _ = this.update(cx, |this, cx| {

@@ -365,7 +365,12 @@ impl NativeTextArea {
 
     /// The outer height: whole lines, the padding and the border.
     pub fn height(rows: usize) -> Pixels {
-        text::UI.1 * rows as f32 + space::S8 * 2. + layout::BORDER * 2.
+        Self::text_height(rows) + space::S8 * 2. + layout::BORDER * 2.
+    }
+
+    /// The height of the text box inside the padding: whole 14 / 20 lines.
+    fn text_height(rows: usize) -> Pixels {
+        text::UI.1 * rows as f32
     }
 }
 
@@ -375,6 +380,18 @@ impl RenderOnce for NativeTextArea {
         let handle = self.state.read(cx).focus_handle(cx);
         let focused = self.focused.unwrap_or_else(|| handle.is_focused(window)) && !self.disabled;
         let (edge, shadows) = field_edge(&k, focused, self.error);
+        // For the scene checks: the lines the last frame showed, the wrapped
+        // rows of the value that fit in the text box.
+        {
+            let state = self.state.read(cx);
+            if let (Some(bounds), Some(line)) = (state.text_bounds(), state.line_height())
+                && line > px(0.)
+            {
+                let fit = (bounds.size.height / line).floor() as usize;
+                let lines = state.display_map().wrap_row_count().min(fit);
+                crate::selftest::drawn::mark("textarea-lines", format!("{} {lines}", self.id));
+            }
+        }
         div()
             .id(self.id)
             .flex_none()
@@ -397,7 +414,12 @@ impl RenderOnce for NativeTextArea {
                 })
             })
             .child(placeholder_input(
+                // The text box is `rows` whole lines tall, whatever rows the
+                // state asks for: a state made with the default single row
+                // would lay out one line and clip the soft-wrapped rest
+                // (review 4 K-12). Longer text scrolls inside the box.
                 Textarea::new(&self.state)
+                    .h(Self::text_height(self.rows))
                     .appearance(false)
                     .disabled(self.disabled)
                     .xsmall()

@@ -327,7 +327,15 @@ impl TimelineView {
                         .py(space::S12)
                         .rounded(crate::theme::radius::FIELD)
                         .border_1()
-                        .border_color(n.separator)
+                        // T-20, §2.15: the destructive variant tints icon
+                        // and border.
+                        .border_color(
+                            crate::ui::native::feedback::alert_colors(
+                                crate::ui::native::AlertTone::Destructive,
+                                &n,
+                            )
+                            .2,
+                        )
                         .flex()
                         .items_start()
                         .gap(space::S12)
@@ -562,9 +570,14 @@ impl TimelineView {
                     .n_figures()
                     .text_color(n.secondary)
                     .children(run.started_at.zip(used).map(|(at, used)| {
+                        // T-20: the start in the inspector's words
+                        // (`今天 10:18 起`).
                         fill(
-                            t::PLAN_FOOTER,
-                            &[("used", &used), ("time", &model::clock(at))],
+                            t::PLAN_FOOTER_SINCE,
+                            &[
+                                ("used", &used),
+                                ("since", &crate::views::topic_rail::run_since(at)),
+                            ],
                         )
                     })),
             )

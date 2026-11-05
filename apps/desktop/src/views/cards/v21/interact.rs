@@ -1263,15 +1263,16 @@ mod tests {
 }
 
 // --- v12/fx-cards ---
-/// The conflicts that already showed their Toast, by client event id.
+/// The conflicts that already showed their Toast, by window and client event id: each
+/// window that opens the card says it once (a scene reopened in another theme too).
 #[derive(Default)]
-struct ShownConflicts(std::collections::HashSet<String>);
+struct ShownConflicts(std::collections::HashSet<(gpui::WindowId, String)>);
 
 impl gpui::Global for ShownConflicts {}
 
 /// Shows the conflict Toast once per conflicting event (§2.16, owner decision on F53):
 /// 卡片刚更新了, what happened, and 看新版, which settles the event.
-pub fn conflict_toast(ctx: &Ctx, cx: &mut App) {
+pub fn conflict_toast(ctx: &Ctx, window: &Window, cx: &mut App) {
     let events = ctx
         .env
         .provider
@@ -1288,8 +1289,9 @@ pub fn conflict_toast(ctx: &Ctx, cx: &mut App) {
         return;
     };
     let cid = e.client_event_id.clone();
+    let handle = window.window_handle();
     let shown = cx.default_global::<ShownConflicts>();
-    if !shown.0.insert(cid.clone()) {
+    if !shown.0.insert((handle.window_id(), cid.clone())) {
         return;
     }
     let (provider, g, t, m) = (
@@ -1300,13 +1302,16 @@ pub fn conflict_toast(ctx: &Ctx, cx: &mut App) {
     );
     let toast_id = format!("card-conflict-{m}");
     cx.defer(move |cx| {
-        crate::ui::overlay::Toast::new(ui::Sym::Refresh, c::CONFLICT_TITLE)
+        let note = crate::ui::overlay::Toast::new(ui::Sym::Refresh, c::CONFLICT_TITLE)
             .description(c::CONFLICT_DETAIL)
             .action_button(crate::copy::cards_v2::STRIP_SEE_NEW, move |_, _| {
                 provider.drop_card_event(&g, &t, &m, &cid)
             })
             .id(toast_id)
-            .push(cx);
+            .notification();
+        // On the window that drew the card, not whichever window is active.
+        use gpui_component::WindowExt as _;
+        let _ = handle.update(cx, |_, window, cx| window.push_notification(note, cx));
     });
 }
 

@@ -38,6 +38,9 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D13 | Right pane | 320 wide for the inspector, 改动, Home rail and side chat. 400 wide for the live pane (实时查看) and the artifact pane, which show a screen or a page. (Owner decision, v14.) | Today 280 / 320 / 380; a terminal or a web page at 320 is unreadable. |
 | D14 | Error text (owner decision v16) | Every error says its words in the foreground color with a red icon, the failed message ("没有发出") too. Red text is never the only carrier. | One error recipe (2.15). |
 | D15 | Group and desk list rows (owner decision v16) | The leading media of a 话题 row is the member's avatar (the kind icon when no member works on it); the state shows only in its StatusBadge. The group page splits its open 话题 into 等你 (asks to me) and 在做 (runs); a waiting row never sits under 在做. | One state carrier per row (2.12). |
+| D16 | Queued 话题 in the sidebar (owner decision v17, O-1) | A 排队 话题 has no sidebar badge: the sidebar stays quiet for the resting state. The title bar, inspector and pages still say 排队. | The sidebar right column carries what needs attention or is at work. |
+| D17 | 完成 and 交付 (owner decision v17, O-2) | 完成 means a done 话题, on every page (群 最近完成, 首页 rail, 成员 完成的话题, the sidebar section 完成 · 今天). A run result is 交付: its badge word is 已交付, and it counts as 交付 (首页 KPI 今天交付, 成员 最近交付 and its stats). | One word, one meaning: a page never counts runs as 完成. |
+| D18 | Pinned banner place (owner decision v17, O-3) | The pinned banner docks above the composer, x 288-1096, as NATIVE.md §9.2 says. | The decision bar sits next to the reply it asks for. |
 
 ---
 
@@ -339,8 +342,9 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | paused | 已暂停 | pause | muted |
 | waiting on someone else | 等李雪回答 / 等李雪审 / 等审 | clock | muted |
 | sending (my answer or message in flight) | 发送中 | loader (spinning) | muted |
-| queued | 排队 | clock | muted |
-| done / merged / answered | 完成 / 已合并 / 已回答 | check-circle (filled) | success |
+| queued | 排队 (no sidebar badge, D16) | clock | muted |
+| done / merged / answered | 完成 (a done 话题, D17) / 已合并 / 已回答 | check-circle (filled) | success |
+| delivered (a run result, D17) | 已交付 | check-circle (filled) | success |
 | failed / stuck | 失败 / 卡住了 | x-circle | destructive |
 | abnormal | 异常 | alert-triangle (+ tooltip with the cause) | destructive |
 | online | 在线 | dot 8 | success |
@@ -351,7 +355,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Order (v16, T-03): a merge in progress first; then what waits on me: every open ask for me in the 话题 (`asks_for_me` less the asks my answer already reached, `topic_page::ask_answered`) reads 等你审 (a review, "等你审 PR #61" with its PR) or 等你回答 (any other ask), before any run; an ask I answered reads 已回答 until the server follows. Then stopping, at work or paused, a failed run, then the 话题's own status (等李雪回答 / 等审, clock, muted, also in the sidebar). Every page badge of a 话题 (群, 首页, 成员) shows these same words; a page never shortens 等李雪回答 to 等人 (v16). The inspector's 标记完成 follows this state.
 - One clock per run (v16, P-01): every elapsed time of a run (首页, 群, 成员, the live pane, the working card, the inspector 用时) comes from `topic_page::run_elapsed` (run start to its end, or to the provider's `clock_now`). A run still at work has a start, not a range ("今天 07:23 起").
 - No free colored dot, colored "!" circle or colored text as the only status carrier. The only free dot allowed: unread dot 8 (info) next to a title, and the presence dot on an avatar.
-- In the sidebar the state goes to the right column as a StatusBadge; an unread 话题 shows the unread dot by its title, never a count pill beside the badges (one right-column kind per group, v16). The icon column keeps one kind per group. A busy member row says 等你 n, else 在做 (with its plan count) only while its run works, else the state of its newest 话题.
+- In the sidebar the state goes to the right column as a StatusBadge, except 排队: a queued 话题 row has an empty right column (owner decision v17, D16). A 私聊 row has the member-row right column: the state of its 话题 that waits on me, else of its newest 话题 with a state (v17). An unread 话题 or 私聊 shows the unread dot by its title, never a count pill beside the badges (one right-column kind per group, v16). The icon column keeps one kind per group. A busy member row says 等你 n, else 在做 (with its plan count) only while its run works, else the state of its newest 话题.
 
 ### 2.13 Empty state
 
@@ -373,13 +377,14 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - Run log failure: the same Alert in the pane, in place of the end step: the cause once (the time is the 用时 fact). Its actions are the pane footer (2.5, v16): 重试 (primary) over 查看日志 (outline), full width, so the pane ends with them and never in a blank band.
 - Run failure in a thread: an Alert in place of the run card: title states the cause ("打包失败：找不到证书"), description, actions "重试" (primary sm) and "查看日志" (outline sm). The inspector 状态 row shows StatusBadge "失败".
 - Failed message: below the body, x = text column: destructive icon 16 + "没有发出" 12 in the foreground color (owner decision v16, D14: the state color on the icon only, like every other error) + ghost sm "重试" (rotate-ccw icon) + ghost sm "⋯" (删除, 复制). Retry is the same button in every place (members detail, files, messages).
-- Offline: a warning Alert docked above the composer (title "连接已断开", description "8 秒后重连", outline sm "立即重连"); the composer shows "消息会在连上后发出" 12 muted; the sidebar footer second line shows "离线" with a muted dot badge. One word for this state everywhere: page subtitles say "离线" too, never "未连接".
+- Offline: a warning Alert docked above the composer (title "连接已断开", description "8 秒后重连", outline sm "立即重连"); a page with no composer shows the same Alert as the sidebar row above the footer (2.1, v17); the composer shows "消息会在连上后发出" 12 muted; the sidebar footer second line shows "离线" with a muted dot badge. One word for this state everywhere: page subtitles say "离线" too, never "未连接".
 - Dates: never epoch zero. A missing date shows "从未上线" / "未知". A same-day range: "11-01 10:21–14:21".
 
 ### 2.16 Toast and banner
 
 - Toast: float surface, radius 10, border, shadow md, p 16, w 360: icon 16, title 14 medium, description 14 muted, an action (outline sm) and a 16 close. Bottom-right, 16 from the window edges; while a composer is on screen (with or without the focus, v16), 16 above its top (`composer::floor_painted`, through `ui::overlay::set_toast_floor`), so a toast never covers Send.
-- In-page banner (pinned review, evidence notice): Alert anatomy (2.15) at the top of the message column content, x 288-1096. Button labels never truncate.
+- Pinned banner (the ask or review that waits on me, owner decision v17, D18): Alert anatomy (2.15) docked above the composer, x 288-1096. It gives way while the ask's card is on screen. A 话题-level ask (no card of its own) takes the 话题's newest card that waits on me (its question, asker and time), and never pins while an ask card of that 话题 is on screen (v17, T-10).
+- Other in-page banners (evidence notice): Alert anatomy (2.15) at the top of the message column content, x 288-1096. Button labels never truncate.
 
 ### 2.17 Thread (message column)
 
@@ -397,7 +402,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.18 Page recipes (main window)
 
-- **Home (desk)**: toolbar title. Content: KPI row 4-up (等你 4, 在做 3, 今天完成 2, 排队 2), cards w (808 - 48) / 4 = 190, number 24. Then one section per queue (SectionHeader with count pill) holding one framed list (2.6) with fixed columns and a footer row. The "Jojo" summary goes in an Alert (info) above the KPI row or in the first card. Rail per 2.5 without duplicate items.
+- **Home (desk)**: toolbar title. Content: KPI row 4-up (等你 4, 在做 3, 今天交付 2, 排队 2; 交付 counts run results, D17), cards w (808 - 48) / 4 = 190, number 24. Then one section per queue (SectionHeader with count pill) holding one framed list (2.6) with fixed columns and a footer row. The "Jojo" summary goes in an Alert (info) above the KPI row or in the first card. Rail per 2.5 without duplicate items.
 - **Artifacts**: table view by default (名称 = icon 16 + title 14 medium truncate; 类型 outline badge; 话题; 做的人 avatar 16 + name; 版本; 更新 right-aligned tabular; "⋯"), table footer "3 个产出". Icon view: equal cards in a grid gap 16, a group header per day (今天, 昨天), title + "v3 · 话题" under each tile, tooltip with the full title.
 - **Members**: the member list column is not framed (rows on the column surface, selection = muted fill); the detail sits beside it.
 - **Member detail**: full pane width, px 24. Header block: avatar 64, name 24 semibold, 14 muted description, actions right-aligned (primary sm "交代", outline sm "单独问", outline sm "暂停"; no trailing "…" in labels). Separator 24. Then cards in a 2-column grid at widths >= 720 (现在在做 | 这周 KPIs; 最近交付 as a table; 问题 as Alert with Retry). Every section in every state (compact empty when no data). 24 bottom padding.

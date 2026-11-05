@@ -103,7 +103,14 @@ impl TimelineView {
             }
             if start || new_day {
                 let mark = self.date_mark(&key, true).into_any_element();
-                item = item.child(super::v2::date_divider_marked(message.created_at, mark, cx));
+                // T-15: the pill stands for this label: keep its place, do
+                // not draw it.
+                let hidden = self.sticky_row.as_deref() == Some(key.as_str());
+                item = item.child(
+                    div()
+                        .when(hidden, |d| d.opacity(0.))
+                        .child(super::v2::date_divider_marked(message.created_at, mark, cx)),
+                );
             }
         } else {
             if start && let Some(topic) = self.topic.clone() {

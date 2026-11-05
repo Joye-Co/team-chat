@@ -887,6 +887,20 @@ fn core_checks(name: &str) -> Option<Checks> {
                 .unwrap_or_default();
             one("artifact-page", &[format!("{title} v2")])
         },
+        // The draft's text runs over one line: its textarea shows the
+        // wrapped lines, not only the first (review 4 K-12).
+        "cards-v2-draft" => |_, _| {
+            let got = ids("textarea-lines");
+            let most = got
+                .iter()
+                .filter_map(|g| g.rsplit(' ').next()?.parse::<usize>().ok())
+                .max()
+                .unwrap_or(0);
+            vec![check(
+                most > 1,
+                format!("a textarea showed {most} lines, more than 1 ({got:?})"),
+            )]
+        },
         _ => return None,
     })
 }

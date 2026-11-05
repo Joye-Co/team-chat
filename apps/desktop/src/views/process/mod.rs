@@ -557,12 +557,15 @@ impl ProcessView {
         // (`failure_footer`). The pane is narrow, so the title and its
         // cause keep the full width.
         let n = native_colors(cx);
+        // T-20, §2.15: the destructive variant tints icon and border.
+        let (_, _, edge) =
+            ui::native::feedback::alert_colors(ui::native::AlertTone::Destructive, &n);
         let alert = div()
             .px(space::S16)
             .py(space::S12)
             .rounded(ui::native::tokens::radius::CONTAINER)
             .border_1()
-            .border_color(n.separator)
+            .border_color(edge)
             .flex()
             .items_start()
             .gap(space::S12)
