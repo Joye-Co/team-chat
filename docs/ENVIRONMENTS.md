@@ -32,8 +32,7 @@ Never print these files; pipe them into commands.
 | File | What it is |
 | --- | --- |
 | `admin-secret` | Worker secret `ADMIN_SECRET` (protects `POST /v1/admin/bootstrap` and the admin routes) |
-| `hook-secret-key` | Worker secret `HOOK_SECRET_KEY` (encrypts integration hook secrets in D1; if you lose it, every hook must be made again) |
-| `anthropic-api-key` | Worker secret `ANTHROPIC_API_KEY` (optional: topics without a title get an AI title from Claude; without it they keep the first line). Local: `ANTHROPIC_API_KEY=...` in `server/.dev.vars` |
+| `hook-secret-key` | Worker secret `HOOK_SECRET_KEY` (encrypts integration hook secrets and the AI 服务 key in D1; if you lose it, every hook must be made again and an owner must enter the AI 服务 key again) |
 | `owner-token` | token of the first owner (`Joye` on staging and production, `e2e-owner` on e2e); `admin.ts` and `tools/e2e` read this file |
 | `owner.token` | staging and production: a copy of `owner-token` |
 | `monitor-token` | staging and production: token of the monitor bot `监测` (Worker secret `MONITOR_TOKEN_<ENV>` of `chat-monitor`) |

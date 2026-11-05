@@ -1598,7 +1598,7 @@ Rules:
   secrets), with the scope as additional data. Without that secret, `PUT` and `test` are
   `internal`.
 - `PUT` without `apiKey` keeps the saved key only when the provider is the saved one; otherwise
-  it is `bad_request`. The first `PUT` needs `apiKey`. `test` without `apiKey` uses the saved key
+  it is `invalid`. The first `PUT` needs `apiKey`. `test` without `apiKey` uses the saved key
   under the same rule.
 - Calls: `anthropic` through the Messages API; `deepseek` (`https://api.deepseek.com`) and
   `openai-compatible` (`baseUrl`) through `POST <base>/chat/completions` with
