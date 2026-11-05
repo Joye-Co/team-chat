@@ -269,7 +269,8 @@ fn table_cols() -> Vec<page::Col> {
         },
         page::Col {
             header: SharedString::default(),
-            width: Some(tsp::S48),
+            // The 32 "⋯", 12 from the time and 16 from the edge.
+            width: Some(tsp::S48 + tsp::S12),
             right: true,
         },
     ]

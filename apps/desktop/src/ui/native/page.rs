@@ -1281,7 +1281,10 @@ pub fn table(
     use gpui::StatefulInteractiveElement as _;
     let k = native_colors(cx);
     let n = cols.len();
+    // A column with no header holds a control (the row's "⋯"), not text: it
+    // does not clip, so the control's focus ring shows whole (E3).
     let cell = |i: usize, right: bool, width: Option<Pixels>| {
+        let text = !cols[i.min(n - 1)].header.is_empty();
         div()
             .min_w(px(0.))
             .when_some(width, |d, w| d.flex_none().w(w))
@@ -1291,7 +1294,7 @@ pub fn table(
             .flex()
             .items_center()
             .when(right, |d| d.justify_end())
-            .overflow_hidden()
+            .when(text, |d| d.overflow_hidden())
             .whitespace_nowrap()
     };
     let header = div()
