@@ -276,6 +276,15 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| (like("diagram-viewer").open)(s, c, cx),
     },
     // --- end v16/c-cards ---
+    // --- v16/tail2: keyboard focus in the Settings window (E3) ---
+    Scene {
+        name: "state-focus-settings-row",
+        about: "settings-notifications-end after ⇧Tab: the focus ring on the pane's last row (the Settings window takes Tab)",
+        start: Start::SignedIn,
+        setup: |s, cx| (like("settings-notifications-end").setup)(s, cx),
+        open: |s, c, cx| (like("settings-notifications-end").open)(s, c, cx),
+    },
+    // --- end v16/tail2 ---
 ];
 
 /// The scene each state scene starts from: its capture must differ from that
@@ -296,6 +305,7 @@ const BASES: &[(&str, &str)] = &[
     ("state-focus-artifact-row", "artifacts-v2"),
     ("state-hover-settings-row", "settings-notifications-end"),
     ("state-focus-diagram-node", "diagram-viewer"),
+    ("state-focus-settings-row", "settings-notifications-end"),
 ];
 
 /// The base scene of state scene `name`.

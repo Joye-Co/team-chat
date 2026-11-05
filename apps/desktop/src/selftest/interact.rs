@@ -87,6 +87,10 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-hover-settings-row", hover(320., 673., 300)),
     ("state-focus-diagram-node", keys(&["tab", "tab"])),
     // --- end v16/c-cards ---
+    // --- v16/tail2 ---
+    // ⇧Tab from the window root: the last tab stop of the pane.
+    ("state-focus-settings-row", keys(&["shift-tab"])),
+    // --- end v16/tail2 ---
 ];
 
 /// The steps of scene `name`, if it has any.
