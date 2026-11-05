@@ -712,6 +712,8 @@ pub fn all() -> Vec<Sample21> {
             }),
         ),
     ));
+    // The report 话题 is 完成, so its embed cards are delivered results, not
+    // open asks (review 5 C-19).
     for (id, artifact) in [
         (EMBED_BROKEN, ART_EMBED_BROKEN),
         (EMBED_FILE, ART_EMBED_FILE),
@@ -723,13 +725,12 @@ pub fn all() -> Vec<Sample21> {
             LEDGER,
             at(10, 38),
             with(
-                base("11 月的 2 万块预算怎么分？", "ask", "Ledger 做了一个预算分配页面，请在 1.1 里打开。"),
+                base("做好了 11 月的预算分配页面", "done", "Ledger 做了一个预算分配页面，请在 1.1 里打开。"),
                 json!({
-                    "summary": "拖动滑块，页面会按 10 月的数估新增群。分好后按页面里的「发给 Ledger」。",
-                    "ask": { "from": [ME] },
+                    "summary": "拖动滑块，页面会按 10 月的数估新增群。",
                     "blocks": [
                         { "id": "page", "type": "embed", "artifactId": artifact, "version": 1, "height": 280,
-                          "title": "渠道预算分配", "events": ["budget.submit"],
+                          "title": "渠道预算分配",
                           "fallbackText": "Ledger 做了一个预算分配页面，请在新版本里打开。" }
                     ]
                 }),
