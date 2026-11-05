@@ -21,7 +21,6 @@ use super::{
     ask::{QuickAnswer, quick_answer},
     done::proof_line,
     model::{AskCard, RunCard, Snapshot},
-    working::elapsed,
 };
 use crate::{
     app::{RightPane, Services},
@@ -135,7 +134,7 @@ pub fn ask_row(
     let from = fill(
         c::DESK_ASK_FROM,
         &[
-            ("name", &isolate(&snap.name(&a.item.from))),
+            ("name", &isolate(&snap.name_by_avatar(&a.item.from))),
             ("topic", &isolate(&topic)),
         ],
     );
@@ -280,9 +279,15 @@ pub fn run_row(
 ) -> AnyElement {
     let member = snap.member(&r.run.bot_id);
     let (n, m) = r.step();
-    let mut rest = vec![snap.name(&r.run.bot_id)];
+    let mut rest = vec![snap.name_by_avatar(&r.run.bot_id)];
     rest.extend(r.current_text());
-    rest.extend(r.step_started.and_then(elapsed));
+    let started = r.run.started_at.unwrap_or(r.run.created_at);
+    // One clock (A5, `run_elapsed`): the run's start on the provider's
+    // clock, as on 群, 成员 and the live pane; the time column is that start.
+    rest.extend(crate::views::topic_page::run_elapsed_text(
+        services.provider.as_ref(),
+        &r.run,
+    ));
     let status = if m > 0 {
         fill(
             c::DESK_STATUS_WORKING,
@@ -291,7 +296,6 @@ pub fn run_row(
     } else {
         c::DESK_STATUS_STARTED.to_string()
     };
-    let started = r.run.started_at.unwrap_or(r.run.created_at);
     let nav = services.nav.clone();
     let (g, t, id) = (
         r.run.group_id.clone(),
@@ -339,7 +343,7 @@ pub fn done_row(
     cx: &App,
 ) -> AnyElement {
     let member = snap.member(&d.member_id);
-    let mut rest = vec![snap.name(&d.member_id)];
+    let mut rest = vec![snap.name_by_avatar(&d.member_id)];
     rest.extend(proof_line(&d.proof, snap));
     let (s1, s2) = (services.clone(), services.clone());
     let (g, t) = (d.group_id.clone(), d.topic_id.clone());

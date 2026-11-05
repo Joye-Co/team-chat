@@ -38,13 +38,13 @@ use crate::{
         native::{
             PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
             native_colors,
-            page::{self, PageLoad, SkeletonKind, m},
+            page::{self, PageLoad, m},
             push_button, toolbar_item,
         },
         sf_symbols::{Sf, Sym},
     },
     views::{
-        group_page::rows,
+        group_page::{kit, rows},
         shell::{PageView, TitleBarSpec, clock},
     },
 };
@@ -480,15 +480,15 @@ impl Render for DeskPage {
                     .child(page::skeleton_cards(4, cx))
                     .child(section(
                         page::section_header(c::DESK_NEEDS_YOU, None, None, None, cx),
-                        page::skeleton_rows("desk-sk-asks", SkeletonKind::Row, 3, cx),
+                        kit::skeleton_list("desk-sk-asks", list::DESK_COLUMNS, true, 3, cx),
                     ))
                     .child(section(
                         page::section_header(c::DESK_WORKING, None, None, None, cx),
-                        page::skeleton_rows("desk-sk-runs", SkeletonKind::Row, 2, cx),
+                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS, false, 3, cx),
                     ))
                     .child(section(
                         page::section_header(c::DESK_DONE_TODAY, None, None, None, cx),
-                        page::skeleton_rows("desk-sk-done", SkeletonKind::Row, 2, cx),
+                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS, false, 3, cx),
                     ));
             }
             PageLoad::Ready => {

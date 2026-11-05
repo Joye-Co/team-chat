@@ -190,8 +190,10 @@ impl Render for PlanForm {
                 c::MEMBERS_PLAN_LIMIT,
                 // The limit is in US dollars: the unit sits in the field, so a cost
                 // in another currency is never read against it.
+                // §2.8 number field: w 112, the value right-aligned.
                 NativeTextField::new("member-plan-limit", &self.limit)
-                    .width(field_w)
+                    .width(crate::ui::native::metrics::LABEL_COLUMN)
+                    .align(gpui::TextAlign::Right)
                     .trailing({
                         use crate::ui::native::NativeType as _;
                         gpui::div()

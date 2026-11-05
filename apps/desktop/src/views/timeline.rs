@@ -876,6 +876,9 @@ impl Render for TimelineView {
                     .pr(v2::SIDE)
                     .flex()
                     .justify_center()
+                    // P-02: a native page under the pill is cut below it, so
+                    // the pill stays on top (`web_embed::clip_band`).
+                    .child(crate::ui::web_embed::clip_band())
                     .child(
                         ui::float_surface(cx)
                             .h(STICKY_H)

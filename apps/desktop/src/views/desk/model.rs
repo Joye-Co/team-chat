@@ -67,8 +67,6 @@ pub struct RunCard {
     pub topic_title: String,
     /// The live terminal, when the run reported tool events.
     pub screen: Option<MachineScreen>,
-    /// When the current step started, for `已 3 分钟`.
-    pub step_started: Option<crate::data::Millis>,
 }
 
 impl RunCard {
@@ -154,6 +152,12 @@ impl Snapshot {
             .map(|m| m.name.clone())
             .unwrap_or_default()
     }
+
+    /// The name as a row shows it beside the member's avatar: no leading
+    /// emoji (the avatar already shows one, X-01).
+    pub fn name_by_avatar(&self, id: &str) -> String {
+        crate::ui::avatar::name_beside_avatar(&self.name(id)).to_string()
+    }
 }
 
 impl Snapshot {
@@ -202,22 +206,18 @@ impl Snapshot {
             .into_iter()
             .filter(|run| !aside(&run.group_id, &run.topic_id))
             .map(|run| {
-                let topic_title = p
-                    .topic(&run.group_id, &run.topic_id)
-                    .map(|t| t.title)
-                    .unwrap_or_default();
+                // F5: the title every surface shows (`（无标题）` when empty).
+                let topic_title = crate::views::sidebar::topic_display_title(
+                    &p.topic(&run.group_id, &run.topic_id)
+                        .map(|t| t.title)
+                        .unwrap_or_default(),
+                )
+                .0;
                 let screen = p.machine_screen(&run.id).filter(|s| !s.lines.is_empty());
-                let times = p.run_step_times(&run.id);
-                let current = run
-                    .plan
-                    .iter()
-                    .position(|i| matches!(i.state, PlanState::Current | PlanState::Waiting));
-                let step_started = current.and_then(|i| times.get(i).copied());
                 RunCard {
                     run,
                     topic_title,
                     screen,
-                    step_started,
                 }
             })
             .collect();
@@ -234,7 +234,29 @@ impl Snapshot {
             })
             .collect();
         let note = p.desk_note();
-        let queue = p.queue();
+        // 排队 (§2.12, A5): the members' queues and every 话题 the one state
+        // mapping calls 排队, so the KPI, the rail list and the 话题 header
+        // agree. A queued 话题 already in a member's queue counts once.
+        let mut queue = p.queue();
+        for g in p.groups() {
+            for t in p.topics(&g.id) {
+                if aside(&t.group_id, &t.id) {
+                    continue;
+                }
+                let state = crate::views::topic_page::topic_state(p.as_ref(), me.as_deref(), &t);
+                let title = crate::views::sidebar::topic_display_title(&t.title).0;
+                if state.badge == crate::ui::native::BadgeState::Queued
+                    && t.status == crate::data::TopicStatus::InProgress
+                    && !queue.iter().any(|q| q.title == title)
+                {
+                    queue.push(crate::data::v2::QueuedItem {
+                        member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
+                        title,
+                        at: crate::views::shell::known(t.last_activity_at),
+                    });
+                }
+            }
+        }
         let groups: HashMap<String, String> =
             p.groups().into_iter().map(|g| (g.id, g.name)).collect();
         let places = asks
@@ -332,6 +354,11 @@ fn recorded(
 ) -> Option<Recorded> {
     let me = me?;
     let p = &services.provider;
+    // One rule with the sidebar and the 话题 (`topic_page::ask_answered`):
+    // only an answer on its way or one to the card's current rev counts.
+    if !crate::views::topic_page::ask_answered(p.as_ref(), me, item) {
+        return None;
+    }
     if let Some(v2) = card_v2 {
         // My answer on its way first, then the one the server stored.
         if let Some(pending) = p

@@ -394,8 +394,7 @@ const INLINE_HTML: &str = concat!(
 :root{color-scheme:light dark;--t1:var(--tc-fg,#0a0a0a);--t2:var(--tc-muted,#737373);--line:var(--tc-border,#e5e5e5);--bar:var(--tc-primary,#171717);--soft:color-mix(in srgb,var(--bar) 20%,transparent)}
 html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{padding:0}
-h1{font-size:15px;line-height:22px;margin:0;font-weight:600}
-.sub{color:var(--t2);font-size:12px;margin:2px 0 12px}
+.sub{color:var(--t2);font-size:12px;margin:0 0 12px}
 .chart{display:flex;align-items:flex-end;gap:14px;height:120px;border-bottom:1px solid var(--line);padding:0 4px}
 .day{flex:1;display:flex;align-items:flex-end;gap:3px;height:100%}
 .bar{flex:1;background:var(--bar);border-radius:4px 4px 0 0}
@@ -407,7 +406,7 @@ h1{font-size:15px;line-height:22px;margin:0;font-weight:600}
 .kpi i{font-style:normal;color:var(--t2);font-size:11px}
 "#,
     r#"</style></head><body><div class="wrap">
-<h1>本周合并的改动</h1><div class="sub">第 3 版 · 周一到周五 · 浅色是还在审的</div>
+<div class="sub">周一到周五 · 浅色是还在审的</div>
 <div class="chart">
 <div class="day"><div class="bar" style="height:42%"></div><div class="bar s" style="height:18%"></div></div>
 <div class="day"><div class="bar" style="height:55%"></div><div class="bar s" style="height:25%"></div></div>
@@ -426,8 +425,7 @@ const PANE_HTML: &str = concat!(
 :root{color-scheme:light dark;--t1:var(--tc-fg,#0a0a0a);--t2:var(--tc-muted,#737373);--line:var(--tc-border,#e5e5e5);--bar:var(--tc-primary,#171717)}
 html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.6 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{padding:0}
-h1{font-size:16px;line-height:24px;margin:0;font-weight:600}
-.sub{color:var(--t2);font-size:12px;margin:2px 0 12px}
+.sub{color:var(--t2);font-size:12px;margin:0 0 12px}
 video{display:block;width:100%;border-radius:8px;background:#000;aspect-ratio:16/9}
 audio{display:block;width:100%;margin-top:12px}
 h2{font-size:13px;margin:16px 0 4px;font-weight:600}
@@ -435,7 +433,7 @@ ul{margin:0;padding-left:18px;color:var(--t1)}
 code{font:12px ui-monospace,Menlo,monospace;background:var(--line);padding:1px 4px;border-radius:4px}
 "#,
     r#"</style></head><body><div class="wrap">
-<h1>登录改动演示</h1><div class="sub">第 1 版 · 视频和提示音都在这个产出里</div>
+<div class="sub">视频和提示音都在这个产出里</div>
 <video id="v" src="clip.mp4" muted autoplay loop playsinline></video>
 <audio id="a" src="tone.wav" controls preload="auto"></audio>
 <h2>改了什么</h2>

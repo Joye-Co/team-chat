@@ -183,11 +183,13 @@ pub fn mail_row(
                     .children(second_trailing),
             )
         })
+        // Under the row, not inside it, so a focus ring keeps its bottom
+        // line (as `page::PageRow`, K-10).
         .when(separator && ink.fill.is_none(), |d| {
             d.child(
                 div()
                     .absolute()
-                    .bottom_0()
+                    .bottom(-metrics::HAIRLINE)
                     .left(ROW_PAD + AVATAR + ROW_GAP)
                     .right(px(0.))
                     .h(metrics::HAIRLINE)
