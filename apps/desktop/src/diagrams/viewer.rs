@@ -35,6 +35,8 @@ pub const ARROW_STEP: f32 = 40.;
 /// Space around the diagram inside the canvas (review 3 C-02: fit the width
 /// with 24 on each side).
 const MARGIN: f32 = 24.;
+/// The room 问这里 needs above a node: the 22 pill, the 8 gap and 8 clear of the header.
+const ASK_PILL_ROOM: f32 = 38.;
 /// The height of the 看原文 pane under the diagram.
 const SOURCE_PANE: f32 = 200.;
 
@@ -503,13 +505,16 @@ impl DiagramViewer {
                             node.label.clone(),
                         );
                         // Above the node's box, clear of its edge and of the arrows
-                        // beside it.
+                        // beside it; under it when the canvas has no room above (a
+                        // top-row node), so the header never cuts it (D2-28).
+                        let below = MARGIN + y - 2. < ASK_PILL_ROOM;
                         el.child(
                             div()
                                 .absolute()
-                                .bottom_full()
                                 .right_0()
-                                .pb(space::S8)
+                                // Under the head box, not under a participant's lifeline.
+                                .when(below, |d| d.top(px(oh + 4.)).pt(space::S8))
+                                .when(!below, |d| d.bottom_full().pb(space::S8))
                                 .child(crate::views::refs::affordance::inline_button(
                                     &format!("dv-{i}"),
                                     std::rc::Rc::new(move |cx: &App| {

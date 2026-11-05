@@ -415,9 +415,10 @@ impl BlockParts {
         affordance::hover_state(&self.id(pick), cx).1
     }
 
-    /// The 问这里 button of `pick` while it shows, for renderers that place it.
-    pub fn button(&self, pick: Pick, cx: &App) -> Option<AnyElement> {
-        if !self.shown(pick, cx) {
+    /// The 问这里 button of `pick` while it shows, for renderers that place it: after the
+    /// pointer's delay, or at once while the part has the keyboard focus (C-03, D2-29).
+    pub fn button(&self, pick: Pick, window: &Window, cx: &App) -> Option<AnyElement> {
+        if !(self.shown(pick, cx) || super::keyboard::part_focused(&self.id(pick), window, cx)) {
             return None;
         }
         let me = self.clone();
@@ -470,7 +471,7 @@ pub fn chart_overlay(
                 if main.values.get(xi).and_then(|v| v.as_f64()).is_none() {
                     return col.into_any_element();
                 }
-                let tip = parts.button(pick, cx).map(|button| {
+                let tip = parts.button(pick, window, cx).map(|button| {
                     // `{x} · {value}`: the part text without the series name.
                     let text = part_of(&parts.0.1, pick)
                         .and_then(|p| p.text)

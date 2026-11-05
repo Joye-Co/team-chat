@@ -607,7 +607,7 @@ pub(crate) fn list_with(
                         .items_center()
                         .gap(space::S8)
                         .child(div().min_w(px(0.)).text_color(text).child(it.text.clone()))
-                        .children(parts.and_then(|(p, _)| p.button(pick, cx))),
+                        .children(parts.and_then(|(p, w)| p.button(pick, w, cx))),
                 );
             match parts {
                 Some((p, w)) => p.wrap_own(pick, row, w, cx),
@@ -1860,7 +1860,7 @@ fn plan(
         .flex_col()
         .children(items.iter().enumerate().map(|(i, it)| {
             let pick = Pick::Step(i);
-            let ask = parts.as_ref().and_then(|(p, _)| p.button(pick, cx));
+            let ask = parts.as_ref().and_then(|(p, w)| p.button(pick, w, cx));
             let current = it.state == RunPlanState::Current && !current_seen;
             if current {
                 current_seen = true;

@@ -93,6 +93,13 @@ const STEPS: &[(&str, Steps)] = &[
     // --- end v16/tail2 ---
 ];
 
+/// Hover points that move in the worst-case run, where longer data shifts the row the
+/// scene points at: (scene, x, y).
+const WORST_POINTERS: &[(&str, f32, f32)] = &[
+    // Row G sits 20 lower under the worst header; the pointer rests on its cut label.
+    ("state-card-tooltip", 900., 546.),
+];
+
 /// The steps of scene `name`, if it has any.
 pub fn steps(name: &str) -> Option<Steps> {
     STEPS.iter().find(|(n, _)| *n == name).map(|(_, s)| *s)
@@ -114,9 +121,13 @@ pub fn pointer(name: &str) -> Point<Pixels> {
         let (x, y) = v.split_once(',')?;
         Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
     });
+    let worst = super::worst_case()
+        .then(|| WORST_POINTERS.iter().find(|(n, ..)| *n == name))
+        .flatten()
+        .map(|&(_, x, y)| (x, y));
     match steps(name)
         .and_then(|s| s.pointer)
-        .map(|p| over.unwrap_or(p))
+        .map(|p| over.or(worst).unwrap_or(p))
     {
         Some((x, y)) => point(px(x), px(y)),
         None => point(px(-10_000.), px(-10_000.)),
