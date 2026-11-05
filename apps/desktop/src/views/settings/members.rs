@@ -25,7 +25,7 @@ use super::{
 use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_top};
 use crate::{
     app::{Changes, Services},
-    characters::{self, CharacterId, CharacterStatus, status::StatusBoard},
+    characters::{self, CharacterId, CharacterStatus},
     copy::{common, fill, settings as s},
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, Change, InviteCreated, InviteRequest, Member,
@@ -306,25 +306,21 @@ impl MembersPage {
         let is_me = me == Some(m.id.as_str());
         let id = m.id.clone();
         let page = cx.entity();
-        // An AI member's live state wins over presence (§2.12 words): 在做,
-        // 等人回答, 异常.
-        let live = if m.is_bot() {
-            StatusBoard::status(cx, m)
-        } else {
-            CharacterStatus::default()
-        };
-        let state = if m.deactivated {
+        // An AI member says the word of its 成员 row (§2.12, review 5 K-19:
+        // 等你, 在做 n/m, 空闲); a person says 在线 or 离线.
+        let state: Option<String> = if m.deactivated {
             None
-        } else if live == CharacterStatus::Working {
-            Some(s::MEMBER_WORKING)
-        } else if live == CharacterStatus::NeedsInput {
-            Some(s::MEMBER_WAITING)
-        } else if live == CharacterStatus::Error {
-            Some(s::MEMBER_ERROR)
+        } else if m.is_bot() {
+            let p = &self.services.provider;
+            Some(crate::views::members_page::ai_member_word(
+                p.as_ref(),
+                me,
+                &m.id,
+            ))
         } else if m.online {
-            Some(s::MEMBER_ONLINE)
+            Some(s::MEMBER_ONLINE.to_string())
         } else {
-            Some(s::MEMBER_OFFLINE)
+            Some(s::MEMBER_OFFLINE.to_string())
         };
         let role = m
             .role
@@ -341,7 +337,7 @@ impl MembersPage {
         });
         let detail = kind
             .into_iter()
-            .chain(state)
+            .chain(state.as_deref())
             .chain(std::iter::once(role.as_str()))
             .collect::<Vec<_>>()
             .join(" · ");

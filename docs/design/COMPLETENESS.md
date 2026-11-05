@@ -423,8 +423,8 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.20 Login (full window)
 
-- Centered card 400 wide, radius 14, border, shadow-sm, p 24, gap 16: logo 48; title 24 semibold; description 14 muted; FormRow-less stacked field: label 14 medium "邀请码", 8, Input h36 full width; error under the field (2.8: foreground text with a destructive icon); primary lg h36 full width (loading: spinner + "正在验证…"); a 14 muted link row "使用其他服务器". No control at the window corners.
-- Server step: same card width, title "连接服务器", one-sentence description, same field width.
+- No card (owner review v18): the window (480 x 480) is the surface. One centered column as wide as the code slots (376): app icon 56; 16; title 18 semibold (the scale has no 20); 4; one 14 muted line; 24; the invite code as a one-time-code input (`ui::native::CodeInput`, shadcn InputOTP): 8 bordered slots 40 x 44, radius 8, gap 6, in two groups of 4 with a dash between (group gap 20); characters upper case, centered, mono with tabular figures; the slot at the caret has a foreground border and a 3 px foreground ring at 15 %; a paste fills every slot, Backspace moves back, the arrow keys and a click move the caret, a character typed over a filled slot replaces it. 8; the error slot (16, kept): a destructive icon and neutral 12 text, centered (2.8), and every slot gets the destructive border; a refused code stays in the slots, selected, so the next character starts a new code. 16; primary lg h36 full width: primary at 30 % until all 8 slots are filled (`waiting_push`), never a mid gray; Enter submits; loading: spinner + "正在验证…". 12; a small ghost link "使用其他服务器…" centered, or a custom server's host (cut in the middle) with "更改". A pasted login credential or a legacy 12-character code shows as one locked line across the slots. No control at the window corners.
+- Server step: the same column, title "连接服务器", one-sentence description, an h36 field across the column, "取消" in the link row.
 
 ### 2.21 Density and fill rules
 
