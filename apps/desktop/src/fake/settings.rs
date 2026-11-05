@@ -34,7 +34,7 @@ fn sample_runners() -> HashMap<String, RunnerSetup> {
     HashMap::from([(
         "m-deploy".to_string(),
         RunnerSetup {
-            runtime: "main".into(),
+            runtime: "claude".into(),
             labels: vec!["mac".into(), "office".into()],
             repo: Some("https://github.com/example/app".into()),
             base_branch: Some("main".into()),
@@ -56,7 +56,7 @@ fn sample_machines() -> Vec<MachineInfo> {
             disk_total_bytes: Some(494 * 1024 * 1024 * 1024),
             active_runs: 1,
             max_parallel_runs: Some(2),
-            runtimes: vec!["main".into()],
+            runtimes: vec!["claude".into(), "codex".into()],
         },
         MachineInfo {
             id: "mc-old".into(),

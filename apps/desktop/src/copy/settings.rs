@@ -99,6 +99,8 @@ crate::copy! {
     RUNNER_RUNTIME = "运行方式",
     RUNNER_RUNTIME_PLACEHOLDER = "机器上配置的运行方式名称",
     RUNNER_RUNTIME_KNOWN = "机器上可用：",
+    RUNNER_RUNTIME_PICK = "选择…",
+    RUNNER_SECTION = "运行设置",
     RUNNER_RUNTIME_REQUIRED = "请填写运行方式",
     RUNNER_REPO = "代码仓库",
     RUNNER_REPO_PLACEHOLDER = "仓库地址，或机器上的文件夹",

@@ -22,7 +22,7 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_top};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus},
@@ -38,7 +38,7 @@ use crate::{
             AlertLayout, BadgeState, FormRow, GroupedForm, NativeSwitch, NativeTextField,
             NativeType as _, PushSize, PushStyle, SearchField, SectionTitle, SheetLayout,
             SheetWidth, StatusBadge, alert_button, disabled_push, inline_commit, metrics,
-            native_colors, page::outline_badge, pull_down, push_button, tokens,
+            native_colors, page::outline_badge, push_button, tokens,
         },
     },
 };
@@ -1696,28 +1696,29 @@ impl Render for BotForm {
             move |_, cx| retry.update(cx, |f, cx| f.submit(cx)),
             cx,
         );
-        let mut form = sheet_form()
-            .child(field_row(
-                s::NAME,
-                "member-name",
-                &self.name,
-                name_err.is_some(),
-                cx,
-            ))
-            .child(field_row(
-                s::ROLE,
-                "member-role",
-                &self.role,
-                role_err.is_some(),
-                cx,
-            ));
+        use crate::ui::native::{Segment, Segmented, tokens::NativeType as _};
+        let k = crate::ui::native::native_colors(cx);
+        // A small label over each block of the sheet (2.3, sheet size).
+        let section = |text: &'static str| {
+            div()
+                .pb(tokens::space::S8)
+                .n_subheadline()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.secondary)
+                .child(text)
+        };
+        let mut body = div().w_full().flex().flex_col().gap(tokens::space::S16).child(
+            sheet_form()
+                .child(field_row(s::NAME, "member-name", &self.name, name_err.is_some(), cx))
+                .child(field_row(s::ROLE, "member-role", &self.role, role_err.is_some(), cx)),
+        );
         match &load {
             Some(RunnerLoad::Loading) => {
-                form = form.child(widgets::list_loading("bot-runner-loading", 2, false, cx));
+                body = body.child(widgets::list_loading("bot-runner-loading", 2, false, cx));
             }
             Some(RunnerLoad::Failed(text)) => {
                 let again = cx.entity();
-                form = form.child(widgets::failed_alert(
+                body = body.child(widgets::failed_alert(
                     "bot-runner-failed",
                     s::BOT_RUNNER_LOAD_FAILED,
                     Some(text.clone()),
@@ -1730,111 +1731,110 @@ impl Render for BotForm {
             _ => {}
         }
         if runner_ready {
-            form = form.child(choice_row(
-                s::BOT_MODE,
-                "bot-mode",
-                [s::BOT_MODE_EXTERNAL, s::BOT_MODE_RUNNER],
-                self.runner,
-                busy,
-                move |runner, _, cx| {
-                    mode_page.update(cx, |f, cx| {
-                        f.runner = runner;
-                        f.status = Status::Idle;
-                        cx.notify();
-                    })
-                },
-                window,
-                cx,
-            ));
-            form = form.child(sheet_footnote(
-                if self.runner {
-                    s::BOT_MODE_RUNNER_HINT
-                } else if was_runner {
-                    s::BOT_EDIT_EXTERNAL_HINT
-                } else {
-                    s::BOT_MODE_EXTERNAL_HINT
-                },
-                cx,
-            ));
-        }
-        if runner_ready && self.runner {
-            let runtime = sheet_form_row(
-                s::RUNNER_RUNTIME,
+            // 工作方式: two choices side by side, the one in effect raised,
+            // and one line on what it means under them.
+            let hint = if self.runner {
+                s::BOT_MODE_RUNNER_HINT
+            } else if was_runner {
+                s::BOT_EDIT_EXTERNAL_HINT
+            } else {
+                s::BOT_MODE_EXTERNAL_HINT
+            };
+            body = body.child(
                 div()
                     .flex()
-                    .items_center()
-                    .gap(crate::ui::native::tokens::space::S6)
-                    .when(!self.known_runtimes.is_empty(), |d| {
-                        let known = self.known_runtimes.clone();
-                        let input = self.runtime.clone();
-                        d.child(
-                            pull_down(
-                                "known-runtime",
-                                s::RUNNER_RUNTIME_KNOWN.trim_end_matches('：'),
-                                PushSize::Regular,
-                                window,
-                                cx,
-                            )
-                            .dropdown_menu(move |menu, _, _| {
-                                known.iter().fold(menu, |menu, rt| {
-                                    let (rt, input) = (rt.clone(), input.clone());
-                                    menu.item(PopupMenuItem::new(rt.clone()).on_click(
-                                        move |_, window, cx| {
-                                            input.update(cx, |st, cx| {
-                                                st.set_value(rt.clone(), window, cx)
-                                            })
-                                        },
-                                    ))
-                                })
-                            }),
+                    .flex_col()
+                    .child(section(s::BOT_MODE))
+                    .child(div().flex().child(
+                        Segmented::new(
+                            "bot-mode",
+                            [
+                                Segment::Label(s::BOT_MODE_RUNNER.into()),
+                                Segment::Label(s::BOT_MODE_EXTERNAL.into()),
+                            ],
                         )
-                    })
-                    .child(NativeTextField::new("member-runtime", &self.runtime).full_width()),
-                cx,
+                        .selected(if self.runner { 0 } else { 1 })
+                        .disabled(busy)
+                        .on_change(move |ix, _, cx| {
+                            mode_page.update(cx, |f, cx| {
+                                f.runner = ix == 0;
+                                f.status = Status::Idle;
+                                cx.notify();
+                            })
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .pt(tokens::space::S8)
+                            .n_subheadline()
+                            .text_color(k.secondary)
+                            .child(hint),
+                    ),
             );
-            form = form
-                .child(runtime)
-                .child(field_row(
-                    s::RUNNER_LABELS,
-                    "member-labels",
-                    &self.labels,
-                    false,
-                    cx,
-                ))
-                .child(field_row(
-                    s::RUNNER_REPO,
-                    "member-repo",
-                    &self.repo,
-                    false,
-                    cx,
-                ))
-                .child(field_row(
-                    s::RUNNER_BRANCH,
-                    "member-branch",
-                    &self.branch,
-                    false,
-                    cx,
-                ));
+        }
+        if runner_ready && self.runner {
+            // 运行方式: picked from what the team's computers have; typed only
+            // when no computer has reported yet.
+            let current = self.value(&self.runtime, cx);
+            let mut known = self.known_runtimes.clone();
+            if !current.is_empty() && !known.contains(&current) {
+                known.insert(0, current.clone());
+            }
+            let runtime: gpui::AnyElement = if known.is_empty() {
+                NativeTextField::new("member-runtime", &self.runtime)
+                    .full_width()
+                    .into_any_element()
+            } else {
+                let input = self.runtime.clone();
+                let shown = if current.is_empty() {
+                    s::RUNNER_RUNTIME_PICK.to_string()
+                } else {
+                    current.clone()
+                };
+                widgets::popup_fixed("member-runtime", shown, SELECT_WIDTH, window, cx)
+                    .dropdown_menu(move |menu, _, _| {
+                        known.iter().fold(menu, |menu, rt| {
+                            let (rt, input) = (rt.clone(), input.clone());
+                            menu.item(PopupMenuItem::new(rt.clone()).checked(rt == current).on_click(
+                                move |_, window, cx| {
+                                    input.update(cx, |st, cx| st.set_value(rt.clone(), window, cx))
+                                },
+                            ))
+                        })
+                    })
+                    .into_any_element()
+            };
+            body = body.child(
+                div().flex().flex_col().child(section(s::RUNNER_SECTION)).child(
+                    sheet_form()
+                        .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
+                        .child(field_row(s::RUNNER_LABELS, "member-labels", &self.labels, false, cx))
+                        .child(field_row(s::RUNNER_REPO, "member-repo", &self.repo, false, cx))
+                        .child(field_row(s::RUNNER_BRANCH, "member-branch", &self.branch, false, cx)),
+                ),
+            );
         }
         // The look of an existing member changes in its own sheet (更换形象…).
         if self.editing.is_none() {
-            form = form.child(sheet_form_row_top(
-                s::BOT_CHARACTER,
-                character_picker(
-                    "bot-character",
-                    Some(self.chosen_character(cx)),
-                    busy,
-                    move |c, _, cx| {
-                        pick_page.update(cx, |f, cx| {
-                            f.character = Some(c);
-                            cx.notify();
-                        })
-                    },
-                    window,
-                    cx,
+            body = body.child(
+                div().flex().flex_col().child(section(s::BOT_CHARACTER)).child(
+                    sheet_form().child(
+                        div().p(tokens::space::S12).child(character_picker(
+                            "bot-character",
+                            Some(self.chosen_character(cx)),
+                            busy,
+                            move |c, _, cx| {
+                                pick_page.update(cx, |f, cx| {
+                                    f.character = Some(c);
+                                    cx.notify();
+                                })
+                            },
+                            window,
+                            cx,
+                        )),
+                    ),
                 ),
-                cx,
-            ));
+            );
         }
         let (title, explanation, default) = match &self.editing {
             Some(e) => (
@@ -1849,9 +1849,9 @@ impl Render for BotForm {
             .body(
                 div()
                     .id("bot-form-body")
-                    .max_h(px(420.))
+                    .max_h(px(460.))
                     .overflow_y_scroll()
-                    .child(form),
+                    .child(body),
             )
             .when_some(failed, |l, f| l.body(f))
             .when_some(name_err.clone().or(role_err.clone()), |l, e| {
