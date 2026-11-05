@@ -97,7 +97,7 @@ pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
         PushStyle::Outline => Look {
             fill: k.control,
             text: k.label,
-            hover: k.fill_hover,
+            hover: k.control_hover,
             pressed: k.pressed,
             border: Some(k.quaternary),
         },
@@ -534,7 +534,11 @@ pub fn chip_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button
             ButtonCustomVariant::new(cx)
                 .color(fill)
                 .foreground(k.label)
-                .hover(k.fill_hover)
+                .hover(if selected {
+                    k.fill_hover
+                } else {
+                    k.control_hover
+                })
                 .active(k.pressed),
         )
         .with_size(gpui_component::Size::Medium)
@@ -816,6 +820,16 @@ mod tests {
             let outline = look(PushStyle::Outline, &k);
             assert_eq!(outline.fill, k.control);
             assert_eq!(outline.border, Some(k.quaternary));
+            // K-04: the hover is one visible step over the rest fill (at
+            // least 8 levels of 255, as light's 255 → 245), below pressed.
+            let lum = |c: gpui::Hsla| gpui::Rgba::from(c).r * 255.;
+            let step = |c: gpui::Hsla| (lum(c) - lum(outline.fill)).abs();
+            assert!(
+                step(outline.hover) >= 8.,
+                "hover step {}",
+                step(outline.hover)
+            );
+            assert!(step(outline.pressed) > step(outline.hover));
             let primary = look(PushStyle::Default, &k);
             assert_eq!(primary.fill, k.primary);
             assert!(primary.border.is_none());

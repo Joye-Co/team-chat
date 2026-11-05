@@ -84,8 +84,13 @@ fn path_at(sym: Sym, size: SymSize, scale: f32) -> String {
         n => n,
     };
     let point = size.point * sym.factor();
+    let ink = if size.ink > 0. {
+        format!("/i{}", (size.ink * 10.).round() as u32)
+    } else {
+        String::new()
+    };
     format!(
-        "{PREFIX}{name}/{}/{}/{}/{}.svg",
+        "{PREFIX}{name}/{}/{}/{}/{}{ink}.svg",
         weight_code(size.weight),
         (point * 10.).round() as u32,
         (size.slot * 10.).round() as u32,
@@ -101,6 +106,8 @@ struct Parsed<'a> {
     point: f32,
     slot: f32,
     scale: f32,
+    /// The ink box's larger side ([`SymSize::fill`]), when set.
+    ink: Option<f32>,
 }
 
 fn parse(path: &str) -> Option<Parsed<'_>> {
@@ -112,6 +119,10 @@ fn parse(path: &str) -> Option<Parsed<'_>> {
     let point = num(parts.next())? as f32 / 10.;
     let slot = num(parts.next())? as f32 / 10.;
     let scale = num(parts.next())? as f32 / 100.;
+    let ink = match parts.next() {
+        Some(i) => Some(num(Some(i.strip_prefix('i')?))? as f32 / 10.),
+        None => None,
+    };
     if parts.next().is_some() || !(1. ..=400.).contains(&slot) || point <= 0. {
         return None;
     }
@@ -121,6 +132,7 @@ fn parse(path: &str) -> Option<Parsed<'_>> {
         point,
         slot,
         scale,
+        ink,
     })
 }
 
@@ -177,7 +189,14 @@ fn draw(p: &Parsed<'_>) -> Option<Arc<[u8]>> {
     if p.name.is_empty() {
         return None;
     }
-    let mask = raster::draw(p.name, p.point, p.weight, p.slot, p.scale * SUPERSAMPLE)?;
+    let mask = raster::draw_ink(
+        p.name,
+        p.point,
+        p.weight,
+        p.slot,
+        p.scale * SUPERSAMPLE,
+        p.ink,
+    )?;
     Some(Arc::from(svg(&mask).into_bytes()))
 }
 
@@ -339,6 +358,11 @@ mod tests {
         assert_eq!(parsed.weight, Weight::Regular);
         assert_eq!((parsed.point, parsed.slot, parsed.scale), (15., 18., 2.));
         assert!(parse("sf/tray/x/150/180/200.svg").is_none());
+        // A filled size carries its ink square.
+        let tab = path_at(Sym::Members, SymSize::TAB, 2.);
+        assert!(tab.ends_with("/240/200/i180.svg"), "{tab}");
+        assert_eq!(parse(&tab).unwrap().ink, Some(18.));
+        assert!(parse("sf/tray/r/150/180/200/x180.svg").is_none());
         assert!(parse("icons/tray.svg").is_none());
         // The live dot draws smaller than its context.
         assert_eq!(

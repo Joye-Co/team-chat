@@ -205,6 +205,12 @@ pub struct NativeColors {
     /// `card` (shadcn `dark:bg-input/30`), so a control on a GroupBox or a
     /// sheet reads as a raised control, not a hole (§2.22, R1-17).
     pub control: Hsla,
+    /// The hover fill of an outline control: `accent` in light; in dark
+    /// `input` at 50 % over `card` (shadcn `dark:hover:bg-input/50`), one
+    /// visible step over [`Self::control`]. `accent` (#262626) is only one
+    /// level over the dark control fill, so a hover in it does not show
+    /// (review 3 K-04).
+    pub control_hover: Hsla,
     /// `border`.
     pub separator: Hsla,
     /// `muted`: control fill (secondary button, segmented track).
@@ -278,6 +284,11 @@ impl NativeColors {
                 p.card.blend(p.input.opacity(0.3))
             } else {
                 p.background
+            },
+            control_hover: if p.dark {
+                p.card.blend(p.input.opacity(0.5))
+            } else {
+                p.accent
             },
             separator: p.border,
             fill: p.muted,

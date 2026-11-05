@@ -6,12 +6,12 @@
 use std::cell::Cell;
 
 use gpui::{
-    App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div, px,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
+    Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    Sizable as _, WindowExt as _,
-    input::{InputEvent, InputState, Textarea, TextareaState},
+    WindowExt as _,
+    input::{InputEvent, InputState, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
@@ -20,18 +20,12 @@ use crate::{
     app::Services,
     copy::{common, overlays as o},
     data::{GroupId, StartTopicRequest},
-    ui::{
-        controls::placeholder_input,
-        native::{
-            NativeTextField, NativeType as _, PushSize, SheetLayout, SheetWidth, disabled_push,
-            metrics, native_colors, native_sheet_keyboard, popup_button, sheet_buttons,
-        },
+    ui::native::{
+        NativeTextArea, NativeTextField, PushSize, SheetLayout, SheetWidth, disabled_push,
+        native_sheet_keyboard, popup_button, sheet_buttons,
     },
     views::rail::model as rail_model,
 };
-
-/// The first message field: four lines of Body text.
-const BODY_FIELD: gpui::Pixels = px(88.);
 
 gpui::actions!(new_topic, [StartTopic]);
 
@@ -149,7 +143,6 @@ impl NewTopicSheet {
 
 impl Render for NewTopicSheet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = native_colors(cx);
         let ready = self.group.is_some() && !self.body.read(cx).value().trim().is_empty();
         let group_name: SharedString = self
             .groups
@@ -183,31 +176,9 @@ impl Render for NewTopicSheet {
                         )
                     })
                 });
-        let body_focused = self.body.read(cx).focus_handle(cx).is_focused(window);
-        // A quiet multi-line field: `content` fill, a 1 px `separator` edge,
-        // and the soft focus halo only while it has the focus.
-        let body_field = div()
-            .id("new-topic-body")
-            .w_full()
-            .h(BODY_FIELD)
-            .px(metrics::FIELD_PAD)
-            .py(px(4.))
-            .rounded(metrics::FIELD_RADIUS)
-            .bg(k.content)
-            .border_1()
-            .border_color(k.separator)
-            .when_focus(body_focused, soft_halo(k.focus))
-            .cursor_text()
-            .child(placeholder_input(
-                Textarea::new(&self.body)
-                    .appearance(false)
-                    .xsmall()
-                    .p_0()
-                    .n_body()
-                    .text_color(k.label),
-                window,
-                cx,
-            ));
+        // The §2.8 textarea: the 标题 field's edge, fill and ring over four
+        // lines (review 3 K-02).
+        let body_field = NativeTextArea::new("new-topic-body", &self.body).rows(4);
         let [cancel, start] = sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
         div()
             .key_context(CONTEXT)
@@ -232,28 +203,6 @@ impl Render for NewTopicSheet {
                             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                     ]),
             )
-    }
-}
-
-/// The soft focus halo of the multi-line field: the focus color, spread
-/// 3 pt and blurred 2 pt, so a tall field does not read as a thick frame.
-fn soft_halo(focus: gpui::Hsla) -> Vec<gpui::BoxShadow> {
-    vec![gpui::BoxShadow {
-        color: focus.opacity(0.7),
-        offset: gpui::point(px(0.), px(0.)),
-        blur_radius: px(2.),
-        spread_radius: px(2.5),
-        inset: false,
-    }]
-}
-
-trait WhenFocus {
-    fn when_focus(self, focused: bool, ring: Vec<gpui::BoxShadow>) -> Self;
-}
-
-impl WhenFocus for gpui::Stateful<gpui::Div> {
-    fn when_focus(self, focused: bool, ring: Vec<gpui::BoxShadow>) -> Self {
-        if focused { self.shadow(ring) } else { self }
     }
 }
 
