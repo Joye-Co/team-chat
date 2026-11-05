@@ -282,11 +282,28 @@ impl TimelineView {
         let body: Option<AnyElement> = if deleted {
             // A recalled message: 14 muted text, no icon (a recall is not a
             // trash can).
+            // Mine, recalled in this run: 重新编辑 puts the text back in the
+            // composer.
+            let reedit = self.can_reedit(message).then(|| {
+                let m = message.clone();
+                ui::native::push_button(
+                    ElementId::Name(format!("reedit-{key}").into()),
+                    t::REEDIT,
+                    ui::native::PushStyle::Link,
+                    ui::native::PushSize::Small,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.reedit(&m, cx)))
+            });
             Some(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
                     .t_body()
                     .text_color(colors.text_3)
                     .child(t::RECALLED)
+                    .children(reedit)
                     .into_any_element(),
             )
         } else if let Some(input) = editing {
@@ -548,12 +565,14 @@ impl TimelineView {
                 })
                 .into_any_element()
         } else {
-            // A click on someone else's avatar @s them in the composer, as in
-            // Feishu; the avatar keeps the row's message menu off it.
+            // A click on someone else's avatar quotes this message and @s
+            // them in the composer, as in Feishu; the avatar keeps the row's
+            // message menu off it.
             let mention = author
                 .as_ref()
                 .filter(|a| self.me.as_deref() != Some(a.id.as_str()))
                 .map(|a| (a.id.clone(), a.name.clone()));
+            let quoted = (!deleted && !message.id.is_empty()).then(|| message.clone());
             div()
                 .id(ElementId::Name(format!("avatar-{key}").into()))
                 .w(gutter_w)
@@ -565,7 +584,12 @@ impl TimelineView {
                         .tooltip(move |window, cx| {
                             gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                         })
-                        .on_click(cx.listener(move |this, _, _, cx| this.mention(&id, cx)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(m) = &quoted {
+                                this.quote(m, cx);
+                            }
+                            this.mention(&id, cx)
+                        }))
                 })
                 .child(if v2 {
                     // v2: tiles and circles only; presence lives in the rail.

@@ -2,8 +2,8 @@
 //!
 //! Items: 复制 (the Markdown source), 复制链接 (a link with the product URL
 //! scheme), 编辑 (my sent messages), 撤回 (my own, within 24 hours of sending;
-//! asks first; nobody takes back someone else's message), and 重试 for a
-//! failed send. Reply and reactions live on the hover
+//! asks first; nobody takes back someone else's message; the tombstone then
+//! offers 重新编辑), and 重试 for a failed send. Reply and reactions live on the hover
 //! toolbar only, so no action shows twice on a hovered row.
 //! To add an item, add it in [`build`]; anything that changes data calls the
 //! provider.
@@ -101,11 +101,7 @@ fn confirm_recall(
             .ok_variant(ButtonVariant::Danger)
             .cancel_text(common::CANCEL)
             .on_ok(move |_, _, cx| {
-                let _ = view.update(cx, |this, _| {
-                    this.services
-                        .provider
-                        .delete(&message.group_id, &message.id);
-                });
+                let _ = view.update(cx, |this, cx| this.recall(&message, cx));
                 true
             })
     });

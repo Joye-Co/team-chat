@@ -79,6 +79,13 @@ pub enum TimelineEvent {
     },
     /// The user clicked a sender's avatar: the composer should @ them.
     Mention { member_id: crate::data::MemberId },
+    /// 重新编辑 on a message I recalled: the composer gets its text back.
+    Reedit {
+        group_id: GroupId,
+        topic_id: TopicId,
+        body: String,
+        mentions: Vec<crate::data::MemberId>,
+    },
 }
 
 /// A message being edited in place.
@@ -106,6 +113,9 @@ pub struct TimelineView {
     topic: Option<Topic>,
     members: Vec<Member>,
     me: Option<String>,
+    /// Text and mentions of the messages I recalled in this run, by id, for
+    /// 重新编辑 (the server keeps none of it).
+    recalled: std::collections::HashMap<MessageId, (String, Vec<crate::data::MemberId>)>,
     typing: Vec<String>,
     /// The window in memory, oldest first.
     messages: Vec<Message>,
@@ -289,6 +299,7 @@ impl TimelineView {
             topic: None,
             members: Vec::new(),
             me: None,
+            recalled: Default::default(),
             typing: Vec::new(),
             messages: Vec::new(),
             has_older: false,
@@ -662,6 +673,39 @@ impl TimelineView {
         cx.emit(TimelineEvent::Mention {
             member_id: member_id.to_string(),
         });
+    }
+
+    /// 撤回 one of my messages, keeping its text for 重新编辑.
+    pub(super) fn recall(&mut self, message: &Message, cx: &mut Context<Self>) {
+        if !self.can_recall(message) {
+            return;
+        }
+        self.recalled.insert(
+            message.id.clone(),
+            (message.body.clone(), message.mentions.clone()),
+        );
+        self.services
+            .provider
+            .delete(&message.group_id, &message.id);
+        cx.notify();
+    }
+
+    /// 重新编辑: hands the text of a message I recalled back to the composer.
+    pub(super) fn reedit(&mut self, message: &Message, cx: &mut Context<Self>) {
+        let Some((body, mentions)) = self.recalled.get(&message.id).cloned() else {
+            return;
+        };
+        cx.emit(TimelineEvent::Reedit {
+            group_id: message.group_id.clone(),
+            topic_id: message.topic_id.clone(),
+            body,
+            mentions,
+        });
+    }
+
+    /// The text of a message I recalled in this run can be edited again.
+    pub(super) fn can_reedit(&self, message: &Message) -> bool {
+        message.deleted_at.is_some() && self.recalled.contains_key(&message.id)
     }
 
     /// R on the keyboard row: reply to it. Returns true when it did.
@@ -1309,5 +1353,61 @@ mod keyboard_tests {
             m.author_id = "someone-else".into();
             assert!(!this.can_recall(&m), "someone else's");
         });
+    }
+
+    /// 撤回 keeps my text for 重新编辑, which hands it to the composer.
+    #[gpui::test]
+    fn recall_then_reedit_returns_the_text(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &TimelineEvent, _| {
+                sink.borrow_mut().push(e.clone())
+            })
+            .detach()
+        });
+        let mine = view.update(cx, |this, _| {
+            let me = this.me.clone().expect("signed in");
+            this.messages
+                .iter()
+                .rev()
+                .find(|m| m.author_id == me && m.deleted_at.is_none() && !m.id.is_empty())
+                .cloned()
+        });
+        let Some(mut mine) = mine else {
+            panic!("the sample 话题 has a message of mine");
+        };
+        // The sample may be old; recall works on a fresh one.
+        mine.created_at = crate::selftest::clock::now_ms();
+        view.update(cx, |this, cx| {
+            assert!(!this.can_reedit(&mine));
+            this.recall(&mine, cx);
+        });
+        cx.run_until_parked();
+        let mut gone = mine.clone();
+        gone.deleted_at = Some(1);
+        view.update(cx, |this, cx| {
+            assert!(this.can_reedit(&gone));
+            this.reedit(&gone, cx);
+        });
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[TimelineEvent::Reedit {
+                group_id: mine.group_id.clone(),
+                topic_id: mine.topic_id.clone(),
+                body: mine.body.clone(),
+                mentions: mine.mentions.clone(),
+            }]
+        );
     }
 }

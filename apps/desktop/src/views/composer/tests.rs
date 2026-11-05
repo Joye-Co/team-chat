@@ -651,3 +651,34 @@ fn reply_quotes_a_message_of_the_open_topic_only(cx: &mut TestAppContext) {
     let sent = h.last(TOPIC);
     assert_eq!(sent.quote_of.as_deref(), Some(target.id.as_str()));
 }
+
+#[gpui::test]
+fn reedit_puts_the_recalled_text_back_after_the_draft(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, Some(TOPIC));
+    h.view.update_in(cx, |this, window, cx| {
+        this.restore_recalled(GROUP, "t-other", "别的话题", &[], window, cx)
+    });
+    assert_eq!(h.text(cx), "", "another 话题's text stays out");
+    h.view.update_in(cx, |this, window, cx| {
+        this.restore_recalled(
+            GROUP,
+            TOPIC,
+            "@Forge 原来的话",
+            &["m-coder".into()],
+            window,
+            cx,
+        )
+    });
+    assert_eq!(h.text(cx), "@Forge 原来的话");
+    cx.simulate_input("，改一下");
+    cx.simulate_keystrokes("enter");
+    let sent = h.last(TOPIC);
+    assert_eq!(sent.body, "@Forge 原来的话，改一下");
+    assert_eq!(sent.mentions, vec!["m-coder".to_string()]);
+
+    cx.simulate_input("先写的");
+    h.view.update_in(cx, |this, window, cx| {
+        this.restore_recalled(GROUP, TOPIC, "撤回的", &[], window, cx)
+    });
+    assert_eq!(h.text(cx), "先写的\n撤回的");
+}

@@ -639,7 +639,7 @@ impl RootView {
         crate::views::banners::register(update_banner.clone(), banner.clone(), cx);
         let timeline = cx.new(|cx| TimelineView::new(services.clone(), cx));
         let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
-        // 回复 and a click on an avatar land in the composer.
+        // 回复, a click on an avatar and 重新编辑 land in the composer.
         let composer_for_timeline = composer.clone();
         subscriptions.push(cx.subscribe_in(
             &timeline,
@@ -655,6 +655,12 @@ impl RootView {
                     TimelineEvent::Mention { member_id } => {
                         composer.mention_member(member_id, window, cx)
                     }
+                    TimelineEvent::Reedit {
+                        group_id,
+                        topic_id,
+                        body,
+                        mentions,
+                    } => composer.restore_recalled(group_id, topic_id, body, mentions, window, cx),
                 });
             },
         ));

@@ -1137,6 +1137,45 @@ impl ComposerView {
         cx.notify();
     }
 
+    /// 重新编辑 a message I recalled in the open 话题: its text goes back
+    /// into the field (after what is there, on a new line) with its
+    /// mentions, and the field takes the focus.
+    pub fn restore_recalled(
+        &mut self,
+        group_id: &str,
+        topic_id: &str,
+        body: &str,
+        mentions: &[MemberId],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(key) = self.key.clone() else {
+            return;
+        };
+        if key.group_id != group_id
+            || key.topic_id.as_deref() != Some(topic_id)
+            || self.editing.is_some()
+        {
+            return;
+        }
+        let current = self.text(cx);
+        let text = if current.trim().is_empty() {
+            body.to_string()
+        } else {
+            format!("{}\n{body}", current.trim_end())
+        };
+        self.set_text(&text, window, cx);
+        for id in mentions {
+            if !self.picked.contains(id) {
+                self.picked.push(id.clone());
+            }
+        }
+        self.mention = None;
+        self.save_text(cx);
+        self.focus_at_end(window, cx);
+        cx.notify();
+    }
+
     fn focus_at_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let len = self.text(cx).len();
         self.input.update(cx, |state, cx| {

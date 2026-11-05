@@ -8,6 +8,7 @@ crate::copy! {
     NO_OLDER = "已经到最早的消息",
     EDITED = "（已编辑）",
     RECALLED = "此消息已撤回",
+    REEDIT = "重新编辑",
     PENDING = "发送中",
     FAILED = "没有发出",
     RETRY = "重试",
@@ -53,8 +54,8 @@ crate::copy! {
     ADD_REACTION = "添加表情回应",
     REACTED_BY = "{names} 回应了 {emoji}",
     REPLY = "回复",
-    // A sender's avatar: a click @s them in the composer.
-    AVATAR_MENTION_TIP = "@{name}",
+    // A sender's avatar: a click @s them and quotes the message in the composer.
+    AVATAR_MENTION_TIP = "@{name} 并引用这条消息",
     MORE = "更多",
     FOLLOW = "关注话题",
     UNFOLLOW = "取消关注",
