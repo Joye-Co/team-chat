@@ -154,6 +154,8 @@ fn draft_card() -> card::Card {
         "v": 1,
         "title": "发布预览",
         "tone": "warning",
+        // The 话题 waits on my review: the card says the same words.
+        "status": { "label": crate::copy::common::STATUS_WAITING_REVIEW_ME },
         "blocks": [
             { "type": "fields", "fields": [
                 { "label": "平台", "value": "小红书" },
