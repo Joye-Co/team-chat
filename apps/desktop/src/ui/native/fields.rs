@@ -3,7 +3,8 @@
 //! 36), px 12, radius 8, 1 px `input` border, shadow xs, 14 text. Search
 //! field: h32, radius full, a 16 search icon at x + 12. Focus: the ring color
 //! border plus a 3 px ring at 50 %. Error: the destructive border plus a 3 px
-//! destructive ring at 20 %.
+//! destructive ring at 20 %. TextArea: the Input recipe over several lines
+//! (py 8, a height of whole lines), the same edge, fill and rings.
 
 use gpui::{
     AnyElement, App, BoxShadow, ElementId, Entity, Focusable as _, Hsla, InteractiveElement as _,
@@ -12,10 +13,12 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    input::{Input, InputState},
+    input::{Input, InputState, Textarea, TextareaState},
 };
 
-use super::tokens::{NativeColors, NativeType as _, icon, metrics, native_colors, shadow, space};
+use super::tokens::{
+    NativeColors, NativeType as _, icon, layout, metrics, native_colors, shadow, space, text,
+};
 use crate::ui::{
     controls::placeholder_input,
     sf_symbols::{Sf, Weight, symbol},
@@ -217,6 +220,103 @@ impl RenderOnce for NativeTextField {
     }
 }
 
+/// A multi-line field (§1.8, §2.8 Textarea): the Input recipe over
+/// `rows` whole lines of 14 / 20 text. px 12, py 8, radius 8, the `control`
+/// fill, the 1 px `input` border with shadow xs at rest, and the same focus
+/// and error rings as [`NativeTextField`] (review 3 K-02: one field recipe
+/// per sheet, no soft halo).
+#[derive(IntoElement)]
+pub struct NativeTextArea {
+    id: ElementId,
+    state: Entity<TextareaState>,
+    rows: usize,
+    disabled: bool,
+    error: bool,
+    focused: Option<bool>,
+}
+
+impl NativeTextArea {
+    /// Four lines, full width: the default (§2.8: min 3 lines).
+    pub fn new(id: impl Into<ElementId>, state: &Entity<TextareaState>) -> Self {
+        Self {
+            id: id.into(),
+            state: state.clone(),
+            rows: 4,
+            disabled: false,
+            error: false,
+            focused: None,
+        }
+    }
+
+    /// The visible lines (at least 3).
+    pub fn rows(mut self, rows: usize) -> Self {
+        self.rows = rows.max(3);
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub fn error(mut self, error: bool) -> Self {
+        self.error = error;
+        self
+    }
+
+    /// Draws the focus ring whatever the focus (self-test scenes).
+    pub fn show_focus(mut self, focused: bool) -> Self {
+        self.focused = Some(focused);
+        self
+    }
+
+    /// The outer height: whole lines, the padding and the border.
+    pub fn height(rows: usize) -> Pixels {
+        text::UI.1 * rows as f32 + space::S8 * 2. + layout::BORDER * 2.
+    }
+}
+
+impl RenderOnce for NativeTextArea {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = native_colors(cx);
+        let handle = self.state.read(cx).focus_handle(cx);
+        let focused = self.focused.unwrap_or_else(|| handle.is_focused(window)) && !self.disabled;
+        let (edge, shadows) = field_edge(&k, focused, self.error);
+        div()
+            .id(self.id)
+            .flex_none()
+            .w_full()
+            .h(Self::height(self.rows))
+            .px(metrics::FIELD_PAD)
+            .py(space::S8)
+            .rounded(metrics::FIELD_RADIUS)
+            .bg(k.control)
+            .border_1()
+            .border_color(edge)
+            .shadow(shadows)
+            .when(self.disabled, |d| d.opacity(0.5))
+            .overflow_hidden()
+            .cursor_text()
+            // A click in the padding lands in the text too.
+            .when(!self.disabled, |d| {
+                d.on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                    handle.focus(window, cx);
+                })
+            })
+            .child(placeholder_input(
+                Textarea::new(&self.state)
+                    .appearance(false)
+                    .disabled(self.disabled)
+                    .xsmall()
+                    .p_0()
+                    .n_body()
+                    .text_color(k.label),
+                window,
+                cx,
+            ))
+    }
+}
+
 /// The search field (§1.8): h32, radius full, a 16 search icon at x + 12.
 #[derive(IntoElement)]
 pub struct SearchField {
@@ -334,6 +434,13 @@ mod tests {
         assert_eq!(FieldSize::Large.height(), px(36.));
         assert_eq!(metrics::SEARCH, px(32.));
         assert_eq!(metrics::FIELD_RADIUS, px(8.));
+    }
+
+    #[test]
+    fn a_textarea_is_whole_lines() {
+        // 4 lines of 20, py 8, a 1 px border: 98.
+        assert_eq!(NativeTextArea::height(4), px(98.));
+        assert_eq!(NativeTextArea::height(3), px(78.));
     }
 
     #[test]
