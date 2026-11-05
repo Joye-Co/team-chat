@@ -286,6 +286,63 @@ describe("quotes and cards", () => {
 });
 
 describe("notifications and prefs", () => {
+  it("mute and unmute a topic: ack, reads to my other connections, only mentions notify", async () => {
+    const { members, gid, clients } = await setup(3);
+    const [, b, c] = members;
+    const [ca, cb, cc] = clients;
+    const { c: cc2 } = await Client.connect(c.token);
+    const r = await ca.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "x" });
+    const tid = r.topic.id;
+    await api(`/v1/groups/${gid}/prefs`, { method: "PATCH", token: c.token, body: { notify: "all" } });
+    await cc.next((f) => f.t === "directory" && f.groups?.[0]?.notify === "all");
+    await cc.ok({ t: "topic.follow", groupId: gid, topicId: tid, follow: true });
+
+    // Mute: the ack is my TopicState, my other connection gets reads, following stays.
+    const st = await cc.ok({ t: "topic.mute", groupId: gid, topicId: tid, muted: true });
+    expect(st).toMatchObject({ topicId: tid, muted: true, following: true });
+    const reads = await cc2.next((f) => f.t === "reads" && f.topics[0]?.muted === true);
+    expect(reads).toMatchObject({ groupId: gid, topics: [{ topicId: tid, muted: true, following: true }] });
+    const list = async () => (await api("/v1/groups", { token: c.token })).body.find((g: any) => g.group.id === gid).topics;
+    expect(await list()).toContainEqual(expect.objectContaining({ topicId: tid, muted: true }));
+
+    // In the muted topic: message, waiting and result are suppressed; a mention still notifies.
+    const m1 = await ca.ok({ t: "send", groupId: gid, topicId: tid, clientMsgId: clientMsgId(), body: "plain" });
+    expect((await cc.next((f) => f.t === "event" && f.event.seq === m1.message.createdSeq)).notify).toBeUndefined();
+    const w = await ca.ok({ t: "topic.update", groupId: gid, topicId: tid, waitingOn: [c.id] });
+    expect((await cc.next((f) => f.t === "event" && f.event.seq === w.topic.lastSeq)).notify).toBeUndefined();
+    const done = await ca.ok({ t: "topic.update", groupId: gid, topicId: tid, status: "done" });
+    expect((await cc.next((f) => f.t === "event" && f.event.seq === done.topic.lastSeq)).notify).toBeUndefined();
+    const m2 = await ca.ok({ t: "send", groupId: gid, topicId: tid, clientMsgId: clientMsgId(), body: "@c", mentions: [c.id] });
+    expect((await cc.next((f) => f.t === "event" && f.event.seq === m2.message.createdSeq)).notify).toBe("mention");
+    // Other members are not affected by my mute.
+    expect((await cb.next((f) => f.t === "event" && f.event.seq === w.topic.lastSeq)).notify).toBeUndefined();
+    // Auto-follow (mention, waitingOn) does not unmute.
+    expect(await list()).toContainEqual(expect.objectContaining({ topicId: tid, muted: true, following: true }));
+
+    // Unmute: messages notify again at level all; following is unchanged.
+    const off = await cc.ok({ t: "topic.mute", groupId: gid, topicId: tid, muted: false });
+    expect(off.muted).toBeUndefined();
+    expect(off.following).toBe(true);
+    await cc2.next((f) => f.t === "reads" && f.topics[0]?.topicId === tid && f.topics[0]?.muted === undefined);
+    const m3 = await ca.ok({ t: "send", groupId: gid, topicId: tid, clientMsgId: clientMsgId(), body: "again" });
+    expect((await cc.next((f) => f.t === "event" && f.event.seq === m3.message.createdSeq)).notify).toBe("message");
+
+    // Validation: missing muted is invalid, an unknown topic not found, an outsider forbidden.
+    expect(await cc.request({ t: "topic.mute", groupId: gid, topicId: tid })).toMatchObject({ ok: false, error: { code: "invalid" } });
+    expect(await cc.request({ t: "topic.mute", groupId: gid, topicId: "01NOPE", muted: true })).toMatchObject({
+      ok: false,
+      error: { code: "not_found" },
+    });
+    const outsider = await createMember();
+    const { c: co } = await Client.connect(outsider.token);
+    expect(await co.request({ t: "topic.mute", groupId: gid, topicId: tid, muted: true })).toMatchObject({
+      ok: false,
+      error: { code: "forbidden" },
+    });
+    void b;
+    closeAll([...clients, cc2, co]);
+  });
+
   it("mark live events with notify per member and honor mute and notify levels", async () => {
     const { members, gid, clients } = await setup(3);
     const [a, b, c] = members;
