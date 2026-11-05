@@ -236,6 +236,33 @@ fn money(cents: u64, currency: Currency) -> String {
     crate::views::topic_rail::money_text(cents, currency)
 }
 
+/// The state word of an AI member, as its 成员 row says it (§2.12, the
+/// rail's priority): an open ask to me first (等你), then a run at work
+/// (在做 n/m), else 空闲. Settings 成员 says the same word (review 5 K-19).
+pub(crate) fn ai_member_word(
+    p: &dyn crate::data::ChatProvider,
+    me: Option<&str>,
+    member_id: &str,
+) -> String {
+    let asks_me = p.asks_for_me().into_iter().any(|a| {
+        a.from == member_id
+            && !me.is_some_and(|me| crate::views::topic_page::ask_answered(p, me, &a))
+    });
+    if asks_me {
+        return c::MEMBERS_WAITS_ON_YOU.to_string();
+    }
+    match p.active_runs().into_iter().find(|r| r.bot_id == member_id) {
+        Some(run) => match kit::plan_progress(&run.plan) {
+            Some((n, m)) => fill(
+                c::MEMBERS_WORKING_N,
+                &[("n", &n.to_string()), ("m", &m.to_string())],
+            ),
+            None => c::MEMBERS_WORKING.to_string(),
+        },
+        None => c::MEMBERS_IDLE.to_string(),
+    }
+}
+
 /// 需要你批准的事: the actions the team's rules make an AI member ask before, in the
 /// order of 设置 › 成员 › 默认规则.
 pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
