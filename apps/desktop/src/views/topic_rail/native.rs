@@ -325,12 +325,10 @@ impl TopicRail {
             .child(if all_done {
                 fill(c::PLAN_ALL_DONE, &[("n", &total.to_string())])
             } else {
+                // §2.12, T-02: one count, done/total, as the bar and the card.
                 fill(
                     c::OWNER_WORKING,
-                    &[
-                        ("n", &(done + 1).min(total).to_string()),
-                        ("total", &total.to_string()),
-                    ],
+                    &[("n", &done.to_string()), ("total", &total.to_string())],
                 )
             })
             .child(div().flex_1())

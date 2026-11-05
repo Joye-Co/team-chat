@@ -86,9 +86,24 @@ pub fn date_divider(at: crate::data::Millis, first: bool, cx: &App) -> AnyElemen
     rule_divider(date_label(at), first, cx)
 }
 
+/// [`date_divider`] with `mark` laid over the label line (the sticky date
+/// reads where it paints).
+pub fn date_divider_marked(at: crate::data::Millis, mark: AnyElement, cx: &App) -> AnyElement {
+    divider(date_label(at), false, Some(mark), cx)
+}
+
 /// The one divider recipe of a thread (§2.17): the date and `新消息` both
 /// draw it, so the thread has one divider look.
 pub fn rule_divider(label: impl Into<SharedString>, first: bool, cx: &App) -> AnyElement {
+    divider(label, first, None, cx)
+}
+
+fn divider(
+    label: impl Into<SharedString>,
+    first: bool,
+    mark: Option<AnyElement>,
+    cx: &App,
+) -> AnyElement {
     let k = native_colors(cx);
     let rule = || div().flex_1().h(px(1.)).bg(k.separator);
     div()
@@ -98,8 +113,10 @@ pub fn rule_divider(label: impl Into<SharedString>, first: bool, cx: &App) -> An
         .px(space::S8)
         .when(!first, |el| el.mt(space::S24))
         .mb(space::S16)
+        .relative()
         .flex()
         .items_center()
+        .children(mark)
         .child(rule())
         .child(
             div()

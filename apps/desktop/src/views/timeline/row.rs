@@ -69,7 +69,10 @@ impl TimelineView {
             .when(!v2, |el| el.px(theme::CONTENT_GUTTER - ROW_INSET))
             .flex()
             .flex_col()
-            .when(last, |el| el.pb(space::S8));
+            .when(last, |el| el.pb(space::S8))
+            // T-01: the sticky date reads where this row and its own date
+            // label paint (`TimelineView::date_label_gone`).
+            .when(v2, |el| el.relative().child(self.date_mark(&key, false)));
         let older_loading = ix == 0 && self.has_older && self.provider_loading;
         if ix == 0 {
             // §2.17: the thread-start block sits 24 under the header.
@@ -99,7 +102,8 @@ impl TimelineView {
                 item = item.child(self.render_start_v2(&topic, cx));
             }
             if start || new_day {
-                item = item.child(super::v2::date_divider(message.created_at, false, cx));
+                let mark = self.date_mark(&key, true).into_any_element();
+                item = item.child(super::v2::date_divider_marked(message.created_at, mark, cx));
             }
         } else {
             if start && let Some(topic) = self.topic.clone() {
