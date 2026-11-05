@@ -66,8 +66,6 @@ crate::copy! {
     GROUP_PAGE_STATUS_ANSWER = "等你回复",
     GROUP_PAGE_STATUS_WORKING = "在做 {n}/{m}",
     GROUP_PAGE_STATUS_STARTED = "在做",
-    GROUP_PAGE_STATUS_WAITING = "等{name}",
-    GROUP_PAGE_STATUS_WAITING_MANY = "等 {n} 人",
     GROUP_PAGE_MEMBERS_EMPTY = "群里还没有成员",
     GROUP_PAGE_OUTPUTS_EMPTY = "还没有产出",
     GROUP_PAGE_WHERE_EMPTY = "现在没有电脑在干活",
@@ -85,7 +83,6 @@ crate::copy! {
     // --- end v13/wire ---
     // --- v14/t3-pages ---
     GROUP_PAGE_STATUS_DONE = "完成",
-    GROUP_PAGE_STATUS_WAITING_OTHER = "等人",
     GROUP_PAGE_COUNT = "共 {n} 个话题",
     GROUP_PAGE_DONE_EMPTY = "这周还没有做完的话题",
     GROUP_PAGE_DONE_EMPTY_BODY = "成员做完一个话题后，会列在这里，带上结果和用到的产出。",

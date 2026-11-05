@@ -22,7 +22,7 @@ crate::copy! {
     STRIP_FILL_READY_DETAIL = "都填好了",
     STRIP_EDITING = "等你改完",
     STRIP_WAITING_ON_DETAIL = "只有被问的人能选",
-    STRIP_SENDING = "正在发送",
+    STRIP_SENDING = "发送中",
     STRIP_SENDING_DETAIL = "发给 {name}",
     STRIP_SEND_FAILED = "没发出去",
     STRIP_SEND_GONE = "这张卡已经变了",

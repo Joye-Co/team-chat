@@ -157,6 +157,10 @@ pub struct SettingsView {
     scroll: gpui::ScrollHandle,
     /// The pane's own height, measured as it is laid out.
     fit: Rc<window_fit::Fit>,
+    /// The window's own focus, on its root: a fresh window focuses it, so
+    /// Tab goes through the `FocusNext` handler to the first control (it is
+    /// not a tab stop itself).
+    focus: gpui::FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -178,6 +182,8 @@ impl SettingsView {
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
         let shortcuts = cx.new(|cx| ShortcutsPage::new(window, cx));
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         let mut this = Self {
             page,
             general,
@@ -189,6 +195,7 @@ impl SettingsView {
             shortcuts,
             scroll: gpui::ScrollHandle::new(),
             fit: Rc::new(window_fit::Fit::default()),
+            focus,
             _subscriptions: vec![theme::follow_system(window, cx)],
         };
         window_fit::dim_window_buttons(window);
@@ -291,7 +298,18 @@ impl Render for SettingsView {
             .collect();
         let fit = self.fit.clone();
         let handle = window.window_handle();
+        // Nothing drawn has the focus (a closed sheet held it): the root
+        // takes it back, so Tab still walks the pane.
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus, cx);
+        }
         div()
+            .id("settings-root")
+            .track_focus(&self.focus)
+            // Tab and ⇧Tab walk the toolbar tabs and the pane's rows and
+            // controls (E3), as in the main window.
+            .on_action(|_: &crate::app::FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &crate::app::FocusPrev, window, cx| window.focus_prev(cx))
             .size_full()
             .flex()
             .flex_col()
@@ -463,4 +481,53 @@ pub fn open_window(
         cx.new(|cx| SettingsView::new_at(services, page, window, cx))
     })
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    /// Tab walks the Settings window (E3): the root holds the focus in a
+    /// fresh window, Tab moves it to a control, and ⇧Tab moves it on.
+    #[gpui::test]
+    fn tab_walks_the_settings_window(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::app::bind_view_keys(cx);
+        });
+        let provider: Arc<dyn crate::data::ChatProvider> = crate::fake::FakeProvider::new();
+        let keep = Rc::new(std::cell::RefCell::new(None));
+        let slot = keep.clone();
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                cx.open_window(Default::default(), move |window, cx| {
+                    let view =
+                        cx.new(|cx| SettingsView::new_at(services, Page::General, window, cx));
+                    *slot.borrow_mut() = Some(view.clone());
+                    cx.new(|cx| gpui_base::Root::new(view, window, cx))
+                })
+            })
+            .expect("the window opens");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        let view = keep.borrow().clone().expect("the settings view");
+        let root = view.read_with(cx, |v, _| v.focus.clone());
+        cx.update(|window, _| assert!(root.is_focused(window), "the root holds the focus"));
+        cx.simulate_keystrokes("tab");
+        let first = cx.update(|window, cx| window.focused(cx));
+        assert!(first.is_some(), "Tab focused something");
+        cx.update(|window, _| assert!(!root.is_focused(window), "Tab left the root"));
+        cx.simulate_keystrokes("tab");
+        let second = cx.update(|window, cx| window.focused(cx));
+        assert!(second.is_some() && second != first, "a second Tab moves on");
+        cx.simulate_keystrokes("shift-tab");
+        let back = cx.update(|window, cx| window.focused(cx));
+        assert_eq!(back, first, "⇧Tab goes back");
+    }
 }

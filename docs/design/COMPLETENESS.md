@@ -276,7 +276,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - A list longer than its region ends with a footer row h40: "看全部 23 个话题 →" 14 muted, or the count "共 12 个" left and pagination right.
 - The topic list of a group uses the ListRow above (owner decision v15; the earlier mail-style item is retired).
 - Hover is muted at 50 %, drawn at once (owner decision v15).
-- Media column carries information: a topic row shows a topic-status icon box, not the same owner avatar on every row (group-v2 shows 7 identical Forge avatars).
+- Leading media (owner decision v16): a 话题 row on 群 and 首页 leads with the avatar of the member who does it (the run's member, else the owner, else the asker), or the kind icon box when there is no member. The status shows only in the StatusBadge column, never a second time in the media. A row's title and meta cut with "…"; the whole text shows in a tooltip only when a line is cut (§2.21), never on a row that fits.
 
 ### 2.7 Table
 
@@ -337,7 +337,8 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | stopping | 停止中 | loader | muted |
 | merging | 正在合并 | loader (spinning) | info |
 | paused | 已暂停 | pause | muted |
-| waiting on someone else | 等李雪回答 / 等审 | clock | muted |
+| waiting on someone else | 等李雪回答 / 等李雪审 / 等审 | clock | muted |
+| sending (my answer or message in flight) | 发送中 | loader (spinning) | muted |
 | queued | 排队 | clock | muted |
 | done / merged / answered | 完成 / 已合并 / 已回答 | check-circle (filled) | success |
 | failed / stuck | 失败 / 卡住了 | x-circle | destructive |
@@ -346,8 +347,8 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | offline / idle / away | 离线 / 空闲 / 不在 | dot 8 outline | muted |
 | deactivated | 已停用 | ban | muted |
 
-- One mapping (owner decision v15, `topic_page::topic_state`): **在做** only while a member's run works (or waits on other members), with "n/m" when it has a plan, where n/m is done/total (steps done over all steps) in every badge, meta line and Progress bar (one count, `topic_page::plan_progress`); two or more members at work read "2 个成员在做", in the sidebar too. A 话题 marked in progress with no run is **排队** (clock, muted). Merging is **正在合并**; 进行中, 合并中, 排队中 and 未开始 are not used. The sidebar right column, title bar, inspector 状态, run log and Card v2 use these words.
-- Order (v16, T-03): a merge in progress first; then what waits on me: every open ask for me in the 话题 (`asks_for_me` less the asks my answer already reached, `topic_page::ask_answered`) reads 等你审 (a review, "等你审 PR #61" with its PR) or 等你回答 (any other ask), before any run; an ask I answered reads 已回答 until the server follows. Then stopping, at work or paused, a failed run, then the 话题's own status (等李雪回答 / 等审, clock, muted, also in the sidebar). The inspector's 标记完成 follows this state.
+- One mapping (owner decision v15, `topic_page::topic_state`): **在做** only while a member's run works (or waits on other members), with "n/m" when it has a plan, where n/m is done/total (steps done over all steps) in every badge, meta line and Progress bar (one count, `topic_page::plan_progress`); two or more members at work read "2 个成员在做", in the sidebar too. A 话题 marked in progress with no run is **排队** (clock, muted). Merging is **正在合并**; an answer or message in flight is **发送中** (v16); 进行中, 合并中, 排队中, 未开始 and 正在发送 are not used. The sidebar right column, title bar, inspector 状态, run log and Card v2 use these words.
+- Order (v16, T-03): a merge in progress first; then what waits on me: every open ask for me in the 话题 (`asks_for_me` less the asks my answer already reached, `topic_page::ask_answered`) reads 等你审 (a review, "等你审 PR #61" with its PR) or 等你回答 (any other ask), before any run; an ask I answered reads 已回答 until the server follows. Then stopping, at work or paused, a failed run, then the 话题's own status (等李雪回答 / 等审, clock, muted, also in the sidebar). Every page badge of a 话题 (群, 首页, 成员) shows these same words; a page never shortens 等李雪回答 to 等人 (v16). The inspector's 标记完成 follows this state.
 - One clock per run (v16, P-01): every elapsed time of a run (首页, 群, 成员, the live pane, the working card, the inspector 用时) comes from `topic_page::run_elapsed` (run start to its end, or to the provider's `clock_now`). A run still at work has a start, not a range ("今天 07:23 起").
 - No free colored dot, colored "!" circle or colored text as the only status carrier. The only free dot allowed: unread dot 8 (info) next to a title, and the presence dot on an avatar.
 - In the sidebar the state goes to the right column as a StatusBadge; an unread 话题 shows the unread dot by its title, never a count pill beside the badges (one right-column kind per group, v16). The icon column keeps one kind per group. A busy member row says 等你 n, else 在做 (with its plan count) only while its run works, else the state of its newest 话题.
@@ -400,7 +401,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 - **Artifacts**: table view by default (名称 = icon 16 + title 14 medium truncate; 类型 outline badge; 话题; 做的人 avatar 16 + name; 版本; 更新 right-aligned tabular; "⋯"), table footer "3 个产出". Icon view: equal cards in a grid gap 16, a group header per day (今天, 昨天), title + "v3 · 话题" under each tile, tooltip with the full title.
 - **Members**: the member list column is not framed (rows on the column surface, selection = muted fill); the detail sits beside it.
 - **Member detail**: full pane width, px 24. Header block: avatar 64, name 24 semibold, 14 muted description, actions right-aligned (primary sm "交代", outline sm "单独问", outline sm "暂停"; no trailing "…" in labels). Separator 24. Then cards in a 2-column grid at widths >= 720 (现在在做 | 这周 KPIs; 最近交付 as a table; 问题 as Alert with Retry). Every section in every state (compact empty when no data). 24 bottom padding.
-- **Group**: toolbar title + primary sm "新话题" at the right (no top composer capsule). Topic list = ListRows (2.6, owner decision v15), paginated, footer "看全部 23 个话题"; open 话题 in two sections, 等你 (asks to me) then 在做 (runs), and each row's media is the member's avatar (D15). Inspector per 2.5 with sections 群里的决定, 成员, 机器, each with a compact empty.
+- **Group**: toolbar title + primary sm "新话题" at the right (no top composer capsule). Topic list = ListRows (2.6, owner decision v15), paginated, footer "看全部 23 个话题"; open 话题 in sections, in this order: 等你 (asks to me), 在做 (runs), 卡住了 (failed or stuck), 等别人 (waits on another member's answer or review), 排队 (in progress with no run); never a waiting row under 在做 (owner decision v16). 在做 always shows (compact empty when no run); the other sections show only with rows. Each row's media is the member's avatar (§2.6, D15), its badge the `topic_state` words (§2.12). Inspector per 2.5 with sections 群里的决定, 成员, 机器, each with a compact empty.
 
 ### 2.19 Settings window (640 wide)
 

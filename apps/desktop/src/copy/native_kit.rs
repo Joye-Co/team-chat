@@ -107,7 +107,6 @@ crate::copy! {
     STATE_FOCUSED = "聚焦",
     STATE_DISABLED = "停用",
     STATE_SELECTED = "选中",
-    STATE_INACTIVE = "窗口不在前台",
     // Buttons
     EDIT = "编辑…",
     SIGN_OUT = "退出登录…",

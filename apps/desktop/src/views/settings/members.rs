@@ -871,19 +871,39 @@ const PICKER_COLUMNS: f32 = 9.;
 /// The 26 characters and a random cell as a 9-column grid of 40 ghost
 /// tiles, gap 8, the idle look at 32; the chosen one has the selected fill
 /// and a `label` edge. `pick` gets the clicked (or the random) character.
+///
+/// The grid is one Tab stop (§2.9 grid, E3): the focused tile, else the
+/// chosen one, else the first; ← → ↑ ↓ walk the tiles inside it.
 pub fn character_picker(
     id: &'static str,
     selected: Option<CharacterId>,
     disabled: bool,
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> gpui::Div {
+    let count = CharacterId::ALL.len() + 1;
+    let handles = window
+        .use_keyed_state(
+            SharedString::from(format!("{id}-focus")),
+            cx,
+            move |_, cx| (0..count).map(|_| cx.focus_handle()).collect::<Vec<_>>(),
+        )
+        .read(cx)
+        .clone();
+    let focused = handles.iter().position(|h| h.is_focused(window));
+    let rover = focused
+        .or_else(|| selected.and_then(|c| CharacterId::ALL.iter().position(|x| *x == c)))
+        .unwrap_or(0);
     let k = native_colors(cx);
     let cell = tokens::avatar::LG;
     let gap = tokens::space::S8;
     let random_pick = pick.clone();
+    let last = count - 1;
     let random =
         crate::ui::native::tile_button(SharedString::from(format!("{id}-random")), cell, false, cx)
+            .track_focus(&handles[last])
+            .tab_stop(rover == last)
             .disabled(disabled)
             .tooltip(s::CHARACTER_RANDOM)
             .child(crate::ui::icons::icon(
@@ -904,24 +924,26 @@ pub fn character_picker(
                 random_pick(c, window, cx)
             });
     // ← → ↑ ↓ walk the tiles (§2.9 grid, review 3 C1-10): a key on a
-    // focused tile bubbles here and moves the focus, ↑ / ↓ by a row.
-    let walk = |e: &gpui::KeyDownEvent, window: &mut Window, cx: &mut App| {
+    // focused tile bubbles here and moves the focus, ↑ / ↓ by a row; the
+    // walk stops at the grid's edges.
+    let walk_handles = handles.clone();
+    let walk = move |e: &gpui::KeyDownEvent, window: &mut Window, cx: &mut App| {
         if e.keystroke.modifiers.modified() {
             return;
         }
-        let (next, steps) = match e.keystroke.key.as_str() {
-            "right" => (true, 1),
-            "left" => (false, 1),
-            "down" => (true, PICKER_COLUMNS as usize),
-            "up" => (false, PICKER_COLUMNS as usize),
+        let Some(at) = walk_handles.iter().position(|h| h.is_focused(window)) else {
+            return;
+        };
+        let columns = PICKER_COLUMNS as usize;
+        let to = match e.keystroke.key.as_str() {
+            "right" => (at + 1 < count).then_some(at + 1),
+            "left" => at.checked_sub(1),
+            "down" => (at + columns < count).then_some(at + columns),
+            "up" => at.checked_sub(columns),
             _ => return,
         };
-        for _ in 0..steps {
-            if next {
-                window.focus_next(cx);
-            } else {
-                window.focus_prev(cx);
-            }
+        if let Some(to) = to {
+            window.focus(&walk_handles[to], cx);
         }
         cx.stop_propagation();
     };
@@ -940,6 +962,8 @@ pub fn character_picker(
                 selected == Some(c),
                 cx,
             )
+            .track_focus(&handles[ix])
+            .tab_stop(rover == ix)
             .disabled(disabled)
             .child(characters::image(
                 c,
@@ -1544,6 +1568,7 @@ impl Render for BotForm {
                         cx.notify();
                     })
                 },
+                window,
                 cx,
             ),
             cx,
@@ -1624,7 +1649,7 @@ impl CharacterForm {
 }
 
 impl Render for CharacterForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = cx.entity();
         SheetLayout::new(fill(s::CHANGE_CHARACTER_TITLE, &[("name", &self.name)]))
             .explanation(s::BOT_CHARACTER_HINT)
@@ -1633,6 +1658,7 @@ impl Render for CharacterForm {
                 self.selected,
                 self.status.busy(),
                 move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
+                window,
                 cx,
             ))
             .when_some(
@@ -1679,6 +1705,75 @@ pub fn open_character(services: Services, member: &Member, window: &mut Window, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The look grid in a bare window with the app's Tab keys; its root
+    /// holds the focus, as the app's windows do.
+    struct Grid(gpui::FocusHandle);
+
+    impl Render for Grid {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .track_focus(&self.0)
+                .on_action(|_: &crate::app::FocusNext, window, cx| window.focus_next(cx))
+                .on_action(|_: &crate::app::FocusPrev, window, cx| window.focus_prev(cx))
+                .child(character_picker(
+                    "grid",
+                    Some(CharacterId::ALL[3]),
+                    false,
+                    |_, _, _| {},
+                    window,
+                    cx,
+                ))
+        }
+    }
+
+    /// The grid is one Tab stop on the chosen look; the arrow keys walk the
+    /// tiles, and Tab stays on the tile the arrows reached (E3, §2.9).
+    #[gpui::test]
+    fn the_look_grid_is_one_tab_stop(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::app::bind_view_keys(cx);
+        });
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|cx| Grid(cx.focus_handle()));
+                let root = view.read(cx).0.clone();
+                window.focus(&root, cx);
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .expect("the window opens")
+        });
+        let cx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.simulate_keystrokes("tab");
+        let chosen = cx.update(|window, cx| window.focused(cx));
+        assert!(chosen.is_some(), "Tab reaches the grid");
+        cx.simulate_keystrokes("tab");
+        assert_eq!(
+            cx.update(|window, cx| window.focused(cx)),
+            chosen,
+            "a second Tab finds no other tile"
+        );
+        cx.simulate_keystrokes("right");
+        let next = cx.update(|window, cx| window.focused(cx));
+        assert!(next.is_some() && next != chosen, "→ moves to the next tile");
+        cx.simulate_keystrokes("left");
+        assert_eq!(
+            cx.update(|window, cx| window.focused(cx)),
+            chosen,
+            "← moves back"
+        );
+        cx.simulate_keystrokes("down");
+        let below = cx.update(|window, cx| window.focused(cx));
+        assert!(below.is_some() && below != chosen, "↓ moves a row down");
+        cx.simulate_keystrokes("tab");
+        assert_eq!(
+            cx.update(|window, cx| window.focused(cx)),
+            below,
+            "the reached tile is the grid's Tab stop"
+        );
+    }
 
     fn owner(mut m: Member) -> Member {
         m.level = MemberLevel::Owner;

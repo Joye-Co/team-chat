@@ -165,6 +165,26 @@ fn sample(label: &'static str, el: impl IntoElement, k: &NativeColors) -> gpui::
         .child(el)
 }
 
+/// The width of a row label in the button gallery.
+const SIZE_LABEL: gpui::Pixels = px(72.);
+
+/// A gallery row with its label in a column at the left, on the controls'
+/// bottom line (the regular row has a caption over each sample).
+fn size_row(label: &'static str, size: PushSize, row: gpui::Div, k: &NativeColors) -> gpui::Div {
+    div()
+        .flex()
+        .items_end()
+        .child(
+            caption(label, k)
+                .flex_none()
+                .w(SIZE_LABEL)
+                .h(size.height())
+                .flex()
+                .items_center(),
+        )
+        .child(row)
+}
+
 fn hstack() -> gpui::Div {
     div().flex().items_center().gap(px(12.))
 }
@@ -174,7 +194,9 @@ impl NativeKit {
         let k = native_colors(cx);
         let reg = PushSize::Regular;
         section(t::SEC_BUTTONS, &k)
-            .child(
+            .child(size_row(
+                t::ROW_SIZE_REGULAR,
+                reg,
                 hstack()
                     .child(sample(
                         t::STATE_REST,
@@ -211,8 +233,11 @@ impl NativeKit {
                         push_button("kb-6", t::SIGN_OUT, PushStyle::Destructive, reg, cx),
                         &k,
                     )),
-            )
-            .child(
+                &k,
+            ))
+            .child(size_row(
+                t::ROW_SIZE_SMALL,
+                PushSize::Small,
                 hstack()
                     .child(push_button(
                         "kb-s1",
@@ -228,10 +253,13 @@ impl NativeKit {
                         PushSize::Small,
                         cx,
                     )),
-            )
+                &k,
+            ))
             // One size per row (review 3 K-11): sm (h28) above, lg (h36)
-            // below.
-            .child(
+            // below, each beside its label.
+            .child(size_row(
+                t::ROW_SIZE_LARGE,
+                PushSize::Large,
                 hstack()
                     .child(push_button(
                         "kb-l1",
@@ -247,9 +275,11 @@ impl NativeKit {
                         PushSize::Large,
                         cx,
                     )),
-            )
+                &k,
+            ))
             .child(
                 hstack()
+                    .pl(SIZE_LABEL)
                     .child(popup_button(
                         "kb-pop",
                         t::ON_LAUNCH_HOME,
@@ -615,7 +645,7 @@ impl NativeKit {
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(caption(t::STATE_SELECTED, &k).pl(px(16.)))
+                .child(caption(t::ROW_SELECTION_ACTIVE, &k).pl(px(16.)))
                 .child(row("kl-1", t::TOPIC_A, cx).selected(true))
                 .child(caption(t::STATE_FOCUSED, &k).pl(px(16.)).pt(px(6.)))
                 // Keyboard focus is the ring, never the selected fill
@@ -631,8 +661,13 @@ impl NativeKit {
                         .selected(true)
                         .list_focused(false),
                 )
-                .child(caption(t::STATE_INACTIVE, &k).pl(px(16.)).pt(px(6.)))
+                .child(
+                    caption(t::ROW_SELECTION_INACTIVE, &k)
+                        .pl(px(16.))
+                        .pt(px(6.)),
+                )
                 .child(row("kl-4", t::TOPIC_D, cx).selected(true).inactive(true))
+                .child(caption(t::ROW_SIDEBAR, &k).pl(px(16.)).pt(px(6.)))
                 .child(
                     SidebarRow::new("kl-sb", t::HOME)
                         .symbol(Sf::Desk)
