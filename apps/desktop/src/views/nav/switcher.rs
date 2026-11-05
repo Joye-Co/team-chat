@@ -247,7 +247,9 @@ pub fn go(services: &Services, target: &Target, cx: &mut App) {
     match target {
         Target::Group(g) => {
             let g = g.clone();
-            services.nav.update(cx, |nav, cx| nav.open_group(g, cx));
+            services
+                .nav
+                .update(cx, |nav, cx| nav.open_group_chat(g, cx));
         }
         Target::Topic(g, t) => {
             let (g, t) = (g.clone(), t.clone());

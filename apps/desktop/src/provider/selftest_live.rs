@@ -265,6 +265,7 @@ async fn drive(
     let stamp = chat_core::new_id();
     let t_topic = Instant::now();
     let cid1 = provider.start_topic(StartTopicRequest {
+        quote_of: None,
         group_id: group.id.clone(),
         title: None,
         body: format!("selftest-live topic {stamp}"),

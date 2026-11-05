@@ -25,7 +25,26 @@ export const topicFields = {
   lastMessageAt: Millis.optional(),
   /** Set on a side chat topic (1.1): the topic it is about. */
   contextOf: TopicContext.optional(),
+  /** The 群's own chat (群聊, 1.1.1): its id is `mainTopicId(groupId)`. Absent = false. */
+  main: z.boolean().optional(),
 };
+
+/**
+ * The 群聊 (1.1.1): every group has one chat topic with a fixed id, so a client can open and
+ * send into it before it exists; the server creates it with the first message sent there.
+ * See docs/protocol.md, "群聊: the group's own chat".
+ */
+export const MAIN_TOPIC_PREFIX = "main-";
+
+/** The id of a group's 群聊 topic. */
+export function mainTopicId(groupId: string): string {
+  return `${MAIN_TOPIC_PREFIX}${groupId}`;
+}
+
+/** Whether `topicId` names a 群聊 (of any group; compare with `mainTopicId` for one group). */
+export function isMainTopicId(topicId: string): boolean {
+  return topicId.startsWith(MAIN_TOPIC_PREFIX);
+}
 
 /**
  * 1.1: the 单独问 answer a message was posted from ("post to topic"): the side chat topic in

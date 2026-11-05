@@ -1,0 +1,13 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "a plain message in the 群聊",
+  "value": {
+    "t": "send",
+    "rid": "r99",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "main-01JBX0GENERAL000000000000A",
+    "clientMsgId": "c99",
+    "body": "大家早，今天先对一下发布"
+  }
+}

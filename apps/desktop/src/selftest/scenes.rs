@@ -34,6 +34,9 @@ pub enum Start {
     /// The v2 sample team on a quiet day: nothing waits on me, nothing runs
     /// (desk track, `desk-empty`).
     V2Quiet,
+    /// The v2 sample team seen by a member who just joined (onboarding,
+    /// `fake::v2::V2Samples::newcomer`).
+    V2Newcomer,
     // --- provider track ---
     /// The real chat-core provider on a seeded cache, with no server
     /// (`provider::seeded`).
@@ -100,6 +103,47 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: open_first_group,
         open: crate::views::nav::selftest::scenes::new_topic,
+    },
+    // 1.1.1: the 群's own chat.
+    Scene {
+        name: "group-chat",
+        about: "The 群聊 of 产品研发: plain chat with Jojo's answer, 新话题 and 这个群的话题 in the title bar",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "group-chat-empty",
+        about: "The 群聊 of 运维告警 before anyone wrote there: its start block with 新话题",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("g-ops".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "dm-chat",
+        about: "The 私聊 with Forge as a chat",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("d-coder".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "new-topic-from",
+        about: "开个话题: the sheet from a 群聊 message, quoting it, the title its first line",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx))
+        },
+        open: crate::views::nav::selftest::scenes::new_topic_from,
     },
     Scene {
         name: "todo",
@@ -240,6 +284,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_character_dialog,
+    },
+    Scene {
+        name: "settings-edit-bot",
+        about: "Settings: the edit sheet of a bot over 成员, its name, 岗位 and runner filled in",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_edit_bot_dialog,
     },
     Scene {
         name: "settings-add-machine",

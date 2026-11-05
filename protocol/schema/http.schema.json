@@ -371,6 +371,9 @@
             "topicId",
             "uptoSeq"
           ]
+        },
+        "main": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -19091,6 +19094,9 @@
                 "topicId",
                 "uptoSeq"
               ]
+            },
+            "main": {
+              "type": "boolean"
             }
           },
           "required": [

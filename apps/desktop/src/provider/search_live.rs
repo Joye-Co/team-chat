@@ -82,6 +82,7 @@ fn search_live() {
     let bot_name = p.member(&bot).map(|m| m.name).unwrap_or_default();
     let body = format!("@{bot_name} 请检查部署流水线 slow");
     let cid = p.start_topic(StartTopicRequest {
+        quote_of: None,
         group_id: g.clone(),
         title: Some("检查部署流水线".into()),
         body,

@@ -370,6 +370,23 @@ fn aside_runs_ignore_widening_config() {
     let normal = runtime::claude::permission_args(&c);
     assert!(normal.contains(&"bypassPermissions".to_string()));
     assert!(normal.contains(&"--dangerously-skip-permissions".to_string()));
+    // The configured tools, plus chat-run: the run can always post its cards and 产出.
+    assert!(
+        normal.contains(&"Bash Bash(chat-run:*)".to_string()),
+        "{normal:?}"
+    );
+    // Without allowed_tools a run may use the shell, edits and the web: `-p` cannot ask.
+    c.cfg.allowed_tools = None;
+    c.cfg.permission_mode = None;
+    let plain = runtime::claude::permission_args(&c);
+    assert!(
+        plain.contains(&"bypassPermissions".to_string()),
+        "{plain:?}"
+    );
+    let i = plain.iter().position(|a| a == "--allowedTools").unwrap();
+    for t in ["Bash", "Edit", "Write", "WebFetch"] {
+        assert!(plain[i + 1].split(' ').any(|x| x == t), "{t}: {plain:?}");
+    }
     c.aside = true;
     let args = runtime::claude::permission_args(&c);
     let value = |flag: &str| {
@@ -520,7 +537,7 @@ fn codex_exec(
     result
 }
 
-/// A Codex run in the default `workspace-write` sandbox can use `chat-run` without network:
+/// A Codex run in a `workspace-write` sandbox can use `chat-run` without network:
 /// the real Codex CLI runs the real client through `command/exec` (the server's sandbox, no
 /// model call) with the app-server args the daemon builds. The sandbox blocks the run's unix
 /// socket, so a Codex run uses the request folder in its working folder. Skipped without
@@ -538,12 +555,19 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
-    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    // The network is closed by hand here: chat-run must work without it.
+    let closed = ["-c", "sandbox_workspace_write.network_access=false"];
+    let mut s = spec(tmp.path(), "codex", "codex", &closed, "hi");
+    s.cfg.sandbox = Some("workspace-write".into());
     s.cfg.approval_policy = None;
     s.note = Some(daemon::chat_run::note());
     assert!(runtime::codex::chat_run_works(&s));
     let args = runtime::codex::app_server_args(&s).unwrap();
-    assert_eq!(args, ["app-server"], "no sandbox or network override");
+    assert_eq!(
+        args,
+        ["app-server", closed[0], closed[1]],
+        "the user's network setting stays"
+    );
 
     daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
@@ -656,24 +680,43 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     assert!(out.starts_with("closed"), "{net}");
 }
 
-/// The `chat-run` note goes only to a Codex run whose sandbox lets `chat-run` work, and the
-/// daemon never adds a sandbox or network override to the user's Codex args.
+/// The `chat-run` note goes only to a Codex run whose sandbox lets `chat-run` work. A
+/// `workspace-write` run gets network access unless the user's args set it.
 #[test]
 fn codex_gets_the_chat_run_note_only_when_it_can_work() {
     let tmp = tempfile::tempdir().unwrap();
     let mut s = spec(tmp.path(), "codex", "codex", &[], "q");
     s.note = Some("n".into());
+    // Default: full access, nothing to add.
+    assert_eq!(runtime::codex::thread_policy(&s).1, "danger-full-access");
     assert!(runtime::codex::chat_run_works(&s));
     assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+    s.cfg.sandbox = Some("workspace-write".into());
+    assert!(runtime::codex::chat_run_works(&s));
+    assert_eq!(
+        runtime::codex::app_server_args(&s).unwrap(),
+        [
+            "app-server",
+            "-c",
+            "sandbox_workspace_write.network_access=true"
+        ]
+    );
     s.cfg.sandbox = Some("danger-full-access".into());
     assert!(runtime::codex::chat_run_works(&s));
     assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
     s.cfg.sandbox = Some("read-only".into());
     assert!(!runtime::codex::chat_run_works(&s));
     assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
-    s.cfg.sandbox = None;
+    s.cfg.sandbox = Some("workspace-write".into());
     s.note = None;
-    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+    assert_eq!(
+        runtime::codex::app_server_args(&s).unwrap(),
+        [
+            "app-server",
+            "-c",
+            "sandbox_workspace_write.network_access=true"
+        ]
+    );
     // A user's own network setting stays as the user wrote it.
     s.note = Some("n".into());
     s.cfg.args = vec![

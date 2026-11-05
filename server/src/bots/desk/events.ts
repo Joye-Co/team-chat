@@ -2,7 +2,7 @@
 // cards), and the end of a run (result, status, follow-up runs).
 import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
-import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine } from "../dispatch";
+import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, stripAcceptance } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, mergePrs, prRefs } from "../proof";
@@ -320,8 +320,10 @@ export abstract class DeskEvents extends DeskRuns {
     this.storeUsage(r, f);
     this.storeSession(r, f.sessionId);
     if (f.status === "succeeded") {
-      const result = (f.resultText ?? "").trim() || (f.summary ?? "").trim() || TEXT.done;
-      this.dropResultFromProgress(r, result);
+      const raw = (f.resultText ?? "").trim();
+      this.dropResultFromProgress(r, raw);
+      // The acceptance block is shown by the done card: the posted text leaves it out.
+      const result = stripAcceptance(raw) || stripAcceptance((f.summary ?? "").trim()) || TEXT.done;
       await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);

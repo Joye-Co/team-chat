@@ -4,6 +4,10 @@
 crate::copy! {
     RAIL_SEARCH = "搜索或交代",
     RAIL_NEW_TOPIC = "新话题",
+    // The 新建 pull-down at the top of the sidebar: 新话题, 新建群, 发起私聊.
+    RAIL_NEW = "新建",
+    RAIL_NEW_GROUP = "新建群…",
+    RAIL_START_DM = "发起私聊…",
     RAIL_DESK = "首页",
     RAIL_ARTIFACTS = "产出",
     RAIL_MEMBERS = "成员",
@@ -40,6 +44,9 @@ crate::copy! {
     // B1-25: the one row of a folded section, under its own label.
     RAIL_FOLDED_N = "{n} 个话题",
     RAIL_NO_TOPICS = "还没有话题",
+    // A 群 whose 话题 all leave me out, while the sidebar shows 我参与的:
+    // one row that opens the 群.
+    RAIL_OTHER_TOPICS = "{n} 个话题，点开看",
     RAIL_WAITS_ON_YOU_N = "等你 {n}",
     // --- end v13/ux-pages ---
     RAIL_NAMES_SEP = "、",

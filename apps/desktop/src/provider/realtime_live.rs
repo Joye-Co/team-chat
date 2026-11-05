@@ -162,6 +162,7 @@ fn realtime_live() {
 
     // Topic 1: unread for B.
     let cid = a.p.start_topic(StartTopicRequest {
+        quote_of: None,
         group_id: g.clone(),
         title: Some("话题一".into()),
         body: "第一条".into(),
@@ -207,6 +208,7 @@ fn realtime_live() {
 
     // Topic 2, then B reads topic 1 only.
     let cid = a.p.start_topic(StartTopicRequest {
+        quote_of: None,
         group_id: g.clone(),
         title: Some("话题二".into()),
         body: "第二个话题".into(),

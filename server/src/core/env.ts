@@ -9,6 +9,10 @@ export interface Env {
   ENVIRONMENT: string;
   VERSION: string;
   ADMIN_SECRET?: string;
+  /** Claude API key (Worker secret): topics without a title get one from Claude (autotitle). */
+  ANTHROPIC_API_KEY?: string;
+  /** Tests only: bodies containing this marker get a fake AI title. */
+  AUTOTITLE_FAKE?: string;
 }
 
 /** Every Durable Object lives near the team (Oceania hint, see AGENTS.md). */

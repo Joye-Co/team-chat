@@ -140,6 +140,7 @@ fn files_live() {
     let ids: Vec<_> = draft.files.iter().map(|f| f.id.clone()).collect();
     let job = a.start_topic_with_files(
         StartTopicRequest {
+            quote_of: None,
             group_id: g.clone(),
             title: None,
             body: "两份文件".into(),

@@ -57,4 +57,18 @@ pub const SCENES: &[Scene] = &[
         setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
         open: open_main,
     },
+    Scene {
+        name: "desk-first-run",
+        about: "首页 of a member who just joined: 从这里开始 with 和 Jojo 聊聊, 开个话题 and 去全员看看; the sidebar keeps 全员 with its 话题 folded into one row",
+        start: Start::V2Newcomer,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "new-topic-hand-to",
+        about: "The 新话题 sheet of a member who just joined: the 交给 row lists who can take it",
+        start: Start::V2Newcomer,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: crate::views::nav::selftest::scenes::new_topic,
+    },
 ];

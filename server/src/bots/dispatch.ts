@@ -173,12 +173,34 @@ export interface ContextMessage {
  * the last fenced `acceptance` block of an assistant message. Limits as in the protocol.
  */
 export const ACCEPTANCE_RULE = [
-  "Report the acceptance criteria of the request and their state as a fenced block with the info string `acceptance` in your message, for example:",
+  "When the request is a piece of work with outcomes someone can check (code, a deploy, a file, a 产出), report its acceptance criteria and their state as a fenced block with the info string `acceptance` at the end of your message. Skip the block for questions, chat and short answers. The block is taken out of your posted answer and shown as a checklist under it, so never refer to it in your text. Example:",
   "```acceptance",
   '[{ "text": "Tests pass", "state": "pass", "evidence": { "text": "cargo test: 42 passed" } }, { "text": "Deployed to staging", "state": "pending" }]',
   "```",
   "Each item has `text` (1-500 characters), `state` (`pending`, `pass` or `fail`) and optional `evidence` (`text` up to 1000 characters, `url`, `fileId`, or `artifact` { artifactId, version }). At most 20 items. Send the whole list again when a state changes: the last block counts.",
 ].join("\n");
+
+/**
+ * The text without its fenced `acceptance` blocks (the daemon already sent them as the run's
+ * acceptance criteria, which the done card shows). An unclosed fence stays as it is.
+ */
+export function stripAcceptance(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^\s*(`{3,})\s*acceptance\s*$/.exec(lines[i]);
+    if (m) {
+      const fence = m[1];
+      const end = lines.findIndex((l, j) => j > i && l.trim() === fence);
+      if (end !== -1) {
+        i = end;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 /** The full prompt for the CLI: who it is, the topic's recent messages, and the request. */
 export function buildPrompt(opts: {

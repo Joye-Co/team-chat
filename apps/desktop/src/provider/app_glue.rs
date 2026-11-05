@@ -47,7 +47,7 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
                 cx.update(|cx| {
                     nav.update(cx, |nav, cx| {
                         if topic_id.is_empty() {
-                            nav.open_group(group_id, cx)
+                            nav.open_group_chat(group_id, cx)
                         } else {
                             nav.open_topic(group_id, topic_id, cx)
                         }

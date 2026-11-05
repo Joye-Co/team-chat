@@ -957,6 +957,12 @@ impl ChatProvider for WorstCase {
     ) -> AdminReply<BotCreated> {
         self.inner.create_bot_member(name, role, character, runner)
     }
+    fn bot_runner(&self, member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        self.inner.bot_runner(member_id)
+    }
+    fn update_bot_member(&self, member_id: &str, edit: BotMemberEdit) -> AdminReply<()> {
+        self.inner.update_bot_member(member_id, edit)
+    }
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.inner.create_machine(name, labels)
     }
@@ -1445,6 +1451,12 @@ impl ChatProvider for Empty {
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
         self.inner.create_bot_member(name, role, character, runner)
+    }
+    fn bot_runner(&self, member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        self.inner.bot_runner(member_id)
+    }
+    fn update_bot_member(&self, member_id: &str, edit: BotMemberEdit) -> AdminReply<()> {
+        self.inner.update_bot_member(member_id, edit)
     }
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.inner.create_machine(name, labels)
