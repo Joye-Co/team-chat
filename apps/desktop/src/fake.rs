@@ -1841,6 +1841,14 @@ impl ChatProvider for FakeProvider {
         self.set_topic_following_fake(group_id, topic_id, follow);
     }
 
+    fn topic_muted(&self, group_id: &str, topic_id: &str) -> bool {
+        self.topic_muted_fake(group_id, topic_id)
+    }
+
+    fn set_topic_muted(&self, group_id: &str, topic_id: &str, muted: bool) {
+        self.set_topic_muted_fake(group_id, topic_id, muted);
+    }
+
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {
         self.send_diagnostics_fake(description)
     }

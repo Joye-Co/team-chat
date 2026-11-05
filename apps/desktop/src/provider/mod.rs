@@ -1690,6 +1690,14 @@ impl ChatProvider for CoreProvider {
         self.set_topic_following_inner(topic_id, follow);
     }
 
+    fn topic_muted(&self, _group_id: &str, topic_id: &str) -> bool {
+        self.topic_muted_inner(topic_id)
+    }
+
+    fn set_topic_muted(&self, _group_id: &str, topic_id: &str, muted: bool) {
+        self.set_topic_muted_inner(topic_id, muted);
+    }
+
     fn set_topic_owner(&self, _group_id: &str, topic_id: &str, owner: Option<MemberId>) {
         self.set_topic_owner_inner(topic_id, owner);
     }

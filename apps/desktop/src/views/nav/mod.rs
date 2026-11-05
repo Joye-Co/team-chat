@@ -9,6 +9,7 @@
 pub mod ask_scenes;
 pub mod dialogs;
 pub mod menus;
+pub mod notify;
 pub mod rename;
 pub mod selftest;
 #[cfg(target_os = "macos")]

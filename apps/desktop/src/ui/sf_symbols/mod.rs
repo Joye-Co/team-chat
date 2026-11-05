@@ -107,6 +107,8 @@ symbols! {
     Settings = General, Settings;
     // Settings tabs (§8).
     Bell = Bell, Bell;
+    // A muted 群, 私聊 or 话题 in the sidebar.
+    Muted = Muted, BellOff;
     Machines = MacMini, Server;
     Appearance = Appearance, Palette;
     Shortcuts = Shortcuts, Keyboard;
@@ -277,7 +279,7 @@ mod tests {
 
     #[test]
     fn every_symbol_draws_centered_in_its_slot() {
-        assert_eq!(Sf::ALL.len(), 40);
+        assert_eq!(Sf::ALL.len(), 41);
         for &scale in &[1., 2.] {
             for s in Sf::ALL {
                 let m = raster::draw(s.name(), point_for_slot(16.), Weight::Regular, 16., scale)

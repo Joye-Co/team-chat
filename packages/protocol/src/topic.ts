@@ -1,5 +1,5 @@
 // V1 topic extensions: who the topic waits on, its responsible member, last activity,
-// and following a topic. See docs/protocol.md, "Topics: waitingOn, owner, follow".
+// and following or muting a topic. See docs/protocol.md, "Topics: waitingOn, owner, follow, mute".
 import { z } from "zod";
 import { Id, Millis, Rid, Seq } from "./common.ts";
 
@@ -72,3 +72,13 @@ export const TopicFollowFrame = z.object({
   follow: z.boolean(),
 });
 export type TopicFollowFrame = z.infer<typeof TopicFollowFrame>;
+
+/** `{ t: "topic.mute" }`: mute or unmute a topic for me (only mentions notify). ack.result = `TopicState`. */
+export const TopicMuteFrame = z.object({
+  t: z.literal("topic.mute"),
+  rid: Rid,
+  groupId: Id,
+  topicId: Id,
+  muted: z.boolean(),
+});
+export type TopicMuteFrame = z.infer<typeof TopicMuteFrame>;

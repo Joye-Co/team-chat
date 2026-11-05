@@ -42,6 +42,8 @@ pub(super) enum Item {
         name: String,
         folded: bool,
         selected: bool,
+        /// I muted the 群: a `bell.slash` after its name.
+        muted: bool,
     },
     /// A: `⌄ 私聊`.
     DmHeader {
@@ -56,6 +58,8 @@ pub(super) enum Item {
         selected: bool,
         line: Option<crate::views::topic_page::StateLine>,
         unread: bool,
+        /// I muted the 私聊.
+        muted: bool,
     },
     /// B: `⌄ • 需要你 4`.
     BucketHeader {
@@ -214,6 +218,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
             name: g.name.clone(),
             folded,
             selected: i.group_page.as_deref() == Some(g.id.as_str()),
+            muted: p.group_muted(&g.id),
         }];
         // T-13: 还没有话题 only once the server answered; while it syncs the
         // open 群 shows sidebar skeleton rows, and nothing while unreachable.
@@ -260,6 +265,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
                     selected,
                     line,
                     unread: unread && !selected,
+                    muted: p.group_muted(&g.id),
                 });
             }
         }
@@ -494,6 +500,7 @@ impl RailView {
                 name,
                 folded,
                 selected,
+                muted,
             } => {
                 let fold_id = id.clone();
                 let this = cx.entity().downgrade();
@@ -501,14 +508,15 @@ impl RailView {
                 let open_id = id.clone();
                 let (menu_services, menu_id) = (self.services.clone(), id.clone());
                 // A right click on the header opens the 群's menu (§7.3).
-                let menu = self.row_menu(move |menu, _, _| {
-                    super::menus::group(menu, &menu_services, &menu_id)
+                let menu = self.row_menu(move |menu, window, cx| {
+                    super::menus::group(menu, &menu_services, &menu_id, window, cx)
                 });
                 self.section_header_selected(
                     SharedString::from(format!("rail-group-{id}")),
                     name.clone(),
                     *folded,
                     *selected,
+                    *muted,
                     move |_, _, cx| {
                         let id = fold_id.clone();
                         let _ = this.update(cx, |this, cx| {
@@ -549,12 +557,14 @@ impl RailView {
                 selected,
                 line,
                 unread,
+                muted,
             } => {
                 let nav = self.services.nav.clone();
                 let open_id = id.clone();
                 let (services, menu_id) = (self.services.clone(), id.clone());
-                let menu =
-                    self.row_menu(move |menu, _, _| super::menus::group(menu, &services, &menu_id));
+                let menu = self.row_menu(move |menu, window, cx| {
+                    super::menus::group(menu, &services, &menu_id, window, cx)
+                });
                 let row = self
                     .row(
                         SharedString::from(format!("rail-dm-{id}")),
@@ -564,6 +574,7 @@ impl RailView {
                     .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
                     .selected(*selected)
                     .unread(*unread)
+                    .muted(*muted)
                     .right(match line {
                         Some(l) => RightColumn::Status(l.badge, l.short.clone().into()),
                         None => RightColumn::None,

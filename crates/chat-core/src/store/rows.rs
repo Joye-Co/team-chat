@@ -52,6 +52,8 @@ pub struct TopicRow {
     pub unread: u64,
     pub mentions: u64,
     pub following: bool,
+    /// I muted this topic: only mentions notify.
+    pub muted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +154,11 @@ pub enum OutboxOp {
         topic_id: String,
         follow: bool,
     },
+    TopicMute {
+        group_id: String,
+        topic_id: String,
+        muted: bool,
+    },
     CardAction {
         group_id: String,
         topic_id: Option<String>,
@@ -221,6 +228,7 @@ impl OutboxOp {
             OutboxOp::Delete { .. } => "delete",
             OutboxOp::TopicUpdate { .. } => "topic_update",
             OutboxOp::TopicFollow { .. } => "topic_follow",
+            OutboxOp::TopicMute { .. } => "topic_mute",
             OutboxOp::CardAction { .. } => "card_action",
             OutboxOp::React { .. } => "react",
             OutboxOp::CardAnswer { .. } => "card_answer",
@@ -235,6 +243,7 @@ impl OutboxOp {
             | OutboxOp::Delete { group_id, .. }
             | OutboxOp::TopicUpdate { group_id, .. }
             | OutboxOp::TopicFollow { group_id, .. }
+            | OutboxOp::TopicMute { group_id, .. }
             | OutboxOp::CardAction { group_id, .. }
             | OutboxOp::React { group_id, .. }
             | OutboxOp::CardAnswer { group_id, .. }
@@ -252,9 +261,9 @@ impl OutboxOp {
             | OutboxOp::CardAnswer { topic_id, .. }
             | OutboxOp::ArtifactEvent { topic_id, .. }
             | OutboxOp::CardEvent { topic_id, .. } => topic_id.as_deref(),
-            OutboxOp::TopicUpdate { topic_id, .. } | OutboxOp::TopicFollow { topic_id, .. } => {
-                Some(topic_id)
-            }
+            OutboxOp::TopicUpdate { topic_id, .. }
+            | OutboxOp::TopicFollow { topic_id, .. }
+            | OutboxOp::TopicMute { topic_id, .. } => Some(topic_id),
         }
     }
     pub(crate) fn reply_to_ref(id: &Option<String>) -> Option<ReplyToRef> {
@@ -377,11 +386,11 @@ pub(crate) fn topic_select(inner: &str) -> String {
            (SELECT COUNT(*) FROM messages m WHERE m.topic_id = t.id AND m.created_seq > t.pos AND {cond}),
            (SELECT COUNT(*) FROM messages m WHERE m.topic_id = t.id AND m.created_seq > t.pos AND {cond}
               AND m.mentions LIKE '%\"' || ?2 || '\"%'),
-           t.following
+           t.following, t.muted
          FROM (SELECT t.*,
                  MAX(COALESCE((SELECT g.read_seq FROM groups g WHERE g.id = t.group_id), 0),
                      COALESCE(rc.seq, 0)) AS pos,
-                 COALESCE(rc.following, 0) AS following
+                 COALESCE(rc.following, 0) AS following, COALESCE(rc.muted, 0) AS muted
                FROM topics t
                LEFT JOIN read_cursors rc ON rc.group_id = t.group_id AND rc.topic_id = t.id
                {inner}) t
@@ -410,6 +419,7 @@ pub(crate) fn topic_from_row(r: &Row<'_>) -> rusqlite::Result<TopicRow> {
         unread: r.get(11)?,
         mentions: r.get(12)?,
         following: r.get(13)?,
+        muted: r.get(14)?,
     })
 }
 

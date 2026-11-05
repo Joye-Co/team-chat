@@ -1,74 +1,39 @@
-//! 通知 (NATIVE.md §8): group 提醒我 with a small switch per event and
-//! 每日摘要 with its time; group 勿扰 with 从 / 到; `按群设置…` opens a sheet
-//! with a table of 群 and their 全部 / 只有 @我 / 不提醒 pop-ups.
+//! 通知 (NATIVE.md §8): the global settings only. Group 提醒我 with a small
+//! switch per event and 每日摘要 with its time; group 勿扰 with 从 / 到.
+//! How one 群 or 私聊 reminds me is set on that conversation (its context
+//! menu: 静音 and 提醒, `views::nav::notify`), not here.
 
-use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
-    WindowExt as _,
-    input::InputState,
-    menu::{DropdownMenu as _, PopupMenuItem},
-};
+use gpui::{Context, IntoElement, ParentElement, Render, Subscription, Window};
 
 use super::widgets::{self, Status, answer};
 use crate::{
     app::{Changes, Services},
-    copy::{fill, settings as s},
-    data::{AdminReply, Change, ClockTime, GroupKind, NotifyLevel, NotifyPreferences},
-    ui::{
-        self, Sym,
-        native::{
-            FormRow, GroupedForm, NativeSwitch, NativeType as _, PushSize, PushStyle, SearchField,
-            SectionTitle, SheetLayout, SheetWidth, metrics, native_colors, push_button,
-        },
-    },
+    copy::settings as s,
+    data::{Change, ClockTime, NotifyPreferences},
+    ui::native::{FormRow, GroupedForm, NativeSwitch, SectionTitle},
 };
-
-const LEVELS: [NotifyLevel; 3] = [NotifyLevel::All, NotifyLevel::Mentions, NotifyLevel::None];
-
-fn level_text(level: NotifyLevel) -> &'static str {
-    match level {
-        NotifyLevel::All => s::LEVEL_ALL,
-        NotifyLevel::Mentions => s::LEVEL_MENTIONS,
-        NotifyLevel::None => s::LEVEL_NONE,
-    }
-}
 
 pub struct NotificationsPage {
     services: Services,
     prefs: Option<NotifyPreferences>,
     load: Status,
-    /// The last save of the switches, or a group pref.
+    /// The last save of the switches.
     status: Status,
-    /// The filter of the 按群设置 sheet.
-    filter: Entity<InputState>,
-    /// The scroll of the 按群设置 list.
-    groups_scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl NotificationsPage {
-    pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(s::PER_GROUP_FILTER));
-        let subscriptions = vec![
-            cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-                if changes
-                    .any(|c| matches!(c, Change::Groups | Change::Topics { .. } | Change::Todo))
-                {
-                    cx.notify();
-                }
-            }),
-            cx.observe(&filter, |_, _, cx| cx.notify()),
-        ];
+    pub fn new(services: Services, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let subscriptions = vec![cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
+            if changes.any(|c| matches!(c, Change::Groups)) {
+                cx.notify();
+            }
+        })];
         Self {
             services,
             prefs: None,
             load: Status::Idle,
             status: Status::Idle,
-            filter,
-            groups_scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -134,267 +99,6 @@ impl NotificationsPage {
         })
         .detach();
     }
-
-    fn run(&mut self, reply: AdminReply<()>, cx: &mut Context<Self>) {
-        self.status = Status::Idle;
-        cx.spawn(async move |this, cx| {
-            let result = answer(reply).await;
-            let _ = this.update(cx, |this, cx| {
-                this.status = match result {
-                    Ok(()) => Status::Idle,
-                    Err(e) => Status::from_error(e),
-                };
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    pub fn set_muted(&mut self, group_id: &str, muted: bool, cx: &mut Context<Self>) {
-        let reply = self
-            .services
-            .provider
-            .set_group_prefs(group_id, Some(muted), None);
-        self.run(reply, cx);
-    }
-
-    pub fn set_level(&mut self, group_id: &str, level: NotifyLevel, cx: &mut Context<Self>) {
-        let reply = self
-            .services
-            .provider
-            .set_group_prefs(group_id, None, Some(level));
-        self.run(reply, cx);
-    }
-
-    /// The pop-up of the 按群设置 table: a muted 群 reads 不提醒, and any
-    /// other choice unmutes it.
-    pub fn pick_level(&mut self, group_id: &str, level: NotifyLevel, cx: &mut Context<Self>) {
-        let prefs = self.services.provider.group_prefs(group_id);
-        let reply = if prefs.muted && level != NotifyLevel::None {
-            self.services
-                .provider
-                .set_group_prefs(group_id, Some(false), Some(level))
-        } else {
-            self.services
-                .provider
-                .set_group_prefs(group_id, None, Some(level))
-        };
-        self.run(reply, cx);
-    }
-
-    pub fn unfollow(&mut self, group_id: &str, topic_id: &str, cx: &mut Context<Self>) {
-        self.services
-            .provider
-            .set_topic_following(group_id, topic_id, false);
-        self.status = Status::Idle;
-        cx.notify();
-    }
-
-    /// 按群设置… : the sheet with every 群 and 私聊 and its pop-up (2.9,
-    /// F55): sections 群 (24 icon box) and 私聊 (avatar 24) in one media
-    /// column, a filter above more than 8 rows, an Empty when none match.
-    pub fn open_groups(this: Entity<Self>, window: &mut Window, cx: &mut App) {
-        let filter = this.read(cx).filter.clone();
-        filter.update(cx, |f, cx| f.set_value("", window, cx));
-        widgets::open_sheet(
-            window,
-            cx,
-            SheetWidth::List,
-            px(640.),
-            move |dialog, window, cx| {
-                let k = native_colors(cx);
-                let page = this.read(cx);
-                let provider = page.services.provider.clone();
-                let members = provider.members();
-                let query = page.filter.read(cx).value().trim().to_lowercase();
-                let all = provider.groups();
-                let total = all.len();
-                let (dms, groups): (Vec<_>, Vec<_>) =
-                    all.into_iter().partition(|g| g.kind == GroupKind::Dm);
-                let media = crate::ui::native::tokens::avatar::SM;
-                // Two 群 with one name are told apart by their size (C1-13).
-                let squash = |n: &str| n.split_whitespace().collect::<Vec<_>>().join(" ");
-                let mut seen = std::collections::HashMap::<String, usize>::new();
-                for g in groups.iter() {
-                    *seen.entry(squash(&g.name)).or_default() += 1;
-                }
-                let row = |g: &crate::data::GroupSummary, window: &Window, cx: &App| {
-                    let prefs = provider.group_prefs(&g.id);
-                    let shown = if prefs.muted {
-                        NotifyLevel::None
-                    } else {
-                        prefs.notify
-                    };
-                    let peer = (g.kind == GroupKind::Dm)
-                        .then(|| {
-                            g.dm_peer
-                                .as_ref()
-                                .and_then(|p| members.iter().find(|m| &m.id == p))
-                        })
-                        .flatten();
-                    let page = this.clone();
-                    let gid = g.id.clone();
-                    // A DM row leads with the peer's avatar: a leading
-                    // emoji is left out (X-01).
-                    let name: SharedString = if peer.is_some() {
-                        squash(crate::ui::avatar::name_beside_avatar(&g.name)).into()
-                    } else {
-                        squash(&g.name).into()
-                    };
-                    let twin =
-                        g.kind != GroupKind::Dm && seen.get(name.as_ref()).is_some_and(|n| *n > 1);
-                    let lead = match peer {
-                        Some(m) => ui::MemberAvatar::new(Some(m), media)
-                            .on(k.group)
-                            .into_any_element(),
-                        None => div()
-                            .flex_none()
-                            .size(media)
-                            .rounded(crate::ui::native::tokens::radius::ITEM)
-                            .bg(k.fill)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(crate::ui::icons::icon(
-                                Sym::Topic,
-                                crate::ui::native::tokens::icon::SM,
-                                k.label,
-                            ))
-                            .into_any_element(),
-                    };
-                    widgets::ItemRow::new(
-                        ElementId::Name(format!("notify-row-{}", g.id).into()),
-                        name,
-                    )
-                    .media(lead)
-                    .when(twin, |r| {
-                        r.description(crate::copy::fill(
-                            crate::copy::nav::MEMBER_COUNT,
-                            &[("n", &g.member_ids.len().to_string())],
-                        ))
-                    })
-                    .value(
-                        widgets::popup_fixed(
-                            ElementId::Name(format!("notify-{}", g.id).into()),
-                            level_text(shown),
-                            LEVEL_WIDTH,
-                            window,
-                            cx,
-                        )
-                        .dropdown_menu(move |menu, _, _| {
-                            LEVELS.into_iter().fold(menu, |menu, level| {
-                                let (page, gid) = (page.clone(), gid.clone());
-                                menu.item(
-                                    PopupMenuItem::new(level_text(level))
-                                        .checked(level == shown)
-                                        .on_click(move |_, _, cx| {
-                                            page.update(cx, |p, cx| p.pick_level(&gid, level, cx))
-                                        }),
-                                )
-                            })
-                        }),
-                    )
-                    .into_any_element()
-                };
-                let matches = |g: &&crate::data::GroupSummary| {
-                    query.is_empty() || g.name.to_lowercase().contains(&query)
-                };
-                let group_rows: Vec<_> = groups
-                    .iter()
-                    .filter(matches)
-                    .map(|g| row(g, window, cx))
-                    .collect();
-                let dm_rows: Vec<_> = dms
-                    .iter()
-                    .filter(matches)
-                    .map(|g| row(g, window, cx))
-                    .collect();
-                let header = |title: &'static str| {
-                    div()
-                        .w_full()
-                        .h(crate::ui::native::tokens::height::ROW)
-                        .px(metrics::FORM_ROW_INSET)
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .n_section()
-                        .text_color(k.secondary)
-                        .child(title)
-                        .child(s::COL_NOTIFY)
-                };
-                let inset = media;
-                let mut list = div().w_full().flex().flex_col();
-                let empty = group_rows.is_empty() && dm_rows.is_empty();
-                for (title, rows) in [(s::COL_GROUP, group_rows), (s::PER_GROUP_DMS, dm_rows)] {
-                    if rows.is_empty() {
-                        continue;
-                    }
-                    list = list
-                        .child(header(title))
-                        .child(widgets::item_rows(rows, inset, cx));
-                }
-                let body = if total == 0 {
-                    widgets::list_empty(Sym::Bell, s::NO_GROUPS, None, cx).into_any_element()
-                } else if empty {
-                    widgets::list_empty(Sym::Search, s::PER_GROUP_NO_MATCH, None, cx)
-                        .into_any_element()
-                } else {
-                    list.into_any_element()
-                };
-                let frame = div()
-                    .w_full()
-                    .rounded(metrics::GROUP_RADIUS)
-                    .border_1()
-                    .border_color(k.separator)
-                    .bg(k.group)
-                    .overflow_hidden()
-                    .child(widgets::capped_list(
-                        "notify-groups",
-                        body,
-                        notify_list_max(),
-                        &page.groups_scroll,
-                    ));
-                let failed = match &page.status {
-                    Status::Failed(t) => Some(widgets::failed_alert(
-                        "notify-groups-failed",
-                        s::NOTIFY_SAVE_FAILED,
-                        Some(t.clone()),
-                        None,
-                        cx,
-                    )),
-                    _ => None,
-                };
-                dialog.on_ok(|_, _, _| true).child(
-                    SheetLayout::new(s::PER_GROUP_TITLE)
-                        .explanation(s::PER_GROUP_HINT)
-                        .when(total > FILTER_FROM, |l| {
-                            l.body(SearchField::new("notify-groups-filter", &page.filter))
-                        })
-                        .body(frame)
-                        .when_some(failed, |l, f| l.body(f))
-                        .buttons([push_button(
-                            "notify-groups-done",
-                            s::DONE,
-                            PushStyle::Default,
-                            PushSize::Regular,
-                            cx,
-                        )
-                        .on_click(|_, window, cx| window.close_dialog(cx))]),
-                )
-            },
-        );
-    }
-}
-
-/// The level pop-ups share one width (2.8 value column).
-const LEVEL_WIDTH: gpui::Pixels = crate::ui::native::metrics::LABEL_COLUMN;
-/// More rows than this get a filter above the list (F55).
-const FILTER_FROM: usize = 8;
-/// The list box of the 按群设置 sheet: its section header, 6 rows and half
-/// of the next, so the cut row says it scrolls (2.9).
-fn notify_list_max() -> gpui::Pixels {
-    crate::ui::native::tokens::height::ROW
-        + widgets::half_row_cap(crate::ui::native::metrics::FORM_ROW, 6)
 }
 
 impl Render for NotificationsPage {
@@ -521,34 +225,16 @@ impl Render for NotificationsPage {
                     |p, t| p.quiet_end = t,
                 )),
         );
-        let groups_page = page.clone();
-        let count = self.services.provider.groups().len();
-        let per_group = widgets::section(
-            SectionTitle::new(s::SECTION_PER_GROUP).description(s::SECTION_PER_GROUP_HINT),
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(crate::ui::native::tokens::space::S12)
-                .child(GroupedForm::new().row(super::general::nav_row(
-                    "notify-groups-open",
-                    s::PER_GROUP_ROW,
-                    Some(fill(s::PER_GROUP_COUNT, &[("n", &count.to_string())])),
-                    window,
-                    cx,
-                    move |window, cx| Self::open_groups(groups_page.clone(), window, cx),
-                )))
-                .children(match &self.status {
-                    Status::Failed(t) => Some(widgets::failed_alert(
-                        "notify-save-failed",
-                        s::NOTIFY_SAVE_FAILED,
-                        Some(t.clone()),
-                        None,
-                        cx,
-                    )),
-                    _ => None,
-                }),
-        );
-        widgets::pane().child(remind).child(quiet).child(per_group)
+        let failed = match &self.status {
+            Status::Failed(t) => Some(widgets::failed_alert(
+                "notify-save-failed",
+                s::NOTIFY_SAVE_FAILED,
+                Some(t.clone()),
+                None,
+                cx,
+            )),
+            _ => None,
+        };
+        widgets::pane().child(remind).child(quiet).children(failed)
     }
 }

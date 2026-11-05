@@ -86,6 +86,9 @@ pub fn floating_sidebar(width: gpui::Pixels, cx: &App) -> gpui::Div {
         .flex_col()
 }
 
+/// The `bell.slash` after a muted 群, 私聊 or 话题 title.
+const MUTED_SYMBOL: Pixels = px(11.);
+
 /// The hit width of a section header's chevron (the trailing 34 pt).
 const SECTION_CHEVRON_HIT: Pixels = px(34.);
 
@@ -105,6 +108,8 @@ pub struct SidebarSection {
     /// A click on the chevron runs this instead of `on_toggle`.
     on_chevron: Option<Click>,
     menu: Option<RowMenu>,
+    /// I muted this 群: a `bell.slash` after the label.
+    muted: bool,
 }
 
 impl SidebarSection {
@@ -118,7 +123,14 @@ impl SidebarSection {
             selected: false,
             on_chevron: None,
             menu: None,
+            muted: false,
         }
+    }
+
+    /// I muted this 群: the label gets a `bell.slash` after it.
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
     }
 
     /// A click on the chevron runs `f` (fold) while a click on the label
@@ -178,10 +190,22 @@ impl RenderOnce for SidebarSection {
             .flex()
             .items_center()
             .child(
-                TruncText::new(self.label)
+                div()
                     .flex_1()
-                    .n_section()
-                    .text_color(label),
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(TruncText::new(self.label).n_section().text_color(label))
+                    .when(self.muted, |d| {
+                        d.child(div().flex_none().child(symbol(
+                            Sf::Muted,
+                            MUTED_SYMBOL,
+                            Weight::Regular,
+                            k.secondary,
+                            window,
+                        )))
+                    }),
             )
             .child(
                 div()
@@ -304,6 +328,8 @@ pub struct SidebarRow {
     /// [`SidebarGroup`].
     media: Option<SidebarMedia>,
     menu: Option<RowMenu>,
+    /// I muted this 群, 私聊 or 话题: a `bell.slash` after the title.
+    muted: bool,
 }
 
 impl SidebarRow {
@@ -325,7 +351,14 @@ impl SidebarRow {
             right: RightColumn::None,
             media: None,
             menu: None,
+            muted: false,
         }
+    }
+
+    /// I muted what the row opens: a `bell.slash` after the title.
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
     }
 
     /// A right-click menu on the row; the row keeps its focus ring while
@@ -593,6 +626,19 @@ impl RenderOnce for SidebarRow {
                             .when(self.unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .text_color(text),
                     )
+                    .when(self.muted, |d| {
+                        d.child(div().flex_none().child(symbol(
+                            Sf::Muted,
+                            MUTED_SYMBOL,
+                            Weight::Regular,
+                            if self.selected {
+                                sel_symbol
+                            } else {
+                                k.secondary
+                            },
+                            window,
+                        )))
+                    })
                     .when(self.unread, |d| {
                         d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
                     }),

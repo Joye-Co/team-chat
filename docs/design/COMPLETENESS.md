@@ -583,7 +583,7 @@ Rank order: foundation first (each screen fix depends on it), then what makes a 
 
 **F54. Web-embed menu and side panel.** Scenes: web-embed-covered, web-embed, web-embed-scrolled. Problem: menu surface shows the subtitle through the "打开" row; side panel ends with a loose orange progress bar at y 510 then a 180 px blank card; orange accent and 36 avatars. Fix: opaque float surface; side panel per 2.5; Progress per D12; no orange; avatars 32. Not confirmed: translucency is visual only. Rule: 2.11, 1.3, 2.5.
 
-**F55. Settings per-group notification sheet.** Scene: settings-notify-groups (all). Problem: groups at x 78 (no icon) and people at x 106 (avatar); column headers ink 9; no sections, search or empty state; only "完成". Fix: sections 群 (24 icon box) and 私聊 (avatar 24), one media column; column headers 12 medium muted; filter when more than 8 rows; Empty; keep 560 width. Rule: 2.9, 2.6.
+**F55. Settings per-group notification sheet.** (Removed: the per-群 level moved to the 群's context menu, NATIVE.md §7.3.) Scene: settings-notify-groups (all). Problem: groups at x 78 (no icon) and people at x 106 (avatar); column headers ink 9; no sections, search or empty state; only "完成". Fix: sections 群 (24 icon box) and 私聊 (avatar 24), one media column; column headers 12 medium muted; filter when more than 8 rows; Empty; keep 560 width. Rule: 2.9, 2.6.
 
 ### 3.3 Polish fixes
 
@@ -595,7 +595,7 @@ Rank order: foundation first (each screen fix depends on it), then what makes a 
 
 **F59. Destructive alerts.** Scenes: settings-device-remove, settings-sign-out, leave-group (all). Problem: black filled "取消" and red text on gray (#f2f2f2) for the destructive action; the checkbox label wraps to 2 lines. Fix: 2.10. Rule: 2.10.
 
-**F60. Settings 通知.** Scene: settings-notifications (all). Problem: 每日摘要 has a time select (x 493-565) and a switch (x 576-607) in one row; 勿扰 group has no header; "按群设置…" floats at the bottom left. Fix: dependent "时间" row; sections 提醒我 and 勿扰 with descriptions; navigation row "按群设置 · 8 个群 ›" in a section 按群. Rule: 2.8, 2.19.
+**F60. Settings 通知.** Scene: settings-notifications (all). Problem: 每日摘要 has a time select (x 493-565) and a switch (x 576-607) in one row; 勿扰 group has no header; "按群设置…" floats at the bottom left. Fix: dependent "时间" row; sections 提醒我 and 勿扰 with descriptions; navigation row "按群设置 · 8 个群 ›" in a section 按群 (later removed: per-群 levels live in the 群's context menu). Rule: 2.8, 2.19.
 
 **F61. Settings 快捷键.** Scene: settings-shortcuts (light, dark). Problem: pitch 31 (separators 169 / 200 / 231) vs 37 elsewhere; keys as gray text. Fix: rows h44, Kbd caps, filter input. Rule: 2.19, 1.8.
 

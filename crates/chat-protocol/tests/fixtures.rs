@@ -354,6 +354,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "search",
             "send",
             "topic.follow",
+            "topic.mute",
             "topic.update",
             "typing"
         ]

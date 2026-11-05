@@ -1,5 +1,5 @@
 //! The topic inspector beside a 话题 page (NATIVE.md §9.3, `native.rs`):
-//! sections 负责, 计划, 改动, 产出, 用到的决定, 在哪干活 and 用时和成本 on
+//! sections 通知, 负责, 计划, 改动, 产出, 用到的决定, 在哪干活 and 用时和成本 on
 //! `sidebar`, each hidden when it has no data. Also the 改动 pane.
 //!
 //! The rail shows status only: the merge decision is the pinned card above
@@ -544,6 +544,11 @@ impl Render for TopicRail {
         // line; it never disappears.
         use native::{CHANGES, COST, DECISIONS, OUTPUTS, PLAN, WHERE};
         let mut sections: Vec<AnyElement> = vec![self.native_status(&d, cx)];
+        // 通知: 关注 and 静音 of this 话题, set here and not in the settings
+        // window (it is this 话题's own setting).
+        sections.push(
+            crate::views::nav::notify::topic_section(&self.services, &g, &t, cx).into_any_element(),
+        );
         let owner = topic.and_then(|t| t.owner_id.clone());
         let by = topic
             .filter(|x| owner.as_deref() != Some(x.created_by.as_str()))

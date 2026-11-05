@@ -20,7 +20,7 @@ use crate::reactions::ReactFrame;
 use crate::search::SearchFrame;
 use crate::serde_util::{any_value, non_null, nullable};
 use crate::topic::TopicContext;
-use crate::topic::{TopicFollowFrame, check_waiting_on};
+use crate::topic::{TopicFollowFrame, TopicMuteFrame, check_waiting_on};
 
 #[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +50,8 @@ pub enum ClientFrame {
     Ping,
     #[serde(rename = "topic.follow")]
     TopicFollow(TopicFollowFrame),
+    #[serde(rename = "topic.mute")]
+    TopicMute(TopicMuteFrame),
     #[serde(rename = "card.action")]
     CardAction(CardActionFrame),
     #[serde(rename = "search")]
@@ -92,6 +94,7 @@ impl ClientFrame {
             Self::History(_) => "history",
             Self::Ping => "ping",
             Self::TopicFollow(_) => "topic.follow",
+            Self::TopicMute(_) => "topic.mute",
             Self::CardAction(_) => "card.action",
             Self::Search(_) => "search",
             Self::React(_) => "react",
@@ -116,6 +119,7 @@ impl ClientFrame {
             Self::Fetch(f) => Some(&f.rid),
             Self::History(f) => Some(&f.rid),
             Self::TopicFollow(f) => Some(&f.rid),
+            Self::TopicMute(f) => Some(&f.rid),
             Self::CardAction(f) => Some(&f.rid),
             Self::Search(f) => Some(&f.rid),
             Self::React(f) => Some(&f.rid),
@@ -253,6 +257,7 @@ impl ClientFrame {
             }
             Self::Ping => Ok(()),
             Self::TopicFollow(f) => f.validate(),
+            Self::TopicMute(f) => f.validate(),
             Self::CardAction(f) => {
                 check_id("rid", &f.rid)?;
                 check_id("groupId", &f.group_id)?;

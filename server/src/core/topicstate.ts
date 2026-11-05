@@ -1,4 +1,4 @@
-// Per-member state inside one group room: per-topic read positions, follow flags and group
+// Per-member state inside one group room: per-topic read positions, follow and mute flags and group
 // notification preferences (docs/protocol.md, "Read positions per topic", "Topics: follow",
 // "Members and preferences"). All functions run on the room's SQLite.
 import type { NotifyLevel, TopicState } from "@chat/protocol";
@@ -30,13 +30,26 @@ export const ROOM_MESSAGING_MIGRATION: MigrationStep = {
   `,
 };
 
+/** Room migration: my per-topic mute (topic.mute). Old rows read as 0: not muted. */
+export const ROOM_TOPIC_MUTE_MIGRATION: MigrationStep = {
+  name: "messaging-2",
+  up: `ALTER TABLE topic_states ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;`,
+};
+
 export interface ReadTotals {
   readSeq: number;
   unread: number;
   mentions: number;
 }
 
-type StateRow = { topic_id: string; unread: number; mentions: number; read_seq: number; following: number };
+type StateRow = {
+  topic_id: string;
+  unread: number;
+  mentions: number;
+  read_seq: number;
+  following: number;
+  muted: number;
+};
 
 function toState(r: StateRow, groupRead: number): TopicState {
   const s: TopicState = {
@@ -46,6 +59,7 @@ function toState(r: StateRow, groupRead: number): TopicState {
     mentions: r.mentions,
   };
   if (r.following) s.following = true;
+  if (r.muted) s.muted = true;
   return s;
 }
 
@@ -68,7 +82,7 @@ function fromJoin(sql: SqlStorage, memberId: string, groupRead: number): number 
 }
 
 /**
- * Every topic with unread > 0, mentions > 0 or following, plus the group totals.
+ * Every topic with unread > 0, mentions > 0, following or muted, plus the group totals.
  * `groupRead` is the member's group cursor, already cut to lastSeq.
  */
 export function groupReadState(
@@ -81,10 +95,11 @@ export function groupReadState(
     .exec<StateRow>(
       `${UNREAD_CTE}
        SELECT t.id AS topic_id, coalesce(u.unread, 0) AS unread, coalesce(u.mentions, 0) AS mentions,
-              coalesce(ts.read_seq, 0) AS read_seq, coalesce(ts.following, 0) AS following
+              coalesce(ts.read_seq, 0) AS read_seq, coalesce(ts.following, 0) AS following,
+              coalesce(ts.muted, 0) AS muted
        FROM topics t LEFT JOIN u ON u.topic_id = t.id
        LEFT JOIN topic_states ts ON ts.member_id = ? AND ts.topic_id = t.id
-       WHERE u.topic_id IS NOT NULL OR ts.following = 1
+       WHERE u.topic_id IS NOT NULL OR ts.following = 1 OR ts.muted = 1
        ORDER BY t.last_seq DESC`,
       memberId,
       memberId,
@@ -110,7 +125,8 @@ export function topicState(sql: SqlStorage, memberId: string, topicId: string, c
     .exec<StateRow>(
       `${UNREAD_CTE}
        SELECT t.id AS topic_id, coalesce(u.unread, 0) AS unread, coalesce(u.mentions, 0) AS mentions,
-              coalesce(ts.read_seq, 0) AS read_seq, coalesce(ts.following, 0) AS following
+              coalesce(ts.read_seq, 0) AS read_seq, coalesce(ts.following, 0) AS following,
+              coalesce(ts.muted, 0) AS muted
        FROM topics t LEFT JOIN u ON u.topic_id = t.id
        LEFT JOIN topic_states ts ON ts.member_id = ? AND ts.topic_id = t.id
        WHERE t.id = ?`,
@@ -122,7 +138,7 @@ export function topicState(sql: SqlStorage, memberId: string, topicId: string, c
       topicId,
     )
     .toArray()[0] as StateRow | undefined;
-  return toState(r ?? { topic_id: topicId, unread: 0, mentions: 0, read_seq: 0, following: 0 }, groupRead);
+  return toState(r ?? { topic_id: topicId, unread: 0, mentions: 0, read_seq: 0, following: 0, muted: 0 }, groupRead);
 }
 
 export function setFollowing(sql: SqlStorage, memberId: string, topicId: string, following: boolean): void {
@@ -139,6 +155,24 @@ export function isFollowing(sql: SqlStorage, memberId: string, topicId: string):
   return (
     sql
       .exec("SELECT 1 FROM topic_states WHERE member_id = ? AND topic_id = ? AND following = 1", memberId, topicId)
+      .toArray().length > 0
+  );
+}
+
+export function setTopicMuted(sql: SqlStorage, memberId: string, topicId: string, muted: boolean): void {
+  sql.exec(
+    `INSERT INTO topic_states (member_id, topic_id, muted) VALUES (?, ?, ?)
+     ON CONFLICT (member_id, topic_id) DO UPDATE SET muted = excluded.muted`,
+    memberId,
+    topicId,
+    muted ? 1 : 0,
+  );
+}
+
+export function isTopicMuted(sql: SqlStorage, memberId: string, topicId: string): boolean {
+  return (
+    sql
+      .exec("SELECT 1 FROM topic_states WHERE member_id = ? AND topic_id = ? AND muted = 1", memberId, topicId)
       .toArray().length > 0
   );
 }

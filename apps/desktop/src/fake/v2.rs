@@ -176,6 +176,13 @@ struct Data {
     paused_by: Option<MemberId>,
     // topic track (v11/topic): who approved PR #61 and when.
     approval: Option<(MemberId, Millis)>,
+    /// My own notify settings, so the 通知 sections and menus can be tried
+    /// in `--fake`: muted 群 / 私聊, their 提醒 levels, the 话题 I unfollowed
+    /// and the 话题 I muted.
+    muted_groups: std::collections::HashSet<GroupId>,
+    levels: HashMap<GroupId, NotifyLevel>,
+    unfollowed: std::collections::HashSet<TopicId>,
+    muted_topics: std::collections::HashSet<TopicId>,
 }
 
 /// The v2 sample provider.
@@ -972,6 +979,10 @@ impl V2Samples {
             side_chat,
             paused_by: None,
             approval: None,
+            muted_groups: Default::default(),
+            levels: HashMap::new(),
+            unfollowed: Default::default(),
+            muted_topics: Default::default(),
         }
     }
 
@@ -1219,17 +1230,95 @@ impl ChatProvider for V2Samples {
     fn save_draft_text(&self, key: &DraftKey, body: String, mentions: Vec<MemberId>) {
         self.inner.save_draft_text(key, body, mentions)
     }
-    fn group_muted(&self, _group_id: &str) -> bool {
-        false
+    fn group_muted(&self, group_id: &str) -> bool {
+        self.with(|d| d.muted_groups.contains(group_id))
     }
-    // --- rail track: I follow every 话题 of the 群 I am in, so the rail's
-    // 我参与的 filter lists what the artboards show.
-    fn topic_following(&self, group_id: &str, _topic_id: &str) -> bool {
+    fn set_group_muted(&self, group_id: &str, muted: bool) {
         self.with(|d| {
-            d.groups
+            if muted {
+                d.muted_groups.insert(group_id.to_string());
+            } else {
+                d.muted_groups.remove(group_id);
+            }
+        });
+        self.emit(vec![Change::Groups]);
+    }
+    fn group_prefs(&self, group_id: &str) -> GroupPrefs {
+        self.with(|d| {
+            let dm = d
+                .groups
                 .iter()
-                .any(|g| g.id == group_id && g.member_ids.iter().any(|m| m == ME))
+                .any(|g| g.id == group_id && g.kind == GroupKind::Dm);
+            GroupPrefs {
+                muted: d.muted_groups.contains(group_id),
+                notify: d.levels.get(group_id).copied().unwrap_or(if dm {
+                    NotifyLevel::All
+                } else {
+                    NotifyLevel::Mentions
+                }),
+            }
         })
+    }
+    fn set_group_prefs(
+        &self,
+        group_id: &str,
+        muted: Option<bool>,
+        notify: Option<NotifyLevel>,
+    ) -> AdminReply<()> {
+        self.with(|d| {
+            match muted {
+                Some(true) => {
+                    d.muted_groups.insert(group_id.to_string());
+                }
+                Some(false) => {
+                    d.muted_groups.remove(group_id);
+                }
+                None => {}
+            }
+            if let Some(level) = notify {
+                d.levels.insert(group_id.to_string(), level);
+            }
+        });
+        self.emit(vec![Change::Groups]);
+        reply_now(Ok(()))
+    }
+    // --- rail track: I follow every 话题 of the 群 I am in (until I
+    // unfollow one), so the rail's 我参与的 filter lists what the artboards
+    // show.
+    fn topic_following(&self, group_id: &str, topic_id: &str) -> bool {
+        self.with(|d| {
+            !d.unfollowed.contains(topic_id)
+                && d.groups
+                    .iter()
+                    .any(|g| g.id == group_id && g.member_ids.iter().any(|m| m == ME))
+        })
+    }
+    fn set_topic_following(&self, group_id: &str, topic_id: &str, follow: bool) {
+        self.with(|d| {
+            if follow {
+                d.unfollowed.remove(topic_id);
+            } else {
+                d.unfollowed.insert(topic_id.to_string());
+            }
+        });
+        self.emit(vec![Change::Topics {
+            group_id: group_id.to_string(),
+        }]);
+    }
+    fn topic_muted(&self, _group_id: &str, topic_id: &str) -> bool {
+        self.with(|d| d.muted_topics.contains(topic_id))
+    }
+    fn set_topic_muted(&self, group_id: &str, topic_id: &str, muted: bool) {
+        self.with(|d| {
+            if muted {
+                d.muted_topics.insert(topic_id.to_string());
+            } else {
+                d.muted_topics.remove(topic_id);
+            }
+        });
+        self.emit(vec![Change::Topics {
+            group_id: group_id.to_string(),
+        }]);
     }
     // --- end rail track
     fn runs(&self, _group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
