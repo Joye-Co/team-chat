@@ -167,7 +167,9 @@ pub struct SavedSessions {
 
 impl SavedSessions {
     fn get(&self, server_url: &str) -> Option<&SavedSession> {
-        self.sessions.iter().find(|s| same_server(&s.server_url, server_url))
+        self.sessions
+            .iter()
+            .find(|s| same_server(&s.server_url, server_url))
     }
 }
 
@@ -235,7 +237,8 @@ pub fn save_session(root: &Path, session: &SavedSession) -> std::io::Result<()> 
 /// the current server stays the same.
 pub fn forget_session(root: &Path, server_url: &str) {
     let mut all = load_sessions(root);
-    all.sessions.retain(|s| !same_server(&s.server_url, server_url));
+    all.sessions
+        .retain(|s| !same_server(&s.server_url, server_url));
     let _ = save_sessions(root, &all);
 }
 
@@ -397,7 +400,11 @@ mod tests {
             server_url: "https://prod.dev".into(),
             member: member("m1"),
         };
-        std::fs::write(legacy_session_path(&root), serde_json::to_vec(&prod).unwrap()).unwrap();
+        std::fs::write(
+            legacy_session_path(&root),
+            serde_json::to_vec(&prod).unwrap(),
+        )
+        .unwrap();
         assert_eq!(load_session(&root), Some(prod.clone()));
 
         // Signing in on staging keeps production signed in.
@@ -411,7 +418,10 @@ mod tests {
         assert_eq!(signed_in_servers(&root).len(), 2);
 
         // Switching back finds the production session.
-        assert_eq!(set_current_server(&root, "https://prod.dev/"), Some(prod.clone()));
+        assert_eq!(
+            set_current_server(&root, "https://prod.dev/"),
+            Some(prod.clone())
+        );
         assert_eq!(load_session(&root), Some(prod.clone()));
 
         // Signing out of production leaves staging alone, and production
@@ -419,7 +429,10 @@ mod tests {
         forget_session(&root, "https://prod.dev");
         assert_eq!(load_session(&root), None);
         assert_eq!(current_server(&root).as_deref(), Some("https://prod.dev/"));
-        assert_eq!(signed_in_servers(&root), vec!["https://staging.dev".to_string()]);
+        assert_eq!(
+            signed_in_servers(&root),
+            vec!["https://staging.dev".to_string()]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

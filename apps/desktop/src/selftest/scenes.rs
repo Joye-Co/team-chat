@@ -179,9 +179,7 @@ pub const SCENES: &[Scene] = &[
         about: "The login view on 用邮箱登录 with an address typed",
         start: Start::SignedOut,
         setup: |_, _| {},
-        open: |services, content, cx| {
-            open_login(services, content, "=joye@example.com", false, cx)
-        },
+        open: |services, content, cx| open_login(services, content, "=joye@example.com", false, cx),
     },
     Scene {
         name: "login-email-code",
@@ -1405,7 +1403,9 @@ fn worst_login_code(code: &'static str) -> &'static str {
         // A wrong legacy code (a locked line) instead of a short one.
         "!0000-0000" => "!000000000000",
         // A long sign-in email on the email steps.
-        "=joye@example.com" => "=huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com",
+        "=joye@example.com" => {
+            "=huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com"
+        }
         "#joye@example.com 042" => {
             "#huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com 042"
         }

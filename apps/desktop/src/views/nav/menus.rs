@@ -248,7 +248,9 @@ fn same_server(a: &str, b: &str) -> bool {
 fn server_menu() -> MenuItem {
     use crate::copy::login as l;
     let (production, staging) = (env!("PRODUCT_PRODUCTION_URL"), env!("PRODUCT_STAGING_URL"));
-    let current = CURRENT_SERVER.with(|c| c.borrow().clone()).unwrap_or_default();
+    let current = CURRENT_SERVER
+        .with(|c| c.borrow().clone())
+        .unwrap_or_default();
     let mut items = Vec::new();
     if !production.is_empty() {
         items.push(
@@ -272,7 +274,10 @@ fn server_menu() -> MenuItem {
         );
     }
     items.push(MenuItem::separator());
-    items.push(MenuItem::action(l::OTHER_SERVER, crate::views::login::UseOtherServer));
+    items.push(MenuItem::action(
+        l::OTHER_SERVER,
+        crate::views::login::UseOtherServer,
+    ));
     MenuItem::submenu(Menu::new(l::MENU_SERVER).items(items))
 }
 
@@ -303,9 +308,7 @@ pub fn refresh_server_menu(cx: &mut App) {
 
 /// Handles 正式服务器 and 测试服务器 from any window.
 fn install_server_actions(cx: &mut App) {
-    cx.on_action(|_: &UseProductionServer, cx| {
-        switch_server(env!("PRODUCT_PRODUCTION_URL"), cx)
-    });
+    cx.on_action(|_: &UseProductionServer, cx| switch_server(env!("PRODUCT_PRODUCTION_URL"), cx));
     cx.on_action(|_: &UseStagingServer, cx| switch_server(env!("PRODUCT_STAGING_URL"), cx));
 }
 

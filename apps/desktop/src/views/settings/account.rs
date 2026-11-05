@@ -24,9 +24,10 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            AlertLayout, CodeInput, CodeInputEvent, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _, PushSize,
-            PushStyle, SectionTitle, SheetLayout, SheetWidth, alert_button, disabled_push, metrics,
-            native_colors, page::outline_badge, push_button, tokens,
+            AlertLayout, CodeInput, CodeInputEvent, GroupedForm, NativeCheckbox, NativeTextField,
+            NativeType as _, PushSize, PushStyle, SectionTitle, SheetLayout, SheetWidth,
+            alert_button, disabled_push, metrics, native_colors, page::outline_badge, push_button,
+            tokens,
         },
     },
     views::topic_list::relative_time,
@@ -134,9 +135,8 @@ impl AccountPage {
         let email_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(crate::copy::login::EMAIL_PLACEHOLDER)
         });
-        let email_code = cx.new(|cx| {
-            CodeInput::new(crate::views::login::EMAIL_CODE_LEN, 3, window, cx)
-        });
+        let email_code =
+            cx.new(|cx| CodeInput::new(crate::views::login::EMAIL_CODE_LEN, 3, window, cx));
         let subscriptions = vec![
             cx.subscribe_in(
                 &services.hub,
@@ -148,23 +148,29 @@ impl AccountPage {
                     }
                 },
             ),
-            cx.subscribe_in(&email_input, window, |this, _, e: &InputEvent, window, cx| {
-                match e {
+            cx.subscribe_in(
+                &email_input,
+                window,
+                |this, _, e: &InputEvent, window, cx| match e {
                     InputEvent::PressEnter { .. } => this.send_email_code(window, cx),
                     InputEvent::Change => {
                         this.email_error = None;
                         cx.notify();
                     }
                     _ => {}
-                }
-            }),
-            cx.subscribe_in(&email_code, window, |this, _, e: &CodeInputEvent, window, cx| {
-                this.email_error = None;
-                if matches!(e, CodeInputEvent::Submit) || this.email_digits(cx).len() == 6 {
-                    this.verify_email(window, cx);
-                }
-                cx.notify();
-            }),
+                },
+            ),
+            cx.subscribe_in(
+                &email_code,
+                window,
+                |this, _, e: &CodeInputEvent, window, cx| {
+                    this.email_error = None;
+                    if matches!(e, CodeInputEvent::Submit) || this.email_digits(cx).len() == 6 {
+                        this.verify_email(window, cx);
+                    }
+                    cx.notify();
+                },
+            ),
             cx.subscribe_in(&name, window, Self::on_input),
             cx.subscribe_in(&role, window, Self::on_input),
         ];
@@ -246,7 +252,8 @@ impl AccountPage {
                 match result {
                     Ok(()) => {
                         this.email_sent_to = Some(email);
-                        this.email_code.update(cx, |c, cx| c.set_value("", window, cx));
+                        this.email_code
+                            .update(cx, |c, cx| c.set_value("", window, cx));
                         let code = this.email_code.clone();
                         let handle = code.read(cx).focus_handle(cx);
                         handle.focus(window, cx);
@@ -354,7 +361,11 @@ impl AccountPage {
                             disabled_push(
                                 push_button(
                                     "email-send",
-                                    if sent.is_some() { s::EMAIL_RESEND } else { s::EMAIL_SEND },
+                                    if sent.is_some() {
+                                        s::EMAIL_RESEND
+                                    } else {
+                                        s::EMAIL_SEND
+                                    },
                                     PushStyle::Outline,
                                     PushSize::Regular,
                                     cx,

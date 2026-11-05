@@ -572,7 +572,9 @@ mod tests {
         for ok in ["a@b.co", " joye@example.com ", "x.y+z@mail.example.org"] {
             assert!(is_email_address(ok), "{ok}");
         }
-        for bad in ["", "a", "a@b", "@b.co", "a@@b.co", "a b@c.co", "a@b.", "a@.co"] {
+        for bad in [
+            "", "a", "a@b", "@b.co", "a@@b.co", "a b@c.co", "a@b.", "a@.co",
+        ] {
             assert!(!is_email_address(bad), "{bad}");
         }
     }

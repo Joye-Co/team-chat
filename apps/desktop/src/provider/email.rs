@@ -45,7 +45,11 @@ impl CoreProvider {
         rx
     }
 
-    pub(super) fn request_sign_in_code_inner(&self, server_url: &str, email: &str) -> EmailReply<()> {
+    pub(super) fn request_sign_in_code_inner(
+        &self,
+        server_url: &str,
+        email: &str,
+    ) -> EmailReply<()> {
         let Some(server_url) = session::normalize_server_url(server_url) else {
             return email_reply_now(Err(EmailError::Offline));
         };
@@ -53,8 +57,7 @@ impl CoreProvider {
         let (tx, rx) = futures::channel::oneshot::channel();
         chat_core::background().spawn(async move {
             let result = async {
-                let http =
-                    HttpClient::new(&server_url, None).map_err(|e| email_error(&e, true))?;
+                let http = HttpClient::new(&server_url, None).map_err(|e| email_error(&e, true))?;
                 http.email_sign_in_code(&email)
                     .await
                     .map_err(|e| email_error(&e, true))?;
@@ -68,7 +71,11 @@ impl CoreProvider {
 
     pub(super) fn my_email_inner(&self) -> EmailReply<Option<String>> {
         self.email_request(|client| async move {
-            let r = client.http().my_email().await.map_err(|e| email_error(&e, false))?;
+            let r = client
+                .http()
+                .my_email()
+                .await
+                .map_err(|e| email_error(&e, false))?;
             Ok(r.email)
         })
     }
@@ -99,7 +106,11 @@ impl CoreProvider {
 
     pub(super) fn remove_email_inner(&self) -> EmailReply<()> {
         self.email_request(|client| async move {
-            client.http().remove_email().await.map_err(|e| email_error(&e, false))?;
+            client
+                .http()
+                .remove_email()
+                .await
+                .map_err(|e| email_error(&e, false))?;
             Ok(())
         })
     }

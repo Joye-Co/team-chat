@@ -207,113 +207,114 @@ impl LoginView {
         let email_code = cx.new(|cx| CodeInput::new(EMAIL_CODE_LEN, EMAIL_GROUP, window, cx));
         // The first slot has the caret when the view opens.
         code.read(cx).focus_handle(cx).focus(window, cx);
-        let subscriptions = vec![
-            cx.subscribe_in(
-                &code,
-                window,
-                |this, _, event: &CodeInputEvent, window, cx| match event {
-                    CodeInputEvent::Submit => this.submit(window, cx),
-                    CodeInputEvent::Change => {
-                        this.clear_stale_error(cx);
-                        this.sync_code(cx);
-                        cx.notify();
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &email,
-                window,
-                |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::PressEnter { .. } => this.continue_(window, cx),
-                    InputEvent::Change => {
-                        this.email_error = None;
-                        cx.notify();
-                    }
-                    _ => {}
-                },
-            ),
-            cx.subscribe_in(
-                &email_code,
-                window,
-                |this, _, event: &CodeInputEvent, window, cx| match event {
-                    CodeInputEvent::Submit => this.submit(window, cx),
-                    CodeInputEvent::Change => {
-                        this.clear_stale_error(cx);
-                        this.email_error = None;
-                        this.sync_code(cx);
-                        // All six digits: sign in at once, as a one-time code does.
-                        if this.email_code_digits(cx).len() == EMAIL_CODE_LEN && this.error.is_none() {
-                            this.submit(window, cx);
+        let subscriptions =
+            vec![
+                cx.subscribe_in(
+                    &code,
+                    window,
+                    |this, _, event: &CodeInputEvent, window, cx| match event {
+                        CodeInputEvent::Submit => this.submit(window, cx),
+                        CodeInputEvent::Change => {
+                            this.clear_stale_error(cx);
+                            this.sync_code(cx);
+                            cx.notify();
                         }
-                        cx.notify();
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &server,
-                window,
-                |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::PressEnter { .. } => this.continue_(window, cx),
-                    InputEvent::Change => {
-                        this.clear_stale_error(cx);
-                        cx.notify();
-                    }
-                    _ => {}
-                },
-            ),
-            cx.subscribe_in(
-                &services.hub,
-                window,
-                |this, _, changes: &Changes, window, cx| {
-                    if !changes.any(|c| matches!(c, Change::Session)) {
-                        return;
-                    }
-                    let session = this.services.provider.session();
-                    // A switch to a server without a saved session: the
-                    // login window shows that server.
-                    if matches!(session, SessionState::SignedOut { last_error: None })
-                        && let Some(url) = this.services.provider.current_server()
-                        && this.server.read(cx).value().trim() != url
-                    {
-                        this.server
-                            .update(cx, |st, cx| st.set_value(url, window, cx));
-                    }
-                    match &session {
-                        SessionState::SignedOut {
-                            last_error: Some(LoginError::ServerUnreachable),
-                        } => {
-                            this.server_open = true;
-                            this.server.read(cx).focus_handle(cx).focus(window, cx);
-                        }
-                        // A wrong code stays in the slots, selected: the
-                        // next character typed starts a new code (§8.3).
-                        SessionState::SignedOut {
-                            last_error: Some(LoginError::BadCredential),
-                        } => {
-                            if this.step == Step::EmailCode {
-                                this.email_code.update(cx, |c, cx| c.select_all(window, cx));
-                            } else {
-                                this.code.update(cx, |c, cx| c.select_all(window, cx));
-                            }
+                    },
+                ),
+                cx.subscribe_in(&email, window, |this, _, event: &InputEvent, window, cx| {
+                    match event {
+                        InputEvent::PressEnter { .. } => this.continue_(window, cx),
+                        InputEvent::Change => {
+                            this.email_error = None;
+                            cx.notify();
                         }
                         _ => {}
                     }
-                    // A refusal marks the field and says why under it.
-                    if let SessionState::SignedOut {
-                        last_error: Some(e),
-                    } = session
-                    {
-                        this.error = Some(e);
-                        this.error_for = this.field_text(cx);
-                    }
-                    this.sync_code(cx);
-                    if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
-                        move_to_login_window(this.services.clone(), window, cx);
-                    }
-                    cx.notify();
-                },
-            ),
-        ];
+                }),
+                cx.subscribe_in(
+                    &email_code,
+                    window,
+                    |this, _, event: &CodeInputEvent, window, cx| match event {
+                        CodeInputEvent::Submit => this.submit(window, cx),
+                        CodeInputEvent::Change => {
+                            this.clear_stale_error(cx);
+                            this.email_error = None;
+                            this.sync_code(cx);
+                            // All six digits: sign in at once, as a one-time code does.
+                            if this.email_code_digits(cx).len() == EMAIL_CODE_LEN
+                                && this.error.is_none()
+                            {
+                                this.submit(window, cx);
+                            }
+                            cx.notify();
+                        }
+                    },
+                ),
+                cx.subscribe_in(
+                    &server,
+                    window,
+                    |this, _, event: &InputEvent, window, cx| match event {
+                        InputEvent::PressEnter { .. } => this.continue_(window, cx),
+                        InputEvent::Change => {
+                            this.clear_stale_error(cx);
+                            cx.notify();
+                        }
+                        _ => {}
+                    },
+                ),
+                cx.subscribe_in(
+                    &services.hub,
+                    window,
+                    |this, _, changes: &Changes, window, cx| {
+                        if !changes.any(|c| matches!(c, Change::Session)) {
+                            return;
+                        }
+                        let session = this.services.provider.session();
+                        // A switch to a server without a saved session: the
+                        // login window shows that server.
+                        if matches!(session, SessionState::SignedOut { last_error: None })
+                            && let Some(url) = this.services.provider.current_server()
+                            && this.server.read(cx).value().trim() != url
+                        {
+                            this.server
+                                .update(cx, |st, cx| st.set_value(url, window, cx));
+                        }
+                        match &session {
+                            SessionState::SignedOut {
+                                last_error: Some(LoginError::ServerUnreachable),
+                            } => {
+                                this.server_open = true;
+                                this.server.read(cx).focus_handle(cx).focus(window, cx);
+                            }
+                            // A wrong code stays in the slots, selected: the
+                            // next character typed starts a new code (§8.3).
+                            SessionState::SignedOut {
+                                last_error: Some(LoginError::BadCredential),
+                            } => {
+                                if this.step == Step::EmailCode {
+                                    this.email_code.update(cx, |c, cx| c.select_all(window, cx));
+                                } else {
+                                    this.code.update(cx, |c, cx| c.select_all(window, cx));
+                                }
+                            }
+                            _ => {}
+                        }
+                        // A refusal marks the field and says why under it.
+                        if let SessionState::SignedOut {
+                            last_error: Some(e),
+                        } = session
+                        {
+                            this.error = Some(e);
+                            this.error_for = this.field_text(cx);
+                        }
+                        this.sync_code(cx);
+                        if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
+                            move_to_login_window(this.services.clone(), window, cx);
+                        }
+                        cx.notify();
+                    },
+                ),
+            ];
         Self {
             services,
             server,
@@ -387,7 +388,8 @@ impl LoginView {
                 st.set_selected_range(0..end, cx);
             }),
             Step::EmailCode => {
-                self.email_code.update(cx, |c, cx| c.set_value("", window, cx));
+                self.email_code
+                    .update(cx, |c, cx| c.set_value("", window, cx));
                 let code = self.email_code.clone();
                 code.read(cx).focus_handle(cx).focus(window, cx);
             }
@@ -414,7 +416,10 @@ impl LoginView {
         }
         self.sending = true;
         self.email_error = None;
-        let reply = self.services.provider.request_sign_in_code(&server_url, &email);
+        let reply = self
+            .services
+            .provider
+            .request_sign_in_code(&server_url, &email);
         cx.spawn_in(window, async move |this, cx| {
             let result = reply.await.unwrap_or(Err(EmailError::Other));
             let _ = this.update_in(cx, |this, window, cx| {
@@ -572,7 +577,8 @@ impl LoginView {
     /// 继续: on the code step it joins; on the server step it goes back to
     /// the code, or joins when the code is complete.
     fn continue_(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.server_open && (self.step != Step::Invite || self.input(cx).credential().is_none()) {
+        if self.server_open && (self.step != Step::Invite || self.input(cx).credential().is_none())
+        {
             self.close_server_field(window, cx);
         } else {
             self.submit(window, cx);
@@ -610,7 +616,9 @@ impl LoginView {
             Step::Invite => {}
             Step::Email => {
                 return link("login-use-invite", l::USE_INVITE, cx)
-                    .on_click(cx.listener(|this, _, window, cx| this.go_to(Step::Invite, window, cx)))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.go_to(Step::Invite, window, cx)),
+                    )
                     .into_any_element();
             }
             Step::EmailCode => {
@@ -619,18 +627,12 @@ impl LoginView {
                     .items_center()
                     .justify_center()
                     .gap(space::S16)
-                    .child(
-                        link("login-email-resend", l::EMAIL_RESEND, cx)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.send_email_code(window, cx)
-                            })),
-                    )
-                    .child(
-                        link("login-email-change", l::EMAIL_CHANGE, cx)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.go_to(Step::Email, window, cx)
-                            })),
-                    )
+                    .child(link("login-email-resend", l::EMAIL_RESEND, cx).on_click(
+                        cx.listener(|this, _, window, cx| this.send_email_code(window, cx)),
+                    ))
+                    .child(link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
+                        cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
+                    ))
                     .into_any_element();
             }
         }
@@ -768,8 +770,11 @@ impl Render for LoginView {
                 Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into()),
                 Step::EmailCode => (
                     l::EMAIL_CODE_TITLE,
-                    crate::copy::fill(l::EMAIL_CODE_LEAD, &[("email", &short_email(&self.sent_to))])
-                        .into(),
+                    crate::copy::fill(
+                        l::EMAIL_CODE_LEAD,
+                        &[("email", &short_email(&self.sent_to))],
+                    )
+                    .into(),
                 ),
             }
         };
