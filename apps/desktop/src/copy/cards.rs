@@ -5,7 +5,7 @@ crate::copy! {
     PRESSED_EARLIER = "之前还有 {n} 次操作",
     PRESS_REMOVED_ACTION = "已移除的按钮",
     SOMEONE = "某位成员",
-    SENDING = "正在发送…",
+    SENDING = "发送中…",
     PRESS_FAILED = "「{action}」没有成功，请再试一次",
     PRESS_GONE = "「{action}」已失效",
     PRESS_FORBIDDEN = "你不能进行「{action}」",
