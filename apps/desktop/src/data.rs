@@ -1101,6 +1101,30 @@ pub struct RunnerSetup {
     pub base_branch: Option<String>,
 }
 
+/// What a save of the AI member edit sheet changes; a `None` field stays as it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BotMemberEdit {
+    pub name: Option<String>,
+    /// `Some(None)` clears the 岗位.
+    pub role: Option<Option<String>>,
+    pub runner: Option<RunnerChange>,
+}
+
+impl BotMemberEdit {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none() && self.role.is_none() && self.runner.is_none()
+    }
+}
+
+/// A change of how a member works on a machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunnerChange {
+    /// `PUT /v1/bots/:id/runner`.
+    Set(RunnerSetup),
+    /// `DELETE /v1/bots/:id/runner`.
+    Remove,
+}
+
 /// A connected (or known) machine, for the 机器 page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MachineInfo {
@@ -1549,6 +1573,17 @@ pub trait ChatProvider: Send + Sync + 'static {
         _character: Option<CharacterId>,
         _runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: how a bot member works on a machine (`GET /v1/bots/:id/runner`);
+    /// `None` when it does not.
+    fn bot_runner(&self, _member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: saves an edit of a bot member: `PATCH /v1/members/:id` for the
+    /// name and 岗位, then `PUT` or `DELETE /v1/bots/:id/runner`. A `Set` keeps
+    /// the runner fields the sheet does not show. Emits `Change::Members`.
+    fn update_bot_member(&self, _member_id: &str, _edit: BotMemberEdit) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: changes a bot's character (`PATCH /v1/members/:id`, `character`).

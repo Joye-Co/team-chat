@@ -12,6 +12,8 @@ pub struct FakeSettings {
     /// (group, topic) pairs I follow.
     followed: HashSet<(GroupId, TopicId)>,
     machines: Vec<MachineInfo>,
+    /// How runner-backed bot members work, by member id.
+    runners: HashMap<String, RunnerSetup>,
     next: u64,
 }
 
@@ -21,9 +23,23 @@ impl FakeSettings {
             notify: HashMap::new(),
             followed: HashSet::new(),
             machines: sample_machines(),
+            runners: sample_runners(),
             next: 1,
         }
     }
+}
+
+/// Jojo works on the office Mac mini.
+fn sample_runners() -> HashMap<String, RunnerSetup> {
+    HashMap::from([(
+        "m-deploy".to_string(),
+        RunnerSetup {
+            runtime: "main".into(),
+            labels: vec!["mac".into(), "office".into()],
+            repo: Some("https://github.com/example/app".into()),
+            base_branch: Some("main".into()),
+        },
+    )])
 }
 
 fn sample_machines() -> Vec<MachineInfo> {
@@ -253,11 +269,72 @@ impl FakeProvider {
             character,
         };
         self.with(|s| s.members.push(member.clone()));
+        if let Some(r) = &runner {
+            let mut settings = self.settings.lock().unwrap();
+            settings.runners.insert(member.id.clone(), r.clone());
+        }
         self.emit(vec![Change::Members]);
         let credential = runner
             .is_none()
             .then(|| SecretText::new(format!("tc_fake{n:040}")));
         reply_now(Ok(BotCreated { member, credential }))
+    }
+
+    pub(super) fn bot_runner_fake(&self, id: &str) -> AdminReply<Option<RunnerSetup>> {
+        if !self.is_owner() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(Ok(self.settings.lock().unwrap().runners.get(id).cloned()))
+    }
+
+    pub(super) fn update_bot_member_fake(&self, id: &str, edit: BotMemberEdit) -> AdminReply<()> {
+        if !self.is_owner() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        let name = edit.name.map(|n| n.trim().to_string());
+        if name
+            .as_ref()
+            .is_some_and(|n| n.is_empty() || n.chars().count() > 64)
+        {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        if let Some(RunnerChange::Set(r)) = &edit.runner
+            && r.runtime.trim().is_empty()
+        {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        if !self.members().iter().any(|m| m.id == id && m.is_bot()) {
+            return reply_now(Err(AdminError::NotFound));
+        }
+        if name.is_some() || edit.role.is_some() {
+            let role = edit
+                .role
+                .map(|r| r.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()));
+            if let Err(e) = self.change_member(id, |m, _| {
+                if let Some(name) = name {
+                    m.name = name;
+                }
+                if let Some(role) = role {
+                    m.role = role;
+                }
+                Ok(())
+            }) {
+                return reply_now(Err(e));
+            }
+        }
+        if let Some(change) = edit.runner {
+            let mut settings = self.settings.lock().unwrap();
+            match change {
+                RunnerChange::Set(r) => {
+                    settings.runners.insert(id.to_string(), r);
+                }
+                RunnerChange::Remove => {
+                    settings.runners.remove(id);
+                }
+            }
+        }
+        self.emit(vec![Change::Members]);
+        reply_now(Ok(()))
     }
 
     pub(super) fn machines_fake(&self) -> AdminReply<Vec<MachineInfo>> {
@@ -479,5 +556,60 @@ mod tests {
         let backed = answer(p.create_bot_member("跑腿".into(), None, None, Some(runner))).unwrap();
         assert!(backed.credential.is_none());
         assert!(p.members().iter().any(|m| m.id == backed.member.id));
+    }
+
+    #[test]
+    fn bot_member_edit_changes_name_role_and_runner() {
+        let p = FakeProvider::new();
+        let runner = RunnerSetup {
+            runtime: "main".into(),
+            labels: vec!["mac".into()],
+            ..Default::default()
+        };
+        let id = answer(p.create_bot_member("跑腿".into(), None, None, Some(runner.clone())))
+            .unwrap()
+            .member
+            .id;
+        assert_eq!(answer(p.bot_runner(&id)).unwrap(), Some(runner));
+        let moved = RunnerSetup {
+            runtime: "other".into(),
+            repo: Some("/srv/app".into()),
+            ..Default::default()
+        };
+        answer(p.update_bot_member(
+            &id,
+            BotMemberEdit {
+                name: Some(" 跑腿二号 ".into()),
+                role: Some(Some("测试".into())),
+                runner: Some(RunnerChange::Set(moved.clone())),
+            },
+        ))
+        .unwrap();
+        let m = p.members().into_iter().find(|m| m.id == id).unwrap();
+        assert_eq!(
+            (m.name.as_str(), m.role.as_deref()),
+            ("跑腿二号", Some("测试"))
+        );
+        assert_eq!(answer(p.bot_runner(&id)).unwrap(), Some(moved));
+        answer(p.update_bot_member(
+            &id,
+            BotMemberEdit {
+                role: Some(None),
+                runner: Some(RunnerChange::Remove),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        let m = p.members().into_iter().find(|m| m.id == id).unwrap();
+        assert_eq!(m.role, None);
+        assert_eq!(answer(p.bot_runner(&id)).unwrap(), None);
+        let blank = BotMemberEdit {
+            name: Some("  ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            answer(p.update_bot_member(&id, blank)),
+            Err(AdminError::Invalid)
+        );
     }
 }
