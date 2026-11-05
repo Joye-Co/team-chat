@@ -20,7 +20,7 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    copy::{fill, live as c, nav as n, topic_rail as tr},
+    copy::{fill, live as c, nav as n},
     data::{
         AdminError, BotRunSummary, Member, MemberLevel, Millis, PlanState,
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
@@ -29,8 +29,8 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            BadgeState, NativeType as _, PushSize, PushStyle, StatusBadge, StatusKind,
-            ToolbarGroup,
+            Arrows, BadgeState, FocusRow as _, NativeType as _, PushSize, PushStyle, StatusBadge,
+            StatusKind, ToolbarGroup,
             badge::state_mark,
             metrics, native_colors,
             overlays::{decision_bar, sym_toolbar_item, sym_toolbar_toggle},
@@ -180,13 +180,19 @@ impl LivePane {
         let n = native_colors(cx);
         // §2.12, A2-13: the run's state is the one StatusBadge and its
         // words: 在做 while it works, 已暂停 while someone holds its computer.
-        let badge = if screen.paused_by.is_some() {
-            Some(StatusBadge::new(BadgeState::Paused, tr::STATE_PAUSED_SHORT).dense())
-        } else {
-            run.status
-                .is_active()
-                .then(|| StatusBadge::new(BadgeState::Working, tr::STATE_WORKING_SHORT).dense())
-        };
+        // T-16: the run's own badge, with its plan count (`在做 2/5`), as the
+        // title bar and the sidebar say it.
+        let badge = (screen.paused_by.is_some() || run.status.is_active()).then(|| {
+            let me = self.services.me();
+            let line = crate::views::topic_page::run_state(
+                run,
+                bot,
+                screen.paused_by.as_deref(),
+                me.as_deref(),
+                |id| member_name(&self.services, id),
+            );
+            StatusBadge::new(line.badge, line.short).dense()
+        });
         // P-01: the run's time on the one clock of every page.
         let elapsed = crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), &run)
             .map(|ms| elapsed_text(ms, cx));
@@ -200,18 +206,32 @@ impl LivePane {
             .n_subheadline()
             .n_figures()
             .text_color(n.secondary);
-        subtitle = subtitle.child(
-            div()
-                .flex_none()
-                .child(fill(c::LIVE_COMPUTER, &[("name", bot)])),
-        );
-        if let Some(m) = screen.machine_name.clone() {
-            subtitle = subtitle
-                .child(dot())
-                .child(div().min_w_0().one_line().child(m));
+        // T-16, F3: empty parts are skipped (never `· ·`); the computer's
+        // and the machine's names cut with "…" before the time does.
+        let mut parts: Vec<AnyElement> = Vec::new();
+        if !bot.trim().is_empty() {
+            parts.push(
+                crate::ui::truncate::TruncText::new(fill(c::LIVE_COMPUTER, &[("name", bot)]))
+                    .flex_shrink(1.)
+                    .into_any_element(),
+            );
+        }
+        if let Some(m) = screen.machine_name.clone().filter(|m| !m.trim().is_empty()) {
+            parts.push(
+                // The machine's name gives way first.
+                crate::ui::truncate::TruncText::new(m)
+                    .flex_shrink(4.)
+                    .into_any_element(),
+            );
         }
         if let Some(e) = elapsed {
-            subtitle = subtitle.child(dot()).child(div().flex_none().child(e));
+            parts.push(div().flex_none().child(e).into_any_element());
+        }
+        for (i, part) in parts.into_iter().enumerate() {
+            if i > 0 {
+                subtitle = subtitle.child(dot());
+            }
+            subtitle = subtitle.child(part);
         }
         div()
             .flex_none()
@@ -288,7 +308,9 @@ impl LivePane {
         let who = screen
             .paused_by
             .as_deref()
-            .map(|w| member_name(&self.services, w))
+            .map(|w| {
+                crate::ui::avatar::name_beside_avatar(&member_name(&self.services, w)).to_string()
+            })
             .unwrap_or_default();
         let title = if held_by_me {
             fill(c::LIVE_HELD_TITLE, &[("name", bot)])
@@ -542,12 +564,15 @@ impl LivePane {
             .flex()
             .flex_col()
             .bg(k.sunken)
-            .child(menu)
+            // T-16, C4: a clip is a rectangle, so the fills take the frame's
+            // inner radius themselves (no square corner outside the border).
+            .child(menu.rounded_t(theme::radius::FIELD - px(1.)))
             .child(
                 div()
                     .relative()
                     .flex_1()
                     .min_h(px(0.))
+                    .rounded_b(theme::radius::FIELD - px(1.))
                     .bg(k.ph[1])
                     .child(terminal)
                     .children(pointer),
@@ -611,6 +636,9 @@ impl LivePane {
                     .ml(-MARK / 2.)
                     .size(MARK)
                     .rounded_full()
+                    // T-16, E3: each mark is a tab stop; ← / → walk the
+                    // track and Enter / Space shows that step.
+                    .focus_row_with(selected, Arrows::Grid, cx)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -887,7 +915,12 @@ impl LivePane {
             let status = match item.met {
                 Some(true) => status_badge(StatusKind::Done, c::LIVE_MET, cx),
                 Some(false) => status_badge(StatusKind::Failed, c::LIVE_NOT_MET, cx),
-                None if active => status_badge(StatusKind::Working, c::LIVE_CHECKING, cx),
+                // T-16, §2.12: a criterion still being checked reads 在做.
+                None if active => status_badge(
+                    StatusKind::Working,
+                    crate::copy::topic_rail::STATE_WORKING_SHORT,
+                    cx,
+                ),
                 None => status_badge(StatusKind::Pending, c::LIVE_UNCHECKED, cx),
             };
             div()
@@ -1513,7 +1546,10 @@ impl Render for LivePane {
         if self.replay.as_ref().is_some_and(|(r, _)| *r != run_id) {
             self.replay = None;
         }
-        let bot = member_name(&self.services, &run.bot_id);
+        // X-01, T-16: the pane writes names in text with no avatar beside
+        // them, so a leading emoji goes, as beside an avatar.
+        let bot = crate::ui::avatar::name_beside_avatar(&member_name(&self.services, &run.bot_id))
+            .to_string();
         crate::selftest::drawn::mark("live", format!("{bot} {}", run.id));
         let me = self.services.me();
         let held = screen.paused_by.is_some();
