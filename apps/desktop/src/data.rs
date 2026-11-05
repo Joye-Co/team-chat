@@ -576,13 +576,53 @@ pub struct SendRequest {
 }
 
 /// The first message of a new topic.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct StartTopicRequest {
     pub group_id: GroupId,
     /// `None` uses the first line of `body`, cut to 80 characters.
     pub title: Option<String>,
     pub body: String,
     pub mentions: Vec<MemberId>,
+    /// 开个话题: the 群聊 message the first message quotes.
+    pub quote_of: Option<MessageId>,
+}
+
+/// The id of a 群's own chat, the 群聊 (docs/protocol.md, "群聊: the group's own
+/// chat"): a topic with a fixed id that exists once someone wrote there.
+pub fn main_topic_id(group_id: &str) -> TopicId {
+    chat_core::proto::main_topic_id(group_id)
+}
+
+/// Whether `topic_id` is a 群聊 (of any 群). Lists of 话题 leave it out.
+pub fn is_main_topic(topic_id: &str) -> bool {
+    chat_core::proto::is_main_topic_id(topic_id)
+}
+
+/// The topic `topic_id` of `group_id`; for the 群聊 before anyone wrote
+/// there, a blank one with its fixed id, so the 群 opens its chat at once.
+pub fn topic_or_chat(p: &dyn ChatProvider, group_id: &str, topic_id: &str) -> Option<Topic> {
+    if let Some(t) = p.topic(group_id, topic_id) {
+        return Some(t);
+    }
+    if topic_id != main_topic_id(group_id) || !p.groups().iter().any(|g| g.id == group_id) {
+        return None;
+    }
+    Some(Topic {
+        id: topic_id.to_string(),
+        group_id: group_id.to_string(),
+        title: String::new(),
+        status: TopicStatus::Open,
+        waiting_on: Vec::new(),
+        owner_id: None,
+        created_by: String::new(),
+        created_at: 0,
+        root_message_id: String::new(),
+        last_seq: 0,
+        last_activity_at: 0,
+        message_count: 0,
+        unread: 0,
+        mentions: 0,
+    })
 }
 
 /// A new 群 from the new-group dialog. I am added as a member by the server.

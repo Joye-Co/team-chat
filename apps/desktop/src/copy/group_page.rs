@@ -57,6 +57,8 @@ crate::copy! {
     // --- end pages track ---
     // --- v13/ux-pages: the 群 recipe (COMPLETENESS.md §2.18) ---
     GROUP_PAGE_NEW_TOPIC = "新话题",
+    // 1.1.1: back from the 群 page to the 群聊.
+    GROUP_PAGE_BACK_TO_CHAT = "回到群里聊",
     GROUP_PAGE_SHOW_ALL = "看全部 {n} 个话题",
     GROUP_PAGE_SHOW_LESS = "收起",
     GROUP_PAGE_EMPTY_TITLE = "这个群还没有话题",

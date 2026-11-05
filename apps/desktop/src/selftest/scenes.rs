@@ -94,6 +94,47 @@ pub const SCENES: &[Scene] = &[
         setup: open_first_group,
         open: crate::views::nav::selftest::scenes::new_topic,
     },
+    // 1.1.1: the 群's own chat.
+    Scene {
+        name: "group-chat",
+        about: "The 群聊 of 产品研发: plain chat with Jojo's answer, 新话题 and 这个群的话题 in the title bar",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "group-chat-empty",
+        about: "The 群聊 of 运维告警 before anyone wrote there: its start block with 新话题",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("g-ops".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "dm-chat",
+        about: "The 私聊 with Forge as a chat",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("d-coder".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "new-topic-from",
+        about: "开个话题: the sheet from a 群聊 message, quoting it, the title its first line",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx))
+        },
+        open: crate::views::nav::selftest::scenes::new_topic_from,
+    },
     Scene {
         name: "todo",
         about: "首页 opened from the sidebar on the v1 sample team: what waits on me, with no 话题 open",

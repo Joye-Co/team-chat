@@ -223,11 +223,22 @@ pub struct Topic {
         skip_serializing_if = "Option::is_none"
     )]
     pub context_of: Option<TopicContext>,
+    /// The group's own chat (群聊, 1.1.1); its id is [`crate::main_topic_id`]. Absent = false.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub main: Option<bool>,
 }
 
 impl Topic {
     pub fn waiting_on(&self) -> &[String] {
         self.waiting_on.as_deref().unwrap_or(&[])
+    }
+    /// Whether this is the group's 群聊 (the flag, or the fixed id).
+    pub fn is_main(&self) -> bool {
+        self.main == Some(true) || self.id == crate::main_topic_id(&self.group_id)
     }
     pub fn owner_id(&self) -> Option<&str> {
         self.owner_id.as_ref().and_then(|o| o.as_deref())
