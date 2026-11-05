@@ -32,6 +32,8 @@ use crate::{
 /// The row's inset inside the content box: hover fills reach 8 pt past the
 /// text (§7.5).
 const ROW_INSET: Pixels = px(8.);
+/// How long after sending I can still 撤回 a message (Feishu's 24 hours).
+pub(super) const RECALL_WINDOW_MS: crate::data::Millis = 24 * 60 * 60 * 1000;
 
 impl TimelineView {
     pub(super) fn render_row(
@@ -197,7 +199,7 @@ impl TimelineView {
             // v12/behavior: the special rows get the message menu too (§7.3).
             let menu_message = message.clone();
             let view = cx.entity().downgrade();
-            let (can_edit, can_delete) = (self.can_edit(message), self.can_delete(message));
+            let (can_edit, can_recall) = (self.can_edit(message), self.can_recall(message));
             return div()
                 .id(ElementId::Name(format!("special-{key}").into()))
                 .child(row)
@@ -207,7 +209,7 @@ impl TimelineView {
                         view.clone(),
                         &menu_message,
                         can_edit,
-                        can_delete,
+                        can_recall,
                         window,
                         cx,
                     )
@@ -278,16 +280,13 @@ impl TimelineView {
         // when it can, on its own line only after a code block or a table.
         let mut mark_inline = false;
         let body: Option<AnyElement> = if deleted {
-            // §2.7: the tombstone is a 16 trash icon and 14 muted text.
+            // A recalled message: 14 muted text, no icon (a recall is not a
+            // trash can).
             Some(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
                     .t_body()
                     .text_color(colors.text_3)
-                    .child(ui::icon(Sym::Delete, theme::icon::ROW, colors.text_3))
-                    .child(t::DELETED)
+                    .child(t::RECALLED)
                     .into_any_element(),
             )
         } else if let Some(input) = editing {
@@ -422,7 +421,7 @@ impl TimelineView {
         let failed = (message.send_state == SendState::Failed).then(|| {
             use gpui_component::menu::DropdownMenu as _;
             let (menu_message, view) = (message.clone(), cx.entity().downgrade());
-            let (can_edit, can_delete) = (self.can_edit(message), self.can_delete(message));
+            let (can_edit, can_recall) = (self.can_edit(message), self.can_recall(message));
             div()
                 .pt(space::S4)
                 .flex()
@@ -465,7 +464,7 @@ impl TimelineView {
                             view.clone(),
                             &menu_message,
                             can_edit,
-                            can_delete,
+                            can_recall,
                             window,
                             cx,
                         )
@@ -593,7 +592,7 @@ impl TimelineView {
         let menu_message = message.clone();
         let view = cx.entity().downgrade();
         let can_edit = self.can_edit(message);
-        let can_delete = self.can_delete(message);
+        let can_recall = self.can_recall(message);
         let hover_key: SharedString = key.to_string().into();
         div()
             .id(ElementId::Name(key.to_string().into()))
@@ -645,6 +644,24 @@ impl TimelineView {
                 div()
                     .flex_1()
                     .min_w(px(0.))
+                    // A double-click on the message replies to it (the toolbar's
+                    // 回复 without aiming for it). Capture phase: the selectable
+                    // text below takes the click for itself.
+                    .when(
+                        !deleted && editing_is_none(self, key) && !message.id.is_empty(),
+                        |el| {
+                            let m = message.clone();
+                            el.capture_any_mouse_down(cx.listener(
+                                move |this, event: &gpui::MouseDownEvent, _, cx| {
+                                    if event.button == gpui::MouseButton::Left
+                                        && event.click_count == 2
+                                    {
+                                        this.quote(&m, cx);
+                                    }
+                                },
+                            ))
+                        },
+                    )
                     .map(|el| {
                         if v2 {
                             el.max_w(super::v2::TEXT_MAX)
@@ -670,7 +687,7 @@ impl TimelineView {
                     view.clone(),
                     &menu_message,
                     can_edit,
-                    can_delete,
+                    can_recall,
                     window,
                     cx,
                 )
@@ -679,9 +696,10 @@ impl TimelineView {
     }
 
     /// The hover toolbar (§7.5): a level-1 capsule 18 pt above the row, at
-    /// the right edge of the content box: add reaction (the emoji picker),
-    /// reply (a quote chip in the composer) and more (the row menu, which
-    /// holds only what the toolbar does not).
+    /// the right edge of the content box: my three most used emoji (one click
+    /// reacts), add reaction (the emoji picker, most used first), reply (a
+    /// quote chip in the composer) and more (the row menu, which holds only
+    /// what the toolbar does not).
     fn render_hover_toolbar(
         &self,
         message: &Message,
@@ -692,7 +710,7 @@ impl TimelineView {
         let menu_message = message.clone();
         let view = cx.entity().downgrade();
         let can_edit = self.can_edit(message);
-        let can_delete = self.can_delete(message);
+        let can_recall = self.can_recall(message);
         let tool = |id: &str, glyph: Sym| {
             ui::native::icon_button_bare(
                 ElementId::Name(format!("{id}-{key}").into()),
@@ -709,7 +727,26 @@ impl TimelineView {
             .gap(space::S2)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .when(sent, |el| {
-                el.child(self.reaction_picker(
+                let me = self.me.clone().unwrap_or_default();
+                el.children(
+                    ui::emoji::ranked()
+                        .into_iter()
+                        .take(ui::emoji::QUICK_COUNT)
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let on = !message
+                                .reactions
+                                .iter()
+                                .any(|r| r.emoji == e && r.member_ids.contains(&me));
+                            let m = message.clone();
+                            ui::emoji::quick_button(
+                                ElementId::Name(format!("quick-react-{i}-{key}").into()),
+                                e,
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| this.react(&m, e, on, cx)))
+                        }),
+                )
+                .child(self.reaction_picker(
                     message,
                     key,
                     false,
@@ -734,7 +771,7 @@ impl TimelineView {
                             view.clone(),
                             &menu_message,
                             can_edit,
-                            can_delete,
+                            can_recall,
                             window,
                             cx,
                         )
@@ -879,13 +916,14 @@ impl TimelineView {
                         })
                         .ok();
                 })
-                .children(ui::emoji::EMOJI.iter().enumerate().map(|(i, e)| {
+                // The ones I use most come first.
+                .children(ui::emoji::ranked().into_iter().enumerate().map(|(i, e)| {
                     let view = view.clone();
                     let m = m.clone();
                     let on = !m
                         .reactions
                         .iter()
-                        .any(|r| r.emoji == *e && r.member_ids.contains(&me));
+                        .any(|r| r.emoji == e && r.member_ids.contains(&me));
                     ui::emoji::picker_cell(("react-emoji", i), e, cx).on_click(move |_, _, cx| {
                         view.update(cx, |this, cx| {
                             this.reacting = None;
@@ -908,6 +946,9 @@ impl TimelineView {
     ) {
         if message.id.is_empty() {
             return;
+        }
+        if on {
+            ui::emoji::record_use(emoji);
         }
         self.services
             .provider
@@ -1321,10 +1362,14 @@ impl TimelineView {
             && Some(message.author_id.as_str()) == self.me.as_deref()
     }
 
-    pub(super) fn can_delete(&self, message: &Message) -> bool {
+    /// 撤回: only my own sent messages, within [`RECALL_WINDOW_MS`] of
+    /// sending. Nobody, owners included, takes back someone else's message.
+    pub(super) fn can_recall(&self, message: &Message) -> bool {
         !message.id.is_empty()
             && message.deleted_at.is_none()
-            && (Some(message.author_id.as_str()) == self.me.as_deref() || self.i_am_owner)
+            && Some(message.author_id.as_str()) == self.me.as_deref()
+            && crate::selftest::clock::now_ms().saturating_sub(message.created_at)
+                < RECALL_WINDOW_MS
     }
 
     pub(super) fn retry(&mut self, message: &Message) {

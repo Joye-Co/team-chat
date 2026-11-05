@@ -1,8 +1,9 @@
 //! Extension point: the context menu of a message row, and in-place edit.
 //!
 //! Items: 复制 (the Markdown source), 复制链接 (a link with the product URL
-//! scheme), 编辑 (my sent messages), 删除 (mine, or any for an owner; asks
-//! first), and 重试 for a failed send. Reply and reactions live on the hover
+//! scheme), 编辑 (my sent messages), 撤回 (my own, within 24 hours of sending;
+//! asks first; nobody takes back someone else's message), and 重试 for a
+//! failed send. Reply and reactions live on the hover
 //! toolbar only, so no action shows twice on a hovered row.
 //! To add an item, add it in [`build`]; anything that changes data calls the
 //! provider.
@@ -39,7 +40,7 @@ pub(super) fn build(
     view: WeakEntity<TimelineView>,
     message: &Message,
     can_edit: bool,
-    can_delete: bool,
+    can_recall: bool,
     _window: &mut Window,
     _cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
@@ -52,10 +53,10 @@ pub(super) fn build(
             let _ = view.update(cx, |this, cx| this.start_edit(&m, window, cx));
         })
     };
-    let delete = {
+    let recall = {
         let (view, m) = (view.clone(), m.clone());
-        PopupMenuItem::new(t::DELETE)
-            .on_click(move |_, window, cx| confirm_delete(view.clone(), m.clone(), window, cx))
+        PopupMenuItem::new(t::RECALL)
+            .on_click(move |_, window, cx| confirm_recall(view.clone(), m.clone(), window, cx))
     };
     let copy_text = {
         let body = m.body.clone();
@@ -78,12 +79,12 @@ pub(super) fn build(
     menu.when(failed, |menu| menu.item(retry))
         .when(m.deleted_at.is_none(), |menu| menu.item(copy_text))
         .when(sent, |menu| menu.item(copy_link))
-        .when(can_edit || can_delete, |menu| menu.separator())
+        .when(can_edit || can_recall, |menu| menu.separator())
         .when(can_edit, |menu| menu.item(edit))
-        .when(can_delete, |menu| menu.item(delete))
+        .when(can_recall, |menu| menu.item(recall))
 }
 
-fn confirm_delete(
+fn confirm_recall(
     view: WeakEntity<TimelineView>,
     message: Message,
     window: &mut Window,
@@ -93,10 +94,10 @@ fn confirm_delete(
         let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         let (view, message) = (view.clone(), message.clone());
         dialog
-            .title(t::DELETE_CONFIRM)
-            .description(t::DELETE_CONFIRM_DETAIL)
+            .title(t::RECALL_CONFIRM)
+            .description(t::RECALL_CONFIRM_DETAIL)
             .show_cancel(true)
-            .ok_text(t::DELETE)
+            .ok_text(t::RECALL)
             .ok_variant(ButtonVariant::Danger)
             .cancel_text(common::CANCEL)
             .on_ok(move |_, _, cx| {

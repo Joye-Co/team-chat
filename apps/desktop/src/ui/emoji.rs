@@ -246,3 +246,116 @@ mod tests {
         assert_eq!(clip_units("", 6), "");
     }
 }
+
+/// A frequent emoji on the hover toolbar: a ghost button the size of the
+/// toolbar's icon buttons, a 16 pt emoji.
+pub fn quick_button(id: impl Into<ElementId>, emoji: &'static str) -> Button {
+    use crate::ui::native::tokens::metrics;
+    let side = metrics::BUTTON_REGULAR;
+    Button::new(id)
+        .ghost()
+        .label(emoji)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .text_size(px(16.))
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+}
+
+/// How many frequent emoji the hover toolbar shows before the full picker.
+pub const QUICK_COUNT: usize = 3;
+
+/// How often I reacted with each emoji, kept on this Mac in
+/// `<data root>/emoji-usage.json` (tests keep it in memory only).
+mod usage {
+    use std::{
+        collections::HashMap,
+        path::PathBuf,
+        sync::{Mutex, OnceLock},
+    };
+
+    fn store() -> &'static Mutex<HashMap<String, u32>> {
+        static STORE: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(load()))
+    }
+
+    fn path() -> Option<PathBuf> {
+        if cfg!(test) {
+            return None;
+        }
+        Some(crate::provider::session::default_data_root().join("emoji-usage.json"))
+    }
+
+    fn load() -> HashMap<String, u32> {
+        path()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn count(emoji: &str) -> u32 {
+        store()
+            .lock()
+            .map(|s| s.get(emoji).copied().unwrap_or(0))
+            .unwrap_or(0)
+    }
+
+    pub fn record(emoji: &str) {
+        let Ok(mut s) = store().lock() else {
+            return;
+        };
+        *s.entry(emoji.to_string()).or_insert(0) += 1;
+        let Some(path) = path() else {
+            return;
+        };
+        if let Ok(json) = serde_json::to_vec(&*s) {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+/// Counts one reaction with `emoji`, so it moves forward in [`ranked`].
+pub fn record_use(emoji: &str) {
+    usage::record(emoji);
+}
+
+/// [`EMOJI`], the ones I use most first; ties keep the picker's order.
+pub fn ranked() -> Vec<&'static str> {
+    rank(EMOJI, usage::count)
+}
+
+fn rank(emoji: &[&'static str], count: impl Fn(&str) -> u32) -> Vec<&'static str> {
+    let mut out: Vec<(usize, u32, &'static str)> = emoji
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (i, count(e), *e))
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    out.into_iter().map(|(_, _, e)| e).collect()
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+
+    #[test]
+    fn most_used_first_and_ties_keep_the_picker_order() {
+        let counts = |e: &str| match e {
+            "🚀" => 5,
+            "👀" => 2,
+            "🎉" => 2,
+            _ => 0,
+        };
+        let ranked = rank(EMOJI, counts);
+        assert_eq!(&ranked[..4], &["🚀", "🎉", "👀", "👍"]);
+        assert_eq!(ranked.len(), EMOJI.len());
+    }
+
+    #[test]
+    fn with_no_use_the_order_is_the_picker_order() {
+        assert_eq!(rank(EMOJI, |_| 0), EMOJI.to_vec());
+    }
+}

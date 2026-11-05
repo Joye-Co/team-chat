@@ -49,9 +49,7 @@ use gpui_component::input::TextareaState;
 use crate::{
     app::{Changes, Services},
     copy::{fill, timeline as t},
-    data::{
-        Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
-    },
+    data::{Change, GroupId, Member, Message, MessageId, SessionState, Topic, TopicId},
     theme::{self, Type as _, space},
     ui::{self, Sym},
 };
@@ -108,7 +106,6 @@ pub struct TimelineView {
     topic: Option<Topic>,
     members: Vec<Member>,
     me: Option<String>,
-    i_am_owner: bool,
     typing: Vec<String>,
     /// The window in memory, oldest first.
     messages: Vec<Message>,
@@ -292,7 +289,6 @@ impl TimelineView {
             topic: None,
             members: Vec::new(),
             me: None,
-            i_am_owner: false,
             typing: Vec::new(),
             messages: Vec::new(),
             has_older: false,
@@ -466,14 +462,8 @@ impl TimelineView {
             return;
         };
         match p.session() {
-            SessionState::SignedIn { me, .. } => {
-                self.i_am_owner = me.level == MemberLevel::Owner;
-                self.me = Some(me.id);
-            }
-            _ => {
-                self.me = None;
-                self.i_am_owner = false;
-            }
+            SessionState::SignedIn { me, .. } => self.me = Some(me.id),
+            _ => self.me = None,
         }
         self.members = p.members();
         self.topic = p.topic(&g, &tid);
@@ -1248,5 +1238,76 @@ mod keyboard_tests {
         cx.simulate_keystrokes("down");
         cx.run_until_parked();
         assert_eq!(keys(&view, cx).1.as_ref(), all.last(), "↓ comes forward");
+    }
+
+    /// R on the keyboard row emits a quote of it; R without a keyboard row
+    /// does nothing.
+    #[gpui::test]
+    fn r_replies_to_the_keyboard_row(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &TimelineEvent, _| {
+                sink.borrow_mut().push(e.clone())
+            })
+            .detach()
+        });
+        view.update_in(cx, |this, window, cx| window.focus(&this.key_focus, cx));
+        cx.simulate_keystrokes("r");
+        cx.run_until_parked();
+        assert!(events.borrow().is_empty(), "no row picked yet");
+        cx.simulate_keystrokes("up r");
+        cx.run_until_parked();
+        let newest = view.update(cx, |this, _| this.messages.last().cloned().unwrap());
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[TimelineEvent::Quote {
+                group_id: newest.group_id.clone(),
+                topic_id: newest.topic_id.clone(),
+                message_id: newest.id.clone(),
+            }]
+        );
+    }
+
+    /// 撤回: my own messages within 24 hours; never someone else's.
+    #[gpui::test]
+    fn recall_is_mine_within_a_day(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        view.update(cx, |this, _| {
+            let me = this.me.clone().expect("signed in");
+            let mut m = this.messages.last().cloned().expect("a message");
+            let now = crate::selftest::clock::now_ms();
+            m.author_id = me;
+            m.deleted_at = None;
+            m.created_at = now - 60_000;
+            assert!(this.can_recall(&m), "mine, a minute old");
+            m.created_at = now - 25 * 60 * 60 * 1000;
+            assert!(!this.can_recall(&m), "mine, over a day old");
+            m.created_at = now - 60_000;
+            m.author_id = "someone-else".into();
+            assert!(!this.can_recall(&m), "someone else's");
+        });
     }
 }
