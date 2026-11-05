@@ -237,6 +237,7 @@ impl RenderOnce for NativeTextField {
                             gpui::canvas(
                                 |_, _, _| (),
                                 move |bounds, _, window, cx| {
+                                    reveal_caret(&state, cx);
                                     let (left, right) =
                                         overflow_edges(&state, bounds.size.width, window, cx);
                                     for (on, at_left) in [(left, true), (right, false)] {
@@ -253,6 +254,30 @@ impl RenderOnce for NativeTextField {
             )
             .children(self.trailing)
     }
+}
+
+/// Scrolls a focused single-line value so its caret is in view. A value
+/// set by the app (`set_value`) starts scrolled to its start with the caret
+/// at its end; the engine follows the caret only when the selection moves,
+/// so a long value would keep its caret out of view (review 4 K-16).
+fn reveal_caret(state: &Entity<InputState>, cx: &mut App) {
+    let (caret, text, offset) = {
+        let s = state.read(cx);
+        let (Some((caret, _)), Some(text)) = (s.cursor_layout(), s.text_bounds()) else {
+            return;
+        };
+        (caret, text, s.scroll_offset())
+    };
+    let shift = if caret.right() > text.right() + px(0.5) {
+        text.right() - caret.right()
+    } else if caret.left() < text.left() - px(0.5) {
+        text.left() - caret.left()
+    } else {
+        return;
+    };
+    state.update(cx, |s, cx| {
+        s.set_scroll_offset(point(offset.x + shift, offset.y), cx)
+    });
 }
 
 /// The edges a focused single-line value runs past in a text box `room`
@@ -397,7 +422,10 @@ impl RenderOnce for NativeTextArea {
             .flex_none()
             .w_full()
             .h(Self::height(self.rows))
-            .px(metrics::FIELD_PAD)
+            // The text sits 12 inside the border, as in the Input (review 4
+            // K-17): the multi-line editor pads its text by its own size's
+            // input padding (4 at xsmall), so the box pads the rest.
+            .px(metrics::FIELD_PAD - gpui_component::Size::XSmall.input_px())
             .py(space::S8)
             .rounded(metrics::FIELD_RADIUS)
             .bg(k.control)

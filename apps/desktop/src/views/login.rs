@@ -400,7 +400,10 @@ impl LoginView {
                     .h(metrics::FIELD_LARGE)
                     .px(metrics::FIELD_PAD)
                     .rounded(metrics::FIELD_RADIUS)
-                    .bg(k.content)
+                    // The fill of every field (§2.22: dark 37, review 4
+                    // K-16), locked or not; the lock and muted text say it
+                    // is read-only.
+                    .bg(k.control)
                     .border_1()
                     .border_color(edge)
                     .shadow(shadows)
