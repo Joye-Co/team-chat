@@ -199,6 +199,7 @@ impl SettingsView {
             _subscriptions: vec![theme::follow_system(window, cx)],
         };
         window_fit::dim_window_buttons(window);
+        window_fit::hide_until_fitted(window);
         this.show(page, window, cx);
         this
     }
