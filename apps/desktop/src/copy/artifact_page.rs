@@ -20,7 +20,7 @@ crate::copy! {
     ARTIFACT_OLD_VERSION_LINE = "v{v} · {time} · {note}",
     ARTIFACT_BACK_TO = "回到 v{v}",
     ARTIFACT_TOPIC_DONE = "{group} · 做完了 {time}",
-    ARTIFACT_TOPIC_ACTIVE = "{group} · 在做",
+    ARTIFACT_TOPIC_ACTIVE = "{group} · {state}",
     ARTIFACT_DECISION_META = "{name} · {time} · {group}",
     ARTIFACT_LIST_META = "v{v} · {kind} · {name}",
     ARTIFACT_SHARE_TEXT = "「{title}」v{v}",

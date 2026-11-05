@@ -141,7 +141,16 @@ impl MembersPage {
         let p = &self.services.provider;
         let me = self.services.me();
         let runs = p.active_runs();
-        let asks = p.asks_for_me();
+        // An ask I answered (at the provider) no longer waits on me
+        // (`topic_page::ask_answered`, as the sidebar and 首页).
+        let asks: Vec<_> = p
+            .asks_for_me()
+            .into_iter()
+            .filter(|a| {
+                !me.as_deref()
+                    .is_some_and(|me| crate::views::topic_page::ask_answered(p.as_ref(), me, a))
+            })
+            .collect();
         let mut out: Vec<Entry> = p
             .members()
             .into_iter()
@@ -153,12 +162,14 @@ impl MembersPage {
                     .filter(|a| a.from == m.id)
                     .max_by_key(|a| a.at)
                     .map(|a| a.title.clone());
+                // §2.12, A5: the rail's priority: an ask to me first (等你),
+                // then a run (在做).
                 let bucket = if !m.is_bot() {
                     Bucket::People
-                } else if run.is_some() {
-                    Bucket::Working
                 } else if ask.is_some() {
                     Bucket::Waiting
+                } else if run.is_some() {
+                    Bucket::Working
                 } else {
                     Bucket::Idle
                 };
@@ -527,7 +538,9 @@ impl MembersPage {
             SharedString::from(format!("member-{}", m.id)),
             rows::MEMBER_ROW,
             rows::avatar(Some(m), AVATAR, cx),
-            m.name.clone(),
+            // X-01: a leading emoji in the name is not shown beside the
+            // avatar.
+            crate::ui::avatar::name_beside_avatar(&m.name).to_string(),
             mark,
             second,
             None,
@@ -721,7 +734,7 @@ impl MembersPage {
                     .flex_col()
                     .gap(tsp::S4)
                     .child(
-                        rows::line(m.name.clone())
+                        rows::line(crate::ui::avatar::name_beside_avatar(&m.name).to_string())
                             .n_large_title()
                             .text_color(k.label),
                     )
@@ -766,10 +779,8 @@ impl MembersPage {
                 .map(|b| member_name(&self.services, b))
                 .unwrap_or_default();
             let current = r.plan.iter().position(|s| s.state == PlanState::Current);
-            let since = current
-                .and_then(|i| p.run_step_times(&r.id).get(i).copied())
-                .or(r.started_at)
-                .unwrap_or(r.created_at);
+            // One clock (A5, `run_elapsed`): as on 首页, 群 and the live pane.
+            let used = crate::views::topic_page::run_elapsed_text(p.as_ref(), r);
             let (badge, value) = match kit::plan_progress(&r.plan) {
                 Some((n, m)) => (
                     fill(
@@ -815,7 +826,7 @@ impl MembersPage {
                             .n_callout()
                             .n_figures()
                             .text_color(k.secondary)
-                            .child(kit::elapsed(p.clock_now(), since))
+                            .children(used)
                             .into_any_element(),
                     ),
                     e.extras.queued.is_empty(),
@@ -834,12 +845,33 @@ impl MembersPage {
                     )
                 })
             });
+            // §2.12 one mapping: a queued 话题 that waits on me reads 等你
+            // (as on 群 and in the sidebar); otherwise 排队.
+            let me = self.services.me();
+            let state = q
+                .topic
+                .as_ref()
+                .and_then(|(g, t)| p.topic(g, t))
+                .map(|t| crate::views::topic_page::topic_state(p.as_ref(), me.as_deref(), &t))
+                .filter(|s| s.badge == crate::ui::native::BadgeState::NeedsYou);
+            let (glyph, tint, badge) = match state {
+                Some(s) => (
+                    Sym::NeedsYou,
+                    k.amber,
+                    crate::ui::native::StatusBadge::new(s.badge, s.text).into_any_element(),
+                ),
+                None => (
+                    Sym::Waiting,
+                    k.secondary,
+                    page::status_badge(Status::Queued, c::MEMBERS_QUEUED, cx),
+                ),
+            };
             let row = page::card_row(
                 SharedString::from(format!("member-queued-{i}")),
-                Some(page::row_icon(Sym::Waiting, k.secondary)),
+                Some(page::row_icon(glyph, tint)),
                 q.title.clone(),
                 meta.map(Into::into),
-                Some(page::status_badge(Status::Queued, c::MEMBERS_QUEUED, cx)),
+                Some(badge),
                 i + 1 == nq,
                 cx,
             );
@@ -1266,14 +1298,27 @@ impl MembersPage {
     /// 在哪干活 (card): the team computer (or cloud runner) with its
     /// StatusBadge and a way to watch it.
     fn workplace(&self, e: &Entry, window: &Window, cx: &App) -> AnyElement {
-        let body: AnyElement = match e.stats.machine.as_ref() {
+        // A5: while a run works the card names its computer (the run's,
+        // or 未知电脑), never "no computer".
+        let from_run = e.run.as_ref().map(|r| crate::data::v2::MemberMachine {
+            name: r
+                .machine_name
+                .clone()
+                .unwrap_or_else(|| crate::copy::group_page::GROUP_PAGE_UNKNOWN_MACHINE.to_string()),
+            online: true,
+            busy: true,
+            disk_used_pct: None,
+        });
+        let body: AnyElement = match e.stats.machine.as_ref().or(from_run.as_ref()) {
             None => page::compact_empty(Sym::Computer, c::MEMBERS_WHERE_EMPTY, None, cx)
                 .into_any_element(),
             Some(mc) => {
+                // §2.12: 在线 (dot) while it is on, 空闲 / 离线 (ring) when
+                // not in use; the run's own state is on its 话题.
                 let badge = if mc.busy {
-                    page::status_badge(Status::Working, c::MEMBERS_IN_USE, cx)
+                    page::status_badge(Status::Online, c::MEMBERS_IN_USE, cx)
                 } else if mc.online {
-                    page::status_badge(Status::Online, c::MEMBERS_MACHINE_IDLE, cx)
+                    page::status_badge(Status::Offline, c::MEMBERS_MACHINE_IDLE, cx)
                 } else {
                     page::status_badge(Status::Offline, c::MEMBERS_MACHINE_OFFLINE, cx)
                 };
@@ -1485,9 +1530,14 @@ impl MembersPage {
                 .child(c::MEMBERS_PLAN_READONLY)
                 .into_any_element()
         };
+        // F5: a person has no limit, so the card is titled 汇报.
         page::titled_card(
             "member-plan",
-            c::MEMBERS_PLAN,
+            if e.member.is_bot() {
+                c::MEMBERS_PLAN
+            } else {
+                c::MEMBERS_PLAN_REPORTS_ONLY
+            },
             None,
             Some(action),
             body,
@@ -1547,7 +1597,7 @@ impl MembersPage {
         let now = p.clock_now();
         let n = e.extras.decisions.len();
         let body: AnyElement = if n == 0 {
-            page::compact_empty(Sym::Check, c::MEMBERS_DECISIONS_EMPTY, None, cx).into_any_element()
+            page::compact_empty(Sym::List, c::MEMBERS_DECISIONS_EMPTY, None, cx).into_any_element()
         } else {
             div()
                 .flex()
@@ -1573,7 +1623,10 @@ impl MembersPage {
                         Some(
                             format!(
                                 "{} · {place}",
-                                who.as_ref().map(|w| w.name.clone()).unwrap_or_default()
+                                who.as_ref()
+                                    .map(|w| crate::ui::avatar::name_beside_avatar(&w.name)
+                                        .to_string())
+                                    .unwrap_or_default()
                             )
                             .into(),
                         ),
@@ -1720,41 +1773,48 @@ fn member_skeleton(cx: &App) -> gpui::Div {
                 .child(Bone::new().h(text::META.0).w(tsp::S48).rounded(tsp::S6)),
         )
         .children(widths.iter().enumerate().map(|(i, w)| {
+            // Pitch 56 with the line inside the row (the real row's pitch).
             div()
+                .relative()
+                .h(rows::MEMBER_ROW)
                 .flex()
-                .flex_col()
+                .items_center()
+                .gap(rows::ROW_GAP)
+                .child(Bone::new().size(AVATAR).rounded_full())
                 .child(
                     div()
-                        .h(rows::MEMBER_ROW)
+                        .flex_1()
                         .flex()
-                        .items_center()
-                        .gap(rows::ROW_GAP)
-                        .child(Bone::new().size(AVATAR).rounded_full())
+                        .flex_col()
+                        .gap(tsp::S6)
                         .child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .gap(tsp::S6)
-                                .child(
-                                    Bone::new()
-                                        .h(text::UI.0)
-                                        .w(gpui::relative(w * 0.7))
-                                        .rounded(tsp::S6),
-                                )
-                                .child(
-                                    Bone::new()
-                                        .h(text::META.0)
-                                        .w(gpui::relative(w * 0.4))
-                                        .rounded(tsp::S6),
-                                ),
+                            Bone::new()
+                                .h(text::UI.0)
+                                .w(gpui::relative(w * 0.7))
+                                .rounded(tsp::S6),
+                        )
+                        .child(
+                            Bone::new()
+                                .h(text::META.0)
+                                .w(gpui::relative(w * 0.4))
+                                .rounded(tsp::S6),
                         ),
+                )
+                // The StatusBadge column.
+                .child(
+                    Bone::new()
+                        .h(text::META.0)
+                        .w(tsp::S48 + tsp::S12)
+                        .rounded(tsp::S6),
                 )
                 .when(i + 1 < widths.len(), |d| {
                     d.child(
                         div()
+                            .absolute()
+                            .bottom_0()
+                            .left(AVATAR + rows::ROW_GAP)
+                            .right_0()
                             .h(crate::ui::native::metrics::HAIRLINE)
-                            .ml(AVATAR + rows::ROW_GAP)
                             .bg(k.separator),
                     )
                 })

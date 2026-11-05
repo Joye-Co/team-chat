@@ -626,9 +626,13 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
         let (video_path, t) = (v.path.clone(), f.t);
         let group = SharedString::from(format!("{}-f{i}", spec.id));
         strip = strip.child(
+            // §2.4: the frames share the in-thread width (no void after
+            // the last one).
             div()
                 .relative()
                 .group(group.clone())
+                .flex_1()
+                .min_w_0()
                 .flex()
                 .flex_col()
                 .gap(space::S4)
@@ -636,8 +640,8 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                     div()
                         .id(ElementId::Name(format!("{}-frame-{i}", spec.id).into()))
                         .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
-                        .w(px(75.))
-                        .h(px(42.))
+                        .w_full()
+                        .h(crate::ui::native::tokens::space::S48 + space::S8)
                         .rounded(radius::MARK)
                         .overflow_hidden()
                         .border_1()
@@ -709,7 +713,8 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
 
 // --- audio --------------------------------------------------------------------------
 
-/// Waveform bars from `peaks`, `n` bars `bar` wide; bars before `played` (0..1) are dark.
+/// Waveform bars from `peaks`: `n` bars that share the row's width; bars before
+/// `played` (0..1) are dark.
 pub fn waveform(
     peaks: &[f32],
     n: usize,
@@ -719,6 +724,7 @@ pub fn waveform(
     off: gpui::Hsla,
 ) -> gpui::Div {
     let mut row = div()
+        .w_full()
         .h(px(height))
         .flex()
         .items_center()
@@ -736,7 +742,8 @@ pub fn waveform(
         } else {
             off
         };
-        row = row.child(div().w(px(2.)).h(px(h)).rounded(px(1.)).bg(color));
+        // The bars share the row's width (no void after the last, §2.4).
+        row = row.child(div().flex_1().min_w_0().h(px(h)).rounded(px(1.)).bg(color));
     }
     row
 }
@@ -853,7 +860,20 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .gap(space::S8)
         .bg(k.code_bg)
         .overflow_hidden();
-    for page in p.images.iter().take(3) {
+    // §2.4: as many whole pages as the 640 card holds (px 10, gap 8), so
+    // the strip has no void at the right and no page cut at the edge.
+    let mut room = PDF_W - 20.;
+    let mut shown = 0;
+    for page in &p.images {
+        let (w, _) = fit(page.width, page.height, 120., 150.);
+        let need = if shown == 0 { w } else { w + 8. };
+        if need > room {
+            break;
+        }
+        room -= need;
+        shown += 1;
+    }
+    for page in p.images.iter().take(shown.max(1)) {
         let (w, h) = fit(page.width, page.height, 120., 150.);
         thumbs = thumbs.child(
             div()

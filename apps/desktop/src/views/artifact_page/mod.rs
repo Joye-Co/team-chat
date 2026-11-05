@@ -232,6 +232,49 @@ pub fn embed(
     })
 }
 
+/// The columns of the 产出 table (§2.18): 名称, 类型, 话题, 做的人, 版本,
+/// 更新, ⋯. 名称 and 话题 share the free width; numbers keep their room
+/// (§2.7). The loading skeleton draws the same columns.
+fn table_cols() -> Vec<page::Col> {
+    vec![
+        page::Col {
+            header: c::ARTIFACTS_COL_NAME.into(),
+            width: None,
+            right: false,
+        },
+        page::Col {
+            header: c::ARTIFACTS_COL_KIND.into(),
+            width: Some(px(72.)),
+            right: false,
+        },
+        page::Col {
+            header: c::ARTIFACTS_COL_TOPIC.into(),
+            width: None,
+            right: false,
+        },
+        page::Col {
+            header: c::ARTIFACTS_COL_BY.into(),
+            width: Some(px(136.)),
+            right: false,
+        },
+        page::Col {
+            header: c::ARTIFACTS_COL_VERSION.into(),
+            width: Some(px(56.)),
+            right: true,
+        },
+        page::Col {
+            header: c::ARTIFACTS_COL_UPDATED.into(),
+            width: Some(px(96.)),
+            right: true,
+        },
+        page::Col {
+            header: SharedString::default(),
+            width: Some(tsp::S48),
+            right: true,
+        },
+    ]
+}
+
 pub struct ArtifactPage {
     services: Services,
     folders: Folders,
@@ -246,6 +289,9 @@ pub struct ArtifactPage {
     /// The width of the 产出 list's content, measured in the last frame (the icon
     /// view's column count).
     list_width: Rc<Cell<Pixels>>,
+    /// The table footer's page (1-based) and rows per page (§2.7).
+    page: usize,
+    per_page: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -282,6 +328,8 @@ impl ArtifactPage {
             sort: ListSort::Time,
             search: None,
             list_width: Rc::new(Cell::new(px(0.))),
+            page: 1,
+            per_page: page::PER_PAGE_CHOICES[0],
         }
     }
 
@@ -716,7 +764,11 @@ impl ArtifactPage {
         // truncates first; both in the tooltip.
         let person = |id: &str| {
             let m = p.member(id);
-            let name = m.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+            // X-01: no leading emoji beside the avatar.
+            let name = m
+                .as_ref()
+                .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+                .unwrap_or_default();
             let role = m.as_ref().and_then(|m| m.role.clone()).unwrap_or_default();
             let full = if role.is_empty() {
                 name.clone()
@@ -756,6 +808,13 @@ impl ArtifactPage {
                 .map(|g| g.name)
                 .unwrap_or_default();
             let done = t.status == TopicStatus::Done;
+            // §2.12 one mapping (`topic_state`): asks to me first, 在做 only
+            // with a run, as the sidebar and the 话题 header say.
+            let state = crate::views::topic_page::topic_state(
+                p.as_ref(),
+                self.services.me().as_deref(),
+                &t,
+            );
             let meta = if done {
                 fill(
                     c::ARTIFACT_TOPIC_DONE,
@@ -765,7 +824,20 @@ impl ArtifactPage {
                     ],
                 )
             } else {
-                fill(c::ARTIFACT_TOPIC_ACTIVE, &[("group", &group)])
+                fill(
+                    c::ARTIFACT_TOPIC_ACTIVE,
+                    &[
+                        ("group", &group),
+                        (
+                            "state",
+                            if state.short.is_empty() {
+                                &state.text
+                            } else {
+                                &state.short
+                            },
+                        ),
+                    ],
+                )
             };
             let title = if t.title.trim().is_empty() {
                 c::ARTIFACT_NO_TITLE.to_string()
@@ -777,7 +849,10 @@ impl ArtifactPage {
             let (sym, color) = if done {
                 (Sym::Done, k.green)
             } else {
-                (Sym::Spinner, k.blue)
+                (
+                    state.badge.symbol().unwrap_or(Sym::Waiting),
+                    state.badge.color(&k),
+                )
             };
             let nav = self.services.nav.clone();
             let (g, id) = (t.group_id.clone(), t.id.clone());
@@ -979,7 +1054,20 @@ impl ArtifactPage {
                 .n_body()
                 .text_color(k.label)
                 .child(MemberAvatar::new(m.as_ref(), tsp::S16))
-                .child(line(r.text.clone()).flex_1())
+                // §2.5: the action keeps its meaning; a long name is cut
+                // first (at most 120), so "选了「B 站」" always shows.
+                .map(
+                    |d| match response_parts(m.as_ref().map(|m| m.name.as_str()), &r.text) {
+                        Some((name, action)) => d
+                            .child(
+                                line(crate::ui::avatar::name_beside_avatar(&name).to_string())
+                                    .flex_none()
+                                    .max_w(tsp::S48 * 2. + tsp::S24),
+                            )
+                            .child(line(action).flex_1().min_w_0()),
+                        None => d.child(line(r.text.clone()).flex_1()),
+                    },
+                )
                 .tooltip(tip(r.text.clone()));
             row = match (r.topic.clone(), r.at) {
                 (Some((g, t)), _) => {
@@ -1150,7 +1238,38 @@ impl ArtifactPage {
                     .then(y.1.updated_at.cmp(&x.1.updated_at))
             }),
         }
+        // §2.7: the table pages; the footer moves between pages and picks
+        // the rows per page. A search or a smaller list keeps a valid page.
+        let pages = all.len().div_ceil(self.per_page).max(1);
+        self.page = self.page.clamp(1, pages);
+        let matched = all.len();
+        let all: Vec<_> = all
+            .into_iter()
+            .skip((self.page - 1) * self.per_page)
+            .take(self.per_page)
+            .collect();
         let this = cx.entity().downgrade();
+        let pager = {
+            let (go_to, set) = (this.clone(), this.clone());
+            page::Pager {
+                page: self.page,
+                pages,
+                go: Some(Rc::new(move |to: usize, _: &mut Window, cx: &mut App| {
+                    let _ = go_to.update(cx, |v, cx| {
+                        v.page = to;
+                        cx.notify();
+                    });
+                })),
+                per_page: self.per_page,
+                set_per_page: Some(Rc::new(move |n: usize, _: &mut Window, cx: &mut App| {
+                    let _ = set.update(cx, |v, cx| {
+                        v.per_page = n;
+                        v.page = 1;
+                        cx.notify();
+                    });
+                })),
+            }
+        };
         let active = nk::emphasized(window);
         // The view control is one Segmented h32 (§2.2, §1.8): 图标 | 列表.
         // With nothing to show it is disabled at 50 % (§1.8).
@@ -1274,12 +1393,7 @@ impl ArtifactPage {
                 );
             }
             page::PageLoad::Loading => {
-                return shell(page::skeleton_rows(
-                    "artifacts-sk",
-                    page::SkeletonKind::TableRow,
-                    14,
-                    cx,
-                ));
+                return shell(page::skeleton_table("artifacts-sk", &table_cols(), 5, cx));
             }
             page::PageLoad::Ready if total == 0 => {
                 return shell(
@@ -1340,7 +1454,7 @@ impl ArtifactPage {
         } else {
             fill(
                 c::ARTIFACTS_FOOTER_MATCH,
-                &[("n", &all.len().to_string()), ("total", &total.to_string())],
+                &[("n", &matched.to_string()), ("total", &total.to_string())],
             )
         };
         let cell_tip = |id: String, text: String, muted: bool, cx: &App| {
@@ -1354,7 +1468,9 @@ impl ArtifactPage {
                 })
                 .into_any_element()
         };
-        let footer = page::list_footer("artifacts-footer", footer_text, None, cx);
+        // §2.7 table footer: the count, 每页, 第 n / m 页 and the four
+        // page buttons (the same footer under the icon view).
+        let footer = page::table_footer("artifacts-footer", footer_text, pager, cx);
         let body: AnyElement = if self.grid && !all.is_empty() {
             // Icon view (§2.18): one group per day (今天, 昨天, 11 月 1 日),
             // equal cards in a grid, gap 16. The column count follows the
@@ -1423,12 +1539,13 @@ impl ArtifactPage {
                                     .border_color(n.separator)
                                     .flex()
                                     .flex_col()
-                                    .gap(tsp::S2)
+                                    .gap(tsp::S4)
                                     .child(
-                                        // Two lines, so titles that share a
-                                        // long start still differ (F07).
+                                        // Up to two lines, so titles that
+                                        // share a long start still differ
+                                        // (F07); the meta follows the title
+                                        // at gap 4 (no void between, A1).
                                         div()
-                                            .h(px(40.))
                                             .n_body()
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .text_color(n.label)
@@ -1473,43 +1590,7 @@ impl ArtifactPage {
         } else {
             // Table view (default): 名称, 类型, 话题, 做的人, 版本, 更新, ⋯. 名称 and
             // 话题 share the free width; numbers keep their room (§2.7).
-            let cols = [
-                page::Col {
-                    header: c::ARTIFACTS_COL_NAME.into(),
-                    width: None,
-                    right: false,
-                },
-                page::Col {
-                    header: c::ARTIFACTS_COL_KIND.into(),
-                    width: Some(px(72.)),
-                    right: false,
-                },
-                page::Col {
-                    header: c::ARTIFACTS_COL_TOPIC.into(),
-                    width: None,
-                    right: false,
-                },
-                page::Col {
-                    header: c::ARTIFACTS_COL_BY.into(),
-                    width: Some(px(136.)),
-                    right: false,
-                },
-                page::Col {
-                    header: c::ARTIFACTS_COL_VERSION.into(),
-                    width: Some(px(56.)),
-                    right: true,
-                },
-                page::Col {
-                    header: c::ARTIFACTS_COL_UPDATED.into(),
-                    width: Some(px(96.)),
-                    right: true,
-                },
-                page::Col {
-                    header: SharedString::default(),
-                    width: Some(tsp::S48),
-                    right: true,
-                },
-            ];
+            let cols = table_cols();
             let rows = all
                 .iter()
                 .map(|(g, a)| {
@@ -1538,7 +1619,13 @@ impl ArtifactPage {
                             gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
                         })
                         .into_any_element();
-                    let who = member_name(&self.services, &a.created_by);
+                    // X-01: a leading emoji in the name is not shown beside
+                    // the avatar.
+                    let who = crate::ui::avatar::name_beside_avatar(&member_name(
+                        &self.services,
+                        &a.created_by,
+                    ))
+                    .to_string();
                     let who_tip = who.clone();
                     let person = div()
                         .id(SharedString::from(format!("artifact-by-{}", a.id)))
@@ -1737,7 +1824,7 @@ pub(crate) fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
 /// True when a person value has room for its role beside the name: the name's
 /// width (CJK about 14, other glyphs about 8 at 14 pt) plus a gap and three
 /// glyphs of the role fit the 320 pane's value column after the avatar.
-fn role_fits(name: &str) -> bool {
+pub(crate) fn role_fits(name: &str) -> bool {
     let w: f32 = name
         .chars()
         .map(|c| if c.is_ascii() { 8. } else { 14. })
@@ -1756,6 +1843,14 @@ fn response_text(name: Option<&str>, text: &str) -> String {
         },
         None => text.to_string(),
     }
+}
+
+/// A 页面里的回应 line as (actor name, action) when its text starts with
+/// the actor's name.
+fn response_parts(name: Option<&str>, text: &str) -> Option<(String, String)> {
+    let n = name.filter(|n| !n.is_empty())?;
+    let rest = text.strip_prefix(n)?.trim_start();
+    (!rest.is_empty()).then(|| (n.to_string(), rest.to_string()))
 }
 
 /// A 36 pt toolbar item drawn with a concept symbol (§5.1): `label` (or `secondary` in

@@ -30,7 +30,7 @@ crate::copy! {
     GROUP_PAGE_JUST_NOW = "刚刚",
     GROUP_PAGE_ALL = "全部",
     GROUP_PAGE_COMPUTER = "电脑",
-    GROUP_PAGE_IN_USE = "在用",
+    GROUP_PAGE_IN_USE = "在线",
     GROUP_PAGE_IDLE = "空闲",
     GROUP_PAGE_SEE_COMPUTER = "看 {name} 的电脑",
     GROUP_PAGE_LIVE = "实时",
@@ -38,8 +38,6 @@ crate::copy! {
     GROUP_PAGE_OUTPUTS = "产出",
     GROUP_PAGE_SETTINGS = "群设置",
     GROUP_PAGE_ELAPSED = "{step} · {time}",
-    ELAPSED_MINUTES = "已 {n} 分钟",
-    ELAPSED_HOURS = "已 {n} 小时",
     GROUP_PAGE_ARTIFACT_META = "v{v} · {kind} · {name}",
     GROUP_PAGE_KIND_PAGE = "网页",
     GROUP_PAGE_KIND_FILE = "文档",
@@ -97,4 +95,11 @@ crate::copy! {
     // --- v15/r3-pages ---
     GROUP_PAGE_OFFLINE = "连上后显示",
     // --- end v15/r3-pages ---
+    // --- v16/p-pages ---
+    GROUP_PAGE_SECTION_YOU = "等你",
+    GROUP_PAGE_SECTION_STUCK = "卡住了",
+    GROUP_PAGE_SECTION_OTHERS = "等别人",
+    GROUP_PAGE_SECTION_QUEUED = "排队",
+    GROUP_PAGE_UNKNOWN_MACHINE = "未知电脑",
+    // --- end v16/p-pages ---
 }

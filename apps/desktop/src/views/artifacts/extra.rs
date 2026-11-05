@@ -3,10 +3,11 @@
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement as _, Styled, Window, div, px,
+    StatefulInteractiveElement as _, Styled, Window, div,
 };
 
-use super::{CARD_H, CARD_W, window};
+use super::window;
+use crate::ui::native::{FocusRow as _, NativeType as _};
 use crate::{
     copy::{artifacts as ca, fill},
     data::{ArtifactKind, Message},
@@ -88,57 +89,53 @@ impl MessageExtra for ArtifactRefsExtra {
             };
             let provider = ctx.provider.clone();
             let (id, version) = (r.artifact_id.clone(), r.version);
-            // §7.11: the 产出 reference is a file row: 40 pt `accent-soft`
-            // tile, name 14/500, meta 12/16 `text-2`, open glyph at the right.
+            // §2.17 file item (the thread's one recipe): a bordered
+            // container (radius 10, 1 px border) h60 at the in-thread width,
+            // the 32 media box (muted), the name 14 medium over the 12 muted
+            // meta, the open glyph at the right.
+            let n = crate::ui::native::native_colors(cx);
             list = list.child(
                 div()
                     .id(ElementId::Name(SharedString::from(format!(
                         "artifact-{key}-{index}"
                     ))))
+                    .focus_row(false, cx)
                     .w_full()
-                    .max_w(CARD_W)
-                    .h(CARD_H)
+                    .max_w(crate::views::files::FILE_ROW_W)
+                    .h(crate::views::files::FILE_ROW_H)
                     .flex_none()
-                    .pl(space::S12)
-                    .pr(space::S16)
-                    .rounded(crate::ui::native::cards::card::RADIUS)
-                    .bg(crate::ui::native::native_colors(cx).fill)
+                    .px(space::S12)
+                    .rounded(crate::ui::native::tokens::radius::CONTAINER)
+                    .border_1()
+                    .border_color(n.separator)
+                    .bg(n.content)
                     .flex()
                     .items_center()
                     .gap(space::S12)
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(px(40.))
-                            .rounded(theme::radius::MD)
-                            .bg(k.accent_soft)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(ui::icon(icon, theme::icon::EMPTY, k.accent_text)),
-                    )
+                    .child(crate::ui::native::media_box(icon, cx))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap(space::S2)
+                            .child(
+                                crate::ui::truncate::TruncText::new(title)
+                                    .n_headline()
+                                    .text_color(n.label),
+                            )
                             .child(
                                 div()
-                                    .t_ui()
-                                    .medium()
-                                    .text_color(k.text_1)
+                                    .n_subheadline()
+                                    .n_figures()
+                                    .text_color(n.secondary)
                                     .one_line()
-                                    .child(title),
-                            )
-                            .child(div().t_meta().tnum().text_color(k.text_2).one_line().child(
-                                if opening {
-                                    ca::OPENING.to_string()
-                                } else {
-                                    meta
-                                },
-                            )),
+                                    .child(if opening {
+                                        ca::OPENING.to_string()
+                                    } else {
+                                        meta
+                                    }),
+                            ),
                     )
                     .child(if opening {
                         crate::ui::spinner().into_any_element()

@@ -336,11 +336,14 @@ impl PageRow {
                     .children(self.actions),
             );
         }
+        // The line sits just under the row, in the next row's first pixel
+        // line: the row's own focus ring (inset) is never drawn over, and the
+        // next row, painted after it, keeps its ring on top too (K-10).
         row.when(self.separator, |d| {
             d.child(
                 div()
                     .absolute()
-                    .bottom_0()
+                    .bottom(-super::metrics::HAIRLINE)
                     .left(title_x)
                     .right(px(0.))
                     .h(px(1.))

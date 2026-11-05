@@ -11,7 +11,7 @@ use gpui::{
 
 use crate::{
     app::Services,
-    copy::{common, fill, group_page as c},
+    copy::{common, group_page as c},
     data::{ArtifactSummary, Millis, PlanItem, PlanState, v2::ScreenLineKind},
     theme::{self, Type as _, space},
     ui::{self, Sym},
@@ -240,16 +240,6 @@ pub fn line_counts(additions: u32, deletions: u32, cx: &App) -> Div {
         .mono()
         .child(div().text_color(k.ok_ink).child(format!("+{additions}")))
         .child(div().text_color(k.bad_ink).child(format!("−{deletions}")))
-}
-
-/// `已 3 分钟` / `已 2 小时` from `since` to `now`.
-pub fn elapsed(now: Millis, since: Millis) -> String {
-    let minutes = ((now - since).max(0) / 60_000) as u64;
-    if minutes < 60 {
-        fill(c::ELAPSED_MINUTES, &[("n", &minutes.max(1).to_string())])
-    } else {
-        fill(c::ELAPSED_HOURS, &[("n", &(minutes / 60).to_string())])
-    }
 }
 
 /// A date as the week lists print it: `11-03`.
@@ -564,12 +554,99 @@ pub fn pane_header(
                         .text_color(k.label)
                         .child(name),
                 )
-                .child(
-                    crate::ui::truncate::TruncText::new(line)
+                .child({
+                    // `title · 网页 · v3`: the kind and the version never
+                    // truncate; the title is cut first (§2.21, F3).
+                    let cut = line
+                        .rmatch_indices(" · ")
+                        .nth(1)
+                        .map(|(i, _)| i)
+                        .filter(|i| *i > 0);
+                    let (head, tail) = match cut {
+                        Some(i) => (line[..i].to_string(), Some(line[i..].to_string())),
+                        None => (line, None),
+                    };
+                    div()
+                        .min_w_0()
+                        .flex()
                         .n_subheadline()
-                        .text_color(k.secondary),
-                ),
+                        .text_color(k.secondary)
+                        .child(crate::ui::truncate::TruncText::new(head).min_w_0())
+                        .children(tail.map(|t| div().flex_none().whitespace_nowrap().child(t)))
+                }),
         )
         .children(actions)
+        .into_any_element()
+}
+
+/// The loading shape of a page list (§2.14) built from its real columns:
+/// `n` (3 to 6) h56 rows in the list frame, each with the 32 media box, the
+/// title and meta lines, then one bar in each right column (status, time,
+/// actions) at that column's x, so the skeleton has the final shape. The
+/// actions column keeps its width; it shows a bar only when `actions`.
+pub fn skeleton_list(
+    id: &str,
+    cols: crate::ui::native::page::Columns,
+    actions: bool,
+    n: usize,
+    cx: &App,
+) -> AnyElement {
+    use crate::ui::native::{
+        Bone, metrics, native_colors,
+        page::{self, m},
+        tokens::text,
+    };
+    let k = native_colors(cx);
+    let n = n.clamp(3, 6);
+    let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
+    let column = |w: Option<Pixels>, bar: Option<Pixels>| {
+        w.map(|w| {
+            div()
+                .flex_none()
+                .w(w)
+                .flex()
+                .justify_end()
+                .children(bar.map(|b| Bone::new().h(text::META.0).w(b)))
+        })
+    };
+    page::frame(cx)
+        .children((0..n).map(|i| {
+            let w = widths[i % widths.len()];
+            div()
+                .id(SharedString::from(format!("{id}-{i}")))
+                .relative()
+                .h(m::ROW)
+                .px(m::ROW_PAD)
+                .flex()
+                .items_center()
+                .gap(tsp::S12)
+                // The rows lead with the member avatar (owner decision v16).
+                .child(Bone::new().size(m::MEDIA).rounded_full())
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(tsp::S6)
+                        .child(Bone::new().h(text::UI.0).w(gpui::relative(w)))
+                        .child(Bone::new().h(text::META.0).w(gpui::relative(w * 0.6))),
+                )
+                // A badge-wide bar in the status column, a time-wide bar in
+                // the time column, a button-wide bar in the actions column.
+                .children(column(cols.status, Some(tsp::S48 + tsp::S16)))
+                .children(column(cols.time, Some(tsp::S32 + tsp::S8)))
+                .children(column(cols.actions, actions.then_some(tsp::S48)))
+                .when(i + 1 < n, |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .left(m::ROW_PAD + m::MEDIA + tsp::S12)
+                            .right_0()
+                            .h(metrics::HAIRLINE)
+                            .bg(k.separator),
+                    )
+                })
+        }))
         .into_any_element()
 }

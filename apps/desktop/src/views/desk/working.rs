@@ -18,7 +18,6 @@ use crate::ui::{
 use crate::{
     app::{RightPane, Services},
     copy::{desk as c, fill},
-    data::Millis,
     ui::{
         MemberAvatar,
         native::{
@@ -29,19 +28,6 @@ use crate::{
     },
     views::{group_page::rows::line, shell::clock},
 };
-
-/// `已 3 分钟`.
-pub fn elapsed(since: Millis) -> Option<String> {
-    let mins = (crate::selftest::clock::local_now().timestamp_millis() - since) / 60_000;
-    if mins < 0 {
-        return None;
-    }
-    Some(if mins < 60 {
-        fill(c::DESK_ELAPSED_MINUTES, &[("n", &mins.max(1).to_string())])
-    } else {
-        fill(c::DESK_ELAPSED_HOURS, &[("n", &(mins / 60).to_string())])
-    })
-}
 
 /// The pane (§2.5): a header band (`今天` and its close button) on the
 /// toolbar row, then 这周 (DescriptionList), 排队, 最近的产出 and 在哪干活,
@@ -101,7 +87,9 @@ pub fn render(
         // Pull the first GroupLabel up so its ink starts at y 68 (B2):
         // the section's own 16 top sits under the header band.
         .child(div().flex_none().mt(-tsp::S12));
-    let offline = || page::compact_empty(Sym::Offline, c::DESK_RAIL_OFFLINE, None, cx);
+    // One offline recipe with the 群 inspector (§2.13): the section's own
+    // icon and the muted line.
+    let offline = |sym: Sym| page::compact_empty(sym, c::DESK_RAIL_OFFLINE, None, cx);
 
     // 这周: the team's week as a DescriptionList.
     let mut week = InspectorSection::new("desk-ins-week", c::DESK_WEEK);
@@ -113,7 +101,7 @@ pub fn render(
             cx,
         ));
     } else if failed {
-        week = week.row(offline());
+        week = week.row(offline(Sym::Chart));
     } else {
         let w = &snap.week;
         let cost = if w.cost.is_empty() {
@@ -148,7 +136,7 @@ pub fn render(
     // 排队.
     let mut queue = InspectorSection::new("desk-ins-queue", c::DESK_QUEUE);
     if failed {
-        queue = queue.row(offline());
+        queue = queue.row(offline(Sym::Waiting));
     } else if loading {
         queue = queue.row(page::skeleton_rows(
             "desk-q-sk",
@@ -166,7 +154,7 @@ pub fn render(
     }
     for (i, q) in snap.queue.iter().enumerate().filter(|_| !failed) {
         let member = snap.member(&q.member_id);
-        let full = format!("{} {}", snap.name(&q.member_id), q.title);
+        let full = format!("{} {}", snap.name_by_avatar(&q.member_id), q.title);
         queue = queue.row(
             div()
                 .id(SharedString::from(format!("desk-queue-{i}")))
@@ -202,7 +190,7 @@ pub fn render(
     };
     recent.sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
     if failed {
-        outputs = outputs.row(offline());
+        outputs = outputs.row(offline(Sym::Document));
     } else if loading {
         outputs = outputs.row(page::skeleton_rows(
             "desk-o-sk",
@@ -269,9 +257,12 @@ pub fn render(
     // 在哪干活: the computers of the running work, with who uses them.
     let mut machines: Vec<(String, Vec<String>, (String, String, String))> = Vec::new();
     for r in &snap.runs {
-        let Some(name) = r.run.machine_name.clone() else {
-            continue;
-        };
+        // A5: a run with no known computer still shows, as 未知电脑.
+        let name = r
+            .run
+            .machine_name
+            .clone()
+            .unwrap_or_else(|| crate::copy::group_page::GROUP_PAGE_UNKNOWN_MACHINE.to_string());
         let who = snap.name(&r.run.bot_id);
         match machines.iter_mut().find(|(n, ..)| *n == name) {
             Some((_, names, _)) => {
@@ -292,7 +283,7 @@ pub fn render(
     }
     let mut where_ = InspectorSection::new("desk-ins-where", c::DESK_WHERE);
     if failed {
-        where_ = where_.row(offline());
+        where_ = where_.row(offline(Sym::Computer));
     } else if loading {
         where_ = where_.row(page::skeleton_rows(
             "desk-m-sk",
