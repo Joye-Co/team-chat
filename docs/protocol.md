@@ -131,7 +131,10 @@ the server answers with an `ack` (or `page`) that has the same `rid`.
 { t: "send", rid, groupId, topicId?: string, title?: string, clientMsgId, body, mentions?: string[], streaming?: boolean }
   // without topicId: start a new topic whose root is this message (1.1.1: the 群聊 has
   //   the fixed id mainTopicId(groupId), see "群聊: the group's own chat");
-  //   title defaults to the first line of body, cut to 80 characters
+  //   title defaults to the first line of body, cut to 80 characters (an empty body with
+  //   replyTo: the quoted message's first line); when no title was sent, the server may
+  //   later replace that default once with an AI title (topic.updated with title), unless
+  //   someone changed the title first
   // ack.result = { message: Message, topic?: Topic, duplicate?: boolean }
 { t: "edit", rid, groupId, messageId, body, streaming?: boolean }      // author only
 { t: "delta", groupId, messageId, append }                            // streaming author only, no ack

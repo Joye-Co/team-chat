@@ -234,6 +234,14 @@ export function defaultTitle(body: string): string {
 }
 
 /**
+ * The title a topic starts with when none is given: the first line of its first message, or,
+ * for a 话题 opened from a message with nothing added (开个话题), the quoted message's.
+ */
+export function startTitle(body: string, quoteExcerpt?: string): string {
+  return defaultTitle(body) || defaultTitle(quoteExcerpt ?? "") || "…";
+}
+
+/**
  * How many of the first `limit` rows fit in `maxBytes` (string lengths, about the JSON size);
  * at least one, so a page always moves forward.
  */
@@ -883,7 +891,8 @@ export class GroupRoom extends DurableObject<Env> {
         if (!topicId || newTopic) {
           const main = topicId !== undefined;
           topicId = topicId ?? ulid(now);
-          const title = main ? mainTitle : (frame.title ?? defaultTitle(body));
+          const excerpt = (ext?.replyTo as { excerpt?: string } | undefined)?.excerpt;
+          const title = main ? mainTitle : (frame.title ?? startTitle(body, excerpt));
           const seq = tx.nextSeq();
           this.sql.exec(
             `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count,
