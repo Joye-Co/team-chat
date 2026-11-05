@@ -655,7 +655,6 @@ pub fn open_about(
 ) -> Result<AnyWindowHandle, String> {
     crate::updater::preview::open_up_to_date(services, content, cx)
 }
-scene_opener!(open_general, Page::General);
 
 /// 快捷键: the menus' key bindings must exist, as in the app.
 pub fn open_shortcuts(
@@ -1009,7 +1008,7 @@ pub const SCENES: &[Scene] = &[
         about: "Settings: 通用 (启动时, 登录时启动, 菜单栏里显示, 声音, version, developer view)",
         start: Start::SignedIn,
         setup: |_, _| {},
-        open: open_general,
+        open: crate::updater::preview::open_idle,
     },
     Scene {
         name: "settings-shortcuts",

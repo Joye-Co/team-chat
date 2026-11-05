@@ -237,7 +237,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Done | `checkmark.circle.fill` in `green` (rows: `checkmark` in `secondary`) |
 | Problem | `exclamationmark.triangle.fill` in `red` |
 | Waiting on someone | `clock` in `secondary` |
-| Computer (team machine) | `desktopcomputer`; laptop `laptopcomputer`; Mac mini `macmini`; Linux server `server.rack` |
+| Computer (team machine) | `display` (outline, like the laptop and phone); laptop `laptopcomputer`; Mac mini `macmini`; Linux server `server.rack` |
 | Phone (a signed-in device) | `iphone` |
 | Cloud runner | `cloud` |
 | Settings tabs | 通用 `gearshape`, 账号 `person.crop.circle`, 通知 `bell`, 成员 `person.2`, 机器 `macmini`, 外观 `paintpalette`, 快捷键 `command` |
@@ -338,7 +338,7 @@ Separate window, ⌘, and App menu › 设置…; minimize and zoom dimmed; reop
 
 - Toolbar tabs (Mail Settings style): symbol 18 pt over a 11 pt label, 56 pt tall; the selected
   tab has `selection` fill (radius 8) and `accent` symbol and label. Window title = pane name.
-- Width 640; height follows the pane (animated 0.2 s), max 720 with scrolling inside.
+- Width 640; height follows the pane (animated 0.2 s), max 760 with scrolling inside (the 通用 pane, 742, fits whole; review 4 K-15).
 - Panes use grouped forms on `window`: groups `group` fill (quiet gray, no shadow), radius 10,
   20 pt side margins, rows min 36 pt with 12 pt side insets, 1 px `separator` between rows inset
   12 pt, 20 pt between groups, group header 13 pt semibold `label` 6 pt above, footer 11 pt
@@ -349,7 +349,7 @@ Panes:
 | Pane | Content |
 | --- | --- |
 | 通用 | 启动时 (pop-up: 打开首页 / 打开上次的话题), 登录时启动 (switch), 菜单栏里显示 (switch), 声音 (switch). |
-| 账号 | Header row: avatar 64, name (Title 3), 岗位 · team (`secondary`), trailing `编辑…` → sheet (avatar, name and 岗位 as standalone fields, jojo character choice for AI members only). Group 登录的设备: rows with `laptopcomputer` / `desktopcomputer` / `iphone`, name, `这台 Mac` or last seen; selection plus `−` square button below the group signs a device out (alert). Bottom-leading `退出登录…` push button → alert with checkbox `同时删除这台 Mac 上的聊天记录和下载的产出`. |
+| 账号 | Header row: avatar 64, name (Title 3), 岗位 · team (`secondary`), trailing `编辑…` → sheet (avatar, name and 岗位 as standalone fields, jojo character choice for AI members only). Group 登录的设备: rows with `laptopcomputer` / `display` / `iphone`, name, `这台 Mac` or last seen; selection plus `−` square button below the group signs a device out (alert). Bottom-leading `退出登录…` push button → alert with checkbox `同时删除这台 Mac 上的聊天记录和下载的产出`. |
 | 通知 | Group 提醒我 (mini switches): 需要我拍板的事, 我交代的事做完了, 成员卡住或出错, 有人 @我, 每日摘要 (with time pop-up). Group 勿扰: switch + 从/到 time pop-ups. `按群设置…` → sheet with a table (群, pop-up 全部 / 只有 @我 / 不提醒). |
 | 成员 | Team admin (owners only): 邀请成员…, 添加 AI 成员…, rows of members with 级别 pop-ups; group 默认规则 for AI members (who approves 合并到 main, 发布到生产, 单次花费超过 ¥…). |
 | 机器 | Where AI members work, on demand. Group 团队的电脑 (rows: symbol, name, 在线 / 空闲 dot, who uses it, version); group 云端 (cloud agents and our containers; shows 还没有 when none). `+`/`−` square buttons under each group. Never say that members run only on local computers. |

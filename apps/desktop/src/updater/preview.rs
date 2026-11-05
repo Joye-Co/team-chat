@@ -149,6 +149,16 @@ pub fn open_up_to_date_end(
     result
 }
 
+/// Settings › 通用 at rest: the updater is idle, so the version row has
+/// its 检查更新 button, as in the app (review 4 K-15).
+pub fn open_idle(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_settings_with(Phase::Idle, services, cx)
+}
+
 /// Settings › 通用 after 检查更新: 已是最新版本.
 pub fn open_up_to_date(
     services: Services,
