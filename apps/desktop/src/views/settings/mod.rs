@@ -219,7 +219,10 @@ impl SettingsView {
         prefs::update(|p| p.last_pane = Some(page.slug().to_string()));
         match page {
             Page::Machines => self.machines.update(cx, |m, cx| m.refresh(cx)),
-            Page::Account => self.account.update(cx, |a, cx| a.refresh_devices(cx)),
+            Page::Account => self.account.update(cx, |a, cx| {
+                a.refresh_devices(cx);
+                a.refresh_email(cx);
+            }),
             Page::Notifications => self.notifications.update(cx, |n, cx| n.refresh(cx)),
             Page::Members => self.members.update(cx, |m, cx| m.refresh_rules(window, cx)),
             _ => {}

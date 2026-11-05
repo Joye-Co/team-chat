@@ -175,6 +175,33 @@ pub const SCENES: &[Scene] = &[
         open: |services, content, cx| open_login(services, content, "@K7QM2X9A", false, cx),
     },
     Scene {
+        name: "login-email",
+        about: "The login view on 用邮箱登录 with an address typed",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| {
+            open_login(services, content, "=joye@example.com", false, cx)
+        },
+    },
+    Scene {
+        name: "login-email-code",
+        about: "The login view on 输入验证码 with three of six digits typed",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| {
+            open_login(services, content, "#joye@example.com 042", false, cx)
+        },
+    },
+    Scene {
+        name: "login-email-error",
+        about: "The login view after a wrong email code: kept in the slots, selected, error under them",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| {
+            open_login(services, content, "#joye@example.com 000000", false, cx)
+        },
+    },
+    Scene {
         name: "offline",
         about: "The connection banner above the sidebar footer while reconnecting",
         start: Start::Offline,
@@ -1328,7 +1355,14 @@ pub fn open_login(
             if worst && !code.starts_with('~') {
                 l.preview_server(WORST_SERVER, window, cx);
             }
-            if let Some(code) = code.strip_prefix('!') {
+            // `=` shows 用邮箱登录 with that address; `#address digits` the
+            // code step with those digits typed.
+            if let Some(email) = code.strip_prefix('=') {
+                l.preview_email(email, None, window, cx)
+            } else if let Some(rest) = code.strip_prefix('#') {
+                let (email, digits) = rest.split_once(' ').unwrap_or((rest, ""));
+                l.preview_email(email, Some(digits), window, cx)
+            } else if let Some(code) = code.strip_prefix('!') {
                 l.preview_submit(code, window, cx)
             } else if let Some(code) = code.strip_prefix('^') {
                 l.preview_signing_in(code, window, cx)
@@ -1370,6 +1404,11 @@ fn worst_login_code(code: &'static str) -> &'static str {
         "^K7QM2X9A" => "^ABCDEFGHJKLM",
         // A wrong legacy code (a locked line) instead of a short one.
         "!0000-0000" => "!000000000000",
+        // A long sign-in email on the email steps.
+        "=joye@example.com" => "=huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com",
+        "#joye@example.com 042" => {
+            "#huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com 042"
+        }
         // A long code against a long host that cannot be reached.
         "@K7QM2X9A" => "@K7QM2X9ABC3D",
         "~https://team.joye.co" => {

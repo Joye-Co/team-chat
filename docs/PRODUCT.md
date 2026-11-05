@@ -171,8 +171,10 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - Permissions: levels `owner` (Joye and the bots at Joye's level) and `member` (interns and
   their bots). Clients and bots use the same API. Every write is audited with who asked, who
   did it, which credential, and what changed.
-- Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. Email or OAuth
-  sign-in is later.
+- Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. After that a
+  member can add a sign-in email in 账号 and sign in on any Mac with a 6-digit code sent there.
+  The app keeps one session per server (正式服务器, 测试服务器 or another), so switching servers
+  from the app menu does not sign out. OAuth sign-in is later.
 - Distribution: a DMG signed with the team's own certificate (not notarized). GitHub Releases keeps every build; the server also serves the
   latest DMG to holders of an invite code and to members, and the app updates itself from it.
 
