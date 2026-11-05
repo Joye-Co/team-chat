@@ -180,9 +180,12 @@ impl TopicRail {
         cx: &App,
     ) -> AnyElement {
         let k = native_colors(cx);
-        // X-01, C5: beside its avatar a name drops its leading emoji.
+        // X-01, C5: beside its avatar a name drops its leading emoji. An
+        // RTL name sits in an LTR line: a cut keeps the start of the name
+        // and the `…` stays at the right end, as in every row (break-ui).
+        // No isolate: a cut drops its closing mark and takes the `…` in.
         let name = member
-            .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+            .map(|m| crate::copy::ltr(crate::ui::avatar::name_beside_avatar(&m.name).to_string()))
             .unwrap_or_default();
         // R2-14, §2.21: the role truncates first, and goes when fewer than
         // 2 of its characters would fit (never a lone `…`).
