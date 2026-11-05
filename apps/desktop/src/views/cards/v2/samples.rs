@@ -137,7 +137,8 @@ pub(crate) fn worsen(v: &mut serde_json::Value) {
                             for n in opts.len()..7 {
                                 opts.push(serde_json::json!({
                                     "id": format!("w{n}"),
-                                    "label": format!("{} {n}", WORST_RTL),
+                                    // The count leads, so 7 long options stay apart.
+                                    "label": format!("{n} · {WORST_RTL}"),
                                     "detail": "1,284 人"
                                 }));
                             }

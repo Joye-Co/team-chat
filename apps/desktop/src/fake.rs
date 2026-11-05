@@ -76,6 +76,45 @@ const HOUR: i64 = 60 * MIN;
 const DAY: i64 = 24 * HOUR;
 
 impl FakeProvider {
+    /// The asks of the cards in one 话题, oldest first: a card whose state word is 等你审 or
+    /// 等你回答, from its author. `None` when the 话题 has no cards: the 话题 itself then
+    /// waits on me. Whether my answer reached the card is the reader's call
+    /// (`topic_page::ask_answered`).
+    fn card_asks(&self, group_id: &str, topic_id: &str) -> Option<Vec<crate::data::v2::AskItem>> {
+        use crate::{copy::common as cc, data::v2::AskKind};
+        let cards: Vec<_> = self
+            .messages(group_id, topic_id, 200)
+            .messages
+            .into_iter()
+            .filter(|m| m.deleted_at.is_none() && m.author_id != ME)
+            .filter_map(|m| Some((self.card(group_id, &m.id)?, m)))
+            .collect();
+        if cards.is_empty() {
+            return None;
+        }
+        Some(
+            cards
+                .into_iter()
+                .filter_map(|(card, m)| {
+                    let kind = match card.status.as_ref()?.label.as_str() {
+                        l if l == cc::STATUS_WAITING_REVIEW_ME => AskKind::Review,
+                        l if l == cc::STATUS_WAITING_ANSWER_ME => AskKind::Choice,
+                        _ => return None,
+                    };
+                    Some(crate::data::v2::AskItem {
+                        group_id: group_id.into(),
+                        topic_id: topic_id.into(),
+                        message_id: Some(m.id.clone()),
+                        from: m.author_id.clone(),
+                        kind,
+                        title: card.title.clone(),
+                        at: m.created_at,
+                    })
+                })
+                .collect(),
+        )
+    }
+
     /// Signed in as Joye with the sample data.
     pub fn new() -> Arc<Self> {
         let provider = Arc::new(Self {
@@ -1579,7 +1618,12 @@ impl ChatProvider for FakeProvider {
         self.todo()
             .into_iter()
             .filter(|t| t.reason == TodoReason::WaitingOnMe)
-            .map(|t| {
+            .flat_map(|t| {
+                // A 话题 whose cards ask me lists one ask per card, from the card's author,
+                // so the pinned banner gives way while the card is on screen (T-10).
+                if let Some(cards) = self.card_asks(&t.group_id, &t.topic.id) {
+                    return cards;
+                }
                 let from = t
                     .topic
                     .owner_id
@@ -1608,7 +1652,7 @@ impl ChatProvider for FakeProvider {
                     })
                     .filter(|b| !b.trim().is_empty());
                 let review = t.topic.status == TopicStatus::WaitingReview;
-                crate::data::v2::AskItem {
+                vec![crate::data::v2::AskItem {
                     group_id: t.group_id,
                     topic_id: t.topic.id.clone(),
                     message_id: None,
@@ -1623,12 +1667,12 @@ impl ChatProvider for FakeProvider {
                         .filter(|_| !review)
                         .unwrap_or_else(|| t.topic.title.clone()),
                     at: t.topic.last_activity_at,
-                }
+                }]
             })
             .collect()
     }
 
-    /// This week of a member from the same data as 首页's 今天完成 and
+    /// This week of a member from the same data as 首页's 今天交付 and
     /// 最近的产出: 话题 it owns that are done, and 产出 it made, in the last
     /// 7 days (fixtures agree, A5).
     fn member_stats(&self, member_id: &str) -> Option<crate::data::v2::MemberStats> {
@@ -1930,6 +1974,30 @@ mod tests {
                 .windows(2)
                 .all(|w| w[0].created_seq < w[1].created_seq)
         );
+    }
+
+    /// T-10: the card sample 话题 asks through its cards, each with its message and author,
+    /// so the pinned banner gives way to the card and never names the 话题's creator.
+    #[test]
+    fn card_asks_link_their_cards() {
+        use crate::views::cards::samples as cs;
+        let p = FakeProvider::new();
+        let asks: Vec<_> = p
+            .asks_for_me()
+            .into_iter()
+            .filter(|a| a.topic_id == cs::TOPIC)
+            .collect();
+        assert_eq!(asks.len(), 2, "{asks:?}");
+        for a in &asks {
+            let id = a.message_id.as_deref().expect("a card ask has its message");
+            let card = p.card(cs::GROUP, id).expect("the ask's card");
+            assert_eq!(a.title, card.title);
+            assert_ne!(a.from, ME);
+        }
+        let pinned = p
+            .pinned_ask(cs::GROUP, cs::TOPIC)
+            .expect("an ask is pinned");
+        assert_eq!(pinned.from, "m-sentry");
     }
 
     #[test]

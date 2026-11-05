@@ -685,7 +685,9 @@ fn badge_state(state: &CardState) -> Option<BadgeState> {
         CardState::Pending => BadgeState::NeedsYou,
         CardState::Answered { .. } | CardState::Done { .. } => BadgeState::Done,
         CardState::Executing { progress, .. } if progress.waiting => BadgeState::Queued,
-        CardState::Executing { .. } | CardState::Sending { .. } => BadgeState::Working,
+        CardState::Executing { .. } => BadgeState::Working,
+        // 发送中: a muted loader (§2.12, v16).
+        CardState::Sending { .. } => BadgeState::Stopping,
         CardState::Failed { .. } | CardState::SendFailed { .. } => BadgeState::Failed,
         CardState::WaitingOn => BadgeState::Queued,
         CardState::Expired | CardState::Superseded => BadgeState::Deactivated,
@@ -735,24 +737,19 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
     };
     match ctx.state {
         CardState::Pending => {
+            // The §2.12 word of the ask (T, `topic_page::ask_words`): 等你审 for a
+            // review, 等你回答 for any other ask (a form and a draft too); the detail
+            // says what is left to do.
+            let word = ask_word(ctx);
             if has_fields(ctx.card) {
                 let ready = form::problems(ctx.card, &ctx.values).is_empty();
                 if ready {
-                    (
-                        c::STRIP_FILL_READY.into(),
-                        c::STRIP_FILL_READY_DETAIL.into(),
-                    )
+                    (word.into(), c::STRIP_FILL_READY_DETAIL.into())
                 } else {
-                    (
-                        c::STRIP_FILL.into(),
-                        fill(c::STRIP_WAITS, &[("name", author)]),
-                    )
+                    (word.into(), fill(c::STRIP_WAITS, &[("name", author)]))
                 }
             } else if has_draft(ctx.card) && ctx.form.read(cx).editing.is_some() {
-                (
-                    c::STRIP_EDITING.into(),
-                    fill(c::STRIP_WAITS, &[("name", author)]),
-                )
+                (word.into(), fill(c::STRIP_WAITS, &[("name", author)]))
             } else {
                 let detail = if ctx.quick() {
                     c::STRIP_WAITS_QUICK
@@ -763,27 +760,10 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
                 } else {
                     c::STRIP_WAITS_APPROVE
                 };
-                // The §2.12 word of the ask (T, `topic_page::ask_words`): 等你审 for a
-                // review, 等你回答 for any other ask.
-                let word = ctx
-                    .env
-                    .provider
-                    .asks_for_me()
-                    .into_iter()
-                    .find(|a| a.message_id.as_deref() == Some(ctx.msg.message_id.as_str()))
-                    .map_or(c::CARD_NEEDS_YOU, |a| {
-                        crate::views::topic_page::ask_words(a.kind)
-                    });
                 (word.into(), fill(detail, &[("name", author)]))
             }
         }
-        CardState::WaitingOn => {
-            let names = asked_names(ctx);
-            (
-                fill(c::CARD_WAITING_ON, &[("name", &names)]),
-                c::STRIP_WAITING_ON_DETAIL.into(),
-            )
-        }
+        CardState::WaitingOn => (waiting_on(ctx), c::STRIP_WAITING_ON_DETAIL.into()),
         CardState::Sending { .. } => (
             c::STRIP_SENDING.into(),
             fill(c::STRIP_SENDING_DETAIL, &[("name", author)]),
@@ -843,7 +823,7 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
             }
         }
         CardState::Executing { progress, .. } if progress.waiting => (
-            fill(c::CARD_WAITING_ON, &[("name", &asked_names(ctx))]),
+            waiting_on(ctx),
             fill(
                 c::STRIP_STOPPED,
                 &[
@@ -916,6 +896,47 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
         ),
         CardState::Info => (String::new(), String::new()),
     }
+}
+
+/// The §2.12 word of an ask on this card: the ask's own kind when 需要你拍板 lists it,
+/// else 等你审 for a card that asks me about a PR (a review), else 等你回答.
+fn ask_word(ctx: &Ctx) -> &'static str {
+    let listed = ctx
+        .env
+        .provider
+        .asks_for_me()
+        .into_iter()
+        .find(|a| a.message_id.as_deref() == Some(ctx.msg.message_id.as_str()))
+        .map(|a| a.kind);
+    use crate::data::cards_v2::RefTarget;
+    let review = ctx
+        .card
+        .actions()
+        .iter()
+        .any(|a| matches!(a.target, Some(RefTarget::Pr { .. })))
+        || ctx.card.all_blocks().iter().any(|b| {
+            matches!(
+                b,
+                CardV2Block::Ref {
+                    target: RefTarget::Pr { .. },
+                    ..
+                }
+            )
+        });
+    let kind = listed.unwrap_or(if review {
+        crate::data::v2::AskKind::Review
+    } else {
+        crate::data::v2::AskKind::Choice
+    });
+    crate::views::topic_page::ask_words(kind)
+}
+
+/// 等李雪回答 (§2.12): the card waits on the members it asks.
+fn waiting_on(ctx: &Ctx) -> String {
+    fill(
+        crate::copy::common::STATUS_WAITING_ANSWER_NAMED,
+        &[("name", &crate::views::spaced_name(&asked_names(ctx)))],
+    )
 }
 
 /// The first line of the fallback when it says more than the title (the
@@ -1504,11 +1525,12 @@ fn working(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         .and_then(|r| r.started_at)
         .or(answer.as_ref().map(|a| a.at))
         .unwrap_or(ctx.msg.created_at);
+    // The start in the thread's and the inspector's words (`今天 10:18 起`, T-20).
     let used = fill(
-        tl::PLAN_FOOTER,
+        tl::PLAN_FOOTER_SINCE,
         &[
             ("used", &span_text(USED, ctx.env.now() - started)),
-            ("time", &crate::views::shell::clock(started)),
+            ("since", &crate::views::topic_rail::run_since(started)),
         ],
     );
     let a = ctx.answerer();

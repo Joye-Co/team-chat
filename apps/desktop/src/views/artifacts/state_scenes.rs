@@ -3,7 +3,7 @@
 //! - `artifact-embed-states`: two cards that embed a 产出. The first one's folder does not
 //!   open (页面没有打开 · 重试); the second one is a file, not a web page (这个产出不是网页 ·
 //!   在窗口打开).
-//! - `artifact-ref-toast`: the 话题 of the report; a page element asks 就这里提问 through the
+//! - `artifact-ref-chip`: the 话题 of the report; a page element asks 就这里提问 through the
 //!   page host (the same `ArtifactEvent::Ref` a page sends). The chip goes into the 话题
 //!   composer, and the chip is the confirmation: no toast (NATIVE.md §7.4).
 
@@ -58,12 +58,12 @@ thread_local! {
     static PROBE: RefCell<Probe> = RefCell::new(Probe::default());
 }
 
-/// True once `artifact-ref-toast` asked about the page element.
+/// True once `artifact-ref-chip` asked about the page element.
 pub fn ref_toast_ready(_cx: &App) -> bool {
     PROBE.with(|p| p.borrow().done)
 }
 
-/// The result of `artifact-ref-toast`'s check.
+/// The result of `artifact-ref-chip`'s check.
 pub fn ref_toast_verify(_png: &std::path::Path, _cx: &mut App) -> Result<(), String> {
     PROBE.with(|p| match &p.borrow().error {
         Some(e) => Err(e.clone()),
@@ -71,13 +71,13 @@ pub fn ref_toast_verify(_png: &std::path::Path, _cx: &mut App) -> Result<(), Str
     })
 }
 
-/// Setup of `artifact-ref-toast`: the report 话题 with an empty composer.
+/// Setup of `artifact-ref-chip`: the report 话题 with an empty composer.
 pub fn ref_toast_setup(services: &Services, cx: &mut App) {
     PROBE.with(|p| *p.borrow_mut() = Probe::default());
     crate::selftest::scenes::v2_open_topic(services, d::GROWTH, d::T_REPORT, cx);
 }
 
-/// Opens the main window of `artifact-ref-toast` and asks about the page element.
+/// Opens the main window of `artifact-ref-chip` and asks about the page element.
 pub fn open_ref_toast(
     services: Services,
     content: gpui::Size<gpui::Pixels>,
