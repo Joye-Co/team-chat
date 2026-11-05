@@ -76,6 +76,13 @@ pub fn normalize_fences(text: &str) -> String {
     if !text.contains(FENCE) {
         return text.to_string();
     }
+    let dropped;
+    let text = if text.contains("acceptance") {
+        dropped = drop_acceptance(text);
+        dropped.as_str()
+    } else {
+        text
+    };
     let mut out: Vec<String> = Vec::new();
     // Index in `out` of the open fence line, and whether code followed it.
     let mut open: Option<(usize, bool)> = None;
@@ -126,6 +133,34 @@ pub fn normalize_fences(text: &str) -> String {
         out.pop();
     }
     out.join("\n")
+}
+
+/// The text without its ```acceptance blocks: a member reports its 验收标准
+/// in one, the app shows them as evidence rows, so the raw JSON never shows
+/// (messages posted before the server dropped them still carry it). A block
+/// that is not closed runs to the end.
+fn drop_acceptance(text: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut lines = text.split('\n');
+    while let Some(line) = lines.next() {
+        let t = line.trim_start();
+        let ticks = t.len() - t.trim_start_matches('`').len();
+        if ticks < FENCE.len() || t[ticks..].trim() != "acceptance" {
+            out.push(line);
+            continue;
+        }
+        let fence = &t[..ticks];
+        for l in lines.by_ref() {
+            if l.trim() == fence {
+                break;
+            }
+        }
+    }
+    let mut joined = out.join("\n");
+    while joined.contains("\n\n\n") {
+        joined = joined.replace("\n\n\n", "\n\n");
+    }
+    joined
 }
 
 /// The byte index of the only triple-backtick run in `line`, when it has
@@ -304,6 +339,18 @@ pub fn top_level_blocks(source: &str) -> Vec<(MdBlock, std::ops::Range<usize>)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acceptance_blocks_never_show() {
+        assert_eq!(
+            normalize_fences(
+                "写好了。\n\n```acceptance\n[{ \"text\": \"a\", \"state\": \"pass\" }]\n```\n\n\n下一步"
+            ),
+            "写好了。\n\n下一步"
+        );
+        assert_eq!(normalize_fences("写好了。\n```acceptance\n[{"), "写好了。");
+        assert_eq!(normalize_fences("```json\n{}\n```"), "```json\n{}\n```");
+    }
 
     #[test]
     fn a_fence_after_text_starts_a_block() {
