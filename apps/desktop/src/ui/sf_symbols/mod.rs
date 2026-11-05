@@ -295,31 +295,32 @@ mod tests {
         }
     }
 
-    /// The Settings tab symbols fill the same 18 square: the wide ones
-    /// (成员 `person.2`, 外观 `paintpalette`) are scaled down by their
-    /// factor so their ink is about as wide as 通用's gear.
+    /// The Settings tab symbols fill the same 18 square (§2.19, review 3
+    /// K-06): the larger side of every tab symbol's ink is 18 ± 0.5.
     #[test]
-    fn wide_tab_symbols_fit_the_tab_square() {
-        let width = |sym: Sym| {
-            let m = raster::draw(
+    fn tab_symbols_fill_the_tab_square() {
+        let size = SymSize::TAB;
+        for sym in [
+            Sym::General,
+            Sym::Account,
+            Sym::Bell,
+            Sym::Members,
+            Sym::Computer,
+            Sym::Appearance,
+            Sym::Shortcuts,
+        ] {
+            let m = raster::draw_ink(
                 sym.name(),
-                point_for_slot(18.) * sym.factor(),
-                Weight::Regular,
-                18.,
+                size.point * sym.factor(),
+                size.weight,
+                size.slot,
                 2.,
+                Some(size.ink),
             )
             .unwrap_or_else(|| panic!("{} draws", sym.name()));
-            let (x0, _, x1, _) = m.ink;
-            (x1 - x0) as f32 / 2.
-        };
-        let gear = width(Sym::General);
-        for sym in [Sym::Members, Sym::Appearance] {
-            let w = width(sym);
-            assert!(
-                w <= 18.5 && (w - gear).abs() <= 2.5,
-                "{}: {w} vs gear {gear}",
-                sym.name()
-            );
+            let (x0, y0, x1, y1) = m.ink;
+            let big = (x1 - x0).max(y1 - y0) as f32 / 2.;
+            assert!((17.5..=18.).contains(&big), "{}: {big}", sym.name());
         }
     }
 

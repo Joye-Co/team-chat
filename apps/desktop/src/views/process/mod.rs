@@ -392,53 +392,59 @@ impl ProcessView {
         self.members.iter().find(|m| m.id == id)
     }
 
-    /// One run: a 40 pt row (§8.1 rows), the 24 pt bot, its name `ui` 14,
-    /// the status label and the start time 12 `text-3`.
+    /// One run (§2.6, A2-16): a bordered row h48 (radius 10, px 12, gap
+    /// 12) that is a Tab stop with the focus ring: the 24 member, its name
+    /// 14, the StatusBadge and the start time 12 muted. Selected: the muted
+    /// fill and the name medium (D10).
     fn render_run_row(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
+        use crate::ui::native::{FocusRow as _, NativeType as _, tokens};
+        let n = native_colors(cx);
         let bot = self.member(&run.bot_id).cloned();
         let selected = self.selected.as_deref() == Some(run.id.as_str());
         let id = run.id.clone();
         // The one date format of the pane (`10:21`, `11-01`), as the facts.
         let when = clock(run.started_at.unwrap_or(run.created_at));
-        ui::list_row(
-            gpui::ElementId::Name(format!("run-{}", run.id).into()),
-            ui::RowSurface::Content,
-            selected,
-            cx,
-        )
-        .h(theme::size::PANEL_ROW)
-        .px(space::S8)
-        .gap(space::S10)
-        .on_click(cx.listener(move |this, _, _, cx| this.select(Some(id.clone()), cx)))
-        .child(
-            ui::MemberAvatar::new(bot.as_ref(), theme::size::AVATAR_ROW)
-                .selected(selected)
-                .on(if selected { k.selected } else { k.content }),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .t_ui()
-                .text_color(k.text_1)
-                .when(selected, |el| el.semibold())
-                .one_line()
-                .child(bot.map(|b| b.name).unwrap_or_default()),
-        )
-        .child(run_badge(
-            run,
-            self.services.provider.run_stopping(&run.id),
-            cx,
-        ))
-        .child(
-            div()
-                .flex_none()
-                .t_meta()
-                .tnum()
-                .text_color(k.text_3)
-                .child(when),
-        )
+        div()
+            .id(gpui::ElementId::Name(format!("run-{}", run.id).into()))
+            .focus_row(selected, cx)
+            .h(space::S48)
+            .px(space::S12)
+            .rounded(tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
+            .when(selected, |el| el.bg(n.fill))
+            .flex()
+            .items_center()
+            .gap(space::S12)
+            .on_click(cx.listener(move |this, _, _, cx| this.select(Some(id.clone()), cx)))
+            .child(
+                div()
+                    .flex_none()
+                    .child(ui::MemberAvatar::new(bot.as_ref(), tokens::avatar::SM)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .n_body()
+                    .text_color(n.label)
+                    .when(selected, |el| el.font_weight(gpui::FontWeight::MEDIUM))
+                    .one_line()
+                    .child(bot.map(|b| b.name).unwrap_or_default()),
+            )
+            .child(run_badge(
+                run,
+                self.services.provider.run_stopping(&run.id),
+                cx,
+            ))
+            .child(
+                div()
+                    .flex_none()
+                    .n_footnote()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .child(when),
+            )
     }
 
     fn render_run_details(
@@ -511,10 +517,16 @@ impl ProcessView {
                         p::DEV_MACHINE_ID,
                         run.machine_id.clone().unwrap_or_else(|| p::DEV_NONE.into()),
                     ),
-                    (p::DEV_STATUS, status_text(run.status).to_string()),
+                    // A2-19: the state and the start are the facts above;
+                    // the box adds only what they do not say.
                     (p::DEV_CREATED, time(Some(run.created_at))),
-                    (p::DEV_STARTED, time(run.started_at)),
-                    (p::DEV_ENDED, time(run.ended_at)),
+                    (
+                        p::DEV_ENDED,
+                        match run.ended_at {
+                            None if run.status.is_active() => p::DEV_NOT_ENDED.to_string(),
+                            t => time(t),
+                        },
+                    ),
                     (p::DEV_UPDATED, time(Some(run.updated_at))),
                     (p::DEV_LOG_SEQ, self.process.last_seq.to_string()),
                 ];
@@ -529,12 +541,7 @@ impl ProcessView {
     /// place of the end step: the cause once (the time is the 用时 fact),
     /// 重试 (primary sm) and 查看日志 (outline sm, the developer view with
     /// the raw log).
-    fn failure_alert(
-        &self,
-        run: &BotRunSummary,
-        developer: bool,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    fn failure_alert(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !matches!(run.status, RunStatus::Failed | RunStatus::Blocked) {
             return None;
         }
@@ -546,40 +553,9 @@ impl ProcessView {
             .map(|c| c.trim().trim_end_matches(['。', '.']).to_string())
             .filter(|c| !c.is_empty());
         let title = fill(p::STEP_DONE, &[("status", status_text(run.status))]);
-        let retry = {
-            let (bot, id) = (run.bot_id.clone(), run.id.clone());
-            push_button(
-                "process-run-retry",
-                p::RETRY,
-                PushStyle::Default,
-                PushSize::Small,
-                cx,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let rx = this.services.provider.retry_member_problem(&bot, &id);
-                cx.spawn(async move |_, _| {
-                    let _ = rx.await;
-                })
-                .detach();
-                cx.notify();
-            }))
-        };
-        let log = (!developer).then(|| {
-            push_button(
-                "process-run-log",
-                crate::copy::timeline::RUN_VIEW_LOG,
-                PushStyle::Outline,
-                PushSize::Small,
-                cx,
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.set_developer_view(true, cx));
-            }))
-        });
-        // The Alert anatomy (§2.15) with the actions under the text: the
-        // pane is narrow, so the title and its cause keep the full width.
+        // The Alert anatomy (§2.15); its actions are the pane's footer
+        // (`failure_footer`). The pane is narrow, so the title and its
+        // cause keep the full width.
         let n = native_colors(cx);
         let alert = div()
             .px(space::S16)
@@ -612,18 +588,70 @@ impl ProcessView {
                             .line_clamp(2)
                             .child(cause.unwrap_or(title)),
                     )
-                    .child(div().n_body().text_color(n.secondary).child(p::FAILED_HINT))
-                    .child(
-                        div()
-                            .pt(space::S8)
-                            .flex()
-                            .items_center()
-                            .gap(space::S8)
-                            .child(retry)
-                            .children(log),
-                    ),
+                    .child(div().n_body().text_color(n.secondary).child(p::FAILED_HINT)),
             );
         Some(div().pt(space::S12).child(alert).into_any_element())
+    }
+
+    /// The pane's footer for a run that ended failed (§2.5, A2-06): border-t,
+    /// p 16, 重试 (primary) over 查看日志 (outline), full width, so the pane
+    /// ends with its actions and never in a blank band.
+    fn failure_footer(
+        &self,
+        run: &BotRunSummary,
+        developer: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !matches!(run.status, RunStatus::Failed | RunStatus::Blocked) {
+            return None;
+        }
+        let retry = {
+            let (bot, id) = (run.bot_id.clone(), run.id.clone());
+            push_button(
+                "process-run-retry",
+                p::RETRY,
+                PushStyle::Default,
+                PushSize::Regular,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let rx = this.services.provider.retry_member_problem(&bot, &id);
+                cx.spawn(async move |_, _| {
+                    let _ = rx.await;
+                })
+                .detach();
+                cx.notify();
+            }))
+        };
+        let log = (!developer).then(|| {
+            push_button(
+                "process-run-log",
+                crate::copy::timeline::RUN_VIEW_LOG,
+                PushStyle::Outline,
+                PushSize::Regular,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.set_developer_view(true, cx));
+            }))
+        });
+        let n = native_colors(cx);
+        Some(
+            div()
+                .flex_none()
+                .w_full()
+                .p(space::S16)
+                .border_t_1()
+                .border_color(n.separator)
+                .flex()
+                .flex_col()
+                .gap(space::S8)
+                .child(retry.w_full())
+                .children(log.map(|b| b.w_full()))
+                .into_any_element(),
+        )
     }
 
     fn render_developer_tail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -804,15 +832,22 @@ impl Render for ProcessView {
         };
         let body = div()
             .id("process-view")
-            .size_full()
+            .w_full()
+            .flex_1()
+            .min_h(px(0.))
             .overflow_y_scroll()
             .px(space::S16)
             .pb(space::S24);
         if self.runs.is_empty() {
             // A compact Empty (§2.13): icon and one 14 muted line.
-            return body
-                .pt(space::S16)
-                .child(ui::native::EmptyLine::new(p::EMPTY).icon(Sym::Terminal))
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(
+                    body.pt(space::S16)
+                        .child(ui::native::EmptyLine::new(p::EMPTY).icon(Sym::Terminal)),
+                )
                 .into_any_element();
         }
         let rows: Vec<_> = self
@@ -840,16 +875,20 @@ impl Render for ProcessView {
         };
         let titled = self.titled;
         let loading = self.process.error.is_none() && !self.process.loaded;
-        body.when(titled, |el| el.child(section(p::RUNS, cx)))
+        let footer = run
+            .as_ref()
+            .and_then(|run| self.failure_footer(run, developer, cx));
+        let body = body
+            .when(titled, |el| el.child(section(p::RUNS, cx)))
             .when(!titled, |el| el.pt(space::S16))
             // R2-07: the run rows sit inside the pane padding (x 1056), so
             // the selected band lines up with the facts below.
-            .child(div().flex().flex_col().children(rows))
+            .child(div().flex().flex_col().gap(space::S8).children(rows))
             .when_some(run, |el, run| {
                 el.child(self.render_run_details(&run, developer, cx))
                     .child(section(p::STEPS, cx))
                     .children(steps)
-                    .children(self.failure_alert(&run, developer, cx))
+                    .children(self.failure_alert(&run, cx))
                     .when(loading, |el| {
                         el.child(ui::native::skeleton_rows(
                             ui::native::SkeletonKind::ListRow,
@@ -894,7 +933,13 @@ impl Render for ProcessView {
                         )
                     })
                     .when(developer, |el| el.child(self.render_developer_tail(cx)))
-            })
+            });
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(body)
+            .children(footer)
             .into_any_element()
     }
 }

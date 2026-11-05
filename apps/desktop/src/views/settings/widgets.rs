@@ -694,7 +694,9 @@ fn rest_cover(
                 .bottom(layout::BORDER)
                 .left(inset)
                 .right(inset)
-                .bg(k.content)
+                // The input's own fill: in dark the window background here
+                // read as a black block inside the field (review 3 K-01).
+                .bg(k.control)
                 .flex()
                 .items_center()
                 .when(number, |d| d.justify_end())

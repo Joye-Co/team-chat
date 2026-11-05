@@ -60,7 +60,7 @@ pub use feedback::{
     skeleton, skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
-pub use fields::{FieldSize, NativeTextField, SearchField, field_edge};
+pub use fields::{FieldSize, NativeTextArea, NativeTextField, SearchField, field_edge};
 #[allow(unused_imports)]
 pub use focus::{Arrows, FocusRow, row_focus_ring};
 #[allow(unused_imports)]

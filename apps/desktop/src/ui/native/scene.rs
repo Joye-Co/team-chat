@@ -183,7 +183,7 @@ impl NativeKit {
                     ))
                     .child(sample(
                         t::STATE_PRESSED,
-                        push_button("kb-2", t::EDIT, PushStyle::Outline, reg, cx).bg(k.fill_hover),
+                        push_button("kb-2", t::EDIT, PushStyle::Outline, reg, cx).bg(k.pressed),
                         &k,
                     ))
                     .child(sample(

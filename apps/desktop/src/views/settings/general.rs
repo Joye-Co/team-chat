@@ -7,7 +7,7 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _, WindowExt as _,
-    input::{InputEvent, Textarea, TextareaState},
+    input::{InputEvent, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
@@ -147,7 +147,6 @@ impl GeneralPage {
             SheetWidth::Form,
             px(440.),
             move |dialog, window, cx| {
-                let k = native_colors(cx);
                 let description = this.read(cx).description.clone();
                 let handle = description.read(cx).focus_handle(cx);
                 if first.replace(false) {
@@ -162,23 +161,13 @@ impl GeneralPage {
                         page.server().is_empty(),
                     )
                 };
-                let field = div()
-                    .w_full()
-                    .px(metrics::FIELD_PAD)
-                    .py(px(4.))
-                    .rounded(metrics::FIELD_RADIUS)
-                    .bg(k.content)
-                    .border_1()
-                    .border_color(if failed { k.red } else { k.separator })
-                    .when(focused, |d| d.shadow(k.focus_ring()))
-                    .child(crate::ui::placeholder_input(
-                        Textarea::new(&description)
-                            .appearance(false)
-                            .n_body()
-                            .text_color(k.label),
-                        window,
-                        cx,
-                    ));
+                // The §2.8 textarea (review 3 K-02): the field recipe of
+                // every sheet, the error ring when sending failed.
+                let field =
+                    crate::ui::native::NativeTextArea::new("diagnostics-description", &description)
+                        .rows(4)
+                        .error(failed)
+                        .show_focus(focused);
                 let page = this.read(cx);
                 let send_page = this.clone();
                 let ok_page = this.clone();
