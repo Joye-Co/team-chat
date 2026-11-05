@@ -433,8 +433,8 @@ pub fn stage_words(stage: Stage, name: &str) -> String {
         Stage::OfflineLive => c::OFFLINE_LIVE,
         Stage::OfflineAnswer => c::OFFLINE_ANSWER,
         Stage::Busy => c::BUSY,
-        // The ack of a short-run limit is `expect.mode: none` too: say so (INTERACT §6.2).
-        Stage::Refused => c::BUSY,
+        // The author said the block takes no action (`expect.mode: none`, INTERACT §6.2).
+        Stage::Refused => c::REFUSED,
     };
     fill(t, &[("name", name)])
 }
@@ -657,9 +657,14 @@ fn reply_link(ctx: &Ctx, block: &str, reply: &str, cx: &mut App) -> AnyElement {
                 cx,
             )
             .text_color(k.ink)
+            // The ↓ sits in the button's icon slot, part of the one target (D1-70).
+            .icon(crate::ui::icons::button_sym(
+                ui::Sym::ArrowDown,
+                crate::ui::icons::SymSize::for_slot(crate::ui::native::tokens::icon::MD),
+                ui::native::PushSize::Small.height(),
+            ))
             .on_click(move |_, window, cx| a.open_message(&reply, window, cx)),
         )
-        .child(ui::icon(ui::Sym::ArrowDown, px(12.), k.ink_2))
         .into_any_element()
 }
 

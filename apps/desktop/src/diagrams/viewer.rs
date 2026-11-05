@@ -51,9 +51,9 @@ pub struct ViewerSpec {
     pub return_focus: Option<FocusHandle>,
 }
 
-/// The smallest zoom a fit picks: diagram text is 13 px at 100 %, and a fit
-/// never draws it under 12 px (a larger diagram scrolls instead).
-pub const FIT_FLOOR: f32 = 12. / 13.;
+/// The smallest zoom a fit picks: diagram text is 15–16 px at 100 % (the library's
+/// sizes), and a fit never draws it under 12 px (a larger diagram scrolls instead; D2-37).
+pub const FIT_FLOOR: f32 = 12. / 15.;
 
 /// The zoom that fits the diagram's width in the viewport (24 on each side),
 /// at most 100 % and at least [`FIT_FLOOR`]: a taller diagram scrolls down

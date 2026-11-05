@@ -118,6 +118,7 @@ crate::copy! {
     OFFLINE_LIVE = "{name} 不在线，这一步没有发出",
     OFFLINE_ANSWER = "{name} 不在线，回来后会看到",
     BUSY = "{name} 现在接不了，稍后再试",
+    REFUSED = "{name} 说这一块只能看",
     CONFLICT_TOAST = "这是最新的一版",
     CONFLICT_TITLE = "卡片刚更新了",
     CONFLICT_DETAIL = "你答的时候成员改了这张卡，留下了还能用的选择。",
@@ -164,7 +165,7 @@ crate::copy! {
 
     // The compose and interact galleries (screenshot scenes).
     G_TITLE = "生成式界面 · 组合和选择题",
-    G_SUBTITLE = "一张卡里的块可以自由组合：上下叠、并排、分组、对比、问卷、标签页（并排和每次操作的回传见「每次操作都回到成员」）。选择题从 2 种扩到 9 种。每张卡顶上有一条状态带，不读内容也知道在等谁、做到哪一步。",
+    G_SUBTITLE = "一张卡里的块可以自由组合：上下叠、并排、分组、对比、问卷、标签页（并排和每次操作的回传见「每次操作都回到成员」）。选择题从 2 种扩到 9 种。每张卡顶上有一条状态带，不读内容也知道在等谁、做到了哪里。",
     G_S_COMPOSE = "组合",
     G_S_COMPOSE_NOTE = "常见的几种组合：问卷、对比、分组、指标加图加批准。成员只定放哪些块、怎么组合，样子由 {product} 定；需要一起提交的块共用一个提交。",
     G_S_CHOICE = "选择题",

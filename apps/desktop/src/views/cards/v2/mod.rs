@@ -1141,6 +1141,7 @@ pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
         Some(PendTone::Live) => Some(BadgeState::Working),
         Some(PendTone::Quiet) => Some(BadgeState::Queued),
         Some(PendTone::Bad) => Some(BadgeState::Failed),
+        Some(PendTone::Off) => Some(BadgeState::Deactivated),
         None => Some(badge_state(ctx.state)?),
     };
     let (label, detail) = match (&waiting, &updated) {

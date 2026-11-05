@@ -516,8 +516,9 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .p(space::S4)
         .rounded(crate::ui::native::tokens::radius::CONTROL)
         .border_1()
+        // A bordered frame on the card fill, like the other wells: muted text keeps its
+        // contrast (§1.2, D1-30).
         .border_color(crate::ui::native::native_colors(cx).separator)
-        .bg(crate::ui::native::native_colors(cx).fill)
         .min_w(px(0.));
     if live {
         let (order2, set2, ui) = (order.clone(), set.clone(), ctx.ui.clone());
