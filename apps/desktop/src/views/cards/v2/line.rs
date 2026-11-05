@@ -193,7 +193,11 @@ pub fn plan_row(
     let k = theme::colors(cx);
     let p = state::progress(&msg.card);
     let member = env.provider.member(&msg.author_id);
-    let name = member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+    // X-01: the row shows the avatar; a leading emoji in the name would read as a second one.
+    let name = member
+        .as_ref()
+        .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+        .unwrap_or_default();
     let working = msg.card.intent == CardIntent::Working;
     let id = format!("cv2-plan-{message_id}");
     let (text, meta_text, action, glyph) = if working {

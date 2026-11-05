@@ -35,12 +35,13 @@ use gpui::{
 };
 
 use crate::{
+    copy::cards as c,
     data::{
         Message,
         card::{Card, CardBlock, CardTone},
     },
     theme::{self, space},
-    ui::{self, Sym, native::NativeType as _},
+    ui::{self, native::NativeType as _},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -201,28 +202,29 @@ pub fn render_card(
     let k = theme::colors(cx);
     let tone = card.tone.unwrap_or_default();
 
-    // NATIVE.md §9.2: the state is a symbol and its word in the state
-    // color over the title, never a pill or a colored bar.
+    // One header slot for every card (§2.4, C-08): the StatusBadge of §2.12 over the
+    // title, as in Card v2; a card with a tone and no status word takes the tone's word.
     let n = ui::native::native_colors(cx);
-    let state = card.status.as_ref().map(|s| {
-        let (sym, color) = match tone {
-            CardTone::Neutral => (Sym::Circle, n.secondary),
-            CardTone::Info => (Sym::Live, n.blue),
-            CardTone::Success => (Sym::Done, n.green),
-            CardTone::Warning => (Sym::NeedsYou, n.amber),
-            CardTone::Danger => (Sym::Problem, n.red),
+    let state = {
+        use ui::native::BadgeState as B;
+        let (badge, word) = match tone {
+            CardTone::Neutral => (B::Queued, None),
+            CardTone::Info => (B::Working, Some(c::STATE_WORKING)),
+            CardTone::Success => (B::Done, Some(c::STATE_DONE)),
+            CardTone::Warning => (B::NeedsYou, Some(c::STATE_NEEDS_YOU)),
+            CardTone::Danger => (B::Failed, Some(c::STATE_FAILED)),
         };
-        // The word stays in the foreground; the color is on the symbol only.
-        let ink = n.label;
-        ui::native::cards::state_words(
-            ui::native::cards::state_symbol(sym, color),
-            s.label.clone(),
-            ink,
-            None,
-            cx,
-        )
-        .mb(space::S8)
-    });
+        card.status
+            .as_ref()
+            .map(|s| s.label.clone())
+            .or_else(|| word.map(str::to_string))
+            .map(|label| {
+                div()
+                    .flex()
+                    .mb(space::S8)
+                    .child(ui::native::StatusBadge::new(badge, label))
+            })
+    };
     // A title is one line of text: line breaks and runs of spaces collapse,
     // it wraps to at most 2 lines, and an empty title takes no room.
     let title = card.title.split_whitespace().collect::<Vec<_>>().join(" ");
