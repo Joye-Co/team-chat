@@ -509,6 +509,10 @@ impl TopicRail {
             );
         }
         for a in &d.artifacts {
+            // The version the page host knows when it is newer than the
+            // provider's (a new version arrived): the embed and this row agree.
+            let version = crate::views::artifacts::host::latest(&a.id, cx)
+                .map_or(a.version, |v| v.max(a.version));
             // A2-21: the kind's own symbol (an image is not a document).
             let sym = match a.kind {
                 crate::data::ArtifactKind::Image => Sym::Image,
@@ -533,10 +537,7 @@ impl TopicRail {
                             .text_color(k.secondary)
                             .child(fill(
                                 c::OUTPUT_VERSION,
-                                &[
-                                    ("v", &a.version.to_string()),
-                                    ("time", &clock(a.updated_at)),
-                                ],
+                                &[("v", &version.to_string()), ("time", &clock(a.updated_at))],
                             )),
                     ),
             );
