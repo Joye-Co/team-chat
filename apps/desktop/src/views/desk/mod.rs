@@ -271,16 +271,6 @@ fn section(header: gpui::Div, body: impl IntoElement) -> gpui::Div {
 }
 
 impl DeskPage {
-    /// Whether row `i` of `n` is the last one a section shows (no line
-    /// under it).
-    fn last_shown(&self, id: &'static str, i: usize, n: usize) -> bool {
-        let shown = if self.expanded.contains(id) {
-            n
-        } else {
-            n.min(SECTION_ROWS)
-        };
-        i + 1 == shown
-    }
 
     /// A framed list of `rows`; past [`SECTION_ROWS`] it shows the first
     /// ones and a footer `看全部 N 件` that opens the rest (and `收起`).
@@ -509,8 +499,7 @@ impl Render for DeskPage {
                     let n = asks.len();
                     let rows: Vec<AnyElement> = asks
                         .into_iter()
-                        .enumerate()
-                        .map(|(i, a)| list::ask_row(a, self.last_shown(id, i, n), self, &snap, cx))
+                        .map(|a| list::ask_row(a, self, &snap, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(title, Some(n), None, None, cx),
@@ -527,7 +516,6 @@ impl Render for DeskPage {
                             list::run_row(
                                 i,
                                 r,
-                                self.last_shown("desk-runs", i, n),
                                 &snap,
                                 &self.services,
                                 cx,
@@ -549,7 +537,6 @@ impl Render for DeskPage {
                             list::done_row(
                                 i,
                                 d,
-                                self.last_shown("desk-done", i, n),
                                 &snap,
                                 &self.services,
                                 cx,

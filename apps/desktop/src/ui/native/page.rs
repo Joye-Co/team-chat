@@ -87,15 +87,13 @@ pub fn row_icon(sym: Sym, color: Hsla) -> AnyElement {
     icons::sym(sym, ROW_ICON, color).into_any_element()
 }
 
-/// A 32 media box (§2.6): radius 6, border, muted fill, a 16 icon.
+/// A 32 media box (§2.6): radius 6, muted fill, a 16 icon.
 pub fn icon_box(sym: Sym, color: Option<Hsla>, cx: &App) -> AnyElement {
     let k = native_colors(cx);
     div()
         .flex_none()
         .size(m::MEDIA)
         .rounded(px(6.))
-        .border_1()
-        .border_color(k.separator)
         .bg(k.fill)
         .flex()
         .items_center()
@@ -167,8 +165,9 @@ pub fn section_header(
         .children(action.map(|a| div().flex_none().h(px(28.)).flex().items_center().child(a)))
 }
 
-/// A list or table frame (§2.6, §2.7): radius 10, 1 px border, the page
-/// background, clipped. Rows draw their own separators.
+/// A list or table frame (§2.6, §2.7): radius 10, the page background,
+/// clipped, and no border: the section header groups the rows, and a row
+/// shows itself with its hover fill (owner decision, v18).
 pub fn frame(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
@@ -176,8 +175,6 @@ pub fn frame(cx: &App) -> gpui::Div {
         .flex()
         .flex_col()
         .rounded(m::FRAME_RADIUS)
-        .border_1()
-        .border_color(k.separator)
         .bg(k.content)
         .overflow_hidden()
 }
@@ -221,8 +218,8 @@ pub struct Columns {
 
 /// A list row (§2.6): h56, px12, gap 12: media 32, title 14 medium over a
 /// 12 muted line, then the right cluster in a fixed order (status, time,
-/// actions) at the widths of [`Columns`]. `separator` draws the 1 px line
-/// under the row, inset to the title x. The caller adds `on_click`; the row
+/// actions) at the widths of [`Columns`]. No line between rows: the
+/// rounded hover fill shows the row (owner decision, v18). The caller adds `on_click`; the row
 /// is a [`FocusRow`](super::FocusRow) (Tab, Enter / Space, ↑ / ↓, hover).
 #[derive(Default)]
 pub struct PageRow {
@@ -233,7 +230,6 @@ pub struct PageRow {
     pub status: Option<AnyElement>,
     pub time: Option<SharedString>,
     pub actions: Option<AnyElement>,
-    pub separator: bool,
     pub selected: bool,
     pub dim: bool,
 }
@@ -248,19 +244,13 @@ impl PageRow {
 
     pub fn render(self, id: impl Into<ElementId>, cols: Columns, cx: &App) -> Stateful<gpui::Div> {
         let k = native_colors(cx);
-        let has_media = self.media.is_some();
-        let title_x = m::ROW_PAD
-            + if has_media {
-                m::MEDIA + px(12.)
-            } else {
-                px(0.)
-            };
         let mut row = div()
             .id(id.into())
             .relative()
             .flex_none()
             .h(m::ROW)
             .px(m::ROW_PAD)
+            .rounded(super::tokens::radius::CONTROL)
             .flex()
             .items_center()
             .gap(px(12.))
@@ -271,15 +261,14 @@ impl PageRow {
             .focus_row(true, cx)
             .framed_ring(cx)
             .group(ROW_GROUP)
-            // Hover, muted 50 %, starts under the 1 px line the row above
-            // draws in this row's first pixel line, so it never tints that
-            // separator (review 4 K-17).
+            // Hover: muted 50 % over the whole rounded row.
             .when(!self.selected, |d| {
                 let hover = k.fill.opacity(0.5);
                 d.child(
                     div()
                         .absolute()
-                        .top(super::metrics::HAIRLINE)
+                        .rounded(super::tokens::radius::CONTROL)
+                        .top_0()
                         .left_0()
                         .right_0()
                         .bottom_0()
@@ -357,24 +346,11 @@ impl PageRow {
                     .children(self.actions),
             );
         }
-        // The line sits just under the row, in the next row's first pixel
-        // line: the row's own focus ring (inset) is never drawn over, and the
-        // next row, painted after it, keeps its ring on top too (K-10).
-        row.when(self.separator, |d| {
-            d.child(
-                div()
-                    .absolute()
-                    .bottom(-super::metrics::HAIRLINE)
-                    .left(title_x)
-                    .right(px(0.))
-                    .h(px(1.))
-                    .bg(k.separator),
-            )
-        })
+        row
     }
 }
 
-/// The footer row of a list (§2.6): h40, border-t, 14 muted text (`看全部
+/// The footer row of a list (§2.6): h40, no line, 14 muted text (`看全部
 /// 23 个话题 →`, or a count). The caller adds `on_click` when it opens more.
 pub fn list_footer(
     id: impl Into<ElementId>,
@@ -388,8 +364,6 @@ pub fn list_footer(
         .flex_none()
         .h(m::FOOTER_ROW)
         .px(px(16.))
-        .border_t_1()
-        .border_color(k.separator)
         .flex()
         .items_center()
         .justify_between()
