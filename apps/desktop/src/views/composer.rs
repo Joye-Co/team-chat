@@ -168,10 +168,6 @@ impl ComposerView {
                 .placeholder(c::PLACEHOLDER)
         });
         let refs_hub = crate::views::refs::hub(cx);
-        // This composer lifted the toasts (it has the focus): it puts them
-        // back when it goes away with the focus (a closed window).
-        let lifted = std::rc::Rc::new(std::cell::Cell::new(false));
-        let (lift, drop_lift, out_lift) = (lifted.clone(), lifted.clone(), lifted);
         let subscriptions = vec![
             cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
@@ -192,34 +188,14 @@ impl ComposerView {
                     this.on_refs_event(event, window, cx);
                 },
             ),
-            cx.on_focus_in(&input.focus_handle(cx), window, move |this, window, cx| {
+            cx.on_focus_in(&input.focus_handle(cx), window, move |_, _, cx| {
                 crate::views::refs::note_focus(false, cx);
-                // R1-15: pushed toasts end above the focused composer, so
-                // they never cover Send. Deferred, so it lands after the
-                // focus-out of another composer in the same move.
-                let anchor = this.anchor.clone();
-                let lift = lift.clone();
-                window.defer(cx, move |window, cx| {
-                    let top = anchor.get().origin.y;
-                    if top > gpui::px(0.) {
-                        let floor = window.viewport_size().height - top;
-                        crate::ui::overlay::set_toast_floor(floor, cx);
-                        lift.set(true);
-                    }
-                });
                 // The 单独问 hint shows only while the composer has focus.
                 cx.notify();
             }),
             // --- end inc-refs
             cx.on_focus_out(&input.focus_handle(cx), window, move |_, _, _, cx| {
-                out_lift.set(false);
-                crate::ui::overlay::set_toast_floor(gpui::px(0.), cx);
                 cx.notify()
-            }),
-            cx.on_release(move |_, cx| {
-                if drop_lift.get() {
-                    crate::ui::overlay::set_toast_floor(gpui::px(0.), cx);
-                }
             }),
         ];
         let mut this = Self {
@@ -1317,6 +1293,58 @@ fn model_format(f: Format) -> model::Format {
     }
 }
 
+/// The composers painted in the main window's current frame (T-04).
+#[derive(Default)]
+struct ToastFloor {
+    /// The highest composer top, from the window's bottom.
+    painted: gpui::Pixels,
+}
+
+impl gpui::Global for ToastFloor {}
+
+/// §2.16, T-04: pushed toasts end 16 above every composer on screen, with
+/// or without the focus, so a toast never covers Send. A composer box
+/// calls this as it paints, with its top.
+pub fn floor_painted(top: gpui::Pixels, window: &Window, cx: &mut gpui::App) {
+    let height = window.viewport_size().height - top;
+    if height <= px(0.) {
+        return;
+    }
+    let floor = cx.default_global::<ToastFloor>();
+    floor.painted = floor.painted.max(height);
+    if height > toast_floor(cx) {
+        apply_floor(height, cx);
+    }
+}
+
+/// The floor the toasts of this app rest on now.
+fn toast_floor(cx: &gpui::App) -> gpui::Pixels {
+    use gpui_component::ActiveTheme as _;
+    cx.theme().notification.margins.bottom - crate::theme::space::S16
+}
+
+/// Sets the floor, also when the process-wide value already matches (a
+/// second app in the same process, as in the tests).
+fn apply_floor(height: gpui::Pixels, cx: &mut gpui::App) {
+    crate::ui::overlay::set_toast_floor(height, cx);
+    if toast_floor(cx) != height {
+        gpui_component::Theme::global_mut(cx)
+            .notification
+            .margins
+            .bottom = crate::theme::space::S16 + height;
+        cx.refresh_windows();
+    }
+}
+
+/// Each main-window frame: the toasts rest on the composers painted in the
+/// last one, and go back down when none was (a page with no composer).
+pub fn floor_frame(cx: &mut gpui::App) {
+    let painted = std::mem::take(&mut cx.default_global::<ToastFloor>().painted);
+    if painted != toast_floor(cx) {
+        apply_floor(painted, cx);
+    }
+}
+
 impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let working = self.working_member();
@@ -1645,9 +1673,19 @@ impl Render for ComposerView {
                     .w_full()
                     .child(shell)
                     .child(
-                        gpui::canvas(move |bounds, _, _| anchor.set(bounds), |_, _, _, _| {})
-                            .absolute()
-                            .size_full(),
+                        gpui::canvas(
+                            move |bounds, window, cx| {
+                                anchor.set(bounds);
+                                floor_painted(bounds.top(), window, cx);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        // At the box's top-left: an absolute child with no
+                        // inset sits at its flow place (the box's bottom).
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
                     )
                     .children(self.render_mentions(window, cx))
                     .children(self.render_emoji(cx)),

@@ -195,7 +195,20 @@ pub struct TimelineView {
     /// The new-messages divider row was drawn since the last render: it is
     /// on screen, so the jump pill must not show (§8.1, U14).
     divider_painted: bool,
+    /// T-01: where each drawn row's own date label sits (`row.rs`), so the
+    /// sticky date pill shows only once that label has gone under it.
+    date_marks: Rc<std::cell::RefCell<DateMarks>>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The painted places of the rows and of their own date labels (window
+/// space, from the last frame).
+#[derive(Default)]
+pub(super) struct DateMarks {
+    /// The row's top in this frame (its mark paints before its label's).
+    row_top: std::collections::HashMap<String, Pixels>,
+    /// The middle of the row's own date label, from the row's top.
+    label_mid: std::collections::HashMap<String, Pixels>,
 }
 
 impl EventEmitter<TimelineEvent> for TimelineView {}
@@ -318,6 +331,7 @@ impl TimelineView {
             cards_shown: Default::default(),
             cards_drawn: Default::default(),
             divider_painted: false,
+            date_marks: Default::default(),
             _subscriptions: subscriptions,
         };
         let open = this.services.nav.read(cx).topic.clone();
@@ -355,6 +369,7 @@ impl TimelineView {
         self.editing = None;
         self.hovered = None;
         self.open_steps.clear();
+        *self.date_marks.borrow_mut() = DateMarks::default();
         self.focus.clear();
         self.reset_live();
         self.live_quiet = true;
@@ -841,40 +856,38 @@ impl Render for TimelineView {
         // block and a compact "no messages" line, never a blank column.
         let empty = (self.v2 && self.messages.is_empty() && !self.has_older)
             .then(|| self.render_empty_thread(&topic, cx));
-        // R2-15: once the thread scrolls (or opens at its end, cut at the
-        // top), the day of the first row on screen stays as the thread's
-        // date divider in a 32 band under the header line (content scrolls
-        // under it), so a date label is never left cut under the header.
+        // §2.17, T-01: once the day label of the first row on screen has
+        // gone under the header line, that day floats as a pill (h24, float
+        // surface) 2 under it. It is the label's own place, so the same date
+        // never shows twice, and nothing behind the pill but the label hides.
         let sticky_date = (self.v2 && jump_unread.is_none())
             .then(|| self.list.logical_scroll_top())
-            .filter(|top| top.item_ix > 0 || top.offset_in_item > px(0.))
+            .filter(|top| self.date_label_gone(top.item_ix, top.offset_in_item))
             .and_then(|top| self.messages.get(top.item_ix))
             .map(|m| {
                 use crate::ui::native::{NativeType as _, native_colors};
                 let n = native_colors(cx);
-                let rule = || div().flex_1().h(px(1.)).bg(n.separator);
                 div()
                     .absolute()
-                    .top_0()
+                    .top(STICKY_TOP)
                     .left_0()
                     .right_0()
-                    .h(space::S32)
                     .pl(v2::LEADING)
                     .pr(v2::SIDE)
-                    .bg(colors.content)
                     .flex()
-                    .items_center()
-                    .child(rule())
+                    .justify_center()
                     .child(
-                        div()
-                            .flex_none()
-                            .px(space::S8)
+                        ui::float_surface(cx)
+                            .h(STICKY_H)
+                            .px(space::S12)
+                            .rounded_full()
+                            .flex()
+                            .items_center()
                             .n_section()
                             .n_figures()
                             .text_color(n.secondary)
                             .child(v2::date_label(m.created_at)),
                     )
-                    .child(rule())
             });
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge
@@ -940,7 +953,69 @@ impl Render for TimelineView {
     }
 }
 
+/// The sticky date pill: h24, 2 under the header line (§2.17).
+const STICKY_TOP: Pixels = space::S2;
+const STICKY_H: Pixels = space::S24;
+
 impl TimelineView {
+    /// The first row on screen starts `offset` into row `ix`: its day label
+    /// is gone under the pill's place (or the row has none, so the label of
+    /// its day is above it).
+    fn date_label_gone(&self, ix: usize, offset: Pixels) -> bool {
+        let Some(message) = self.messages.get(ix) else {
+            return false;
+        };
+        let start = ix == 0 && !self.has_older;
+        let prev = ix.checked_sub(1).and_then(|i| self.messages.get(i));
+        let own_label = start || model::starts_day(prev, message);
+        if !own_label {
+            return true;
+        }
+        let key = model::key(message);
+        // Not painted yet: a plain day row has its label 24 + 8 down; the
+        // start block's height is not known, so the pill waits a frame.
+        let mid = self
+            .date_marks
+            .borrow()
+            .label_mid
+            .get(key)
+            .copied()
+            .or((!start).then_some(space::S32));
+        // The label's middle has passed the pill's middle: the pill covers
+        // the rest of it, in its place.
+        mid.is_some_and(|mid| mid - offset < STICKY_TOP + STICKY_H / 2.)
+    }
+
+    /// Marks where row `key` and its own date label are painted.
+    pub(super) fn date_mark(&self, key: &str, label: bool) -> impl IntoElement {
+        let marks = self.date_marks.clone();
+        let key = key.to_string();
+        gpui::canvas(
+            move |bounds, window, _| {
+                let mut marks = marks.borrow_mut();
+                if !label {
+                    marks.row_top.insert(key, bounds.top());
+                    return;
+                }
+                let Some(top) = marks.row_top.get(&key).copied() else {
+                    return;
+                };
+                // A first or moved label: draw once more so the pill reads
+                // the new place.
+                let mid = bounds.center().y - top;
+                let old = marks.label_mid.insert(key, mid);
+                if old.is_none_or(|old| (old - mid).abs() > px(0.5)) {
+                    window.refresh();
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
     /// The search bar of a 话题 opened at a search hit (COMPLETENESS §2.17):
     /// 40 pt under the toolbar, the query, `2 / 7`, the previous and next
     /// hit, and close (back to the newest message).

@@ -699,6 +699,8 @@ impl Render for RootView {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
+        // T-04: the toasts rest on the composers this window painted last.
+        crate::views::composer::floor_frame(cx);
         let k = theme::colors(cx);
         let root = div()
             .id("root")
