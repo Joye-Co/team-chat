@@ -33,7 +33,7 @@ crate::copy! {
     BAND_VOTED = "已投 {n}/{total}",
     BAND_ASKED = "{name} 问了 {n} 个问题",
     BAND_ASKED_ONE = "{name} 在问",
-    BAND_SURFACE_YOU = "问你",
+    BAND_SURFACE_YOU = "等你",
     BAND_WAITS_ON_YOU = "{name} 在等你看一眼",
 
     // Choices (CARD21 §4).
@@ -164,7 +164,7 @@ crate::copy! {
 
     // The compose and interact galleries (screenshot scenes).
     G_TITLE = "生成式界面 · 组合和选择题",
-    G_SUBTITLE = "一张卡里的块可以自由组合：上下叠、并排、分组、对比、问卷、标签页（并排和每次操作的回传见「每次操作都回到成员」）。选择题从 2 种扩到 9 种。每张卡顶上有一条状态带，不用读内容就知道在等谁、做到了哪一步。",
+    G_SUBTITLE = "一张卡里的块可以自由组合：上下叠、并排、分组、对比、问卷、标签页（并排和每次操作的回传见「每次操作都回到成员」）。选择题从 2 种扩到 9 种。每张卡顶上有一条状态带，不读内容也知道在等谁、做到哪一步。",
     G_S_COMPOSE = "组合",
     G_S_COMPOSE_NOTE = "常见的几种组合：问卷、对比、分组、指标加图加批准。成员只定放哪些块、怎么组合，样子由 {product} 定；需要一起提交的块共用一个提交。",
     G_S_CHOICE = "选择题",
@@ -235,6 +235,8 @@ crate::copy! {
     // v11/pb-cards: an embed that did not open.
     EMBED_FAILED = "页面没有打开",
     EMBED_NOT_PAGE = "这个产出不是网页",
+    EMBED_FAILED_DESC = "页面的文件没有读出来，可以再试一次。",
+    EMBED_NOT_PAGE_DESC = "它不能放进卡片里，可以在窗口里打开。",
     // v11/pb-cards: the step of a working band (CARD21 §2).
     // v11/pb-cards: the notes scene.
     I_NOTES_OFFLINE = "成员不在线",

@@ -2096,24 +2096,28 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             })
             .into_any_element()
         }
+        // §2.15 (D2-09): the Alert in place of the page, the frame hugging it, never a
+        // lone line centred in a filled well.
         (_, EmbedBody::Failed) => {
             let (art, v) = (artifact_id.clone(), *version);
             div()
-                .h(px(h.min(200.)))
-                .bg(k.sunken)
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(space::S8)
-                .child(hint(c::EMBED_FAILED, cx))
+                .p(space::S12)
                 .child(
-                    b20::quiet_button(eid(node, format!("embed-retry-{id}")), c::PENDING_RETRY, cx)
-                        .text_color(k.ink)
-                        .on_click(move |_, _, cx| {
-                            forget_folder(&art, v);
-                            cx.refresh_windows();
-                        }),
+                    ui::native::Alert::new(Sym::Alert, c::EMBED_FAILED)
+                        .description(c::EMBED_FAILED_DESC)
+                        .action(
+                            ui::native::push_button(
+                                eid(node, format!("embed-retry-{id}")),
+                                c::PENDING_RETRY,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
+                                cx,
+                            )
+                            .on_click(move |_, _, cx| {
+                                forget_folder(&art, v);
+                                cx.refresh_windows();
+                            }),
+                        ),
                 )
                 .into_any_element()
         }
@@ -2124,18 +2128,20 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 version: Some(*version),
             };
             div()
-                .h(px(h.min(200.)))
-                .bg(k.sunken)
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(space::S8)
-                .child(hint(c::EMBED_NOT_PAGE, cx))
+                .p(space::S12)
                 .child(
-                    b20::quiet_button(eid(node, format!("embed-window-{id}")), c::EMBED_OPEN, cx)
-                        .text_color(k.ink)
-                        .on_click(move |_, window, cx| a.open(&target, window, cx)),
+                    ui::native::Alert::new(Sym::Document, c::EMBED_NOT_PAGE)
+                        .description(c::EMBED_NOT_PAGE_DESC)
+                        .action(
+                            ui::native::push_button(
+                                eid(node, format!("embed-window-{id}")),
+                                c::EMBED_OPEN,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
+                                cx,
+                            )
+                            .on_click(move |_, window, cx| a.open(&target, window, cx)),
+                        ),
                 )
                 .into_any_element()
         }
@@ -2303,7 +2309,7 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .flex()

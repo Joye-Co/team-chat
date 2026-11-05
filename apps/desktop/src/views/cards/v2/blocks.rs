@@ -651,7 +651,7 @@ fn code(text: &str, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .rounded(theme::radius::MD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .px(space::S12)
@@ -1311,13 +1311,14 @@ pub(crate) fn form_grid(
                 .when(top, |el| el.items_start())
                 .when(!top, |el| el.items_center())
                 .gap(space::S12)
-                // FormRow (§2.8, D8): the label left-aligned in a 112 column,
-                // the control fills the value column.
+                // FormRow (§2.8, D8): the label left-aligned in a 112 column (gap
+                // included, so the field starts 112 in as in the sheets), the
+                // control fills the value column.
                 .child(
                     div()
                         .n_body()
                         .flex_none()
-                        .w(m::FORM_LABEL)
+                        .w(m::FORM_LABEL - space::S12)
                         .one_line()
                         .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
                         .text_color(k.ink)
@@ -1730,7 +1731,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
         .gap(space::S14)
         .p(space::S12)
         .rounded(theme::radius::FIELD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .children(thumbs)
@@ -2013,13 +2014,23 @@ pub(crate) fn metrics_with(
                     ""
                 };
                 let mut s = format!("{sign}{}", fmt_number(d.abs()));
-                if let Some(u) = unit.as_deref().filter(|u| *u == "%") {
-                    s.push_str(u);
+                // The unit stays with its number (C-09): `+12%`, `−0.3 秒`.
+                match unit.as_deref() {
+                    Some("%") => s.push('%'),
+                    Some(u) if !u.is_empty() => {
+                        s.push(' ');
+                        s.push_str(u);
+                    }
+                    _ => {}
                 }
                 s
             });
             let mut tail = Vec::new();
-            if let Some(n) = note {
+            // A note that only repeats the unit says nothing more.
+            if let Some(n) = note
+                .as_ref()
+                .filter(|n| Some(n.as_str()) != unit.as_deref())
+            {
                 tail.push(n.clone());
             }
             if matches!(better, Some(MetricBetter::Down)) && d.is_some() {
@@ -2246,7 +2257,7 @@ fn diff(
     // A `sunken` well with its own 1 px line (§1.7: a fill step alone is not an edge).
     div()
         .rounded(theme::radius::MD)
-        .bg(k.sunken)
+        .bg(ui::native::native_colors(cx).sheet)
         .border_1()
         .border_color(k.line)
         .overflow_hidden()
@@ -2571,7 +2582,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .pl(space::S12)
             .pr(space::S4)
             .rounded(theme::radius::MD)
-            .bg(k.sunken)
+            .bg(ui::native::native_colors(cx).sheet)
             .border_1()
             .border_color(k.line)
             .text_color(k.ink_2)
@@ -2681,10 +2692,21 @@ fn pr_state(raw: &str) -> PrState {
                     PrTone::Plain => 4,
                 })
                 .unwrap_or(PrTone::Plain);
-            return PrState {
-                text: raw.to_string(),
-                tone,
+            // The badge says the §2.12 word of its state (C-09): 等你审 for a review that
+            // waits on me, 在做 n/m for checks that run; other free text shows as it is.
+            let count = raw
+                .split_whitespace()
+                .last()
+                .filter(|w| is_count(w))
+                .and_then(|w| w.split_once('/'));
+            let text = match (tone, count) {
+                (PrTone::Waits, _) => common::STATUS_WAITING_REVIEW_ME.to_string(),
+                (PrTone::Running, Some((n, total))) if !raw.contains(rail::CHANGES_MERGING) => {
+                    fill(c::STRIP_WORKING_COUNT, &[("n", n), ("total", total)])
+                }
+                _ => raw.to_string(),
             };
+            return PrState { text, tone };
         }
     };
     PrState {
@@ -2937,7 +2959,7 @@ const REFS_CAP: usize = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::copy::topic_rail as rail;
+    use crate::copy::{common, topic_rail as rail};
 
     #[test]
     fn a_current_plan_step_says_how_long_it_runs() {
@@ -2982,6 +3004,9 @@ mod tests {
         assert_eq!(pr_state("1 项检查没过").tone, PrTone::Bad);
         assert_eq!(pr_state("检查 2/3").tone, PrTone::Running);
         assert_eq!(pr_state("你好").tone, PrTone::Plain);
+        // §2.12 words on the badge.
+        assert_eq!(pr_state("需要你审").text, common::STATUS_WAITING_REVIEW_ME);
+        assert_eq!(pr_state("检查 2/3").text, "在做 2/3");
         // Free text shows unchanged.
         assert_eq!(pr_state("已合并 11-02").text, "已合并 11-02");
         assert_eq!(pr_state("reopened").text, "reopened");

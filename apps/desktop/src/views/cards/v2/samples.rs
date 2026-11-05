@@ -725,7 +725,7 @@ fn all() -> Vec<Sample> {
             "fallback": "这周的 PR",
             "blocks": [
                 { "type": "ref", "id": "p61", "label": "重连后按 seq 去重", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3/3 项检查通过", "state": "需要你审" } },
+                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3/3 项检查通过", "state": "等你审" } },
                 { "type": "ref", "id": "p62", "label": "话题列表虚拟滚动", "target": { "kind": "pr",
                   "url": "https://github.com/example/qqbot/pull/62", "number": 62, "repo": "开发 · Forge", "state": "检查 2/3" } },
                 { "type": "ref", "id": "p59", "label": "话题加载提速", "target": { "kind": "pr",
@@ -830,7 +830,7 @@ fn all() -> Vec<Sample> {
             "fallback": "今天要看的四样",
             "blocks": [
                 { "type": "ref", "id": "pr", "label": "重连后按 seq 去重", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3 项检查通过", "state": "需要你审" } },
+                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3 项检查通过", "state": "等你审" } },
                 { "type": "ref", "id": "art", "label": "10 月数据月报", "target": { "kind": "artifact",
                   "artifactId": ART_REPORT, "version": 2 } },
                 { "type": "ref", "id": "topic", "label": "夹夹 4.0 需求", "target": { "kind": "topic",

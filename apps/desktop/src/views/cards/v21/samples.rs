@@ -256,7 +256,7 @@ fn report_rev1() -> Value {
             "ask": { "id": "verify", "from": [ME], "expiresAt": at(14, 0),
                      "promise": "你确认之前，我不会把月报发到全员群。" },
             "blocks": [
-                { "id": "basis", "type": "text", "text": "按去重设备算，用的是 Joye 11-01 定的口径。发到周会之前，想请你看一眼。" },
+                { "id": "basis", "type": "text", "text": "按去重设备算，用的是 Joye 11-01 定的口径。发到周会之前请你先看看。" },
                 { "id": "main", "type": "row", "weights": [2, 1], "children": ["trend", "check_col"] },
                 { "id": "trend", "type": "chart", "kind": "line", "label": "日活 · 近 4 周", "emphasis": "high",
                   "x": ["10-06", "10-13", "10-20", "10-27"],
