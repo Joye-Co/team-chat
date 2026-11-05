@@ -3,7 +3,7 @@
 crate::copy! {
     DESK_TITLE = "首页",
     DESK_NEEDS_YOU = "需要你拍板",
-    DESK_DONE_TODAY = "做完了",
+    DESK_DONE_TODAY = "今天交付",
     DESK_TODAY = "今天",
     DESK_WORKING = "正在做",
     DESK_QUEUE = "排队",
@@ -61,7 +61,7 @@ crate::copy! {
     // --- v13/ux-pages: the 首页 recipe (COMPLETENESS.md §2.18) ---
     DESK_KPI_WAITING = "等你",
     DESK_KPI_WORKING = "在做",
-    DESK_KPI_DONE = "今天完成",
+    DESK_KPI_DONE = "今天交付",
     DESK_KPI_QUEUE = "排队",
     DESK_KPI_WAITING_FOOT = "最早 {time}",
     DESK_KPI_WAITING_NONE = "没有要你回答的事",
@@ -82,7 +82,7 @@ crate::copy! {
     DESK_SHOW_LESS = "收起",
     DESK_COUNT = "共 {n} 件",
     DESK_EMPTY_TITLE = "都处理完了",
-    DESK_EMPTY_BODY = "成员需要你拍板、开始干活或做完一件事时，会出现在这里。",
+    DESK_EMPTY_BODY = "成员需要你拍板、开始干活或交付结果时，会出现在这里。",
     DESK_NEW_TOPIC = "开个话题",
     DESK_SEE_ARTIFACTS = "看产出",
     DESK_RAIL_TITLE = "今天",
@@ -93,13 +93,13 @@ crate::copy! {
     DESK_MACHINE_USERS = "{names} 在用",
     // --- end v13/ux-pages ---
     // --- v14/t3-pages ---
-    DESK_STATUS_DONE = "完成",
+    DESK_STATUS_DONE = "已交付",
     DESK_JUST_HANDLED = "刚处理",
     DESK_SUBTITLE_SYNCING = "正在同步…",
     DESK_SUBTITLE_OFFLINE = "离线",
     DESK_RAIL_LINE_WEEK = "这周的进度、排队的事和在用的电脑",
     DESK_WEEK = "这周",
-    DESK_WEEK_DONE = "完成的话题",
+    DESK_WEEK_DONE = "交付",
     DESK_WEEK_OUTPUTS = "产出",
     DESK_WEEK_COST = "花费",
     DESK_WEEK_NO_COST = "还没有花费",

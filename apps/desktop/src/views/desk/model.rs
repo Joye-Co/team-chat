@@ -104,7 +104,8 @@ pub struct Snapshot {
     pub week: Week,
 }
 
-/// This week across the AI members: 话题 done, 产出 and what it cost.
+/// This week across the AI members: 交付 (done runs, O-2), 产出 and what
+/// it cost.
 #[derive(Clone, Debug, Default)]
 pub struct Week {
     pub done: u32,
