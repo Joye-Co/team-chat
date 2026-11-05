@@ -15,12 +15,15 @@
 //   cards        p95 time from the bot's send of a Card v2 ask (ask.from requester and owners,
 //                the per-send requester and member lookups, GAPS PC-16) to its ack, and to the
 //                owner's live event (bar: 300 ms); skipped on a server before 1.1
+// Each timed loop starts with --warmup untimed rounds (default 2), so the first access to a room
+// after a deploy (cold start, named migrations) is not counted. Every sample is in the report
+// (`samples`, ms), so one slow request shows.
 // Round trips include the network: `pingMs` (WebSocket ping) is reported next to them so the
 // server part can be read off. Sleep and the macOS notification banner are app behavior and are
 // not measured here.
 //
 // Usage: bun scripts/staging-smoke.ts [--env staging] [--base <url>] [--owner-token <file>]
-//        [--bot-token <file>] [--upload-mb 100] [--samples 20] [--out <folder>]
+//        [--bot-token <file>] [--upload-mb 100] [--samples 50] [--warmup 2] [--out <folder>]
 // Token files default to ~/.config/team-chat/<env>/owner-token and the newest
 // ~/.config/team-chat/<env>/bot-*.token. Report (no tokens): .tmp/staging-smoke/report.json.
 // Exits 1 when a check fails or a bar is missed.
@@ -49,7 +52,8 @@ const newestBot = (): string => {
 const OWNER = readFileSync(opt("owner-token") ?? join(CONF, "owner-token"), "utf8").trim();
 const BOT = readFileSync(opt("bot-token") ?? newestBot(), "utf8").trim();
 const UPLOAD_MB = Number(opt("upload-mb", "100"));
-const SAMPLES = Number(opt("samples", "20"));
+const SAMPLES = Number(opt("samples", "50"));
+const WARMUP = Number(opt("warmup", "2"));
 const OUT = opt("out") ?? join(ROOT, ".tmp/staging-smoke");
 
 type Frame = { t: string; rid?: string; [k: string]: any };
@@ -134,6 +138,8 @@ const pct = (xs: number[], p: number) => {
   return Math.round(s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)] * 10) / 10;
 };
 const stats = (xs: number[]) => ({ n: xs.length, p50: pct(xs, 50), p95: pct(xs, 95), max: pct(xs, 100) });
+/** stats plus every sample in order, rounded to 0.1 ms. */
+const timed = (xs: number[]) => ({ ...stats(xs), samples: xs.map((x) => Math.round(x * 10) / 10) });
 
 const report: Record<string, any> = { env: ENV, base: BASE, at: new Date().toISOString() };
 const failures: string[] = [];
@@ -162,28 +168,29 @@ const run = randomBytes(4).toString("hex");
 const root = (await owner.call({ t: "send", groupId, title: `smoke ${run}`, clientMsgId: `smoke-${run}-root`, body: `冒烟测试 ${run}` })).result;
 const topicId: string = root.message.topicId;
 const delivery: number[] = [];
-for (let i = 0; i < SAMPLES; i++) {
-  const id = `smoke-${run}-d${i}`;
+for (let i = -WARMUP; i < SAMPLES; i++) {
+  const id = `smoke-${run}-d${i < 0 ? `w${-i}` : i}`;
   const got = botc.wait((f) => f.t === "event" && f.event.type === "message.created" && f.event.data.message.clientMsgId === id);
   const t0 = performance.now();
   await owner.call({ t: "send", groupId, topicId, clientMsgId: id, body: `送达 ${i} 检索词${run}` });
   await got;
-  delivery.push(performance.now() - t0);
+  if (i >= 0) delivery.push(performance.now() - t0);
   await pace(t0);
 }
-report.delivery = stats(delivery);
+report.delivery = timed(delivery);
 check("delivery", report.delivery.p95 < 300, `p95 ${report.delivery.p95} ms`);
 
 // Search: a Chinese two-character word in this group and across all groups.
 const searchMs: number[] = [];
 let hits = 0;
-for (let i = 0; i < SAMPLES; i++) {
+for (let i = -2 * WARMUP; i < SAMPLES; i++) {
   const t0 = performance.now();
   const r = await owner.call({ t: "search", query: "送达", ...(i % 2 ? {} : { groupId }), limit: 20 });
+  if (i < 0) continue;
   searchMs.push(performance.now() - t0);
   hits = Math.max(hits, r.hits?.length ?? 0);
 }
-report.search = { ...stats(searchMs), hits };
+report.search = { ...timed(searchMs), hits };
 check("search", hits > 0, "no hits for 送达");
 check("search", report.search.p95 < 300, `p95 ${report.search.p95} ms`);
 
@@ -269,7 +276,7 @@ if (UPLOAD_MB > 0) {
 
 // Card v2 asks from the bot in the topic: each send resolves `requester` and `owners`.
 {
-  const card = (i: number) => ({
+  const card = (i: string) => ({
     v: 2,
     rev: 1,
     intent: "ask",
@@ -284,17 +291,21 @@ if (UPLOAD_MB > 0) {
   const ackMs: number[] = [];
   const deliveryMs: number[] = [];
   try {
-    for (let i = 0; i < SAMPLES; i++) {
-      const id = `smoke-${run}-c${i}`;
+    for (let i = -WARMUP; i < SAMPLES; i++) {
+      const k = i < 0 ? `w${-i}` : String(i);
+      const id = `smoke-${run}-c${k}`;
       const got = owner.wait((f) => f.t === "event" && f.event.type === "message.created" && f.event.data.message.clientMsgId === id);
       const t0 = performance.now();
-      await bc.call({ t: "send", groupId, topicId, clientMsgId: id, body: `冒烟卡片 ${i}`, cardV2: card(i) });
-      ackMs.push(performance.now() - t0);
+      await bc.call({ t: "send", groupId, topicId, clientMsgId: id, body: `冒烟卡片 ${k}`, cardV2: card(k) });
+      const ack = performance.now() - t0;
       await got;
-      deliveryMs.push(performance.now() - t0);
+      if (i >= 0) {
+        ackMs.push(ack);
+        deliveryMs.push(performance.now() - t0);
+      }
       await pace(t0);
     }
-    report.cards = { ack: stats(ackMs), delivery: stats(deliveryMs) };
+    report.cards = { ack: timed(ackMs), delivery: timed(deliveryMs) };
     check("cards", report.cards.delivery.p95 < 300, `p95 ${report.cards.delivery.p95} ms`);
   } catch (err) {
     if (ackMs.length > 0) throw err;
