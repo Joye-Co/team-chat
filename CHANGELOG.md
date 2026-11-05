@@ -6,23 +6,70 @@ and their `.sha256` files. Release notes for the team are in Chinese in `docs/re
 ## 1.1.0 (unreleased)
 
 Notes: [docs/releases/1.1.0.md](docs/releases/1.1.0.md). `scripts/release.sh` writes the date in
-the release commit. The server deploys first (`bun run deploy:e2e`, `deploy:staging`,
-`deploy:production`; each one fails unless `/v1/health` then reports `1.1.0`), then the app and
-the machine daemon. 1.0.x clients keep working against the 1.1.0 server.
+the release commit. The server deploys first, from the commit that will be tagged, with
+`DEPLOY_VERSION=1.1.0` (`bun run deploy:e2e`, `deploy:staging`, `deploy:production`; each one
+applies the D1 migrations, then fails unless `/v1/health` reports `1.1.0`), then
+`scripts/release.sh` makes the app, the machine daemon and the tag. 1.0.x clients and 1.0.x
+daemons keep working against the 1.1.0 server.
+
+D1 migrations, all additive (new nullable or defaulted columns and new tables; 1.0.x reads the
+data unchanged): `0007_file_parts` (`files.upload_id`, table `file_parts`), `0007_group_purpose`
+(`groups.purpose`, `groups.update_seq`), `0007_settings` (table `approval_policies`),
+`0008_member_plan` (`members.reports_to`, `members.weekly_budget_cents`). The member gateway
+Durable Object adds the named migration `settings-1` (notify settings, notify log, digest state)
+on first access. No Durable Object class change.
 
 Deferred to 1.2 (not in 1.1.0): real screen frames in 实时查看 (it shows the terminal rebuilt from
 tool events), scheduled jobs, typed asks from CLIs through a daemon MCP tool server, secret inputs,
-and the landing page.
+cloud runners, enforcement of the weekly limit, and the landing page.
 
-- Design v3 ([docs/DESIGN.md](docs/DESIGN.md), artboards in `docs/design/mockups-v3/`): HELMET2
-  ink-on-paper tokens, ink primary buttons, grey selection, state colors amber (you), blue (live)
-  and red (problem), mono numerals, member tiles with status rings, 52 pt title bars, motion with
-  reduce-motion support, light, dark and Increase contrast.
-- Shell: left rail · page · right pane; the topic-list column is removed. The rail has three
-  modes (work, attention, members), chosen in the new 设置 → 外观 page with the theme.
-- New pages: 首页 (需要你拍板, 做完了, 正在做, 排队), 群, 成员 and the 产出 viewer in the main window.
+Owner actions after the release: install the 1.1.0 daemon on the Mac mini and enable Jojo's
+runner (production has no machine and Jojo's runner is disabled, checked on 2026-11-05 with
+`admin.ts machines` and `GET /v1/bots/:id/runner`); see the notes and
+[docs/USER-ACTIONS.md](docs/USER-ACTIONS.md#3-install-the-daemon-on-the-mac-mini).
+
+- Native Mac client (#6, [docs/design/NATIVE.md](docs/design/NATIVE.md)): the shell, sidebar,
+  话题, 首页, 群, 成员, 产出, cards, sheets, alerts, settings window and login are rebuilt on a
+  native kit (`apps/desktop/src/ui/native/`) over gpui-component 0.8.1 (vendored in
+  `third_party/gpui-component`, Apache-2.0): toolbar, push buttons, switches, segmented controls,
+  pop-up menus, sheets, alerts, SF Symbols rasterized by AppKit, key, main and inactive window
+  states.
+- Completeness (#7, #9–#11, #13–#41, [docs/design/COMPLETENESS.md](docs/design/COMPLETENESS.md)):
+  one token module (`ui/native/tokens.rs`) with one space, size, radius, type, icon and shadow
+  scale; a black and white palette like shadcn, with state colors only on badges, dots and alerts
+  next to text; every page and pane has loading (skeleton), failed (alert with 重试), empty and
+  worst-case states; keyboard focus rings and Tab order through the kit; one topic state and one
+  set of counts shared by the sidebar, 话题 header, inspector, 首页, 群 and 成员; light, dark and
+  Increase contrast parity.
+- Settings window (⌘,, #6, #15, #20, #29, #40): panes 通用, 账号, 通知, 成员, 机器, 外观, 快捷键.
+  Server settings routes (`server/src/settings/`, protocol `NotifySettings`, `ApprovalPolicy`,
+  `Device`, the `digest` transient event and the `blocked` notify event): `GET`/`PATCH
+  /v1/me/notify-settings` (events, quiet hours, per-group levels, daily digest at a local time,
+  filtered in the member gateway), `GET /v1/me/devices` and `DELETE /v1/me/devices/:id` (signs a
+  device out), `GET`/`PATCH /v1/settings/approvals` (the team's approval rules for AI members;
+  they go into the run prompt).
+- Backend gap fixes (#5, #8): anonymous card answers stay hidden from runner bots; idempotent
+  `chat-run` outputs (`output.unconfirmed` on a lost ack); multipart uploads of files over 100 MB
+  up to 2 GB (`PUT /v1/files/:id/parts/:n`, `POST /v1/files/:id/complete`); `POST
+  /v1/groups/:id/decisions` (记一条); `PUT /v1/desk-note` (bot SDK `setDeskNote`, `chat-run desk
+  note`); `POST /v1/runs/:id/retry`; session resume in follow-up runs (daemon feature `resume`);
+  `Member.reportsTo` and `Member.weeklyBudgetCents` (owner-set with `PATCH /v1/members/:id`,
+  stored and shown, not enforced); Card v2 member directory cache per isolate; a repeated
+  `run.pause` is reported again; `POST /v1/admin/import/groups/:id/copy-files` has an executed
+  test.
+- Desktop wiring of backend data (#12): 成员 需要你批准的事 from the approval rules, 汇报和限额
+  (owner sheet), queue times on 首页 and 成员, 修改群说明…, 记一条 with its errors, the page
+  response log of a 产出, and 重试 of a member's failed run.
+- Login: the 8-character invite code in 8 separate boxes; a pasted code with dashes or spaces
+  fills them.
+- Design v3 ([docs/DESIGN.md](docs/DESIGN.md)) as the first 1.1.0 layout; the native client and
+  the completeness work above replace its colors, sizes and controls. DESIGN.md still owns Card
+  v2, status words and content.
+- Shell: sidebar · page · right pane; the topic-list column is removed. The sidebar has three
+  styles (以工作为中心, 以「需要我」为中心, 以成员为中心), chosen in the 侧栏选项 menu above the list.
+- New pages: 首页 (需要你拍板, 今天交付, 正在做, 排队), 群, 成员 and the 产出 viewer in the main window.
 - Topic page: title bar with pane buttons, the pinned decision card above the composer, and the
-  topic rail (负责, 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本).
+  topic rail (负责, 计划, 改动, 产出, 用到的决定, 在哪干活, 用时和成本).
 - 单独问 (⌘;): a private side chat with a member that reads the topic; a suggestion posts into the
   topic only when pressed.
 - 实时查看: a member's terminal rebuilt from the run's tool events, 回放 by step, 验收标准, and
