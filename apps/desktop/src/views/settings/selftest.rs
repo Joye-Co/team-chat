@@ -27,7 +27,6 @@ use super::{
     account::AccountPage,
     machines::{MachineForm, open_add_machine},
     members::{BotForm, InviteForm, open_add_bot, open_invite},
-    notifications::NotificationsPage,
     widgets::Status,
 };
 use crate::{
@@ -508,16 +507,12 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
     };
     check("machine_listed", listed);
 
-    // 通知: mute and level of the first group, then put them back.
-    let notifications = cx.update(|cx| view.read(cx).notifications().clone());
+    // A 群's own 提醒 (set from its context menu, `views::nav::notify`):
+    // mute and level of the first group, then put them back.
     if let Some(group) = provider.groups().into_iter().next() {
         let before = provider.group_prefs(&group.id);
         let gid = group.id.clone();
-        cx.update(|cx| {
-            notifications.update(cx, |p, cx| {
-                p.set_muted(&gid, !before.muted, cx);
-            })
-        });
+        let _ = provider.set_group_prefs(&gid, Some(!before.muted), None);
         let muted = wait_for(cx, |_| {
             (provider.group_prefs(&group.id).muted == !before.muted).then_some(())
         })
@@ -527,7 +522,7 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         } else {
             NotifyLevel::None
         };
-        cx.update(|cx| notifications.update(cx, |p, cx| p.set_level(&gid, target, cx)));
+        let _ = provider.set_group_prefs(&gid, None, Some(target));
         let level = wait_for(cx, |_| {
             (provider.group_prefs(&group.id).notify == target).then_some(())
         })
@@ -536,16 +531,7 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
             "group_prefs_change",
             muted.and(level).ok_or("prefs not changed".into()),
         );
-        cx.update(|cx| {
-            notifications.update(cx, |p, cx| {
-                p.set_muted(&gid, before.muted, cx);
-            })
-        });
-        wait_for(cx, |_| {
-            (provider.group_prefs(&group.id).muted == before.muted).then_some(())
-        })
-        .await;
-        cx.update(|cx| notifications.update(cx, |p, cx| p.set_level(&gid, before.notify, cx)));
+        let _ = provider.set_group_prefs(&gid, Some(before.muted), Some(before.notify));
         let restored = wait_for(cx, |_| {
             (provider.group_prefs(&group.id) == before).then_some(())
         })
@@ -558,7 +544,7 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
     let followed = provider.followed_topics();
     if let Some(f) = followed.first() {
         let (g, t) = (f.group_id.clone(), f.topic.id.clone());
-        cx.update(|cx| notifications.update(cx, |p, cx| p.unfollow(&g, &t, cx)));
+        provider.set_topic_following(&g, &t, false);
         let gone = wait_for(cx, |_| {
             (!provider.followed_topics().iter().any(|x| x.topic.id == t)).then_some(())
         })
@@ -730,7 +716,7 @@ pub fn open_notifications_end(
                 cx,
             )
         });
-        // The pane is taller than the window: show its end (按群).
+        // The pane is taller than the window: show its end (勿扰).
         view.read(cx).scroll_to_end();
     });
     Ok(handle)
@@ -901,20 +887,6 @@ pub fn open_machines_loading(
 }
 
 // --- end v14/t4 lists ---
-
-/// 通知 with the 按群设置 sheet open.
-pub fn open_notify_groups(
-    services: Services,
-    _content: gpui::Size<gpui::Pixels>,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    let (handle, view) = open_page(services, Page::Notifications, cx)?;
-    after_fit(handle, cx, move |window, cx| {
-        let page = view.read(cx).notifications().clone();
-        NotificationsPage::open_groups(page, window, cx);
-    });
-    Ok(handle)
-}
 
 /// The longest member name and the longest 岗位 of the seeded members: the
 /// worst values a sheet field can hold.
@@ -1123,13 +1095,6 @@ pub const SCENES: &[Scene] = &[
         open: open_machines_loading,
     },
     // --- end v14/t4 lists ---
-    Scene {
-        name: "settings-notify-groups",
-        about: "Settings: the 按群设置通知 sheet over 通知",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: open_notify_groups,
-    },
 ];
 
 // --- end v12/settings track ---

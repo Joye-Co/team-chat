@@ -49,9 +49,7 @@ use gpui_component::input::TextareaState;
 use crate::{
     app::{Changes, Services},
     copy::{fill, timeline as t},
-    data::{
-        Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
-    },
+    data::{Change, GroupId, Member, Message, MessageId, SessionState, Topic, TopicId},
     theme::{self, Type as _, space},
     ui::{self, Sym},
 };
@@ -72,12 +70,21 @@ const STREAM_REFRESH: Duration = Duration::from_millis(100);
 /// Events for other views.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TimelineEvent {
-    /// The user chose 引用回复 on a message: the composer should quote it
-    /// (`SendRequest::quote_of`).
+    /// The user chose 回复 on a message (the hover toolbar, or R on the
+    /// keyboard row): the composer should quote it (`SendRequest::quote_of`).
     Quote {
         group_id: GroupId,
         topic_id: TopicId,
         message_id: MessageId,
+    },
+    /// The user clicked a sender's avatar: the composer should @ them.
+    Mention { member_id: crate::data::MemberId },
+    /// 重新编辑 on a message I recalled: the composer gets its text back.
+    Reedit {
+        group_id: GroupId,
+        topic_id: TopicId,
+        body: String,
+        mentions: Vec<crate::data::MemberId>,
     },
 }
 
@@ -106,7 +113,9 @@ pub struct TimelineView {
     topic: Option<Topic>,
     members: Vec<Member>,
     me: Option<String>,
-    i_am_owner: bool,
+    /// Text and mentions of the messages I recalled in this run, by id, for
+    /// 重新编辑 (the server keeps none of it).
+    recalled: std::collections::HashMap<MessageId, (String, Vec<crate::data::MemberId>)>,
     typing: Vec<String>,
     /// The window in memory, oldest first.
     messages: Vec<Message>,
@@ -290,7 +299,7 @@ impl TimelineView {
             topic: None,
             members: Vec::new(),
             me: None,
-            i_am_owner: false,
+            recalled: Default::default(),
             typing: Vec::new(),
             messages: Vec::new(),
             has_older: false,
@@ -464,14 +473,8 @@ impl TimelineView {
             return;
         };
         match p.session() {
-            SessionState::SignedIn { me, .. } => {
-                self.i_am_owner = me.level == MemberLevel::Owner;
-                self.me = Some(me.id);
-            }
-            _ => {
-                self.me = None;
-                self.i_am_owner = false;
-            }
+            SessionState::SignedIn { me, .. } => self.me = Some(me.id),
+            _ => self.me = None,
         }
         self.members = p.members();
         self.topic = crate::data::topic_or_chat(p.as_ref(), &g, &tid);
@@ -662,6 +665,69 @@ impl TimelineView {
         });
     }
 
+    /// Asks the composer to @ `member_id` (a click on their avatar).
+    fn mention(&mut self, member_id: &str, cx: &mut Context<Self>) {
+        if self.me.as_deref() == Some(member_id) {
+            return;
+        }
+        cx.emit(TimelineEvent::Mention {
+            member_id: member_id.to_string(),
+        });
+    }
+
+    /// 撤回 one of my messages, keeping its text for 重新编辑.
+    pub(super) fn recall(&mut self, message: &Message, cx: &mut Context<Self>) {
+        if !self.can_recall(message) {
+            return;
+        }
+        self.recalled.insert(
+            message.id.clone(),
+            (message.body.clone(), message.mentions.clone()),
+        );
+        self.services
+            .provider
+            .delete(&message.group_id, &message.id);
+        cx.notify();
+    }
+
+    /// 重新编辑: hands the text of a message I recalled back to the composer.
+    pub(super) fn reedit(&mut self, message: &Message, cx: &mut Context<Self>) {
+        let Some((body, mentions)) = self.recalled.get(&message.id).cloned() else {
+            return;
+        };
+        cx.emit(TimelineEvent::Reedit {
+            group_id: message.group_id.clone(),
+            topic_id: message.topic_id.clone(),
+            body,
+            mentions,
+        });
+    }
+
+    /// The text of a message I recalled in this run can be edited again.
+    pub(super) fn can_reedit(&self, message: &Message) -> bool {
+        message.deleted_at.is_some() && self.recalled.contains_key(&message.id)
+    }
+
+    /// R on the keyboard row: reply to it. Returns true when it did.
+    fn reply_to_keyboard_row(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.keyboard_row {
+            return false;
+        }
+        let Some(message) = self
+            .hovered
+            .as_deref()
+            .and_then(|k| self.row_index(k))
+            .map(|ix| self.messages[ix].clone())
+        else {
+            return false;
+        };
+        let replyable = !message.id.is_empty() && message.deleted_at.is_none();
+        if replyable {
+            self.quote(&message, cx);
+        }
+        replyable
+    }
+
     fn row_index(&self, key: &str) -> Option<usize> {
         self.messages.iter().rposition(|m| model::key(m) == key)
     }
@@ -705,7 +771,9 @@ impl TimelineView {
 /// The key context of the thread.
 const KEY_CONTEXT: &str = "Timeline";
 
-/// ↑↓ in a focused thread (call once at start-up).
+/// ↑↓ in a focused thread (call once at start-up). R on the row they
+/// reached replies to it (`on_key_down` in render, so it never takes an "r"
+/// typed in the in-place editor).
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         gpui::KeyBinding::new("up", crate::views::rail::SelectPrevious, Some(KEY_CONTEXT)),
@@ -934,6 +1002,16 @@ impl Render for TimelineView {
                     this.move_keyboard_row(1, cx)
                 }),
             )
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                let k = &event.keystroke;
+                if k.key == "r"
+                    && !k.modifiers.modified()
+                    && this.key_focus.is_focused(window)
+                    && this.reply_to_keyboard_row(cx)
+                {
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -1204,5 +1282,132 @@ mod keyboard_tests {
         cx.simulate_keystrokes("down");
         cx.run_until_parked();
         assert_eq!(keys(&view, cx).1.as_ref(), all.last(), "↓ comes forward");
+    }
+
+    /// R on the keyboard row emits a quote of it; R without a keyboard row
+    /// does nothing.
+    #[gpui::test]
+    fn r_replies_to_the_keyboard_row(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &TimelineEvent, _| {
+                sink.borrow_mut().push(e.clone())
+            })
+            .detach()
+        });
+        view.update_in(cx, |this, window, cx| window.focus(&this.key_focus, cx));
+        cx.simulate_keystrokes("r");
+        cx.run_until_parked();
+        assert!(events.borrow().is_empty(), "no row picked yet");
+        cx.simulate_keystrokes("up r");
+        cx.run_until_parked();
+        let newest = view.update(cx, |this, _| this.messages.last().cloned().unwrap());
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[TimelineEvent::Quote {
+                group_id: newest.group_id.clone(),
+                topic_id: newest.topic_id.clone(),
+                message_id: newest.id.clone(),
+            }]
+        );
+    }
+
+    /// 撤回: my own messages within 24 hours; never someone else's.
+    #[gpui::test]
+    fn recall_is_mine_within_a_day(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        view.update(cx, |this, _| {
+            let me = this.me.clone().expect("signed in");
+            let mut m = this.messages.last().cloned().expect("a message");
+            let now = crate::selftest::clock::now_ms();
+            m.author_id = me;
+            m.deleted_at = None;
+            m.created_at = now - 60_000;
+            assert!(this.can_recall(&m), "mine, a minute old");
+            m.created_at = now - 25 * 60 * 60 * 1000;
+            assert!(!this.can_recall(&m), "mine, over a day old");
+            m.created_at = now - 60_000;
+            m.author_id = "someone-else".into();
+            assert!(!this.can_recall(&m), "someone else's");
+        });
+    }
+
+    /// 撤回 keeps my text for 重新编辑, which hands it to the composer.
+    #[gpui::test]
+    fn recall_then_reedit_returns_the_text(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &TimelineEvent, _| {
+                sink.borrow_mut().push(e.clone())
+            })
+            .detach()
+        });
+        let mine = view.update(cx, |this, _| {
+            let me = this.me.clone().expect("signed in");
+            this.messages
+                .iter()
+                .rev()
+                .find(|m| m.author_id == me && m.deleted_at.is_none() && !m.id.is_empty())
+                .cloned()
+        });
+        let Some(mut mine) = mine else {
+            panic!("the sample 话题 has a message of mine");
+        };
+        // The sample may be old; recall works on a fresh one.
+        mine.created_at = crate::selftest::clock::now_ms();
+        view.update(cx, |this, cx| {
+            assert!(!this.can_reedit(&mine));
+            this.recall(&mine, cx);
+        });
+        cx.run_until_parked();
+        let mut gone = mine.clone();
+        gone.deleted_at = Some(1);
+        view.update(cx, |this, cx| {
+            assert!(this.can_reedit(&gone));
+            this.reedit(&gone, cx);
+        });
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[TimelineEvent::Reedit {
+                group_id: mine.group_id.clone(),
+                topic_id: mine.topic_id.clone(),
+                body: mine.body.clone(),
+                mentions: mine.mentions.clone(),
+            }]
+        );
     }
 }

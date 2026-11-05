@@ -63,7 +63,7 @@ crate::copy! {
     GROUP_PAGE_SHOW_LESS = "收起",
     GROUP_PAGE_EMPTY_TITLE = "这个群还没有话题",
     GROUP_PAGE_EMPTY_BODY = "开个话题交给群里的成员。在做和做完的话题都会列在这里。",
-    GROUP_PAGE_INFO_LINE = "成员、决定和在用的电脑",
+    GROUP_PAGE_INFO_LINE = "通知、成员、决定和在用的电脑",
     GROUP_PAGE_STATUS_REVIEW = "等你审",
     GROUP_PAGE_STATUS_DECIDE = "等你拍板",
     GROUP_PAGE_STATUS_ANSWER = "等你回复",

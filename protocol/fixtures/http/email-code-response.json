@@ -1,0 +1,8 @@
+{
+  "kind": "EmailCodeResponse",
+  "valid": true,
+  "value": {
+    "sent": true,
+    "expiresAt": 1762128600000
+  }
+}

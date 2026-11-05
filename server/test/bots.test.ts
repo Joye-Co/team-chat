@@ -268,7 +268,8 @@ describe("runner-backed bots", () => {
     expect(card.body).toBe(result);
     expect(card.kind).toBe("card");
     expect(card.cardV2).toMatchObject({ v: 2, intent: "done", title: "修好了：sync 测试不再随机失败。", data: { runId } });
-    expect(card.cardV2.blocks).toContainEqual({ type: "text", id: "result", text: result });
+    // The first line is the title; the text block holds only the lines after it.
+    expect(card.cardV2.blocks).toContainEqual({ type: "text", id: "result", text: result.split("\n").slice(1).join("\n") });
     expect(card.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: "测试：12 个通过", state: "pass", tests: { passed: 12, failed: 0 } });
     // The pull request the result names becomes a topic link.
     const linked = await c.waitEvent((e) => e.type === "topic.linked" && e.data.topicId === topicId);

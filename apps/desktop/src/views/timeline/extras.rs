@@ -167,7 +167,7 @@ impl MessageExtra for QuoteExtra {
         let (name, text) = match quoted {
             Some(q) if q.deleted => (
                 ctx.member(&q.author_id).map(|m| m.name.clone()),
-                t::DELETED.to_string(),
+                t::RECALLED.to_string(),
             ),
             Some(q) => (
                 ctx.member(&q.author_id).map(|m| m.name.clone()),

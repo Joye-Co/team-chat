@@ -1,0 +1,8 @@
+{
+  "kind": "MyEmailResponse",
+  "valid": true,
+  "description": "no sign-in email",
+  "value": {
+    "email": null
+  }
+}

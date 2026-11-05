@@ -134,8 +134,8 @@ pub struct GroupSummary {
     /// Group totals over the per-topic read positions.
     pub unread: u64,
     pub mentions: u64,
-    /// Every topic with unread > 0, mentions > 0 or following. Topics not listed have no
-    /// unread messages and are not followed.
+    /// Every topic with unread > 0, mentions > 0, following or muted. Topics not listed have
+    /// no unread messages and are neither followed nor muted.
     #[serde(
         default,
         deserialize_with = "non_null",

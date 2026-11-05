@@ -24,6 +24,29 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "rail-muted",
+        about: "Rail A with a muted 群, 私聊 and 话题: bell.slash after each name",
+        start: Start::V2,
+        setup: |s, cx| {
+            rail(s, RailMode::Work, cx);
+            let p = &s.provider;
+            let groups = p.groups();
+            if let Some(g) = groups
+                .iter()
+                .find(|g| g.kind == crate::data::GroupKind::Group)
+            {
+                p.set_group_muted(&groups[1.min(groups.len() - 1)].id, true);
+                if let Some(t) = p.topics(&g.id).first() {
+                    p.set_topic_muted(&g.id, &t.id, true);
+                }
+            }
+            if let Some(dm) = groups.iter().find(|g| g.kind == crate::data::GroupKind::Dm) {
+                p.set_group_muted(&dm.id, true);
+            }
+        },
+        open: open_main,
+    },
+    Scene {
         name: "rail-attention",
         about: "Rail B 以「需要我」为中心: 需要你 / 在做 / 完成 · 今天",
         start: Start::V2,
@@ -52,7 +75,7 @@ pub const BEHAVIOR_SCENES: &[Scene] = &[
     },
     Scene {
         name: "rail-group-menu",
-        about: "Right click on a 群 header in the rail: 静音, 重命名群…, 添加成员, 离开群",
+        about: "Right click on a 群 header in the rail: 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
         start: Start::V2,
         setup: |s, cx| rail(s, RailMode::Work, cx),
         open: |s, c, cx| open_with_menu(s, c, true, cx),

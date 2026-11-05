@@ -11,6 +11,10 @@
 //! alert. A pasted login credential (`tc_…`) or a legacy 12-character code
 //! is accepted in the same place and shows as one locked line. The server
 //! URL defaults to the production URL from product.json, then staging.
+//!
+//! `用邮箱登录` in the link row switches the column to the email steps: the
+//! address (`发送验证码`), then the 6-digit code in six slots (3 – 3), which
+//! signs in as soon as all six are typed. `使用邀请码登录` goes back.
 
 use gpui::{
     AppContext, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
@@ -21,7 +25,7 @@ use gpui_component::input::{InputEvent, InputState};
 use crate::{
     app::{Changes, Services},
     copy::{common, login as l, overlays as o},
-    data::{Change, Credential, LoginError, LoginRequest, SessionState},
+    data::{Change, Credential, EmailError, LoginError, LoginRequest, SessionState},
     ui::{
         self, Sym,
         native::{
@@ -52,6 +56,20 @@ pub const CODE_LEN: usize = 8;
 pub const LEGACY_CODE_LEN: usize = 12;
 /// Characters per group of a code (`XXXX-XXXX`).
 const GROUP: usize = 4;
+/// Digits of an email code, in groups of three (`123-456`).
+pub const EMAIL_CODE_LEN: usize = 6;
+const EMAIL_GROUP: usize = 3;
+
+/// Which step the login column shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// The invite code (or a pasted credential).
+    Invite,
+    /// The sign-in email.
+    Email,
+    /// The code sent to the email.
+    EmailCode,
+}
 /// The login window: small, fixed, not resizable.
 pub const WINDOW_SIZE: gpui::Size<gpui::Pixels> = gpui::Size {
     width: px(480.),
@@ -139,6 +157,15 @@ pub struct LoginView {
     services: Services,
     server: Entity<InputState>,
     code: Entity<CodeInput>,
+    email: Entity<InputState>,
+    email_code: Entity<CodeInput>,
+    step: Step,
+    /// The address the last code was sent to.
+    sent_to: String,
+    /// `发送验证码` is waiting for the server.
+    sending: bool,
+    /// The last refusal of an email request (sending a code).
+    email_error: Option<EmailError>,
     /// The server field is open (`更改`, or after an unreachable server).
     server_open: bool,
     /// Drawn inside a main window (signed out there): a sign-out moves to
@@ -159,84 +186,145 @@ impl LoginView {
     pub fn has_focus(&self, window: &Window, cx: &gpui::App) -> bool {
         self.code.read(cx).is_focused(window, cx)
             || self.server.read(cx).focus_handle(cx).is_focused(window)
+            || self.email.read(cx).focus_handle(cx).is_focused(window)
+            || self.email_code.read(cx).is_focused(window, cx)
     }
 
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // The server in use (after 服务器 › 测试服务器, or a sign-out), else
+        // the default one.
+        let start_url = services
+            .provider
+            .current_server()
+            .unwrap_or_else(|| default_server_url().to_string());
         let server = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(l::SERVER_PLACEHOLDER)
-                .default_value(default_server_url())
+                .default_value(start_url)
         });
         let code = cx.new(|cx| CodeInput::new(CODE_LEN, GROUP, window, cx).keep_raw(keeps_whole));
+        let email = cx.new(|cx| InputState::new(window, cx).placeholder(l::EMAIL_PLACEHOLDER));
+        let email_code = cx.new(|cx| CodeInput::new(EMAIL_CODE_LEN, EMAIL_GROUP, window, cx));
         // The first slot has the caret when the view opens.
         code.read(cx).focus_handle(cx).focus(window, cx);
-        let subscriptions = vec![
-            cx.subscribe_in(
-                &code,
-                window,
-                |this, _, event: &CodeInputEvent, window, cx| match event {
-                    CodeInputEvent::Submit => this.submit(window, cx),
-                    CodeInputEvent::Change => {
-                        this.clear_stale_error(cx);
-                        this.sync_code(cx);
-                        cx.notify();
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &server,
-                window,
-                |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::PressEnter { .. } => this.continue_(window, cx),
-                    InputEvent::Change => {
-                        this.clear_stale_error(cx);
-                        cx.notify();
-                    }
-                    _ => {}
-                },
-            ),
-            cx.subscribe_in(
-                &services.hub,
-                window,
-                |this, _, changes: &Changes, window, cx| {
-                    if !changes.any(|c| matches!(c, Change::Session)) {
-                        return;
-                    }
-                    let session = this.services.provider.session();
-                    match &session {
-                        SessionState::SignedOut {
-                            last_error: Some(LoginError::ServerUnreachable),
-                        } => {
-                            this.server_open = true;
-                            this.server.read(cx).focus_handle(cx).focus(window, cx);
+        let subscriptions =
+            vec![
+                cx.subscribe_in(
+                    &code,
+                    window,
+                    |this, _, event: &CodeInputEvent, window, cx| match event {
+                        CodeInputEvent::Submit => this.submit(window, cx),
+                        CodeInputEvent::Change => {
+                            this.clear_stale_error(cx);
+                            this.sync_code(cx);
+                            cx.notify();
                         }
-                        // A wrong code stays in the slots, selected: the
-                        // next character typed starts a new code (§8.3).
-                        SessionState::SignedOut {
-                            last_error: Some(LoginError::BadCredential),
-                        } => this.code.update(cx, |c, cx| c.select_all(window, cx)),
+                    },
+                ),
+                cx.subscribe_in(&email, window, |this, _, event: &InputEvent, window, cx| {
+                    match event {
+                        InputEvent::PressEnter { .. } => this.continue_(window, cx),
+                        InputEvent::Change => {
+                            this.email_error = None;
+                            cx.notify();
+                        }
                         _ => {}
                     }
-                    // A refusal marks the field and says why under it.
-                    if let SessionState::SignedOut {
-                        last_error: Some(e),
-                    } = session
-                    {
-                        this.error = Some(e);
-                        this.error_for = this.field_text(cx);
-                    }
-                    this.sync_code(cx);
-                    if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
-                        move_to_login_window(this.services.clone(), window, cx);
-                    }
-                    cx.notify();
-                },
-            ),
-        ];
+                }),
+                cx.subscribe_in(
+                    &email_code,
+                    window,
+                    |this, _, event: &CodeInputEvent, window, cx| match event {
+                        CodeInputEvent::Submit => this.submit(window, cx),
+                        CodeInputEvent::Change => {
+                            this.clear_stale_error(cx);
+                            this.email_error = None;
+                            this.sync_code(cx);
+                            // All six digits: sign in at once, as a one-time code does.
+                            if this.email_code_digits(cx).len() == EMAIL_CODE_LEN
+                                && this.error.is_none()
+                            {
+                                this.submit(window, cx);
+                            }
+                            cx.notify();
+                        }
+                    },
+                ),
+                cx.subscribe_in(
+                    &server,
+                    window,
+                    |this, _, event: &InputEvent, window, cx| match event {
+                        InputEvent::PressEnter { .. } => this.continue_(window, cx),
+                        InputEvent::Change => {
+                            this.clear_stale_error(cx);
+                            cx.notify();
+                        }
+                        _ => {}
+                    },
+                ),
+                cx.subscribe_in(
+                    &services.hub,
+                    window,
+                    |this, _, changes: &Changes, window, cx| {
+                        if !changes.any(|c| matches!(c, Change::Session)) {
+                            return;
+                        }
+                        let session = this.services.provider.session();
+                        // A switch to a server without a saved session: the
+                        // login window shows that server.
+                        if matches!(session, SessionState::SignedOut { last_error: None })
+                            && let Some(url) = this.services.provider.current_server()
+                            && this.server.read(cx).value().trim() != url
+                        {
+                            this.server
+                                .update(cx, |st, cx| st.set_value(url, window, cx));
+                        }
+                        match &session {
+                            SessionState::SignedOut {
+                                last_error: Some(LoginError::ServerUnreachable),
+                            } => {
+                                this.server_open = true;
+                                this.server.read(cx).focus_handle(cx).focus(window, cx);
+                            }
+                            // A wrong code stays in the slots, selected: the
+                            // next character typed starts a new code (§8.3).
+                            SessionState::SignedOut {
+                                last_error: Some(LoginError::BadCredential),
+                            } => {
+                                if this.step == Step::EmailCode {
+                                    this.email_code.update(cx, |c, cx| c.select_all(window, cx));
+                                } else {
+                                    this.code.update(cx, |c, cx| c.select_all(window, cx));
+                                }
+                            }
+                            _ => {}
+                        }
+                        // A refusal marks the field and says why under it.
+                        if let SessionState::SignedOut {
+                            last_error: Some(e),
+                        } = session
+                        {
+                            this.error = Some(e);
+                            this.error_for = this.field_text(cx);
+                        }
+                        this.sync_code(cx);
+                        if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
+                            move_to_login_window(this.services.clone(), window, cx);
+                        }
+                        cx.notify();
+                    },
+                ),
+            ];
         Self {
             services,
             server,
             code,
+            email,
+            email_code,
+            step: Step::Invite,
+            sent_to: String::new(),
+            sending: false,
+            email_error: None,
             server_open: false,
             embedded: true,
             error: None,
@@ -259,13 +347,95 @@ impl LoginView {
         cx.notify();
     }
 
-    /// The text of the field that is up: the server, or the code.
+    /// The text of the field that is up: the server, the code, or the email code.
     fn field_text(&self, cx: &gpui::App) -> String {
         if self.server_open {
             self.server.read(cx).value().to_string()
+        } else if self.step == Step::EmailCode {
+            self.email_code.read(cx).value(cx).to_string()
         } else {
             self.code.read(cx).value(cx).to_string()
         }
+    }
+
+    /// The digits typed in the email code slots.
+    fn email_code_digits(&self, cx: &gpui::App) -> String {
+        self.email_code
+            .read(cx)
+            .value(cx)
+            .chars()
+            .filter(char::is_ascii_digit)
+            .take(EMAIL_CODE_LEN)
+            .collect()
+    }
+
+    /// The address typed, trimmed and in lower case.
+    fn email_text(&self, cx: &gpui::App) -> String {
+        self.email.read(cx).value().trim().to_lowercase()
+    }
+
+    /// Shows `step` with the focus in its field.
+    pub fn go_to(&mut self, step: Step, window: &mut Window, cx: &mut Context<Self>) {
+        self.step = step;
+        self.server_open = false;
+        self.error = None;
+        self.email_error = None;
+        match step {
+            Step::Invite => self.code.read(cx).focus_handle(cx).focus(window, cx),
+            Step::Email => self.email.update(cx, |st, cx| {
+                let end = st.value().len();
+                st.focus(window, cx);
+                st.set_selected_range(0..end, cx);
+            }),
+            Step::EmailCode => {
+                self.email_code
+                    .update(cx, |c, cx| c.set_value("", window, cx));
+                let code = self.email_code.clone();
+                code.read(cx).focus_handle(cx).focus(window, cx);
+            }
+        }
+        self.sync_code(cx);
+        cx.notify();
+    }
+
+    /// `发送验证码` (and `重新发送`): asks the server for a code at the address.
+    fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sending {
+            return;
+        }
+        let email = self.email_text(cx);
+        if !chat_core::proto::is_email_address(&email) {
+            self.email_error = Some(EmailError::BadAddress);
+            cx.notify();
+            return;
+        }
+        let server_url = self.server.read(cx).value().trim().to_string();
+        if server_url.is_empty() {
+            self.open_server_field(window, cx);
+            return;
+        }
+        self.sending = true;
+        self.email_error = None;
+        let reply = self
+            .services
+            .provider
+            .request_sign_in_code(&server_url, &email);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(EmailError::Other));
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.sending = false;
+                match result {
+                    Ok(()) => {
+                        this.sent_to = email;
+                        this.go_to(Step::EmailCode, window, cx);
+                    }
+                    Err(e) => this.email_error = Some(e),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     /// An edit of the field the refusal was about takes the error away.
@@ -279,10 +449,16 @@ impl LoginView {
     fn sync_code(&mut self, cx: &mut Context<Self>) {
         let locked = self.input(cx).locked();
         let error = self.error.is_some() && !self.server_open;
+        let (invite_error, email_error) = match self.step {
+            Step::EmailCode => (false, error),
+            _ => (error, false),
+        };
         self.code.update(cx, |c, cx| {
             c.set_locked(locked, cx);
-            c.set_error(error, cx);
+            c.set_error(invite_error, cx);
         });
+        self.email_code
+            .update(cx, |c, cx| c.set_error(email_error, cx));
     }
 
     /// Draws the signing-in state with `code` typed, for a screenshot scene.
@@ -323,7 +499,21 @@ impl LoginView {
             return;
         }
         let server_url = self.server.read(cx).value().trim().to_string();
-        let Some(credential) = self.input(cx).credential() else {
+        let credential = match self.step {
+            Step::Invite => self.input(cx).credential(),
+            Step::Email => {
+                self.send_email_code(window, cx);
+                return;
+            }
+            Step::EmailCode => {
+                let code = self.email_code_digits(cx);
+                (code.len() == EMAIL_CODE_LEN).then(|| Credential::EmailCode {
+                    email: self.sent_to.clone(),
+                    code,
+                })
+            }
+        };
+        let Some(credential) = credential else {
             return;
         };
         // No server: the server step, whose 继续 is off until it has one.
@@ -344,6 +534,33 @@ impl LoginView {
         cx.notify();
     }
 
+    /// The email steps for a screenshot scene: the address typed, and with
+    /// `code` the code step after a code was sent, with those digits typed
+    /// (`000000` is refused).
+    pub fn preview_email(
+        &mut self,
+        email: &str,
+        code: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.email
+            .update(cx, |st, cx| st.set_value(email.to_string(), window, cx));
+        match code {
+            None => self.go_to(Step::Email, window, cx),
+            Some(code) => {
+                self.sent_to = email.to_string();
+                self.go_to(Step::EmailCode, window, cx);
+                self.email_code
+                    .update(cx, |c, cx| c.set_value(code, window, cx));
+                if self.email_code_digits(cx).len() == EMAIL_CODE_LEN {
+                    self.submit(window, cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
     /// Sets a custom server, for a screenshot scene.
     pub fn preview_server(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.server
@@ -360,7 +577,8 @@ impl LoginView {
     /// 继续: on the code step it joins; on the server step it goes back to
     /// the code, or joins when the code is complete.
     fn continue_(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.server_open && self.input(cx).credential().is_none() {
+        if self.server_open && (self.step != Step::Invite || self.input(cx).credential().is_none())
+        {
             self.close_server_field(window, cx);
         } else {
             self.submit(window, cx);
@@ -368,10 +586,8 @@ impl LoginView {
     }
 
     fn close_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.server_open = false;
-        self.code.read(cx).focus_handle(cx).focus(window, cx);
-        self.sync_code(cx);
-        cx.notify();
+        let step = self.step;
+        self.go_to(step, window, cx);
     }
 
     /// The link row under 继续: on the code step `使用其他服务器…`, or a
@@ -394,10 +610,43 @@ impl LoginView {
                 .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
                 .into_any_element();
         }
+        // The email steps: back to the invite code, and on the code step
+        // 重新发送 and 换一个邮箱.
+        match self.step {
+            Step::Invite => {}
+            Step::Email => {
+                return link("login-use-invite", l::USE_INVITE, cx)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.go_to(Step::Invite, window, cx)),
+                    )
+                    .into_any_element();
+            }
+            Step::EmailCode => {
+                return div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(space::S16)
+                    .child(link("login-email-resend", l::EMAIL_RESEND, cx).on_click(
+                        cx.listener(|this, _, window, cx| this.send_email_code(window, cx)),
+                    ))
+                    .child(link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
+                        cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
+                    ))
+                    .into_any_element();
+            }
+        }
         let open = cx.listener(|this, _, window, cx| this.open_server_field(window, cx));
+        let email = link("login-email", l::EMAIL_SIGN_IN, cx)
+            .on_click(cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)));
         match custom {
-            None => link("login-server-other", l::OTHER_SERVER, cx)
-                .on_click(open)
+            None => div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(space::S16)
+                .child(email)
+                .child(link("login-server-other", l::OTHER_SERVER, cx).on_click(open))
                 .into_any_element(),
             // A long host is cut in the middle (both ends name it), with the
             // full host in a tooltip (2.21).
@@ -426,6 +675,7 @@ impl LoginView {
                         .text_color(k.label)
                         .on_click(open),
                 )
+                .child(div().ml(space::S12).child(email))
                 .into_any_element(),
         }
     }
@@ -436,15 +686,31 @@ impl Render for LoginView {
         use crate::ui::native::tokens::space;
         let k = native_colors(cx);
         let session = self.services.provider.session();
-        let signing_in = self.preview_busy || matches!(session, SessionState::SigningIn);
-        let complete = self.input(cx).credential().is_some();
+        let signing_in =
+            self.preview_busy || self.sending || matches!(session, SessionState::SigningIn);
+        let step = self.step;
+        let complete = match step {
+            Step::Invite => self.input(cx).credential().is_some(),
+            Step::Email => !self.email_text(cx).is_empty(),
+            Step::EmailCode => self.email_code_digits(cx).len() == EMAIL_CODE_LEN,
+        };
         let server_url = self.server.read(cx).value().to_string();
         let custom = (server_url.trim().trim_end_matches('/')
             != default_server_url().trim_end_matches('/'))
         .then(|| SharedString::from(server_host(&server_url).to_string()));
         // One field at a time: the server, or the invite code.
         let server_step = self.server_open;
-        let error = self.error.filter(|_| !signing_in);
+        let error_text: Option<&'static str> = if signing_in {
+            None
+        } else if let Some(e) = self.email_error.filter(|_| !server_step) {
+            Some(email_error_text(e))
+        } else {
+            self.error.map(|e| match (step, e) {
+                (Step::EmailCode, LoginError::BadCredential) => l::EMAIL_ERROR_WRONG_CODE,
+                _ => error_text(e),
+            })
+        };
+        let error = error_text;
         let field: gpui::AnyElement = if server_step {
             NativeTextField::new("login-server", &self.server)
                 .size(FieldSize::Large)
@@ -452,13 +718,21 @@ impl Render for LoginView {
                 .error(error.is_some())
                 .into_any_element()
         } else {
-            self.code.clone().into_any_element()
+            match step {
+                Step::Invite => self.code.clone().into_any_element(),
+                Step::Email => NativeTextField::new("login-email-field", &self.email)
+                    .size(FieldSize::Large)
+                    .full_width()
+                    .error(error.is_some())
+                    .into_any_element(),
+                Step::EmailCode => self.email_code.clone().into_any_element(),
+            }
         };
         // Under the field: the error (owner decision v15: neutral 12 text
         // after a 16 destructive icon, as in every sheet footer). The slot
         // keeps its height, so nothing moves.
-        let under = error.map(|e| {
-            crate::ui::native::sheet::sheet_status_error(error_text(e), cx)
+        let under = error.map(|text| {
+            crate::ui::native::sheet::sheet_status_error(text, cx)
                 .id("login-error")
                 .max_w_full()
         });
@@ -469,10 +743,11 @@ impl Render for LoginView {
         };
         let go = push_button(
             "login",
-            if signing_in {
-                l::SIGNING_IN
-            } else {
-                o::LOGIN_CONTINUE
+            match (signing_in, step) {
+                (true, Step::Email) | (true, Step::EmailCode) if self.sending => l::EMAIL_SENDING,
+                (true, _) => l::SIGNING_IN,
+                (false, Step::Email) if !server_step => l::EMAIL_SEND,
+                (false, _) => o::LOGIN_CONTINUE,
             },
             PushStyle::Default,
             PushSize::Large,
@@ -487,10 +762,21 @@ impl Render for LoginView {
         )
         .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
         let link = self.render_link_row(server_step, custom.filter(|_| !server_step), cx);
-        let (title, description) = if server_step {
-            (l::SERVER_TITLE, l::SERVER_LEAD)
+        let (title, description): (&'static str, SharedString) = if server_step {
+            (l::SERVER_TITLE, l::SERVER_LEAD.into())
         } else {
-            (l::WELCOME, l::LEAD)
+            match step {
+                Step::Invite => (l::WELCOME, l::LEAD.into()),
+                Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into()),
+                Step::EmailCode => (
+                    l::EMAIL_CODE_TITLE,
+                    crate::copy::fill(
+                        l::EMAIL_CODE_LEAD,
+                        &[("email", &short_email(&self.sent_to))],
+                    )
+                    .into(),
+                ),
+            }
         };
         let column = div()
             .w(column_width())
@@ -565,6 +851,31 @@ impl Render for LoginView {
                     .top_0()
                     .left_0(),
             )
+    }
+}
+
+/// A long address cut in the middle (both ends name it), so the lead stays
+/// at two lines.
+fn short_email(email: &str) -> String {
+    const MAX: usize = 32;
+    let chars: Vec<char> = email.chars().collect();
+    if chars.len() <= MAX {
+        return email.to_string();
+    }
+    let head: String = chars[..14].iter().collect();
+    let tail: String = chars[chars.len() - 17..].iter().collect();
+    format!("{head}…{tail}")
+}
+
+/// The text of a refused email request.
+fn email_error_text(e: EmailError) -> &'static str {
+    match e {
+        EmailError::BadAddress => l::EMAIL_ERROR_BAD_ADDRESS,
+        EmailError::WrongCode => l::EMAIL_ERROR_WRONG_CODE,
+        EmailError::RateLimited => l::EMAIL_ERROR_RATE,
+        EmailError::NotSetUp => l::EMAIL_ERROR_NOT_SET_UP,
+        EmailError::Offline => l::ERROR_UNREACHABLE,
+        EmailError::Taken | EmailError::Other => l::ERROR_OTHER,
     }
 }
 
@@ -751,6 +1062,14 @@ mod tests {
         assert!(!keeps_whole("K7QM2X9AB"));
         assert!(keeps_whole("K7QM-2X9A-BC3D"));
         assert!(keeps_whole("tc_abcdefghijklmnop"));
+    }
+
+    #[test]
+    fn a_long_email_is_cut_in_the_middle() {
+        assert_eq!(short_email("joye@example.com"), "joye@example.com");
+        let cut = short_email("huang.deshiou.product-design@northwind-holdings.example.com");
+        assert_eq!(cut.chars().count(), 32);
+        assert!(cut.starts_with("huang.deshiou.") && cut.ends_with(".example.com"));
     }
 
     #[test]

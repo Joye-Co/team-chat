@@ -9,6 +9,7 @@
 pub mod ask_scenes;
 pub mod dialogs;
 pub mod menus;
+pub mod notify;
 pub mod rename;
 pub mod selftest;
 #[cfg(target_os = "macos")]
@@ -111,8 +112,12 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         if changes.any(|c| matches!(c, Change::Groups)) {
             open_pending(cx);
         }
+        if changes.any(|c| matches!(c, Change::Session)) {
+            menus::refresh_server_menu(cx);
+        }
     })
     .detach();
+    menus::refresh_server_menu(cx);
 
     cx.on_action(|_: &QuickSwitch, cx| {
         in_main_window(cx, |window, cx| {

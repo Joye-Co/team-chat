@@ -1,10 +1,11 @@
-// Notifications, topic follow, group prefs and card presses; members admin, audit and HTTP send
+// Notifications, topic follow and mute, group prefs and card presses; members admin, audit and HTTP send
 // live in the sibling files. Registered at import time from src/features.ts.
 import {
   type CardActionFrame,
   type Event,
   type GroupSummary,
   type TopicFollowFrame,
+  type TopicMuteFrame,
   type TopicState,
   UpdateGroupPrefsRequest,
 } from "@chat/protocol";
@@ -14,6 +15,7 @@ import { getGroup, isGroupMember } from "../core/db";
 import { gatewayStub, roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import {
+  type FrameContext,
   registerEventDecorator,
   registerFrameHandler,
   registerRoomRpc,
@@ -25,8 +27,10 @@ import {
   getPrefs,
   groupReadState,
   isFollowing,
+  isTopicMuted,
   setFollowing,
   setPrefs,
+  setTopicMuted,
   topicState,
 } from "../core/topicstate";
 import { NOTIFY_EVENT_TYPES, decideNotifyEvent, eventTopicId } from "./rules";
@@ -44,7 +48,8 @@ registerEventDecorator((event, memberId, c) => {
   return decideNotifyEvent({
     event: event as Event,
     memberId,
-    muted: prefs.muted,
+    // A muted topic notifies like a muted group: mentions only.
+    muted: prefs.muted || (topicId ? isTopicMuted(c.sql, memberId, topicId) : false),
     level: prefs.notify,
     following: topicId ? isFollowing(c.sql, memberId, topicId) : false,
     waitingAdded: (c.hints?.waitingAdded as string[] | undefined) ?? [],
@@ -52,23 +57,39 @@ registerEventDecorator((event, memberId, c) => {
 });
 
 // ---------------------------------------------------------------------------
-// topic.follow
+// topic.follow, topic.mute
 // ---------------------------------------------------------------------------
 
 function lastSeq(sql: SqlStorage): number {
   return sql.exec<{ s: number | null }>("SELECT max(seq) AS s FROM events").one().s ?? 0;
 }
 
-registerRoomRpc("topic.follow", (room, actor, args) => {
-  const { topicId, follow, groupRead } = args as { topicId: string; follow: boolean; groupRead: number };
+/** Sets one per-member topic flag and returns the new totals and that topic's state. */
+function setTopicFlag(
+  room: { sql: SqlStorage },
+  actor: { id: string } | null,
+  { topicId, on, groupRead }: { topicId: string; on: boolean; groupRead: number },
+  set: (sql: SqlStorage, memberId: string, topicId: string, on: boolean) => void,
+): ReadTotals & { state: TopicState } {
   if (!actor) throw new ApiError("internal", "actor required");
   if (room.sql.exec("SELECT 1 FROM topics WHERE id = ?", topicId).toArray().length === 0) {
     throw new ApiError("not_found", "topic not found");
   }
   const read = Math.min(groupRead, lastSeq(room.sql));
-  setFollowing(room.sql, actor.id, topicId, follow);
+  set(room.sql, actor.id, topicId, on);
   const { topics: _all, ...totals } = groupReadState(room.sql, actor.id, read);
   return { ...totals, state: topicState(room.sql, actor.id, topicId, read) };
+}
+
+registerRoomRpc("topic.follow", (room, actor, args) => {
+  const a = args as { topicId: string; follow: boolean; groupRead: number };
+  return setTopicFlag(room, actor, { topicId: a.topicId, on: a.follow, groupRead: a.groupRead }, setFollowing);
+});
+
+// topic.mute: muting does not change following, and auto-follow does not unmute.
+registerRoomRpc("topic.mute", (room, actor, args) => {
+  const a = args as { topicId: string; muted: boolean; groupRead: number };
+  return setTopicFlag(room, actor, { topicId: a.topicId, on: a.muted, groupRead: a.groupRead }, setTopicMuted);
 });
 
 /** The member's group read cursor, from the gateway's own SQLite (core table `cursors`). */
@@ -76,27 +97,40 @@ function groupCursor(sql: SqlStorage, groupId: string): number {
   return sql.exec<{ seq: number }>("SELECT seq FROM cursors WHERE group_id = ?", groupId).toArray()[0]?.seq ?? 0;
 }
 
+/** Runs a topic flag change in the room and sends the new state to every connection of mine. */
+async function changeTopicFlag(
+  c: FrameContext,
+  rpc: "topic.follow" | "topic.mute",
+  frame: { groupId: string; topicId: string },
+  args: Record<string, boolean>,
+): Promise<TopicState> {
+  await c.requireMember(frame.groupId);
+  const r = unwrap(
+    await roomStub(c.env, frame.groupId).rpc(frame.groupId, rpc, c.actor, {
+      topicId: frame.topicId,
+      ...args,
+      groupRead: groupCursor(c.sql, frame.groupId),
+    }),
+  ) as ReadTotals & { state: TopicState };
+  c.broadcast({
+    t: "reads",
+    groupId: frame.groupId,
+    readSeq: r.readSeq,
+    unread: r.unread,
+    mentions: r.mentions,
+    topics: [r.state],
+  });
+  return r.state;
+}
+
 registerFrameHandler<TopicFollowFrame>("topic.follow", {
   rate: "write",
-  async handle(frame, c) {
-    await c.requireMember(frame.groupId);
-    const r = unwrap(
-      await roomStub(c.env, frame.groupId).rpc(frame.groupId, "topic.follow", c.actor, {
-        topicId: frame.topicId,
-        follow: frame.follow,
-        groupRead: groupCursor(c.sql, frame.groupId),
-      }),
-    ) as ReadTotals & { state: TopicState };
-    c.broadcast({
-      t: "reads",
-      groupId: frame.groupId,
-      readSeq: r.readSeq,
-      unread: r.unread,
-      mentions: r.mentions,
-      topics: [r.state],
-    });
-    return r.state;
-  },
+  handle: (frame, c) => changeTopicFlag(c, "topic.follow", frame, { follow: frame.follow }),
+});
+
+registerFrameHandler<TopicMuteFrame>("topic.mute", {
+  rate: "write",
+  handle: (frame, c) => changeTopicFlag(c, "topic.mute", frame, { muted: frame.muted }),
 });
 
 // ---------------------------------------------------------------------------

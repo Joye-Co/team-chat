@@ -1013,6 +1013,7 @@ impl ChatProvider for FakeProvider {
                 "WRONG-CODE-0000" | "0000-0000" | "0000-0000-0000"
             ),
             Credential::Token(token) => token.len() > 3,
+            Credential::EmailCode { code, .. } => code != "000000",
         };
         // A `.invalid` host (RFC 2606) never answers: the login-unreachable scene.
         let unreachable = request.server_url.contains(".invalid");
@@ -1360,7 +1361,7 @@ impl ChatProvider for FakeProvider {
             }
             None
         });
-        // inc-refs: references to the deleted message show 原消息已删除.
+        // inc-refs: references to the deleted message show 原消息已撤回.
         if topic.is_some() {
             self.with(|s| {
                 let mut all: Vec<&mut Message> =
@@ -1922,6 +1923,27 @@ impl ChatProvider for FakeProvider {
     }
     // --- end settings-backend track ---
 
+    // Email sign-in: every address gets a code; 000000 is the wrong one.
+    fn request_sign_in_code(&self, _server_url: &str, _email: &str) -> crate::data::EmailReply<()> {
+        crate::data::email_reply_now(Ok(()))
+    }
+    fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
+        crate::data::email_reply_now(Ok(Some("joye@example.com".into())))
+    }
+    fn add_email_code(&self, _email: &str) -> crate::data::EmailReply<()> {
+        crate::data::email_reply_now(Ok(()))
+    }
+    fn verify_email(&self, email: &str, code: &str) -> crate::data::EmailReply<String> {
+        crate::data::email_reply_now(if code == "000000" {
+            Err(crate::data::EmailError::WrongCode)
+        } else {
+            Ok(email.to_string())
+        })
+    }
+    fn remove_email(&self) -> crate::data::EmailReply<()> {
+        crate::data::email_reply_now(Ok(()))
+    }
+
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_fake(name, labels)
     }
@@ -1945,6 +1967,14 @@ impl ChatProvider for FakeProvider {
 
     fn set_topic_following(&self, group_id: &str, topic_id: &str, follow: bool) {
         self.set_topic_following_fake(group_id, topic_id, follow);
+    }
+
+    fn topic_muted(&self, group_id: &str, topic_id: &str) -> bool {
+        self.topic_muted_fake(group_id, topic_id)
+    }
+
+    fn set_topic_muted(&self, group_id: &str, topic_id: &str, muted: bool) {
+        self.set_topic_muted_fake(group_id, topic_id, muted);
     }
 
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {

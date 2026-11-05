@@ -50,9 +50,8 @@ impl Fit {
             .clamp(f32::from(MIN_HEIGHT), f32::from(MAX_HEIGHT))
             .round();
         let now = f32::from(window.viewport_size().height);
-        if (target - now).abs() < 1.
-            || (target - self.applied.get()).abs() < 1. && self.fitted.get()
-        {
+        let first = !self.fitted.get();
+        if !first && ((target - now).abs() < 1. || (target - self.applied.get()).abs() < 1.) {
             return;
         }
         self.applied.set(target);
@@ -66,37 +65,88 @@ impl Fit {
             }) else {
                 return;
             };
-            set_height(ns_window, now, px(target), animate);
+            set_height(ns_window, now, px(target), animate, first);
+            // The window was transparent until it had its own height, so it
+            // never shows the opening size and then jumps (the flicker).
+            if first {
+                reveal(ns_window);
+            }
         })
         .detach();
     }
 }
 
 /// Changes the content height of a window from `now` to `height`, keeping
-/// its top edge where it is.
+/// its top edge where it is, and always inside the screen's visible frame
+/// (above the Dock, under the menu bar): a window that would run past the
+/// bottom moves up, one taller than the screen gets the screen's height. The
+/// `first` height centers the window on the screen instead.
 #[cfg(target_os = "macos")]
-fn set_height(ns_window: NsWindow, now: Pixels, height: Pixels, animate: bool) {
-    use objc2::msg_send;
+fn set_height(ns_window: NsWindow, now: Pixels, height: Pixels, animate: bool, first: bool) {
+    use objc2::{msg_send, runtime::AnyObject};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
     let delta = f64::from(f32::from(height)) - f64::from(f32::from(now));
-    if delta.abs() < 1. {
-        return;
-    }
-    // SAFETY: a live NSWindow on the main thread; `frame` is a getter and
-    // `setFrame:display:animate:` a setter.
+    // SAFETY: a live NSWindow on the main thread; `frame`, `screen` and
+    // `visibleFrame` are getters and `setFrame:display:animate:` a setter.
     unsafe {
         let frame: NSRect = msg_send![ns_window, frame];
-        let next = NSRect::new(
+        let mut next = NSRect::new(
             NSPoint::new(frame.origin.x, frame.origin.y - delta),
             NSSize::new(frame.size.width, frame.size.height + delta),
         );
+        let screen: *mut AnyObject = msg_send![ns_window, screen];
+        if !screen.is_null() {
+            let visible: NSRect = msg_send![screen, visibleFrame];
+            next.size.height = next.size.height.min(visible.size.height);
+            let top = visible.origin.y + visible.size.height;
+            if first {
+                next.origin.y = visible.origin.y + (visible.size.height - next.size.height) / 2.;
+            }
+            if next.origin.y < visible.origin.y {
+                next.origin.y = visible.origin.y;
+            }
+            if next.origin.y + next.size.height > top {
+                next.origin.y = top - next.size.height;
+            }
+        }
+        if (next.size.height - frame.size.height).abs() < 1.
+            && (next.origin.y - frame.origin.y).abs() < 1.
+        {
+            return;
+        }
         let _: () = msg_send![ns_window, setFrame: next, display: true, animate: animate];
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn set_height(_: NsWindow, _: Pixels, _: Pixels, _: bool) {}
+fn set_height(_: NsWindow, _: Pixels, _: Pixels, _: bool, _: bool) {}
+
+/// Keeps a new window transparent until its first height is set.
+#[cfg(target_os = "macos")]
+pub fn hide_until_fitted(window: &Window) {
+    let Some(ns_window) = ns_window(window) else {
+        return;
+    };
+    // SAFETY: a live NSWindow on the main thread; `setAlphaValue:` a setter.
+    unsafe {
+        let _: () = objc2::msg_send![ns_window, setAlphaValue: 0.0f64];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn hide_until_fitted(_window: &Window) {}
+
+#[cfg(target_os = "macos")]
+fn reveal(ns_window: NsWindow) {
+    // SAFETY: a live NSWindow on the main thread; `setAlphaValue:` a setter.
+    unsafe {
+        let _: () = objc2::msg_send![ns_window, setAlphaValue: 1.0f64];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reveal(_: NsWindow) {}
 
 /// Dims the minimize and zoom buttons (§8): the window has one size.
 #[cfg(target_os = "macos")]

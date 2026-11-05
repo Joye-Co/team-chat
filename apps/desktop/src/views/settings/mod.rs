@@ -200,6 +200,7 @@ impl SettingsView {
             _subscriptions: vec![theme::follow_system(window, cx)],
         };
         window_fit::dim_window_buttons(window);
+        window_fit::hide_until_fitted(window);
         this.show(page, window, cx);
         this
     }
@@ -219,7 +220,10 @@ impl SettingsView {
         prefs::update(|p| p.last_pane = Some(page.slug().to_string()));
         match page {
             Page::Machines => self.machines.update(cx, |m, cx| m.refresh(cx)),
-            Page::Account => self.account.update(cx, |a, cx| a.refresh_devices(cx)),
+            Page::Account => self.account.update(cx, |a, cx| {
+                a.refresh_devices(cx);
+                a.refresh_email(cx);
+            }),
             Page::Notifications => self.notifications.update(cx, |n, cx| n.refresh(cx)),
             Page::Members => self.members.update(cx, |m, cx| m.refresh_rules(window, cx)),
             _ => {}
@@ -428,6 +432,20 @@ pub fn open(services: Services, cx: &mut App) {
     if let Ok((handle, _)) = open_window(services, last_page(), true, cx) {
         cx.set_global(SettingsWindow(Some(handle)));
     }
+}
+
+/// The sidebar's settings entry: opens the settings window, or closes it
+/// when it is open (a second click on the same button closes it).
+pub fn toggle(services: Services, cx: &mut App) {
+    if let Some(handle) = cx.try_global::<SettingsWindow>().and_then(|w| w.0)
+        && handle
+            .update(cx, |_, window, _| window.remove_window())
+            .is_ok()
+    {
+        cx.set_global(SettingsWindow(None));
+        return;
+    }
+    open(services, cx);
 }
 
 /// v12/fx-overlays: opens the settings window at `page` (the app menu's

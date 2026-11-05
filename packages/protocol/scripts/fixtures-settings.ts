@@ -79,4 +79,13 @@ export function addSettingsFixtures({ ok, bad, T0, ID, base }: SettingsCtx) {
     devices: [device, { id: "01JBX0TOKEN0000000000000AJ", name: "", createdAt: T0 - 1000, lastUsedAt: null, current: false }],
   });
   bad("http/device-missing-current.json", "Device", { id: device.id, name: "x", createdAt: T0, lastUsedAt: null }, "missing current");
+
+  ok("http/email-code-request.json", "EmailCodeRequest", { email: "joye@example.com" });
+  bad("http/email-code-request-bad.json", "EmailCodeRequest", { email: "joye at example.com" }, "not an email address");
+  ok("http/email-code-response.json", "EmailCodeResponse", { sent: true, expiresAt: T0 + 600_000 });
+  ok("http/email-sign-in-request.json", "EmailSignInRequest", { email: "joye@example.com", code: "042817", deviceName: "Joye 的 MacBook Pro" });
+  bad("http/email-sign-in-request-short-code.json", "EmailSignInRequest", { email: "joye@example.com", code: "4281", deviceName: "Mac" }, "code is six digits");
+  ok("http/verify-email-request.json", "VerifyEmailRequest", { email: "joye@example.com", code: "042817" });
+  ok("http/my-email-response.json", "MyEmailResponse", { email: "joye@example.com" });
+  ok("http/my-email-response-none.json", "MyEmailResponse", { email: null }, "no sign-in email");
 }

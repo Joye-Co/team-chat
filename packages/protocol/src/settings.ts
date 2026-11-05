@@ -228,5 +228,44 @@ export type Device = z.infer<typeof Device>;
 export const DevicesResponse = z.object({ devices: z.array(Device) });
 export type DevicesResponse = z.infer<typeof DevicesResponse>;
 
+// ---------------------------------------------------------------------------
+// Email sign-in
+// ---------------------------------------------------------------------------
+
+/** An email address as members type it: trimmed and compared in lower case, at most 254 chars. */
+export const EmailAddress = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "not an email address");
+export type EmailAddress = z.infer<typeof EmailAddress>;
+
+/** The 6 digits of an email code. */
+export const EmailCode = z.string().regex(/^[0-9]{6}$/, "six digits");
+
+/** `POST /v1/auth/email/code` (sign in) and `POST /v1/me/email/code` (add my email). */
+export const EmailCodeRequest = z.object({ email: EmailAddress });
+export type EmailCodeRequest = z.infer<typeof EmailCodeRequest>;
+/** The code was sent, if the address may get one; it stops working at `expiresAt`. */
+export const EmailCodeResponse = z.object({ sent: z.literal(true), expiresAt: Millis });
+export type EmailCodeResponse = z.infer<typeof EmailCodeResponse>;
+
+/** `POST /v1/auth/email/sign-in`; answers `RedeemResponse` (a new token for that member). */
+export const EmailSignInRequest = z.object({
+  email: EmailAddress,
+  code: EmailCode,
+  deviceName: z.string().min(1).max(128),
+});
+export type EmailSignInRequest = z.infer<typeof EmailSignInRequest>;
+
+/** `POST /v1/me/email`: confirms the code sent to `email` and makes it my sign-in email. */
+export const VerifyEmailRequest = z.object({ email: EmailAddress, code: EmailCode });
+export type VerifyEmailRequest = z.infer<typeof VerifyEmailRequest>;
+
+/** `GET`, `POST` and `DELETE /v1/me/email`: my sign-in email, `null` when I have none. */
+export const MyEmailResponse = z.object({ email: EmailAddress.nullable() });
+export type MyEmailResponse = z.infer<typeof MyEmailResponse>;
+
 /** `hello.features` value of a client that handles `digest` and `notifyEvent`. */
 export const SETTINGS_FEATURE = "settings/1";

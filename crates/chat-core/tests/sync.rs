@@ -514,6 +514,31 @@ async fn start_topic_edit_delete_and_refused_update() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mute_and_unmute_a_topic() {
+    let server = server_with_group().await;
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    h.client.start_topic(G1, None, "Muted", vec![]).unwrap();
+    next_update(&mut h.updates, "sent", |u| {
+        matches!(u, ClientUpdate::Sent { .. })
+    })
+    .await;
+    let tid = topic_of(&h);
+    assert!(!h.client.topics(G1, 10).unwrap()[0].muted);
+    h.client.mute_topic(&tid, true).unwrap();
+    until("muted", || h.client.topics(G1, 10).unwrap()[0].muted).await;
+    let sent = h.server.with(|s| s.frames_of("topic.mute"));
+    assert_eq!(sent[0]["muted"], true);
+    assert_eq!(sent[0]["topicId"], tid.as_str());
+    h.client.mute_topic(&tid, false).unwrap();
+    until("unmuted", || !h.client.topics(G1, 10).unwrap()[0].muted).await;
+    assert!(h.client.store().outbox_all().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn typing_presence_and_streaming_text() {
     let server = server_with_group().await;
     let tid = server.with(|s| {

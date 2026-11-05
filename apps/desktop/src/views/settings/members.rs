@@ -1707,11 +1707,28 @@ impl Render for BotForm {
                 .text_color(k.secondary)
                 .child(text)
         };
-        let mut body = div().w_full().flex().flex_col().gap(tokens::space::S16).child(
-            sheet_form()
-                .child(field_row(s::NAME, "member-name", &self.name, name_err.is_some(), cx))
-                .child(field_row(s::ROLE, "member-role", &self.role, role_err.is_some(), cx)),
-        );
+        let mut body = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(tokens::space::S16)
+            .child(
+                sheet_form()
+                    .child(field_row(
+                        s::NAME,
+                        "member-name",
+                        &self.name,
+                        name_err.is_some(),
+                        cx,
+                    ))
+                    .child(field_row(
+                        s::ROLE,
+                        "member-role",
+                        &self.role,
+                        role_err.is_some(),
+                        cx,
+                    )),
+            );
         match &load {
             Some(RunnerLoad::Loading) => {
                 body = body.child(widgets::list_loading("bot-runner-loading", 2, false, cx));
@@ -1745,24 +1762,26 @@ impl Render for BotForm {
                     .flex()
                     .flex_col()
                     .child(section(s::BOT_MODE))
-                    .child(div().flex().child(
-                        Segmented::new(
-                            "bot-mode",
-                            [
-                                Segment::Label(s::BOT_MODE_RUNNER.into()),
-                                Segment::Label(s::BOT_MODE_EXTERNAL.into()),
-                            ],
-                        )
-                        .selected(if self.runner { 0 } else { 1 })
-                        .disabled(busy)
-                        .on_change(move |ix, _, cx| {
-                            mode_page.update(cx, |f, cx| {
-                                f.runner = ix == 0;
-                                f.status = Status::Idle;
-                                cx.notify();
-                            })
-                        }),
-                    ))
+                    .child(
+                        div().flex().child(
+                            Segmented::new(
+                                "bot-mode",
+                                [
+                                    Segment::Label(s::BOT_MODE_RUNNER.into()),
+                                    Segment::Label(s::BOT_MODE_EXTERNAL.into()),
+                                ],
+                            )
+                            .selected(if self.runner { 0 } else { 1 })
+                            .disabled(busy)
+                            .on_change(move |ix, _, cx| {
+                                mode_page.update(cx, |f, cx| {
+                                    f.runner = ix == 0;
+                                    f.status = Status::Idle;
+                                    cx.notify();
+                                })
+                            }),
+                        ),
+                    )
                     .child(
                         div()
                             .pt(tokens::space::S8)
@@ -1795,31 +1814,60 @@ impl Render for BotForm {
                     .dropdown_menu(move |menu, _, _| {
                         known.iter().fold(menu, |menu, rt| {
                             let (rt, input) = (rt.clone(), input.clone());
-                            menu.item(PopupMenuItem::new(rt.clone()).checked(rt == current).on_click(
-                                move |_, window, cx| {
-                                    input.update(cx, |st, cx| st.set_value(rt.clone(), window, cx))
-                                },
-                            ))
+                            menu.item(
+                                PopupMenuItem::new(rt.clone())
+                                    .checked(rt == current)
+                                    .on_click(move |_, window, cx| {
+                                        input.update(cx, |st, cx| {
+                                            st.set_value(rt.clone(), window, cx)
+                                        })
+                                    }),
+                            )
                         })
                     })
                     .into_any_element()
             };
             body = body.child(
-                div().flex().flex_col().child(section(s::RUNNER_SECTION)).child(
-                    sheet_form()
-                        .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
-                        .child(field_row(s::RUNNER_LABELS, "member-labels", &self.labels, false, cx))
-                        .child(field_row(s::RUNNER_REPO, "member-repo", &self.repo, false, cx))
-                        .child(field_row(s::RUNNER_BRANCH, "member-branch", &self.branch, false, cx)),
-                ),
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section(s::RUNNER_SECTION))
+                    .child(
+                        sheet_form()
+                            .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
+                            .child(field_row(
+                                s::RUNNER_LABELS,
+                                "member-labels",
+                                &self.labels,
+                                false,
+                                cx,
+                            ))
+                            .child(field_row(
+                                s::RUNNER_REPO,
+                                "member-repo",
+                                &self.repo,
+                                false,
+                                cx,
+                            ))
+                            .child(field_row(
+                                s::RUNNER_BRANCH,
+                                "member-branch",
+                                &self.branch,
+                                false,
+                                cx,
+                            )),
+                    ),
             );
         }
         // The look of an existing member changes in its own sheet (更换形象…).
         if self.editing.is_none() {
             body = body.child(
-                div().flex().flex_col().child(section(s::BOT_CHARACTER)).child(
-                    sheet_form().child(
-                        div().p(tokens::space::S12).child(character_picker(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section(s::BOT_CHARACTER))
+                    .child(sheet_form().child(div().p(tokens::space::S12).child(
+                        character_picker(
                             "bot-character",
                             Some(self.chosen_character(cx)),
                             busy,
@@ -1831,9 +1879,8 @@ impl Render for BotForm {
                             },
                             window,
                             cx,
-                        )),
-                    ),
-                ),
+                        ),
+                    ))),
             );
         }
         let (title, explanation, default) = match &self.editing {

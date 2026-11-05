@@ -1,4 +1,4 @@
-// V1 per-topic read positions, unread and mention counts, and follow state.
+// V1 per-topic read positions, unread and mention counts, follow and mute state.
 // See docs/protocol.md, "Read positions per topic".
 import { z } from "zod";
 import { Count, Id, Seq } from "./common.ts";
@@ -14,6 +14,8 @@ export const TopicState = z.object({
   mentions: Count,
   /** I follow this topic. Absent means false. */
   following: z.boolean().optional(),
+  /** I muted this topic: only mentions notify. Absent means false. */
+  muted: z.boolean().optional(),
 });
 export type TopicState = z.infer<typeof TopicState>;
 
@@ -22,14 +24,14 @@ export const readFields = {
   topicId: Id.optional(),
 };
 
-/** Field added to `GroupSummary`: every topic with unread > 0, mentions > 0 or following. */
+/** Field added to `GroupSummary`: every topic with unread > 0, mentions > 0, following or muted. */
 export const groupSummaryReadFields = {
   topics: z.array(TopicState).optional(),
 };
 
 /**
  * `{ t: "reads" }`: my read state changed (from this or another device of mine, or a
- * follow change). Group totals plus only the topics that changed.
+ * follow or mute change). Group totals plus only the topics that changed.
  */
 export const ReadsFrame = z.object({
   t: z.literal("reads"),

@@ -271,17 +271,6 @@ fn section(header: gpui::Div, body: impl IntoElement) -> gpui::Div {
 }
 
 impl DeskPage {
-    /// Whether row `i` of `n` is the last one a section shows (no line
-    /// under it).
-    fn last_shown(&self, id: &'static str, i: usize, n: usize) -> bool {
-        let shown = if self.expanded.contains(id) {
-            n
-        } else {
-            n.min(SECTION_ROWS)
-        };
-        i + 1 == shown
-    }
-
     /// A framed list of `rows`; past [`SECTION_ROWS`] it shows the first
     /// ones and a footer `看全部 N 件` that opens the rest (and `收起`).
     fn list(&self, id: &'static str, rows: Vec<AnyElement>, cx: &mut Context<Self>) -> gpui::Div {
@@ -400,6 +389,98 @@ impl DeskPage {
     }
 }
 
+impl DeskPage {
+    /// Onboarding: 首页 for a member no 话题 involves yet (a new member): 从这里开始,
+    /// with the way to talk to the default bot (its 私聊), to start a 话题 and to open the
+    /// first 群, instead of 都处理完了 to someone who has not started. None once any
+    /// 话题 involves me.
+    fn first_run(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let p = &self.services.provider;
+        let me = self.services.me();
+        let groups = p.groups();
+        let involved = groups.iter().any(|g| {
+            p.topics(&g.id)
+                .iter()
+                .any(|t| crate::views::rail::model::involves_me(p.as_ref(), me.as_deref(), t))
+        });
+        if involved {
+            return None;
+        }
+        let k = native_colors(cx);
+        let bot = p
+            .side_chat_default_member()
+            .and_then(|id| p.member(&id))
+            .filter(|m| Some(&m.id) != me.as_ref());
+        let mut actions = Vec::new();
+        if let Some(bot) = &bot {
+            let id = bot.id.clone();
+            actions.push(
+                push_button(
+                    "desk-start-dm",
+                    fill(c::DESK_START_DM, &[("name", &bot.name)]),
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, _, cx| crate::views::nav::open_dm_with(id.clone(), cx))
+                .into_any_element(),
+            );
+        }
+        let topic_style = if bot.is_some() {
+            PushStyle::Outline
+        } else {
+            PushStyle::Default
+        };
+        actions.push(
+            push_button(
+                "desk-start-topic",
+                c::DESK_NEW_TOPIC,
+                topic_style,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx))
+            .into_any_element(),
+        );
+        if let Some(g) = groups
+            .iter()
+            .find(|g| g.kind == crate::data::GroupKind::Group)
+        {
+            let (nav, id) = (self.services.nav.clone(), g.id.clone());
+            actions.push(
+                push_button(
+                    "desk-start-group",
+                    fill(c::DESK_START_GROUP, &[("name", &g.name)]),
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    nav.update(cx, |n, cx| n.open_group(id, cx))
+                })
+                .into_any_element(),
+            );
+        }
+        Some(
+            div()
+                .flex_none()
+                .flex()
+                .rounded(m::FRAME_RADIUS)
+                .border_1()
+                .border_color(k.separator)
+                .child(page::page_empty(
+                    Sym::Compose,
+                    c::DESK_START_TITLE,
+                    c::DESK_START_BODY,
+                    actions,
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
+}
+
 impl Render for DeskPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
@@ -509,8 +590,7 @@ impl Render for DeskPage {
                     let n = asks.len();
                     let rows: Vec<AnyElement> = asks
                         .into_iter()
-                        .enumerate()
-                        .map(|(i, a)| list::ask_row(a, self.last_shown(id, i, n), self, &snap, cx))
+                        .map(|a| list::ask_row(a, self, &snap, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(title, Some(n), None, None, cx),
@@ -523,16 +603,7 @@ impl Render for DeskPage {
                         .runs
                         .iter()
                         .enumerate()
-                        .map(|(i, r)| {
-                            list::run_row(
-                                i,
-                                r,
-                                self.last_shown("desk-runs", i, n),
-                                &snap,
-                                &self.services,
-                                cx,
-                            )
-                        })
+                        .map(|(i, r)| list::run_row(i, r, &snap, &self.services, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(c::DESK_WORKING, Some(n), None, None, cx),
@@ -545,23 +616,16 @@ impl Render for DeskPage {
                         .done
                         .iter()
                         .enumerate()
-                        .map(|(i, d)| {
-                            list::done_row(
-                                i,
-                                d,
-                                self.last_shown("desk-done", i, n),
-                                &snap,
-                                &self.services,
-                                cx,
-                            )
-                        })
+                        .map(|(i, d)| list::done_row(i, d, &snap, &self.services, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(c::DESK_DONE_TODAY, Some(n), None, None, cx),
                         self.list("desk-done", rows, cx),
                     ));
                 }
-                if quiet {
+                if quiet && let Some(start) = self.first_run(cx) {
+                    content = content.child(start);
+                } else if quiet {
                     let new_topic = push_button(
                         "desk-empty-new",
                         c::DESK_NEW_TOPIC,

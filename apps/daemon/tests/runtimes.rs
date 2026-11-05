@@ -371,12 +371,18 @@ fn aside_runs_ignore_widening_config() {
     assert!(normal.contains(&"bypassPermissions".to_string()));
     assert!(normal.contains(&"--dangerously-skip-permissions".to_string()));
     // The configured tools, plus chat-run: the run can always post its cards and 产出.
-    assert!(normal.contains(&"Bash Bash(chat-run:*)".to_string()), "{normal:?}");
+    assert!(
+        normal.contains(&"Bash Bash(chat-run:*)".to_string()),
+        "{normal:?}"
+    );
     // Without allowed_tools a run may use the shell, edits and the web: `-p` cannot ask.
     c.cfg.allowed_tools = None;
     c.cfg.permission_mode = None;
     let plain = runtime::claude::permission_args(&c);
-    assert!(plain.contains(&"bypassPermissions".to_string()), "{plain:?}");
+    assert!(
+        plain.contains(&"bypassPermissions".to_string()),
+        "{plain:?}"
+    );
     let i = plain.iter().position(|a| a == "--allowedTools").unwrap();
     for t in ["Bash", "Edit", "Write", "WebFetch"] {
         assert!(plain[i + 1].split(' ').any(|x| x == t), "{t}: {plain:?}");
@@ -557,7 +563,11 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     s.note = Some(daemon::chat_run::note());
     assert!(runtime::codex::chat_run_works(&s));
     let args = runtime::codex::app_server_args(&s).unwrap();
-    assert_eq!(args, ["app-server", closed[0], closed[1]], "the user's network setting stays");
+    assert_eq!(
+        args,
+        ["app-server", closed[0], closed[1]],
+        "the user's network setting stays"
+    );
 
     daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
@@ -683,7 +693,14 @@ fn codex_gets_the_chat_run_note_only_when_it_can_work() {
     assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
     s.cfg.sandbox = Some("workspace-write".into());
     assert!(runtime::codex::chat_run_works(&s));
-    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server", "-c", "sandbox_workspace_write.network_access=true"]);
+    assert_eq!(
+        runtime::codex::app_server_args(&s).unwrap(),
+        [
+            "app-server",
+            "-c",
+            "sandbox_workspace_write.network_access=true"
+        ]
+    );
     s.cfg.sandbox = Some("danger-full-access".into());
     assert!(runtime::codex::chat_run_works(&s));
     assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
@@ -692,7 +709,14 @@ fn codex_gets_the_chat_run_note_only_when_it_can_work() {
     assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
     s.cfg.sandbox = Some("workspace-write".into());
     s.note = None;
-    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server", "-c", "sandbox_workspace_write.network_access=true"]);
+    assert_eq!(
+        runtime::codex::app_server_args(&s).unwrap(),
+        [
+            "app-server",
+            "-c",
+            "sandbox_workspace_write.network_access=true"
+        ]
+    );
     // A user's own network setting stays as the user wrote it.
     s.note = Some("n".into());
     s.cfg.args = vec![

@@ -752,8 +752,8 @@ pub(crate) fn decision(
     let a = ctx.answerer();
     let sending = matches!(ctx.state, CardState::Sending { .. });
     let enabled = live && !sending;
-    // Every choice is a RadioGroup of full-width rows (§2.17): h40, a 1 px
-    // border, radius 8, the letter in a 20 box (a checkbox when several may
+    // Every choice is a RadioGroup of full-width rows (§2.17): h40, a muted
+    // fill, radius 8, the letter in a 20 box (a checkbox when several may
     // be chosen). With two or three short options a press answers at once.
     let rows = options.iter().enumerate().map(|(i, o)| {
         let picked = chosen.contains(&o.id);
@@ -789,10 +789,10 @@ pub(crate) fn decision(
         .into_any_element()
 }
 
-/// One choice row (§2.17): h40, full width, a 1 px border, radius 8; the
+/// One choice row (§2.17): h40, full width, a muted fill, radius 8; the
 /// letter in a 20 box (a checkbox when several may be chosen), the label
 /// with `推荐`, the detail at the trailing edge. Selected: a foreground
-/// border on the muted fill. Hover: muted at 50%. A row that cannot be
+/// border on the muted fill. Hover: the pressed fill. A row that cannot be
 /// chosen shows at 50% with no hover.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn choice_row(
@@ -818,8 +818,6 @@ pub(crate) fn choice_row(
             .flex_none()
             .size(m::TILE)
             .rounded(theme::radius::ITEM)
-            .border_1()
-            .border_color(if picked { n.primary } else { n.separator })
             .bg(if picked { n.primary } else { n.content })
             .flex()
             .items_center()
@@ -829,19 +827,24 @@ pub(crate) fn choice_row(
             .child(letter.to_string())
             .into_any_element()
     };
-    // Hover: muted at 50 % and the border at foreground 50 %, so it reads
-    // on the card fill and stays apart from the picked row (E2, E3).
-    let hover = m::alpha(n.fill, 0.5);
-    let hover_edge = m::alpha(n.label, 0.5);
+    // No line at rest (owner decision, v18): the row is a muted fill, the
+    // hover one step darker; only the picked row draws a foreground border,
+    // so the choice stands out (E2, E3). The border is always 1 px wide so
+    // picking does not move the text.
+    let hover = n.pressed;
     div()
         .id(id)
         .w_full()
         .min_h(m::OPTION)
         .px(space::S12)
         .rounded(m::OPTION_RADIUS)
+        .bg(n.fill)
         .border_1()
-        .border_color(if picked { n.label } else { n.separator })
-        .when(picked, |el| el.bg(n.selection))
+        .border_color(if picked {
+            n.label
+        } else {
+            gpui::transparent_black()
+        })
         // A tab stop with Enter / Space and ↑ ↓, and the focus ring apart
         // from the picked fill (E3, R1 FocusRow); the hover below keeps its
         // border step.
@@ -849,9 +852,7 @@ pub(crate) fn choice_row(
         .when(enabled, |el| {
             el.focus_row_with(true, ui::native::Arrows::Vertical, cx)
         })
-        .when(enabled && !picked, |el| {
-            el.hover(move |s| s.bg(hover).border_color(hover_edge))
-        })
+        .when(enabled && !picked, |el| el.hover(move |s| s.bg(hover)))
         .when(!enabled, |el| el.opacity(0.5))
         .flex()
         .items_center()

@@ -74,7 +74,12 @@ impl RailView {
                 title,
             )
             .selected(*selected)
-            .unread(unread);
+            .unread(unread)
+            .muted(
+                self.services
+                    .provider
+                    .topic_muted(&topic.group_id, &topic.id),
+            );
         // §2.1: inside one group every item has a 16 media or none has; the
         // 话题 under a member (indented) get the 话题 symbol, as the member
         // rows of that group have avatars.
@@ -120,17 +125,18 @@ impl RailView {
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
     ) -> AnyElement {
-        self.section_header_selected(id, label, (folded, false, false), fold, open, None)
+        self.section_header_selected(id, label, (folded, false, false, false), fold, open, None)
     }
 
     /// [`Self::section_header`] with the selected look (T-12: the 群 header
-    /// while its 群 page is open).
-    /// `look`: folded, selected, and unread (the 群's 群聊 has unread messages).
+    /// while its 群 page is open) and the muted mark.
+    /// `look`: folded, selected, unread (the 群's 群聊 has unread messages)
+    /// and muted.
     pub(super) fn section_header_selected(
         &self,
         id: impl Into<ElementId>,
         label: String,
-        (folded, selected, unread): (bool, bool, bool),
+        (folded, selected, unread, muted): (bool, bool, bool, bool),
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         open: Option<ClickHandler>,
         menu: Option<RowMenu>,
@@ -142,6 +148,7 @@ impl RailView {
             .collapsed(folded)
             .selected(selected)
             .unread(unread && !selected)
+            .muted(muted)
             .on_toggle(move |e, window, cx| match &open {
                 Some(open) => open(e, window, cx),
                 None => fold(e, window, cx),

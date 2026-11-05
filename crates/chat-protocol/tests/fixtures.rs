@@ -71,7 +71,10 @@ check!(
     RecordDecisionRequest,
     PutArtifactMediaRequest,
     FileRef,
-    PutDeskNoteRequest
+    PutDeskNoteRequest,
+    EmailCodeRequest,
+    EmailSignInRequest,
+    VerifyEmailRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -220,6 +223,11 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("AiServiceTestResult", plain::<AiServiceTestResult>),
     ("Device", plain::<Device>),
     ("DevicesResponse", plain::<DevicesResponse>),
+    ("EmailCodeRequest", validated::<EmailCodeRequest>),
+    ("EmailCodeResponse", plain::<EmailCodeResponse>),
+    ("EmailSignInRequest", validated::<EmailSignInRequest>),
+    ("VerifyEmailRequest", validated::<VerifyEmailRequest>),
+    ("MyEmailResponse", plain::<MyEmailResponse>),
     // 1.1 gap fixes
     ("RecordedDecision", plain::<RecordedDecision>),
     ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
@@ -363,6 +371,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "search",
             "send",
             "topic.follow",
+            "topic.mute",
             "topic.update",
             "typing"
         ]

@@ -1084,6 +1084,123 @@ impl ComposerView {
         self.on_text_changed(window, cx);
     }
 
+    /// 回复 on a message of the open 话题: put its quote chip on the draft and
+    /// focus the field. A message of another 话题 is ignored.
+    pub fn quote_message(
+        &mut self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(key) = self.key.clone() else {
+            return;
+        };
+        if key.group_id != group_id || key.topic_id.as_deref() != Some(topic_id) {
+            return;
+        }
+        self.services.provider.set_quote(&key, Some(message_id));
+        self.refresh_extras(cx);
+        self.focus_at_end(window, cx);
+    }
+
+    /// A click on a sender's avatar: types `@name ` at the caret (after a
+    /// space when the caret follows a word), remembers the member for the
+    /// send and focuses the field.
+    pub fn mention_member(&mut self, member_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.key.is_none() {
+            return;
+        }
+        let Some(member) = self
+            .services
+            .provider
+            .members()
+            .into_iter()
+            .find(|m| m.id == member_id)
+        else {
+            return;
+        };
+        let text = self.text(cx);
+        let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
+        // An unfocused field puts the mention at the end of the draft.
+        let cursor = if focused {
+            self.input.read(cx).cursor()
+        } else {
+            text.len()
+        };
+        let before = text[..cursor.min(text.len())].chars().last();
+        let lead = if before.is_some_and(|c| !c.is_whitespace()) {
+            " "
+        } else {
+            ""
+        };
+        let insert = format!("{lead}@{} ", member.name);
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+            if !focused {
+                state.set_selected_range(text.len()..text.len(), cx);
+            }
+            state.replace(insert, window, cx);
+        });
+        if !self.picked.contains(&member.id) {
+            self.picked.push(member.id);
+        }
+        self.mention = None;
+        self.last_text = self.text(cx);
+        if self.editing.is_none() {
+            self.save_text(cx);
+        }
+        cx.notify();
+    }
+
+    /// 重新编辑 a message I recalled in the open 话题: its text goes back
+    /// into the field (after what is there, on a new line) with its
+    /// mentions, and the field takes the focus.
+    pub fn restore_recalled(
+        &mut self,
+        group_id: &str,
+        topic_id: &str,
+        body: &str,
+        mentions: &[MemberId],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(key) = self.key.clone() else {
+            return;
+        };
+        if key.group_id != group_id
+            || key.topic_id.as_deref() != Some(topic_id)
+            || self.editing.is_some()
+        {
+            return;
+        }
+        let current = self.text(cx);
+        let text = if current.trim().is_empty() {
+            body.to_string()
+        } else {
+            format!("{}\n{body}", current.trim_end())
+        };
+        self.set_text(&text, window, cx);
+        for id in mentions {
+            if !self.picked.contains(id) {
+                self.picked.push(id.clone());
+            }
+        }
+        self.mention = None;
+        self.save_text(cx);
+        self.focus_at_end(window, cx);
+        cx.notify();
+    }
+
+    fn focus_at_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let len = self.text(cx).len();
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.set_selected_range(len..len, cx);
+        });
+    }
+
     /// Types `text` at the caret and focuses the field (`@` opens the @ list).
     pub fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |state, cx| {

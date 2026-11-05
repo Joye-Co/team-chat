@@ -258,6 +258,12 @@ impl ChatProvider for Shaped {
     fn set_topic_following(&self, group_id: &str, topic_id: &str, follow: bool) {
         self.inner.set_topic_following(group_id, topic_id, follow)
     }
+    fn topic_muted(&self, group_id: &str, topic_id: &str) -> bool {
+        self.inner.topic_muted(group_id, topic_id)
+    }
+    fn set_topic_muted(&self, group_id: &str, topic_id: &str, muted: bool) {
+        self.inner.set_topic_muted(group_id, topic_id, muted)
+    }
     fn set_topic_owner(&self, group_id: &str, topic_id: &str, owner: Option<MemberId>) {
         self.inner.set_topic_owner(group_id, topic_id, owner)
     }

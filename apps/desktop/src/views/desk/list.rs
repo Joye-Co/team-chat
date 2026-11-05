@@ -115,7 +115,6 @@ pub fn is_answered(a: &AskCard, page: &DeskPage) -> bool {
 
 pub fn ask_row(
     a: &AskCard,
-    last: bool,
     page: &DeskPage,
     snap: &Snapshot,
     cx: &mut Context<DeskPage>,
@@ -236,7 +235,6 @@ pub fn ask_row(
         status: Some(status),
         time: Some(time.into()),
         actions,
-        separator: !last,
         ..PageRow::new(a.item.title.clone())
     }
     .render(
@@ -273,7 +271,6 @@ pub fn ask_row(
 pub fn run_row(
     i: usize,
     r: &RunCard,
-    last: bool,
     snap: &Snapshot,
     services: &Services,
     cx: &App,
@@ -310,7 +307,6 @@ pub fn run_row(
         second: Some(line(rest.join(" · ")).into_any_element()),
         status: Some(page::status_badge(Status::Working, status, cx)),
         time: Some(clock(started).into()),
-        separator: !last,
         ..PageRow::new(r.topic_title.clone())
     }
     .render(
@@ -338,7 +334,6 @@ pub fn run_row(
 pub fn done_row(
     i: usize,
     d: &DoneItem,
-    last: bool,
     snap: &Snapshot,
     services: &Services,
     cx: &App,
@@ -354,7 +349,6 @@ pub fn done_row(
         second: Some(line(rest.join(" · ")).into_any_element()),
         status: Some(page::status_badge(Status::Done, c::DESK_STATUS_DONE, cx)),
         time: Some(clock(d.at).into()),
-        separator: !last,
         ..PageRow::new(d.title.clone())
     }
     .render(

@@ -11,6 +11,8 @@ pub struct FakeSettings {
     notify: HashMap<GroupId, NotifyLevel>,
     /// (group, topic) pairs I follow.
     followed: HashSet<(GroupId, TopicId)>,
+    /// (group, topic) pairs I muted.
+    muted_topics: HashSet<(GroupId, TopicId)>,
     machines: Vec<MachineInfo>,
     /// How runner-backed bot members work, by member id.
     runners: HashMap<String, RunnerSetup>,
@@ -22,6 +24,7 @@ impl FakeSettings {
         Self {
             notify: HashMap::new(),
             followed: HashSet::new(),
+            muted_topics: HashSet::new(),
             machines: sample_machines(),
             runners: sample_runners(),
             next: 1,
@@ -469,6 +472,36 @@ impl FakeProvider {
         }]);
     }
 
+    pub(super) fn topic_muted_fake(&self, group_id: &str, topic_id: &str) -> bool {
+        self.settings
+            .lock()
+            .unwrap()
+            .muted_topics
+            .contains(&(group_id.to_string(), topic_id.to_string()))
+    }
+
+    pub(super) fn set_topic_muted_fake(&self, group_id: &str, topic_id: &str, muted: bool) {
+        if !self.with(|s| {
+            s.topics
+                .iter()
+                .any(|t| t.group_id == group_id && t.id == topic_id)
+        }) {
+            return;
+        }
+        {
+            let mut st = self.settings.lock().unwrap();
+            let key = (group_id.to_string(), topic_id.to_string());
+            if muted {
+                st.muted_topics.insert(key);
+            } else {
+                st.muted_topics.remove(&key);
+            }
+        }
+        self.emit(vec![Change::Topics {
+            group_id: group_id.to_string(),
+        }]);
+    }
+
     pub(super) fn send_diagnostics_fake(&self, description: String) -> AdminReply<String> {
         if description.chars().count() > 2000 {
             return reply_now(Err(AdminError::TooLarge));
@@ -541,6 +574,15 @@ mod tests {
         let t = &followed[0];
         p.set_topic_following(&t.group_id, &t.topic.id, false);
         assert_eq!(p.followed_topics().len(), followed.len() - 1);
+        // Muting is separate from following.
+        assert!(!p.topic_muted(&t.group_id, &t.topic.id));
+        p.set_topic_muted(&t.group_id, &t.topic.id, true);
+        assert!(p.topic_muted(&t.group_id, &t.topic.id));
+        assert!(!p.topic_following(&t.group_id, &t.topic.id));
+        p.set_topic_muted(&t.group_id, &t.topic.id, false);
+        assert!(!p.topic_muted(&t.group_id, &t.topic.id));
+        p.set_topic_muted(&t.group_id, "no-such-topic", true);
+        assert!(!p.topic_muted(&t.group_id, "no-such-topic"));
     }
 
     #[test]

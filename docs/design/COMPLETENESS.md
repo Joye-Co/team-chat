@@ -234,6 +234,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 
 ### 2.2 Toolbar and pane headers
 
+- **Owner decision v18 (wins over the 52 / border lines in this file):** every header (toolbar and right panes) is one line: the title, then its subtitle or state badge after it on the same line, centered in an h64 band (y 32, a little under the traffic lights; read every "y 52" here as y 64); never a subtitle under the title. Borders only where they separate something: list frames, list rows, list footers, StatusBadges (muted fill), icon boxes and Card v2 choice rows (muted fill; only the picked row draws a foreground border) have no line; a card is the card fill, shadow sm and a 6 % foreground ring, no 1 px border. The group page's 新话题 is a Secondary button with a plus, not the black primary.
 - One header band h52 across the message column and the right pane. One 1 px border-b at y 52 from x 264 to 1440. Content scrolls under it; no fade.
 - Message column header: title 16 medium, subtitle 12 muted under it (or a breadcrumb in 14: ancestors muted, current foreground, chevron-right 16 muted separators). Status in the subtitle row is a StatusBadge, not colored text; on a 话题 the badge stays under the title, at the start of the subtitle row (owner decision v17). Actions at the right: 32 ghost icon buttons, gap 8; a vertical separator h16, mx 8, before the right-pane toggle.
 - Right pane header: same h52 band. Pane name 16 medium ("话题信息", "群信息", "今天", "单独问 Ledger", "产出"), optional 12 muted description, actions as 32 ghost icon buttons (close at the far right). A pane that shows one item names the pane, never the item: the 产出 pane reads "产出" with "<title> · <kind> · v<n>" as its description. The first content row starts at y 52 + 16 = 68.
@@ -582,7 +583,7 @@ Rank order: foundation first (each screen fix depends on it), then what makes a 
 
 **F54. Web-embed menu and side panel.** Scenes: web-embed-covered, web-embed, web-embed-scrolled. Problem: menu surface shows the subtitle through the "打开" row; side panel ends with a loose orange progress bar at y 510 then a 180 px blank card; orange accent and 36 avatars. Fix: opaque float surface; side panel per 2.5; Progress per D12; no orange; avatars 32. Not confirmed: translucency is visual only. Rule: 2.11, 1.3, 2.5.
 
-**F55. Settings per-group notification sheet.** Scene: settings-notify-groups (all). Problem: groups at x 78 (no icon) and people at x 106 (avatar); column headers ink 9; no sections, search or empty state; only "完成". Fix: sections 群 (24 icon box) and 私聊 (avatar 24), one media column; column headers 12 medium muted; filter when more than 8 rows; Empty; keep 560 width. Rule: 2.9, 2.6.
+**F55. Settings per-group notification sheet.** (Removed: the per-群 level moved to the 群's context menu, NATIVE.md §7.3.) Scene: settings-notify-groups (all). Problem: groups at x 78 (no icon) and people at x 106 (avatar); column headers ink 9; no sections, search or empty state; only "完成". Fix: sections 群 (24 icon box) and 私聊 (avatar 24), one media column; column headers 12 medium muted; filter when more than 8 rows; Empty; keep 560 width. Rule: 2.9, 2.6.
 
 ### 3.3 Polish fixes
 
@@ -594,7 +595,7 @@ Rank order: foundation first (each screen fix depends on it), then what makes a 
 
 **F59. Destructive alerts.** Scenes: settings-device-remove, settings-sign-out, leave-group (all). Problem: black filled "取消" and red text on gray (#f2f2f2) for the destructive action; the checkbox label wraps to 2 lines. Fix: 2.10. Rule: 2.10.
 
-**F60. Settings 通知.** Scene: settings-notifications (all). Problem: 每日摘要 has a time select (x 493-565) and a switch (x 576-607) in one row; 勿扰 group has no header; "按群设置…" floats at the bottom left. Fix: dependent "时间" row; sections 提醒我 and 勿扰 with descriptions; navigation row "按群设置 · 8 个群 ›" in a section 按群. Rule: 2.8, 2.19.
+**F60. Settings 通知.** Scene: settings-notifications (all). Problem: 每日摘要 has a time select (x 493-565) and a switch (x 576-607) in one row; 勿扰 group has no header; "按群设置…" floats at the bottom left. Fix: dependent "时间" row; sections 提醒我 and 勿扰 with descriptions; navigation row "按群设置 · 8 个群 ›" in a section 按群 (later removed: per-群 levels live in the 群's context menu). Rule: 2.8, 2.19.
 
 **F61. Settings 快捷键.** Scene: settings-shortcuts (light, dark). Problem: pitch 31 (separators 169 / 200 / 231) vs 37 elsewhere; keys as gray text. Fix: rows h44, Kbd caps, filter input. Rule: 2.19, 1.8.
 

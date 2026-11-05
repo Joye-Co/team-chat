@@ -25,7 +25,7 @@ crate::copy! {
     ATTACH = "添加文件",
     MENTION = "提及成员",
     QUOTING = "引用 {name}",
-    QUOTE_DELETED = "引用的消息已删除",
+    QUOTE_DELETED = "引用的消息已撤回",
     EDITING = "正在编辑",
     EDIT_HINT = "Enter 保存，Esc 取消",
     TOO_LONG = "消息太长了",

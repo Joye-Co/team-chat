@@ -244,6 +244,10 @@ log records `group.memberAdded` / `group.memberRemoved`.
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
   `ADMIN_SECRET` Worker secret. It also makes the default group, called "全员" (environments
   bootstrapped before this change called it "General" until it was renamed).
+- First redeem of a new member: the member joins every default group and, when it is a human,
+  gets a DM with the default bot (the active bot named Jojo, else the oldest active bot), made
+  exactly as `POST /v1/dms` makes one (`dm.create` audited by the new member). No bot, no DM; a
+  failure here never fails the redeem. A sign-in code of an existing member opens nothing.
 
 # V1 extensions
 
@@ -255,7 +259,7 @@ default value. Unless a rule says otherwise, a frame that breaks a rule gets `ac
 `ok: false` and code `invalid` (bad value), `forbidden` (not allowed), `not_found` (unknown id or
 not a member of the group) or `too_large`.
 
-## Topics: waitingOn, owner, follow
+## Topics: waitingOn, owner, follow, mute
 
 Module: `topic.ts` / `topic.rs`.
 
@@ -270,6 +274,7 @@ Topic += {
 topic.updated data += { waitingOn?: string[], ownerId?: string | null, lastMessageAt?: number }
   // present = changed to this value
 { t: "topic.follow", rid, groupId, topicId, follow: boolean }   // ack.result = TopicState
+{ t: "topic.mute", rid, groupId, topicId, muted: boolean }      // ack.result = TopicState
 ```
 
 Rules:
@@ -286,6 +291,10 @@ Rules:
   sends a `reads` frame to my other connections. Auto-follow: the server sets `following` to true
   when I create the topic, post in it, am mentioned in it, am added to its `waitingOn`, or become
   its owner. An explicit unfollow stays until the next of these.
+- `topic.mute` sets my mute state for one topic (话题静音); the server answers with my
+  `TopicState` and sends a `reads` frame to my other connections, as for `topic.follow`. In a
+  muted topic only mentions of me notify (see Notifications). Muting does not change `following`,
+  and auto-follow does not unmute: a mute stays until I unmute.
 
 ## Read positions per topic
 
@@ -298,6 +307,7 @@ TopicState = {
   unread: number        // unread messages in this topic not written by me
   mentions: number      // of those, the ones that mention me
   following?: boolean   // absent = false
+  muted?: boolean       // absent = false
 }
 GroupSummary += { topics?: TopicState[] }
 { t: "read", groupId, seq, topicId?: string }                       // client, no ack
@@ -316,9 +326,9 @@ Rules:
 - `GroupSummary.unread` and `.mentions` are group totals: the sums over all topics.
   `GroupSummary.readSeq` is the group cursor.
 - `GroupSummary.topics` (in `welcome`, `directory` and `GET /v1/groups`) lists every topic with
-  `unread > 0`, `mentions > 0` or `following`. A topic that is not listed has no unread
-  messages, no mentions and is not followed.
-- After a `read` or `topic.follow` changes my state, the server sends `reads` to every connection
+  `unread > 0`, `mentions > 0`, `following` or `muted`. A topic that is not listed has no
+  unread messages, no mentions and is neither followed nor muted.
+- After a `read`, `topic.follow` or `topic.mute` changes my state, the server sends `reads` to every connection
   of mine (all devices, the sender too). `topics` holds only the topics that changed; for a
   group-wide read it may be empty, and the client then sets every topic's unread and mentions to
   0 for topics with `lastSeq <= readSeq`. The totals in `reads` are always the new group totals.
@@ -600,8 +610,9 @@ NotifyReason = "mention" | "waiting" | "result" | "message"
 ```
 
 The server sets `notify` per receiving member on live `event` frames only (never on `page`).
-No notification for an event whose `actorId` is me or when my level is `none`. In a muted group
-only rule 1 (`mention`) applies. Otherwise, the first rule that matches wins:
+No notification for an event whose `actorId` is me or when my level is `none`. In a muted group,
+and in a topic I muted (`topic.mute`), only rule 1 (`mention`) applies. Otherwise, the first rule
+that matches wins:
 
 1. `mention`: `message.created` that mentions me.
 2. `waiting`: `topic.updated` whose `waitingOn` now includes me and did not before.
@@ -1490,7 +1501,7 @@ block.
 
 Additive, as in 1.1. Module: `settings.ts` / `settings.rs`; server feature `server/src/settings/`.
 The settings window (设置: panes 账号, 通知, 成员) reads and writes these; clients keep only
-sound, badge and window choices locally. Per-group levels (按群设置) stay
+sound, badge and window choices locally. Per-group levels (set from the 群's own menu) stay
 `PATCH /v1/groups/:id/prefs` (see Notifications).
 
 ## Notification settings
@@ -1526,7 +1537,7 @@ Rules:
   "Notifications" stays the first step and its `notify` values do not change; the room adds
   `notifyEvent` for `mention`, `waiting` and `result`, and one new case with reason `message`
   (so 1.0.x and 1.1 clients show a plain notification): `blocked` when a topic I follow gets
-  status `blocked` (not muted, level not `none`, not my own change).
+  status `blocked` (group and topic not muted, level not `none`, not my own change).
 - The gateway removes `notify` and `notifyEvent` when the event's switch is off and inside quiet
   hours. A `notify` without `notifyEvent` follows only quiet hours. Quiet hours that cross
   midnight work; equal start and end mean none. The event itself is always delivered.
@@ -1622,3 +1633,40 @@ DevicesResponse = { devices: Device[] }   // newest use first, at most 100
 
 `lastUsedAt` is updated at most once a minute per token. The name is what the client sent at
 sign in; clients pick the device symbol from it.
+
+## Email sign-in
+
+A member who added a sign-in email can sign in on any Mac with a 6-digit code sent to it; the
+first sign-in is still an invite code. Each member has at most one sign-in email, and one email
+belongs to at most one member (compared in lower case).
+
+```ts
+EmailAddress = string            // trimmed, lower case, name@host.tld, <= 254
+EmailCodeRequest = { email }
+EmailCodeResponse = { sent: true, expiresAt }
+EmailSignInRequest = { email, code /* 6 digits */, deviceName /* 1..128 */ }
+VerifyEmailRequest = { email, code }
+MyEmailResponse = { email: EmailAddress | null }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `POST /v1/auth/email/code` | anyone | `EmailCodeResponse`; sends a sign-in code when the email belongs to an active member, and answers the same either way (no account lookup) |
+| `POST /v1/auth/email/sign-in` | anyone | `RedeemResponse`: one more token for that member (audited as `email.sign_in`); a wrong, used or expired code is `unauthorized` |
+| `GET /v1/me/email` | member | `MyEmailResponse` |
+| `POST /v1/me/email/code` | member | `EmailCodeResponse`; sends a code to the new address. An address another member uses is `conflict` |
+| `POST /v1/me/email` | member | `MyEmailResponse`; confirms the code and makes the address my sign-in email (audited as `email.set`) |
+| `DELETE /v1/me/email` | member | `MyEmailResponse` with `null` (audited as `email.remove`) |
+
+Rules:
+
+- A code is 6 random digits, stored as a SHA-256 digest, single use, and expires after 10
+  minutes. A new code for the same address and purpose replaces the old one. After 5 wrong tries
+  a code stops working.
+- Sending allows 5 codes per address per hour and 20 per client IP per hour; checking allows 10
+  tries per client IP per minute. Over a limit the answer is 429 `rate_limited`.
+- The Worker sends mail through the `EMAIL` binding (Cloudflare Email Service) from `EMAIL_FROM`.
+  Without both, the code routes answer 400 `invalid` with reason `email.not_configured`, except
+  when `ENVIRONMENT` is `local` or `e2e`: there the code goes to the `email_outbox` D1 table
+  instead (read by tests with `GET /v1/admin/email-outbox?email=…` and the `x-admin-secret`
+  header), and is never sent or logged.

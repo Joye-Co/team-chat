@@ -1,0 +1,8 @@
+{
+  "kind": "VerifyEmailRequest",
+  "valid": true,
+  "value": {
+    "email": "joye@example.com",
+    "code": "042817"
+  }
+}
