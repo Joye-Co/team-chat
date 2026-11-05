@@ -240,7 +240,7 @@ pub fn state_mark(state: BadgeState, k: &NativeColors) -> Option<AnyElement> {
     }
 }
 
-/// The StatusBadge (§2.12): an outline [`Badge`] with the state's colored
+/// The StatusBadge (§2.12): a secondary [`Badge`] with the state's colored
 /// 12 icon and the state words in foreground. The one status carrier of the
 /// app: never a free colored dot or colored text.
 #[derive(IntoElement)]
@@ -275,7 +275,9 @@ impl StatusBadge {
 impl RenderOnce for StatusBadge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
-        let mut b = Badge::new(self.label);
+        // A muted fill, no border (owner decision, v18: lines only where
+        // they separate something).
+        let mut b = Badge::new(self.label).secondary();
         if let Some(mark) = state_mark(self.state, &k) {
             b = b.lead(mark);
         }

@@ -467,8 +467,11 @@ pub mod height {
     pub const DEFAULT: Pixels = px(32.);
     /// Control lg: login, full-page empty CTA, composer Send.
     pub const LG: Pixels = px(36.);
-    /// The toolbar row and every pane header (§2.2).
-    pub const TOOLBAR: Pixels = px(52.);
+    /// The toolbar row and every pane header (§2.2): 64, one line centered
+    /// in it (y 32), so the title has room above it and sits a little under
+    /// the traffic lights. The subtitle sits after the title on that line,
+    /// never under it (owner decision, v18).
+    pub const TOOLBAR: Pixels = px(64.);
     /// Sidebar item, menu item, palette row, group label, compact row.
     pub const ROW: Pixels = px(32.);
     /// A menu group label.
@@ -717,7 +720,7 @@ pub mod size {
     pub const OPTION_ROW: Pixels = px(40.);
     pub const PANEL_ROW: Pixels = px(40.);
     pub const PLAN_ROW: Pixels = height::ROW;
-    pub const BANNER: Pixels = height::TOOLBAR;
+    pub const BANNER: Pixels = px(52.);
     pub const TOAST: Pixels = px(48.);
     pub const AVATAR_MESSAGE: Pixels = avatar::MD;
     pub const AVATAR_FOOTER: Pixels = avatar::MD;
@@ -824,6 +827,12 @@ pub mod layout {
     pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
     pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
     pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
+    /// With the sidebar hidden, the 显示侧栏 button sits right after the
+    /// traffic lights, on the toolbar row's center line.
+    pub const SIDEBAR_SHOW_X: Pixels = px(80.);
+    /// Where a page's title starts with the sidebar hidden: past the lights
+    /// and the 显示侧栏 button.
+    pub const SIDEBAR_HIDDEN_INSET: Pixels = px(80. + 32. + 8.);
     /// The message avatar (D7).
     pub const AVATAR_SIZE: Pixels = avatar::MD;
     pub const ROW_HEIGHT: Pixels = height::ROW;

@@ -724,7 +724,8 @@ impl ArtifactPage {
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .flex_col()
+                    .items_center()
+                    .gap(gpui::px(8.))
                     .child(
                         div()
                             .n_title3()

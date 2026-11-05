@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
+    AnyElement, App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle,
+    InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, Styled, Subscription,
+    TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point,
+    prelude::FluentBuilder as _, px, size,
 };
 
 use crate::{
@@ -40,6 +41,7 @@ gpui::actions!(
     [
         Quit,
         OpenSettings,
+        ToggleSettings,
         ToggleSidePanel,
         ToggleSidebar,
         NewTopic,
@@ -600,6 +602,14 @@ pub struct RootView {
     first_frame: Option<FirstFrameHook>,
     /// v12/shell: draw as an inactive window (a self-test scene).
     show_inactive: bool,
+    /// The sidebar's width: dragged on its trailing edge, kept on this Mac
+    /// by the app (self-tests draw the default).
+    columns: crate::views::columns::Columns,
+    /// The sidebar and the right pane slide open and shut (their width).
+    left_reveal: Reveal,
+    right_reveal: Reveal,
+    /// The pane drawn while the right pane slides shut.
+    last_pane: RightPane,
     /// The app's own focus, on its root: a fresh window focuses it, so the
     /// first Tab goes through the app's `FocusNext` handler (it is not a
     /// tab stop, so that Tab lands on the first control).
@@ -619,7 +629,7 @@ impl RootView {
         // the focus itself (the login field) still wins.
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
                 // Groups too: the first 群 replaces the welcome (§8.5).
@@ -639,11 +649,35 @@ impl RootView {
         crate::views::banners::register(update_banner.clone(), banner.clone(), cx);
         let timeline = cx.new(|cx| TimelineView::new(services.clone(), cx));
         let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
+        // 回复, a click on an avatar and 重新编辑 land in the composer.
+        let composer_for_timeline = composer.clone();
+        subscriptions.push(cx.subscribe_in(
+            &timeline,
+            window,
+            move |_, _, event: &crate::views::timeline::TimelineEvent, window, cx| {
+                use crate::views::timeline::TimelineEvent;
+                composer_for_timeline.update(cx, |composer, cx| match event {
+                    TimelineEvent::Quote {
+                        group_id,
+                        topic_id,
+                        message_id,
+                    } => composer.quote_message(group_id, topic_id, message_id.clone(), window, cx),
+                    TimelineEvent::Mention { member_id } => {
+                        composer.mention_member(member_id, window, cx)
+                    }
+                    TimelineEvent::Reedit {
+                        group_id,
+                        topic_id,
+                        body,
+                        mentions,
+                    } => composer.restore_recalled(group_id, topic_id, body, mentions, window, cx),
+                });
+            },
+        ));
         let pages = Pages::new(&services, timeline.clone(), composer.clone(), cx);
         let panes = Panes::new(&services, window, cx);
         let rail = cx.new(|cx| RailView::new(services.clone(), window, cx));
         // --- v12/behavior ---
-        let mut subscriptions = subscriptions;
         subscriptions.extend(crate::views::nav::menus::watch_menu_state(
             &services, &rail, cx,
         ));
@@ -660,6 +694,10 @@ impl RootView {
             services,
             first_frame,
             show_inactive: false,
+            columns: crate::views::columns::Columns::default(),
+            left_reveal: Reveal::default(),
+            right_reveal: Reveal::default(),
+            last_pane: RightPane::None,
             focus,
             _subscriptions: subscriptions,
         }
@@ -697,7 +735,77 @@ impl RootView {
     }
 }
 
+/// A side column that slides open and shut: its width goes 0 → 1 of its
+/// own over `motion::SLOW` on the on-screen movement curve; at once under
+/// Reduce Motion and on the first frame. A toggle in the middle starts from
+/// where the column is.
+#[derive(Default)]
+struct Reveal {
+    shown: Option<bool>,
+    from: f32,
+    at: Option<std::time::Instant>,
+}
+
+impl Reveal {
+    /// How open the column is (0 shut, 1 open) and whether it still moves.
+    fn frac(&mut self, shown: bool, reduce: bool) -> (f32, bool) {
+        let target = if shown { 1. } else { 0. };
+        match self.shown {
+            None => self.shown = Some(shown),
+            Some(was) if was != shown => {
+                let (now, _) = self.current(1. - target);
+                self.shown = Some(shown);
+                self.from = now;
+                self.at = (!reduce).then(std::time::Instant::now);
+            }
+            _ => {}
+        }
+        self.current(target)
+    }
+
+    fn current(&mut self, target: f32) -> (f32, bool) {
+        let Some(at) = self.at else {
+            return (target, false);
+        };
+        let t = at.elapsed().as_secs_f32() / theme::motion::SLOW.as_secs_f32();
+        if t >= 1. {
+            self.at = None;
+            return (target, false);
+        }
+        let e = theme::motion::moving().sample(t);
+        (self.from + (target - self.from) * e, true)
+    }
+}
+
 impl RootView {
+    /// The sidebar's resize handle: an 8 pt strip on its trailing edge with
+    /// the resize cursor. A drag resizes 1:1 (200–320 pt, rubber band past
+    /// the bounds); a double-click resets the width.
+    fn sidebar_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::views::columns::Column;
+        div()
+            .id("sidebar-resize")
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(px(8.))
+            .cursor(gpui::CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if e.click_count >= 2 {
+                        this.columns.reset(Column::Sidebar);
+                    } else {
+                        this.columns.start_drag(Column::Sidebar, e.position.x);
+                    }
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
     /// K-10, E3: F6 / ⌥Tab move the focus to the next region of the window
     /// (⇧ to the previous one): the sidebar, then on a 话题 page the thread
     /// and its composer, so a list is a keystroke away, not 26 Tabs.
@@ -817,13 +925,43 @@ impl Render for RootView {
         // (traffic lights inside it), the content running under its 8 pt
         // gap, the page column with its toolbar row, and the inspector
         // edge to edge.
+        use crate::views::columns::Column;
+        let sidebar_w = self.columns.width(Column::Sidebar);
+        if self.columns.settling() {
+            window.request_animation_frame();
+        }
+        let handle = self.sidebar_handle(cx);
+        let reduce = cx.reduce_motion();
+        let sidebar_open = !self.services.nav.read(cx).sidebar_hidden;
+        let (left, left_moving) = self.left_reveal.frac(sidebar_open, reduce);
+        let pane_now = self.services.nav.read(cx).visible_pane();
+        if pane_now != RightPane::None {
+            self.last_pane = pane_now.clone();
+        }
+        let (right, right_moving) = self.right_reveal.frac(pane_now != RightPane::None, reduce);
+        if left_moving || right_moving {
+            window.request_animation_frame();
+        }
         let nav = self.services.nav.read(cx);
-        let rail_shown = !nav.sidebar_hidden;
+        // Drawn while it is open or still sliding shut.
+        let rail_shown = left > 0.;
         let active = !self.show_inactive && crate::ui::native::tokens::emphasized(window);
         let root = root.bg(crate::views::shell::chrome::colors(cx).content);
         let rail = rail_shown.then(|| {
-            crate::ui::native::floating_sidebar(cx)
-                .child(crate::views::shell::chrome::menu_accent(self.rail.clone()))
+            // The column clips the sidebar at its full width, so the sidebar
+            // slides under the window edge instead of squeezing its rows.
+            div()
+                .flex_none()
+                .h_full()
+                .w(crate::views::shell::chrome::sidebar_room(sidebar_w) * left)
+                .overflow_hidden()
+                .flex()
+                .child(
+                    crate::ui::native::floating_sidebar(sidebar_w, cx)
+                        .relative()
+                        .child(crate::views::shell::chrome::menu_accent(self.rail.clone()))
+                        .child(handle),
+                )
                 .into_any_element()
         });
         // No 群 yet: the sidebar and the 首页 empty state (v12/fx-shell:
@@ -832,7 +970,7 @@ impl Render for RootView {
             let leading = if rail_shown {
                 crate::ui::native::metrics::CONTENT_LEADING
             } else {
-                theme::TRAFFIC_LIGHTS_INSET
+                theme::SIDEBAR_HIDDEN_INSET
             };
             // R2-02: while the first sync runs, the 群 may still arrive: the
             // 首页 skeleton, never "还没有加入群" and its create buttons.
@@ -849,15 +987,22 @@ impl Render for RootView {
         }
         let page = nav.page();
         let pane = nav.visible_pane();
+        // While the pane slides shut it still draws what it showed.
+        let drawn_pane = if pane == RightPane::None && right > 0. {
+            self.last_pane.clone()
+        } else {
+            pane.clone()
+        };
         let window_w = window.viewport_size().width;
         let rail_w = if rail_shown {
-            crate::views::shell::chrome::sidebar_room()
+            crate::views::shell::chrome::sidebar_room(sidebar_w) * left
         } else {
             px(0.)
         };
-        let pane_w = self
+        let full_pane_w = self
             .panes
-            .fitted_width(&pane, window_w, window_w - rail_w, cx);
+            .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx);
+        let pane_w = full_pane_w * right;
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
         let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
@@ -866,10 +1011,12 @@ impl Render for RootView {
         // column), or past the traffic lights when the sidebar is hidden;
         // then the page column shifts by the sidebar's 8 pt gap so lists
         // still start 20 pt from the window edge.
+        // While the sidebar slides, the title moves between its two places.
         let leading = if rail_shown {
-            crate::ui::native::metrics::CONTENT_LEADING
+            let shown = crate::ui::native::metrics::CONTENT_LEADING;
+            shown + (theme::SIDEBAR_HIDDEN_INSET - shown) * (1. - left)
         } else {
-            theme::TRAFFIC_LIGHTS_INSET - crate::ui::native::metrics::SIDEBAR_INSET
+            theme::SIDEBAR_HIDDEN_INSET - crate::ui::native::metrics::SIDEBAR_INSET
         };
         let page_el = self
             .pages
@@ -887,13 +1034,82 @@ impl Render for RootView {
                 .child(page_el)
                 .into_any_element()
         };
-        let pane_el = self.panes.render(&pane, pane_w, floats, cx);
+        let pane_el = if floats || right >= 1. {
+            self.panes
+                .render(&drawn_pane, full_pane_w, floats, cx)
+                .map(|el| {
+                    if right < 1. {
+                        div().opacity(right).child(el).into_any_element()
+                    } else {
+                        el
+                    }
+                })
+        } else {
+            // The column clips the pane at its full width while it slides.
+            self.panes
+                .render(&drawn_pane, full_pane_w, false, cx)
+                .map(|el| {
+                    div()
+                        .flex_none()
+                        .h_full()
+                        .w(pane_w)
+                        .overflow_hidden()
+                        .flex()
+                        .child(div().flex_none().w(full_pane_w).h_full().child(el))
+                        .into_any_element()
+                })
+        };
+        // 显示侧栏: with the sidebar hidden, its toggle stays on screen right
+        // after the traffic lights, so the sidebar is one click away.
+        let show_sidebar = (!rail_shown).then(|| {
+            let nav = self.services.nav.clone();
+            div()
+                .absolute()
+                .left(theme::SIDEBAR_SHOW_X)
+                .top(
+                    (crate::ui::native::metrics::TOOLBAR_ROW
+                        - crate::ui::native::metrics::TOOLBAR_ITEM)
+                        / 2.,
+                )
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    crate::ui::native::toolbar_item_sym(
+                        "show-sidebar",
+                        crate::ui::Sym::SidebarToggle,
+                        crate::copy::nav::SIDEBAR_SHOW,
+                        false,
+                        active,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| nav.update(cx, |nav, cx| nav.toggle_sidebar(cx))),
+                )
+                .into_any_element()
+        });
         root.flex()
             .flex_row()
             .relative()
+            // A sidebar drag follows the pointer anywhere in the window.
+            .when(self.columns.drag.is_some(), |el| {
+                el.cursor(gpui::CursorStyle::ResizeLeftRight)
+            })
+            .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
+                if this.columns.drag.is_some() && this.columns.drag_to(e.position.x) {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _: &gpui::MouseUpEvent, _, cx| {
+                    let reduce = cx.reduce_motion();
+                    if this.columns.end_drag(reduce) {
+                        cx.notify();
+                    }
+                }),
+            )
             .children(rail)
             .child(page_el)
             .children(pane_el)
+            .children(show_sidebar)
     }
 }
 
@@ -953,7 +1169,13 @@ pub fn open_main_window(
                 .nav
                 .update(cx, |nav, cx| nav.set_rail_mode(prefs.rail_mode, cx));
         }
-        cx.new(|cx| RootView::new(services, first_frame, window, cx))
+        let view = cx.new(|cx| RootView::new(services, first_frame, window, cx));
+        if focus {
+            view.update(cx, |v, _| {
+                v.columns = crate::views::columns::Columns::load()
+            });
+        }
+        view
     })
     .map_err(|e| e.to_string())?;
     Ok(view)
@@ -1002,6 +1224,12 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
+    {
+        let services = services.clone();
+        cx.on_action(move |_: &ToggleSettings, cx| {
+            crate::views::settings::toggle(services.clone(), cx)
+        });
+    }
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
     bind_view_keys(cx);

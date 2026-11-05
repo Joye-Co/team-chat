@@ -89,6 +89,11 @@ export function testCounts(text: string): TestCounts | null {
   return skipped > 0 ? { passed, failed, skipped } : { passed, failed };
 }
 
+/** A card title is plain text: inline code ticks of the first line go. */
+function plainTitle(line: string): string {
+  return line.replace(/`([^`\n]+)`/g, "$1");
+}
+
 /** The done card of a run, or null when it would not be a valid Card v2. */
 export function doneCard(opts: {
   runId: string;
@@ -99,7 +104,12 @@ export function doneCard(opts: {
 }): CardV2 | null {
   const blocks: CardV2Block[] = [];
   const text = opts.result.trim();
-  if (text !== "") blocks.push({ type: "text", id: "result", text: cutUnits(text, CARD_TEXT_UNITS) });
+  // The first line is the title; the text block holds only what follows, so the card never
+  // says its first line twice.
+  const lines = text.split(/\r?\n/);
+  const head = lines.findIndex((l) => l.trim() !== "");
+  const rest = head < 0 ? "" : lines.slice(head + 1).join("\n").trim();
+  if (rest !== "") blocks.push({ type: "text", id: "result", text: cutUnits(rest, CARD_TEXT_UNITS) });
   const tests = testCounts(text);
   if (tests) {
     blocks.push({
@@ -144,7 +154,7 @@ export function doneCard(opts: {
     v: 2 as const,
     rev: 1,
     intent: "done" as const,
-    title: cutUnits(firstLine(text, 200), 200) || PROOF_TEXT.doneTitle,
+    title: cutUnits(plainTitle(firstLine(text, 200)), 200) || PROOF_TEXT.doneTitle,
     fallback: cutUnits(text, 4000),
     blocks,
     data: { runId: opts.runId },

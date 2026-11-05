@@ -1017,16 +1017,21 @@ fn open_client(
 
 impl ChatProvider for CoreProvider {
     fn session(&self) -> SessionState {
-        let s = self.state();
-        if let Some(a) = &s.account {
+        // `avatar_file` takes the state lock, so read the account first.
+        if let Some(a) = self.account() {
             // The cached row has my latest name, 岗位 and avatar.
             let me = a.client.member(&a.me.id).ok().flatten();
+            let row = me.as_ref().unwrap_or(&a.me);
+            // Views draw only the downloaded file, like `members()`.
+            let mut me = convert::member(row, true);
+            me.avatar_url = self.avatar_file(&a, row);
             return SessionState::SignedIn {
-                me: convert::member(me.as_ref().unwrap_or(&a.me), true),
+                me,
                 server_url: a.server_url.clone(),
             };
         }
-        s.session
+        self.state()
+            .session
             .clone()
             .unwrap_or(SessionState::SignedOut { last_error: None })
     }

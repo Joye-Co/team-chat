@@ -706,8 +706,6 @@ impl MembersPage {
         }
         let mut actions: Vec<AnyElement> = Vec::new();
         if m.is_bot() {
-            let run = e.run.clone();
-            let services = self.services.clone();
             let side = {
                 let nav = self.services.nav.clone();
                 let run = e.run.clone();
@@ -721,28 +719,6 @@ impl MembersPage {
                     })
                 }
             };
-            actions.push(
-                disabled_push(
-                    push_button(
-                        "member-pause",
-                        c::MEMBERS_PAUSE,
-                        PushStyle::Outline,
-                        PushSize::Small,
-                        cx,
-                    )
-                    .on_click(move |_, _, _| {
-                        if let Some(r) = &run {
-                            let _ =
-                                services
-                                    .provider
-                                    .take_over_run(&r.group_id, &r.topic_id, &r.id);
-                        }
-                    }),
-                    e.run.is_none(),
-                    cx,
-                )
-                .into_any_element(),
-            );
             actions.push(
                 disabled_push(
                     push_button(
@@ -2221,19 +2197,7 @@ fn member_menu(
         PopupMenuItem::new(c::MEMBERS_OUTPUTS_BUTTON)
             .on_click(move |_, _, cx| outputs.update(cx, |n, cx| n.open_artifacts(cx))),
     );
-    match run.cloned() {
-        Some(r) => {
-            let services = services.clone();
-            menu.separator().item(
-                PopupMenuItem::new(c::MEMBERS_PAUSE).on_click(move |_, _, _| {
-                    let _ = services
-                        .provider
-                        .take_over_run(&r.group_id, &r.topic_id, &r.id);
-                }),
-            )
-        }
-        None => menu,
-    }
+    menu
 }
 // --- end v12/behavior ---
 

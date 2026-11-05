@@ -154,6 +154,6 @@ impl Element for MenuAccent {
 
 /// The width the floating sidebar takes from the window: the panel and
 /// its inset on both sides.
-pub fn sidebar_room() -> Pixels {
-    metrics::SIDEBAR_WIDTH + metrics::SIDEBAR_INSET * 2.
+pub fn sidebar_room(width: Pixels) -> Pixels {
+    width + metrics::SIDEBAR_INSET * 2.
 }

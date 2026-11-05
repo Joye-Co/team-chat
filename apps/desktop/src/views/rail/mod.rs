@@ -426,7 +426,7 @@ impl RailView {
         let avatar = crate::ui::MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::MD);
         let footer =
             SidebarFooter::new("rail-footer", avatar, me.name.clone()).on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
+                window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
             });
         let _ = server_url;
         // §2.1: the second line is the role, never a server address.
@@ -589,13 +589,37 @@ impl Render for RailView {
                     .id("rail-lights-row")
                     .flex_none()
                     .h(LIGHTS_ROW)
+                    .pr(metrics::SIDEBAR_ROW_INSET)
+                    .flex()
+                    .items_center()
+                    .justify_end()
                     .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
                         if event.click_count >= 2 {
                             window.titlebar_double_click();
                         } else {
                             window.start_window_move();
                         }
-                    }),
+                    })
+                    // 隐藏侧栏 (⌃⌘S), at the trailing end of the lights row as
+                    // in Mail and Notes; a press here never moves the window.
+                    .child(
+                        div()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .child({
+                                let nav = self.services.nav.clone();
+                                self.tool(
+                                    "rail-hide-sidebar",
+                                    Sym::SidebarToggle,
+                                    crate::copy::nav::SIDEBAR_HIDE,
+                                    cx,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    nav.update(cx, |nav, cx| nav.toggle_sidebar(cx))
+                                })
+                            }),
+                    ),
             )
             // The search field, then the filter pull-down and 新话题 on its
             // center line.
@@ -677,20 +701,8 @@ impl Render for RailView {
                 cx.try_global::<crate::views::banners::AppBanners>()
                     .map(|b| b.update.clone()),
             )
-            // COMPLETENESS.md §2.1, F04: the secondary items at the end of
-            // the groups, then the pinned user footer.
-            .child(
-                div()
-                    .flex_none()
-                    .pb(crate::ui::native::tokens::space::S8)
-                    .child(
-                        self.row("rail-settings", c::RAIL_SETTINGS)
-                            .symbol(Sf::Settings)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
-                            }),
-                    ),
-            )
+            // The pinned user footer is the one way into 设置 (it opens and
+            // closes the settings window); no second 设置 row above it.
             .children(self.footer(cx))
     }
 }

@@ -388,14 +388,14 @@ fn the_exact_prefix_is_stripped_and_anything_else_shown_unchanged() {
         None
     );
     assert_eq!(strip_prefix(body, &[]), None);
-    // A deleted source: its line says 原消息已删除.
+    // A deleted source: its line says 原消息已撤回.
     let mut gone = stored("");
     gone.deleted = Some(chat_core::proto::True);
     let two = vec![refs[0].clone(), gone];
     let p = prefix(&two);
     assert_eq!(
         p,
-        "> ↳ 10 月数据月报 · 渠道表 · B 站 · 新增群 9\n> ↳ 原消息已删除"
+        "> ↳ 10 月数据月报 · 渠道表 · B 站 · 新增群 9\n> ↳ 原消息已撤回"
     );
     assert_eq!(strip_prefix(&format!("{p}\n\n好"), &two), Some("好"));
     // The client's prefix is the protocol's.

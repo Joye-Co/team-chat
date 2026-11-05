@@ -1271,7 +1271,7 @@ impl ChatProvider for FakeProvider {
             }
             None
         });
-        // inc-refs: references to the deleted message show 原消息已删除.
+        // inc-refs: references to the deleted message show 原消息已撤回.
         if topic.is_some() {
             self.with(|s| {
                 let mut all: Vec<&mut Message> =

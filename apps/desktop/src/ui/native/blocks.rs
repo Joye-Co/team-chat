@@ -124,16 +124,14 @@ impl ParentElement for Card {
     }
 }
 
-/// The card surface alone (§2.4): radius 14, a 1 px border, the card fill,
-/// shadow sm.
+/// The card surface alone (§2.4): radius 14, the card fill, shadow sm and
+/// a foreground ring at 6 %: a soft edge, not a drawn line (owner decision,
+/// v18: borders only where they separate something).
 pub fn card_surface(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
-    div()
-        .rounded(radius::CARD)
-        .bg(k.sheet)
-        .border_1()
-        .border_color(k.separator)
-        .shadow(shadow::sm())
+    let mut s = shadow::sm();
+    s.push(shadow::line(k.label.opacity(0.06)));
+    div().rounded(radius::CARD).bg(k.sheet).shadow(s)
 }
 
 impl RenderOnce for Card {
