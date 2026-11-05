@@ -23,7 +23,7 @@ mod focus;
 mod header;
 mod live;
 mod menu;
-mod model;
+pub(crate) mod model;
 pub mod plan;
 pub mod preview;
 mod row;

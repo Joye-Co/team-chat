@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use gpui::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
+    Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -63,8 +63,13 @@ pub fn mentioned(services: &Services, group_id: &str, body: &str) -> Vec<String>
 #[derive(Clone, Debug)]
 struct QuoteFrom {
     message_id: String,
-    /// The author and the first line, as the sheet shows them.
-    line: String,
+    author: Option<crate::data::Member>,
+    /// The author's name, or empty when unknown.
+    name: String,
+    /// The message text (Markdown as written), shown at most three lines.
+    text: String,
+    /// The message time, `HH:MM`.
+    time: String,
 }
 
 pub struct NewTopicSheet {
@@ -83,6 +88,7 @@ impl NewTopicSheet {
     fn new(
         services: Services,
         group: Option<GroupId>,
+        body_placeholder: &'static str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -91,7 +97,7 @@ impl NewTopicSheet {
         let body = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(4, 4)
-                .placeholder(o::NEW_TOPIC_BODY_PLACEHOLDER)
+                .placeholder(body_placeholder)
         });
         let groups = rail_model::groups(services.provider.as_ref());
         let group = group
@@ -129,12 +135,17 @@ impl NewTopicSheet {
         let Some(group_id) = self.group.clone() else {
             return;
         };
-        let body = self.body.read(cx).value().trim().to_string();
+        let mut body = self.body.read(cx).value().trim().to_string();
+        let title = crate::views::topic_menu::validate_title(&self.title.read(cx).value()).ok();
+        // 开个话题: the quote is the content, so the note may stay empty;
+        // the first message then says the title.
+        if body.is_empty() && self.quote.is_some() {
+            body = title.clone().unwrap_or_default();
+        }
         // An empty message only turns 开始 off (NATIVE.md §7.4).
         if body.is_empty() {
             return;
         }
-        let title = crate::views::topic_menu::validate_title(&self.title.read(cx).value()).ok();
         let mentions = mentioned(&self.services, &group_id, &body);
         let provider = self.services.provider.clone();
         provider.start_topic(StartTopicRequest {
@@ -156,6 +167,9 @@ impl NewTopicSheet {
 
 impl Render for NewTopicSheet {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.quote.is_some() {
+            return self.render_from(cx).into_any_element();
+        }
         let ready = self.group.is_some() && !self.body.read(cx).value().trim().is_empty();
         let group_name: SharedString = self
             .groups
@@ -199,34 +213,7 @@ impl Render for NewTopicSheet {
         // lines (review 3 K-02).
         let body_field = NativeTextArea::new("new-topic-body", &self.body).rows(4);
         let [cancel, start] = sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
-        // 开个话题: the quoted 群聊 message, one muted line under its label.
-        let quote_row = self.quote.as_ref().map(|q| {
-            let k = crate::ui::native::native_colors(cx);
-            let line: SharedString = q.line.clone().into();
-            sheet_form_row(
-                o::NEW_TOPIC_QUOTE,
-                div()
-                    .id("new-topic-quote")
-                    .w(form_field_width(SheetWidth::Form))
-                    .pl(crate::theme::space::S8)
-                    .border_l_2()
-                    .border_color(k.separator)
-                    .text_color(k.secondary)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(line.clone())
-                    .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(line.clone()).build(window, cx)
-                    }),
-                cx,
-            )
-        });
-        let (sheet_title, explanation) = if self.quote.is_some() {
-            (o::NEW_TOPIC_FROM_TITLE, o::NEW_TOPIC_FROM_EXPLANATION)
-        } else {
-            (o::NEW_TOPIC_TITLE, o::NEW_TOPIC_EXPLANATION)
-        };
+        let (sheet_title, explanation) = (o::NEW_TOPIC_TITLE, o::NEW_TOPIC_EXPLANATION);
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &StartTopic, window, cx| this.submit(window, cx)))
@@ -237,13 +224,128 @@ impl Render for NewTopicSheet {
                     .body(
                         sheet_form()
                             .child(sheet_form_row(o::NEW_TOPIC_GROUP, group_popup, cx))
-                            .children(quote_row)
                             .child(sheet_form_row(
                                 o::NEW_TOPIC_NAME,
                                 NativeTextField::new("new-topic-title", &self.title).full_width(),
                                 cx,
                             ))
                             .child(sheet_form_row_top(o::NEW_TOPIC_BODY, body_field, cx)),
+                    )
+                    .buttons([
+                        cancel.on_click(|_, window, cx| window.close_dialog(cx)),
+                        disabled_push(start, !ready, cx)
+                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                    ]),
+            )
+            .into_any_element()
+    }
+}
+
+impl NewTopicSheet {
+    /// 开个话题: the quoted message as a card (who, when, up to three
+    /// lines), then the 标题 and an optional note. The 群 is the message's,
+    /// named in the explanation; there is nothing to pick.
+    fn render_from(&mut self, cx: &mut Context<Self>) -> gpui::Div {
+        use crate::ui::native::tokens::{NativeType as _, avatar, metrics, space};
+        let Some(q) = self.quote.clone() else {
+            return div();
+        };
+        let k = crate::ui::native::native_colors(cx);
+        let group_name = self
+            .groups
+            .iter()
+            .find(|(id, _)| Some(id) == self.group.as_ref())
+            .map(|(_, n)| n.clone())
+            .unwrap_or_default();
+        let ready = self.group.is_some()
+            && (!self.body.read(cx).value().trim().is_empty()
+                || !self.title.read(cx).value().trim().is_empty());
+        let card = div()
+            .id("new-topic-quote")
+            .w_full()
+            .p(space::S12)
+            .rounded(metrics::GROUP_RADIUS)
+            .border_1()
+            .border_color(k.separator)
+            .bg(k.group)
+            .flex()
+            .gap(space::S12)
+            .child(
+                div()
+                    .flex_none()
+                    .child(crate::ui::MemberAvatar::new(q.author.as_ref(), avatar::SM)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(gpui::Pixels::ZERO)
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap(space::S8)
+                            .child(
+                                div()
+                                    .n_headline()
+                                    .text_color(k.label)
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(q.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .n_subheadline()
+                                    .text_color(k.secondary)
+                                    .child(q.time.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .n_body()
+                            .text_color(k.label)
+                            .line_clamp(3)
+                            .child(q.text.clone()),
+                    ),
+            );
+        let body_field = NativeTextArea::new("new-topic-body", &self.body).rows(3);
+        let [cancel, start] =
+            sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_FROM_CREATE, cx);
+        div()
+            .key_context(CONTEXT)
+            .on_action(cx.listener(|this, _: &StartTopic, window, cx| this.submit(window, cx)))
+            .w_full()
+            .child(
+                SheetLayout::new(o::NEW_TOPIC_FROM_TITLE)
+                    .explanation(crate::copy::fill(
+                        o::NEW_TOPIC_FROM_EXPLANATION,
+                        &[("group", &group_name)],
+                    ))
+                    .body(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::S12)
+                            .child(card)
+                            .child(
+                                sheet_form()
+                                    .child(sheet_form_row_top(
+                                        o::NEW_TOPIC_NAME,
+                                        NativeTextField::new("new-topic-title", &self.title)
+                                            .full_width(),
+                                        cx,
+                                    ))
+                                    .child(sheet_form_row_top(
+                                        o::NEW_TOPIC_FROM_NOTE,
+                                        body_field,
+                                        cx,
+                                    )),
+                            ),
                     )
                     .buttons([
                         cancel.on_click(|_, window, cx| window.close_dialog(cx)),
@@ -262,7 +364,7 @@ pub fn open_new_topic(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<NewTopicSheet> {
-    let sheet = cx.new(|cx| NewTopicSheet::new(services, group, window, cx));
+    let sheet = cx.new(|cx| NewTopicSheet::new(services, group, o::NEW_TOPIC_BODY_PLACEHOLDER, window, cx));
     present(sheet, window, cx)
 }
 
@@ -275,11 +377,7 @@ pub fn open_new_topic_from(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<NewTopicSheet> {
-    let author = services
-        .provider
-        .member(&message.author_id)
-        .map(|m| m.name)
-        .unwrap_or_default();
+    let author = services.provider.member(&message.author_id);
     let first = message
         .body
         .lines()
@@ -293,11 +391,10 @@ pub fn open_new_topic_from(
         .collect();
     let quote = QuoteFrom {
         message_id: message.id.clone(),
-        line: if author.is_empty() {
-            first.clone()
-        } else {
-            format!("{author}：{first}")
-        },
+        name: author.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
+        author,
+        text: message.body.trim().to_string(),
+        time: crate::views::timeline::model::clock(message.created_at),
     };
     let group_id = message.group_id.clone();
     // A 私聊 is not in the sheet's 群 list; its 话题 still start there.
@@ -308,7 +405,13 @@ pub fn open_new_topic_from(
         .find(|g| g.id == group_id)
         .map(|g| g.name);
     let sheet = cx.new(|cx| {
-        let mut sheet = NewTopicSheet::new(services, Some(group_id.clone()), window, cx);
+        let mut sheet = NewTopicSheet::new(
+            services,
+            Some(group_id.clone()),
+            o::NEW_TOPIC_FROM_NOTE_PLACEHOLDER,
+            window,
+            cx,
+        );
         if !sheet.groups.iter().any(|(id, _)| *id == group_id) {
             sheet
                 .groups
