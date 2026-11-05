@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.2.0 (unreleased)
+## 1.2.0 (2026-11-05)
 
 Notes: [docs/releases/1.2.0.md](docs/releases/1.2.0.md). The server deploys first, from the
 commit that will be tagged, with `DEPLOY_VERSION=1.2.0` (`bun run deploy:e2e`, `deploy:staging`,
