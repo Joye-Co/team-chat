@@ -467,10 +467,11 @@ pub mod height {
     pub const DEFAULT: Pixels = px(32.);
     /// Control lg: login, full-page empty CTA, composer Send.
     pub const LG: Pixels = px(36.);
-    /// The toolbar row and every pane header (§2.2): 52, one line centered
-    /// on the traffic-light line (y 26). The subtitle sits after the title
-    /// on that line, never under it (owner decision, v18).
-    pub const TOOLBAR: Pixels = px(52.);
+    /// The toolbar row and every pane header (§2.2): 64, one line centered
+    /// in it (y 32), so the title has room above it and sits a little under
+    /// the traffic lights. The subtitle sits after the title on that line,
+    /// never under it (owner decision, v18).
+    pub const TOOLBAR: Pixels = px(64.);
     /// Sidebar item, menu item, palette row, group label, compact row.
     pub const ROW: Pixels = px(32.);
     /// A menu group label.
@@ -719,7 +720,7 @@ pub mod size {
     pub const OPTION_ROW: Pixels = px(40.);
     pub const PANEL_ROW: Pixels = px(40.);
     pub const PLAN_ROW: Pixels = height::ROW;
-    pub const BANNER: Pixels = height::TOOLBAR;
+    pub const BANNER: Pixels = px(52.);
     pub const TOAST: Pixels = px(48.);
     pub const AVATAR_MESSAGE: Pixels = avatar::MD;
     pub const AVATAR_FOOTER: Pixels = avatar::MD;
