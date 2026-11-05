@@ -3,9 +3,6 @@
 crate::copy! {
     LIVE_TITLE = "实时查看",
     LIVE_COMPUTER = "{name} 的电脑",
-    LIVE_NOW = "实时",
-    LIVE_YOU_HOLD = "你在操作",
-    LIVE_HELD_BY_OTHER = "{who} 在操作",
     LIVE_ELAPSED = "已用 {n} 分钟",
     LIVE_ELAPSED_HOURS = "已用 {h} 小时 {m} 分钟",
     LIVE_EXPAND = "全屏查看",

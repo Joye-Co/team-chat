@@ -17,7 +17,7 @@ pub fn is_side_chat(side: &SideChats, topic: &Topic) -> bool {
 
 use crate::{
     copy::{fill, rail as c},
-    data::{ChatProvider, GroupId, GroupKind, Member, MemberId, PlanState, Topic, TopicStatus},
+    data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic, TopicStatus},
 };
 
 /// What the slot at the start of a 话题 row shows.
@@ -58,13 +58,9 @@ impl Meta {
     }
 }
 
-/// `3/5`: the step a run works on of its plan.
+/// `2/5`: the steps of a run's plan done over all (§2.12, one count).
 pub fn plan_meta(plan: &[crate::data::PlanItem]) -> Option<String> {
-    if plan.is_empty() {
-        return None;
-    }
-    let done = plan.iter().filter(|i| i.state == PlanState::Done).count();
-    Some(format!("{}/{}", (done + 1).min(plan.len()), plan.len()))
+    crate::views::topic_page::plan_progress(plan).map(|(n, total, _)| format!("{n}/{total}"))
 }
 
 /// The state of a 话题 row and its trailing meta (`3/5`, `09:12`, `等小王`).
