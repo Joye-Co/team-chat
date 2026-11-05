@@ -910,22 +910,67 @@ impl Render for SideChat {
                     }
                 })
                 .collect();
+            // A2-17, §2.17: the questions not asked yet stay as outline sm
+            // buttons over the composer, so a short aside ends with its next
+            // step, never a blank band.
+            let asked: Vec<&str> = thread
+                .messages
+                .iter()
+                .filter(|msg| Some(&msg.author_id) == me.as_ref())
+                .map(|msg| msg.body.trim())
+                .collect();
+            let next: Vec<AnyElement> = STARTERS
+                .iter()
+                .enumerate()
+                .filter(|(_, q)| !asked.iter().any(|a| a.contains(q.trim_end_matches('？'))))
+                .take(2)
+                .map(|(i, q)| {
+                    push_button(
+                        SharedString::from(format!("side-chat-next-{i}")),
+                        *q,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.ask(q, cx)))
+                    .into_any_element()
+                })
+                .collect();
             div()
-                .id("side-chat-thread")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
+                .flex()
+                .flex_col()
                 .child(
                     div()
-                        .pt(space::S16)
-                        .px(metrics::INSPECTOR_PAD)
-                        .pb(space::S24)
-                        .flex()
-                        .flex_col()
-                        .gap(space::S16)
-                        .children(rows),
+                        .id("side-chat-thread")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .child(
+                            div()
+                                .pt(space::S16)
+                                .px(metrics::INSPECTOR_PAD)
+                                .pb(space::S24)
+                                .flex()
+                                .flex_col()
+                                .gap(space::S16)
+                                .children(rows),
+                        ),
                 )
+                .when(!next.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .flex_none()
+                            .px(metrics::INSPECTOR_PAD)
+                            .pb(space::S8)
+                            .flex()
+                            .flex_wrap()
+                            .gap(space::S8)
+                            .children(next),
+                    )
+                })
                 .into_any_element()
         };
 
