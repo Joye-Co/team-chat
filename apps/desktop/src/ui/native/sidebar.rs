@@ -54,6 +54,9 @@ pub struct SidebarSection {
     on_toggle: Option<Click>,
     /// Show the chevron without hover (gallery).
     show_chevron: bool,
+    /// The section's own page is open (a 群 header on its 群 page): the
+    /// label row takes the selected look (D10).
+    selected: bool,
 }
 
 impl SidebarSection {
@@ -64,7 +67,15 @@ impl SidebarSection {
             collapsed: false,
             on_toggle: None,
             show_chevron: false,
+            selected: false,
         }
+    }
+
+    /// T-12: the selected look (D10): the muted fill under the label row
+    /// and the label in the selected ink, as a selected row.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
     }
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
@@ -92,27 +103,26 @@ impl RenderOnce for SidebarSection {
         } else {
             Sf::ChevronDown
         };
-        div()
-            .id(self.id)
-            .group(group.clone())
-            .flex_none()
-            .h(metrics::SIDEBAR_SECTION)
-            .mx(metrics::SIDEBAR_ROW_INSET)
+        let (_, sel_text) = k.selected_ink(emphasized(window));
+        let label = if self.selected { sel_text } else { k.secondary };
+        let row = div()
+            .size_full()
             .px(px(8.))
-            .pt(px(8.))
+            .rounded(metrics::SIDEBAR_ROW_RADIUS)
+            .when(self.selected, |d| d.bg(k.selection))
             .flex()
             .items_center()
             .child(
                 TruncText::new(self.label)
                     .flex_1()
                     .n_section()
-                    .text_color(k.secondary),
+                    .text_color(label),
             )
             .child(
                 div()
                     .flex_none()
                     .when(!self.show_chevron, |d| {
-                        d.opacity(0.).group_hover(group, |s| s.opacity(1.))
+                        d.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.))
                     })
                     .child(symbol(
                         chevron,
@@ -121,7 +131,15 @@ impl RenderOnce for SidebarSection {
                         k.secondary,
                         window,
                     )),
-            )
+            );
+        div()
+            .id(self.id)
+            .group(group.clone())
+            .flex_none()
+            .h(metrics::SIDEBAR_SECTION)
+            .mx(metrics::SIDEBAR_ROW_INSET)
+            .pt(px(8.))
+            .child(row)
             .when_some(self.on_toggle, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
             })
@@ -465,13 +483,24 @@ impl RenderOnce for SidebarRow {
             })
             .child(
                 // D10: the selected item is the muted fill and 500; unread
-                // is 600. A cut title shows the whole title in a tooltip.
-                TruncText::new(self.title)
+                // is 600 with the 8 info dot by the title (§2.12, T-20). A
+                // cut title shows the whole title in a tooltip.
+                div()
                     .flex_1()
-                    .n_body()
-                    .when(self.selected, |d| d.font_weight(MEDIUM_WEIGHT))
-                    .when(self.unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
-                    .text_color(text),
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        TruncText::new(self.title)
+                            .n_body()
+                            .when(self.selected, |d| d.font_weight(MEDIUM_WEIGHT))
+                            .when(self.unread, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
+                            .text_color(text),
+                    )
+                    .when(self.unread, |d| {
+                        d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
+                    }),
             )
             .when_some(trailing_text, |d, t| {
                 d.child(

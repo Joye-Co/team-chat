@@ -66,6 +66,9 @@ struct Cache {
     asks: usize,
     /// B: the 群 of the filter pull-down.
     groups: Vec<(GroupId, String)>,
+    /// Some 群 has a 话题 in the cache (T-13: the first sync is over for
+    /// the sidebar once one shows).
+    has_topics: bool,
 }
 
 /// The traffic-light row at the top of the sidebar panel: the lights are
@@ -174,6 +177,7 @@ impl RailView {
     fn inputs(&self, cx: &App) -> Inputs {
         let nav = self.services.nav.read(cx);
         Inputs {
+            sync: modes::Sync::of(&self.services.provider.connection()),
             mode: nav.rail_mode,
             me: self.me(),
             open: nav.topic.clone(),
@@ -240,6 +244,7 @@ impl RailView {
             // One needs-you query for this count and the 首页 subtitle.
             asks: crate::views::desk::model::waiting_on_me(&self.services, cx),
             groups: model::groups(p.as_ref()),
+            has_topics: p.groups().iter().any(|g| !p.topics(&g.id).is_empty()),
             entries: Rc::new(entries),
             inputs,
         });
@@ -437,6 +442,48 @@ impl RailView {
         Some(footer.into_any_element())
     }
 
+    /// The offline Alert row above the footer (§2.1, §2.15): the state and
+    /// when it tries again, with 立即重连. `None` while connected or
+    /// connecting, and on a 话题 page (its composer docks the Alert).
+    fn offline_row(&self, page: Page, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::data::{ConnectionState, SessionState};
+        let p = &self.services.provider;
+        let state = p.connection();
+        if page == Page::Topic
+            || matches!(state, ConnectionState::Connecting)
+            || !matches!(p.session(), SessionState::SignedIn { .. })
+        {
+            return None;
+        }
+        let (title, detail) = crate::views::connection_banner::banner_lines(state.clone())?;
+        let retry = crate::ui::native::push_button(
+            "rail-reconnect",
+            if state == ConnectionState::TokenUnreadable {
+                crate::copy::connection::RETRY_TOKEN
+            } else {
+                crate::copy::connection::RECONNECT
+            },
+            crate::ui::native::PushStyle::Outline,
+            crate::ui::native::PushSize::Small,
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now()));
+        Some(
+            div()
+                .id("rail-offline")
+                .flex_none()
+                .px(metrics::SIDEBAR_ROW_INSET)
+                .pb(space::S8)
+                .child(
+                    crate::ui::native::Alert::new(Sym::Offline, title)
+                        .tone(crate::ui::native::AlertTone::Warning)
+                        .description(detail)
+                        .action(retry),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// Draws the inactive-window look (gray selection, `secondary` tools).
     pub fn set_show_inactive(&mut self, inactive: bool, cx: &mut Context<Self>) {
         if self.show_inactive != inactive {
@@ -453,12 +500,15 @@ impl Render for RailView {
         let page = nav.page();
         let mode = nav.rail_mode;
         let asks = self.cache.as_ref().map_or(0, |c| c.asks);
-        // R2-02: no count on 首页 until the first sync has rows.
-        let syncing = self.cache.as_ref().is_none_or(|c| c.entries.is_empty())
-            && matches!(
-                self.services.provider.connection(),
-                crate::data::ConnectionState::Connecting
-            );
+        // R2-02, T-13: the first sync runs while it connects and no 话题 is
+        // cached yet (私聊 and 群 names alone are not the sidebar's data):
+        // no 首页 count, no create button, the sidebar skeleton.
+        let sync = self
+            .cache
+            .as_ref()
+            .map_or(modes::Sync::Syncing, |c| c.inputs.sync);
+        let syncing =
+            sync == modes::Sync::Syncing && self.cache.as_ref().is_none_or(|c| !c.has_topics);
         let view = cx.entity();
         let rows = list(self.list.clone(), move |ix, _, cx| {
             view.update(cx, |this, cx| this.entry(ix, cx))
@@ -493,11 +543,7 @@ impl Render for RailView {
         ];
         let filter = self.filter_button(mode, cx);
         let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
-        let first_sync = no_rows
-            && matches!(
-                self.services.provider.connection(),
-                crate::data::ConnectionState::Connecting
-            );
+        let first_sync = syncing;
         // §2.14, A1-13: no create button while the first sync runs.
         let new_topic = crate::ui::native::disabled_push(
             self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx),
@@ -611,6 +657,9 @@ impl Render for RailView {
                             )),
                     ),
             )
+            // §2.1, §2.15, T-13: offline, an Alert row above the footer.
+            // A 话题 page docks the same Alert above its composer instead.
+            .children(self.offline_row(page, cx))
             // An update that runs while its sheet is hidden.
             .children(
                 cx.try_global::<crate::views::banners::AppBanners>()
