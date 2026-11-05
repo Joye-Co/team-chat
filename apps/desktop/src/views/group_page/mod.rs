@@ -239,13 +239,21 @@ impl GroupPage {
         // §2.14: no create button while the first sync runs or offline;
         // it stays in place, disabled at 50 %.
         let new_topic = crate::ui::native::disabled_push(
+            // A quiet muted-fill button with a plus, not the black primary:
+            // the page is for reading what runs, creating is one action of
+            // several (owner decision, v18).
             push_button(
                 "group-new-topic",
                 c::GROUP_PAGE_NEW_TOPIC,
-                PushStyle::Default,
+                PushStyle::Secondary,
                 PushSize::Regular,
                 cx,
-            ),
+            )
+            .icon(crate::ui::button_glyph(
+                Sym::Plus,
+                crate::theme::icon::HEADER,
+                crate::theme::size::ICON_BUTTON,
+            )),
             !ready,
             cx,
         )
@@ -305,7 +313,6 @@ impl GroupPage {
         t: &Topic,
         st: Standing,
         run: Option<&BotRunSummary>,
-        last: bool,
         cx: &App,
     ) -> AnyElement {
         let p = &self.services.provider;
@@ -402,7 +409,6 @@ impl GroupPage {
             second: Some(line(second).into_any_element()),
             status: Some(badge),
             time: Some(clock(time).into()),
-            separator: !last,
             ..page::PageRow::new(t.title.clone())
         }
         .render(
@@ -462,7 +468,6 @@ impl GroupPage {
         all.sort_by_key(|d| std::cmp::Reverse(d.at));
         let total = all.len();
         let done: Vec<_> = all.into_iter().take(5).collect();
-        let n = done.len();
         let rows = done
             .into_iter()
             .enumerate()
@@ -490,7 +495,6 @@ impl GroupPage {
                         cx,
                     )),
                     time: Some(kit::month_day(d.at).into()),
-                    separator: i + 1 < n,
                     ..page::PageRow::new(d.title.clone())
                 }
                 .render(SharedString::from(format!("group-done-{i}")), COLUMNS, cx)
@@ -544,10 +548,11 @@ impl GroupPage {
             .border_b_1()
             .border_color(k.separator)
             .flex()
-            .flex_col()
-            .justify_center()
+            .items_center()
+            .gap(tsp::S8)
             .child(
                 div()
+                    .flex_none()
                     .n_title3()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(k.label)
@@ -1009,8 +1014,6 @@ impl Render for GroupPage {
                         .flex_none()
                         .flex()
                         .rounded(page::m::FRAME_RADIUS)
-                        .border_1()
-                        .border_color(k.separator)
                         .child(page::page_empty(
                             Sym::Topic,
                             c::GROUP_PAGE_EMPTY_TITLE,
@@ -1052,10 +1055,7 @@ impl Render for GroupPage {
                     let topic_rows: Vec<AnyElement> = rows
                         .iter()
                         .take(shown)
-                        .enumerate()
-                        .map(|(i, (st, t, run))| {
-                            self.topic_row(t, *st, run.as_ref(), i + 1 == shown, cx)
-                        })
+                        .map(|(st, t, run)| self.topic_row(t, *st, run.as_ref(), cx))
                         .collect();
                     let slug = st.slug();
                     let footer = if total > ACTIVE_ROWS {
