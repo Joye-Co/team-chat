@@ -1,5 +1,5 @@
 //! The rows of the 首页 lists (COMPLETENESS.md §2.6, §2.18): 需要你拍板,
-//! 正在做 and 做完了 as list rows in one frame each, with fixed right columns
+//! 正在做 and 今天交付 as list rows in one frame each, with fixed right columns
 //! (StatusBadge, time, actions) so every row of a list lines up. A
 //! needs-you row shows the small buttons `看看` and its one answer; a
 //! button that asks first ends with `…`. Once answered a row shows the
@@ -45,7 +45,8 @@ use crate::{
 /// and room for `看看` and one answer. Rows with no action keep the column
 /// empty, so badges and times sit at one x in every section.
 pub const DESK_COLUMNS: Columns = Columns {
-    status: Some(gpui::px(96.)),
+    // 112 holds `等你审 PR #61`, as on 群.
+    status: Some(gpui::px(112.)),
     time: Some(m::TIME_COLUMN),
     actions: Some(gpui::px(200.)),
 };
@@ -210,7 +211,7 @@ pub fn ask_row(
                 (
                     clock(a.item.at),
                     line(from).into_any_element(),
-                    page::status_badge(Status::NeedsYou, c::DESK_STATUS_WAITING, cx),
+                    page::status_badge(Status::NeedsYou, a.words.clone(), cx),
                     Some(
                         div()
                             .flex()

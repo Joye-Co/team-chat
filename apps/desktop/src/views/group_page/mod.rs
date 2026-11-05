@@ -335,7 +335,13 @@ impl GroupPage {
         let asker = || {
             with_note(fill(
                 c::GROUP_PAGE_ASKED_BY,
-                &[("name", &member_name(&self.services, &t.created_by))],
+                &[(
+                    "name",
+                    crate::ui::avatar::name_beside_avatar(&member_name(
+                        &self.services,
+                        &t.created_by,
+                    )),
+                )],
             ))
         };
         let (second, badge): (String, AnyElement) = match st {
@@ -426,15 +432,34 @@ impl GroupPage {
         .into_any_element()
     }
 
-    /// The 最近完成 rows (at most 5) and how many there are. A 话题 that is
-    /// open again (in `active`) is not listed twice (§2.21: no duplicates).
+    /// The 最近完成 rows (at most 5) and how many there are. 完成 is a done
+    /// 话题 (O-2), as in the sidebar: a 话题 that is open again (in
+    /// `active`) is not listed (§2.21: no duplicates), and a 话题 marked
+    /// done this week with no run result is listed too.
     fn done_rows(&self, g: &str, active: &[String], cx: &App) -> (Vec<AnyElement>, usize) {
         let p = &self.services.provider;
-        let all: Vec<_> = p
+        let mut all: Vec<_> = p
             .group_recent_done(g)
             .into_iter()
             .filter(|d| !active.contains(&d.topic_id))
             .collect();
+        let week_ago = p.clock_now() - 7 * 24 * 3_600_000;
+        for t in p.topics(g) {
+            if t.status == TopicStatus::Done
+                && t.last_activity_at >= week_ago
+                && !all.iter().any(|d| d.topic_id == t.id)
+            {
+                all.push(crate::data::pages::RecentDone {
+                    group_id: t.group_id.clone(),
+                    member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
+                    title: t.title.clone(),
+                    note: None,
+                    at: t.last_activity_at,
+                    topic_id: t.id,
+                });
+            }
+        }
+        all.sort_by_key(|d| std::cmp::Reverse(d.at));
         let total = all.len();
         let done: Vec<_> = all.into_iter().take(5).collect();
         let n = done.len();
@@ -692,7 +717,10 @@ impl GroupPage {
                             .text_color(k.secondary)
                             .child(format!(
                                 "{} · {date}",
-                                who.map(|m| m.name).unwrap_or_default()
+                                who.map(
+                                    |m| crate::ui::avatar::name_beside_avatar(&m.name).to_string()
+                                )
+                                .unwrap_or_default()
                             )),
                     )
                     .tooltip({
@@ -760,7 +788,13 @@ impl GroupPage {
                                     &[
                                         ("v", &a.version.to_string()),
                                         ("kind", kind_label(a.kind)),
-                                        ("name", &member_name(&self.services, &a.created_by)),
+                                        (
+                                            "name",
+                                            crate::ui::avatar::name_beside_avatar(&member_name(
+                                                &self.services,
+                                                &a.created_by,
+                                            )),
+                                        ),
                                     ],
                                 ))
                                 .n_subheadline()
@@ -821,7 +855,13 @@ impl GroupPage {
                 ));
             }
             Some(run) => {
-                let who = member_name(&self.services, &run.bot_id);
+                let who = crate::ui::avatar::name_beside_avatar(&member_name(
+                    &self.services,
+                    &run.bot_id,
+                ))
+                .to_string();
+                let users = fill(c::GROUP_PAGE_MACHINE_USERS, &[("names", &who)]);
+                let known = run.machine_name.is_some();
                 let step = run
                     .plan
                     .iter()
@@ -870,11 +910,18 @@ impl GroupPage {
                                     .flex()
                                     .flex_col()
                                     .child(line(name).n_body().text_color(k.label))
-                                    .child(line(step).n_subheadline().text_color(k.secondary)),
+                                    .child(line(users).n_subheadline().text_color(k.secondary)),
                             )
-                            // §2.12: a computer is 在线 (the run's own
-                            // state is on its 话题 row).
-                            .child(page::status_badge(Status::Online, c::GROUP_PAGE_IN_USE, cx))
+                            // §2.12: a known computer is 在线 (the run's own
+                            // state is on its 话题 row); 未知电脑 has no
+                            // presence badge (B1-44, one recipe with 首页).
+                            .when(known, |el| {
+                                el.child(page::status_badge(
+                                    Status::Online,
+                                    c::GROUP_PAGE_IN_USE,
+                                    cx,
+                                ))
+                            })
                             .tooltip(move |window, cx| {
                                 gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                             }),
