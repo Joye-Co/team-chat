@@ -833,7 +833,7 @@ impl TimelineView {
         let m = message.clone();
         let close = cx.entity().downgrade();
         let open_key = key.to_string();
-        Popover::new(ElementId::Name(
+        let popover = Popover::new(ElementId::Name(
             format!("react-picker-{key}-{from_pill}").into(),
         ))
         .anchor(if from_pill {
@@ -886,8 +886,34 @@ impl TimelineView {
                         .ok();
                     })
                 }))
-        })
-        .into_any_element()
+        });
+        if from_pill {
+            return popover.into_any_element();
+        }
+        // The hover toolbar's add reaction opens every emoji as soon as the
+        // pointer rests on it; a click still toggles it. It closes on a pick
+        // or a click outside.
+        let hover = cx.entity().downgrade();
+        let hover_key = key.to_string();
+        div()
+            .id(ElementId::Name(format!("react-hover-{key}").into()))
+            .on_hover(move |hovered, _, cx| {
+                if !*hovered {
+                    return;
+                }
+                let key = hover_key.clone();
+                hover
+                    .update(cx, |this, cx| {
+                        let want = Some((key, false));
+                        if this.reacting != want {
+                            this.reacting = want;
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            })
+            .child(popover)
+            .into_any_element()
     }
 
     /// Adds (`on`) or removes my reaction.
