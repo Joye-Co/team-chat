@@ -1,0 +1,8 @@
+{
+  "kind": "EmailCodeRequest",
+  "valid": false,
+  "description": "not an email address",
+  "value": {
+    "email": "joye at example.com"
+  }
+}

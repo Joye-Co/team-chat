@@ -1549,3 +1549,40 @@ DevicesResponse = { devices: Device[] }   // newest use first, at most 100
 
 `lastUsedAt` is updated at most once a minute per token. The name is what the client sent at
 sign in; clients pick the device symbol from it.
+
+## Email sign-in
+
+A member who added a sign-in email can sign in on any Mac with a 6-digit code sent to it; the
+first sign-in is still an invite code. Each member has at most one sign-in email, and one email
+belongs to at most one member (compared in lower case).
+
+```ts
+EmailAddress = string            // trimmed, lower case, name@host.tld, <= 254
+EmailCodeRequest = { email }
+EmailCodeResponse = { sent: true, expiresAt }
+EmailSignInRequest = { email, code /* 6 digits */, deviceName /* 1..128 */ }
+VerifyEmailRequest = { email, code }
+MyEmailResponse = { email: EmailAddress | null }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `POST /v1/auth/email/code` | anyone | `EmailCodeResponse`; sends a sign-in code when the email belongs to an active member, and answers the same either way (no account lookup) |
+| `POST /v1/auth/email/sign-in` | anyone | `RedeemResponse`: one more token for that member (audited as `email.sign_in`); a wrong, used or expired code is `unauthorized` |
+| `GET /v1/me/email` | member | `MyEmailResponse` |
+| `POST /v1/me/email/code` | member | `EmailCodeResponse`; sends a code to the new address. An address another member uses is `conflict` |
+| `POST /v1/me/email` | member | `MyEmailResponse`; confirms the code and makes the address my sign-in email (audited as `email.set`) |
+| `DELETE /v1/me/email` | member | `MyEmailResponse` with `null` (audited as `email.remove`) |
+
+Rules:
+
+- A code is 6 random digits, stored as a SHA-256 digest, single use, and expires after 10
+  minutes. A new code for the same address and purpose replaces the old one. After 5 wrong tries
+  a code stops working.
+- Sending allows 5 codes per address per hour and 20 per client IP per hour; checking allows 10
+  tries per client IP per minute. Over a limit the answer is 429 `rate_limited`.
+- The Worker sends mail through the `EMAIL` binding (Cloudflare Email Service) from `EMAIL_FROM`.
+  Without both, the code routes answer 400 `invalid` with reason `email.not_configured`, except
+  when `ENVIRONMENT` is `local` or `e2e`: there the code goes to the `email_outbox` D1 table
+  instead (read by tests with `GET /v1/admin/email-outbox?email=…` and the `x-admin-secret`
+  header), and is never sent or logged.

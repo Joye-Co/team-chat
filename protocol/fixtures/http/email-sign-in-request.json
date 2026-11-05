@@ -1,0 +1,9 @@
+{
+  "kind": "EmailSignInRequest",
+  "valid": true,
+  "value": {
+    "email": "joye@example.com",
+    "code": "042817",
+    "deviceName": "Joye 的 MacBook Pro"
+  }
+}

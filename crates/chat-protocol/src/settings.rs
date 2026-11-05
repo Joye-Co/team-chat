@@ -460,9 +460,122 @@ pub struct DevicesResponse {
     pub devices: Vec<Device>,
 }
 
+// ---------------------------------------------------------------------------
+// Email sign-in
+// ---------------------------------------------------------------------------
+
+/// True for an address like `name@host.tld`: no spaces, one `@`, a dot after
+/// it, at most 254 characters (as `EmailAddress` in packages/protocol, after
+/// trimming).
+pub fn is_email_address(s: &str) -> bool {
+    let s = s.trim();
+    if s.chars().count() > 254 || s.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let Some((local, domain)) = s.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && !domain.contains('@')
+        && domain
+            .split_once('.')
+            .is_some_and(|(a, b)| !a.is_empty() && !b.is_empty())
+        && !domain.ends_with('.')
+}
+
+fn check_email(email: &str) -> Validation {
+    if is_email_address(email) {
+        Ok(())
+    } else {
+        invalid("email", "not an email address")
+    }
+}
+
+fn check_email_code(code: &str) -> Validation {
+    if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(())
+    } else {
+        invalid("code", "six digits")
+    }
+}
+
+/// `POST /v1/auth/email/code` (sign in) and `POST /v1/me/email/code` (add my email).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailCodeRequest {
+    pub email: String,
+}
+
+impl EmailCodeRequest {
+    pub fn validate(&self) -> Validation {
+        check_email(&self.email)
+    }
+}
+
+/// The code was sent, if the address may get one; it stops working at `expires_at`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailCodeResponse {
+    pub sent: bool,
+    pub expires_at: Millis,
+}
+
+/// `POST /v1/auth/email/sign-in`; answers `RedeemResponse`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailSignInRequest {
+    pub email: String,
+    pub code: String,
+    pub device_name: String,
+}
+
+impl EmailSignInRequest {
+    pub fn validate(&self) -> Validation {
+        check_email(&self.email)?;
+        check_email_code(&self.code)?;
+        let n = self.device_name.chars().count();
+        if n == 0 || n > 128 {
+            return invalid("deviceName", "1 to 128 characters");
+        }
+        Ok(())
+    }
+}
+
+/// `POST /v1/me/email`: confirms the code sent to `email`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyEmailRequest {
+    pub email: String,
+    pub code: String,
+}
+
+impl VerifyEmailRequest {
+    pub fn validate(&self) -> Validation {
+        check_email(&self.email)?;
+        check_email_code(&self.code)
+    }
+}
+
+/// `GET`, `POST` and `DELETE /v1/me/email`: my sign-in email, if any.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyEmailResponse {
+    pub email: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn email_addresses() {
+        for ok in ["a@b.co", " joye@example.com ", "x.y+z@mail.example.org"] {
+            assert!(is_email_address(ok), "{ok}");
+        }
+        for bad in ["", "a", "a@b", "@b.co", "a@@b.co", "a b@c.co", "a@b.", "a@.co"] {
+            assert!(!is_email_address(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn clock_times() {

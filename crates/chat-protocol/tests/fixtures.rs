@@ -69,7 +69,10 @@ check!(
     RecordDecisionRequest,
     PutArtifactMediaRequest,
     FileRef,
-    PutDeskNoteRequest
+    PutDeskNoteRequest,
+    EmailCodeRequest,
+    EmailSignInRequest,
+    VerifyEmailRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -211,6 +214,11 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ),
     ("Device", plain::<Device>),
     ("DevicesResponse", plain::<DevicesResponse>),
+    ("EmailCodeRequest", validated::<EmailCodeRequest>),
+    ("EmailCodeResponse", plain::<EmailCodeResponse>),
+    ("EmailSignInRequest", validated::<EmailSignInRequest>),
+    ("VerifyEmailRequest", validated::<VerifyEmailRequest>),
+    ("MyEmailResponse", plain::<MyEmailResponse>),
     // 1.1 gap fixes
     ("RecordedDecision", plain::<RecordedDecision>),
     ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
