@@ -740,9 +740,10 @@ impl ChatProvider for WorstCase {
         self.inner.refresh_artifacts(group_id, topic_id)
     }
     fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
+        // The worst name only: the version stays real, since the page sends its events
+        // for that version (artifact-v2-choose checks them).
         self.inner.artifact(artifact_id).map(|mut d| {
-            let i = self.artifact_index(artifact_id);
-            d.summary = worst_artifact(d.summary, i);
+            d.summary.title = pick(FILE_TITLES, self.artifact_index(artifact_id)).to_string();
             d
         })
     }

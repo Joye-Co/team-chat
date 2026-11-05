@@ -878,7 +878,15 @@ fn core_checks(name: &str) -> Option<Checks> {
             )
         },
         "core-side-chat" => |s, _| one("side-chat", &[format!("{} messages=0", forge_name(s))]),
-        "core-artifact" => |_, _| one("artifact-page", &["重连测试报告 v2"]),
+        // The name comes from the provider: `--worst-case` renames every 产出 (C-07).
+        "core-artifact" => |s, _| {
+            let title = s
+                .provider
+                .artifact(crate::provider::seeded::ARTIFACT)
+                .map(|d| d.summary.title)
+                .unwrap_or_default();
+            one("artifact-page", &[format!("{title} v2")])
+        },
         _ => return None,
     })
 }
