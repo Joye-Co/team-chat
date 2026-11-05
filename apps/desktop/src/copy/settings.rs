@@ -311,6 +311,11 @@ crate::copy! {
     ADD_AI_HINT = "AI 成员被 @ 后会干活，可以由外部程序接入，或在团队的电脑上工作。",
     BOT_FAILED = "没有添加 AI 成员",
     CHARACTER_FAILED = "没有换成这个形象",
+    EDIT_AI_TITLE = "编辑 {name}",
+    EDIT_AI_HINT = "改名字、岗位和工作方式，保存后马上生效。",
+    BOT_EDIT_FAILED = "没有保存修改",
+    BOT_RUNNER_LOAD_FAILED = "没有加载出工作方式",
+    BOT_EDIT_EXTERNAL_HINT = "TA 不再在机器上工作，由你自己的程序接入。",
     CHARACTER_RANDOM = "随机选一个",
     PROFILE_FAILED = "没有保存资料",
     // --- end v14/t4 lists ---

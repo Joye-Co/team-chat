@@ -210,6 +210,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_character_dialog,
     },
     Scene {
+        name: "settings-edit-bot",
+        about: "Settings: the edit sheet of a bot over 成员, its name, 岗位 and runner filled in",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_edit_bot_dialog,
+    },
+    Scene {
         name: "settings-add-machine",
         about: "Settings: the add-machine dialog over 机器",
         start: Start::SignedIn,

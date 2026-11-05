@@ -1753,6 +1753,18 @@ impl ChatProvider for CoreProvider {
         self.create_bot_member_inner(name, role, character, runner)
     }
 
+    fn bot_runner(&self, member_id: &str) -> AdminReply<Option<RunnerSetup>> {
+        self.bot_runner_inner(member_id)
+    }
+
+    fn update_bot_member(
+        &self,
+        member_id: &str,
+        edit: crate::data::BotMemberEdit,
+    ) -> AdminReply<()> {
+        self.update_bot_member_inner(member_id, edit)
+    }
+
     fn set_member_character(
         &self,
         member_id: &str,

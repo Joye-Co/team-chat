@@ -15,9 +15,9 @@ use chat_core::{
 
 use super::{CoreProvider, convert};
 use crate::data::{
-    AdminError, AdminReply, BotCreated, Change, CharacterId, GroupKind, GroupPrefs, InviteCreated,
-    InviteRequest, MachineCreated, MachineInfo, Member, MemberKind, MemberLevel, NotifyLevel,
-    RunnerSetup, SecretText, reply_now,
+    AdminError, AdminReply, BotCreated, BotMemberEdit, Change, CharacterId, GroupKind, GroupPrefs,
+    InviteCreated, InviteRequest, MachineCreated, MachineInfo, Member, MemberKind, MemberLevel,
+    NotifyLevel, RunnerChange, RunnerSetup, SecretText, reply_now,
 };
 
 /// Largest avatar the server takes.
@@ -81,6 +81,51 @@ fn notify_from_wire(level: proto::NotifyLevel) -> NotifyLevel {
 /// Empty or blank text is "not set".
 fn non_empty(text: Option<String>) -> Option<String> {
     text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+/// The `PUT /v1/bots/:id/runner` body for what the sheet shows: a repo that
+/// looks like a URL is a URL, anything else a folder on the machine.
+fn runner_request(runner: RunnerSetup) -> SetBotRunnerRequest {
+    let repo = non_empty(runner.repo).map(|r| {
+        if r.contains("://") || r.starts_with("git@") {
+            RunnerRepo {
+                url: Some(r),
+                path: None,
+            }
+        } else {
+            RunnerRepo {
+                url: None,
+                path: Some(r),
+            }
+        }
+    });
+    SetBotRunnerRequest {
+        runtime: runner.runtime.trim().to_string(),
+        labels: Some(
+            runner
+                .labels
+                .iter()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect(),
+        ),
+        repo,
+        base_branch: non_empty(runner.base_branch),
+        ..Default::default()
+    }
+}
+
+/// What the edit sheet shows of a stored runner.
+pub(super) fn runner_setup(r: &proto::BotRunner) -> RunnerSetup {
+    RunnerSetup {
+        runtime: r.runtime.clone(),
+        labels: r.labels.clone(),
+        repo: r
+            .repo
+            .as_ref()
+            .and_then(|repo| repo.url.clone().or_else(|| repo.path.clone())),
+        base_branch: r.base_branch.clone(),
+    }
 }
 
 pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
@@ -360,33 +405,7 @@ impl CoreProvider {
                     credential: Some(SecretText::new(created.token)),
                 });
             };
-            let repo = non_empty(runner.repo).map(|r| {
-                if r.contains("://") || r.starts_with("git@") {
-                    RunnerRepo {
-                        url: Some(r),
-                        path: None,
-                    }
-                } else {
-                    RunnerRepo {
-                        url: None,
-                        path: Some(r),
-                    }
-                }
-            });
-            let req = SetBotRunnerRequest {
-                runtime: runner.runtime.trim().to_string(),
-                labels: Some(
-                    runner
-                        .labels
-                        .iter()
-                        .map(|l| l.trim().to_string())
-                        .filter(|l| !l.is_empty())
-                        .collect(),
-                ),
-                repo,
-                base_branch: non_empty(runner.base_branch),
-                ..Default::default()
-            };
+            let req = runner_request(runner);
             http.set_bot_runner(&member.id, &req)
                 .await
                 .map_err(|e| api_error(&e))?;
@@ -398,6 +417,75 @@ impl CoreProvider {
                 member,
                 credential: None,
             })
+        })
+    }
+
+    pub(super) fn bot_runner_inner(&self, id: &str) -> AdminReply<Option<RunnerSetup>> {
+        let id = id.to_string();
+        self.request(move |client, _| async move {
+            let r = client
+                .http()
+                .bot_runner(&id)
+                .await
+                .map_err(|e| api_error(&e))?;
+            Ok(r.as_ref().map(runner_setup))
+        })
+    }
+
+    pub(super) fn update_bot_member_inner(&self, id: &str, edit: BotMemberEdit) -> AdminReply<()> {
+        let name = edit.name.map(|n| n.trim().to_string());
+        if name.as_ref().is_some_and(|n| n.is_empty()) {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        if let Some(RunnerChange::Set(r)) = &edit.runner
+            && r.runtime.trim().is_empty()
+        {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        let id = id.to_string();
+        let this = self.clone();
+        self.request(move |client, _| async move {
+            if name.is_some() || edit.role.is_some() {
+                let req = UpdateMemberRequest {
+                    name,
+                    role: edit.role.map(non_empty),
+                    ..Default::default()
+                };
+                client
+                    .update_member(&id, req)
+                    .await
+                    .map_err(|_| AdminError::Other)?
+                    .map_err(|e| admin_error(&e))?;
+            }
+            let http = client.http();
+            match edit.runner {
+                Some(RunnerChange::Set(setup)) => {
+                    // PUT replaces the whole runner: keep what the sheet does not show.
+                    let mut req = runner_request(setup);
+                    if let Some(old) = http.bot_runner(&id).await.map_err(|e| api_error(&e))? {
+                        req.model = old.model;
+                        req.env_allowlist = Some(old.env_allowlist);
+                        req.enabled = Some(old.enabled);
+                    }
+                    let saved = http
+                        .set_bot_runner(&id, &req)
+                        .await
+                        .map_err(|e| api_error(&e))?;
+                    this.remember_runner(&id, Some(saved));
+                }
+                Some(RunnerChange::Remove) => {
+                    match http.delete_bot_runner(&id).await {
+                        Ok(()) => {}
+                        // Already gone: what the user asked for.
+                        Err(e) if api_error(&e) == AdminError::NotFound => {}
+                        Err(e) => return Err(api_error(&e)),
+                    }
+                    this.remember_runner(&id, None);
+                }
+                None => {}
+            }
+            this.emit(vec![Change::Members]);
+            Ok(())
         })
     }
 
