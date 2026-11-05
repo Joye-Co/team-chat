@@ -167,13 +167,13 @@ fn topic(mut t: Topic, i: usize, now: Millis) -> Topic {
     t
 }
 
-/// An 产出 with a long title, a 999 / 1 / 12 version and 100 MB / 0 / 1,284 B.
-/// One 产出's worst name, version and size from its place `i` in the team's 产出
-/// ([`WorstCase::artifact_index`], C-07), so every list, the thumbnail, the page and the
-/// pane show the same 产出 the same way.
+/// An 产出 with a long title and 100 MB / 0 / 1,284 B: one 产出's worst name and size
+/// from its place `i` in the team's 产出 ([`WorstCase::artifact_index`], C-07), so every
+/// list, the thumbnail, the page and the pane show the same 产出 the same way. The
+/// version stays real everywhere (C-12): the page, its events, the embed and the
+/// inspector all read it, so a list never says v12 beside a page that says v3.
 fn worst_artifact(mut a: ArtifactSummary, i: usize) -> ArtifactSummary {
     a.title = pick(FILE_TITLES, i).to_string();
-    a.version = [999, 1, 12][i % 3];
     a.size_bytes = a.size_bytes.map(|_| [104_857_600, 0, 1_284][i % 3]);
     a
 }
@@ -265,6 +265,15 @@ impl WorstCase {
             .iter()
             .position(|(_, a)| a.id == id)
             .unwrap_or_else(|| hash_index(id))
+    }
+
+    /// The real and the worst name of the member who made 产出 `id`, when they differ.
+    fn maker_names(&self, artifact_id: &str) -> Option<(String, String)> {
+        let by = self.inner.artifact(artifact_id)?.summary.created_by;
+        let real = self.inner.member(&by)?.name;
+        let worst = member(self.inner.member(&by)?, self.member_index(&by)).name;
+        let worst = worst.trim().to_string();
+        (!real.is_empty() && real != worst).then_some((real, worst))
     }
 
     fn member_index(&self, id: &str) -> usize {
@@ -755,7 +764,27 @@ impl ChatProvider for WorstCase {
         artifact_id: &str,
         version: Option<u32>,
     ) -> Reply<ArtifactFolder> {
-        self.inner.open_artifact_version(artifact_id, version)
+        let mut rx = self.inner.open_artifact_version(artifact_id, version);
+        // The page names its maker as the inspector does (C-12): the sample page's text
+        // takes the maker's worst name. Only a page the fake wrote at once is changed.
+        let Some((real, worst)) = self.maker_names(artifact_id) else {
+            return rx;
+        };
+        match rx.try_recv() {
+            Ok(Some(Ok(folder))) => {
+                let page = folder.dir.join(&folder.entry);
+                if folder.is_page
+                    && let Ok(html) = std::fs::read_to_string(&page)
+                {
+                    let _ = std::fs::write(&page, html.replace(&real, &escape_html(&worst)));
+                }
+                let (tx, out) = futures::channel::oneshot::channel();
+                let _ = tx.send(Ok(folder));
+                out
+            }
+            Ok(Some(Err(e))) => reply_err(e),
+            _ => rx,
+        }
     }
     // --- r2-trust ---
     fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
@@ -813,7 +842,17 @@ impl ChatProvider for WorstCase {
         self.inner.page_signals()
     }
     fn artifact_responses(&self, artifact_id: &str) -> Vec<pages::ArtifactResponse> {
-        self.inner.artifact_responses(artifact_id)
+        let names = self.maker_names(artifact_id);
+        self.inner
+            .artifact_responses(artifact_id)
+            .into_iter()
+            .map(|mut r| {
+                if let Some((real, worst)) = &names {
+                    r.text = r.text.replace(real.as_str(), worst);
+                }
+                r
+            })
+            .collect()
     }
     fn file_media(&self, file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
         self.inner.file_media(file)
@@ -1203,14 +1242,10 @@ impl ChatProvider for WorstCase {
         // The 产出 row of a done card names the 产出 as every other view does (C-07).
         for p in proof.iter_mut() {
             if let v2::Proof::Artifact {
-                artifact_id,
-                title,
-                version,
+                artifact_id, title, ..
             } = p
             {
-                let i = self.artifact_index(artifact_id);
-                *title = pick(FILE_TITLES, i).to_string();
-                *version = [999, 1, 12][i % 3];
+                *title = pick(FILE_TITLES, self.artifact_index(artifact_id)).to_string();
             }
         }
         proof
@@ -1422,4 +1457,12 @@ mod tests {
             mine.iter().map(|e| &e.client_event_id).collect::<Vec<_>>()
         );
     }
+}
+
+/// `text` safe inside HTML text.
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
