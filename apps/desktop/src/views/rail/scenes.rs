@@ -25,7 +25,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "rail-attention",
-        about: "Rail B 以「需要我」为中心: 需要你 / 在做 / 做完了 · 今天",
+        about: "Rail B 以「需要我」为中心: 需要你 / 在做 / 完成 · 今天",
         start: Start::V2,
         setup: |s, cx| rail(s, RailMode::Attention, cx),
         open: open_main,

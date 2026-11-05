@@ -64,7 +64,7 @@ pub(super) enum Item {
         count: usize,
         folded: bool,
     },
-    /// B: a folded bucket as one dimmed row (`做完了 · 今天 · 2`) that
+    /// B: a folded bucket as one dimmed row (`完成 · 今天 · 2`) that
     /// opens it.
     BucketTail {
         bucket: Bucket,
@@ -296,7 +296,7 @@ fn dm_state(
     (line, unread)
 }
 
-/// B: 需要你 / 在做 / 等别人 / 做完了 · 今天, of the chosen 群.
+/// B: 需要你 / 在做 / 等别人 / 完成 · 今天, of the chosen 群.
 pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> Vec<Entry> {
     let me = i.me.as_deref();
     let names = model::groups(p);
@@ -307,7 +307,7 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
         }
         let folded = i.folded_buckets.contains(&bucket);
         // §2.1: a folded section is one dimmed "More" row with its count
-        // (`做完了 · 今天 · 2`), never a label with no rows under it.
+        // (`完成 · 今天 · 2`), never a label with no rows under it.
         // B1-25: under its own label, so it never reads as part of the
         // section above.
         if folded {
@@ -645,7 +645,7 @@ impl RailView {
                 .id(SharedString::from(format!("rail-no-topics-{id}")))
                 .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
                 .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
-                .px(px(8.))
+                .pl(crate::ui::native::tokens::space::S8)
                 .flex()
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
@@ -657,7 +657,7 @@ impl RailView {
                         crate::ui::native::SkeletonKind::SidebarItem,
                         3,
                     )
-                    .px(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET),
+                    .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET),
                 )
                 .into_any_element(),
             Item::MemberTail { id, label, open } => {

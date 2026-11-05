@@ -39,7 +39,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D14 | Error text (owner decision v16) | Every error says its words in the foreground color with a red icon, the failed message ("没有发出") too. Red text is never the only carrier. | One error recipe (2.15). |
 | D15 | Group and desk list rows (owner decision v16) | The leading media of a 话题 row is the member's avatar (the kind icon when no member works on it); the state shows only in its StatusBadge. The group page splits its open 话题 into 等你 (asks to me) and 在做 (runs); a waiting row never sits under 在做. | One state carrier per row (2.12). |
 | D16 | Queued 话题 in the sidebar (owner decision v17, O-1) | A 排队 话题 has no sidebar badge: the sidebar stays quiet for the resting state. The title bar, inspector and pages still say 排队. | The sidebar right column carries what needs attention or is at work. |
-| D17 | 完成 and 交付 (owner decision v17, O-2) | 完成 means a done 话题, on every page (群 最近完成, 首页 rail, 成员 完成的话题, the sidebar 做完了 row). A run result is 交付 (首页 KPI 今天交付, 成员 最近交付 and its stats). | One word, one meaning: a page never counts runs as 完成. |
+| D17 | 完成 and 交付 (owner decision v17, O-2) | 完成 means a done 话题, on every page (群 最近完成, 首页 rail, 成员 完成的话题, the sidebar section 完成 · 今天). A run result is 交付: its badge word is 已交付, and it counts as 交付 (首页 KPI 今天交付, 成员 最近交付 and its stats). | One word, one meaning: a page never counts runs as 完成. |
 | D18 | Pinned banner place (owner decision v17, O-3) | The pinned banner docks above the composer, x 288-1096, as NATIVE.md §9.2 says. | The decision bar sits next to the reply it asks for. |
 
 ---
@@ -344,6 +344,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
 | sending (my answer or message in flight) | 发送中 | loader (spinning) | muted |
 | queued | 排队 (no sidebar badge, D16) | clock | muted |
 | done / merged / answered | 完成 (a done 话题, D17) / 已合并 / 已回答 | check-circle (filled) | success |
+| delivered (a run result, D17) | 已交付 | check-circle (filled) | success |
 | failed / stuck | 失败 / 卡住了 | x-circle | destructive |
 | abnormal | 异常 | alert-triangle (+ tooltip with the cause) | destructive |
 | online | 在线 | dot 8 | success |

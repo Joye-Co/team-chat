@@ -9,7 +9,7 @@
 //!
 //! - A 以工作为中心: one section per 群, then 私聊; the pull-down and 显示 ›
 //!   我参与的 switch between 我参与的 and 全部话题.
-//! - B 以「需要我」为中心: 需要你 / 在做 / 等别人 / 做完了 · 今天 (folded);
+//! - B 以「需要我」为中心: 需要你 / 在做 / 等别人 / 完成 · 今天 (folded);
 //!   the pull-down picks the 群.
 //! - C 以成员为中心: one row per member (avatar 16, a state dot) under
 //!   the headers 在做, 空闲 and 不在; a busy member opens to its 话题. The
@@ -85,7 +85,7 @@ pub struct RailView {
     folded_groups: HashSet<GroupId>,
     /// B: the 群 chip (`None` = 全部).
     chip: Option<GroupId>,
-    /// B: folded buckets (做完了 · 今天 starts folded).
+    /// B: folded buckets (完成 · 今天 starts folded).
     folded_buckets: HashSet<Bucket>,
     /// C: open member rows; `None` until the user opens or closes one, which
     /// opens the first busy member.
@@ -472,7 +472,7 @@ impl RailView {
             div()
                 .id("rail-offline")
                 .flex_none()
-                .px(metrics::SIDEBAR_ROW_INSET)
+                .mx(metrics::SIDEBAR_ROW_INSET)
                 .pb(space::S8)
                 .child(
                     crate::ui::native::Alert::new(Sym::Offline, title)
