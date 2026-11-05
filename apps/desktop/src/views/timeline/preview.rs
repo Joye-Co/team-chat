@@ -474,6 +474,20 @@ impl TopicSamples {
         })
     }
 
+    /// The 产出 the main 话题's thread names (告警合并规则说明 v2).
+    fn rules_artifact(&self) -> ArtifactSummary {
+        ArtifactSummary {
+            id: ARTIFACT.into(),
+            topic_id: MAIN.into(),
+            kind: ArtifactKind::Page,
+            title: "告警合并规则说明".into(),
+            version: 2,
+            size_bytes: Some(18_000),
+            created_by: "m-coder".into(),
+            updated_at: self.now,
+        }
+    }
+
     fn mine(&self, group_id: &str, topic_id: &str) -> bool {
         group_id == GROUP && self.data.messages.contains_key(topic_id)
     }
@@ -545,10 +559,14 @@ impl ChatProvider for TopicSamples {
     }
     fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
         if self.mine(group_id, topic_id) {
+            // T-17, A5: the 产出 the thread shows is in the 话题's 产出 too,
+            // from the one source `artifact()` reads.
+            let rules = self.rules_artifact();
             return self
                 .data
                 .artifacts
                 .iter()
+                .chain((!self.data.artifacts.iter().any(|a| a.id == ARTIFACT)).then_some(&rules))
                 .filter(|a| a.topic_id == topic_id)
                 .cloned()
                 .collect();
@@ -640,16 +658,7 @@ impl ChatProvider for TopicSamples {
         }
         if artifact_id == ARTIFACT {
             return Some(ArtifactDetail {
-                summary: ArtifactSummary {
-                    id: ARTIFACT.into(),
-                    topic_id: MAIN.into(),
-                    kind: ArtifactKind::Page,
-                    title: "告警合并规则说明".into(),
-                    version: 2,
-                    size_bytes: Some(18_000),
-                    created_by: "m-coder".into(),
-                    updated_at: self.now,
-                },
+                summary: self.rules_artifact(),
                 group_id: GROUP.into(),
                 versions: Vec::new(),
             });

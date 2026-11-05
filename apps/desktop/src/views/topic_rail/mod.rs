@@ -591,18 +591,44 @@ impl Render for TopicRail {
             .flex_col()
             .child(
                 div()
-                    .id("topic-rail")
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    // §2.2, B2: the first GroupLabel's ink sits at y 68, 16
-                    // under the header band; pull up by the section's own
-                    // top padding less 4.
-                    .mt(-space::S12)
-                    .overflow_y_scroll()
-                    .pb(space::S24)
                     .flex()
                     .flex_col()
-                    .children(sections),
+                    .child(
+                        div()
+                            .id("topic-rail")
+                            .flex_1()
+                            .min_h_0()
+                            // §2.2, B2: the first GroupLabel's ink sits at y
+                            // 68, 16 under the header band; pull up by the
+                            // section's own top padding less 4.
+                            .mt(-space::S12)
+                            .overflow_y_scroll()
+                            .pb(space::S24)
+                            .flex()
+                            .flex_col()
+                            .children(sections),
+                    )
+                    // T-14, A4: the last 24 above the footer fade out (as in
+                    // the live pane), so a row that runs under the footer
+                    // never ends in a mid-glyph cut.
+                    .when(footer.is_some(), |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(space::S24)
+                                .bg(gpui::linear_gradient(
+                                    0.,
+                                    gpui::linear_color_stop(k.content, 0.),
+                                    gpui::linear_color_stop(k.content.opacity(0.), 1.),
+                                )),
+                        )
+                    }),
             )
             .children(footer)
             .into_any_element()
