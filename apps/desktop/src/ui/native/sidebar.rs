@@ -14,7 +14,7 @@ use gpui_component::menu::{ContextMenuExt as _, PopupMenu};
 
 use super::{
     badge::{BadgeState, StatusBadge},
-    focus::{Arrows, FocusRow as _},
+    focus::FocusRow as _,
     tokens::{NativeType as _, emphasized, metrics, native_colors},
 };
 use crate::{
@@ -675,17 +675,21 @@ impl RenderOnce for SidebarRow {
     }
 }
 
+/// The account menu of the footer.
+pub type FooterMenu = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+
 /// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
 /// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
-/// or workspace, or the offline state), the 设置 gear 16 at the right. It
-/// opens and closes the settings window (the sidebar's only 设置 entry).
+/// or workspace, or the offline state), `chevron.up.chevron.down` 16 at the
+/// right. A ghost button (gpui-component): it opens the account menu (the
+/// accounts, 设置…, 添加账号…, 退出这个账号…).
 #[derive(IntoElement)]
 pub struct SidebarFooter {
     id: ElementId,
     avatar: AnyElement,
     name: SharedString,
     second: Option<AnyElement>,
-    on_click: Option<Click>,
+    menu: Option<FooterMenu>,
 }
 
 impl SidebarFooter {
@@ -699,7 +703,7 @@ impl SidebarFooter {
             avatar: avatar.into_any_element(),
             name: name.into(),
             second: None,
-            on_click: None,
+            menu: None,
         }
     }
 
@@ -722,56 +726,76 @@ impl SidebarFooter {
         self
     }
 
-    pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.on_click = Some(Rc::new(f));
+    /// The account menu it opens, above the footer.
+    pub fn menu(
+        mut self,
+        f: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> Self {
+        self.menu = Some(Rc::new(f));
         self
     }
 }
 
 impl RenderOnce for SidebarFooter {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        use gpui_component::{
+            Sizable as _,
+            button::{Button, ButtonVariants as _},
+            menu::DropdownMenu as _,
+        };
         let k = native_colors(cx);
+        let content = div()
+            .w_full()
+            .min_w(px(0.))
+            .flex()
+            .items_center()
+            .gap(super::tokens::space::S8)
+            .child(div().flex_none().child(self.avatar))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .child(TruncText::new(self.name).n_headline().text_color(k.label))
+                    // A badge on the second line hugs its text (T1-08): the
+                    // row does not stretch it.
+                    .children(
+                        self.second
+                            .map(|el| div().flex().items_center().min_w(px(0.)).child(el)),
+                    ),
+            )
+            .child(div().flex_none().child(symbol(
+                Sf::Popup,
+                super::tokens::icon::MD,
+                Weight::Regular,
+                k.secondary,
+                window,
+            )));
+        let button = Button::new(self.id)
+            .custom(super::buttons::borderless_variant(cx))
+            .with_size(gpui_component::Size::Medium)
+            .w_full()
+            .h(super::tokens::height::SIDEBAR_FOOTER - metrics::SIDEBAR_ROW_INSET * 2.)
+            .px(metrics::SIDEBAR_ROW_INSET)
+            .rounded(metrics::SIDEBAR_ROW_RADIUS)
+            .accessibility_label(crate::copy::rail::ACCOUNT_MENU)
+            .child(content);
+        let trigger = match self.menu {
+            Some(menu) => button
+                .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |m, window, cx| {
+                    menu(m, window, cx)
+                })
+                .into_any_element(),
+            None => button.into_any_element(),
+        };
         div()
             .flex_none()
             .p(metrics::SIDEBAR_ROW_INSET)
             .border_t_1()
             .border_color(k.separator)
-            .child(
-                div()
-                    .id(self.id)
-                    .h(super::tokens::height::SIDEBAR_FOOTER - metrics::SIDEBAR_ROW_INSET * 2.)
-                    .px(metrics::SIDEBAR_ROW_INSET)
-                    .rounded(metrics::SIDEBAR_ROW_RADIUS)
-                    .focus_row_with(false, Arrows::Owner, cx)
-                    .flex()
-                    .items_center()
-                    .gap(super::tokens::space::S8)
-                    .child(div().flex_none().child(self.avatar))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .flex()
-                            .flex_col()
-                            .child(TruncText::new(self.name).n_headline().text_color(k.label))
-                            // A badge on the second line hugs its text
-                            // (T1-08): the row does not stretch it.
-                            .children(
-                                self.second
-                                    .map(|el| div().flex().items_center().min_w(px(0.)).child(el)),
-                            ),
-                    )
-                    .child(symbol(
-                        Sf::Settings,
-                        super::tokens::icon::MD,
-                        Weight::Regular,
-                        k.secondary,
-                        window,
-                    ))
-                    .when_some(self.on_click, |d, f| {
-                        d.on_click(move |e, w, cx| f(e, w, cx))
-                    }),
-            )
+            .child(trigger)
     }
 }
 

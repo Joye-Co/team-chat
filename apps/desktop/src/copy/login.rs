@@ -25,4 +25,6 @@ crate::copy! {
     SERVER_TITLE = "连接服务器",
     SERVER_LEAD = "填写团队服务器的地址，管理员会告诉你。",
     // --- end v14/t4 nav ---
+    ADD_TITLE = "添加账号",
+    ADD_LEAD = "输入新账号的邀请码，当前账号仍保持登录。",
 }

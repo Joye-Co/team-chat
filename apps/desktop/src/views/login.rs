@@ -395,7 +395,7 @@ impl LoginView {
                 .into_any_element();
         }
         let open = cx.listener(|this, _, window, cx| this.open_server_field(window, cx));
-        match custom {
+        let row = match custom {
             None => link("login-server-other", l::OTHER_SERVER, cx)
                 .on_click(open)
                 .into_any_element(),
@@ -427,7 +427,25 @@ impl LoginView {
                         .on_click(open),
                 )
                 .into_any_element(),
+        };
+        // 添加账号…: 取消 goes back to the account that stays signed in.
+        if !self.services.provider.adding_account() {
+            return row;
         }
+        let services = self.services.clone();
+        div()
+            .max_w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(space::S16)
+            .child(row)
+            .child(
+                link("login-add-cancel", common::CANCEL, cx)
+                    .on_click(move |_, _, _| services.provider.cancel_add_account()),
+            )
+            .into_any_element()
     }
 }
 
@@ -489,6 +507,8 @@ impl Render for LoginView {
         let link = self.render_link_row(server_step, custom.filter(|_| !server_step), cx);
         let (title, description) = if server_step {
             (l::SERVER_TITLE, l::SERVER_LEAD)
+        } else if self.services.provider.adding_account() {
+            (l::ADD_TITLE, l::ADD_LEAD)
         } else {
             (l::WELCOME, l::LEAD)
         };
@@ -549,6 +569,19 @@ impl Render for LoginView {
             .bg(k.window)
             .on_action(cx.listener(|this, _: &UseOtherServer, window, cx| {
                 this.open_server_field(window, cx)
+            }))
+            .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
+                if e.keystroke.key != "escape" {
+                    return;
+                }
+                if this.server_open {
+                    this.close_server_field(window, cx);
+                } else if this.services.provider.adding_account() {
+                    this.services.provider.cancel_add_account();
+                } else {
+                    return;
+                }
+                cx.stop_propagation();
             }))
             .child(
                 div()

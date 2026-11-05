@@ -484,14 +484,7 @@ fn group_decisions_of_one_account_are_not_shown_to_the_next() {
         .store()
         .apply_welcome(&other, std::slice::from_ref(&other), &[group])
         .expect("welcome");
-    s.p.install(
-        SavedSession {
-            server_url: SERVER.into(),
-            member: other,
-        },
-        client,
-        dir,
-    );
+    s.p.install(SavedSession::new(SERVER, other), client, dir);
     assert_eq!(s.p.group_decisions(GROUP), Vec::<Decision>::new());
 }
 

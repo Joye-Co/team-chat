@@ -383,6 +383,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::nav::selftest::scenes::group_menu,
     },
     Scene {
+        name: "account-menu",
+        about: "The account menu of the sidebar footer: two accounts with their server, the shown one checked, 添加账号…, 设置…, 退出这个账号…",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::account_menu,
+    },
+    Scene {
         name: "rename-group",
         about: "The dialog that renames a 群 (from its menu), the name prefilled and selected",
         start: Start::SignedIn,

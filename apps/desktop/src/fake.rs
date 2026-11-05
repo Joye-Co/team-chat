@@ -950,6 +950,30 @@ impl ChatProvider for FakeProvider {
         self.with(|s| s.session.clone())
     }
 
+    /// The signed-in account and a second one on a local server (the
+    /// account menu's sample).
+    fn accounts(&self) -> Vec<crate::data::AccountEntry> {
+        let SessionState::SignedIn { me, server_url } = self.session() else {
+            return Vec::new();
+        };
+        vec![
+            crate::data::AccountEntry {
+                id: format!("{server_url}#{}", me.id),
+                name: me.name.clone(),
+                role: me.role.clone().filter(|r| !r.trim().is_empty()),
+                server_url,
+                active: true,
+            },
+            crate::data::AccountEntry {
+                id: format!("http://127.0.0.1:8787#{}", me.id),
+                name: me.name,
+                role: None,
+                server_url: "http://127.0.0.1:8787".into(),
+                active: false,
+            },
+        ]
+    }
+
     fn login(&self, request: LoginRequest) {
         let ok = match &request.credential {
             Credential::InviteCode(code) => !matches!(

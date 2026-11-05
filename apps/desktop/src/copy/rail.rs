@@ -75,4 +75,11 @@ crate::copy! {
     ASK_HINT_SELECT = "选择",
     ASK_HINT_CLOSE = "关闭",
     ASK_EMPTY = "没有找到",
+    // --- accounts: the account menu of the sidebar footer ---
+    ACCOUNT_MENU = "账号",
+    ACCOUNT_ADD = "添加账号…",
+    ACCOUNT_SIGN_OUT = "退出这个账号…",
+    ACCOUNT_SIGN_OUT_TITLE = "退出这个账号？",
+    ACCOUNT_SIGN_OUT_BODY = "退出后，这台 Mac 不再收到这个账号的消息。其他账号仍保持登录。",
+    ACCOUNT_SIGN_OUT_CONFIRM = "退出",
 }
