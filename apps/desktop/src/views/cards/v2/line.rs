@@ -24,7 +24,8 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
         .flex()
         .flex_col()
         .p(inset)
-        .gap(space::S8)
+        // The compact gap between the header row and the title (§2.4: 16, D1-73).
+        .gap(ui::native::cards::card::STACK)
         .children(strip(ctx, cx))
         .child(
             div()

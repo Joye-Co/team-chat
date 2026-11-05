@@ -1008,7 +1008,8 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             let (form, block, option, target) =
                 (ctx.form.clone(), id.clone(), o.id.clone(), target.clone());
             // Photos-style (NATIVE.md rule 4): the picture, its title with `推荐` after
-            // it; a chosen picture shows a checkmark badge, never an outline.
+            // it; a chosen picture shows the checkmark badge and the selected option's
+            // foreground border (§2.17 one option recipe, C-09).
             div()
                 .id(eid(node, format!("img-{id}-{}", o.id)))
                 .flex_1()
@@ -1030,6 +1031,10 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         .h(t::IMAGE)
                         .rounded(crate::ui::native::tokens::radius::CONTROL)
                         .overflow_hidden()
+                        .when(on, |el| {
+                            el.border_2()
+                                .border_color(crate::ui::native::native_colors(cx).label)
+                        })
                         .map(|el| match path {
                             Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
                             None => b20::missing_image(el, cx),

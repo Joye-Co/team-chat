@@ -828,6 +828,18 @@ pub fn decorate(
                     .child(col)
             };
         }
+        // Provenance is a 2 px line at the left and the muted label, never a state
+        // color fill (§1.3). The line sits inside the card padding, on the content x,
+        // and the block's text 10 in from it (C-09: never flush on the card border).
+        let col = if inserted {
+            div()
+                .border_l_2()
+                .border_color(k.border_strong)
+                .pl(space::S10)
+                .child(col)
+        } else {
+            col
+        };
         // A top-level block spans the card's width (its 16 pt padding), as the artboard
         // draws it; a nested one gets a small rounded tint.
         let top = node.depth == 0;
@@ -856,9 +868,7 @@ pub fn decorate(
                 .rounded(theme::radius::MD)
                 .child(col)
         };
-        // Provenance is a 2 px line at the left and the muted label, never a
-        // state color fill (§1.3); a change flashes in the muted fill only.
-        let tinted = tinted.when(inserted, |el| el.border_l_2().border_color(k.border_strong));
+        // A change flashes in the muted fill only.
         let rest = k.bg;
         if cx.reduce_motion() {
             return tinted.into_any_element();

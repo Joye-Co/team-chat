@@ -119,7 +119,6 @@ crate::copy! {
     REFS_ALL = "看全部 {count} 个",
     REFS_FEWER = "收起",
     REF_ARTIFACT_NEWER = "有新版本 v{version}",
-    REF_TOPIC_LINE = "{group} · {status}",
     REF_MEMBER_LINE = "{role}",
     REF_OPEN = "打开",
 

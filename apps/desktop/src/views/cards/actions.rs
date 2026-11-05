@@ -158,10 +158,10 @@ fn button(
     let id = ElementId::Name(part_id(message, format_args!("action-{}", action.id)).into());
     let kind = match action.style.unwrap_or_default() {
         ActionStyle::Primary => ui::native::PushStyle::Default,
-        // Every other action is a standard push button (NATIVE.md §5.2).
+        // Every other action is an outline button, as in Card v2 (§2.4, C-09).
         ActionStyle::Default => {
             let _ = quiet;
-            ui::native::PushStyle::Secondary
+            ui::native::PushStyle::Outline
         }
         ActionStyle::Danger => ui::native::PushStyle::Destructive,
     };
