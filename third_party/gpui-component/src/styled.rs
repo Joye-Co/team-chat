@@ -1,8 +1,8 @@
 pub use crate::component_traits::{Collapsible, Disableable, Selectable};
 pub use crate::sizing::{Sizable, Size, StyleSized};
 use gpui::{
-    App, BoxShadow, Corners, Edges, Hsla, InteractiveElement as _, ParentElement, Pixels,
-    StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder as _, px,
+    App, BoxShadow, Corners, Edges, Hsla, InteractiveElement as _, IntoElement as _, ParentElement,
+    Pixels, StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder as _, px,
 };
 pub use gpui_base::{FocusableExt, RoleOverride, StyledExt, box_shadow, h_flex, v_flex};
 
@@ -309,7 +309,7 @@ pub(crate) fn focus_ring<T: Styled + ParentElement>(
     let ring_style = corner_radii_refinement(radius);
     let inset = FOCUS_RING_WIDTH;
 
-    element.child(
+    element.child(RingLayer(Some(
         div()
             .when(cfg!(test), |this| {
                 this.debug_selector(|| "focus-ring".into())
@@ -322,6 +322,75 @@ pub(crate) fn focus_ring<T: Styled + ParentElement>(
             .bottom(-(inset + border_widths.bottom))
             .border(FOCUS_RING_WIDTH)
             .border_color(color)
-            .refine_style(&ring_style),
-    )
+            .refine_style(&ring_style)
+            .into_any_element(),
+    )))
+}
+
+/// Paints the focus ring after the rest of the window, under the clip it
+/// would have had in place. A container paints its border after its
+/// children, so a ring painted in place loses its inner pixel to the border
+/// of a group it touches (a row at a group's edge). The ring is laid out in
+/// place; only its paint moves later, so popups (a higher priority) still
+/// cover it.
+struct RingLayer(Option<gpui::AnyElement>);
+
+impl gpui::IntoElement for RingLayer {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl gpui::Element for RingLayer {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, ()) {
+        let child = self.0.as_mut().expect("laid out once");
+        (child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        _: &mut App,
+    ) {
+        let child = self.0.take().expect("prepainted once");
+        let offset = window.element_offset();
+        let mask = window.content_mask();
+        let priority = window.deferred_priority();
+        window.defer_draw(child, offset, priority, Some(mask));
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
 }
