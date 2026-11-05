@@ -832,6 +832,23 @@ impl Client {
         )
     }
 
+    /// Mutes or unmutes a topic for me: in a muted topic only mentions notify.
+    pub fn mute_topic(&self, topic_id: &str, muted: bool) -> Result<String, ClientError> {
+        let group_id = self
+            .shared
+            .store
+            .topic_group(topic_id)?
+            .ok_or(ClientError::NotFound)?;
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::TopicMute {
+                group_id,
+                topic_id: topic_id.into(),
+                muted,
+            },
+        )
+    }
+
     /// Presses a card button. The card's author gets a `card.actioned` event.
     pub fn card_action(&self, message_id: &str, action_id: &str) -> Result<String, ClientError> {
         let m = self

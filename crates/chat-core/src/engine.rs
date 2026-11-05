@@ -11,8 +11,8 @@ use crate::proto::{
     ClientInfo, DeleteFrame, DeltaFrame, DirectoryFrame, EditFrame, ErrorBody, ErrorCode, Event,
     FetchFrame, HelloFrame, HistoryFrame, HistoryRequestFrame, Message, MessageDeltaEvent,
     NotifyReason, PROTOCOL_VERSION, PresenceEvent, ReactFrame, ReadFrame, SearchFrame, SendFrame,
-    SendResult, ServerFrame, TopicFollowFrame, TopicState, TopicUpdateFrame, TransientEvent,
-    TypingEvent, TypingFrame, WelcomeFrame,
+    SendResult, ServerFrame, TopicFollowFrame, TopicMuteFrame, TopicState, TopicUpdateFrame,
+    TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
 };
 use crate::proto::{CARD_CATALOGS, CLIENT_FEATURES, CardEventFrame};
 use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState, PendingRead};
@@ -960,6 +960,16 @@ impl Session {
                     topic_id,
                     follow,
                 }),
+                OutboxOp::TopicMute {
+                    group_id,
+                    topic_id,
+                    muted,
+                } => ClientFrame::TopicMute(TopicMuteFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    topic_id,
+                    muted,
+                }),
                 OutboxOp::CardAction {
                     group_id,
                     message_id,
@@ -1466,7 +1476,7 @@ impl Session {
                         }
                     }
                 }
-                OutboxOp::TopicFollow { group_id, .. } => {
+                OutboxOp::TopicFollow { group_id, .. } | OutboxOp::TopicMute { group_id, .. } => {
                     if let Some(state) =
                         result.and_then(|v| serde_json::from_value::<TopicState>(v).ok())
                         && let Err(e) = self.shared.store.apply_topic_state(group_id, &state)

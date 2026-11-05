@@ -51,6 +51,7 @@ fn migrations_are_named_and_run_once() {
             "core-1",
             "ext-1",
             "members-2",
+            "topic-mute-1",
             "v11-1",
             "v11-2",
             "v11-3",
@@ -452,12 +453,19 @@ fn welcome_topic_states_and_reads_frames_set_per_topic_positions() {
         unread: 1,
         mentions: 0,
         following: Some(true),
+        muted: Some(true),
     }]);
     s.apply_welcome(&member(ME, "me"), &[], &[sum]).unwrap();
     let rows = s.topics(G1, 10).unwrap();
     let get = |id: &str| rows.iter().find(|t| t.topic.id == id).unwrap().clone();
-    assert_eq!((get("TA").unread, get("TA").following), (0, false));
-    assert_eq!((get("TB").unread, get("TB").following), (1, true));
+    assert_eq!(
+        (get("TA").unread, get("TA").following, get("TA").muted),
+        (0, false, false)
+    );
+    assert_eq!(
+        (get("TB").unread, get("TB").following, get("TB").muted),
+        (1, true, true)
+    );
     // A reads frame from another device reads TB.
     s.apply_reads(
         &ReadsFrame {
@@ -471,12 +479,31 @@ fn welcome_topic_states_and_reads_frames_set_per_topic_positions() {
                 unread: 0,
                 mentions: 0,
                 following: Some(true),
+                muted: None,
             }],
         },
         4,
     )
     .unwrap();
     assert_eq!(s.topic("TB").unwrap().unwrap().unread, 0);
+    // Unmuted on another device: following stays.
+    let tb = s.topic("TB").unwrap().unwrap();
+    assert_eq!((tb.following, tb.muted), (true, false));
+    // The ack of topic.mute mutes TA without touching its read position.
+    s.apply_topic_state(
+        G1,
+        &TopicState {
+            topic_id: "TA".into(),
+            read_seq: 4,
+            unread: 0,
+            mentions: 0,
+            following: None,
+            muted: Some(true),
+        },
+    )
+    .unwrap();
+    let ta = s.topic("TA").unwrap().unwrap();
+    assert_eq!((ta.following, ta.muted), (false, true));
     assert_eq!(s.group(G1).unwrap().unwrap().unread, 0);
     // A later message counts once.
     s.apply_events(
