@@ -631,8 +631,8 @@ impl RenderOnce for SidebarRow {
 
 /// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
 /// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
-/// or workspace, or the offline state), `chevrons-up-down` 16 at the right.
-/// It opens account and Settings.
+/// or workspace, or the offline state), the 设置 gear 16 at the right. It
+/// opens and closes the settings window (the sidebar's only 设置 entry).
 #[derive(IntoElement)]
 pub struct SidebarFooter {
     id: ElementId,
@@ -716,7 +716,7 @@ impl RenderOnce for SidebarFooter {
                             ),
                     )
                     .child(symbol(
-                        Sf::Popup,
+                        Sf::Settings,
                         super::tokens::icon::MD,
                         Weight::Regular,
                         k.secondary,

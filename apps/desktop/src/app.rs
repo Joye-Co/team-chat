@@ -41,6 +41,7 @@ gpui::actions!(
     [
         Quit,
         OpenSettings,
+        ToggleSettings,
         ToggleSidePanel,
         ToggleSidebar,
         NewTopic,
@@ -1199,6 +1200,12 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
+    {
+        let services = services.clone();
+        cx.on_action(move |_: &ToggleSettings, cx| {
+            crate::views::settings::toggle(services.clone(), cx)
+        });
+    }
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
     bind_view_keys(cx);

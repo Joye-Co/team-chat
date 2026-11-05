@@ -430,6 +430,20 @@ pub fn open(services: Services, cx: &mut App) {
     }
 }
 
+/// The sidebar's settings entry: opens the settings window, or closes it
+/// when it is open (a second click on the same button closes it).
+pub fn toggle(services: Services, cx: &mut App) {
+    if let Some(handle) = cx.try_global::<SettingsWindow>().and_then(|w| w.0)
+        && handle
+            .update(cx, |_, window, _| window.remove_window())
+            .is_ok()
+    {
+        cx.set_global(SettingsWindow(None));
+        return;
+    }
+    open(services, cx);
+}
+
 /// v12/fx-overlays: opens the settings window at `page` (the app menu's
 /// 检查更新… opens 通用), or brings the open one to the front.
 pub fn open_page(services: Services, page: Page, cx: &mut App) {
