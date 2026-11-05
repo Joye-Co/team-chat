@@ -1228,6 +1228,18 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Reconnects at once instead of waiting for the next retry.
     fn reconnect_now(&self) {}
+    /// The server in use, signed in or not; `None` before the first login.
+    fn current_server(&self) -> Option<String> {
+        None
+    }
+    /// The servers this Mac has a saved session on.
+    fn signed_in_servers(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// Uses another server. The session of the server in use stays saved
+    /// (no sign-out): a server with a saved session signs in at once, any
+    /// other one shows the login window for it. Emits `Change::Session`.
+    fn switch_server(&self, _server_url: &str) {}
 
     // --- directory ---
 

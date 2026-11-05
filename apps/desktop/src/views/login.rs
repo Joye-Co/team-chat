@@ -162,10 +162,16 @@ impl LoginView {
     }
 
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // The server in use (after 服务器 › 测试服务器, or a sign-out), else
+        // the default one.
+        let start_url = services
+            .provider
+            .current_server()
+            .unwrap_or_else(|| default_server_url().to_string());
         let server = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(l::SERVER_PLACEHOLDER)
-                .default_value(default_server_url())
+                .default_value(start_url)
         });
         let code = cx.new(|cx| CodeInput::new(CODE_LEN, GROUP, window, cx).keep_raw(keeps_whole));
         // The first slot has the caret when the view opens.
@@ -203,6 +209,15 @@ impl LoginView {
                         return;
                     }
                     let session = this.services.provider.session();
+                    // A switch to a server without a saved session: the
+                    // login window shows that server.
+                    if matches!(session, SessionState::SignedOut { last_error: None })
+                        && let Some(url) = this.services.provider.current_server()
+                        && this.server.read(cx).value().trim() != url
+                    {
+                        this.server
+                            .update(cx, |st, cx| st.set_value(url, window, cx));
+                    }
                     match &session {
                         SessionState::SignedOut {
                             last_error: Some(LoginError::ServerUnreachable),

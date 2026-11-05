@@ -1,14 +1,20 @@
 //! Where the provider keeps its files, the saved session, token storage and
 //! the sign-in calls.
 //!
-//! Layout under the data root (`~/Library/Application Support/<bundle id>`):
-//! - `session.json`: the signed-in server and member (no secret).
+//! Layout under the data root (`~/Library/Application Support/<app id>`):
+//! - `sessions.json`: one signed-in member per server and the current server
+//!   (no secret). Switching servers keeps the others signed in. An older
+//!   `session.json` (one session) is read once and moved into it.
 //! - `accounts/<server>/<member id>/cache.sqlite3`: the chat-core cache of one
 //!   account, so two accounts never share a cache.
 //! - `logs/`: chat-core and app logs (secrets are never logged).
 //!
-//! The token lives in the macOS Keychain (service = bundle id, account =
-//! server URL). Self-tests use a memory store.
+//! The token lives in the macOS Keychain (service = app id, account = server
+//! URL). Self-tests use a memory store.
+//!
+//! The app id is the bundle id for a release build and `<bundle id>.dev` for
+//! a debug build, so a build from a worktree never reads, replaces or signs
+//! out the installed app's sessions and tokens.
 
 use std::{
     path::{Path, PathBuf},
@@ -47,10 +53,9 @@ impl TokenStorage {
     pub fn store(&self, server_url: &str) -> Box<dyn TokenStore> {
         match self {
             #[cfg(target_os = "macos")]
-            TokenStorage::Keychain => Box::new(chat_core::KeychainTokenStore::new(
-                env!("PRODUCT_BUNDLE_ID"),
-                server_url,
-            )),
+            TokenStorage::Keychain => {
+                Box::new(chat_core::KeychainTokenStore::new(app_id(), server_url))
+            }
             #[cfg(not(target_os = "macos"))]
             TokenStorage::Keychain => Box::new(chat_core::FileTokenStore::new(
                 default_data_root().join("token"),
@@ -100,13 +105,22 @@ impl TokenStore for FailingTokenStore {
     }
 }
 
-/// `~/Library/Application Support/<bundle id>`.
+/// The bundle id for a release build, `<bundle id>.dev` for a debug build:
+/// the data folder and the Keychain service of this build.
+pub const fn app_id() -> &'static str {
+    if cfg!(debug_assertions) {
+        concat!(env!("PRODUCT_BUNDLE_ID"), ".dev")
+    } else {
+        env!("PRODUCT_BUNDLE_ID")
+    }
+}
+
+/// `~/Library/Application Support/<app id>`.
 pub fn default_data_root() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    home.join("Library/Application Support")
-        .join(env!("PRODUCT_BUNDLE_ID"))
+    home.join("Library/Application Support").join(app_id())
 }
 
 /// The cache directory of one account.
@@ -131,7 +145,7 @@ pub fn account_dir(root: &Path, server_url: &str, member_id: &str) -> PathBuf {
         .join(safe(member_id))
 }
 
-/// What `session.json` holds. No secret.
+/// One signed-in member on one server. No secret.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSession {
@@ -140,25 +154,106 @@ pub struct SavedSession {
     pub member: proto::Member,
 }
 
-pub fn session_path(root: &Path) -> PathBuf {
+/// What `sessions.json` holds: a session per server and the server in use.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedSessions {
+    /// The server the app uses now, signed in or not.
+    #[serde(default)]
+    pub current: Option<String>,
+    #[serde(default)]
+    pub sessions: Vec<SavedSession>,
+}
+
+impl SavedSessions {
+    fn get(&self, server_url: &str) -> Option<&SavedSession> {
+        self.sessions.iter().find(|s| same_server(&s.server_url, server_url))
+    }
+}
+
+fn same_server(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+/// `sessions.json`.
+pub fn sessions_path(root: &Path) -> PathBuf {
+    root.join("sessions.json")
+}
+
+/// The single session of builds before `sessions.json`.
+fn legacy_session_path(root: &Path) -> PathBuf {
     root.join("session.json")
 }
 
-pub fn load_session(root: &Path) -> Option<SavedSession> {
-    let text = std::fs::read_to_string(session_path(root)).ok()?;
-    serde_json::from_str(&text).ok()
+/// Every saved session; an older `session.json` counts as the current one.
+pub fn load_sessions(root: &Path) -> SavedSessions {
+    if let Ok(text) = std::fs::read_to_string(sessions_path(root)) {
+        return serde_json::from_str(&text).unwrap_or_default();
+    }
+    std::fs::read_to_string(legacy_session_path(root))
+        .ok()
+        .and_then(|text| serde_json::from_str::<SavedSession>(&text).ok())
+        .map(|s| SavedSessions {
+            current: Some(s.server_url.clone()),
+            sessions: vec![s],
+        })
+        .unwrap_or_default()
 }
 
-pub fn save_session(root: &Path, session: &SavedSession) -> std::io::Result<()> {
+fn save_sessions(root: &Path, all: &SavedSessions) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
-    let path = session_path(root);
+    let path = sessions_path(root);
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(session)?)?;
-    std::fs::rename(tmp, path)
+    std::fs::write(&tmp, serde_json::to_vec_pretty(all)?)?;
+    std::fs::rename(tmp, path)?;
+    let _ = std::fs::remove_file(legacy_session_path(root));
+    Ok(())
 }
 
-pub fn clear_session(root: &Path) {
-    let _ = std::fs::remove_file(session_path(root));
+/// The session of the current server, if it is signed in.
+pub fn load_session(root: &Path) -> Option<SavedSession> {
+    let all = load_sessions(root);
+    all.get(all.current.as_deref()?).cloned()
+}
+
+/// The server in use, signed in or not.
+pub fn current_server(root: &Path) -> Option<String> {
+    load_sessions(root).current
+}
+
+/// Saves the session of its server and makes that server the current one.
+pub fn save_session(root: &Path, session: &SavedSession) -> std::io::Result<()> {
+    let mut all = load_sessions(root);
+    all.sessions
+        .retain(|s| !same_server(&s.server_url, &session.server_url));
+    all.sessions.push(session.clone());
+    all.current = Some(session.server_url.clone());
+    save_sessions(root, &all)
+}
+
+/// Forgets the session of one server; the other servers stay signed in and
+/// the current server stays the same.
+pub fn forget_session(root: &Path, server_url: &str) {
+    let mut all = load_sessions(root);
+    all.sessions.retain(|s| !same_server(&s.server_url, server_url));
+    let _ = save_sessions(root, &all);
+}
+
+/// Makes `server_url` the current server. Returns its saved session.
+pub fn set_current_server(root: &Path, server_url: &str) -> Option<SavedSession> {
+    let mut all = load_sessions(root);
+    all.current = Some(server_url.to_string());
+    let _ = save_sessions(root, &all);
+    all.get(server_url).cloned()
+}
+
+/// The servers that have a saved session.
+pub fn signed_in_servers(root: &Path) -> Vec<String> {
+    load_sessions(root)
+        .sessions
+        .into_iter()
+        .map(|s| s.server_url)
+        .collect()
 }
 
 /// The name of this Mac, shown in the member's device list.
@@ -280,6 +375,54 @@ mod tests {
     }
 
     #[test]
+    fn each_server_keeps_its_own_session() {
+        let root = std::env::temp_dir().join(format!("sessions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let member = |id: &str| -> proto::Member {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "kind": "human", "name": "A", "level": "member"
+            }))
+            .unwrap()
+        };
+        // A session.json of an older build is the current session.
+        std::fs::create_dir_all(&root).unwrap();
+        let prod = SavedSession {
+            server_url: "https://prod.dev".into(),
+            member: member("m1"),
+        };
+        std::fs::write(legacy_session_path(&root), serde_json::to_vec(&prod).unwrap()).unwrap();
+        assert_eq!(load_session(&root), Some(prod.clone()));
+
+        // Signing in on staging keeps production signed in.
+        let staging = SavedSession {
+            server_url: "https://staging.dev".into(),
+            member: member("m2"),
+        };
+        save_session(&root, &staging).unwrap();
+        assert!(!legacy_session_path(&root).exists());
+        assert_eq!(load_session(&root), Some(staging.clone()));
+        assert_eq!(signed_in_servers(&root).len(), 2);
+
+        // Switching back finds the production session.
+        assert_eq!(set_current_server(&root, "https://prod.dev/"), Some(prod.clone()));
+        assert_eq!(load_session(&root), Some(prod.clone()));
+
+        // Signing out of production leaves staging alone, and production
+        // stays the current server for the login window.
+        forget_session(&root, "https://prod.dev");
+        assert_eq!(load_session(&root), None);
+        assert_eq!(current_server(&root).as_deref(), Some("https://prod.dev/"));
+        assert_eq!(signed_in_servers(&root), vec!["https://staging.dev".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_debug_build_has_its_own_app_id() {
+        assert_eq!(app_id(), concat!(env!("PRODUCT_BUNDLE_ID"), ".dev"));
+        assert!(default_data_root().ends_with(app_id()));
+    }
+
+    #[test]
     fn errors_map_to_login_errors() {
         let server = |status, code| ApiError::Server {
             status,
@@ -345,7 +488,7 @@ mod tests {
             p.connection() == ConnectionState::TokenUnreadable
         });
         assert!(matches!(p.session(), SessionState::SignedIn { .. }));
-        assert!(session_path(&root).exists());
+        assert!(load_session(&root).is_some());
         assert!(slot.lock().unwrap().is_some());
 
         // The prompt is allowed on retry: the client starts.
