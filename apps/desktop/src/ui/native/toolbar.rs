@@ -138,15 +138,25 @@ impl RenderOnce for ToolbarRow {
             .items_center()
             .gap(metrics::TOOLBAR_GROUP_GAP)
             .child(
+                // One line on the traffic-light line: the title, then the
+                // subtitle after it (owner decision, v18).
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     .flex()
-                    .flex_col()
-                    .child(TruncText::new(self.title).n_title3().text_color(title_ink))
+                    .items_center()
+                    .gap(px(12.))
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .max_w(gpui::relative(0.7))
+                            .child(TruncText::new(self.title).n_title3().text_color(title_ink)),
+                    )
                     .when_some(self.subtitle, |d, sub| {
                         d.child(
                             div()
+                                .flex_1()
+                                .min_w(px(0.))
                                 .flex()
                                 .items_center()
                                 .gap(px(4.))

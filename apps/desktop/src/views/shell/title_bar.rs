@@ -15,7 +15,7 @@
 use gpui::{
     AnyElement, App, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
     Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText, TextLayout, Window,
-    div, prelude::FluentBuilder as _, px,
+    div, px,
 };
 
 use crate::{
@@ -326,18 +326,17 @@ fn heading_with(
         Some((el, layout)) => (Some(el), Some(layout)),
         None => (None, None),
     };
-    // T2-15: the title's 24 line puts 4.5 of air over its ink and none
-    // under the badge; 4 of bottom padding centers the two-line ink in the
-    // 52 band (5.5 above, 5.5 below).
-    let two_lines = sub_el.is_some();
+    // One line on the traffic-light line: the title, then the subtitle
+    // after it, never under it (owner decision, v18). The title keeps up to
+    // 70 % of the row; the subtitle is cut first.
     let el = div()
         .flex_1()
         .min_w(px(0.))
         .flex()
-        .flex_col()
-        .when(two_lines, |d| d.pb(space::S4))
-        .child(title)
-        .children(sub_el)
+        .items_center()
+        .gap(space::S12)
+        .child(div().flex_shrink_0().max_w(gpui::relative(0.7)).child(title))
+        .children(sub_el.map(|s| div().flex_1().min_w(px(0.)).child(s)))
         .into_any_element();
     (el, title_layout, sub_layout)
 }

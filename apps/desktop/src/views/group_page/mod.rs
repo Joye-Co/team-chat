@@ -548,10 +548,11 @@ impl GroupPage {
             .border_b_1()
             .border_color(k.separator)
             .flex()
-            .flex_col()
-            .justify_center()
+            .items_center()
+            .gap(tsp::S8)
             .child(
                 div()
+                    .flex_none()
                     .n_title3()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(k.label)
