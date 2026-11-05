@@ -9,6 +9,7 @@ const MIN: u64 = 60_000;
 pub struct FakeSettingsBackend {
     notify: NotifyPreferences,
     approvals: ApprovalDefaults,
+    ai: AiServiceSettings,
     devices: Vec<DeviceInfo>,
 }
 
@@ -29,6 +30,12 @@ impl FakeSettingsBackend {
                 ..NotifyPreferences::default()
             },
             approvals: ApprovalDefaults::default(),
+            ai: AiServiceSettings {
+                provider: Some(AiProviderKind::Deepseek),
+                model: AiProviderKind::Deepseek.default_model().into(),
+                base_url: None,
+                key_hint: Some("7Qx2".into()),
+            },
             devices: vec![
                 dev("tk-mbp", "Joye 的 MacBook Pro", Some(now), true),
                 dev(
@@ -93,6 +100,60 @@ impl FakeProvider {
             s.approvals = defaults;
             s.approvals
         })))
+    }
+
+    fn i_am_owner_fake(&self) -> bool {
+        self.with(|s| {
+            s.members
+                .iter()
+                .any(|m| m.id == ME && m.level == MemberLevel::Owner)
+        })
+    }
+
+    pub(super) fn ai_service_fake(&self) -> AdminReply<AiServiceSettings> {
+        if !self.i_am_owner_fake() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(Ok(self.sb(|s| s.ai.clone())))
+    }
+
+    pub(super) fn set_ai_service_fake(
+        &self,
+        draft: AiServiceDraft,
+    ) -> AdminReply<AiServiceSettings> {
+        if !self.i_am_owner_fake() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(self.sb(|s| {
+            draft.check(&s.ai).map_err(|_| AdminError::Invalid)?;
+            let hint = match &draft.api_key {
+                Some(k) => Some(k[k.len().saturating_sub(4)..].to_string()),
+                None => s.ai.key_hint.clone(),
+            };
+            s.ai = AiServiceSettings {
+                provider: Some(draft.provider),
+                model: draft.model,
+                base_url: draft.base_url.filter(|_| draft.provider.needs_base_url()),
+                key_hint: hint,
+            };
+            Ok(s.ai.clone())
+        }))
+    }
+
+    /// A key with "bad" in it fails like a provider that refuses the key.
+    pub(super) fn test_ai_service_fake(&self, draft: AiServiceDraft) -> AdminReply<AiTestOutcome> {
+        if !self.i_am_owner_fake() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(self.sb(|s| {
+            draft.check(&s.ai).map_err(|_| AdminError::Invalid)?;
+            Ok(match draft.api_key.as_deref() {
+                Some(k) if k.contains("bad") => AiTestOutcome::Failed(
+                    "401 Authentication Fails (auth header format should be Bearer sk-...)".into(),
+                ),
+                _ => AiTestOutcome::Ok { latency_ms: 412 },
+            })
+        }))
     }
 
     pub(super) fn devices_fake(&self) -> AdminReply<Vec<DeviceInfo>> {

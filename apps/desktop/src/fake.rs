@@ -1905,6 +1905,15 @@ impl ChatProvider for FakeProvider {
     fn set_approval_defaults(&self, defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
         self.set_approval_defaults_fake(defaults)
     }
+    fn ai_service(&self) -> AdminReply<AiServiceSettings> {
+        self.ai_service_fake()
+    }
+    fn set_ai_service(&self, draft: AiServiceDraft) -> AdminReply<AiServiceSettings> {
+        self.set_ai_service_fake(draft)
+    }
+    fn test_ai_service(&self, draft: AiServiceDraft) -> AdminReply<AiTestOutcome> {
+        self.test_ai_service_fake(draft)
+    }
     fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
         self.devices_fake()
     }

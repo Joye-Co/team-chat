@@ -1331,6 +1331,21 @@ impl ChatProvider for WorstCase {
     fn set_approval_defaults(&self, defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
         self.inner.set_approval_defaults(defaults)
     }
+    fn ai_service(&self) -> AdminReply<crate::data::AiServiceSettings> {
+        self.inner.ai_service()
+    }
+    fn set_ai_service(
+        &self,
+        draft: crate::data::AiServiceDraft,
+    ) -> AdminReply<crate::data::AiServiceSettings> {
+        self.inner.set_ai_service(draft)
+    }
+    fn test_ai_service(
+        &self,
+        draft: crate::data::AiServiceDraft,
+    ) -> AdminReply<crate::data::AiTestOutcome> {
+        self.inner.test_ai_service(draft)
+    }
 }
 
 /// A long run of mixed text with an unbroken token (panes track).

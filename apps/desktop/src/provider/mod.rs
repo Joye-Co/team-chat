@@ -1831,6 +1831,21 @@ impl ChatProvider for CoreProvider {
     ) -> AdminReply<crate::data::ApprovalDefaults> {
         self.set_approval_defaults_inner(defaults)
     }
+    fn ai_service(&self) -> AdminReply<crate::data::AiServiceSettings> {
+        self.ai_service_inner()
+    }
+    fn set_ai_service(
+        &self,
+        draft: crate::data::AiServiceDraft,
+    ) -> AdminReply<crate::data::AiServiceSettings> {
+        self.set_ai_service_inner(draft)
+    }
+    fn test_ai_service(
+        &self,
+        draft: crate::data::AiServiceDraft,
+    ) -> AdminReply<crate::data::AiTestOutcome> {
+        self.test_ai_service_inner(draft)
+    }
     fn devices(&self) -> AdminReply<Vec<crate::data::DeviceInfo>> {
         self.devices_inner()
     }

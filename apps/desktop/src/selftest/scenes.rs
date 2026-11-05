@@ -293,6 +293,20 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_about,
     },
     Scene {
+        name: "settings-ai-service",
+        about: "Settings: 通用 › AI 服务 (owner) after 测试连接 with the saved DeepSeek key",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_ai_service,
+    },
+    Scene {
+        name: "settings-ai-service-failed",
+        about: "Settings: 通用 › AI 服务 with OpenAI 兼容 and a refused key: 连接失败",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_ai_service_failed,
+    },
+    Scene {
         name: "settings-members-end",
         about: "Settings: 成员 scrolled to the end, with the footnote under the table",
         start: Start::SignedIn,

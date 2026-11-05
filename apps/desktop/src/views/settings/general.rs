@@ -1,5 +1,6 @@
 //! 通用 (NATIVE.md §8): 启动时, 登录时启动, 菜单栏里显示 and 声音; the
-//! version with 检查更新; 开发者视图; 发送诊断… opens a sheet.
+//! version with 检查更新; AI 服务 for owners (ai_service.rs); 开发者视图;
+//! 发送诊断… opens a sheet.
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
@@ -33,6 +34,8 @@ pub const DIAGNOSTICS_MAX: usize = 2000;
 
 pub struct GeneralPage {
     services: Services,
+    /// AI 服务, shown to owners only.
+    ai: Entity<super::ai_service::AiServicePanel>,
     updater: Option<Entity<updater::Updater>>,
     description: Entity<TextareaState>,
     status: Status,
@@ -64,8 +67,10 @@ impl GeneralPage {
         if let Some(u) = &updater {
             subscriptions.push(cx.observe(u, |_, _, cx| cx.notify()));
         }
+        let ai = cx.new(|cx| super::ai_service::AiServicePanel::new(services.clone(), window, cx));
         Self {
             services,
+            ai,
             updater,
             description,
             status: Status::Idle,
@@ -75,6 +80,10 @@ impl GeneralPage {
 
     pub fn status(&self) -> &Status {
         &self.status
+    }
+
+    pub fn ai_service(&self) -> &Entity<super::ai_service::AiServicePanel> {
+        &self.ai
     }
 
     pub fn set_description(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -643,9 +652,11 @@ impl Render for GeneralPage {
                 }),
         );
         let _ = k;
+        let owner = super::i_am_owner(&self.services);
         widgets::pane()
             .child(startup)
             .child(alerts)
+            .when(owner, |p| p.child(self.ai.clone()))
             .child(version)
             .child(developer_section)
     }

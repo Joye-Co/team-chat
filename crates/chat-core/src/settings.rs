@@ -1,13 +1,14 @@
 //! Settings (docs/protocol.md, "Settings"): notification settings, the team's approval rules
-//! for AI members and my signed-in devices, over HTTP.
+//! for AI members, the team's AI 服务 and my signed-in devices, over HTTP.
 
 use reqwest::Method;
 
 use crate::client::{Client, ClientError};
 use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::{
-    ApprovalPolicy, DevicesResponse, NotifySettings, RevokeTokensResponse,
-    UpdateApprovalPolicyRequest, UpdateNotifySettingsRequest,
+    AiServiceConfig, AiServiceTestResult, ApprovalPolicy, DevicesResponse, NotifySettings,
+    RevokeTokensResponse, UpdateAiServiceRequest, UpdateApprovalPolicyRequest,
+    UpdateNotifySettingsRequest,
 };
 
 type Handle<T> = tokio::task::JoinHandle<Result<T, ClientError>>;
@@ -44,6 +45,32 @@ impl HttpClient {
     ) -> ApiResult<ApprovalPolicy> {
         req.validate().map_err(invalid)?;
         self.call(Method::PATCH, "/v1/settings/approvals", Some(req), true)
+            .await
+    }
+
+    /// The team's AI 服务, without the key. Owner only; others get `Forbidden`.
+    pub async fn ai_service(&self) -> ApiResult<AiServiceConfig> {
+        self.call::<(), _>(Method::GET, "/v1/settings/ai", None, true)
+            .await
+    }
+
+    /// Saves the team's AI 服务 (owner only). Without `api_key` the saved key stays.
+    pub async fn update_ai_service(
+        &self,
+        req: &UpdateAiServiceRequest,
+    ) -> ApiResult<AiServiceConfig> {
+        req.validate().map_err(invalid)?;
+        self.call(Method::PUT, "/v1/settings/ai", Some(req), true)
+            .await
+    }
+
+    /// 测试连接: one tiny call with these values; nothing is saved (owner only).
+    pub async fn test_ai_service(
+        &self,
+        req: &UpdateAiServiceRequest,
+    ) -> ApiResult<AiServiceTestResult> {
+        req.validate().map_err(invalid)?;
+        self.call(Method::POST, "/v1/settings/ai/test", Some(req), true)
             .await
     }
 
