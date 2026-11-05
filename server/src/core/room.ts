@@ -11,6 +11,7 @@ import {
   type ClientFrameOf,
   cardV2ToV1,
   type Event,
+  mainTopicId,
   type Message,
   type MessageKind,
   type NotifyLevel,
@@ -595,6 +596,7 @@ export class GroupRoom extends DurableObject<Env> {
     };
     if (r.last_message_at !== null && r.last_message_at !== undefined) t.lastMessageAt = r.last_message_at;
     if (r.context) t.contextOf = JSON.parse(r.context) as TopicContext;
+    if (this.isMain(r.id)) t.main = true;
     return t;
   }
 
@@ -627,6 +629,16 @@ export class GroupRoom extends DurableObject<Env> {
       type: r.type,
       data: JSON.parse(r.data),
     } as Event;
+  }
+
+  /** Whether `topicId` is this group's 群聊 (docs/protocol.md, "群聊: the group's own chat"). */
+  isMain(topicId: string): boolean {
+    return this.groupId !== null && topicId === mainTopicId(this.groupId);
+  }
+
+  /** A topic id that exists, or this group's 群聊 before its first message. */
+  private knownTopic(topicId: string): boolean {
+    return this.isMain(topicId) || this.topicRow(topicId) !== undefined;
   }
 
   private topicRow(id: string): TopicRow | undefined {
@@ -764,7 +776,7 @@ export class GroupRoom extends DurableObject<Env> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(memberId);
-      if (!this.topicRow(topicId)) throw new ApiError("not_found", "topic not found");
+      if (!this.knownTopic(topicId)) throw new ApiError("not_found", "topic not found");
       const read = Math.min(groupRead, this.lastSeq);
       const moved = advanceTopicRead(this.sql, memberId, topicId, Math.min(seq, this.lastSeq));
       const { topics: _all, ...totals } = groupReadState(this.sql, memberId, read);
@@ -803,6 +815,14 @@ export class GroupRoom extends DurableObject<Env> {
     return c.uptoSeq > cur.uptoSeq ? { groupId: c.groupId, topicId: c.topicId, uptoSeq: c.uptoSeq } : undefined;
   }
 
+  /** The title of a new 群聊: the group's name, "" in a DM (each side sees the other's name). */
+  private async mainTitle(groupId: string): Promise<string> {
+    if (this.groupKind === "dm") return "";
+    const renamed = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'group_name'").toArray()[0]?.value;
+    if (renamed !== undefined) return renamed;
+    return (await getGroup(this.env.DB, groupId))?.name ?? "";
+  }
+
   private async sendNow(groupId: string, actor: Actor, frame: SendFrame): Promise<Result<SendResult>> {
     return run(async () => {
       await this.ready(groupId);
@@ -822,7 +842,10 @@ export class GroupRoom extends DurableObject<Env> {
       for (const id of mentions) {
         if (!this.members.has(id)) throw new ApiError("invalid", "mention of a member outside this group");
       }
-      if (frame.topicId && !this.topicRow(frame.topicId)) throw new ApiError("not_found", "topic not found");
+      if (frame.topicId && !this.knownTopic(frame.topicId)) throw new ApiError("not_found", "topic not found");
+      // The 群聊 is made by its first message; its title is the group's name ("" in a DM).
+      const startsMain = frame.topicId !== undefined && this.isMain(frame.topicId) && !this.topicRow(frame.topicId);
+      const mainTitle = startsMain ? await this.mainTitle(groupId) : "";
 
       const room = this.roomContext();
       let ext: Record<string, unknown> | undefined;
@@ -855,9 +878,12 @@ export class GroupRoom extends DurableObject<Env> {
       const sent = this.commit((tx) => {
         let topicId = frame.topicId;
         let createdTopic: Topic | undefined;
-        if (!topicId) {
-          topicId = ulid(now);
-          const title = frame.title ?? defaultTitle(body);
+        // Two first messages can race into a new 群聊: the second finds the row made by the first.
+        const newTopic = !topicId || (startsMain && !this.topicRow(topicId));
+        if (!topicId || newTopic) {
+          const main = topicId !== undefined;
+          topicId = topicId ?? ulid(now);
+          const title = main ? mainTitle : (frame.title ?? defaultTitle(body));
           const seq = tx.nextSeq();
           this.sql.exec(
             `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count,
@@ -869,7 +895,7 @@ export class GroupRoom extends DurableObject<Env> {
             now,
             messageId,
             seq,
-            actor.id,
+            main ? null : actor.id,
             now,
             context ? JSON.stringify(context) : null,
           );
@@ -903,13 +929,16 @@ export class GroupRoom extends DurableObject<Env> {
         for (const id of mentions) {
           this.sql.exec("INSERT OR IGNORE INTO mentions (member_id, seq, message_id) VALUES (?, ?, ?)", id, seq, messageId);
         }
-        // Auto-follow: the author (and creator) and every mentioned member.
-        for (const id of new Set([actor.id, ...mentions])) setFollowing(this.sql, id, topicId, true);
+        // Auto-follow: the author (and creator) and every mentioned member. Not in the 群聊,
+        // which is a chat, not a piece of work.
+        if (!this.isMain(topicId)) {
+          for (const id of new Set([actor.id, ...mentions])) setFollowing(this.sql, id, topicId, true);
+        }
         const message = this.toMessage(this.messageRow(messageId) as MessageRow);
         tx.append({ type: "message.created", actorId: actor.id, topicId, messageId, data: { message } });
         this.touchTopic(topicId, seq, true);
         for (const w of writes) w.inTx?.(tx, message);
-        if (!frame.topicId) createdTopic = this.toTopic(this.topicRow(topicId) as TopicRow);
+        if (newTopic) createdTopic = this.toTopic(this.topicRow(topicId) as TopicRow);
         const result: SendResult = { message };
         if (createdTopic) result.topic = createdTopic;
         return result;
@@ -1064,6 +1093,9 @@ export class GroupRoom extends DurableObject<Env> {
       this.requireMember(actor.id);
       const row = this.topicRow(frame.topicId);
       if (!row) throw new ApiError("not_found", "topic not found");
+      // The 群聊 keeps no title, status, waitingOn or owner of its own; bots that report a run's
+      // status there get the topic as it is.
+      if (this.isMain(row.id)) return { topic: this.toTopic(row) };
       if (
         frame.title === undefined &&
         frame.status === undefined &&
@@ -1161,7 +1193,7 @@ export class GroupRoom extends DurableObject<Env> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
-      if (!this.topicRow(topicId)) throw new ApiError("not_found", "topic not found");
+      if (!this.knownTopic(topicId)) throw new ApiError("not_found", "topic not found");
       const key = `${actor.id}:${topicId}`;
       const now = Date.now();
       const last = this.typingAt.get(key);
@@ -1287,7 +1319,7 @@ export class GroupRoom extends DurableObject<Env> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
-      if (!this.topicRow(topicId)) throw new ApiError("not_found", "topic not found");
+      if (!this.knownTopic(topicId)) throw new ApiError("not_found", "topic not found");
       const n = Math.min(limit ?? DEFAULT_HISTORY_LIMIT, 500);
       const rows = this.sql
         .exec<MessageRow>(
