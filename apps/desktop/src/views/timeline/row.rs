@@ -408,9 +408,10 @@ impl TimelineView {
                 .into_any_element()
         });
 
-        // §2.15: a failed message: the destructive icon 16 and 没有发出 12,
-        // then ghost sm 重试 (rotate-ccw) and a ghost sm ⋯ with the row's
-        // menu (删除, 复制).
+        // §2.15 (owner decision v16): a failed message: the destructive
+        // icon 16 and 没有发出 12 in the foreground color (the state color
+        // on the icon only, as every error), then ghost sm 重试 (rotate-ccw)
+        // and a ghost sm ⋯ with the row's menu (删除, 复制).
         let failed = (message.send_state == SendState::Failed).then(|| {
             use gpui_component::menu::DropdownMenu as _;
             let (menu_message, view) = (message.clone(), cx.entity().downgrade());
@@ -426,7 +427,7 @@ impl TimelineView {
                         .items_center()
                         .gap(space::S6)
                         .t_meta()
-                        .text_color(colors.danger_text)
+                        .text_color(colors.text_1)
                         .child(ui::icon(Sym::Failed, theme::icon::ROW, colors.danger_text))
                         .child(t::FAILED),
                 )
