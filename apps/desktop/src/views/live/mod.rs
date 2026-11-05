@@ -566,13 +566,13 @@ impl LivePane {
             .bg(k.sunken)
             // T-16, C4: a clip is a rectangle, so the fills take the frame's
             // inner radius themselves (no square corner outside the border).
-            .child(menu.rounded_t(theme::radius::FIELD - px(1.)))
+            .child(menu.rounded_t(theme::radius::FIELD - metrics::HAIRLINE))
             .child(
                 div()
                     .relative()
                     .flex_1()
                     .min_h(px(0.))
-                    .rounded_b(theme::radius::FIELD - px(1.))
+                    .rounded_b(theme::radius::FIELD - metrics::HAIRLINE)
                     .bg(k.ph[1])
                     .child(terminal)
                     .children(pointer),
