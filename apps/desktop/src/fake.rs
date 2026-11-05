@@ -1672,7 +1672,7 @@ impl ChatProvider for FakeProvider {
             .collect()
     }
 
-    /// This week of a member from the same data as 首页's 今天完成 and
+    /// This week of a member from the same data as 首页's 今天交付 and
     /// 最近的产出: 话题 it owns that are done, and 产出 it made, in the last
     /// 7 days (fixtures agree, A5).
     fn member_stats(&self, member_id: &str) -> Option<crate::data::v2::MemberStats> {
