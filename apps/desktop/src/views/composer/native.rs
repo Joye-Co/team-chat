@@ -396,9 +396,19 @@ impl ComposerView {
                     .w_full()
                     .child(field)
                     .child(
-                        gpui::canvas(move |bounds, _, _| anchor.set(bounds), |_, _, _, _| {})
-                            .absolute()
-                            .size_full(),
+                        gpui::canvas(
+                            move |bounds, window, cx| {
+                                anchor.set(bounds);
+                                super::floor_painted(bounds.top(), window, cx);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        // At the box's top-left: an absolute child with no
+                        // inset sits at its flow place (the box's bottom).
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
                     )
                     .children(self.render_mentions(window, cx)),
             )

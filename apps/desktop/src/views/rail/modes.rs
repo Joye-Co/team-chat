@@ -588,21 +588,43 @@ impl RailView {
         if !expanded {
             row = row.disclosure(false);
         }
-        let (status, text) = if r.waiting_on_me > 0 {
-            (
-                crate::ui::native::page::Status::NeedsYou,
+        // B1-24, §2.12: 在做 only while the member's run works; a busy
+        // member with no run says the state of its newest 话题 (等X, 排队).
+        let badge = if r.waiting_on_me > 0 {
+            crate::ui::native::StatusBadge::new(
+                crate::ui::native::BadgeState::NeedsYou,
                 crate::copy::fill(
                     c::RAIL_WAITS_ON_YOU_N,
                     &[("n", &r.waiting_on_me.to_string())],
                 ),
             )
+        } else if r.working {
+            let text = r.plan.as_ref().map_or_else(
+                || c::RAIL_WORKING.to_string(),
+                |n| crate::copy::fill(c::RAIL_WORKING_N, &[("n", n)]),
+            );
+            crate::ui::native::StatusBadge::new(crate::ui::native::BadgeState::Working, text)
         } else {
-            (
-                crate::ui::native::page::Status::Working,
-                crate::copy::fill(c::RAIL_WORKING_N, &[("n", &r.topics.len().to_string())]),
-            )
+            let line = r.topics.first().map(|mt| {
+                crate::views::topic_page::topic_state(
+                    self.services.provider.as_ref(),
+                    self.services.me().as_deref(),
+                    &mt.topic,
+                )
+            });
+            let (state, text) = line.map_or(
+                (
+                    crate::ui::native::BadgeState::Queued,
+                    crate::copy::common::STATUS_QUEUED.to_string(),
+                ),
+                |l| {
+                    let text = if l.short.is_empty() { l.text } else { l.short };
+                    (l.badge, text)
+                },
+            );
+            crate::ui::native::StatusBadge::new(state, text)
         };
-        row = row.trailing_element(crate::ui::native::page::status_badge(status, text, cx));
+        row = row.trailing_element(badge);
         row.on_click(move |_, _, cx| {
             let id: MemberId = id.clone();
             let _ = this.update(cx, |this, cx| {

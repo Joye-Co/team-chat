@@ -20,7 +20,7 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    copy::{fill, live as c, nav as n},
+    copy::{fill, live as c, nav as n, topic_rail as tr},
     data::{
         AdminError, BotRunSummary, Member, MemberLevel, Millis, PlanState,
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
@@ -50,7 +50,8 @@ const TERMINAL_LINE: Pixels = px(20.);
 /// The pane header: 48 pt.
 const HEADER: Pixels = px(48.);
 /// The side padding of the pane body.
-const SIDE: Pixels = px(24.);
+/// The one inset of the pane (§2.5, A2-12): header, panels and footer.
+const SIDE: Pixels = space::S16;
 /// The screen frame is 16:10.
 const SCREEN_RATIO: f32 = 1.6;
 /// The menu bar of the screen and the title bar of its terminal window.
@@ -173,31 +174,22 @@ impl LivePane {
         bot: &str,
         screen: &MachineScreen,
         run: &BotRunSummary,
-        held_by_me: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let developer = self.developer_toggle(cx);
         let n = native_colors(cx);
-        let state: Option<(Sym, gpui::Hsla, String)> = match &screen.paused_by {
-            Some(_) if held_by_me => Some((Sym::Pointer, n.label, c::LIVE_YOU_HOLD.to_string())),
-            Some(who) => Some((
-                Sym::Pointer,
-                n.secondary,
-                fill(
-                    c::LIVE_HELD_BY_OTHER,
-                    &[("who", &member_name(&self.services, who))],
-                ),
-            )),
-            None => None,
+        // §2.12, A2-13: the run's state is the one StatusBadge and its
+        // words: 在做 while it works, 已暂停 while someone holds its computer.
+        let badge = if screen.paused_by.is_some() {
+            Some(StatusBadge::new(BadgeState::Paused, tr::STATE_PAUSED_SHORT).dense())
+        } else {
+            run.status
+                .is_active()
+                .then(|| StatusBadge::new(BadgeState::Working, tr::STATE_WORKING_SHORT).dense())
         };
-        // A live run says so with the one StatusBadge (§2.12), not a blue dot.
-        let live_badge = (screen.paused_by.is_none() && run.status.is_active())
-            .then(|| StatusBadge::new(BadgeState::Working, c::LIVE_NOW).dense());
-        let end = run.ended_at.unwrap_or_else(now_ms);
-        let elapsed = screen
-            .started_at
-            .or(run.started_at)
-            .map(|s| elapsed_text((end - s).max(0), cx));
+        // P-01: the run's time on the one clock of every page.
+        let elapsed = crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), &run)
+            .map(|ms| elapsed_text(ms, cx));
         let close = self.services.clone();
         let dot = || div().flex_none().child("·");
         let mut subtitle = div()
@@ -208,34 +200,23 @@ impl LivePane {
             .n_subheadline()
             .n_figures()
             .text_color(n.secondary);
-        let mut first = true;
-        if let Some(badge) = live_badge {
-            subtitle = subtitle.child(div().flex_none().child(badge));
-            first = false;
-        }
-        if let Some((sym, color, text)) = state {
-            subtitle = subtitle
-                .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))
-                .child(div().flex_none().text_color(n.label).child(text));
-            first = false;
-        }
+        subtitle = subtitle.child(
+            div()
+                .flex_none()
+                .child(fill(c::LIVE_COMPUTER, &[("name", bot)])),
+        );
         if let Some(m) = screen.machine_name.clone() {
-            if !first {
-                subtitle = subtitle.child(dot());
-            }
-            subtitle = subtitle.child(div().min_w_0().one_line().child(m));
-            first = false;
+            subtitle = subtitle
+                .child(dot())
+                .child(div().min_w_0().one_line().child(m));
         }
         if let Some(e) = elapsed {
-            if !first {
-                subtitle = subtitle.child(dot());
-            }
-            subtitle = subtitle.child(div().flex_none().child(e));
+            subtitle = subtitle.child(dot()).child(div().flex_none().child(e));
         }
         div()
             .flex_none()
             .h(metrics::TOOLBAR_ROW)
-            .pl(metrics::TOOLBAR_LEADING)
+            .pl(SIDE)
             .pr(metrics::TOOLBAR_TRAILING)
             .flex()
             .items_center()
@@ -246,12 +227,21 @@ impl LivePane {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
+                    // §2.2, A2-13: the pane names the pane; the computer
+                    // is its description.
                     .child(
                         div()
-                            .n_title3()
-                            .text_color(n.label)
-                            .one_line()
-                            .child(fill(c::LIVE_COMPUTER, &[("name", bot)])),
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .n_title3()
+                                    .text_color(n.label)
+                                    .child(c::LIVE_TITLE),
+                            )
+                            .children(badge.map(|b| div().flex_none().child(b))),
                     )
                     .child(subtitle),
             )
@@ -430,13 +420,19 @@ impl LivePane {
                     .text_color(k.ink_3)
                     .child(title),
             );
-        let rows: Vec<AnyElement> = if lines.is_empty() {
+        let empty = lines.is_empty();
+        let rows: Vec<AnyElement> = if empty {
+            // §2.13, A2-20: a compact empty in the middle of the terminal,
+            // never a lone line at its top.
             vec![
                 div()
-                    .flex_none()
-                    .h(TERMINAL_LINE)
-                    .text_color(k.ink_3)
-                    .child(c::LIVE_NO_LINES)
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(div().flex_none().child(
+                        crate::ui::native::EmptyLine::new(c::LIVE_NO_LINES).icon(Sym::Terminal),
+                    ))
                     .into_any_element(),
             ]
         } else {
@@ -499,9 +495,9 @@ impl LivePane {
                     .flex_col()
                     .t_meta()
                     .line_height(TERMINAL_LINE)
-                    .code_font()
+                    .when(!empty, |d| d.code_font())
                     .children(rows)
-                    .children(cursor),
+                    .children(cursor.filter(|_| !empty)),
             );
         let pointer = pointer.map(|name| {
             div()
@@ -1655,6 +1651,21 @@ impl Render for LivePane {
                 .flex_1()
                 .min_h(px(0.))
                 .child(body)
+                // A2-14: the last 24 above the footer fade out, so a row
+                // that runs under it never ends in a hard mid-glyph cut.
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right(space::S12)
+                        .bottom_0()
+                        .h(space::S24)
+                        .bg(gpui::linear_gradient(
+                            0.,
+                            gpui::linear_color_stop(native_colors(cx).content, 0.),
+                            gpui::linear_color_stop(native_colors(cx).content.opacity(0.), 1.),
+                        )),
+                )
                 .child(
                     div()
                         .absolute()
@@ -1675,7 +1686,7 @@ impl Render for LivePane {
             .flex()
             .flex_col()
             .bg(native_colors(cx).content)
-            .child(self.header(&bot, &screen, &run, held_by_me, cx))
+            .child(self.header(&bot, &screen, &run, cx))
             .child(body)
             .child(self.footer(&run, &bot, held, can_control, cx))
             .into_any_element()
