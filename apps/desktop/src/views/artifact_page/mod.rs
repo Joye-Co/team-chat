@@ -816,30 +816,26 @@ impl ArtifactPage {
                 self.services.me().as_deref(),
                 &t,
             );
-            let meta = if done {
+            // Two parts: the 群 name cuts, the state word stays (§2.21).
+            let tail = if done {
                 fill(
                     c::ARTIFACT_TOPIC_DONE,
-                    &[
-                        ("group", &group),
-                        ("time", &short_time(now, t.last_activity_at)),
-                    ],
+                    &[("time", &short_time(now, t.last_activity_at))],
                 )
             } else {
                 fill(
                     c::ARTIFACT_TOPIC_ACTIVE,
-                    &[
-                        ("group", &group),
-                        (
-                            "state",
-                            if state.short.is_empty() {
-                                &state.text
-                            } else {
-                                &state.short
-                            },
-                        ),
-                    ],
+                    &[(
+                        "state",
+                        if state.short.is_empty() {
+                            &state.text
+                        } else {
+                            &state.short
+                        },
+                    )],
                 )
             };
+            let meta = format!("{group}{tail}");
             let title = if t.title.trim().is_empty() {
                 c::ARTIFACT_NO_TITLE.to_string()
             } else {
@@ -874,7 +870,15 @@ impl ArtifactPage {
                             .flex()
                             .flex_col()
                             .child(line(title.clone()).n_body().text_color(k.label))
-                            .child(line(meta.clone()).n_subheadline().text_color(k.secondary)),
+                            .child(
+                                div()
+                                    .flex()
+                                    .min_w_0()
+                                    .n_subheadline()
+                                    .text_color(k.secondary)
+                                    .child(div().min_w_0().child(line(group.clone())))
+                                    .child(div().flex_none().child(tail.clone())),
+                            ),
                     )
                     .child(page::row_icon(Sym::ChevronRight, k.secondary))
                     .tooltip(tip(format!("{title} · {meta}")))
@@ -1436,13 +1440,13 @@ impl ArtifactPage {
                 .map(|x| x.name)
                 .unwrap_or_default()
         };
-        let topic_name = |g: &str, t: &str| {
-            let topic = p.topic(g, t).map(|t| t.title).unwrap_or_default();
-            if topic.trim().is_empty() {
-                group_name(g)
-            } else {
-                topic
-            }
+        // B2-12: an untitled 话题 reads `（无标题）`, as in the sidebar, the
+        // header and the inspector; only an artifact with no known 话题
+        // names its 群.
+        let topic_name = |g: &str, t: &str| match p.topic(g, t) {
+            Some(topic) if topic.title.trim().is_empty() => c::ARTIFACT_NO_TITLE.to_string(),
+            Some(topic) => topic.title,
+            None => group_name(g),
         };
         let open = |id: String, nav: gpui::Entity<crate::app::Navigation>| {
             move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
@@ -1458,15 +1462,17 @@ impl ArtifactPage {
                 &[("n", &matched.to_string()), ("total", &total.to_string())],
             )
         };
-        let cell_tip = |id: String, text: String, muted: bool, cx: &App| {
-            let tip = text.clone();
+        // B2-18: a cell shows its full text in a tooltip only when it is
+        // cut (the kit TruncText); each cell has its own id, as rows can
+        // share a 话题 or a maker.
+        let cell_tip = |id: String, text: String, muted: bool, _cx: &App| {
             div()
-                .id(SharedString::from(id))
                 .min_w_0()
-                .child(page::cell_text(text, muted, cx))
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                })
+                .child(
+                    crate::ui::truncate::TruncText::new(text)
+                        .id(SharedString::from(id))
+                        .text_color(if muted { n.secondary } else { n.label }),
+                )
                 .into_any_element()
         };
         // §2.7 table footer: the count, 每页, 第 n / m 页 and the four
@@ -1585,8 +1591,9 @@ impl ArtifactPage {
                                 .children(tiles),
                         )
                 }))
-                // The count in a footer row under the tiles (§2.6).
-                .child(page::frame(cx).child(footer.border_t_0()))
+                // The count in a footer row under the tiles (§2.6): its top
+                // border only, not a second, empty card (B2-16).
+                .child(footer)
                 .into_any_element()
         } else {
             // Table view (default): 名称, 类型, 话题, 做的人, 版本, 更新, ⋯. 名称 and
@@ -1597,9 +1604,7 @@ impl ArtifactPage {
                 .map(|(g, a)| {
                     let opener = open(a.id.clone(), self.services.nav.clone());
                     let by = p.member(&a.created_by);
-                    let full = a.title.clone();
                     let name = div()
-                        .id(SharedString::from(format!("artifact-name-{}", a.id)))
                         .min_w_0()
                         .flex()
                         .items_center()
@@ -1610,15 +1615,11 @@ impl ArtifactPage {
                                 .child(page::row_icon(kind_sym(a.kind), n.secondary)),
                         )
                         .child(
-                            div()
-                                .min_w_0()
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .one_line()
-                                .child(a.title.clone()),
+                            div().min_w_0().font_weight(gpui::FontWeight::MEDIUM).child(
+                                crate::ui::truncate::TruncText::new(a.title.clone())
+                                    .id(SharedString::from(format!("artifact-name-{}", a.id))),
+                            ),
                         )
-                        .tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
-                        })
                         .into_any_element();
                     // X-01: a leading emoji in the name is not shown beside
                     // the avatar.
@@ -1627,9 +1628,7 @@ impl ArtifactPage {
                         &a.created_by,
                     ))
                     .to_string();
-                    let who_tip = who.clone();
                     let person = div()
-                        .id(SharedString::from(format!("artifact-by-{}", a.id)))
                         .min_w_0()
                         .flex()
                         .items_center()
@@ -1643,10 +1642,7 @@ impl ArtifactPage {
                                     cx,
                                 )),
                         )
-                        .child(page::cell_text(who, false, cx))
-                        .tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(who_tip.clone()).build(window, cx)
-                        })
+                        .child(cell_tip(format!("artifact-by-{}", a.id), who, false, cx))
                         .into_any_element();
                     let menu = {
                         let (services, art) = (self.services.clone(), a.clone());
