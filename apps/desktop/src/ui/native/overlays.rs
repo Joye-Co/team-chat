@@ -66,8 +66,8 @@ pub mod spot {
     /// The bordered list in a sheet (list box radius 10).
     pub const LIST_ROW: Pixels = height::ROW;
     pub const LIST_RADIUS: Pixels = radius::CONTAINER;
-    /// The logo of the login card (§2.20).
-    pub const LOGIN_ICON: Pixels = px(48.);
+    /// The app icon of the login window (§2.20).
+    pub const LOGIN_ICON: Pixels = px(56.);
 }
 
 /// Configures a gpui-component dialog as a Tahoe alert (§7.2): 260 wide,

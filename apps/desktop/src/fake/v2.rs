@@ -1322,7 +1322,28 @@ impl ChatProvider for V2Samples {
         if self.quiet {
             return Vec::new();
         }
+        // Every result delivered today, newest first: the 首页 KPI, the
+        // rail and 成员 count the same three (review 5 C-18).
         vec![
+            DoneItem {
+                group_id: DEV.into(),
+                topic_id: T_RECONNECT.into(),
+                member_id: FORGE.into(),
+                title: "改好了重连后的重复消息".into(),
+                at: at(9, 55),
+                proof: vec![
+                    Proof::Pr {
+                        number: 61,
+                        additions: 214,
+                        deletions: 63,
+                    },
+                    Proof::Artifact {
+                        artifact_id: ART_RECONNECT.into(),
+                        title: "重连测试报告".into(),
+                        version: 2,
+                    },
+                ],
+            },
             DoneItem {
                 group_id: GROWTH.into(),
                 topic_id: T_REPORT.into(),
@@ -1619,6 +1640,12 @@ impl ChatProvider for V2Samples {
             LIXUE => 2,
             ALEX => 1,
             ME => 9,
+            _ => 0,
+        };
+        // This week's deliveries include today's (`done_today`): Ledger's
+        // 10 月数据月报 and Scout's staging check (review 5 C-18).
+        stats.done_this_week = match member_id {
+            LEDGER | SCOUT => 1,
             _ => 0,
         };
         if member_id == FORGE {

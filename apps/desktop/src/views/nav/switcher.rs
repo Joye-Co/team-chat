@@ -287,14 +287,17 @@ pub fn topic_symbol(
     cx: &App,
 ) -> gpui::Div {
     let k = native_colors(cx);
-    let (state, _) = crate::views::rail::model::row_state(provider, me, topic);
-    use crate::views::rail::model::RowState;
-    let (sym, color) = match state {
-        RowState::NeedsYou => (Sym::NeedsYou, k.amber),
-        RowState::Working(_) => (Sym::Live, k.blue),
-        RowState::Done => (Sym::Check, ink),
-        RowState::Waiting => (Sym::Waiting, ink),
-        RowState::Idle => (Sym::Topic, ink),
+    // The same state as the row's StatusBadge (§2.12, `topic_state`).
+    let state = crate::views::topic_page::topic_state(provider, me, topic);
+    use crate::ui::native::BadgeState as B;
+    let (sym, color) = match state.badge {
+        B::NeedsYou => (Sym::NeedsYou, k.amber),
+        B::Working | B::Merging => (Sym::Live, k.blue),
+        B::Done => (Sym::Check, ink),
+        B::Failed | B::Abnormal => (Sym::Failed, k.red),
+        B::Quiet | B::Paused | B::Stopping => (Sym::Waiting, ink),
+        _ if !state.short.is_empty() => (Sym::Waiting, ink),
+        _ => (Sym::Topic, ink),
     };
     spotlight_symbol(sym, color)
 }
@@ -992,7 +995,6 @@ pub mod palette {
                 tokens::{height, space},
             },
         },
-        views::rail::model::{RowState, row_state},
     };
 
     /// The time column: 12 muted tabular, right-aligned, at one x in every
@@ -1125,20 +1127,19 @@ pub mod palette {
         me: Option<&str>,
         topic: &Topic,
     ) -> Option<AnyElement> {
-        let (state, meta) = row_state(p, me, topic);
-        let (badge, text) = match state {
-            RowState::NeedsYou => (BadgeState::NeedsYou, copy::STATUS_NEEDS_YOU.to_string()),
-            RowState::Working(_) => (
-                BadgeState::Working,
-                match meta {
-                    Some(m) => fill(copy::STATUS_WORKING_STEP, &[("step", &m.text)]),
-                    None => copy::STATUS_WORKING.to_string(),
-                },
-            ),
-            RowState::Done => (BadgeState::Done, copy::STATUS_DONE.to_string()),
-            RowState::Waiting => (BadgeState::Queued, meta?.text),
-            RowState::Idle => return None,
+        // The one state mapping of a 话题 (§2.12, `topic_state`) in the
+        // sidebar's words: 等你审 / 等你回答, 在做 n/m, 正在合并, 失败, 已暂停,
+        // 等李雪回答, and 完成 for a done one (review 5 K-19). 排队 shows no
+        // badge, as in the sidebar (D16).
+        let state = crate::views::topic_page::topic_state(p, me, topic);
+        let text = if !state.short.is_empty() {
+            state.short
+        } else if state.badge == BadgeState::Done {
+            state.text
+        } else {
+            return None;
         };
+        let badge = state.badge;
         Some(
             StatusBadge::new(badge, text)
                 .max_w(STATUS_MAX)

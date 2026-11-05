@@ -125,7 +125,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "login-code",
-        about: "The login view with half an invite code typed and the boxes focused",
+        about: "The login view with half an invite code typed in the code slots",
         start: Start::SignedOut,
         setup: |_, _| {},
         open: |services, content, cx| open_login(services, content, "K7QM2X", false, cx),
@@ -148,21 +148,21 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "login-error",
-        about: "The login view after a wrong invite code: kept, caret after it, error ring",
+        about: "The login view after a wrong invite code: kept in the slots, selected, error border",
         start: Start::SignedOut,
         setup: |_, _| {},
         open: |services, content, cx| open_login(services, content, "!0000-0000", false, cx),
     },
     Scene {
         name: "login-signing-in",
-        about: "The login card while a complete code is checked: spinner and 正在验证…",
+        about: "The login view while a complete code is checked: spinner and 正在验证…",
         start: Start::SignedOut,
         setup: |_, _| {},
         open: |services, content, cx| open_login(services, content, "^K7QM2X9A", false, cx),
     },
     Scene {
         name: "login-unreachable",
-        about: "The login card after a code was sent to a server that cannot be reached: the field error under the server",
+        about: "The login view after a code was sent to a server that cannot be reached: the field error under the server",
         start: Start::SignedOut,
         setup: |_, _| {},
         open: |services, content, cx| open_login(services, content, "@K7QM2X9A", false, cx),

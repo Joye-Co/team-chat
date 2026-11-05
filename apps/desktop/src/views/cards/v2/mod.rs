@@ -861,7 +861,7 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
             (label, parts.join(" · "))
         }
         CardState::Done { answer } => (
-            c::CARD_DONE.into(),
+            c::CARD_DELIVERED.into(),
             match (answer.as_ref().map(answered_at), subtitle(ctx.card)) {
                 (Some(a), s) if !s.is_empty() => format!("{a} · {s}"),
                 (Some(a), _) => a,
