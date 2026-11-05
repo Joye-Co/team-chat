@@ -246,8 +246,11 @@ fn field_value(value: &str, color: gpui::Hsla) -> AnyElement {
     }
 }
 
-/// Width of a table column from its longest cell, in pixels.
-fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+/// Width of a table column from its longest cell, in pixels. A text column stops at 240
+/// and cuts its cells with "…"; a number column takes its widest number, since numbers
+/// never cut (§2.7, F3): a tabular figure at 12 is about 7.6 wide, a CJK header 12.6.
+fn column_width(columns: &[String], rows: &[Vec<String>], col: usize, numeric: bool) -> f32 {
+    let ascii = if numeric { 7.6 } else { 7.0 };
     let longest = std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
         .chain(
             rows.iter()
@@ -255,11 +258,12 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
         )
         .map(|s| {
             s.chars()
-                .map(|ch| if ch.is_ascii() { 1.0 } else { 1.8 })
+                .map(|ch| if ch.is_ascii() { ascii } else { 12.6 })
                 .sum::<f32>()
         })
         .fold(0.0_f32, f32::max);
-    (longest * 7.0 + 20.0).clamp(72.0, 240.0)
+    let w = (longest + 20.0).max(72.0);
+    if numeric { w.ceil() } else { w.min(240.0) }
 }
 
 fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
@@ -288,15 +292,7 @@ fn render_table(
     let colors = theme::colors(cx);
     // inc-refs: cells, columns and the 问这里 slot at the end of each row.
     let table_refs = refs.map(|r| r.table(columns, rows));
-    let mut widths: Vec<f32> = (0..columns.len())
-        .map(|i| column_width(columns, rows, i))
-        .collect();
-    // Room for 问这里 after a row's name (Refs.dc.html).
-    if table_refs.is_some()
-        && let Some(w) = widths.first_mut()
-    {
-        *w += crate::views::refs::markdown::NAME_ROOM;
-    }
+
     let expanded = is_expanded(key, cx);
     let shown = if expanded {
         rows.len()
@@ -315,6 +311,15 @@ fn render_table(
                 })
         })
         .collect();
+    let mut widths: Vec<f32> = (0..columns.len())
+        .map(|i| column_width(columns, rows, i, numeric[i]))
+        .collect();
+    // Room for 问这里 after a row's name (Refs.dc.html).
+    if table_refs.is_some()
+        && let Some(w) = widths.first_mut()
+    {
+        *w += crate::views::refs::markdown::NAME_ROOM;
+    }
     let cell_in = |ci: usize, text: String, width: f32, head: bool| -> Div {
         let num = numeric.get(ci).copied().unwrap_or(false);
         div()
@@ -325,7 +330,18 @@ fn render_table(
             .flex()
             .items_center()
             .when(num, |el| el.justify_end())
-            .child(div().when(num && !head, |el| el.mono()).child(text))
+            .child(if num {
+                // A number stays whole on one line, inside its own column.
+                div()
+                    .flex_none()
+                    .whitespace_nowrap()
+                    .when(!head, |el| el.mono())
+                    .child(text)
+                    .into_any_element()
+            } else {
+                // A text cell cuts at the end, the whole text in a tooltip (§2.21).
+                ui::truncate::TruncText::new(text).into_any_element()
+            })
     };
     let header = div()
         .flex()
@@ -732,8 +748,18 @@ mod tests {
     fn column_width_is_clamped() {
         let cols = vec!["名称".to_string(), "x".repeat(500)];
         let rows = vec![vec!["a".to_string()]];
-        assert_eq!(column_width(&cols, &rows, 0), 72.0);
-        assert_eq!(column_width(&cols, &rows, 1), 240.0);
-        assert_eq!(column_width(&cols, &rows, 5), 72.0);
+        assert_eq!(column_width(&cols, &rows, 0, false), 72.0);
+        assert_eq!(column_width(&cols, &rows, 1, false), 240.0);
+        assert_eq!(column_width(&cols, &rows, 5, false), 72.0);
+    }
+
+    #[test]
+    fn a_number_column_fits_its_widest_number() {
+        let cols = vec!["名称".to_string(), "数".to_string()];
+        let rows = vec![vec!["a".to_string(), "1,284,567,890".to_string()]];
+        // 13 tabular figures at 12 plus the 10 + 10 padding, never cut at 240.
+        assert!(column_width(&cols, &rows, 1, true) >= 13. * 7.6 + 20.);
+        let long = vec![vec!["a".to_string(), "9".repeat(40)]];
+        assert!(column_width(&cols, &long, 1, true) > 240.);
     }
 }
