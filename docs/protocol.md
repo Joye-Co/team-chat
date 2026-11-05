@@ -239,6 +239,10 @@ log records `group.memberAdded` / `group.memberRemoved`.
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
   `ADMIN_SECRET` Worker secret. It also makes the default group, called "全员" (environments
   bootstrapped before this change called it "General" until it was renamed).
+- First redeem of a new member: the member joins every default group and, when it is a human,
+  gets a DM with the default bot (the active bot named Jojo, else the oldest active bot), made
+  exactly as `POST /v1/dms` makes one (`dm.create` audited by the new member). No bot, no DM; a
+  failure here never fails the redeem. A sign-in code of an existing member opens nothing.
 
 # V1 extensions
 

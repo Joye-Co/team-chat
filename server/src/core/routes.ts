@@ -325,6 +325,7 @@ export function registerCoreRoutes(): void {
       const auth: AuthContext = { memberId, tokenId, member: toMember(row), row };
       await addToDefaultGroups(env, waitUntil, auth, memberId);
       await notifyMembersChanged(env, waitUntil, [row]);
+      await openFirstDm(env, waitUntil, auth);
       return { token, member: toMember(row) };
     },
   });
@@ -583,36 +584,60 @@ export function registerCoreRoutes(): void {
       const a = auth as AuthContext;
       if (memberId === a.memberId) throw new ApiError("invalid", "cannot DM yourself");
       await requireActiveMembers(env, [memberId]);
-      const dmKey = [a.memberId, memberId].sort().join(":");
-      const existing = await env.DB.prepare("SELECT id FROM groups WHERE dm_key = ?").bind(dmKey).first<{ id: string }>();
-      if (existing) return summaryFor(env, a.memberId, existing.id);
-      const now = Date.now();
-      const groupId = ulid(now);
-      const results = await env.DB.batch([
-        env.DB.prepare(
-          "INSERT OR IGNORE INTO groups (id, kind, name, dm_key, created_by, created_at) VALUES (?, 'dm', '', ?, ?, ?)",
-        ).bind(groupId, dmKey, a.memberId, now),
-        env.DB.prepare(
-          `INSERT INTO group_members (group_id, member_id, added_at, added_by)
-           SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM groups WHERE id = ?)`,
-        ).bind(groupId, a.memberId, now, a.memberId, groupId),
-        env.DB.prepare(
-          `INSERT INTO group_members (group_id, member_id, added_at, added_by)
-           SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM groups WHERE id = ?)`,
-        ).bind(groupId, memberId, now, a.memberId, groupId),
-        auditStatement(env.DB, a, { action: "dm.create", target: groupId, details: { memberId } }, now),
-      ]);
-      if (!results[0].meta.changes) {
-        // Lost a race with the other member: return the DM they made.
-        const winner = await env.DB.prepare("SELECT id FROM groups WHERE dm_key = ?").bind(dmKey).first<{ id: string }>();
-        if (!winner) throw new ApiError("internal", "dm race");
-        return summaryFor(env, a.memberId, winner.id);
-      }
-      unwrap(await roomStub(env, groupId).init(groupId, [a.memberId, memberId]));
-      notifyGroupChanged(env, (p) => ctx.waitUntil(p), groupId, [a.memberId, memberId]);
+      const groupId = await findOrCreateDm(env, (p) => ctx.waitUntil(p), a, memberId);
       return summaryFor(env, a.memberId, groupId);
     },
   });
+}
+
+/** The DM of `actor` and `memberId`: the existing one, else a new one (the race with the other
+ * member made the same DM is resolved to the winner). Returns its group id. */
+async function findOrCreateDm(env: Env, waitUntil: Wait, a: AuthContext, memberId: string): Promise<string> {
+  const dmKey = [a.memberId, memberId].sort().join(":");
+  const existing = await env.DB.prepare("SELECT id FROM groups WHERE dm_key = ?").bind(dmKey).first<{ id: string }>();
+  if (existing) return existing.id;
+  const now = Date.now();
+  const groupId = ulid(now);
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO groups (id, kind, name, dm_key, created_by, created_at) VALUES (?, 'dm', '', ?, ?, ?)",
+    ).bind(groupId, dmKey, a.memberId, now),
+    env.DB.prepare(
+      `INSERT INTO group_members (group_id, member_id, added_at, added_by)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM groups WHERE id = ?)`,
+    ).bind(groupId, a.memberId, now, a.memberId, groupId),
+    env.DB.prepare(
+      `INSERT INTO group_members (group_id, member_id, added_at, added_by)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM groups WHERE id = ?)`,
+    ).bind(groupId, memberId, now, a.memberId, groupId),
+    auditStatement(env.DB, a, { action: "dm.create", target: groupId, details: { memberId } }, now),
+  ]);
+  if (!results[0].meta.changes) {
+    // Lost a race with the other member: the DM they made.
+    const winner = await env.DB.prepare("SELECT id FROM groups WHERE dm_key = ?").bind(dmKey).first<{ id: string }>();
+    if (!winner) throw new ApiError("internal", "dm race");
+    return winner.id;
+  }
+  unwrap(await roomStub(env, groupId).init(groupId, [a.memberId, memberId]));
+  notifyGroupChanged(env, waitUntil, groupId, [a.memberId, memberId]);
+  return groupId;
+}
+
+/** A new person starts with a DM with the default bot (Jojo, else the first active bot, the
+ * client's 单独问 default), so the first thing they see has someone to talk to. Best effort:
+ * joining never fails because of it. */
+async function openFirstDm(env: Env, waitUntil: Wait, a: AuthContext): Promise<void> {
+  if (a.member.kind !== "human") return;
+  const bot = await env.DB.prepare(
+    `SELECT id FROM members WHERE kind = 'bot' AND deactivated = 0
+     ORDER BY CASE WHEN lower(name) = 'jojo' THEN 0 ELSE 1 END, created_at, id LIMIT 1`,
+  ).first<{ id: string }>();
+  if (!bot) return;
+  try {
+    await findOrCreateDm(env, waitUntil, a, bot.id);
+  } catch (err) {
+    logger.warn("first dm failed", { memberId: a.memberId, err });
+  }
 }
 
 async function requireActiveMembers(env: Env, ids: string[]): Promise<void> {
