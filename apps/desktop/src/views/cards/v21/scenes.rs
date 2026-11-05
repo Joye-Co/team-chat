@@ -15,6 +15,9 @@ fn open(
     page: Page,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    // A gallery has no composer: pushed toasts sit 16 above the window edge, whatever floor
+    // a composer of an earlier window left (§2.16).
+    crate::ui::overlay::set_toast_floor(gpui::px(0.), cx);
     let mut options = main_window_options(false, cx);
     options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
@@ -119,6 +122,21 @@ pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
             vec![check(
                 retry.contains(super::samples::FAILED),
                 format!("an answer that did not get there has one 重试 ({retry:?})"),
+            )]
+        }),
+        "interact_conflict_toast" => Some(|_, cx| {
+            use gpui_component::WindowExt as _;
+            let toasts: usize = cx
+                .windows()
+                .into_iter()
+                .filter_map(|w| {
+                    w.update(cx, |_, window, cx| window.notifications(cx).len())
+                        .ok()
+                })
+                .sum();
+            vec![check(
+                toasts > 0,
+                format!("the conflict toast is on screen ({toasts} toasts)"),
             )]
         }),
         "interact_pending" => Some(|_, _| {
