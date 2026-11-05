@@ -72,12 +72,12 @@ impl RowMenu {
 /// leading and bottom edges, radius 18, `sidebar` fill, 0.5 pt `glassEdge`
 /// and the `float` shadow. Children go inside; the traffic lights sit in
 /// its top row.
-pub fn floating_sidebar(cx: &App) -> gpui::Div {
+pub fn floating_sidebar(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
         .m(metrics::SIDEBAR_INSET)
-        .w(metrics::SIDEBAR_WIDTH)
+        .w(width)
         .rounded(metrics::SIDEBAR_RADIUS)
         .bg(k.sidebar)
         .shadow(k.glass())
@@ -631,8 +631,8 @@ impl RenderOnce for SidebarRow {
 
 /// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
 /// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
-/// or workspace, or the offline state), `chevrons-up-down` 16 at the right.
-/// It opens account and Settings.
+/// or workspace, or the offline state), the 设置 gear 16 at the right. It
+/// opens and closes the settings window (the sidebar's only 设置 entry).
 #[derive(IntoElement)]
 pub struct SidebarFooter {
     id: ElementId,
@@ -716,7 +716,7 @@ impl RenderOnce for SidebarFooter {
                             ),
                     )
                     .child(symbol(
-                        Sf::Popup,
+                        Sf::Settings,
                         super::tokens::icon::MD,
                         Weight::Regular,
                         k.secondary,

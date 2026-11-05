@@ -238,8 +238,9 @@ describe("1.1 runs", () => {
     const seq = d.done(runId, { status: "succeeded", resultText: "发好了。" });
     await d.acked(runId, seq);
     const card = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.cardV2), 5000, "done card");
+    // A one-line result is the title only: no text block repeats it.
+    expect(card.cardV2.title).toBe("发好了。");
     expect(card.cardV2.blocks).toEqual([
-      { type: "text", id: "result", text: "发好了。" },
       { type: "evidence", id: "acceptance-1", label: "staging 上能登录", state: "pass" },
       { type: "evidence", id: "acceptance-2", label: "E2E 全过", state: "pass", detail: "48 个通过", url: "https://ci.example.com/1" },
       { type: "ref", id: "artifact-1", label: "发布说明（第 2 版）", target: { kind: "artifact", artifactId: "01JBX0ART000000000000000AM", version: 2 } },

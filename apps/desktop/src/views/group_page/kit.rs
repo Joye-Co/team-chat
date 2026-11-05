@@ -38,7 +38,7 @@ pub const PREVIEW_HEIGHT: Pixels = px(76.);
 /// is hidden.
 pub fn leading(services: &Services, cx: &App) -> Pixels {
     if services.nav.read(cx).sidebar_hidden {
-        theme::TRAFFIC_LIGHTS_INSET
+        theme::SIDEBAR_HIDDEN_INSET
     } else {
         px(0.)
     }

@@ -88,6 +88,13 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "main-sidebar-hidden",
+        about: "The main scene with the sidebar hidden: 显示侧栏 right after the traffic lights",
+        start: Start::SignedIn,
+        setup: open_first_topic_sidebar_hidden,
+        open: open_main,
+    },
+    Scene {
         name: "new-topic",
         about: "The 新话题 sheet over the first 群 (v12/overlays)",
         start: Start::SignedIn,
@@ -1215,6 +1222,11 @@ pub fn open_first_group(services: &Services, cx: &mut App) {
         let id = group.id.clone();
         services.nav.update(cx, |nav, cx| nav.open_group(id, cx));
     }
+}
+
+fn open_first_topic_sidebar_hidden(services: &Services, cx: &mut App) {
+    open_first_topic(services, cx);
+    services.nav.update(cx, |nav, cx| nav.toggle_sidebar(cx));
 }
 
 pub fn open_first_topic(services: &Services, cx: &mut App) {

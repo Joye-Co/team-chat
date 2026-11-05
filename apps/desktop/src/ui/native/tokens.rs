@@ -827,6 +827,12 @@ pub mod layout {
     pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
     pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
     pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
+    /// With the sidebar hidden, the 显示侧栏 button sits right after the
+    /// traffic lights, on the toolbar row's center line.
+    pub const SIDEBAR_SHOW_X: Pixels = px(80.);
+    /// Where a page's title starts with the sidebar hidden: past the lights
+    /// and the 显示侧栏 button.
+    pub const SIDEBAR_HIDDEN_INSET: Pixels = px(80. + 32. + 8.);
     /// The message avatar (D7).
     pub const AVATAR_SIZE: Pixels = avatar::MD;
     pub const ROW_HEIGHT: Pixels = height::ROW;
