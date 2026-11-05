@@ -79,8 +79,8 @@ async function issueCode(env: EmailEnv, email: string, purpose: Purpose, memberI
       .run();
     return expiresAt;
   }
-  const lead = purpose === "sign_in" ? "你正在登录" : "你正在把这个邮箱设为登录邮箱";
-  const text = `${lead}${product.name}。\n\n验证码：${code}\n\n10 分钟内有效，只能用一次。如果不是你本人操作，请忽略这封邮件。`;
+  const lead = purpose === "sign_in" ? `你正在登录 ${product.name}。` : `你正在把这个邮箱设为 ${product.name} 的登录邮箱。`;
+  const text = `${lead}\n\n验证码：${code}\n\n10 分钟内有效，只能用一次。如果不是你本人操作，请忽略这封邮件。`;
   await env.EMAIL!.send({
     from: { email: env.EMAIL_FROM!, name: product.name },
     to: email,
