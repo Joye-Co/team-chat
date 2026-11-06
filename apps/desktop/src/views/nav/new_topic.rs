@@ -307,8 +307,6 @@ impl NewTopicSheet {
             .w_full()
             .p(space::S12)
             .rounded(metrics::GROUP_RADIUS)
-            .border_1()
-            .border_color(k.separator)
             .bg(k.group)
             .flex()
             .gap(space::S12)

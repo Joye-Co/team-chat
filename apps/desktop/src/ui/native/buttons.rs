@@ -94,12 +94,14 @@ pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
             pressed: k.primary.opacity(0.8),
             border: None,
         },
+        // A Mac push button: a soft tint, no frame (owner review: a border
+        // on every 编辑… / 取消 is noise).
         PushStyle::Outline => Look {
-            fill: k.control,
+            fill: k.push,
             text: k.label,
-            hover: k.control_hover,
-            pressed: k.pressed,
-            border: Some(k.quaternary),
+            hover: k.push_hover,
+            pressed: k.push_pressed,
+            border: None,
         },
         PushStyle::Secondary => Look {
             fill: k.fill,
@@ -144,6 +146,31 @@ fn variant(l: Look, cx: &App) -> ButtonCustomVariant {
         .foreground(l.text)
         .hover(l.hover)
         .active(l.pressed)
+}
+
+/// The look of a field-like control (a select): the input's fill, its 1 px
+/// border and shadow xs, so a select lines up with the text fields beside
+/// it.
+fn field_look(k: &NativeColors) -> Look {
+    Look {
+        fill: k.control,
+        text: k.label,
+        hover: k.control_hover,
+        pressed: k.pressed,
+        border: Some(k.quaternary),
+    }
+}
+
+/// Gives a button the frame of a text field ([`field_look`]).
+fn styled_field(b: Button, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let l = field_look(&k);
+    b.custom(variant(l, cx))
+        .bg(l.fill)
+        .text_color(l.text)
+        .border_1()
+        .border_color(k.quaternary)
+        .shadow(shadow::xs())
 }
 
 /// Gives a gpui-component button the look of `style`: fill, text, border and
@@ -352,9 +379,11 @@ pub fn borderless_variant(cx: &App) -> ButtonCustomVariant {
     variant(look(PushStyle::Ghost, &native_colors(cx)), cx)
 }
 
-/// A select / pop-up button (§1.9): an outline button whose title is the
-/// chosen value, a 16 `chevron.up.chevron.down` at the end; the title
+/// A select / pop-up button (§1.9) for a form field: an outline button
+/// whose title is the chosen value, a quiet 16 `chevron.down` at the end
+/// (shadcn Select: the chevron in `tertiary`, so the value leads); the title
 /// truncates with an ellipsis. Chain `.dropdown_menu(..)` to open the menu.
+/// A choice inside a header, toolbar or sentence is an [`inline_popup`].
 pub fn popup_button(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
@@ -362,7 +391,43 @@ pub fn popup_button(
     window: &Window,
     cx: &App,
 ) -> Button {
-    chevron_button(id, title, Sf::Popup, size, window, cx)
+    chevron_button(id, title, Sf::ChevronDown, size, window, cx)
+}
+
+/// A pop-up that reads as part of the line it sits in (a pane header's
+/// member, a toolbar's version, a palette's target): no frame and no fill
+/// at rest, the title in `label`, a 12 `chevron.down` in `secondary` 4
+/// after it, the ghost hover. h28, px 8, radius 8; the title truncates and
+/// the chevron stays. Chain a text style (`.n_title3()`) to match the line,
+/// then `.dropdown_menu(..)`.
+pub fn inline_popup(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let b = Button::new(id)
+        .with_size(gpui_component::Size::Medium)
+        .h(metrics::BUTTON_SMALL)
+        .px(space::S8)
+        .rounded(metrics::BUTTON_SMALL_RADIUS)
+        .n_headline();
+    styled(b, PushStyle::Ghost, cx).child(
+        div()
+            .min_w(px(0.))
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .child(TruncText::new(title).min_w(px(0.)))
+            .child(div().flex_none().child(symbol(
+                Sf::ChevronDown,
+                icon::SM,
+                Weight::Semibold,
+                k.secondary,
+                window,
+            ))),
+    )
 }
 
 /// A pull-down: an outline button with a trailing `chevron.down`; its title
@@ -397,7 +462,7 @@ fn chevron_button(
     // centers its children), so the title starts at x + 12 and the chevron
     // ends 8 before the right edge in every select of a column (§1.8, F4;
     // review 2 R1-10).
-    styled(b, PushStyle::Outline, cx).child(
+    styled_field(b, cx).child(
         div()
             .flex_1()
             .w_full()
@@ -411,7 +476,7 @@ fn chevron_button(
                 chevron,
                 metrics::POPUP_CHEVRON_SLOT,
                 Weight::Regular,
-                k.secondary,
+                k.tertiary,
                 window,
             ))),
     )
@@ -489,7 +554,7 @@ pub fn borderless_text(
 }
 
 /// A select (§1.9) built without a window: an outline button whose title is
-/// the chosen value, a 16 `chevron.up.chevron.down` at the end, the title
+/// the chosen value, a quiet 16 `chevron.down` at the end, the title
 /// truncating at the end; 160 wide unless the caller sets a width. Chain
 /// `.dropdown_menu(..)` to open the menu.
 pub fn select_button(
@@ -509,7 +574,7 @@ pub fn select_button(
         .n_body();
     // The same row as [`popup_button`]: title at x + 12, chevron pinned 8
     // before the right edge.
-    styled(b, PushStyle::Outline, cx).child(
+    styled_field(b, cx).child(
         div()
             .flex_1()
             .w_full()
@@ -520,9 +585,9 @@ pub fn select_button(
             .gap(space::S8)
             .child(TruncText::new(title).flex_1())
             .child(div().flex_none().child(crate::ui::icons::icon(
-                Sym::PopUp,
+                Sym::ChevronDown,
                 icon::MD,
-                k.secondary,
+                k.tertiary,
             ))),
     )
 }
@@ -576,7 +641,7 @@ pub fn row_button(id: impl Into<ElementId>, cx: &App) -> Button {
 /// more than 8 levels; pressed stays the full `pressed`.
 pub fn group_row_button(id: impl Into<ElementId>, cx: &App) -> Button {
     let k = native_colors(cx);
-    row_button_with(id, k.pressed.opacity(0.5), cx)
+    row_button_with(id, k.row_hover, cx)
 }
 
 fn row_button_with(id: impl Into<ElementId>, hover: Hsla, cx: &App) -> Button {
@@ -847,21 +912,23 @@ mod tests {
     #[test]
     fn the_variants_follow_the_table() {
         for k in [NativeColors::light(), NativeColors::dark()] {
-            // D11: Cancel (outline) has a border and the background fill; a
-            // primary has the primary fill and no border.
+            // Cancel (outline) is a tinted push button with no border; each
+            // state is a deeper tint of the text color.
             let outline = look(PushStyle::Outline, &k);
-            assert_eq!(outline.fill, k.control);
-            assert_eq!(outline.border, Some(k.quaternary));
-            // K-04: the hover is one visible step over the rest fill (at
-            // least 8 levels of 255, as light's 255 → 245), below pressed.
+            assert_eq!(outline.fill, k.push);
+            assert!(outline.border.is_none());
+            assert!(outline.hover.a > outline.fill.a);
+            assert!(outline.pressed.a > outline.hover.a);
+            // A select keeps the field frame; K-04: its hover is one visible
+            // step over the rest fill (at least 8 levels of 255), below
+            // pressed.
+            let field = field_look(&k);
+            assert_eq!(field.fill, k.control);
+            assert_eq!(field.border, Some(k.quaternary));
             let lum = |c: gpui::Hsla| gpui::Rgba::from(c).r * 255.;
-            let step = |c: gpui::Hsla| (lum(c) - lum(outline.fill)).abs();
-            assert!(
-                step(outline.hover) >= 8.,
-                "hover step {}",
-                step(outline.hover)
-            );
-            assert!(step(outline.pressed) > step(outline.hover));
+            let step = |c: gpui::Hsla| (lum(c) - lum(field.fill)).abs();
+            assert!(step(field.hover) >= 8., "hover step {}", step(field.hover));
+            assert!(step(field.pressed) > step(field.hover));
             let primary = look(PushStyle::Default, &k);
             assert_eq!(primary.fill, k.primary);
             assert!(primary.border.is_none());

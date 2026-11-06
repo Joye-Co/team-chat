@@ -3,6 +3,7 @@
 
 crate::copy! {
     MINUS_SIGN = "−",
+    MIDDLE_DOT = "·",
     // Row labels of the kit scenes (review 3 K-11), for track K.
     ROW_SIZE_REGULAR = "常规尺寸",
     ROW_SIZE_SMALL = "小尺寸",

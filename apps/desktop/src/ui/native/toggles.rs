@@ -94,8 +94,39 @@ impl RenderOnce for NativeSwitch {
             .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
             .read(cx)
             .clone();
-        let focused = self.focused || handle.is_focused(window);
-        let track = if self.on { k.primary } else { k.quaternary };
+        // The ring marks keyboard focus only (focus-visible): a click
+        // focuses the control too, but must not leave a halo around it.
+        let focused =
+            self.focused || (handle.is_focused(window) && window.last_input_was_keyboard());
+        // The knob slides and the track fades between off and on over FAST
+        // on the out curve when `on` changes (not on the first draw);
+        // Reduce Motion jumps.
+        let (off_x, on_x) = (metrics::SWITCH_INSET, w - knob - metrics::SWITCH_INSET);
+        let on = self.on;
+        let motion = window.use_keyed_state(
+            ElementId::Name(format!("{:?}-motion", self.id).into()),
+            cx,
+            move |_, _| (on, None::<std::time::Instant>),
+        );
+        let (last, since) = *motion.read(cx);
+        let since = if last != self.on && !cx.reduce_motion() {
+            Some(std::time::Instant::now())
+        } else if last != self.on {
+            None
+        } else {
+            since
+        };
+        motion.update(cx, |m, _| *m = (on, since));
+        let dur = crate::theme::motion::FAST.as_secs_f32();
+        let progress = since
+            .map(|t| (t.elapsed().as_secs_f32() / dur).min(1.))
+            .unwrap_or(1.);
+        if progress < 1. {
+            window.request_animation_frame();
+        }
+        let eased = 1. - (1. - progress).powi(3);
+        let at = if self.on { eased } else { 1. - eased };
+        let track = k.quaternary.blend(k.primary.opacity(at));
         let on_change = self.on_change.clone();
         BaseSwitch::new(self.id)
             .checked(self.on)
@@ -117,11 +148,7 @@ impl RenderOnce for NativeSwitch {
                 div()
                     .absolute()
                     .top(metrics::SWITCH_INSET)
-                    .left(if self.on {
-                        w - knob - metrics::SWITCH_INSET
-                    } else {
-                        metrics::SWITCH_INSET
-                    })
+                    .left(off_x + (on_x - off_x) * at)
                     .size(knob)
                     .rounded_full()
                     .bg(if self.on { k.knob_on } else { k.knob })
@@ -182,7 +209,10 @@ impl RenderOnce for NativeCheckbox {
             .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
             .read(cx)
             .clone();
-        let focused = self.focused || handle.is_focused(window);
+        // The ring marks keyboard focus only (focus-visible): a click
+        // focuses the control too, but must not leave a halo around it.
+        let focused =
+            self.focused || (handle.is_focused(window) && window.last_input_was_keyboard());
         let on_change = self.on_change.clone();
         let indicator = div()
             .flex_none()

@@ -10,6 +10,7 @@ use gpui::{
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
+    button::Button,
     input::{InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
@@ -26,8 +27,8 @@ use crate::{
         native::{
             AlertLayout, CodeInput, CodeInputEvent, GroupedForm, NativeCheckbox, NativeTextField,
             NativeType as _, PushSize, PushStyle, SectionTitle, SheetLayout, SheetWidth,
-            alert_button, disabled_push, metrics, native_colors, page::outline_badge, push_button,
-            tokens,
+            alert_button, disabled_push, loading_push, metrics, native_colors, page::outline_badge,
+            push_button, tokens,
         },
     },
     views::topic_list::relative_time,
@@ -38,6 +39,9 @@ use crate::{
 const DEVICE_ROWS_SHOWN: usize = 6;
 
 pub const NAME_MAX: usize = 64;
+
+/// How far a step of the email sheet travels as it enters.
+const EMAIL_STEP_TRAVEL: gpui::Pixels = gpui::px(24.);
 pub const ROLE_MAX: usize = 64;
 
 /// The form field a check failed on.
@@ -112,6 +116,12 @@ pub struct AccountPage {
     email_sent_to: Option<String>,
     email_busy: bool,
     email_error: Option<EmailError>,
+    /// Bumped on every step change of the email sheet, so the new step
+    /// plays its enter animation once.
+    email_step: u32,
+    /// The last step change went back (换个邮箱): the step slides in from
+    /// the leading side instead of the trailing one.
+    email_back: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -195,6 +205,8 @@ impl AccountPage {
             email_sent_to: None,
             email_busy: false,
             email_error: None,
+            email_step: 0,
+            email_back: false,
             _subscriptions: subscriptions,
         };
         this.fill_from_me(window, cx);
@@ -245,12 +257,22 @@ impl AccountPage {
         self.email_busy = true;
         self.email_error = None;
         let reply = self.services.provider.add_email_code(&email);
+        let started = std::time::Instant::now();
         cx.spawn_in(window, async move |this, cx| {
             let result = reply.await.unwrap_or(Err(EmailError::Other));
+            // The spinner stays at least BUSY_MIN, so a fast reply reads as
+            // "sent" rather than a flicker before the next step.
+            if let Some(rest) = crate::theme::motion::BUSY_MIN.checked_sub(started.elapsed()) {
+                cx.background_executor().timer(rest).await;
+            }
             let _ = this.update_in(cx, |this, window, cx| {
                 this.email_busy = false;
                 match result {
                     Ok(()) => {
+                        if this.email_sent_to.is_none() {
+                            this.email_step += 1;
+                            this.email_back = false;
+                        }
                         this.email_sent_to = Some(email);
                         this.email_code
                             .update(cx, |c, cx| c.set_value("", window, cx));
@@ -315,6 +337,33 @@ impl AccountPage {
         .detach();
     }
 
+    /// 换个邮箱: back to the address step, the address selected.
+    fn edit_email_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.email_step += 1;
+        self.email_back = true;
+        self.email_sent_to = None;
+        self.email_error = None;
+        let handle = self.email_input.read(cx).focus_handle(cx);
+        handle.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Self-test: the address step while 发送验证码 is on its way.
+    pub fn preview_email_sending(&mut self, cx: &mut Context<Self>) {
+        self.email_busy = true;
+        cx.notify();
+    }
+
+    /// Self-test: the 设置登录邮箱 sheet after 发送验证码 to `to` (the code
+    /// slots and the sent line), without a server round trip.
+    pub fn preview_email_sent(&mut self, to: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.email_input
+            .update(cx, |st, cx| st.set_value(to.to_string(), window, cx));
+        self.email_step += 1;
+        self.email_sent_to = Some(to.to_string());
+        cx.notify();
+    }
+
     /// 添加… / 更改… : the 设置登录邮箱 sheet (the address, 发送验证码, then
     /// the six code slots; 取消 and 完成).
     pub fn open_email_sheet(this: Entity<Self>, window: &mut Window, cx: &mut App) {
@@ -342,95 +391,216 @@ impl AccountPage {
                 let busy = page.email_busy;
                 let sent = page.email_sent_to.clone();
                 let error = page.email_error.map(email_error_text);
-                let send = this.clone();
-                let mut fields = sheet_form().child(sheet_form_row(
-                    s::EMAIL_FIELD,
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap(tokens::space::S8)
-                        .child(
-                            div().flex_1().min_w(px(0.)).child(
-                                NativeTextField::new("email-field", &page.email_input)
-                                    .full_width()
-                                    .error(error.is_some() && sent.is_none()),
-                            ),
-                        )
-                        .child(
-                            disabled_push(
-                                push_button(
+                let k = native_colors(cx);
+                // One centered column, one thing at a time (Stripe / Linear
+                // verification): the icon, the title and one line; the
+                // address or the six slots; one full-width button; quiet
+                // links under it. A ✕ in the corner closes, so the footer
+                // has no 取消 / OK pair.
+                let full_button = |id: &'static str, label: &'static str, enabled: bool| {
+                    loading_push(
+                        disabled_push(
+                            push_button(id, label, PushStyle::Default, PushSize::Large, cx),
+                            !enabled && !busy,
+                            cx,
+                        ),
+                        busy,
+                        PushSize::Large,
+                    )
+                    .w_full()
+                    .h(metrics::CODE_SLOT.1)
+                    .rounded(metrics::FIELD_RADIUS)
+                };
+                let link = |id: &'static str, label: &'static str| {
+                    push_button(id, label, PushStyle::Link, PushSize::Small, cx)
+                        .px(tokens::space::S4)
+                };
+                let (title, hint, content, primary, links): (
+                    &'static str,
+                    String,
+                    gpui::AnyElement,
+                    Option<Button>,
+                    Option<gpui::Div>,
+                ) = match &sent {
+                    None => {
+                        let send = this.clone();
+                        (
+                            s::EMAIL_SHEET_TITLE,
+                            s::EMAIL_SHEET_HINT.to_string(),
+                            NativeTextField::new("email-field", &page.email_input)
+                                .full_width()
+                                .size(crate::ui::native::FieldSize::Hero)
+                                .leading(crate::ui::icons::icon(
+                                    Sym::Mention,
+                                    tokens::icon::MD,
+                                    k.secondary,
+                                ))
+                                .error(error.is_some())
+                                .into_any_element(),
+                            Some(
+                                full_button(
                                     "email-send",
-                                    if sent.is_some() {
-                                        s::EMAIL_RESEND
+                                    if busy {
+                                        s::EMAIL_SENDING
                                     } else {
                                         s::EMAIL_SEND
                                     },
-                                    PushStyle::Outline,
-                                    PushSize::Regular,
-                                    cx,
-                                ),
-                                busy,
-                                cx,
-                            )
-                            .on_click(move |_, window, cx| {
-                                send.update(cx, |p, cx| p.send_email_code(window, cx))
-                            }),
-                        ),
+                                    !busy,
+                                )
+                                .on_click(move |_, window, cx| {
+                                    send.update(cx, |p, cx| p.send_email_code(window, cx))
+                                }),
+                            ),
+                            None,
+                        )
+                    }
+                    Some(to) => {
+                        let (resend, back) = (this.clone(), this.clone());
+                        // The sixth digit submits (no 完成 button); while it
+                        // checks, the link row says so.
+                        let links = if busy {
+                            div()
+                                .h(metrics::BUTTON_SMALL)
+                                .flex()
+                                .items_center()
+                                .n_body()
+                                .text_color(k.secondary)
+                                .child(s::EMAIL_VERIFYING)
+                        } else {
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .gap(tokens::space::S4)
+                                .n_body()
+                                .text_color(k.secondary)
+                                .child(s::EMAIL_NOT_RECEIVED)
+                                .child(
+                                    disabled_push(link("email-resend", s::EMAIL_RESEND), busy, cx)
+                                        .on_click(move |_, window, cx| {
+                                            resend.update(cx, |p, cx| p.send_email_code(window, cx))
+                                        }),
+                                )
+                                .child(crate::copy::native_kit::MIDDLE_DOT)
+                                .child(link("email-other", s::EMAIL_OTHER_ADDRESS).on_click(
+                                    move |_, window, cx| {
+                                        back.update(cx, |p, cx| p.edit_email_address(window, cx))
+                                    },
+                                ))
+                        };
+                        (
+                            s::EMAIL_CODE_TITLE,
+                            fill(s::EMAIL_CODE_HINT, &[("email", to)]),
+                            div()
+                                .w_full()
+                                .flex()
+                                .justify_center()
+                                .child(page.email_code.clone())
+                                .into_any_element(),
+                            None,
+                            Some(links),
+                        )
+                    }
+                };
+                let close = crate::ui::native::icon_button(
+                    "email-close",
+                    crate::ui::sf_symbols::Sf::Close,
+                    common::CLOSE,
+                    crate::ui::native::IconSize::Small,
+                    window,
                     cx,
-                ));
-                if let Some(to) = &sent {
-                    fields = fields.child(sheet_form_row(
-                        s::EMAIL_CODE_FIELD,
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .items_start()
-                            .gap(tokens::space::S8)
-                            .child(page.email_code.clone())
-                            .child(widgets::quiet(fill(s::EMAIL_SENT, &[("email", to)]), cx)),
-                        cx,
-                    ));
-                }
-                let ready = sent.is_some() && page.email_digits(cx).len() == 6 && !busy;
-                let (ok, done) = (this.clone(), this.clone());
+                )
+                .on_click(|_, window, cx| window.close_dialog(cx));
+                let ok = this.clone();
                 dialog
                     .on_ok(move |_, window, cx| {
-                        ok.update(cx, |p, cx| p.verify_email(window, cx));
+                        ok.update(cx, |p, cx| {
+                            if p.email_sent_to.is_some() {
+                                p.verify_email(window, cx)
+                            } else {
+                                p.send_email_code(window, cx)
+                            }
+                        });
                         false
                     })
                     .on_cancel(|_, _, _| true)
-                    .child(
-                        SheetLayout::new(s::EMAIL_SHEET_TITLE)
-                            .explanation(s::EMAIL_SHEET_HINT)
-                            .body(fields)
-                            .when_some(error, |l, e| l.status(sheet_status_error(e, cx)))
-                            .buttons([
-                                push_button(
-                                    "email-cancel",
-                                    common::CANCEL,
-                                    PushStyle::Outline,
-                                    PushSize::Regular,
-                                    cx,
+                    .child({
+                        // The step below the icon slides in (24 pt from the
+                        // trailing side, or the leading side on 换个邮箱) and
+                        // fades, once per step change; the icon and ✕ stay.
+                        let step = div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .child(
+                                div()
+                                    .pt(tokens::space::S16)
+                                    .n_title2()
+                                    .text_color(k.label)
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .pt(tokens::space::S8)
+                                    .n_body()
+                                    .text_center()
+                                    .text_color(k.secondary)
+                                    .child(hint),
+                            )
+                            .child(div().w_full().pt(tokens::space::S24).child(content))
+                            .when_some(error, |d, e| {
+                                d.child(
+                                    div()
+                                        .pt(tokens::space::S12)
+                                        .flex()
+                                        .justify_center()
+                                        .child(sheet_status_error(e, cx)),
                                 )
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                                disabled_push(
-                                    push_button(
-                                        "email-done",
-                                        s::DONE,
-                                        PushStyle::Default,
-                                        PushSize::Regular,
-                                        cx,
-                                    ),
-                                    !ready,
-                                    cx,
-                                )
-                                .on_click(move |_, window, cx| {
-                                    done.update(cx, |p, cx| p.verify_email(window, cx))
-                                }),
-                            ]),
-                    )
+                            })
+                            .when_some(primary, |d, b| {
+                                d.child(div().w_full().pt(tokens::space::S24).child(b))
+                            })
+                            .when_some(links, |d, l| {
+                                d.child(div().pt(tokens::space::S24).child(l))
+                            });
+                        let (seq, back) = (page.email_step, page.email_back);
+                        let shift = if back {
+                            -EMAIL_STEP_TRAVEL
+                        } else {
+                            EMAIL_STEP_TRAVEL
+                        };
+                        let step = if seq == 0 {
+                            step.into_any_element()
+                        } else {
+                            crate::ui::motion::enter(
+                                ElementId::Name(format!("email-step-{seq}").into()),
+                                crate::theme::motion::SLOW,
+                                step.relative(),
+                                move |el, t| el.left(shift * (1. - t)),
+                                cx,
+                            )
+                        };
+                        div()
+                            .relative()
+                            .w_full()
+                            .px(tokens::space::S32)
+                            .pt(tokens::space::S32)
+                            .pb(tokens::space::S24)
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top(tokens::space::S12)
+                                    .right(tokens::space::S12)
+                                    .child(close),
+                            )
+                            .child(crate::ui::native::feedback::icon_box(Sym::Mention, cx))
+                            .child(step)
+                    })
             },
         );
     }

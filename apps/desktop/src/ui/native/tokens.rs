@@ -190,7 +190,7 @@ pub struct NativeColors {
     pub menu: Hsla,
     /// The sidebar panel.
     pub sidebar: Hsla,
-    /// The group box fill (§2.8): `sidebar`.
+    /// The group box fill (§2.8): `muted` in light, a raised step in dark.
     pub group: Hsla,
     /// `foreground`.
     pub label: Hsla,
@@ -211,6 +211,18 @@ pub struct NativeColors {
     /// level over the dark control fill, so a hover in it does not show
     /// (review 3 K-04).
     pub control_hover: Hsla,
+    /// The fill of a push button that is not the primary one (取消, 编辑…,
+    /// 更改…): the foreground at 8 %, no border, like a Mac push button. A
+    /// tint of the text color, so it shows on the window, a GroupBox and a
+    /// sheet in both modes.
+    pub push: Hsla,
+    /// The hover of a row inside a group box: the foreground at 4 %, a
+    /// quiet tint of the group's own fill in both modes.
+    pub row_hover: Hsla,
+    /// [`Self::push`] on hover: the foreground at 12 %.
+    pub push_hover: Hsla,
+    /// [`Self::push`] pressed: the foreground at 16 %.
+    pub push_pressed: Hsla,
     /// `border`.
     pub separator: Hsla,
     /// `muted`: control fill (secondary button, segmented track).
@@ -275,7 +287,15 @@ impl NativeColors {
             sheet: p.card,
             menu: p.card,
             sidebar: p.sidebar,
-            group: p.sidebar,
+            // The group box has no border, so its fill alone sets it off:
+            // `muted` on the white window and sheet in light; in dark the
+            // foreground at 5 % over `card`, a step over both the window
+            // (#0a0a0a) and a sheet (#171717).
+            group: if p.dark {
+                p.card.blend(p.foreground.opacity(0.05))
+            } else {
+                p.muted
+            },
             label: p.foreground,
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,
@@ -290,6 +310,10 @@ impl NativeColors {
             } else {
                 p.accent
             },
+            push: p.foreground.opacity(0.08),
+            push_hover: p.foreground.opacity(0.12),
+            row_hover: p.foreground.opacity(0.04),
+            push_pressed: p.foreground.opacity(0.16),
             separator: p.border,
             fill: p.muted,
             fill_hover: p.accent,

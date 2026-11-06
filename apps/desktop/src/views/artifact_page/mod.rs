@@ -412,7 +412,6 @@ impl ArtifactPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use crate::ui::native as nk;
-        use gpui_component::button::ButtonVariants as _;
         let p = self.services.provider.clone();
         let now = p.clock_now();
         let a = &detail.summary;
@@ -433,14 +432,12 @@ impl ArtifactPage {
         let id = a.id.clone();
         // The version pop-up as a toolbar item (R12): the same capsule,
         // height and shape as the toolbar groups beside it.
-        let picker = nk::popup_button(
+        let picker = nk::inline_popup(
             "artifact-version",
             format!("v{shown} · {}", version_time(now, at)),
-            nk::PushSize::Regular,
             window,
             cx,
         )
-        .custom(nk::borderless_variant(cx))
         .h(nk::metrics::TOOLBAR_ITEM)
         .px(nk::metrics::FIELD_PAD)
         .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
