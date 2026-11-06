@@ -638,18 +638,41 @@ fn reply_quotes_a_message_of_the_open_topic_only(cx: &mut TestAppContext) {
         .last()
         .cloned()
         .expect("the fake topic has messages");
-    h.view.update_in(cx, |this, window, cx| {
-        this.quote_message(GROUP, "t-other", target.id.clone(), window, cx)
-    });
+    let author = h
+        .provider
+        .members()
+        .into_iter()
+        .find(|m| m.id == target.author_id)
+        .expect("the sender is a member");
+    let quote = |cx: &mut VisualTestContext, topic: &str| {
+        let (id, author_id) = (target.id.clone(), target.author_id.clone());
+        h.view.update_in(cx, |this, window, cx| {
+            this.quote_message(GROUP, topic, id, Some(&author_id), window, cx)
+        });
+    };
+    quote(cx, "t-other");
     assert!(h.view.update(cx, |this, _| this.quote.is_none()));
-    h.view.update_in(cx, |this, window, cx| {
-        this.quote_message(GROUP, TOPIC, target.id.clone(), window, cx)
-    });
+    assert_eq!(h.text(cx), "");
+    quote(cx, TOPIC);
     assert!(h.view.update(cx, |this, _| this.quote.is_some()));
+    // The quote @s its sender, once however often it is quoted.
+    let at = format!("@{} ", author.name);
+    assert_eq!(h.text(cx), at);
+    quote(cx, TOPIC);
+    assert_eq!(h.text(cx), at);
     cx.simulate_input("同意");
     cx.simulate_keystrokes("enter");
     let sent = h.last(TOPIC);
     assert_eq!(sent.quote_of.as_deref(), Some(target.id.as_str()));
+    assert_eq!(sent.body, format!("{at}同意"));
+    assert_eq!(sent.mentions, vec![author.id.clone()]);
+
+    // My own message: the quote alone.
+    h.view.update_in(cx, |this, window, cx| {
+        this.quote_message(GROUP, TOPIC, sent.id.clone(), None, window, cx)
+    });
+    assert!(h.view.update(cx, |this, _| this.quote.is_some()));
+    assert_eq!(h.text(cx), "");
 }
 
 #[gpui::test]

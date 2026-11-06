@@ -76,6 +76,8 @@ pub enum TimelineEvent {
         group_id: GroupId,
         topic_id: TopicId,
         message_id: MessageId,
+        /// The sender to @ with the quote; `None` for my own messages.
+        author_id: Option<crate::data::MemberId>,
     },
     /// The user clicked a sender's avatar: the composer should @ them.
     Mention { member_id: crate::data::MemberId },
@@ -662,6 +664,8 @@ impl TimelineView {
             group_id: message.group_id.clone(),
             topic_id: message.topic_id.clone(),
             message_id: message.id.clone(),
+            author_id: (self.me.as_deref() != Some(message.author_id.as_str()))
+                .then(|| message.author_id.clone()),
         });
     }
 
@@ -1322,6 +1326,7 @@ mod keyboard_tests {
                 group_id: newest.group_id.clone(),
                 topic_id: newest.topic_id.clone(),
                 message_id: newest.id.clone(),
+                author_id: Some(newest.author_id.clone()),
             }]
         );
     }

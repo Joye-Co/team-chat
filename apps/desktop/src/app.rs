@@ -724,7 +724,15 @@ impl RootView {
                         group_id,
                         topic_id,
                         message_id,
-                    } => composer.quote_message(group_id, topic_id, message_id.clone(), window, cx),
+                        author_id,
+                    } => composer.quote_message(
+                        group_id,
+                        topic_id,
+                        message_id.clone(),
+                        author_id.as_deref(),
+                        window,
+                        cx,
+                    ),
                     TimelineEvent::Mention { member_id } => {
                         composer.mention_member(member_id, window, cx)
                     }

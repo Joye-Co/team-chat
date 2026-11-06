@@ -1084,13 +1084,15 @@ impl ComposerView {
         self.on_text_changed(window, cx);
     }
 
-    /// 回复 on a message of the open 话题: put its quote chip on the draft and
-    /// focus the field. A message of another 话题 is ignored.
+    /// 回复 on a message of the open 话题: put its quote chip on the draft,
+    /// @ its sender (`author_id`, unless the draft already does) and focus
+    /// the field. A message of another 话题 is ignored.
     pub fn quote_message(
         &mut self,
         group_id: &str,
         topic_id: &str,
         message_id: MessageId,
+        author_id: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1103,6 +1105,21 @@ impl ComposerView {
         self.services.provider.set_quote(&key, Some(message_id));
         self.refresh_extras(cx);
         self.focus_at_end(window, cx);
+        let Some(author_id) = author_id else {
+            return;
+        };
+        let name = self
+            .services
+            .provider
+            .members()
+            .into_iter()
+            .find(|m| m.id == author_id)
+            .map(|m| m.name);
+        if let Some(name) = name
+            && !self.text(cx).contains(&format!("@{name}"))
+        {
+            self.mention_member(author_id, window, cx);
+        }
     }
 
     /// A click on a sender's avatar: types `@name ` at the caret (after a
