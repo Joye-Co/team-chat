@@ -73,8 +73,6 @@ impl gpui::RenderOnce for SheetForm {
         let mut group = div()
             .w_full()
             .rounded(metrics::GROUP_RADIUS)
-            .border_1()
-            .border_color(k.separator)
             .bg(k.group)
             .flex()
             .flex_col();

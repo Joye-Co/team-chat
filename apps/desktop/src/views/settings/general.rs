@@ -463,8 +463,6 @@ fn open_notes(info: chat_core::proto::UpdateInfo, window: &mut Window, cx: &mut 
                             .overflow_y_scroll()
                             .p(metrics::FORM_ROW_INSET)
                             .rounded(metrics::GROUP_RADIUS)
-                            .border_1()
-                            .border_color(k.separator)
                             .bg(k.group)
                             .n_body()
                             .text_color(k.label)

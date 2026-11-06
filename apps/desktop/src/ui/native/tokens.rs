@@ -190,7 +190,7 @@ pub struct NativeColors {
     pub menu: Hsla,
     /// The sidebar panel.
     pub sidebar: Hsla,
-    /// The group box fill (§2.8): `sidebar`.
+    /// The group box fill (§2.8): `muted` in light, a raised step in dark.
     pub group: Hsla,
     /// `foreground`.
     pub label: Hsla,
@@ -284,7 +284,15 @@ impl NativeColors {
             sheet: p.card,
             menu: p.card,
             sidebar: p.sidebar,
-            group: p.sidebar,
+            // The group box has no border, so its fill alone sets it off:
+            // `muted` on the white window and sheet in light; in dark the
+            // foreground at 5 % over `card`, a step over both the window
+            // (#0a0a0a) and a sheet (#171717).
+            group: if p.dark {
+                p.card.blend(p.foreground.opacity(0.05))
+            } else {
+                p.muted
+            },
             label: p.foreground,
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,

@@ -10,13 +10,14 @@ use gpui::{
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
+    button::Button,
     input::{InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
 use super::widgets::{self, Status, answer};
 use crate::ui::native::sheet::sheet_status_error;
-use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_top};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::{Changes, Services},
     copy::{common, fill, settings as s},
@@ -26,8 +27,8 @@ use crate::{
         native::{
             AlertLayout, CodeInput, CodeInputEvent, GroupedForm, NativeCheckbox, NativeTextField,
             NativeType as _, PushSize, PushStyle, SectionTitle, SheetLayout, SheetWidth,
-            alert_button, disabled_push, metrics, native_colors, page::outline_badge, push_button,
-            tokens,
+            alert_button, disabled_push, loading_push, metrics, native_colors, page::outline_badge,
+            push_button, tokens,
         },
     },
     views::topic_list::relative_time,
@@ -315,6 +316,15 @@ impl AccountPage {
         .detach();
     }
 
+    /// 换个邮箱: back to the address step, the address selected.
+    fn edit_email_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.email_sent_to = None;
+        self.email_error = None;
+        let handle = self.email_input.read(cx).focus_handle(cx);
+        handle.focus(window, cx);
+        cx.notify();
+    }
+
     /// Self-test: the 设置登录邮箱 sheet after 发送验证码 to `to` (the code
     /// slots and the sent line), without a server round trip.
     pub fn preview_email_sent(&mut self, to: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -351,72 +361,140 @@ impl AccountPage {
                 let busy = page.email_busy;
                 let sent = page.email_sent_to.clone();
                 let error = page.email_error.map(email_error_text);
-                let send = this.clone();
-                // Label over the control (2.8 full-width row): the address
-                // and its button get the whole row, and the six code slots
-                // fit inside the group instead of running past its edge.
-                let mut fields = sheet_form().child(sheet_form_row_top(
-                    s::EMAIL_FIELD,
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap(tokens::space::S8)
-                        .child(
-                            div().flex_1().min_w(px(0.)).child(
+                let k = native_colors(cx);
+                // Two steps, one thing on screen at a time (the Stripe /
+                // Linear pattern): the address and 发送验证码; then the code,
+                // centered, with 重新发送 and 换个邮箱 as quiet links.
+                let (title, hint, body, primary): (String, String, gpui::AnyElement, Button) =
+                    match &sent {
+                        None => {
+                            let send = this.clone();
+                            (
+                                s::EMAIL_SHEET_TITLE.to_string(),
+                                s::EMAIL_SHEET_HINT.to_string(),
                                 NativeTextField::new("email-field", &page.email_input)
                                     .full_width()
-                                    .error(error.is_some() && sent.is_none()),
-                            ),
-                        )
-                        .child(
-                            disabled_push(
-                                push_button(
-                                    "email-send",
-                                    if sent.is_some() {
-                                        s::EMAIL_RESEND
-                                    } else {
-                                        s::EMAIL_SEND
-                                    },
-                                    PushStyle::Outline,
+                                    .error(error.is_some())
+                                    .into_any_element(),
+                                loading_push(
+                                    disabled_push(
+                                        push_button(
+                                            "email-send",
+                                            s::EMAIL_SEND,
+                                            PushStyle::Default,
+                                            PushSize::Regular,
+                                            cx,
+                                        ),
+                                        busy,
+                                        cx,
+                                    ),
+                                    busy,
                                     PushSize::Regular,
-                                    cx,
-                                ),
-                                busy,
-                                cx,
+                                )
+                                .on_click(move |_, window, cx| {
+                                    send.update(cx, |p, cx| p.send_email_code(window, cx))
+                                }),
                             )
-                            .on_click(move |_, window, cx| {
-                                send.update(cx, |p, cx| p.send_email_code(window, cx))
-                            }),
-                        ),
-                    cx,
-                ));
-                if let Some(to) = &sent {
-                    fields = fields.child(sheet_form_row_top(
-                        s::EMAIL_CODE_FIELD,
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .items_start()
-                            .gap(tokens::space::S8)
-                            .child(page.email_code.clone())
-                            .child(widgets::quiet(fill(s::EMAIL_SENT, &[("email", to)]), cx)),
-                        cx,
-                    ));
-                }
-                let ready = sent.is_some() && page.email_digits(cx).len() == 6 && !busy;
-                let (ok, done) = (this.clone(), this.clone());
+                        }
+                        Some(to) => {
+                            let (resend, back, done) = (this.clone(), this.clone(), this.clone());
+                            let ready = page.email_digits(cx).len() == 6 && !busy;
+                            let links = div()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .gap(tokens::space::S4)
+                                .n_body()
+                                .text_color(k.secondary)
+                                .child(s::EMAIL_NOT_RECEIVED)
+                                .child(
+                                    disabled_push(
+                                        push_button(
+                                            "email-resend",
+                                            s::EMAIL_RESEND,
+                                            PushStyle::Link,
+                                            PushSize::Small,
+                                            cx,
+                                        ),
+                                        busy,
+                                        cx,
+                                    )
+                                    .px(tokens::space::S4)
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            resend.update(cx, |p, cx| p.send_email_code(window, cx))
+                                        },
+                                    ),
+                                )
+                                .child(crate::copy::native_kit::MIDDLE_DOT)
+                                .child(
+                                    push_button(
+                                        "email-other",
+                                        s::EMAIL_OTHER_ADDRESS,
+                                        PushStyle::Link,
+                                        PushSize::Small,
+                                        cx,
+                                    )
+                                    .px(tokens::space::S4)
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            back.update(cx, |p, cx| {
+                                                p.edit_email_address(window, cx)
+                                            })
+                                        },
+                                    ),
+                                );
+                            (
+                                s::EMAIL_CODE_TITLE.to_string(),
+                                fill(s::EMAIL_CODE_HINT, &[("email", to)]),
+                                div()
+                                    .w_full()
+                                    .pt(tokens::space::S8)
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .gap(tokens::space::S16)
+                                    .child(page.email_code.clone())
+                                    .child(links)
+                                    .into_any_element(),
+                                loading_push(
+                                    disabled_push(
+                                        push_button(
+                                            "email-done",
+                                            s::DONE,
+                                            PushStyle::Default,
+                                            PushSize::Regular,
+                                            cx,
+                                        ),
+                                        !ready && !busy,
+                                        cx,
+                                    ),
+                                    busy,
+                                    PushSize::Regular,
+                                )
+                                .on_click(move |_, window, cx| {
+                                    done.update(cx, |p, cx| p.verify_email(window, cx))
+                                }),
+                            )
+                        }
+                    };
+                let ok = this.clone();
                 dialog
                     .on_ok(move |_, window, cx| {
-                        ok.update(cx, |p, cx| p.verify_email(window, cx));
+                        ok.update(cx, |p, cx| {
+                            if p.email_sent_to.is_some() {
+                                p.verify_email(window, cx)
+                            } else {
+                                p.send_email_code(window, cx)
+                            }
+                        });
                         false
                     })
                     .on_cancel(|_, _, _| true)
                     .child(
-                        SheetLayout::new(s::EMAIL_SHEET_TITLE)
-                            .explanation(s::EMAIL_SHEET_HINT)
-                            .body(fields)
+                        SheetLayout::new(title)
+                            .explanation(hint)
+                            .body(body)
                             .when_some(error, |l, e| l.status(sheet_status_error(e, cx)))
                             .buttons([
                                 push_button(
@@ -427,20 +505,7 @@ impl AccountPage {
                                     cx,
                                 )
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
-                                disabled_push(
-                                    push_button(
-                                        "email-done",
-                                        s::DONE,
-                                        PushStyle::Default,
-                                        PushSize::Regular,
-                                        cx,
-                                    ),
-                                    !ready,
-                                    cx,
-                                )
-                                .on_click(move |_, window, cx| {
-                                    done.update(cx, |p, cx| p.verify_email(window, cx))
-                                }),
+                                primary,
                             ]),
                     )
             },
