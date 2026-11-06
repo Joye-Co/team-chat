@@ -667,7 +667,7 @@ impl Answerer {
             } => {
                 if let Some(nav) = self.nav(window, cx) {
                     let (id, v) = (artifact_id.clone(), *version);
-                    nav.update(cx, |nav, cx| nav.open_artifact(id, v, cx));
+                    nav.update(cx, |nav, cx| nav.show_artifact(id, v, cx));
                 }
             }
             RefTarget::Member { .. } | RefTarget::Unknown => {}

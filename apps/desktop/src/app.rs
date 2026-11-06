@@ -232,6 +232,9 @@ pub struct Navigation {
     pub right_pane: RightPane,
     /// v2: how the rail lists work.
     pub rail_mode: RailMode,
+    /// Where an 产出 page was opened from (the place and the open 话题), so its back
+    /// button returns there. Set when the page opens from somewhere else.
+    pub artifact_return: Option<(Option<Place>, Option<(GroupId, TopicId)>)>,
 }
 
 /// Scroll the open topic to this message and highlight it. `serial` grows
@@ -269,6 +272,7 @@ impl Navigation {
         self.side_panel_settled.clear();
         self.side_panel_auto_at = None;
         self.right_pane = RightPane::default();
+        self.artifact_return = None;
         cx.notify();
     }
 
@@ -286,6 +290,7 @@ impl Navigation {
             sidebar_hidden: false,
             right_pane: RightPane::default(),
             rail_mode: RailMode::default(),
+            artifact_return: None,
         }
     }
 
@@ -322,11 +327,42 @@ impl Navigation {
         cx.notify();
     }
 
-    /// One 产出 page.
+    /// One 产出 page. The place it opens from is kept for its back button; another version
+    /// of a 产出 already open keeps the place it came from.
     pub fn open_artifact(&mut self, id: String, version: Option<u32>, cx: &mut Context<Self>) {
+        if !matches!(self.place, Some(Place::Artifact { .. })) {
+            self.artifact_return = Some((self.place.clone(), self.topic.clone()));
+        }
+        // The page shows the 产出 itself: the same one in the right pane would be twice.
+        if matches!(&self.right_pane, RightPane::Artifact { id: open, .. } if *open == id) {
+            self.right_pane = RightPane::None;
+        }
         self.place = Some(Place::Artifact { id, version });
         self.topic = None;
         cx.notify();
+    }
+
+    /// The 产出 page's back button: back to the 话题 (or page) it was opened from, else
+    /// the 产出 list.
+    pub fn back_from_artifact(&mut self, cx: &mut Context<Self>) {
+        match self.artifact_return.take() {
+            Some((place, topic)) if place.is_some() || topic.is_some() => {
+                self.place = place;
+                self.topic = topic;
+                cx.notify();
+            }
+            _ => self.open_artifacts(cx),
+        }
+    }
+
+    /// Opens a 产出 from a message or card: in the right pane next to the open 话题, so
+    /// the conversation stays; the full page only when no 话题 is open.
+    pub fn show_artifact(&mut self, id: String, version: Option<u32>, cx: &mut Context<Self>) {
+        if self.page() == Page::Topic {
+            self.set_right_pane(RightPane::Artifact { id, version }, cx);
+        } else {
+            self.open_artifact(id, version, cx);
+        }
     }
 
     /// The pane that shows now: the chosen one on a 话题 page, an 产出 pane
@@ -1346,6 +1382,46 @@ mod tests {
     use gpui::{TestAppContext, VisualTestContext};
 
     use super::*;
+
+    /// A 产出 opened from a message stays next to the 话题; the 产出 page goes back to the
+    /// 话题 it was opened from, also after switching versions.
+    #[gpui::test]
+    fn an_artifact_opens_beside_the_topic_and_goes_back_to_it(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        let topic = ("g1".to_string(), "t1".to_string());
+        nav.update(cx, |n, cx| {
+            n.open_topic(topic.0.clone(), topic.1.clone(), cx);
+            n.show_artifact("a1".into(), Some(1), cx);
+            assert_eq!(n.page(), Page::Topic);
+            assert_eq!(n.topic, Some(topic.clone()));
+            assert_eq!(
+                n.right_pane,
+                RightPane::Artifact {
+                    id: "a1".into(),
+                    version: Some(1)
+                }
+            );
+            // The pane's button to the full page.
+            n.open_artifact("a1".into(), Some(1), cx);
+            assert_eq!(n.page(), Page::Artifact);
+            assert_eq!(n.right_pane, RightPane::None, "not shown twice");
+            n.open_artifact("a1".into(), Some(2), cx);
+            n.back_from_artifact(cx);
+            assert_eq!(n.page(), Page::Topic);
+            assert_eq!(n.topic, Some(topic.clone()));
+            // Opened from the 产出 list: back goes to the list.
+            n.open_artifacts(cx);
+            n.open_artifact("a2".into(), None, cx);
+            n.back_from_artifact(cx);
+            assert_eq!(n.page(), Page::Artifacts);
+            // No page open yet (a link from another window): the list.
+            n.reset_place(cx);
+            n.show_artifact("a3".into(), None, cx);
+            assert_eq!(n.page(), Page::Artifact);
+            n.back_from_artifact(cx);
+            assert_eq!(n.page(), Page::Artifacts);
+        });
+    }
 
     /// The first Tab in a fresh signed-in window reaches a control: the
     /// login field that took the focus when the window was made is not
