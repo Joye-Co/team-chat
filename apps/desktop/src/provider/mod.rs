@@ -49,6 +49,7 @@ pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+mod this_mac;
 #[cfg(test)]
 mod wire_live;
 // --- settings-backend track ---
@@ -2035,6 +2036,14 @@ impl ChatProvider for CoreProvider {
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_inner(name, labels)
+    }
+
+    fn this_mac(&self) -> crate::data::ThisMac {
+        this_mac::state()
+    }
+
+    fn use_this_mac(&self) -> AdminReply<()> {
+        self.use_this_mac_inner()
     }
 
     fn group_prefs(&self, group_id: &str) -> GroupPrefs {

@@ -444,31 +444,22 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
         );
         return args;
     }
-    args.push(
-        spec.cfg
-            .permission_mode
-            .clone()
-            .unwrap_or_else(|| DEFAULT_PERMISSION_MODE.into()),
-    );
-    // `-p` has no one to answer a permission prompt: a tool that needs approval is denied at
-    // once. So a run asks for nothing by default (`bypassPermissions`), and even a stricter
-    // configured mode keeps the shell, edits and the web; `chat-run` is always allowed, it is
-    // how the run posts cards and 产出.
+    // An AI member has every permission: `-p` has no one to answer a permission prompt, so a
+    // run asks for nothing. `permission_mode` and `allowed_tools` in `daemon.toml` are ignored
+    // (old configs still parse); `chat-run` is listed too, it is how the run posts cards and 产出.
+    args.push(PERMISSION_MODE.into());
     args.push("--allowedTools".into());
-    args.push(match &spec.cfg.allowed_tools {
-        Some(t) => format!("{t} {CHAT_RUN_TOOL}"),
-        None => DEFAULT_ALLOWED_TOOLS.to_string(),
-    });
+    args.push(DEFAULT_ALLOWED_TOOLS.to_string());
     args.extend(spec.cfg.args.iter().cloned());
     args
 }
 
-/// The permission mode of a run when `daemon.toml` sets none: everything allowed.
-pub const DEFAULT_PERMISSION_MODE: &str = "bypassPermissions";
+/// The permission mode of every run that is not an aside: everything allowed.
+pub const PERMISSION_MODE: &str = "bypassPermissions";
 
-/// The tools a run may use without asking when `daemon.toml` sets no `allowed_tools`.
+/// The tools every run that is not an aside may use without asking.
 pub const DEFAULT_ALLOWED_TOOLS: &str =
-    "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch TodoWrite Task";
+    "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch TodoWrite Task Bash(chat-run:*)";
 
 /// The `chat-run` command, allowed in every non-aside run.
 pub const CHAT_RUN_TOOL: &str = "Bash(chat-run:*)";

@@ -91,16 +91,17 @@ pub struct RuntimeConfig {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// codex: approval policy ("never", "on-request", "untrusted"). Default "never".
+    /// Ignored since 1.2.1: an AI member always has every permission (codex approval `never`,
+    /// sandbox `danger-full-access`; claude `bypassPermissions`). Kept so old configs parse.
     #[serde(default)]
     pub approval_policy: Option<String>,
-    /// codex: sandbox ("read-only", "workspace-write", "danger-full-access"). Default "danger-full-access".
+    /// Ignored since 1.2.1, see `approval_policy`.
     #[serde(default)]
     pub sandbox: Option<String>,
-    /// claude: permission mode. Default "bypassPermissions".
+    /// Ignored since 1.2.1, see `approval_policy`.
     #[serde(default)]
     pub permission_mode: Option<String>,
-    /// claude: --allowedTools value.
+    /// Ignored since 1.2.1, see `approval_policy`.
     #[serde(default)]
     pub allowed_tools: Option<String>,
 }
@@ -288,14 +289,12 @@ repo_roots = []                     # e.g. ["~/code"]; empty allows any local re
 env_passthrough = []                # e.g. ["GITHUB_TOKEN"]; assignments pick from these
 # takeover_url = "vnc://mac-mini.tailnet"   # 接管: Screen Sharing address (turn Sharing on by hand; no passwords)
 
+# AI members always run with every permission (no approvals); there is nothing to set.
 [runtimes.codex]
 kind = "codex"
-sandbox = "danger-full-access"
-approval_policy = "never"
 
 [runtimes.claude]
 kind = "claude"
-permission_mode = "bypassPermissions"
 
 # [runtimes.gemini]
 # kind = "acp"

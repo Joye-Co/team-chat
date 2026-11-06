@@ -219,14 +219,12 @@ RunEvent =
 - Input that reaches the daemon after the run's last turn has ended and the CLI exits is not
   taken: no `input.accepted` comes, `run.done` follows. BotDesk must then start a new run for
   that input (with the topic context in its prompt).
-- `approval.request` comes from CLIs that ask (Codex with `approval_policy` other than
-  `never`, ACP `session/request_permission`). The server answers `run.approval`; the daemon
-  answers the CLI and emits `approval.resolved`. Claude Code runs with a fixed
-  `permission_mode` (default `bypassPermissions`) and does not ask: `-p` denies any tool that
-  needs approval, so the daemon also always passes `--allowedTools` — `allowed_tools` plus `Bash(chat-run:*)`, or without
-  `allowed_tools` the shell, edit, web, todo and task tools. Codex defaults to sandbox
-  `danger-full-access` with approval `never`; a run with sandbox `workspace-write` gets `-c sandbox_workspace_write.network_access=true` unless the configured
-  args set `network_access` themselves.
+- `approval.request` comes from CLIs that ask (ACP `session/request_permission`). The server
+  answers `run.approval`; the daemon answers the CLI and emits `approval.resolved`. Since 1.2.1
+  an AI member always has every permission and nothing in `daemon.toml` narrows it: Claude Code
+  runs with `--permission-mode bypassPermissions` and `--allowedTools` for the shell, edit, web,
+  todo and task tools and `Bash(chat-run:*)` (`-p` has nobody to ask); Codex runs with sandbox
+  `danger-full-access` and approval `never`. Only a side chat run (aside) is read-only.
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
   SIGTERM to the CLI's whole process group and to the tool groups below it (see **pause**),
   SIGKILL after 3 s, and ends with
@@ -572,8 +570,8 @@ secret split over two deltas is redacted whole.
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
 `stall_minutes`, `repo_roots`, `env_passthrough`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
-`command`, `args`, `env`, `model`, `approval_policy`, `sandbox` (Codex), `permission_mode`,
-`allowed_tools` (Claude Code). Without `[runtimes.*]`, `codex` and `claude` are added when
+`command`, `args`, `env`, `model`. `approval_policy`, `sandbox`, `permission_mode` and
+`allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 
 - `daemon run`: the service. SIGTERM cancels all runs and exits.

@@ -42,6 +42,8 @@ pub struct FakeProvider {
     refs: refs::FakeRefs,
     // --- settings-backend track
     settings_backend: Mutex<settings_backend::FakeSettingsBackend>,
+    /// 用这台电脑 was clicked in the demo.
+    this_mac_used: std::sync::atomic::AtomicBool,
 }
 
 struct State {
@@ -125,6 +127,7 @@ impl FakeProvider {
             refs: refs::FakeRefs::default(),
             // settings-backend track
             settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
+            this_mac_used: std::sync::atomic::AtomicBool::new(false),
         });
         provider.seed_followed();
         provider
@@ -147,6 +150,7 @@ impl FakeProvider {
             refs: refs::FakeRefs::default(),
             // settings-backend track
             settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
+            this_mac_used: std::sync::atomic::AtomicBool::new(false),
         });
         provider.seed_followed();
         provider
@@ -1970,6 +1974,24 @@ impl ChatProvider for FakeProvider {
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_fake(name, labels)
+    }
+
+    /// The demo Mac has no daemon yet, so 用这台电脑 shows; using it only pretends.
+    fn this_mac(&self) -> crate::data::ThisMac {
+        if self
+            .this_mac_used
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            crate::data::ThisMac::Working
+        } else {
+            crate::data::ThisMac::NotSetUp
+        }
+    }
+
+    fn use_this_mac(&self) -> AdminReply<()> {
+        self.this_mac_used
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        reply_now(Ok(()))
     }
 
     fn group_prefs(&self, group_id: &str) -> GroupPrefs {

@@ -548,23 +548,15 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     }
 }
 
-/// `thread/start` approval policy and sandbox: by default approval `never` and sandbox
-/// `danger-full-access` (a run can do anything; nobody is there to approve). A side chat run (`spec.aside`) is read-only
-/// whatever `daemon.toml` says: sandbox `read-only`, approval policy `never` (nothing to ask).
+/// `thread/start` approval policy and sandbox. An AI member has every permission: approval
+/// `never` and sandbox `danger-full-access` (nobody is there to approve), whatever `daemon.toml`
+/// says (`approval_policy` and `sandbox` are ignored; old configs still parse). A side chat run
+/// (`spec.aside`) is read-only: sandbox `read-only`, approval policy `never`.
 pub fn thread_policy(spec: &RunSpec) -> (String, String) {
     if spec.aside {
         return ("never".into(), "read-only".into());
     }
-    (
-        spec.cfg
-            .approval_policy
-            .clone()
-            .unwrap_or_else(|| "never".into()),
-        spec.cfg
-            .sandbox
-            .clone()
-            .unwrap_or_else(|| "danger-full-access".into()),
-    )
+    ("never".into(), "danger-full-access".into())
 }
 
 /// Whether `chat-run` works from a command Codex runs in this run: the sandbox is
@@ -617,8 +609,7 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String>
     Ok(names)
 }
 
-/// `codex app-server` arguments: the configured args, plus network access for a
-/// `workspace-write` sandbox when those args set none (a user's own network setting stays). A side chat run ignores the configured args (they could widen
+/// `codex app-server` arguments: the configured args. A side chat run ignores them (they could widen
 /// the sandbox) and turns off [`ASIDE_CONFIG`] and every configured MCP server: MCP tools run
 /// outside the sandbox. The sandbox (`thread_policy`) blocks writes and network for commands.
 ///
@@ -630,15 +621,6 @@ pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
     let mut args = vec!["app-server".to_string()];
     if !spec.aside {
         args.extend(spec.cfg.args.iter().cloned());
-        // `workspace-write` blocks the network by default, so `gh`, `git push` and package
-        // installs fail. A run gets the network unless the configured args say otherwise.
-        let (_, sandbox) = thread_policy(spec);
-        if sandbox == "workspace-write"
-            && !spec.cfg.args.iter().any(|a| a.contains("network_access"))
-        {
-            args.push("-c".into());
-            args.push("sandbox_workspace_write.network_access=true".into());
-        }
         return Ok(args);
     }
     let plain = |n: &str| {

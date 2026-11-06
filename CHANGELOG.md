@@ -3,6 +3,27 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.1 (unreleased)
+
+Notes: [docs/releases/1.2.1.md](docs/releases/1.2.1.md). No server or protocol change; the
+server is redeployed with `DEPLOY_VERSION=1.2.1` so `/v1/health` matches the release.
+
+- AI members always have every permission: Claude Code runs with `bypassPermissions` and the
+  shell, edit, web, todo, task and `chat-run` tools; Codex with sandbox `danger-full-access` and
+  approval `never`. `permission_mode`, `allowed_tools`, `sandbox` and `approval_policy` in
+  `daemon.toml` still parse but are ignored (a 1.1 config with `acceptEdits` no longer blocks
+  `chat-run`). Asides stay read-only.
+- The daemon restarts itself on a new version: when its program file is replaced (the app
+  updated itself, or a new binary was copied over it) and no run is active, it exits and launchd
+  starts the new one (`apps/daemon/src/selfupdate.rs`).
+- 设置 › 机器 › 用这台电脑: an owner makes this Mac one of the team's computers with no
+  terminal. The app registers the machine (named after the Mac, label `mac`), writes the config
+  and token (mode 600), and runs `install-service` from the daemon inside the app with the login
+  shell's `PATH`. A Mac whose service runs a daemon copied by hand gets 改用应用里的版本, which
+  keeps its config and moves the service to the app's daemon.
+- The app no longer sends requests with an empty token while it reads the saved token at launch
+  (a burst of 401s in the log after each update).
+
 ## 1.2.0 (2026-11-05)
 
 Notes: [docs/releases/1.2.0.md](docs/releases/1.2.0.md). The server deploys first, from the

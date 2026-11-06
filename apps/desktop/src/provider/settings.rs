@@ -533,6 +533,42 @@ impl CoreProvider {
         })
     }
 
+    /// 用这台电脑: a Mac with a daemon config keeps it (its machine and token) and only moves
+    /// the service to the app's own daemon; a new Mac is registered first.
+    pub(super) fn use_this_mac_inner(&self) -> AdminReply<()> {
+        let Some(daemon) = super::this_mac::bundled_daemon() else {
+            return reply_now(Err(AdminError::Unsupported));
+        };
+        self.request(move |client, server_url| async move {
+            let new = if super::this_mac::config_path().is_file() {
+                None
+            } else {
+                let name = super::this_mac::computer_name();
+                let labels = vec!["mac".to_string()];
+                let req = CreateMachineRequest {
+                    name: name.clone(),
+                    labels: Some(labels.clone()),
+                };
+                let r = client
+                    .http()
+                    .create_machine(&req)
+                    .await
+                    .map_err(|e| api_error(&e))?;
+                Some(super::this_mac::NewMachine {
+                    server_url,
+                    id: r.machine.id.clone(),
+                    name: r.machine.name.clone(),
+                    labels,
+                    token: r.token,
+                })
+            };
+            super::this_mac::install(&daemon, new.as_ref()).map_err(|e| {
+                tracing::warn!(error = %e, "用这台电脑: install failed");
+                AdminError::Other
+            })
+        })
+    }
+
     pub(super) fn group_prefs_inner(&self, group_id: &str) -> GroupPrefs {
         let row = self
             .account()
