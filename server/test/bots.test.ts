@@ -91,6 +91,16 @@ describe("dispatch rules", () => {
     expect(candidates([idle], runner, now, ["m3"])).toEqual([]);
   });
 
+  it("run a runner pinned to one machine only there, whatever the labels", () => {
+    const other = { ...base, id: "m2" };
+    const pinned = { ...base, id: "m3", labels: [] };
+    const r = { ...runner, machineId: "m3" };
+    expect(candidates([other, pinned], r, now).map((m) => m.id)).toEqual(["m3"]);
+    // The pinned machine still has to be healthy and have the runtime.
+    expect(candidates([other, { ...pinned, connected: false }], r, now)).toEqual([]);
+    expect(candidates([other], r, now)).toEqual([]);
+  });
+
   it("read approval answers", () => {
     expect(approvalDecision("同意")).toBe("approve");
     expect(approvalDecision("@dev 同意。")).toBe("approve");
@@ -217,6 +227,17 @@ describe("runner-backed bots", () => {
     const r = await api(`/v1/bots/${bot.id}/runner`, { method: "PUT", token: owner.token, body: { runtime: "claude" } });
     expect(r.body).toMatchObject({ botId: bot.id, runtime: "claude", labels: [], envAllowlist: [], enabled: true });
     expect((await api(`/v1/bots/${bot.id}/runner`, { token: owner.token })).body.runtime).toBe("claude");
+    // 1.2.2: pin to one machine; absent keeps it, null clears it, an unknown machine is 404.
+    const m = await api("/v1/machines", { token: owner.token, body: { name: "mbp" } });
+    const mid = m.body.machine.id as string;
+    const put = (body: Record<string, unknown>) => api(`/v1/bots/${bot.id}/runner`, { method: "PUT", token: owner.token, body });
+    expect((await put({ runtime: "claude", machineId: mid })).body.machineId).toBe(mid);
+    expect((await put({ runtime: "claude", labels: ["x"] })).body.machineId).toBe(mid);
+    expect((await put({ runtime: "claude", machineId: null })).body.machineId).toBeUndefined();
+    expect((await put({ runtime: "claude", machineId: "01JBX0MACH00000000000000ZZ" })).status).toBe(404);
+    await put({ runtime: "claude", machineId: mid });
+    expect((await api(`/v1/machines/${mid}`, { method: "DELETE", token: owner.token })).status).toBe(200);
+    expect((await api(`/v1/bots/${bot.id}/runner`, { token: owner.token })).body.machineId).toBeUndefined();
     expect((await api(`/v1/bots/${bot.id}/runner`, { method: "DELETE", token: owner.token })).status).toBe(200);
     expect((await api(`/v1/bots/${bot.id}/runner`, { token: owner.token })).status).toBe(404);
   });
@@ -469,6 +490,18 @@ describe("runner-backed bots", () => {
     c2.close();
     d.close();
     low.close();
+  });
+
+  it("send a runner pinned to a machine there even when the labels do not match", async () => {
+    const w = await world({ labels: ["gpu-only"] });
+    const r = await api(`/v1/bots/${w.bot.id}/runner`, { method: "PUT", token: w.owner.token, body: { runtime: "codex", machineId: w.machineId } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const { d } = await Daemon.connect(w.machineToken, { labels: ["mac"] });
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    await waitUntil(() => d.frames.some((f) => f.t === "run.assign"), 5000, "assigned to the pinned machine");
+    c.close();
+    d.close();
   });
 
   it("keep a run through a reconnect, and block it when the machine stays away past the lease", async () => {

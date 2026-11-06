@@ -18,6 +18,8 @@ export interface RunnerRow {
   env_allowlist: string;
   enabled: number;
   updated_at: number;
+  /** 1.2.2 (migration 0010); undefined on a database before it. */
+  machine_id?: string | null;
 }
 
 export function toRunner(r: RunnerRow): BotRunner {
@@ -33,6 +35,7 @@ export function toRunner(r: RunnerRow): BotRunner {
   else if (r.repo_path) out.repo = { path: r.repo_path };
   if (r.base_branch) out.baseBranch = r.base_branch;
   if (r.model) out.model = r.model;
+  if (r.machine_id) out.machineId = r.machine_id;
   return out;
 }
 

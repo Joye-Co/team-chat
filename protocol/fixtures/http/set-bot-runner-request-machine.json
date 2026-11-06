@@ -1,0 +1,8 @@
+{
+  "kind": "SetBotRunnerRequest",
+  "valid": true,
+  "value": {
+    "runtime": "claude",
+    "machineId": "01JBX0MACH00000000000000AA"
+  }
+}

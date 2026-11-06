@@ -88,7 +88,7 @@ function activeRuns(m: MachineView): number {
 /** Machines that can take a new run of this bot, best first. */
 export function candidates(
   machines: MachineView[],
-  runner: Pick<BotRunner, "labels" | "runtime">,
+  runner: Pick<BotRunner, "labels" | "runtime" | "machineId">,
   now: number,
   exclude: string[] = [],
 ): MachineView[] {
@@ -97,7 +97,8 @@ export function candidates(
       (m) =>
         !exclude.includes(m.id) &&
         isHealthy(m, now) &&
-        labelsMatch(runner.labels, m.labels) &&
+        // A runner pinned to one machine (1.2.2) runs only there; its labels do not count.
+        (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)) &&
         hasRuntime(m, runner.runtime) &&
         activeRuns(m) < Math.max(1, m.info?.maxParallelRuns ?? 1),
     )
@@ -106,7 +107,7 @@ export function candidates(
 
 export function pickMachine(
   machines: MachineView[],
-  runner: Pick<BotRunner, "labels" | "runtime">,
+  runner: Pick<BotRunner, "labels" | "runtime" | "machineId">,
   now: number,
   exclude: string[] = [],
 ): MachineView | null {

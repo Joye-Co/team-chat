@@ -80,16 +80,23 @@ export function registerBotRoutes(): void {
     async handler({ env, params, auth, body }) {
       const req = await body(SetBotRunnerRequest);
       await requireBot(env.DB, params.id);
+      if (req.machineId) {
+        const m = await env.DB.prepare("SELECT id FROM machines WHERE id = ? AND revoked_at IS NULL").bind(req.machineId).first();
+        if (!m) throw new ApiError("not_found", "machine not found");
+      }
       const now = Date.now();
       const a = auth as AuthContext;
+      // machineId: absent keeps the stored machine (clients before 1.2.2 send none), null clears.
+      const keepMachine = req.machineId === undefined ? 1 : 0;
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO bot_runners (member_id, runtime, labels, repo_url, repo_path, base_branch, model, env_allowlist, enabled, updated_by, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO bot_runners (member_id, runtime, labels, repo_url, repo_path, base_branch, model, env_allowlist, enabled, updated_by, updated_at, machine_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (member_id) DO UPDATE SET runtime = excluded.runtime, labels = excluded.labels,
              repo_url = excluded.repo_url, repo_path = excluded.repo_path, base_branch = excluded.base_branch,
              model = excluded.model, env_allowlist = excluded.env_allowlist, enabled = excluded.enabled,
-             updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+             updated_by = excluded.updated_by, updated_at = excluded.updated_at,
+             machine_id = CASE WHEN ? = 1 THEN bot_runners.machine_id ELSE excluded.machine_id END`,
         ).bind(
           params.id,
           req.runtime,
@@ -102,6 +109,8 @@ export function registerBotRoutes(): void {
           req.enabled === false ? 0 : 1,
           a.memberId,
           now,
+          req.machineId ?? null,
+          keepMachine,
         ),
         auditStatement(env.DB, a, { action: "bot.runner.set", target: params.id, details: { ...req } }, now),
       ]);
@@ -211,6 +220,8 @@ export function registerBotRoutes(): void {
       const now = Date.now();
       const res = await env.DB.batch([
         env.DB.prepare("UPDATE machines SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, params.id),
+        // Bots pinned to it go back to any machine with their labels.
+        env.DB.prepare("UPDATE bot_runners SET machine_id = NULL WHERE machine_id = ?").bind(params.id),
         auditStatement(env.DB, auth as AuthContext, { action: "machine.revoke", target: params.id }, now),
       ]);
       if (!res[0].meta.changes) throw new ApiError("not_found", "machine not found");

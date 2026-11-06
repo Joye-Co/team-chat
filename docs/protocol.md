@@ -769,8 +769,10 @@ RunLogEntry = run.event | run.done | run.session frames of machine-protocol.md, 
 RunEventsResponse = { run: BotRun, entries: RunLogEntry[], hasMore: boolean, lastSeq: number }
 
 SetBotRunnerRequest = { runtime, labels?: string[], repo?: { url } | { path }, baseBranch?,
-                        model?, envAllowlist?: string[], enabled? /* absent = true */ }
-BotRunner = { botId, runtime, labels, repo?, baseBranch?, model?, envAllowlist, enabled, updatedAt }
+                        model?, envAllowlist?: string[], enabled? /* absent = true */,
+                        machineId?: Id | null /* 1.2.2: absent keeps, null clears */ }
+BotRunner = { botId, runtime, labels, repo?, baseBranch?, model?, envAllowlist, enabled, updatedAt,
+              machineId? /* 1.2.2 */ }
 Machine = { id, name, labels, createdBy, createdAt, revoked?, connected, healthy,
             lastHeartbeatAt?, daemonVersion?, os?, arch?, maxParallelRuns?, health?: Health,
             clis?: CliInfo[], runningRuns: string[] }
@@ -802,6 +804,9 @@ Rules:
   labels, reports the bot's `runtime` as available, is connected with a heartbeat in the last
   90 s, has fewer active runs than `maxParallelRuns` and at least 5 GiB free disk (`healthy`).
   Among those the server picks the one with the fewest active runs, then the lowest load.
+  1.2.2: a runner with `machineId` runs only on that machine (its labels do not count; the other
+  conditions do). `PUT` without `machineId` keeps the stored one, `null` clears it, and an
+  unknown or revoked machine is `not_found`. Revoking the machine clears it.
 - Trigger: a `message.created` by a human that mentions a runner-backed bot starts a run in
   that topic, unless the topic already has a responsible bot. The first bot that starts a run
   in a topic becomes its only responsible bot. Messages written by bots never start runs or
