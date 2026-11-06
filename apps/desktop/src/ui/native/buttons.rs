@@ -94,12 +94,14 @@ pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
             pressed: k.primary.opacity(0.8),
             border: None,
         },
+        // A Mac push button: a soft tint, no frame (owner review: a border
+        // on every 编辑… / 取消 is noise).
         PushStyle::Outline => Look {
-            fill: k.control,
+            fill: k.push,
             text: k.label,
-            hover: k.control_hover,
-            pressed: k.pressed,
-            border: Some(k.quaternary),
+            hover: k.push_hover,
+            pressed: k.push_pressed,
+            border: None,
         },
         PushStyle::Secondary => Look {
             fill: k.fill,
@@ -144,6 +146,31 @@ fn variant(l: Look, cx: &App) -> ButtonCustomVariant {
         .foreground(l.text)
         .hover(l.hover)
         .active(l.pressed)
+}
+
+/// The look of a field-like control (a select): the input's fill, its 1 px
+/// border and shadow xs, so a select lines up with the text fields beside
+/// it.
+fn field_look(k: &NativeColors) -> Look {
+    Look {
+        fill: k.control,
+        text: k.label,
+        hover: k.control_hover,
+        pressed: k.pressed,
+        border: Some(k.quaternary),
+    }
+}
+
+/// Gives a button the frame of a text field ([`field_look`]).
+fn styled_field(b: Button, cx: &App) -> Button {
+    let k = native_colors(cx);
+    let l = field_look(&k);
+    b.custom(variant(l, cx))
+        .bg(l.fill)
+        .text_color(l.text)
+        .border_1()
+        .border_color(k.quaternary)
+        .shadow(shadow::xs())
 }
 
 /// Gives a gpui-component button the look of `style`: fill, text, border and
@@ -435,7 +462,7 @@ fn chevron_button(
     // centers its children), so the title starts at x + 12 and the chevron
     // ends 8 before the right edge in every select of a column (§1.8, F4;
     // review 2 R1-10).
-    styled(b, PushStyle::Outline, cx).child(
+    styled_field(b, cx).child(
         div()
             .flex_1()
             .w_full()
@@ -547,7 +574,7 @@ pub fn select_button(
         .n_body();
     // The same row as [`popup_button`]: title at x + 12, chevron pinned 8
     // before the right edge.
-    styled(b, PushStyle::Outline, cx).child(
+    styled_field(b, cx).child(
         div()
             .flex_1()
             .w_full()
@@ -885,21 +912,23 @@ mod tests {
     #[test]
     fn the_variants_follow_the_table() {
         for k in [NativeColors::light(), NativeColors::dark()] {
-            // D11: Cancel (outline) has a border and the background fill; a
-            // primary has the primary fill and no border.
+            // Cancel (outline) is a tinted push button with no border; each
+            // state is a deeper tint of the text color.
             let outline = look(PushStyle::Outline, &k);
-            assert_eq!(outline.fill, k.control);
-            assert_eq!(outline.border, Some(k.quaternary));
-            // K-04: the hover is one visible step over the rest fill (at
-            // least 8 levels of 255, as light's 255 → 245), below pressed.
+            assert_eq!(outline.fill, k.push);
+            assert!(outline.border.is_none());
+            assert!(outline.hover.a > outline.fill.a);
+            assert!(outline.pressed.a > outline.hover.a);
+            // A select keeps the field frame; K-04: its hover is one visible
+            // step over the rest fill (at least 8 levels of 255), below
+            // pressed.
+            let field = field_look(&k);
+            assert_eq!(field.fill, k.control);
+            assert_eq!(field.border, Some(k.quaternary));
             let lum = |c: gpui::Hsla| gpui::Rgba::from(c).r * 255.;
-            let step = |c: gpui::Hsla| (lum(c) - lum(outline.fill)).abs();
-            assert!(
-                step(outline.hover) >= 8.,
-                "hover step {}",
-                step(outline.hover)
-            );
-            assert!(step(outline.pressed) > step(outline.hover));
+            let step = |c: gpui::Hsla| (lum(c) - lum(field.fill)).abs();
+            assert!(step(field.hover) >= 8., "hover step {}", step(field.hover));
+            assert!(step(field.pressed) > step(field.hover));
             let primary = look(PushStyle::Default, &k);
             assert_eq!(primary.fill, k.primary);
             assert!(primary.border.is_none());

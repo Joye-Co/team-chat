@@ -16,7 +16,7 @@ use gpui_component::{
 
 use super::widgets::{self, Status, answer};
 use crate::ui::native::sheet::sheet_status_error;
-use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_top};
 use crate::{
     app::{Changes, Services},
     copy::{common, fill, settings as s},
@@ -315,6 +315,15 @@ impl AccountPage {
         .detach();
     }
 
+    /// Self-test: the 设置登录邮箱 sheet after 发送验证码 to `to` (the code
+    /// slots and the sent line), without a server round trip.
+    pub fn preview_email_sent(&mut self, to: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.email_input
+            .update(cx, |st, cx| st.set_value(to.to_string(), window, cx));
+        self.email_sent_to = Some(to.to_string());
+        cx.notify();
+    }
+
     /// 添加… / 更改… : the 设置登录邮箱 sheet (the address, 发送验证码, then
     /// the six code slots; 取消 and 完成).
     pub fn open_email_sheet(this: Entity<Self>, window: &mut Window, cx: &mut App) {
@@ -343,7 +352,10 @@ impl AccountPage {
                 let sent = page.email_sent_to.clone();
                 let error = page.email_error.map(email_error_text);
                 let send = this.clone();
-                let mut fields = sheet_form().child(sheet_form_row(
+                // Label over the control (2.8 full-width row): the address
+                // and its button get the whole row, and the six code slots
+                // fit inside the group instead of running past its edge.
+                let mut fields = sheet_form().child(sheet_form_row_top(
                     s::EMAIL_FIELD,
                     div()
                         .w_full()
@@ -380,7 +392,7 @@ impl AccountPage {
                     cx,
                 ));
                 if let Some(to) = &sent {
-                    fields = fields.child(sheet_form_row(
+                    fields = fields.child(sheet_form_row_top(
                         s::EMAIL_CODE_FIELD,
                         div()
                             .w_full()
