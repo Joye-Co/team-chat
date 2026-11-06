@@ -620,6 +620,9 @@ pub mod motion {
     pub const BUSY_MIN: Duration = Duration::from_millis(500);
     /// Tooltip delay the first time.
     pub const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
+    /// A picker opened by hover closes this long after the pointer leaves
+    /// both its trigger and its panel, so crossing the gap keeps it open.
+    pub const HOVER_LEAVE: Duration = Duration::from_millis(250);
     /// Streaming caret: idle time before it blinks, and the blink half-period.
     pub const CARET_IDLE: Duration = Duration::from_millis(1000);
     pub const CARET_BLINK: Duration = Duration::from_millis(530);

@@ -167,6 +167,10 @@ pub struct TimelineView {
     /// The emoji picker is open for this message row: from the hover
     /// toolbar (`false`) or from the add pill under the reactions (`true`).
     reacting: Option<(String, bool)>,
+    /// The pointer is over the hover toolbar's add reaction (`0`) or over
+    /// its open picker (`1`); when both clear, `react_leave` closes it.
+    react_pointer: [bool; 2],
+    react_leave: Option<gpui::Task<()>>,
     /// Bot runs of the open topic, newest first.
     runs: Vec<crate::data::BotRunSummary>,
     /// Working runs at the last refresh, rows of runs that just ended (with
@@ -328,6 +332,8 @@ impl TimelineView {
             keyboard_row: false,
             key_focused: false,
             reacting: None,
+            react_pointer: [false; 2],
+            react_leave: None,
             runs: Vec::new(),
             live_shown: Vec::new(),
             live_leaving: Vec::new(),

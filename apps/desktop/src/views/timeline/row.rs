@@ -902,6 +902,7 @@ impl TimelineView {
         let m = message.clone();
         let close = cx.entity().downgrade();
         let open_key = key.to_string();
+        let picker_key = key.to_string();
         let popover = Popover::new(ElementId::Name(
             format!("react-picker-{key}-{from_pill}").into(),
         ))
@@ -919,6 +920,7 @@ impl TimelineView {
             close
                 .update(cx, |this, cx| {
                     this.reacting = open.then_some((key, from_pill));
+                    this.react_pointer[1] = false;
                     cx.notify();
                 })
                 .ok();
@@ -928,7 +930,19 @@ impl TimelineView {
             let m = m.clone();
             let me = me.clone();
             let dismiss = view.clone();
+            let pointer = view.clone();
+            let pointer_key = picker_key.clone();
             ui::menu_surface(cx)
+                .id("react-picker-panel")
+                .when(!from_pill, |el| {
+                    el.on_hover(move |hovered, _, cx| {
+                        let key = pointer_key.clone();
+                        let hovered = *hovered;
+                        pointer
+                            .update(cx, |this, cx| this.react_pointer(1, hovered, &key, cx))
+                            .ok();
+                    })
+                })
                 .w(ui::emoji::picker_width())
                 .flex_row()
                 .flex_wrap()
@@ -961,29 +975,54 @@ impl TimelineView {
             return popover.into_any_element();
         }
         // The hover toolbar's add reaction opens every emoji as soon as the
-        // pointer rests on it; a click still toggles it. It closes on a pick
-        // or a click outside.
+        // pointer rests on it; a click still toggles it. It closes on a pick,
+        // a click outside, or once the pointer has left both the button and
+        // the picker.
         let hover = cx.entity().downgrade();
         let hover_key = key.to_string();
         div()
             .id(ElementId::Name(format!("react-hover-{key}").into()))
             .on_hover(move |hovered, _, cx| {
-                if !*hovered {
-                    return;
-                }
                 let key = hover_key.clone();
+                let hovered = *hovered;
                 hover
-                    .update(cx, |this, cx| {
-                        let want = Some((key, false));
-                        if this.reacting != want {
-                            this.reacting = want;
-                            cx.notify();
-                        }
-                    })
+                    .update(cx, |this, cx| this.react_pointer(0, hovered, &key, cx))
                     .ok();
             })
             .child(popover)
             .into_any_element()
+    }
+
+    /// The pointer entered or left the hover toolbar's add reaction
+    /// (`slot` 0, which opens the picker) or its picker (`slot` 1). Once it
+    /// is over neither, the picker closes after [`theme::motion::HOVER_LEAVE`].
+    fn react_pointer(&mut self, slot: usize, hovered: bool, key: &str, cx: &mut Context<Self>) {
+        self.react_pointer[slot] = hovered;
+        let want = Some((key.to_string(), false));
+        if hovered {
+            self.react_leave = None;
+            if slot == 0 && self.reacting != want {
+                self.reacting = want;
+                self.react_pointer[1] = false;
+                cx.notify();
+            }
+            return;
+        }
+        if self.react_pointer.iter().any(|&p| p) || self.reacting != want {
+            return;
+        }
+        self.react_leave = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(theme::motion::HOVER_LEAVE)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.react_leave = None;
+                if !this.react_pointer.iter().any(|&p| p) && this.reacting == want {
+                    this.reacting = None;
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     /// Adds (`on`) or removes my reaction.
