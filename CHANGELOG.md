@@ -3,6 +3,22 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.3 (unreleased)
+
+Notes: [docs/releases/1.2.3.md](docs/releases/1.2.3.md). No D1 migration. Protocol: wording only
+in `docs/protocol.md` (a done card is posted only with proof). The server is redeployed: a run
+result with no tests, acceptance, pull requests or 产出 is posted as a text message, not a done
+card. 1.2.2 clients keep working.
+
+- 设置 › 快捷键 records and saves custom shortcuts.
+- Quoting a message mentions its sender.
+- A 产出 opened from a message opens beside the 话题, and the 产出 page goes back to it; HTML
+  产出 render live in the side pane and are hidden after leaving the 产出 page.
+- Card text renders Markdown; the done-card evidence nag is gone.
+- 设置登录邮箱 is a two-step sheet (email, then code) with a send spinner and animated steps.
+- Smoother settings window resize, keyboard-only focus rings, switch and pane motion, no
+  ellipsis on buttons, quieter select chevrons and borderless setting groups.
+
 ## 1.2.2 (2026-11-06)
 
 Notes: [docs/releases/1.2.2.md](docs/releases/1.2.2.md).
