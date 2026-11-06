@@ -3,7 +3,7 @@
 //! Usage:
 //!   desktop                          open the app on the chat-core provider (signs in, or
 //!                                    restores the saved session)
-//!   desktop --fake                   open the app with fake data
+//!   desktop --fake                   open the app with the sample team (fake data, 产出 included)
 //!   desktop --signed-out             start at the login view (fake provider)
 //!   desktop --selftest-smoke --report <path>
 //!       open the window with fake data without taking focus, render the long
@@ -217,6 +217,10 @@ fn main() {
             core.clone()
         } else if args.signed_out {
             fake::FakeProvider::signed_out()
+        } else if args.fake {
+            // --fake: the sample team of the screenshots (话题 with 产出, cards and runs), so
+            // every flow can be tried by hand without touching a real server.
+            fake::v2::V2Samples::new()
         } else {
             fake::FakeProvider::new()
         };
