@@ -791,6 +791,21 @@ pub fn open_email(
     Ok(handle)
 }
 
+/// The 设置登录邮箱 sheet while the code is being sent: the spinner.
+pub fn open_email_sending(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let account = view.read(cx).account().clone();
+        AccountPage::open_email_sheet(account.clone(), window, cx);
+        account.update(cx, |p, cx| p.preview_email_sending(cx));
+    });
+    Ok(handle)
+}
+
 /// The 设置登录邮箱 sheet after 发送验证码 to a long address.
 pub fn open_email_code(
     services: Services,
@@ -1093,6 +1108,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_email,
+    },
+    Scene {
+        name: "settings-email-sending",
+        about: "Settings: the 设置登录邮箱 sheet while 发送验证码 is on its way",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_email_sending,
     },
     Scene {
         name: "settings-email-code",

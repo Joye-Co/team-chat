@@ -39,6 +39,9 @@ use crate::{
 const DEVICE_ROWS_SHOWN: usize = 6;
 
 pub const NAME_MAX: usize = 64;
+
+/// How far a step of the email sheet travels as it enters.
+const EMAIL_STEP_TRAVEL: gpui::Pixels = gpui::px(24.);
 pub const ROLE_MAX: usize = 64;
 
 /// The form field a check failed on.
@@ -113,6 +116,12 @@ pub struct AccountPage {
     email_sent_to: Option<String>,
     email_busy: bool,
     email_error: Option<EmailError>,
+    /// Bumped on every step change of the email sheet, so the new step
+    /// plays its enter animation once.
+    email_step: u32,
+    /// The last step change went back (换个邮箱): the step slides in from
+    /// the leading side instead of the trailing one.
+    email_back: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -196,6 +205,8 @@ impl AccountPage {
             email_sent_to: None,
             email_busy: false,
             email_error: None,
+            email_step: 0,
+            email_back: false,
             _subscriptions: subscriptions,
         };
         this.fill_from_me(window, cx);
@@ -246,12 +257,22 @@ impl AccountPage {
         self.email_busy = true;
         self.email_error = None;
         let reply = self.services.provider.add_email_code(&email);
+        let started = std::time::Instant::now();
         cx.spawn_in(window, async move |this, cx| {
             let result = reply.await.unwrap_or(Err(EmailError::Other));
+            // The spinner stays at least BUSY_MIN, so a fast reply reads as
+            // "sent" rather than a flicker before the next step.
+            if let Some(rest) = crate::theme::motion::BUSY_MIN.checked_sub(started.elapsed()) {
+                cx.background_executor().timer(rest).await;
+            }
             let _ = this.update_in(cx, |this, window, cx| {
                 this.email_busy = false;
                 match result {
                     Ok(()) => {
+                        if this.email_sent_to.is_none() {
+                            this.email_step += 1;
+                            this.email_back = false;
+                        }
                         this.email_sent_to = Some(email);
                         this.email_code
                             .update(cx, |c, cx| c.set_value("", window, cx));
@@ -318,10 +339,18 @@ impl AccountPage {
 
     /// 换个邮箱: back to the address step, the address selected.
     fn edit_email_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.email_step += 1;
+        self.email_back = true;
         self.email_sent_to = None;
         self.email_error = None;
         let handle = self.email_input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Self-test: the address step while 发送验证码 is on its way.
+    pub fn preview_email_sending(&mut self, cx: &mut Context<Self>) {
+        self.email_busy = true;
         cx.notify();
     }
 
@@ -330,6 +359,7 @@ impl AccountPage {
     pub fn preview_email_sent(&mut self, to: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.email_input
             .update(cx, |st, cx| st.set_value(to.to_string(), window, cx));
+        self.email_step += 1;
         self.email_sent_to = Some(to.to_string());
         cx.notify();
     }
@@ -378,6 +408,8 @@ impl AccountPage {
                         PushSize::Large,
                     )
                     .w_full()
+                    .h(metrics::CODE_SLOT.1)
+                    .rounded(metrics::FIELD_RADIUS)
                 };
                 let link = |id: &'static str, label: &'static str| {
                     push_button(id, label, PushStyle::Link, PushSize::Small, cx)
@@ -397,13 +429,28 @@ impl AccountPage {
                             s::EMAIL_SHEET_HINT.to_string(),
                             NativeTextField::new("email-field", &page.email_input)
                                 .full_width()
+                                .size(crate::ui::native::FieldSize::Hero)
+                                .leading(crate::ui::icons::icon(
+                                    Sym::Mention,
+                                    tokens::icon::MD,
+                                    k.secondary,
+                                ))
                                 .error(error.is_some())
                                 .into_any_element(),
-                            Some(full_button("email-send", s::EMAIL_SEND, !busy).on_click(
-                                move |_, window, cx| {
+                            Some(
+                                full_button(
+                                    "email-send",
+                                    if busy {
+                                        s::EMAIL_SENDING
+                                    } else {
+                                        s::EMAIL_SEND
+                                    },
+                                    !busy,
+                                )
+                                .on_click(move |_, window, cx| {
                                     send.update(cx, |p, cx| p.send_email_code(window, cx))
-                                },
-                            )),
+                                }),
+                            ),
                             None,
                         )
                     }
@@ -477,24 +524,15 @@ impl AccountPage {
                         false
                     })
                     .on_cancel(|_, _, _| true)
-                    .child(
-                        div()
-                            .relative()
+                    .child({
+                        // The step below the icon slides in (24 pt from the
+                        // trailing side, or the leading side on 换个邮箱) and
+                        // fades, once per step change; the icon and ✕ stay.
+                        let step = div()
                             .w_full()
-                            .px(tokens::space::S32)
-                            .pt(tokens::space::S32)
-                            .pb(tokens::space::S24)
                             .flex()
                             .flex_col()
                             .items_center()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top(tokens::space::S12)
-                                    .right(tokens::space::S12)
-                                    .child(close),
-                            )
-                            .child(crate::ui::native::feedback::icon_box(Sym::Mention, cx))
                             .child(
                                 div()
                                     .pt(tokens::space::S16)
@@ -525,8 +563,44 @@ impl AccountPage {
                             })
                             .when_some(links, |d, l| {
                                 d.child(div().pt(tokens::space::S24).child(l))
-                            }),
-                    )
+                            });
+                        let (seq, back) = (page.email_step, page.email_back);
+                        let shift = if back {
+                            -EMAIL_STEP_TRAVEL
+                        } else {
+                            EMAIL_STEP_TRAVEL
+                        };
+                        let step = if seq == 0 {
+                            step.into_any_element()
+                        } else {
+                            crate::ui::motion::enter(
+                                ElementId::Name(format!("email-step-{seq}").into()),
+                                crate::theme::motion::SLOW,
+                                step.relative(),
+                                move |el, t| el.left(shift * (1. - t)),
+                                cx,
+                            )
+                        };
+                        div()
+                            .relative()
+                            .w_full()
+                            .px(tokens::space::S32)
+                            .pt(tokens::space::S32)
+                            .pb(tokens::space::S24)
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top(tokens::space::S12)
+                                    .right(tokens::space::S12)
+                                    .child(close),
+                            )
+                            .child(crate::ui::native::feedback::icon_box(Sym::Mention, cx))
+                            .child(step)
+                    })
             },
         );
     }

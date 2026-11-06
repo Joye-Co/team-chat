@@ -206,6 +206,7 @@ crate::copy! {
     EMAIL_SHEET_TITLE = "设置登录邮箱",
     EMAIL_SHEET_HINT = "我们会发一个 6 位验证码到这个邮箱，确认是你的。",
     EMAIL_SEND = "发送验证码",
+    EMAIL_SENDING = "正在发送…",
     EMAIL_RESEND = "重新发送",
     EMAIL_CODE_TITLE = "输入验证码",
     EMAIL_CODE_HINT = "验证码已发到 {email}\n10 分钟内有效。",
