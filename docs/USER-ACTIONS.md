@@ -57,6 +57,12 @@ code to `~/.config/team-chat/production/invite-*.txt`; the link is
 
 ## 3. Install the daemon on the Mac mini
 
+Since 1.2.1 the short way needs no terminal: install the app on the Mac mini, sign in as an
+owner, and click 用这台电脑 in 设置 › 机器 (on a Mac mini that runs a daemon copied by hand,
+the button says 改用应用里的版本 and keeps its machine and token). The app writes the config
+and token, installs the launchd service from the daemon inside the app, and the daemon updates
+with the app from then on. Then do step 6. The manual steps below still work.
+
 The daemon runs Jojo's coding-CLI runs. Jojo is set up as runner-backed with the label `mac-mini`
 but **disabled**, because its runtime is not chosen yet. Step 3.6 chooses it and enables it.
 
@@ -103,13 +109,12 @@ but **disabled**, because its runtime is not chosen yet. Step 3.6 chooses it and
 
    [runtimes.claude]          # keep the one you chose in step 1 (or both)
    kind = "claude"
-   permission_mode = "bypassPermissions"
 
    [runtimes.codex]
    kind = "codex"
-   sandbox = "danger-full-access"
-   approval_policy = "never"
    ```
+
+   AI members always run with every permission (no approvals); there is nothing to set.
 
 5. On the Mac mini, check, then install the launchd service (it starts at login and restarts by
    itself; logs in `~/Library/Logs`):

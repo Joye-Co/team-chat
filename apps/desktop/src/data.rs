@@ -1227,6 +1227,20 @@ pub struct MachineInfo {
     pub runtimes: Vec<String>,
 }
 
+/// Whether this Mac is one of the team's computers (设置 › 机器 › 用这台电脑).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThisMac {
+    /// This build has no daemon inside it (a debug build, the fake data): nothing to offer.
+    Unavailable,
+    /// No daemon service on this Mac yet.
+    NotSetUp,
+    /// The daemon service runs a daemon outside the app (one copied by hand): it does not
+    /// update with the app.
+    Elsewhere,
+    /// The daemon service runs the app's own daemon, which updates with the app.
+    Working,
+}
+
 /// A new machine: its credential and install command are shown once.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MachineCreated {
@@ -1758,6 +1772,16 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Owner: registers a machine.
     fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Whether this Mac runs the app's own daemon (read from disk, fast).
+    fn this_mac(&self) -> ThisMac {
+        ThisMac::Unavailable
+    }
+    /// Owner: makes this Mac one of the team's computers, with no terminal: registers it
+    /// (unless it has a daemon config already), writes the config and installs the service
+    /// from the app's own daemon.
+    fn use_this_mac(&self) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// My mute and notify level of a group, from the cache.

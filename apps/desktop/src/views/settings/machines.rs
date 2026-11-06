@@ -27,7 +27,7 @@ use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::Services,
     copy::{common, fill, settings as s},
-    data::{MachineCreated, MachineInfo},
+    data::{MachineCreated, MachineInfo, ThisMac},
     theme,
     ui::{
         Sym,
@@ -47,6 +47,10 @@ pub struct MachinesPage {
     services: Services,
     machines: Option<Vec<MachineInfo>>,
     status: Status,
+    /// Whether this Mac runs the app's own daemon (用这台电脑).
+    this_mac: ThisMac,
+    /// 用这台电脑 in progress or failed.
+    using: Status,
     /// The periodic reload; dropped with the pane.
     _poll: Task<()>,
 }
@@ -66,10 +70,13 @@ impl MachinesPage {
                 };
             }
         });
+        let this_mac = services.provider.this_mac();
         Self {
             services,
             machines: None,
             status: Status::Idle,
+            this_mac,
+            using: Status::Idle,
             _poll: poll,
         }
     }
@@ -86,6 +93,33 @@ impl MachinesPage {
     pub fn preview_loading(&mut self, cx: &mut Context<Self>) {
         self.machines = None;
         self.status = Status::Busy(s::LOADING.into());
+        cx.notify();
+    }
+
+    pub fn this_mac(&self) -> ThisMac {
+        self.this_mac
+    }
+
+    /// 用这台电脑: sets this Mac up with the app's own daemon, then reloads the list.
+    pub fn use_this_mac(&mut self, cx: &mut Context<Self>) {
+        if self.using.busy() {
+            return;
+        }
+        self.using = Status::Busy(s::THIS_MAC_SETTING_UP.into());
+        let reply = self.services.provider.use_this_mac();
+        cx.spawn(async move |this, cx| {
+            let result = answer(reply).await;
+            let _ = this.update(cx, |this, cx| {
+                this.this_mac = this.services.provider.this_mac();
+                match result {
+                    Ok(()) => this.using = Status::Done(s::THIS_MAC_DONE.into()),
+                    Err(e) => this.using = Status::from_error(e),
+                }
+                this.refresh(cx);
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -182,10 +216,56 @@ impl Render for MachinesPage {
             )
             .on_click(move |_, window, cx| Self::open_add(page.clone(), window, cx))
         });
+        // 用这台电脑: this Mac has no daemon yet, or runs one copied by hand that does not
+        // update with the app.
+        let use_label = match self.this_mac {
+            ThisMac::NotSetUp => Some(s::THIS_MAC_USE),
+            ThisMac::Elsewhere => Some(s::THIS_MAC_SWITCH),
+            ThisMac::Unavailable | ThisMac::Working => None,
+        };
+        let use_here = use_label.filter(|_| owner).map(|label| {
+            disabled_push(
+                push_button(
+                    "machine-use-this",
+                    label,
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                ),
+                self.using.busy(),
+                cx,
+            )
+            .loading(self.using.busy())
+            .on_click(cx.listener(|this, _, _, cx| this.use_this_mac(cx)))
+        });
         let mut header = SectionTitle::new(s::TEAM_COMPUTERS).description(s::TEAM_COMPUTERS_FOOTER);
-        if let Some(add) = add {
-            header = header.action(add);
+        if add.is_some() || use_here.is_some() {
+            header = header.action(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(tokens::space::S8)
+                    .children(use_here)
+                    .children(add),
+            );
         }
+        // Why this Mac is offered: a daemon copied by hand does not update with the app.
+        let this_mac_note = (owner && self.this_mac == ThisMac::Elsewhere && !self.using.busy())
+            .then(|| widgets::quiet(s::THIS_MAC_ELSEWHERE_HINT, cx));
+        let using = match &self.using {
+            Status::Failed(t) => Some(widgets::failed_alert(
+                "machine-use-this-failed",
+                s::THIS_MAC_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("machine-use-this-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.use_this_mac(cx))),
+                ),
+                cx,
+            )),
+            Status::Done(t) => Some(widgets::quiet(t.clone(), cx).into_any_element()),
+            _ => None,
+        };
         let body: gpui::AnyElement = match (&self.machines, &self.status) {
             (Some(list), _) if !list.is_empty() => {
                 header = header.count(list.len() as u32);
@@ -246,6 +326,8 @@ impl Render for MachinesPage {
                     .flex()
                     .flex_col()
                     .gap(tokens::space::S12)
+                    .children(this_mac_note)
+                    .children(using)
                     .child(body)
                     .children(reload_failed),
             ))
