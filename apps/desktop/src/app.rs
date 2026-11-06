@@ -928,6 +928,8 @@ impl Render for RootView {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
+        // A 产出 page this frame does not paint hides after it, even when no page paints.
+        crate::ui::web_embed::begin_window_frame(window, cx);
         // T-04: the toasts rest on the composers this window painted last.
         crate::views::composer::floor_frame(cx);
         let k = theme::colors(cx);

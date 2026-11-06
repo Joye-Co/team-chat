@@ -48,6 +48,13 @@ pub const SCENES: &[Scene] = &[
         },
         open: open_main,
     },
+    Scene {
+        name: "artifact-v2-leave",
+        about: "产出 page left for the first 群 once its page loaded: the 群 shows, no web view stays on top",
+        start: Start::V2,
+        setup: setup_leave,
+        open: open_main,
+    },
     // --- r2-trust ---
     Scene {
         name: "artifact-v2-choose",
@@ -144,4 +151,47 @@ pub fn ready(cx: &gpui::App) -> bool {
             && *s.phase() == crate::ui::web_embed::Phase::Ready
             && s.shown()
     })
+}
+
+/// `artifact-v2-leave`: after leaving the 产出 page, no page shows.
+pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
+    (name == "artifact-v2-leave").then_some(|_, cx| {
+        let left = crate::ui::web_embed::live(cx).len();
+        vec![if left == 0 {
+            Ok("no page shows after leaving the 产出 page".into())
+        } else {
+            Err(format!(
+                "{left} page(s) still show after leaving the 产出 page"
+            ))
+        }]
+    })
+}
+
+static LEFT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `artifact-v2-leave`: opens the 产出 page, and once its page shows, the first 群.
+fn setup_leave(s: &crate::app::Services, cx: &mut gpui::App) {
+    LEFT.store(false, std::sync::atomic::Ordering::SeqCst);
+    s.nav.update(cx, |nav, cx| {
+        nav.open_artifact(d::ART_REPORT.into(), None, cx)
+    });
+    let services = s.clone();
+    cx.spawn(async move |cx| {
+        for _ in 0..200 {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(100))
+                .await;
+            if cx.update(|cx| ready(cx)) {
+                cx.update(|cx| crate::selftest::scenes::open_first_group(&services, cx));
+                LEFT.store(true, std::sync::atomic::Ordering::SeqCst);
+                return;
+            }
+        }
+    })
+    .detach();
+}
+
+/// True once `artifact-v2-leave` left the loaded 产出 page.
+pub fn left(_: &gpui::App) -> bool {
+    LEFT.load(std::sync::atomic::Ordering::SeqCst)
 }

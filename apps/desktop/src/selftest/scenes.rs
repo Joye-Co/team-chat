@@ -1104,6 +1104,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     }
     // --- end inc-refs ---
     match name {
+        "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
         "web-embed-covered" => Some(|cx| embed_preview::ready(EmbedMode::Covered, cx)),
@@ -1293,6 +1294,7 @@ pub fn checks(name: &str) -> Option<Checks> {
     core_checks(name)
         .or_else(|| crate::views::topic_page::scenes::checks(name))
         .or_else(|| crate::views::cards::v21::scenes::checks(name))
+        .or_else(|| crate::views::artifact_page::scenes::checks(name))
         .or_else(|| {
             (name == "artifact-embed-states")
                 .then_some(crate::views::artifacts::state_scenes::embed_states_checks as Checks)
