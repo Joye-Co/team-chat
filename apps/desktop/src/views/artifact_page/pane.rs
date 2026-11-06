@@ -53,12 +53,14 @@ impl Render for ArtifactPane {
         };
         let shown = version.unwrap_or(detail.summary.version);
         // topic track: a 产出 with a provider preview (metrics, table, chart)
-        // draws as the Topic artboard's 产出 pane; the rest show the live page.
-        if self
-            .services
-            .provider
-            .artifact_preview(&id, shown)
-            .is_some()
+        // draws as the Topic artboard's 产出 pane; a web page always shows live
+        // (its scraped preview is only its text), and so do the rest.
+        if detail.summary.kind != crate::data::ArtifactKind::Page
+            && self
+                .services
+                .provider
+                .artifact_preview(&id, shown)
+                .is_some()
             && let Some(pane) =
                 crate::views::topic_page::output_pane::render(&self.services, &id, version, cx)
         {

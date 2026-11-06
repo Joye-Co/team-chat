@@ -1224,6 +1224,37 @@ fn sweep(wid: WindowId, frame: u64, _window: &mut Window, cx: &mut App) {
     cx.set_global(cache);
 }
 
+/// Call from a window's root view at the top of every render, before anything paints.
+///
+/// The sweep that hides unpainted pages is otherwise queued only by a page that paints,
+/// so leaving the last screen with a page on it (the 产出 page for a 话题 with none)
+/// would leave its native view on top of the window forever. While any page of this
+/// window shows, this starts a new frame and queues the sweep for it, so a page that
+/// this frame does not paint hides right after it.
+pub fn begin_window_frame(window: &mut Window, cx: &mut App) {
+    let wid = window.window_handle().window_id();
+    let shown = cx.try_global::<EmbedCache>().is_some_and(|c| {
+        c.entries
+            .iter()
+            .any(|((w, _), e)| *w == wid && !e.state.read(cx).parked)
+    });
+    if !shown {
+        return;
+    }
+    let frame = {
+        let f = cx
+            .default_global::<Covers>()
+            .windows
+            .entry(wid)
+            .or_default();
+        f.count += 1;
+        f.count
+    };
+    if cx.default_global::<EmbedCache>().sweeping.insert(wid) {
+        window.on_next_frame(move |window, cx| sweep(wid, frame, window, cx));
+    }
+}
+
 fn mark_painting(window: &Window, cx: &mut App) {
     let id = window.window_handle().window_id();
     cx.default_global::<Covers>()
