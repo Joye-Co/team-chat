@@ -471,7 +471,19 @@ impl Client {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        self.http.with_token(Some(token))
+        // Before the saved token is read (the Keychain at launch) there is none: a request
+        // then fails here with `NoToken` instead of reaching the server as `Bearer ` (401).
+        self.http.with_token((!token.is_empty()).then_some(token))
+    }
+
+    /// Whether the client has a token yet (it is read from the Keychain after launch).
+    pub fn has_token(&self) -> bool {
+        !self
+            .shared
+            .token
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     pub(crate) fn shared(&self) -> &Arc<Shared> {

@@ -256,7 +256,12 @@ impl CoreProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let entry = map.of(generation).entry(group_id.to_string()).or_default();
-        if !entry.in_flight && (entry.list.is_none() || entry.local_key != key) {
+        // Until the saved token is read at launch there is nothing to fetch with (the cache
+        // still shows); the connection change that follows draws the page again.
+        if a.client.has_token()
+            && !entry.in_flight
+            && (entry.list.is_none() || entry.local_key != key)
+        {
             entry.in_flight = true;
             entry.local_key = key;
             let handle = a.client.fetch_decisions_page(group_id, 50);
