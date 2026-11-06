@@ -515,7 +515,9 @@ mod tests {
             assert!(p.refused.is_some());
         });
         cx.simulate_keystrokes("k");
-        page.read_with(cx, |p, _| assert!(p.recording.is_some(), "K alone is refused"));
+        page.read_with(cx, |p, _| {
+            assert!(p.recording.is_some(), "K alone is refused")
+        });
         cx.simulate_keystrokes("cmd-shift-k");
         page.read_with(cx, |p, _| assert!(p.recording.is_none(), "recorded"));
         assert_eq!(keys(cx).as_deref(), Some("⇧⌘K"));
