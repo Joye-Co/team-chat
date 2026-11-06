@@ -36,8 +36,8 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            Empty, NativeType as _, PushSize, PushStyle, borderless_button, metrics, native_colors,
-            popup_button, push_button, tokens::avatar,
+            Empty, NativeType as _, PushSize, PushStyle, borderless_button, inline_popup, metrics,
+            native_colors, push_button, tokens::avatar,
         },
         sf_symbols::Sf,
     },
@@ -184,8 +184,8 @@ impl SideChat {
             .max()
     }
 
-    /// The h52 header (§2.2, §2.5): `单独问` and the member select h28 (max
-    /// 200, the name truncates, the full name in its tooltip) over the 12
+    /// The h52 header (§2.2, §2.5): `单独问` and the member as an inline
+    /// pop-up h28 (max 200, the name truncates, the full name in its tooltip) over the 12
     /// muted `只有你能看到`, and the 32 ghost close at the far right.
     fn header(
         &self,
@@ -199,36 +199,33 @@ impl SideChat {
         let services = self.services.clone();
         let bots = self.askable();
         let current = member.map(|m| m.id.clone());
-        let picker = popup_button(
-            "side-chat-member",
-            name.clone(),
-            PushSize::Small,
-            window,
-            cx,
-        )
-        .min_w_0()
-        .max_w(SELECT_MAX)
-        .named(fill(c::SIDE_CHAT_CHANGE_MEMBER, &[("name", &name)]))
-        .dropdown_menu(move |mut menu, _window, _cx| {
-            for m in &bots {
-                let services = services.clone();
-                let id = m.id.clone();
-                let label = match &m.role {
-                    Some(role) => format!("{} · {role}", m.name),
-                    None => m.name.clone(),
-                };
-                menu = menu.item(
-                    PopupMenuItem::new(label)
-                        .checked(current.as_deref() == Some(m.id.as_str()))
-                        .on_click(move |_, _, cx| {
-                            services.nav.update(cx, |nav, cx| {
-                                nav.set_right_pane(RightPane::SideChat(id.clone()), cx)
-                            })
-                        }),
-                );
-            }
-            menu
-        });
+        // The member reads as the rest of the title, `单独问 Jojo ⌄`: an
+        // inline pop-up in title 3, not a framed field.
+        let picker = inline_popup("side-chat-member", name.clone(), window, cx)
+            .n_title3()
+            .min_w_0()
+            .max_w(SELECT_MAX)
+            .named(fill(c::SIDE_CHAT_CHANGE_MEMBER, &[("name", &name)]))
+            .dropdown_menu(move |mut menu, _window, _cx| {
+                for m in &bots {
+                    let services = services.clone();
+                    let id = m.id.clone();
+                    let label = match &m.role {
+                        Some(role) => format!("{} · {role}", m.name),
+                        None => m.name.clone(),
+                    };
+                    menu = menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(current.as_deref() == Some(m.id.as_str()))
+                            .on_click(move |_, _, cx| {
+                                services.nav.update(cx, |nav, cx| {
+                                    nav.set_right_pane(RightPane::SideChat(id.clone()), cx)
+                                })
+                            }),
+                    );
+                }
+                menu
+            });
         let services = self.services.clone();
         div()
             .flex_none()

@@ -30,12 +30,11 @@ use crate::{
     ui::{
         MemberAvatar, Sym,
         native::{
-            BadgeState, PushSize, StatusBadge, native_colors,
+            BadgeState, StatusBadge, inline_popup, native_colors,
             overlays::{
                 SpotlightField, spot, spotlight, spotlight_divider, spotlight_ink, spotlight_row,
                 spotlight_section,
             },
-            popup_button,
         },
     },
     views::{
@@ -811,7 +810,7 @@ impl AskPalette {
         let current = self.target_group(Some(&member), cx).map(|(id, _)| id);
         let label = format!("{} {name}", c::ASK_SEND_TO);
         Some(
-            popup_button("ask-target", label.clone(), PushSize::Regular, window, cx)
+            inline_popup("ask-target", label.clone(), window, cx)
                 .max_w(TARGET_NAME_MAX)
                 .tooltip(label)
                 .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
