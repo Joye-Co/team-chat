@@ -111,6 +111,8 @@ fn runner_request(runner: RunnerSetup) -> SetBotRunnerRequest {
         ),
         repo,
         base_branch: non_empty(runner.base_branch),
+        // Always sent: `null` lets any computer run it again.
+        machine_id: Some(non_empty(runner.machine_id)),
         ..Default::default()
     }
 }
@@ -125,6 +127,7 @@ pub(super) fn runner_setup(r: &proto::BotRunner) -> RunnerSetup {
             .as_ref()
             .and_then(|repo| repo.url.clone().or_else(|| repo.path.clone())),
         base_branch: r.base_branch.clone(),
+        machine_id: r.machine_id.clone(),
     }
 }
 

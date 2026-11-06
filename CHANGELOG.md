@@ -3,6 +3,24 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.2 (unreleased)
+
+Notes: [docs/releases/1.2.2.md](docs/releases/1.2.2.md).
+
+D1 migration `0010_runner_machine` (`bot_runners.machine_id`, nullable; 1.2.1 reads the table
+unchanged). Protocol, additive: `BotRunner.machineId?` and `SetBotRunnerRequest.machineId?`
+(absent keeps, `null` clears). 1.2.1 clients and daemons keep working; a 1.2.1 client that saves
+a runner keeps its machine.
+
+- An owner picks the computer an AI member works on (`machineId`): 设置 › 成员 › 编辑 › 运行设置 ›
+  在哪台电脑干活 (任意一台空闲电脑, or one computer; this Mac is marked 这台电脑). A pinned runner
+  runs only on that machine, whatever its labels; revoking the machine unpins it.
+- 设置 › 机器 marks this Mac's row 这台电脑, and its ⋯ menu has 重新启动 (restarts the daemon
+  service, so a daemon from before 1.2.1 runs the app's current one).
+- Checked end to end on staging with a real daemon whose `daemon.toml` still said
+  `acceptEdits`: a runner pinned to it with a label no machine has got the run there, and the run
+  published an HTML 产出 with `chat-run` without asking.
+
 ## 1.2.1 (2026-11-06)
 
 Notes: [docs/releases/1.2.1.md](docs/releases/1.2.1.md). No server or protocol change; the

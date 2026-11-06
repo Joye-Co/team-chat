@@ -685,6 +685,8 @@ pub mod size {
     pub const SELECT: Pixels = height::DEFAULT;
     /// One width for every select in a column (§2.8).
     pub const SELECT_WIDTH: Pixels = px(160.);
+    /// A pop-up button whose choices are names (a computer, with 这台电脑 after it).
+    pub const SELECT_WIDE: Pixels = px(280.);
     /// Invite code box: 40 × 48.
     pub const INVITE_BOX: (Pixels, Pixels) = (px(40.), px(48.));
     /// Composer: p 8 + one 20 line + 8 + the h28 action row + p 8.

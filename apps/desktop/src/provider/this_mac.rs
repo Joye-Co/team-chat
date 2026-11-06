@@ -220,6 +220,41 @@ pub(super) fn merge_path(from_shell: &str, home: &Path, exists: impl Fn(&Path) -
     parts.join(":")
 }
 
+/// The machine id in this Mac's daemon config (`machine_id = "…"`), if it has one.
+pub(super) fn machine_id() -> Option<String> {
+    machine_id_in(&std::fs::read_to_string(config_path()).ok()?)
+}
+
+pub(super) fn machine_id_in(config: &str) -> Option<String> {
+    config.lines().find_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        if k.trim() != "machine_id" {
+            return None;
+        }
+        let v = v.split('#').next()?.trim().trim_matches('"').trim();
+        (!v.is_empty()).then(|| v.to_string())
+    })
+}
+
+/// Restarts the daemon service now (`launchctl kickstart -k`): it starts again from the
+/// daemon file on disk, so a daemon from before 1.2.1 (which does not restart itself after
+/// an app update) runs the app's current one.
+pub(super) fn restart() -> Result<(), String> {
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    let target = format!("gui/{uid}/{}.daemon", env!("PRODUCT_BUNDLE_ID"));
+    let out = Command::new("/bin/launchctl")
+        .args(["kickstart", "-k", &target])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("launchctl: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// A new machine for this Mac: its id, name, labels and token.
 pub(super) struct NewMachine {
     pub server_url: String,
@@ -308,6 +343,14 @@ mod tests {
         assert_eq!(state_of(Some(bundled), Some(mine)), ThisMac::Working);
         let other = "<array>\n<string>/Users/a/bin/x-daemon</string>";
         assert_eq!(state_of(Some(bundled), Some(other)), ThisMac::Elsewhere);
+    }
+
+    #[test]
+    fn the_machine_id_comes_from_the_config() {
+        let c = "server_url = \"https://x\"\nmachine_id = \"01M6N4A0P5\"  # mine\nname = \"m\"\n";
+        assert_eq!(machine_id_in(c).as_deref(), Some("01M6N4A0P5"));
+        assert_eq!(machine_id_in("name = \"m\"\n"), None);
+        assert_eq!(machine_id_in("machine_id = \"\"\n"), None);
     }
 
     #[test]

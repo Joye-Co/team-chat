@@ -124,6 +124,9 @@ export const SetBotRunnerRequest = z.object({
   envAllowlist: z.array(EnvName).max(50).optional(),
   /** Absent = true. */
   enabled: z.boolean().optional(),
+  /** 1.2.2: the one machine that runs this bot (labels then do not count). Absent keeps the
+   * stored machine; null lets any machine with the labels run it. */
+  machineId: Id.nullable().optional(),
 });
 export type SetBotRunnerRequest = z.infer<typeof SetBotRunnerRequest>;
 
@@ -138,6 +141,8 @@ export const BotRunner = z.object({
   envAllowlist: z.array(z.string()),
   enabled: z.boolean(),
   updatedAt: Millis,
+  /** 1.2.2: the one machine that runs this bot; absent = any machine with the labels. */
+  machineId: Id.optional(),
 });
 export type BotRunner = z.infer<typeof BotRunner>;
 

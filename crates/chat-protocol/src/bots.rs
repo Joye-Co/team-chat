@@ -7,7 +7,7 @@ use crate::entities::{Millis, Seq};
 use crate::limits::{Validation, ValidationError, check_chars, check_name};
 use crate::machine::{CliInfo, Health, RunLogEntry};
 use crate::message::ArtifactRef;
-use crate::serde_util::non_null;
+use crate::serde_util::{non_null, nullable};
 
 pub const MAX_LABELS: usize = 20;
 
@@ -534,6 +534,14 @@ pub struct SetBotRunnerRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub enabled: Option<bool>,
+    /// 1.2.2: the one machine that runs this bot (labels then do not count). Absent keeps the
+    /// stored machine; `Some(None)` = `null` lets any machine with the labels run it.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub machine_id: Option<Option<String>>,
 }
 
 impl SetBotRunnerRequest {
@@ -581,6 +589,13 @@ pub struct BotRunner {
     pub env_allowlist: Vec<String>,
     pub enabled: bool,
     pub updated_at: Millis,
+    /// 1.2.2: the one machine that runs this bot; absent = any machine with the labels.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub machine_id: Option<String>,
 }
 
 /// A machine that runs coding CLIs for bots (settings: 机器).
