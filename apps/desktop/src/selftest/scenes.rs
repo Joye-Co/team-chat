@@ -1020,6 +1020,32 @@ const V2_SHARED: &[Scene] = &[
         open: crate::views::settings::appearance::open_scene,
     },
     // cards-v2: moved to the cards v2 track's slice (views/cards/v2/scenes.rs).
+    Scene {
+        name: "artifact-beside-topic",
+        about: "a 产出 clicked in a message opens in the right pane; the 话题 stays",
+        start: Start::V2,
+        setup: |s, cx| {
+            use crate::fake::v2::{ART_RECONNECT, DEV, T_RECONNECT};
+            s.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx);
+                nav.show_artifact(ART_RECONNECT.into(), Some(2), cx);
+            })
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "artifact-page-back",
+        about: "the 产出 page opened from a 话题: ‹ 回到话题 before the title",
+        start: Start::V2,
+        setup: |s, cx| {
+            use crate::fake::v2::{ART_RECONNECT, DEV, T_RECONNECT};
+            s.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx);
+                nav.open_artifact(ART_RECONNECT.into(), Some(2), cx);
+            })
+        },
+        open: open_main,
+    },
 ];
 
 // --- inc-host track: the 产出 page host ---
