@@ -165,7 +165,7 @@ crate::copy! {
     GALLERY_S_DIFF = "对比",
     GALLERY_S_DIFF_NOTE = "改动直接在卡片里看。只展开最关键的一段；完整改动去 PR。",
     GALLERY_S_EVIDENCE = "证据",
-    GALLERY_S_EVIDENCE_NOTE = "做完了要带证据：截图、录屏、测试结果。没有证据时明说，不用红色。",
+    GALLERY_S_EVIDENCE_NOTE = "有证据就附上：截图、录屏、测试结果。请人审改动却没附证据时明说，不用红色。",
     GALLERY_S_REFS = "链接",
     GALLERY_S_REFS_NOTE = "PR、产出、话题、成员用同一种引用行：符号、名字、一行说明、右侧状态。删了也留下一行。",
     GALLERY_S_ACK = "轻回应",
