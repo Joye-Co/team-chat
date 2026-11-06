@@ -1147,7 +1147,8 @@ Rules:
   started; the newest version each; at most 10). A GitHub pull request URL in the result that
   the topic has no link for yet becomes a `topic.linked` (state `open`, no checks) before the
   card is posted; the GitHub adapter later replaces it with the real state. A card that does not fit the Card v2 limits
-  falls back to a text message. Its v1 `card` is the derived one without the fallback text
+  falls back to a text message, and so does a result with no `tests`, acceptance, pull request
+  or 产出 block (a plain answer is a text message, not a card). Its v1 `card` is the derived one without the fallback text
   block and the `result` block (the message body holds the result, and 1.0.x draws the body).
   Side chat runs answer with a text message.
 - `usage` and `durationMs` are set when the run ends, from `run.done` (also when `run.done`

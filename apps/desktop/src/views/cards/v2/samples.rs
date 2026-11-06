@@ -772,7 +772,7 @@ fn all() -> Vec<Sample> {
             "v": 2, "rev": 1, "intent": "done", "title": "改好了：重连后不再重复",
             "fallback": "截图、录屏和测试结果都在",
             "blocks": [
-                { "type": "text", "id": "why", "text": "原因是客户端重连后从旧的 seq 重新拉取，服务器把已经收到的消息又推了一遍。现在按 seq 去重，重连时从最后一个确认过的 seq 继续。" },
+                { "type": "text", "id": "why", "text": "原因是客户端重连后从**旧的 seq** 重新拉取，服务器把已经收到的消息又推了一遍。\n\n改法：\n- **去重**：按 seq 去掉重复的消息\n- **续传**：重连时从最后一个确认过的 seq 继续" },
                 { "type": "evidence", "id": "s1", "label": "断网前", "fileId": "f-shot-1",
                   "detail": "#1201 小王：能复现了\n#1202 Forge：收到\n#1203 李雪：周四发" },
                 { "type": "evidence", "id": "s2", "label": "重连后 · 修复前", "fileId": "f-shot-2",
@@ -794,9 +794,18 @@ fn all() -> Vec<Sample> {
         at(10, 8),
         None,
         json!({
-            "v": 2, "rev": 1, "intent": "done", "title": "告警规则调好了",
-            "fallback": "Watch 交付",
-            "blocks": [{ "type": "text", "id": "what", "text": "同一个群 5 分钟内的重复告警，合并成一条再发。" }]
+            "v": 2, "rev": 1, "intent": "ask", "title": "告警合并，请你审",
+            "fallback": "Watch 请你审",
+            "ask": { "from": [ME] },
+            "blocks": [
+                { "type": "text", "id": "what", "text": "同一个群 5 分钟内的重复告警，合并成一条再发。" },
+                { "type": "ref", "id": "p70", "label": "告警合并", "target": { "kind": "pr",
+                  "url": "https://github.com/example/qqbot/pull/70", "repo": "example/qqbot", "number": 70 } }
+            ],
+            "actions": [
+                { "id": "approve", "label": "通过", "style": "primary" },
+                { "id": "changes", "label": "要改", "kind": "cancel" }
+            ]
         }),
     ));
     out.push(sample(

@@ -212,11 +212,16 @@ pub(crate) fn block(
 ) -> AnyElement {
     let k = theme::colors(cx);
     match b {
+        // Bots write Markdown here, like in a message: draw it the same way.
         CardV2Block::Text { text, .. } => div()
+            .w_full()
             .text_size(crate::ui::native::tokens::text::UI.0)
             .line_height(px(22.))
             .text_color(k.ink_2)
-            .child(text.clone())
+            .child(
+                crate::markdown::message_body(ctx.id(format!("text-{ix}")), text.clone(), &[])
+                    .w_full(),
+            )
             .into_any_element(),
         CardV2Block::Fields { fields, .. } => fields_grid(fields, cx),
         CardV2Block::Table { columns, rows, .. } => {
@@ -2543,14 +2548,12 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         .into_any_element()
 }
 
-/// `这次没有附证据` + `让 X 补上`: a result of work (a done card with no data
-/// blocks, or a change to review) that carries no evidence. Neutral, never
-/// red.
+/// `这次没有附证据` + `让 X 补上`: a change to review (an ask card with one
+/// pull request) that carries no proof of testing. Neutral, never red. A done
+/// card never shows it: most answers are not code changes, and the nag on
+/// every answer read as noise.
 fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let blocks = ctx.card.all_blocks();
-    let any_evidence = blocks
-        .iter()
-        .any(|b| matches!(b, CardV2Block::Evidence { .. }));
     // Proof of testing: a screenshot, a recording, a link or a result line.
     let proof = blocks.iter().any(|b| {
         matches!(
@@ -2586,22 +2589,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         && prs == 1
         && !proof
         && !blocks.iter().any(|b| matches!(b, CardV2Block::Diff { .. }));
-    let data = blocks.iter().any(|b| {
-        matches!(
-            b,
-            CardV2Block::Metric { .. }
-                | CardV2Block::Chart { .. }
-                | CardV2Block::Table { .. }
-                | CardV2Block::Plan { .. }
-                | CardV2Block::Ref { .. }
-                | CardV2Block::Diff { .. }
-                | CardV2Block::Draft { .. }
-                | CardV2Block::Image { .. }
-                | CardV2Block::Fields { .. }
-        )
-    });
-    let done = ctx.card.intent == CardIntent::Done && !data && !any_evidence;
-    if !(done || change) || matches!(ctx.state, CardState::Superseded | CardState::Expired) {
+    if !change || matches!(ctx.state, CardState::Superseded | CardState::Expired) {
         return None;
     }
     let a = ctx.answerer();

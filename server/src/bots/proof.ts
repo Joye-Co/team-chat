@@ -164,6 +164,15 @@ export function doneCard(opts: {
 }
 
 /**
+ * A done card has something to show beyond the result text: test counts, acceptance items, pull
+ * requests or 产出. A result without any is an answer, not a delivery, and goes out as a text
+ * message: a card around a plain answer only frames it.
+ */
+export function hasProof(card: CardV2): boolean {
+  return card.blocks.some((b) => b.id !== "result");
+}
+
+/**
  * The v1 card 1.0.x clients get for a done card: the derived one without the fallback text
  * and the `result` block. The message body holds the result, and 1.0.x draws it above the card.
  */
