@@ -143,8 +143,20 @@ impl MessageExtra for ArtifactRefsExtra {
                         ui::icon(Sym::OpenExternal, theme::icon::HEADER, k.text_2)
                             .into_any_element()
                     })
-                    .on_click(move |_, _, cx| {
-                        window::open_artifact(&provider, &id, Some(version), cx)
+                    .on_click(move |_, win, cx| {
+                        // In the right pane next to the 话题 (the conversation stays); a
+                        // separate 产出 window only where there is no main window.
+                        let nav = win
+                            .root::<crate::app::RootView>()
+                            .flatten()
+                            .map(|r| r.read(cx).services().nav.clone());
+                        match nav {
+                            Some(nav) => {
+                                let id = id.clone();
+                                nav.update(cx, |n, cx| n.show_artifact(id, Some(version), cx))
+                            }
+                            None => window::open_artifact(&provider, &id, Some(version), cx),
+                        }
                     }),
             );
         }

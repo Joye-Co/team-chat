@@ -72,6 +72,8 @@ pub struct ToolbarRow {
     groups: Vec<AnyElement>,
     leading_inset: gpui::Pixels,
     inactive: Option<bool>,
+    /// A control before the title (the 产出 page's back button).
+    leading: Option<AnyElement>,
 }
 
 impl ToolbarRow {
@@ -83,7 +85,14 @@ impl ToolbarRow {
             groups: Vec::new(),
             leading_inset: metrics::TOOLBAR_LEADING,
             inactive: None,
+            leading: None,
         }
+    }
+
+    /// A control before the title, such as a back button.
+    pub fn leading(mut self, el: impl IntoElement) -> Self {
+        self.leading = Some(el.into_any_element());
+        self
     }
 
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
@@ -137,6 +146,7 @@ impl RenderOnce for ToolbarRow {
             .flex()
             .items_center()
             .gap(metrics::TOOLBAR_GROUP_GAP)
+            .children(self.leading)
             .child(
                 // One line on the traffic-light line: the title, then the
                 // subtitle after it (owner decision, v18).

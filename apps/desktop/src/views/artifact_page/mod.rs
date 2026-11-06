@@ -378,6 +378,23 @@ fn version_note(services: &Services, detail: &ArtifactDetail, v: u32) -> Option<
         })
 }
 
+/// What the 产出 page's back button says: where it goes back to.
+pub fn back_label(
+    from: Option<&(
+        Option<crate::app::Place>,
+        Option<(crate::data::GroupId, crate::data::TopicId)>,
+    )>,
+) -> &'static str {
+    use crate::app::Place;
+    match from {
+        Some((_, Some(_))) => c::ARTIFACT_BACK_TOPIC,
+        Some((Some(Place::Group(_)), None)) => c::ARTIFACT_BACK_GROUP,
+        Some((Some(Place::Desk | Place::Todo), None)) => c::ARTIFACT_BACK_DESK,
+        Some((Some(Place::Members(_)), None)) => c::ARTIFACT_BACK_MEMBERS,
+        _ => c::ARTIFACT_BACK_LIST,
+    }
+}
+
 /// `今天 09:40`, `昨天` or `10-31`.
 fn version_time(now: Millis, at: Millis) -> String {
     kit::day_and_time(now, at, false)
@@ -537,9 +554,23 @@ impl ArtifactPage {
             cx.notify();
         }));
         let leading = content_leading(&self.services, cx);
+        // Back to where the page was opened from: the 话题 whose 产出 it is, mostly.
+        let back_to = back_label(self.services.nav.read(cx).artifact_return.as_ref());
+        let nav = self.services.nav.clone();
+        let back = nk::toolbar_item(
+            "artifact-back",
+            crate::ui::sf_symbols::Sf::ChevronLeft,
+            back_to,
+            nk::ToolbarItemKind::Plain,
+            active,
+            window,
+            cx,
+        )
+        .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.back_from_artifact(cx)));
         nk::ToolbarRow::new(a.title.clone())
             .subtitle(subtitle)
             .leading_inset(leading)
+            .leading(nk::ToolbarGroup::new([back]))
             .group(crate::views::group_page::rows::toolbar_capsule(picker, cx))
             .group(nk::ToolbarGroup::new([share, open_window, side_chat]))
             .group(crate::views::group_page::rows::toolbar_separator(cx))

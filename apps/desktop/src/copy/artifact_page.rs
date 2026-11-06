@@ -3,6 +3,11 @@
 crate::copy! {
     ARTIFACTS_TITLE = "产出",
     ARTIFACT_STORY = "来龙去脉",
+    ARTIFACT_BACK_TOPIC = "回到话题",
+    ARTIFACT_BACK_GROUP = "回到群",
+    ARTIFACT_BACK_DESK = "回到首页",
+    ARTIFACT_BACK_MEMBERS = "回到成员",
+    ARTIFACT_BACK_LIST = "回到产出",
     ARTIFACT_FROM_TOPIC = "来自话题",
     ARTIFACT_MADE_BY = "做的人",
     ARTIFACT_ASKED_BY = "要求",
