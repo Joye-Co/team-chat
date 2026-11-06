@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.2.1 (unreleased)
+## 1.2.1 (2026-11-06)
 
 Notes: [docs/releases/1.2.1.md](docs/releases/1.2.1.md). No server or protocol change; the
 server is redeployed with `DEPLOY_VERSION=1.2.1` so `/v1/health` matches the release.
