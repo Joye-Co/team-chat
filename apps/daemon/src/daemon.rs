@@ -121,6 +121,10 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         tokio::time::Instant::now() + Duration::from_secs(1800),
         Duration::from_secs(1800),
     );
+    // A new program file (the app updated itself): restart once no run is active.
+    let mut exe = crate::selfupdate::Watch::current();
+    let mut update_check =
+        tokio::time::interval_at(tokio::time::Instant::now() + UPDATE_CHECK, UPDATE_CHECK);
     tokio::pin!(shutdown);
     log!("daemon started: {} runtimes", d.clis.len());
     loop {
@@ -131,6 +135,13 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             Some(ev) = link_rx.recv() => d.on_link(ev),
             Some((id, msg)) = run_rx.recv() => d.on_run(id, msg),
             _ = heartbeat.tick() => d.heartbeat(hb),
+            _ = update_check.tick() => {
+                // While runs are active the change stays ready; the next idle check restarts.
+                if exe.as_mut().is_some_and(|w| w.check()) && d.active_count() == 0 {
+                    log!("a new version of the daemon is installed; restarting");
+                    break;
+                }
+            }
             _ = cleanup.tick() => {
                 let cfg = d.cfg.clone();
                 let active: Vec<String> = d.runs.keys().cloned().collect();
@@ -159,6 +170,9 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     }
     Ok(())
 }
+
+/// How often the daemon looks for a new version of its own program file.
+const UPDATE_CHECK: Duration = Duration::from_secs(60);
 
 /// Unfinished runs are recovered at start; finished ones too when they ended this recently
 /// (the server may not have acked their last frames).
