@@ -211,6 +211,7 @@ crate::copy! {
     EMAIL_CODE_HINT = "验证码已发到 {email}\n10 分钟内有效。",
     EMAIL_NOT_RECEIVED = "没收到？",
     EMAIL_OTHER_ADDRESS = "换个邮箱",
+    EMAIL_VERIFYING = "正在验证…",
     EMAIL_FAILED = "没有加载出登录邮箱",
     EMAIL_BAD_ADDRESS = "邮箱地址不对",
     EMAIL_WRONG_CODE = "验证码不对或已过期",
