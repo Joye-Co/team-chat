@@ -29,7 +29,7 @@ use crate::{
     copy::{common, fill, settings as s},
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, BotMemberEdit, Change, InviteCreated,
-        InviteRequest, Member, MemberKind, MemberLevel, RunnerChange, RunnerSetup,
+        InviteRequest, MachineInfo, Member, MemberKind, MemberLevel, RunnerChange, RunnerSetup,
     },
     theme,
     ui::{
@@ -85,6 +85,8 @@ fn one_line(text: &str) -> String {
 
 /// The width of every select in the 成员 tab (2.8: one value column).
 const SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDTH;
+/// 在哪台电脑干活 shows a computer name and 这台电脑.
+const MACHINE_SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDE;
 /// The spend limit field (2.8 number field).
 const SPEND_WIDTH: gpui::Pixels = metrics::LABEL_COLUMN;
 
@@ -1270,6 +1272,24 @@ fn clean_runner(r: &RunnerSetup) -> RunnerSetup {
             .collect(),
         repo: text(&r.repo),
         base_branch: text(&r.base_branch),
+        machine_id: text(&r.machine_id),
+    }
+}
+
+/// How 在哪台电脑干活 names a choice: 任意一台空闲的电脑, a computer by name (this Mac
+/// marked 这台电脑), or a computer that is no longer in the list.
+pub fn machine_choice_text(
+    id: Option<&str>,
+    machines: &[MachineInfo],
+    this: Option<&str>,
+) -> String {
+    let Some(id) = id else {
+        return s::RUNNER_MACHINE_ANY.to_string();
+    };
+    match machines.iter().find(|m| m.id == id) {
+        Some(m) if this == Some(id) => fill(s::RUNNER_MACHINE_THIS, &[("name", &m.name)]),
+        Some(m) => m.name.clone(),
+        None => s::RUNNER_MACHINE_GONE.to_string(),
     }
 }
 
@@ -1329,6 +1349,12 @@ pub struct BotForm {
     branch: Entity<InputState>,
     /// Runtime names that machines report.
     known_runtimes: Vec<String>,
+    /// The team's computers, for 在哪台电脑干活.
+    machines: Vec<MachineInfo>,
+    /// This Mac's machine id, marked 这台电脑 in the list.
+    this_machine: Option<String>,
+    /// The one computer picked to run this member; `None` = any free computer.
+    machine: Option<String>,
     /// The character picked by hand; until then [`default_character`] for the typed name.
     character: Option<CharacterId>,
     status: Status,
@@ -1343,13 +1369,15 @@ pub struct BotForm {
 impl BotForm {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let machines = services.provider.machines();
+        let this_machine = services.provider.this_machine_id();
         cx.spawn(async move |this, cx| {
             if let Ok(list) = answer(machines).await {
-                let mut known: Vec<String> = list.into_iter().flat_map(|m| m.runtimes).collect();
+                let mut known: Vec<String> = list.iter().flat_map(|m| m.runtimes.clone()).collect();
                 known.sort();
                 known.dedup();
                 let _ = this.update(cx, |this, cx| {
                     this.known_runtimes = known;
+                    this.machines = list;
                     cx.notify();
                 });
             }
@@ -1383,6 +1411,9 @@ impl BotForm {
             services,
             runner: false,
             known_runtimes: Vec::new(),
+            machines: Vec::new(),
+            this_machine,
+            machine: None,
             character: None,
             status: Status::Idle,
             created: None,
@@ -1462,6 +1493,7 @@ impl BotForm {
         };
         set(&self.runtime, r.runtime.clone(), window, cx);
         set(&self.labels, r.labels.join(", "), window, cx);
+        self.machine = r.machine_id.clone();
         set(&self.repo, r.repo.clone().unwrap_or_default(), window, cx);
         set(
             &self.branch,
@@ -1469,6 +1501,14 @@ impl BotForm {
             window,
             cx,
         );
+    }
+
+    /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
+    fn pick_machine(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        self.machine = id;
+        self.labels
+            .update(cx, |st, cx| st.set_value(String::new(), window, cx));
+        cx.notify();
     }
 
     /// The runner the fields describe; `None` when the member does not work
@@ -1484,6 +1524,7 @@ impl BotForm {
             labels: widgets::split_labels(&self.value(&self.labels, cx)),
             repo: (!repo.is_empty()).then_some(repo),
             base_branch: (!branch.is_empty()).then_some(branch),
+            machine_id: self.machine.clone(),
         })
     }
 
@@ -1827,6 +1868,40 @@ impl Render for BotForm {
                     })
                     .into_any_element()
             };
+            // 在哪台电脑干活: one of the team's computers, or any free one. Picking a
+            // computer (or 任意) replaces the old hand-typed labels.
+            let picked = self.machine.clone();
+            let shown = machine_choice_text(
+                picked.as_deref(),
+                &self.machines,
+                self.this_machine.as_deref(),
+            );
+            let mut options: Vec<(Option<String>, String)> =
+                vec![(None, s::RUNNER_MACHINE_ANY.to_string())];
+            options.extend(self.machines.iter().map(|m| {
+                (
+                    Some(m.id.clone()),
+                    machine_choice_text(Some(&m.id), &self.machines, self.this_machine.as_deref()),
+                )
+            }));
+            let form = cx.entity();
+            let machine =
+                widgets::popup_fixed("member-machine", shown, MACHINE_SELECT_WIDTH, window, cx)
+                    .dropdown_menu(move |menu, _, _| {
+                        options.iter().fold(menu, |menu, (id, text)| {
+                            let (id, form) = (id.clone(), form.clone());
+                            menu.item(
+                                PopupMenuItem::new(text.clone())
+                                    .checked(id == picked)
+                                    .on_click(move |_, window, cx| {
+                                        form.update(cx, |f, cx| {
+                                            f.pick_machine(id.clone(), window, cx)
+                                        })
+                                    }),
+                            )
+                        })
+                    })
+                    .into_any_element();
             body = body.child(
                 div()
                     .flex()
@@ -1835,13 +1910,7 @@ impl Render for BotForm {
                     .child(
                         sheet_form()
                             .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
-                            .child(field_row(
-                                s::RUNNER_LABELS,
-                                "member-labels",
-                                &self.labels,
-                                false,
-                                cx,
-                            ))
+                            .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
                             .child(field_row(
                                 s::RUNNER_REPO,
                                 "member-repo",
@@ -2187,7 +2256,52 @@ mod tests {
             labels: labels.iter().map(|l| l.to_string()).collect(),
             repo: repo.map(str::to_string),
             base_branch: None,
+            machine_id: None,
         }
+    }
+
+    #[test]
+    fn the_computer_choice_reads_as_words() {
+        let m = |id: &str, name: &str| MachineInfo {
+            id: id.into(),
+            name: name.into(),
+            labels: Vec::new(),
+            connected: true,
+            healthy: true,
+            last_heartbeat_at: None,
+            version: None,
+            disk_free_bytes: None,
+            disk_total_bytes: None,
+            active_runs: 0,
+            max_parallel_runs: None,
+            runtimes: Vec::new(),
+        };
+        let list = [m("a", "macbook-pro"), m("b", "mac-mini")];
+        assert_eq!(
+            machine_choice_text(None, &list, Some("a")),
+            "任意一台空闲电脑"
+        );
+        assert_eq!(
+            machine_choice_text(Some("a"), &list, Some("a")),
+            "macbook-pro（这台电脑）"
+        );
+        assert_eq!(machine_choice_text(Some("b"), &list, Some("a")), "mac-mini");
+        assert_eq!(
+            machine_choice_text(Some("gone"), &list, None),
+            "已移除的电脑"
+        );
+    }
+
+    #[test]
+    fn picking_a_computer_is_a_runner_change() {
+        let before = rs("claude", &["mac-mini"], None);
+        let after = RunnerSetup {
+            labels: Vec::new(),
+            machine_id: Some("m1".into()),
+            ..before.clone()
+        };
+        let e = bot_edit("Jojo", None, Some(&before), "Jojo", "", Some(&after));
+        assert_eq!(e.runner, Some(RunnerChange::Set(after)));
     }
 
     #[test]

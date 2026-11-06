@@ -1182,6 +1182,8 @@ pub struct RunnerSetup {
     /// Repository URL or a folder on the machine.
     pub repo: Option<String>,
     pub base_branch: Option<String>,
+    /// The one computer that runs this member (1.2.2); `None` = any computer with the labels.
+    pub machine_id: Option<String>,
 }
 
 /// What a save of the AI member edit sheet changes; a `None` field stays as it is.
@@ -1782,6 +1784,14 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// (unless it has a daemon config already), writes the config and installs the service
     /// from the app's own daemon.
     fn use_this_mac(&self) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The team machine id of this Mac (its daemon config), if it is one.
+    fn this_machine_id(&self) -> Option<String> {
+        None
+    }
+    /// Restarts this Mac's daemon service (it then runs the daemon file now on disk).
+    fn restart_this_mac(&self) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// My mute and notify level of a group, from the cache.

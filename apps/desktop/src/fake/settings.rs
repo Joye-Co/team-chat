@@ -41,6 +41,7 @@ fn sample_runners() -> HashMap<String, RunnerSetup> {
             labels: vec!["mac".into(), "office".into()],
             repo: Some("https://github.com/example/app".into()),
             base_branch: Some("main".into()),
+            machine_id: None,
         },
     )])
 }

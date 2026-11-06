@@ -1988,6 +1988,17 @@ impl ChatProvider for FakeProvider {
         }
     }
 
+    /// After 用这台电脑 the demo Mac is the office Mac mini.
+    fn this_machine_id(&self) -> Option<String> {
+        self.this_mac_used
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .then(|| "mc-mini".into())
+    }
+
+    fn restart_this_mac(&self) -> AdminReply<()> {
+        reply_now(Ok(()))
+    }
+
     fn use_this_mac(&self) -> AdminReply<()> {
         self.this_mac_used
             .store(true, std::sync::atomic::Ordering::Relaxed);

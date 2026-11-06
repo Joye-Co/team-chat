@@ -2046,6 +2046,21 @@ impl ChatProvider for CoreProvider {
         self.use_this_mac_inner()
     }
 
+    fn this_machine_id(&self) -> Option<String> {
+        this_mac::machine_id()
+    }
+
+    fn restart_this_mac(&self) -> AdminReply<()> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(this_mac::restart().map_err(|e| {
+                tracing::warn!(error = %e, "restart the daemon failed");
+                crate::data::AdminError::Other
+            }));
+        });
+        rx
+    }
+
     fn group_prefs(&self, group_id: &str) -> GroupPrefs {
         self.group_prefs_inner(group_id)
     }

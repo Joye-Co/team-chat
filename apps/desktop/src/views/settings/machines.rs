@@ -49,6 +49,8 @@ pub struct MachinesPage {
     status: Status,
     /// Whether this Mac runs the app's own daemon (用这台电脑).
     this_mac: ThisMac,
+    /// This Mac's machine id: its row says 这台电脑 and can 重新启动.
+    this_machine: Option<String>,
     /// 用这台电脑 in progress or failed.
     using: Status,
     /// The periodic reload; dropped with the pane.
@@ -71,11 +73,13 @@ impl MachinesPage {
             }
         });
         let this_mac = services.provider.this_mac();
+        let this_machine = services.provider.this_machine_id();
         Self {
             services,
             machines: None,
             status: Status::Idle,
             this_mac,
+            this_machine,
             using: Status::Idle,
             _poll: poll,
         }
@@ -111,10 +115,35 @@ impl MachinesPage {
             let result = answer(reply).await;
             let _ = this.update(cx, |this, cx| {
                 this.this_mac = this.services.provider.this_mac();
+                this.this_machine = this.services.provider.this_machine_id();
                 match result {
                     Ok(()) => this.using = Status::Done(s::THIS_MAC_DONE.into()),
                     Err(e) => this.using = Status::from_error(e),
                 }
+                this.refresh(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// 重新启动 on this Mac's row: the daemon starts again from the app's current file.
+    pub fn restart_this_mac(&mut self, cx: &mut Context<Self>) {
+        if self.using.busy() {
+            return;
+        }
+        self.using = Status::Busy(s::THIS_MAC_SETTING_UP.into());
+        let reply = self.services.provider.restart_this_mac();
+        cx.spawn(async move |this, cx| {
+            let result = answer(reply).await;
+            // The daemon reconnects within a few seconds; then the list shows its version.
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.using = match result {
+                    Ok(()) => Status::Idle,
+                    Err(_) => Status::Failed(s::MACHINE_RESTART_FAILED.into()),
+                };
                 this.refresh(cx);
                 cx.notify();
             });
@@ -149,7 +178,7 @@ impl MachinesPage {
     /// One computer (2.19): a 28 icon box by OS, the name, then what it
     /// does · version · OS · tags (the status first, tags last), a
     /// StatusBadge (异常 explains itself in a tooltip) and "⋯".
-    fn row(&self, m: &MachineInfo, window: &Window, cx: &App) -> gpui::AnyElement {
+    fn row(&self, m: &MachineInfo, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let now = crate::selftest::clock::local_now();
         let badge = if !m.connected {
             StatusBadge::new(BadgeState::Offline, s::MACHINE_OFFLINE)
@@ -165,6 +194,11 @@ impl MachinesPage {
                 d.tooltip(|window, cx| Tooltip::new(s::MACHINE_UNHEALTHY_TIP).build(window, cx))
             });
         let name: gpui::SharedString = m.name.clone().into();
+        let this = self.this_machine.as_deref() == Some(m.id.as_str());
+        // This Mac's own daemon can be restarted here (an old one that does not restart
+        // itself after an app update, or one that is stuck).
+        let restart = (this && i_am_owner(&self.services) && self.this_mac == ThisMac::Working)
+            .then(|| cx.entity());
         let more = crate::views::settings::widgets::more_button(
             ElementId::Name(format!("machine-more-{}", m.id).into()),
             window,
@@ -172,18 +206,29 @@ impl MachinesPage {
         )
         .dropdown_menu(move |menu, _, _| {
             let name = name.clone();
-            menu.item(
-                PopupMenuItem::new(s::MACHINE_COPY_NAME).on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(name.to_string()))
-                }),
-            )
+            let menu = menu.item(PopupMenuItem::new(s::MACHINE_COPY_NAME).on_click(
+                move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(name.to_string())),
+            ));
+            match restart.clone() {
+                Some(page) => menu.item(
+                    PopupMenuItem::new(s::MACHINE_RESTART)
+                        .on_click(move |_, _, cx| page.update(cx, |p, cx| p.restart_this_mac(cx))),
+                ),
+                None => menu,
+            }
         });
+        let facts = machine_facts(m, now);
+        let facts = if this {
+            format!("{} · {facts}", s::MACHINE_THIS)
+        } else {
+            facts
+        };
         widgets::ItemRow::new(
             ElementId::Name(format!("machine-{}", m.id).into()),
             m.name.clone(),
         )
         .media(widgets::icon_box_28(machine_glyph(m), cx))
-        .description(machine_facts(m, now))
+        .description(facts)
         .value(badge)
         .menu(more)
         .into_any_element()
