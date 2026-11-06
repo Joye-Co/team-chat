@@ -195,6 +195,12 @@ thread_local! {
     static LAST_STATE: std::cell::Cell<MenuState> = std::cell::Cell::new(MenuState::default());
 }
 
+/// Sets the menus again with the current check marks, so they show the
+/// shortcuts as now bound (after a change in Settings › 快捷键).
+pub fn refresh(cx: &mut App) {
+    cx.set_menus(app_menus_with(LAST_STATE.with(|s| s.get())));
+}
+
 /// The app menu's update item: 检查更新…, the download's progress, or
 /// 重启安装 (NATIVE.md: the download shows here and in Settings › 通用).
 fn update_item() -> MenuItem {

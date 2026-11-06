@@ -19,6 +19,7 @@ mod notifications;
 pub mod prefs;
 pub mod selftest;
 mod shortcuts;
+pub use shortcuts::apply_saved as apply_saved_shortcuts;
 pub(crate) mod widgets;
 mod window_fit;
 

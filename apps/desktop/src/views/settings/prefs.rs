@@ -30,6 +30,9 @@ pub struct LocalPrefs {
     pub message_size: u8,
     /// The slug of the pane shown last.
     pub last_pane: Option<String>,
+    /// Shortcuts changed in 快捷键: a menu action's name → its keystroke
+    /// ("cmd-shift-k"), or "" when the shortcut was removed.
+    pub shortcuts: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for LocalPrefs {
@@ -41,6 +44,7 @@ impl Default for LocalPrefs {
             sound: true,
             message_size: MESSAGE_SIZE_DEFAULT,
             last_pane: None,
+            shortcuts: Default::default(),
         }
     }
 }

@@ -1323,6 +1323,8 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
     bind_view_keys(cx);
+    // Last, over every default binding: the shortcuts changed in Settings.
+    crate::views::settings::apply_saved_shortcuts(cx);
     // --- v12/shell: the accent of System Settings (NATIVE.md §4) ---
     theme::watch_system_accent(cx);
     // --- end v12/shell ---

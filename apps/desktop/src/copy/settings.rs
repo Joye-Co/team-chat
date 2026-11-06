@@ -281,7 +281,14 @@ crate::copy! {
     MESSAGE_TEXT_SIZE = "消息文字大小",
     TEXT_SIZE_MARK = "A",
     // 快捷键
-    SHORTCUTS_FOOTER = "这些快捷键也写在菜单栏的菜单里。",
+    SHORTCUTS_FOOTER = "点一下快捷键就能改，菜单栏会一起更新。",
+    SHORTCUT_RECORD = "按下新的快捷键",
+    SHORTCUT_NONE = "未设置",
+    SHORTCUT_CHANGE = "修改「{name}」的快捷键",
+    SHORTCUT_RESET = "恢复默认",
+    SHORTCUT_RESET_ALL = "全部恢复默认",
+    SHORTCUT_TAKEN = "已被「{name}」使用",
+    SHORTCUT_NEEDS_MODIFIER = "要带上 ⌘、⌃ 或 ⌥",
     // --- end v12/settings track ---
     // --- v14/t4 lists ---
     DEVICES_HINT = "你的账号在这些设备上登录着。",
