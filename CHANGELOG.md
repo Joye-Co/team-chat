@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.2.3 (unreleased)
+## 1.2.3 (2026-11-06)
 
 Notes: [docs/releases/1.2.3.md](docs/releases/1.2.3.md). No D1 migration. Protocol: wording only
 in `docs/protocol.md` (a done card is posted only with proof). The server is redeployed: a run
