@@ -641,7 +641,7 @@ pub fn row_button(id: impl Into<ElementId>, cx: &App) -> Button {
 /// more than 8 levels; pressed stays the full `pressed`.
 pub fn group_row_button(id: impl Into<ElementId>, cx: &App) -> Button {
     let k = native_colors(cx);
-    row_button_with(id, k.pressed.opacity(0.5), cx)
+    row_button_with(id, k.row_hover, cx)
 }
 
 fn row_button_with(id: impl Into<ElementId>, hover: Hsla, cx: &App) -> Button {

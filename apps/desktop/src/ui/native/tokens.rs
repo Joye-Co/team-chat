@@ -216,6 +216,9 @@ pub struct NativeColors {
     /// tint of the text color, so it shows on the window, a GroupBox and a
     /// sheet in both modes.
     pub push: Hsla,
+    /// The hover of a row inside a group box: the foreground at 4 %, a
+    /// quiet tint of the group's own fill in both modes.
+    pub row_hover: Hsla,
     /// [`Self::push`] on hover: the foreground at 12 %.
     pub push_hover: Hsla,
     /// [`Self::push`] pressed: the foreground at 16 %.
@@ -309,6 +312,7 @@ impl NativeColors {
             },
             push: p.foreground.opacity(0.08),
             push_hover: p.foreground.opacity(0.12),
+            row_hover: p.foreground.opacity(0.04),
             push_pressed: p.foreground.opacity(0.16),
             separator: p.border,
             fill: p.muted,

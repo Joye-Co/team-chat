@@ -1,6 +1,6 @@
 //! The settings window's height follows its pane (NATIVE.md §8): the pane is
 //! measured as it is laid out and the window frame changes with its top edge
-//! fixed, animated in the app (AppKit's own resize animation, about 0.2 s),
+//! fixed, animated by the app frame by frame over 0.2 s on the out curve,
 //! at once in self-tests, on the first frame and under Reduce Motion. While a sheet is open the
 //! window is at least as tall as the sheet needs.
 
@@ -10,6 +10,11 @@ use gpui::{AnyWindowHandle, App, Pixels, Window, px};
 use gpui_component::WindowExt as _;
 
 use super::{MAX_HEIGHT, MIN_HEIGHT};
+
+/// How long the window takes to reach a pane's height.
+const RESIZE: std::time::Duration = crate::theme::motion::SLOW;
+/// One step of that resize (120 Hz).
+const FRAME: std::time::Duration = std::time::Duration::from_micros(8_333);
 
 thread_local! {
     /// The window height the open sheet needs (0 when none was asked for).
@@ -28,6 +33,9 @@ pub struct Fit {
     applied: Cell<f32>,
     /// Whether the window has had its first height (no animation for it).
     fitted: Cell<bool>,
+    /// Bumped per new target, so a running resize stops when a newer one
+    /// starts.
+    generation: std::rc::Rc<Cell<u64>>,
 }
 
 impl Fit {
@@ -59,13 +67,41 @@ impl Fit {
         let animate = self.fitted.replace(true) && super::prefs::saving() && !cx.reduce_motion();
         // After this frame and outside the window update: AppKit calls back
         // into the window while it resizes.
+        let generation = self.generation.clone();
+        let run = generation.get() + 1;
+        generation.set(run);
         cx.spawn(async move |cx| {
             let Ok(Some((ns_window, now))) = handle.update(cx, |_, window, _| {
                 ns_window(window).map(|w| (w, window.viewport_size().height))
             }) else {
                 return;
             };
-            set_height(ns_window, now, px(target), animate, first);
+            if animate {
+                // One smooth resize driven here, frame by frame, on the out
+                // curve: AppKit's own animated `setFrame` runs ahead of
+                // GPUI's redraws, so the pane jumped and settled in steps.
+                let from = f32::from(now);
+                let started = std::time::Instant::now();
+                let dur = RESIZE.as_secs_f32();
+                loop {
+                    if generation.get() != run {
+                        return;
+                    }
+                    let t = (started.elapsed().as_secs_f32() / dur).min(1.);
+                    let eased = 1. - (1. - t).powi(3);
+                    let h = (from + (target - from) * eased).round();
+                    let Ok(cur) = handle.update(cx, |_, window, _| window.viewport_size().height)
+                    else {
+                        return;
+                    };
+                    set_height(ns_window, cur, px(h), false, false);
+                    if t >= 1. {
+                        return;
+                    }
+                    cx.background_executor().timer(FRAME).await;
+                }
+            }
+            set_height(ns_window, now, px(target), false, first);
             // The window was transparent until it had its own height, so it
             // never shows the opening size and then jumps (the flicker).
             if first {

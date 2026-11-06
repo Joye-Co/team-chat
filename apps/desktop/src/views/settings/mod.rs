@@ -380,7 +380,17 @@ impl Render for SettingsView {
                         div()
                             .w_full()
                             .relative()
-                            .child(self.render_page())
+                            // A pane fades in with a 4 pt rise when the tab
+                            // changes, instead of swapping in one frame.
+                            .child(crate::ui::motion::enter(
+                                gpui::ElementId::Name(
+                                    format!("settings-pane-{}", self.page.slug()).into(),
+                                ),
+                                crate::theme::motion::NORMAL,
+                                div().relative().w_full().child(self.render_page()),
+                                |el, t| el.top(crate::theme::motion::TRAVEL * (1. - t)),
+                                cx,
+                            ))
                             // Measures the pane as laid out; the window then
                             // takes its height (§8: height follows the pane).
                             .child(
