@@ -116,6 +116,9 @@ pub struct Updater {
     postponed: Option<(String, Instant)>,
     /// The running download, so 取消下载 can stop it.
     download: Option<tokio::task::AbortHandle>,
+    /// `--fake` with `UPDATE_PREVIEW`: 更新 and 重启安装 play the flow
+    /// without a server (see `preview::install_for_fake`).
+    demo: bool,
 }
 
 struct UpdaterGlobal(Entity<Updater>);
@@ -233,6 +236,7 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
         last_attempt: None,
         postponed: None,
         download: None,
+        demo: false,
     });
     cx.set_global(UpdaterGlobal(updater.clone()));
     cx.on_action(|_: &UpdateCommand, cx| on_update_command(cx));
@@ -417,6 +421,11 @@ impl Updater {
         ) {
             return;
         }
+        if self.demo {
+            self.postponed = None;
+            preview::play_download(info, cx);
+            return;
+        }
         let Some(client) = (self.source)() else {
             self.set_phase(
                 Phase::Failed {
@@ -527,6 +536,10 @@ impl Updater {
     pub fn install_now(&mut self, cx: &mut Context<Self>) {
         if let Phase::Ready { info, dmg } = self.phase.clone() {
             self.postponed = None;
+            if self.demo {
+                preview::play_install(self, info, cx);
+                return;
+            }
             self.install_when_idle(info, dmg, cx);
         }
     }

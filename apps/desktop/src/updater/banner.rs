@@ -301,7 +301,12 @@ impl Render for UpdateBanner {
         // 已更新到: once, the first time a new version opens.
         if !self.whats_new_checked && !window.has_active_dialog(cx) {
             self.whats_new_checked = true;
-            if let Some(notes) = super::notes::take_whats_new(super::just_updated()) {
+            let notes = if super::preview::whats_new_demo() {
+                super::notes::bundled(version::CURRENT)
+            } else {
+                super::notes::take_whats_new(super::just_updated())
+            };
+            if let Some(notes) = notes {
                 window.defer(cx, move |window, cx| {
                     super::notes::open_whats_new(notes, super::notes::Place::Main, window, cx)
                 });
