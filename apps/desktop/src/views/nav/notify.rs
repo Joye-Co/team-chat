@@ -4,7 +4,7 @@
 //! context menu and the 群 page's ⋯ menu. Settings → 通知 holds only the
 //! global ones.
 
-use gpui::{App, Context, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{App, Context, IntoElement, ParentElement, Styled, Window, div, px};
 use gpui_component::{
     Disableable as _,
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
@@ -177,6 +177,77 @@ pub fn topic_section(
         },
         cx,
     ))
+}
+
+/// 提醒 of a 话题 (owner decision, 2026-11-08): one select, 关注 / 默认 /
+/// 静音, so the two switches can never say opposite things; the hint for
+/// the chosen level under it.
+pub fn topic_select(
+    services: &Services,
+    group_id: &str,
+    topic_id: &str,
+    cx: &App,
+) -> impl IntoElement {
+    let p = &services.provider;
+    let following = p.topic_following(group_id, topic_id);
+    let muted = p.topic_muted(group_id, topic_id);
+    let (now, hint) = if muted {
+        (nav::MUTE, nav::TOPIC_MUTED_HINT)
+    } else if following {
+        (nav::FOLLOW_ROW, nav::FOLLOW_HINT)
+    } else {
+        (nav::NOTIFY_DEFAULT, nav::TOPIC_DEFAULT_HINT)
+    };
+    let (s, g, t) = (services.clone(), group_id.to_string(), topic_id.to_string());
+    let select = crate::ui::native::select_button(
+        "topic-notify-level",
+        now,
+        crate::ui::native::PushSize::Regular,
+        cx,
+    )
+    .w(px(120.))
+    .dropdown_menu(move |menu, _, _| {
+        let set = |label: &'static str, follow: bool, mute: bool| {
+            let (s, g, t) = (s.clone(), g.clone(), t.clone());
+            PopupMenuItem::new(label)
+                .checked(label == now)
+                .on_click(move |_, _, _| {
+                    s.provider.set_topic_muted(&g, &t, mute);
+                    s.provider.set_topic_following(&g, &t, follow);
+                })
+        };
+        menu.min_w(px(120.))
+            .item(set(nav::FOLLOW_ROW, true, false))
+            .item(set(nav::NOTIFY_DEFAULT, false, false))
+            .item(set(nav::MUTE, false, true))
+    });
+    let k = native_colors(cx);
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(space::S8)
+        .child(
+            div()
+                .w_full()
+                .rounded(crate::ui::native::metrics::GROUP_RADIUS)
+                .bg(k.group)
+                .pl(px(14.))
+                .pr(px(8.))
+                .h(px(48.))
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().n_body().text_color(k.label).child(nav::NOTIFY_LEVEL))
+                .child(select),
+        )
+        .child(
+            div()
+                .px(px(2.))
+                .n_subheadline()
+                .text_color(k.secondary)
+                .child(hint),
+        )
 }
 
 #[cfg(test)]

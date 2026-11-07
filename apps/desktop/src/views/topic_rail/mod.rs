@@ -21,7 +21,7 @@ use crate::{
         v2::{ArtifactPreview, Currency, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
-    ui::{self, Sym},
+    ui::{self, Sym, native::NativeType as _},
     views::shell::{PaneView, panes::watch, stub_body},
 };
 
@@ -187,8 +187,6 @@ impl TopicRail {
 }
 
 impl TopicRail {
-    /// The pinned footer of the inspector (§2.5): 标记完成 (primary) over
-    /// 交给… (outline, a menu of the 群's members), full width, gap 8.
     /// The members of the 群 to hand the 话题 to, as a dropdown on `button`.
     fn assign_menu(&self, topic: &Topic, button: gpui_component::button::Button) -> AnyElement {
         use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -228,13 +226,14 @@ impl TopicRail {
         )
     }
 
-    fn footer(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
+    /// The actions of the 话题 at the top of the pane (owner decision,
+    /// 2026-11-08: no pinned full-width footer): 标记完成 (outline, with a
+    /// check) and 交给… (ghost, a menu of the 群's members), small, side by
+    /// side. While the 话题 waits on a review, an answer or a merge,
+    /// 标记完成 is not the next step (R2-17); 交给… stays.
+    fn actions(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{BadgeState, PushSize, PushStyle, push_button};
-        let k = ui::native::native_colors(cx);
         let (g, t) = (topic.group_id.clone(), topic.id.clone());
-        // R2-17, §2.5: the footer follows the state. While the 话题 waits on
-        // a review, an answer or a merge, 标记完成 is not the next step; 交给…
-        // stays.
         let waits = matches!(
             topic.status,
             crate::data::TopicStatus::WaitingReview | crate::data::TopicStatus::WaitingAnswer
@@ -248,11 +247,11 @@ impl TopicRail {
             push_button(
                 "rail-mark-done",
                 c::MARK_DONE,
-                PushStyle::Default,
-                PushSize::Regular,
+                PushStyle::Outline,
+                PushSize::Small,
                 cx,
             )
-            .w_full()
+            .icon(gpui_component::Icon::new(crate::ui::Sym::Check))
             .on_click(move |_, _, _| {
                 s.provider
                     .set_topic_status(&g, &t, crate::data::TopicStatus::Done, Vec::new())
@@ -263,20 +262,16 @@ impl TopicRail {
             push_button(
                 "rail-hand-to",
                 c::HAND_TO,
-                PushStyle::Outline,
-                PushSize::Regular,
+                PushStyle::Ghost,
+                PushSize::Small,
                 cx,
-            )
-            .w_full(),
+            ),
         );
         div()
-            .flex_none()
             .w_full()
-            .p(space::S16)
-            .border_t_1()
-            .border_color(k.separator)
             .flex()
-            .flex_col()
+            .flex_wrap()
+            .items_center()
             .gap(space::S8)
             .children(done)
             .child(hand)
@@ -538,58 +533,58 @@ impl Render for TopicRail {
         let d = self.data(&g, &t);
         let topic = d.topic.as_ref();
         let run = d.run.as_ref();
-        // COMPLETENESS §2.5: the same sections in every 话题, in this order:
-        // 状态, 负责 (with 提出), 计划, 改动, 产出, 用到的决定, 在哪干活,
-        // 用时和成本. A section with no data keeps its place with one quiet
-        // line; it never disappears.
-        use native::{CHANGES, COST, DECISIONS, OUTPUTS, PLAN, WHERE};
-        let mut sections: Vec<AnyElement> = vec![self.native_status(&d, cx)];
-        // 通知: 关注 and 静音 of this 话题, set here and not in the settings
-        // window (it is this 话题's own setting).
+        // Owner decision (2026-11-08), replacing COMPLETENESS §2.5's fixed
+        // list: the actions, what the 话题 is doing now, 提醒, then only the
+        // sections that have something (成员, 计划, 改动, 产出, 用到的决定,
+        // 在哪干活, 用时和成本, in this order). The empty ones are named in
+        // one quiet line at the end. Nothing in the pane scrolls sideways.
+        let mut sections: Vec<AnyElement> = Vec::new();
+        if let Some(t) = topic.filter(|t| t.status != crate::data::TopicStatus::Done) {
+            sections.push(self.actions(t, cx));
+        }
+        sections.push(self.native_status(&d, cx));
         sections.push(
-            crate::views::nav::notify::topic_section(&self.services, &g, &t, cx).into_any_element(),
+            crate::views::nav::notify::topic_select(&self.services, &g, &t, cx).into_any_element(),
         );
         let owner = topic.and_then(|t| t.owner_id.clone());
         let by = topic
             .filter(|x| owner.as_deref() != Some(x.created_by.as_str()))
             .map(|x| (x.created_by.clone(), x.created_at));
         sections.push(self.native_owner(&d, owner.as_deref(), by, cx));
-        sections.push(match run.filter(|r| !r.plan.is_empty()) {
-            Some(r) => self.native_plan(&d, r, cx),
-            None => self.native_empty(PLAN, c::TOPIC_RAIL_PLAN, c::RAIL_EMPTY_PLAN, cx),
-        });
+        let mut empty: Vec<&'static str> = Vec::new();
+        let mut add =
+            |el: Option<AnyElement>, name: &'static str, sections: &mut Vec<AnyElement>| match el {
+                Some(el) => sections.push(el),
+                None => empty.push(name),
+            };
+        let plan = run
+            .filter(|r| !r.plan.is_empty())
+            .map(|r| self.native_plan(&d, r, cx));
+        add(plan, c::RAIL_EMPTY_NAME_PLAN, &mut sections);
         let changes = self.native_changes(&d, window, cx);
-        sections.push(changes.unwrap_or_else(|| {
-            self.native_empty(CHANGES, c::TOPIC_RAIL_CHANGES, c::RAIL_EMPTY_CHANGES, cx)
-        }));
+        add(changes, c::RAIL_EMPTY_NAME_CHANGES, &mut sections);
         let outputs = self.native_outputs(&d, window, cx);
-        sections.push(outputs.unwrap_or_else(|| {
-            self.native_empty(OUTPUTS, c::TOPIC_RAIL_OUTPUTS, c::RAIL_EMPTY_OUTPUTS, cx)
-        }));
+        add(outputs, c::RAIL_EMPTY_NAME_OUTPUTS, &mut sections);
         let decisions = self.native_decisions(&d, cx);
-        sections.push(decisions.unwrap_or_else(|| {
-            self.native_empty(
-                DECISIONS,
-                c::TOPIC_RAIL_DECISIONS,
-                c::RAIL_EMPTY_DECISIONS,
-                cx,
-            )
-        }));
+        add(decisions, c::RAIL_EMPTY_NAME_DECISIONS, &mut sections);
         let place = run.and_then(|r| self.native_where(&d, r, window, cx));
-        sections.push(
-            place.unwrap_or_else(|| {
-                self.native_empty(WHERE, c::WHERE_WORK, c::RAIL_EMPTY_WHERE, cx)
-            }),
-        );
+        add(place, c::RAIL_EMPTY_NAME_WHERE, &mut sections);
         let cost = self.native_cost(&d, cx);
-        sections.push(cost.unwrap_or_else(|| {
-            self.native_empty(COST, c::TOPIC_RAIL_COST, c::RAIL_EMPTY_COST, cx)
-        }));
-        let footer = topic
-            .filter(|t| t.status != crate::data::TopicStatus::Done)
-            .map(|t| self.footer(t, cx));
-        // §2.5: the body scrolls by itself and ends 24 above the pinned
-        // footer; the footer (标记完成 / 交给…) is full width, p 16, border-t.
+        add(cost, c::RAIL_EMPTY_NAME_COST, &mut sections);
+        if !empty.is_empty() {
+            sections.push(
+                div()
+                    .w_full()
+                    .px(px(2.))
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .child(fill(
+                        c::RAIL_EMPTY_REST,
+                        &[("names", &empty.join(crate::copy::rail::RAIL_NAMES_SEP))],
+                    ))
+                    .into_any_element(),
+            );
+        }
         div()
             .size_full()
             .bg(k.content)
@@ -597,46 +592,20 @@ impl Render for TopicRail {
             .flex_col()
             .child(
                 div()
-                    .relative()
+                    .id("topic-rail")
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
+                    .overflow_y_scroll()
+                    .overflow_x_hidden()
+                    .px(space::S16)
+                    .pt(space::S16)
+                    .pb(space::S24)
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .id("topic-rail")
-                            .flex_1()
-                            .min_h_0()
-                            // §2.2, B2: the first GroupLabel's ink sits at y
-                            // 68, 16 under the header band; pull up by the
-                            // section's own top padding less 4.
-                            .mt(-space::S12)
-                            .overflow_y_scroll()
-                            .pb(space::S24)
-                            .flex()
-                            .flex_col()
-                            .children(sections),
-                    )
-                    // T-14, A4: the last 24 above the footer fade out (as in
-                    // the live pane), so a row that runs under the footer
-                    // never ends in a mid-glyph cut.
-                    .when(footer.is_some(), |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .bottom_0()
-                                .h(space::S24)
-                                .bg(gpui::linear_gradient(
-                                    0.,
-                                    gpui::linear_color_stop(k.content, 0.),
-                                    gpui::linear_color_stop(k.content.opacity(0.), 1.),
-                                )),
-                        )
-                    }),
+                    .gap(space::S20)
+                    .children(sections),
             )
-            .children(footer)
             .into_any_element()
     }
 }

@@ -57,6 +57,7 @@ pub struct InspectorSection {
     action: Option<AnyElement>,
     rows: Vec<AnyElement>,
     on_toggle: Option<Click>,
+    grouped: bool,
 }
 
 impl InspectorSection {
@@ -68,7 +69,17 @@ impl InspectorSection {
             action: None,
             rows: Vec::new(),
             on_toggle: None,
+            grouped: false,
         }
+    }
+
+    /// The settings look (owner decision, 2026-11-08): the title in 13
+    /// semibold `label` over the rows on a rounded `group` fill, as a
+    /// grouped form; the chevron trails the title. The parent sets the side
+    /// padding and the gap between sections.
+    pub fn grouped(mut self) -> Self {
+        self.grouped = true;
+        self
     }
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
@@ -102,6 +113,60 @@ impl RenderOnce for InspectorSection {
         } else {
             Sf::ChevronDown
         };
+        if self.grouped {
+            let k = native_colors(cx);
+            return div()
+                .w_full()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .gap(super::tokens::space::S8)
+                .child(
+                    div()
+                        .id(self.id)
+                        .min_h(px(28.))
+                        .px(px(2.))
+                        .flex()
+                        .items_center()
+                        .gap(super::tokens::space::S6)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .n_headline()
+                                .text_color(k.label)
+                                .child(self.title),
+                        )
+                        .children(self.action)
+                        .child(symbol(
+                            chevron,
+                            super::tokens::icon::SM,
+                            Weight::Semibold,
+                            k.tertiary,
+                            window,
+                        ))
+                        .when_some(self.on_toggle, |d, f| {
+                            d.on_click(move |e, w, cx| f(e, w, cx))
+                        }),
+                )
+                .when(!self.collapsed, |d| {
+                    d.child(
+                        div()
+                            .w_full()
+                            .min_w(px(0.))
+                            .overflow_hidden()
+                            .rounded(metrics::GROUP_RADIUS)
+                            .bg(k.group)
+                            .px(px(14.))
+                            .py(px(10.))
+                            .flex()
+                            .flex_col()
+                            .gap(super::tokens::space::S6)
+                            .children(self.rows),
+                    )
+                })
+                .into_any_element();
+        }
         // COMPLETENESS.md §2.5: px 16, sections 24 apart; the GroupLabel h32
         // (12 medium muted) with an optional 28 ghost action.
         div()
@@ -139,6 +204,7 @@ impl RenderOnce for InspectorSection {
                     }),
             )
             .when(!self.collapsed, |d| d.children(self.rows))
+            .into_any_element()
     }
 }
 
