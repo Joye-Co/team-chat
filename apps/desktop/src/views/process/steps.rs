@@ -251,6 +251,61 @@ pub fn failed_end(step: &ProcessStep) -> bool {
     )
 }
 
+/// What the member is doing now, in product words, from its newest step: the live line of a
+/// working card that has no plan step (`Jojo 正在做：读网页 claude.dev`). Tool names stay out
+/// of it (developer words).
+pub fn live_action(steps: &[ProcessStep]) -> Option<String> {
+    steps.iter().rev().find_map(|s| match s {
+        ProcessStep::Tool { title, .. } => Some(tool_action(title)),
+        ProcessStep::Files { changes } if !changes.is_empty() => {
+            Some(fill(p::STEP_FILES, &[("n", &changes.len().to_string())]))
+        }
+        ProcessStep::Reasoning { .. } => Some(p::ACT_THINKING.to_string()),
+        ProcessStep::Message {
+            from_bot: true,
+            text,
+            ..
+        } if !text.trim().is_empty() => Some(p::ACT_REPLY.to_string()),
+        ProcessStep::Approval { approved: None, .. } => Some(p::ACT_WAITING.to_string()),
+        ProcessStep::TurnStarted => Some(p::ACT_START.to_string()),
+        _ => None,
+    })
+}
+
+/// A tool call's title (`WebFetch: https://…`, `Write: /work/index.html`, a bare command) in
+/// product words.
+fn tool_action(title: &str) -> String {
+    let (name, arg) = match title.split_once(": ") {
+        Some((n, a)) if !n.trim().is_empty() && !n.contains(' ') => (n.trim(), Some(a.trim())),
+        _ => (title.trim(), None),
+    };
+    let file = |path: &str| {
+        path.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .map(|n| clip(n, 40))
+            .unwrap_or_default()
+    };
+    let host = |url: &str| {
+        let rest = url.split_once("://").map_or(url, |(_, r)| r);
+        clip(rest.split(['/', '?', '#']).next().unwrap_or(rest), 40)
+    };
+    match (name, arg) {
+        ("WebFetch", Some(a)) => fill(p::ACT_READ_PAGE, &[("host", &host(a))]),
+        ("WebFetch", None) => p::ACT_READ_PAGE_BARE.to_string(),
+        ("WebSearch", Some(a)) => fill(p::ACT_SEARCH, &[("query", &clip(a, 30))]),
+        ("Read" | "NotebookRead", Some(a)) => fill(p::ACT_READ_FILE, &[("name", &file(a))]),
+        ("Write" | "Edit" | "MultiEdit" | "NotebookEdit", Some(a)) => {
+            fill(p::ACT_WRITE_FILE, &[("name", &file(a))])
+        }
+        ("Grep" | "Glob" | "LS", _) => p::ACT_LOOK.to_string(),
+        ("Task" | "Agent", _) => p::ACT_DELEGATE.to_string(),
+        ("TodoWrite", _) => p::ACT_PLAN.to_string(),
+        ("Bash", _) => p::ACT_RUN.to_string(),
+        _ => p::ACT_TOOL.to_string(),
+    }
+}
+
 pub fn error_line(steps: &[ProcessStep]) -> Option<String> {
     steps.iter().rev().find_map(|s| match s {
         ProcessStep::Done { error: Some(e), .. }
@@ -527,6 +582,48 @@ fn render_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_live_action_names_the_newest_step_in_product_words() {
+        let tool = |title: &str| ProcessStep::Tool {
+            title: title.into(),
+            input: None,
+            ok: None,
+            output: None,
+            exit_code: None,
+        };
+        let say = |t: &[ProcessStep]| live_action(t);
+        assert_eq!(
+            say(&[tool(
+                "WebFetch: https://claude.dev/blog/solving-code-review/"
+            )])
+            .as_deref(),
+            Some("读网页 claude.dev")
+        );
+        assert_eq!(
+            say(&[tool("WebFetch: x"), tool("Write: /work/out/index.html")]).as_deref(),
+            Some("写 index.html")
+        );
+        assert_eq!(
+            say(&[tool("Bash: curl -s https://x")]).as_deref(),
+            Some("运行命令")
+        );
+        assert_eq!(
+            say(&[tool("npm run build")]).as_deref(),
+            Some("执行一步操作")
+        );
+        assert_eq!(
+            say(&[
+                tool("Read: /a/b.md"),
+                ProcessStep::Status {
+                    message: "x".into()
+                }
+            ])
+            .as_deref(),
+            Some("读 b.md")
+        );
+        assert_eq!(say(&[]), None);
+    }
 
     #[test]
     fn long_text_is_clipped_by_chars() {

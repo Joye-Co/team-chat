@@ -688,6 +688,14 @@ impl Services {
 /// Called once per frame after the first frame; see `main.rs` self-tests.
 pub type FirstFrameHook = Box<dyn FnOnce(&mut Window, &mut App)>;
 
+/// The main window's [`RootView`] when `window` is the main window. `gpui_kit::open_window`
+/// wraps every window's view in `base::Root`, so `window.root::<RootView>()` is always
+/// `None`: look inside the wrapper.
+pub fn root_view(window: &Window, cx: &App) -> Option<Entity<RootView>> {
+    let root = window.root::<gpui_base::Root>().flatten()?;
+    root.read(cx).view().clone().downcast::<RootView>().ok()
+}
+
 /// The root view of the main window: login, or the v2 shell (1.1.0): the
 /// left rail | the page (title bar + body) | the right pane. See
 /// `views/shell` for the pages and panes and who owns each.
@@ -1008,6 +1016,34 @@ impl RootView {
             .into_any_element()
     }
 
+    /// The 产出 pane's resize handle: an 8 pt strip centred on its leading edge with the
+    /// resize cursor. A drag to the left widens the pane (400–960 pt, rubber band past the
+    /// bounds); a double-click resets the width.
+    fn artifact_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::views::columns::Column;
+        div()
+            .id("artifact-pane-resize")
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(px(-4.))
+            .w(px(8.))
+            .cursor(gpui::CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if e.click_count >= 2 {
+                        this.columns.reset(Column::ArtifactPane);
+                    } else {
+                        this.columns.start_drag(Column::ArtifactPane, e.position.x);
+                    }
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
     /// K-10, E3: F6 / ⌥Tab move the focus to the next region of the window
     /// (⇧ to the previous one): the sidebar, then on a 话题 page the thread
     /// and its composer, so a list is a keystroke away, not 26 Tabs.
@@ -1214,9 +1250,15 @@ impl Render for RootView {
         } else {
             px(0.)
         };
-        let full_pane_w = self
-            .panes
-            .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx);
+        let artifact_pane = matches!(drawn_pane, RightPane::Artifact { .. });
+        let full_pane_w = if artifact_pane {
+            // The 产出 pane takes the width it was dragged to.
+            self.columns
+                .width(crate::views::columns::Column::ArtifactPane)
+        } else {
+            self.panes
+                .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx)
+        };
         let pane_w = full_pane_w * right;
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
@@ -1259,6 +1301,20 @@ impl Render for RootView {
                         .child(div().flex_none().w(full_pane_w).h_full().child(el))
                         .into_any_element()
                 })
+        };
+        // The 产出 pane's leading edge resizes it (a page needs room for its own layout).
+        let pane_el = match pane_el {
+            Some(el) if artifact_pane && !floats && right >= 1. => Some(
+                div()
+                    .relative()
+                    .flex_none()
+                    .h_full()
+                    .flex()
+                    .child(el)
+                    .child(self.artifact_pane_handle(cx))
+                    .into_any_element(),
+            ),
+            el => el,
         };
         root.flex()
             .flex_row()
@@ -1461,6 +1517,51 @@ mod tests {
             assert_eq!(n.page(), Page::Artifact);
             n.back_from_artifact(cx);
             assert_eq!(n.page(), Page::Artifacts);
+        });
+    }
+
+    /// A card or message in the main window finds its navigation: the window's view is the
+    /// `gpui_base::Root` around [`RootView`], so a bare `window.root::<RootView>()` finds
+    /// nothing and a click on a card's 产出 did nothing.
+    #[gpui::test]
+    fn the_main_window_root_view_is_found_inside_its_wrapper(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = crate::fake::FakeProvider::new();
+        let root = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let keep = root.clone();
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                services.nav.update(cx, |nav, cx| {
+                    nav.open_topic("g-dev".into(), "t-api".into(), cx)
+                });
+                cx.open_window(Default::default(), move |window, cx| {
+                    let view = cx.new(|cx| RootView::new(services, None, window, cx));
+                    *keep.borrow_mut() = Some(view.clone());
+                    cx.new(|cx| gpui_base::Root::new(view, window, cx))
+                })
+            })
+            .expect("the window opens");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let view = root.borrow().clone().expect("the root view");
+        cx.update(|window, cx| {
+            assert!(
+                window.root::<RootView>().flatten().is_none(),
+                "the wrapper is the root"
+            );
+            let found = root_view(window, cx).expect("found inside the wrapper");
+            assert_eq!(found.entity_id(), view.entity_id());
+            // What a click on a card's 产出 does with it: the pane beside the 话题.
+            let nav = found.read(cx).services().nav.clone();
+            nav.update(cx, |n, cx| n.show_artifact("a1".into(), Some(1), cx));
+            assert_eq!(
+                nav.read(cx).visible_pane(),
+                RightPane::Artifact {
+                    id: "a1".into(),
+                    version: Some(1)
+                }
+            );
         });
     }
 

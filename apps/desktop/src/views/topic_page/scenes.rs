@@ -44,6 +44,13 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "topic-done-output",
+        about: "话题 page: Jojo's done card for a web 产出 (the 产出 first, the passed checks folded)",
+        start: Start::V2,
+        setup: |s, cx| v2_open_topic(s, d::GROWTH, d::T_REPORT, cx),
+        open: open_main,
+    },
+    Scene {
         name: "topic-two-runs",
         about: "话题 page with two members at work (Forge builds the virtual list, Scout checks it): one plan card each",
         start: Start::V2TwoRuns,

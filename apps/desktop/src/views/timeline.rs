@@ -175,6 +175,8 @@ pub struct TimelineView {
     react_leave: Option<gpui::Task<()>>,
     /// Bot runs of the open topic, newest first.
     runs: Vec<crate::data::BotRunSummary>,
+    /// Runs whose log the thread follows for the live line of their working card.
+    live_polls: std::collections::HashSet<String>,
     /// Working runs at the last refresh, rows of runs that just ended (with
     /// the time they ended) and when each run's row first showed
     /// (`timeline/live.rs`).
@@ -337,6 +339,7 @@ impl TimelineView {
             react_pointer: [false; 2],
             react_leave: None,
             runs: Vec::new(),
+            live_polls: Default::default(),
             live_shown: Vec::new(),
             live_leaving: Vec::new(),
             live_entered: Default::default(),

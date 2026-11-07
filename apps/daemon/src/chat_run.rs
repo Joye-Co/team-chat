@@ -78,7 +78,15 @@ page or a file as a 产出 (a deliverable people open in the group), write it in
 folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--file <path>`; \
 `chat-run artifact version --artifact <id> --dir <folder>` adds a version); `chat-run file \
 upload --file <path>` uploads one file. Each prints the JSON result and exits 0, or prints the \
-error with its reason and exits 1. A card is a Card v2 \
+error with its reason and exits 1. A page opens beside the conversation in a pane about 400 pt \
+wide: make it work at that width (a row of tabs wraps or scrolls sideways, nothing is cut off). \
+When what people do on a page should be kept or seen by others (a checklist, a vote, a choice), \
+declare the events with `--events events.json` and use the page bridge `window.teamchat` \
+(`emit`, `ask`, `getData`, `onData`); the events reach you as <{scheme}-event> blocks and \
+`chat-run artifact data` sends the state back to every open copy. When your run ends, your last \
+message becomes the result card, shown with the 产出 at its top: say in one or two sentences what \
+you made, then only what the reader still has to do or check. Do not retell what the 产出 \
+already shows and do not list the steps you took. A card is a Card v2 \
 document `{{\"v\":2,\"rev\":1,\"intent\":\"done\"|\"working\"|\"ask\",\"title\":…,\"fallback\":…,\"blocks\":[…]}}`; block \
 types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help` shows more.",
         name = crate::product::name(),

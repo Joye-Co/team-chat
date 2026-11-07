@@ -106,6 +106,7 @@ impl TimelineView {
         let mut out: Vec<AnyElement> = runs
             .iter()
             .map(|run| {
+                self.follow_live(&run.id, cx);
                 let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
                 if in_pane.as_deref() == Some(run.id.as_str()) {
                     return self.plan_line(run, paused_by.is_some(), cx);
@@ -116,6 +117,36 @@ impl TimelineView {
             .collect();
         out.extend(self.failed_run_alert(cx));
         out
+    }
+
+    /// Follows the log of working run `id` every [`crate::views::process::POLL`] while it
+    /// works, so its card says what it does now (`Jojo 正在做：读网页 claude.dev`).
+    fn follow_live(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.live_polls.insert(id.to_string()) {
+            return;
+        }
+        self.services.provider.follow_run(id);
+        let id = id.to_string();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(crate::views::process::POLL)
+                    .await;
+                let go_on = this.update(cx, |this, _| {
+                    let working = this.runs.iter().any(|r| r.id == id && r.status.is_active());
+                    if working {
+                        this.services.provider.follow_run(&id);
+                    } else {
+                        this.live_polls.remove(&id);
+                    }
+                    working
+                });
+                if !matches!(go_on, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// The working card's header alone, for a run whose plan shows in
@@ -193,8 +224,18 @@ impl TimelineView {
             bot.map(|m| crate::ui::avatar::name_beside_avatar(&m.name))
                 .unwrap_or_default(),
         );
+        // With no plan step, the newest step of its log says what it does now.
         let doing = progress_of
             .and_then(|(_, _, now)| now)
+            .or_else(|| {
+                (!stopping)
+                    .then(|| {
+                        crate::views::process::live_action(
+                            &self.services.provider.run_process(&run.id).steps,
+                        )
+                    })
+                    .flatten()
+            })
             .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
             .unwrap_or_else(|| {
                 if stopping {

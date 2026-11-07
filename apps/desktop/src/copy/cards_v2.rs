@@ -109,11 +109,14 @@ crate::copy! {
     EVIDENCE_ASK = "让 {name} 补上",
     EVIDENCE_ASK_MESSAGE = "请补上这次的证据：截图、录屏或测试结果。",
     EVIDENCE_MORE = "+{n}",
+    CHECKS_PASSED = "已检查 {n} 项",
+    CHECKS_HIDE = "收起检查",
 
     // Links.
     REF_ARTIFACT_GONE = "产出已删除",
     REF_ARTIFACT_GONE_DETAIL = "原来是「{title}」",
     REF_ARTIFACT_LINE = "v{version} · {name}",
+    REF_ARTIFACT_KIND_LINE = "{kind} · v{version} · {name}",
     REFS_ALL = "看全部 {count} 个",
     REFS_FEWER = "收起",
     REF_ARTIFACT_NEWER = "有新版本 v{version}",
