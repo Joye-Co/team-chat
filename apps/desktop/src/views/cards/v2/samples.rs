@@ -54,6 +54,9 @@ pub const FAILED: &str = "cv2-failed";
 pub const EXPIRED: &str = "cv2-expired";
 pub const SENDING: &str = "cv2-sending";
 pub const PAGE: &str = "cv2-page";
+/// A run's done card around a web 产出 (the server's `doneCard`: result text, acceptance
+/// items, then the 产出 reference), as Jojo posted it for an article 解读.
+pub const DONE_PAGE: &str = "cv2-done-page";
 /// The message of the 轻回应 example (sample data).
 pub const ACK_BODY: &str = "本地试了，没再出现重复。";
 
@@ -864,6 +867,36 @@ fn all() -> Vec<Sample> {
                   "url": "https://github.com/example/qqbot/pull/418", "number": 418, "repo": "运维 · Watch", "state": "已合并" } },
                 { "type": "ref", "id": "gone", "label": "qqbot 告警汇总", "target": { "kind": "artifact",
                   "artifactId": "art-v2-gone" } }
+            ]
+        }),
+    ));
+
+    // A run's done card around a web 产出 (server `doneCard`).
+    out.push(sample(
+        DONE_PAGE,
+        GROWTH,
+        T_REPORT,
+        JOJO,
+        at(10, 18),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "done",
+            "title": "解读页面已经发到群里，标题是“解读 | 10 月数据月报”。",
+            "fallback": "解读页面已经发到群里。",
+            "blocks": [
+                { "type": "text", "id": "result",
+                  "text": "**文章核心**：日活按去重设备算是 2340，比 9 月多 4%。新增群主要来自 B 站教程视频。\n\n**页面有 9 节**：\n\n- 先讲口径的变化和度量方式。\n- “一次增长的来源”是可以点的流程图，点任意一步能看这一步的细节。\n- **渠道模拟器**：选一种渠道，再勾选几种情况，页面会显示预计新增群。\n- **落地清单**：15 条，可以勾选，带进度条。\n\n页面里的数字都和原表核对过。我在本机 Chrome 里截图看过排版，但没有在群里的产出预览中打开过。" },
+                { "type": "evidence", "id": "acceptance-1", "label": "阅读原表", "state": "pass",
+                  "detail": "抓取了原表全部 12 列，数字逐条和原表核对" },
+                { "type": "evidence", "id": "acceptance-2", "label": "写出一个 HTML 解读页面，内容和原表一致", "state": "pass",
+                  "detail": "共 9 节：流程图、渠道模拟器、4 张前后对比图、15 条清单；脚本语法检查通过" },
+                { "type": "evidence", "id": "acceptance-3", "label": "排版正常", "state": "pass",
+                  "detail": "用本机 Chrome 无头模式截了桌面宽度的图，逐段查看，没有重叠或溢出" },
+                { "type": "evidence", "id": "acceptance-4", "label": "在群里的产出预览中，模拟器和清单能点", "state": "info",
+                  "detail": "没在群里的产出预览中打开过，需要你试一下" },
+                { "type": "evidence", "id": "acceptance-5", "label": "作为产出发到群里", "state": "pass" },
+                { "type": "ref", "id": "artifact-1", "label": "10 月数据月报 · v3",
+                  "target": { "kind": "artifact", "artifactId": ART_REPORT, "version": 3 } }
             ]
         }),
     ));

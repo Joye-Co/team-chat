@@ -311,6 +311,8 @@ pub struct CardForm {
     pub expanded: bool,
     /// The ref list shows every row (看全部).
     pub refs_all: bool,
+    /// A done card's passed checks are open (they fold into one line).
+    pub checks_all: bool,
     /// inc-cards21: rank orders, numbers and matrix rows.
     other: HashMap<String, Val>,
     _subscriptions: Vec<Subscription>,
@@ -350,6 +352,7 @@ impl CardForm {
             editing,
             expanded,
             refs_all: false,
+            checks_all: false,
             other: HashMap::new(),
             _subscriptions: Vec::new(),
         };
@@ -569,6 +572,11 @@ impl CardForm {
 
     pub fn toggle_expanded(&mut self, cx: &mut Context<Self>) {
         self.expanded = !self.expanded;
+        cx.notify();
+    }
+
+    pub fn toggle_checks_all(&mut self, cx: &mut Context<Self>) {
+        self.checks_all = !self.checks_all;
         cx.notify();
     }
 

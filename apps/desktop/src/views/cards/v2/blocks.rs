@@ -58,6 +58,14 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         .iter()
         .filter(|b| !matches!(b, CardV2Block::Unknown))
         .collect();
+    // A done card leads with what it delivered: its 产出 first, its passed checks folded
+    // into one line at the end (the steps are how, not what).
+    let done = ctx.card.intent == CardIntent::Done;
+    let (blocks, folded) = if done {
+        done_order(blocks)
+    } else {
+        (blocks, Vec::new())
+    };
     let note_input = footer_note_input(ctx.card).map(|(id, _)| id);
     let collapsed = ctx.state.collapsed();
     let mut record_done = false;
@@ -116,6 +124,10 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                     j,
                     space::S12,
                 )
+            }
+            CardV2Block::Ref { .. } if done && is_output(b) => {
+                let j = run_end(&is_output);
+                (Some(outputs(ctx, &blocks[i..j], cx)), j, space::S12)
             }
             CardV2Block::Ref { .. } => {
                 let j = run_end(&|x| matches!(x, CardV2Block::Ref { .. }));
@@ -191,10 +203,218 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         prev = Some(b);
         i = next;
     }
+    if !folded.is_empty() {
+        out.push(
+            div()
+                .mt(space::S12)
+                .min_w(px(0.))
+                .child(checks(ctx, &folded, window, cx))
+                .into_any_element(),
+        );
+    }
     if let Some(notice) = no_evidence(ctx, cx) {
         out.push(div().mt(space::S12).child(notice).into_any_element());
     }
     out
+}
+
+/// A reference to a 产出.
+fn is_output(b: &CardV2Block) -> bool {
+    matches!(
+        b,
+        CardV2Block::Ref {
+            target: RefTarget::Artifact { .. },
+            ..
+        }
+    )
+}
+
+/// A passed check with no screenshot: folds away in a done card.
+fn is_passed_check(b: &CardV2Block) -> bool {
+    matches!(
+        b,
+        CardV2Block::Evidence {
+            state: Some(EvidenceState::Pass),
+            file_id: None,
+            ..
+        }
+    )
+}
+
+/// The blocks of a done card in reading order: its 产出 first, then the rest as sent; the
+/// passed checks come back apart, to fold into one line.
+fn done_order<'a>(blocks: Vec<&'a CardV2Block>) -> (Vec<&'a CardV2Block>, Vec<&'a CardV2Block>) {
+    let mut first = Vec::new();
+    let mut rest = Vec::new();
+    let mut folded = Vec::new();
+    for b in blocks {
+        if is_output(b) {
+            first.push(b);
+        } else if is_passed_check(b) {
+            folded.push(b);
+        } else {
+            rest.push(b);
+        }
+    }
+    // One passed check reads fine as it is: folding it saves nothing.
+    if folded.len() == 1 {
+        rest.append(&mut folded);
+    }
+    first.append(&mut rest);
+    (first, folded)
+}
+
+/// A done card's passed checks: one quiet line `✓ 已检查 4 项` that opens them.
+fn checks(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut App) -> AnyElement {
+    let k = theme::colors(cx);
+    let open = ctx.form.read(cx).checks_all;
+    let form = ctx.form.clone();
+    let label = if open {
+        c::CHECKS_HIDE.to_string()
+    } else {
+        fill(c::CHECKS_PASSED, &[("n", &blocks.len().to_string())])
+    };
+    let toggle = div()
+        .id(ctx.id("checks-toggle"))
+        .focus_row(false, cx)
+        .flex()
+        .items_center()
+        .gap(space::S6)
+        .min_h(px(28.))
+        .px(space::S4)
+        .mx(-space::S4)
+        .rounded(theme::radius::MD)
+        .text_color(k.ink_3)
+        .child(ui::icon(Sym::Check, px(14.), k.ink_3))
+        .child(meta(div()).child(label))
+        .child(ui::icon(
+            if open {
+                Sym::ChevronUp
+            } else {
+                Sym::ChevronDown
+            },
+            px(12.),
+            k.ink_3,
+        ))
+        .on_click(move |_, _, cx| form.update(cx, |f, cx| f.toggle_checks_all(cx)));
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S8)
+        .child(div().flex().child(toggle))
+        .when(open, |el| el.child(evidence(ctx, blocks, window, cx)))
+        .into_any_element()
+}
+
+/// A done card's 产出 (§2.17 file item, the thread's one recipe): a bordered row with the
+/// kind symbol, the title over `网页产出 · v1 · Jojo`, and the open arrow. The whole row
+/// opens the 产出 beside the 话题.
+fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
+    use crate::data::ArtifactKind;
+    use crate::ui::native::NativeType as _;
+    let n = crate::ui::native::native_colors(cx);
+    let p = &ctx.env.provider;
+    let rows = blocks.iter().enumerate().filter_map(|(i, b)| {
+        let CardV2Block::Ref { label, target, .. } = b else {
+            return None;
+        };
+        let RefTarget::Artifact {
+            artifact_id,
+            version,
+        } = target
+        else {
+            return None;
+        };
+        let detail = p.artifact(artifact_id);
+        let (icon, title, line) = match &detail {
+            Some(a) => {
+                let shown = version.unwrap_or(a.summary.version);
+                let (kind, icon) = match a.summary.kind {
+                    ArtifactKind::Page => (crate::copy::artifacts::CARD_KIND_PAGE, Sym::Document),
+                    ArtifactKind::Image => (crate::copy::artifacts::CARD_KIND_FILE, Sym::Image),
+                    _ => (crate::copy::artifacts::CARD_KIND_FILE, Sym::File),
+                };
+                let mut line = fill(
+                    c::REF_ARTIFACT_KIND_LINE,
+                    &[
+                        ("kind", kind),
+                        ("version", &shown.to_string()),
+                        ("name", &ctx.name(&a.summary.created_by)),
+                    ],
+                );
+                if a.summary.version > shown {
+                    line.push_str(" · ");
+                    line.push_str(&fill(
+                        c::REF_ARTIFACT_NEWER,
+                        &[("version", &a.summary.version.to_string())],
+                    ));
+                }
+                (icon, a.summary.title.clone(), line)
+            }
+            None => (
+                Sym::MissingFile,
+                c::REF_ARTIFACT_GONE.to_string(),
+                fill(c::REF_ARTIFACT_GONE_DETAIL, &[("title", label)]),
+            ),
+        };
+        let gone = detail.is_none();
+        let a = ctx.answerer();
+        let t = target.clone();
+        Some(
+            div()
+                .id(ctx.id(format!("output-{i}")))
+                .w_full()
+                .h(crate::views::files::FILE_ROW_H)
+                .flex_none()
+                .px(space::S12)
+                .rounded(crate::ui::native::tokens::radius::CONTAINER)
+                .border_1()
+                .border_color(n.separator)
+                .bg(n.content)
+                .flex()
+                .items_center()
+                .gap(space::S12)
+                .when(!gone, |el| {
+                    el.focus_row(false, cx)
+                        .cursor_pointer()
+                        .on_click(move |_, window, cx| a.open(&t, window, cx))
+                })
+                .child(crate::ui::native::media_box(icon, cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            crate::ui::truncate::TruncText::new(title)
+                                .id(ctx.id(format!("output-name-{i}")))
+                                .n_headline()
+                                .text_color(if gone { n.secondary } else { n.label }),
+                        )
+                        .child(
+                            crate::ui::truncate::TruncText::new(line)
+                                .id(ctx.id(format!("output-line-{i}")))
+                                .n_subheadline()
+                                .n_figures()
+                                .text_color(n.secondary),
+                        ),
+                )
+                .when(!gone, |el| {
+                    el.child(ui::icon(
+                        Sym::OpenExternal,
+                        theme::icon::HEADER,
+                        theme::colors(cx).text_2,
+                    ))
+                }),
+        )
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S8)
+        .children(rows)
+        .into_any_element()
 }
 
 fn note_input_ix(blocks: &[&CardV2Block], id: Option<&str>) -> Option<usize> {

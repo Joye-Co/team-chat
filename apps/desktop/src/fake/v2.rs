@@ -806,6 +806,20 @@ impl V2Samples {
                     "@Ledger 出 10 月数据月报，日活按去重设备算。",
                 ),
                 report,
+                message(
+                    GROWTH,
+                    t,
+                    3,
+                    ME,
+                    at(10, 12),
+                    "@Jojo 看看这份月报，然后产出一个 html 的解读",
+                ),
+                {
+                    let mut done =
+                        message(GROWTH, t, 4, JOJO, at(10, 18), "解读页面已经发到群里。");
+                    done.id = crate::views::cards::v2::samples::DONE_PAGE.into();
+                    done
+                },
             ],
         );
         let t = T_V4;
