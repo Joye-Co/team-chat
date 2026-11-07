@@ -732,15 +732,28 @@ fn account_menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     use crate::ui::native::{NativeType as _, native_colors};
+    use gpui::prelude::FluentBuilder as _;
     let accounts = services.provider.accounts();
-    for account in accounts {
+    // §2.1: the second line is the role. The server shows only to tell
+    // apart two accounts with the same name.
+    let same_name = |name: &str| accounts.iter().filter(|a| a.name == name).count() > 1;
+    let lines: Vec<Option<SharedString>> = accounts
+        .iter()
+        .map(|account| {
+            let role = account.role.clone().filter(|r| !r.trim().is_empty());
+            let host = same_name(&account.name)
+                .then(|| crate::views::login::server_host(&account.server_url).to_string());
+            match (role, host) {
+                (Some(role), Some(host)) => Some(format!("{role} · {host}").into()),
+                (Some(role), None) => Some(role.into()),
+                (None, Some(host)) => Some(host.into()),
+                (None, None) => None,
+            }
+        })
+        .collect();
+    for (account, line) in accounts.iter().zip(lines) {
         let k = native_colors(cx);
-        let host = crate::views::login::server_host(&account.server_url).to_string();
         let name = SharedString::from(account.name.clone());
-        let line = SharedString::from(match &account.role {
-            Some(role) => format!("{role} · {host}"),
-            None => host,
-        });
         let services = services.clone();
         let id = account.id.clone();
         menu = menu.item(
@@ -755,11 +768,13 @@ fn account_menu(
                             .n_body()
                             .text_color(k.label),
                     )
-                    .child(
-                        crate::ui::truncate::TruncText::new(line.clone())
-                            .n_footnote()
-                            .text_color(k.secondary),
-                    )
+                    .when_some(line.clone(), |d, line| {
+                        d.child(
+                            crate::ui::truncate::TruncText::new(line)
+                                .n_footnote()
+                                .text_color(k.secondary),
+                        )
+                    })
             })
             .checked(account.active)
             .on_click(move |_, _, _| services.provider.switch_account(&id)),

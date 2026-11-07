@@ -514,8 +514,9 @@ pub mod height {
     pub const FOOTER_ROW: Pixels = px(40.);
     /// The palette input row.
     pub const PALETTE_INPUT: Pixels = px(48.);
-    /// The pinned sidebar user row.
-    pub const SIDEBAR_FOOTER: Pixels = px(48.);
+    /// The pinned sidebar user row: p 8 around a 40 button, so the 32
+    /// avatar and the two lines (20 + 16) fit without clipping.
+    pub const SIDEBAR_FOOTER: Pixels = px(56.);
     /// Badge, count pill, kbd, segmented trigger.
     pub const BADGE: Pixels = px(22.);
     pub const COUNT: Pixels = px(20.);

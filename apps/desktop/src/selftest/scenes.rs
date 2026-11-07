@@ -474,7 +474,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "account-menu",
-        about: "The account menu of the sidebar footer: two accounts with their server, the shown one checked, 添加账号…, 设置…, 退出这个账号…",
+        about: "The account menu of the sidebar footer: two accounts with their role, the shown one checked, 添加账号…, 设置…, 退出这个账号…",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::account_menu,
