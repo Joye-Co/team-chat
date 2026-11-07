@@ -661,6 +661,14 @@ impl Services {
 /// Called once per frame after the first frame; see `main.rs` self-tests.
 pub type FirstFrameHook = Box<dyn FnOnce(&mut Window, &mut App)>;
 
+/// The main window's [`RootView`] when `window` is the main window. `gpui_kit::open_window`
+/// wraps every window's view in `base::Root`, so `window.root::<RootView>()` is always
+/// `None`: look inside the wrapper.
+pub fn root_view(window: &Window, cx: &App) -> Option<Entity<RootView>> {
+    let root = window.root::<gpui_base::Root>().flatten()?;
+    root.read(cx).view().clone().downcast::<RootView>().ok()
+}
+
 /// The root view of the main window: login, or the v2 shell (1.1.0): the
 /// left rail | the page (title bar + body) | the right pane. See
 /// `views/shell` for the pages and panes and who owns each.
@@ -1422,6 +1430,51 @@ mod tests {
             assert_eq!(n.page(), Page::Artifact);
             n.back_from_artifact(cx);
             assert_eq!(n.page(), Page::Artifacts);
+        });
+    }
+
+    /// A card or message in the main window finds its navigation: the window's view is the
+    /// `gpui_base::Root` around [`RootView`], so a bare `window.root::<RootView>()` finds
+    /// nothing and a click on a card's 产出 did nothing.
+    #[gpui::test]
+    fn the_main_window_root_view_is_found_inside_its_wrapper(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = crate::fake::FakeProvider::new();
+        let root = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let keep = root.clone();
+        let window = cx
+            .update(|cx| {
+                let services = Services::new(provider, cx);
+                services.nav.update(cx, |nav, cx| {
+                    nav.open_topic("g-dev".into(), "t-api".into(), cx)
+                });
+                cx.open_window(Default::default(), move |window, cx| {
+                    let view = cx.new(|cx| RootView::new(services, None, window, cx));
+                    *keep.borrow_mut() = Some(view.clone());
+                    cx.new(|cx| gpui_base::Root::new(view, window, cx))
+                })
+            })
+            .expect("the window opens");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        let view = root.borrow().clone().expect("the root view");
+        cx.update(|window, cx| {
+            assert!(
+                window.root::<RootView>().flatten().is_none(),
+                "the wrapper is the root"
+            );
+            let found = root_view(window, cx).expect("found inside the wrapper");
+            assert_eq!(found.entity_id(), view.entity_id());
+            // What a click on a card's 产出 does with it: the pane beside the 话题.
+            let nav = found.read(cx).services().nav.clone();
+            nav.update(cx, |n, cx| n.show_artifact("a1".into(), Some(1), cx));
+            assert_eq!(
+                nav.read(cx).visible_pane(),
+                RightPane::Artifact {
+                    id: "a1".into(),
+                    version: Some(1)
+                }
+            );
         });
     }
 

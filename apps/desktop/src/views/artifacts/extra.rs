@@ -146,9 +146,7 @@ impl MessageExtra for ArtifactRefsExtra {
                     .on_click(move |_, win, cx| {
                         // In the right pane next to the 话题 (the conversation stays); a
                         // separate 产出 window only where there is no main window.
-                        let nav = win
-                            .root::<crate::app::RootView>()
-                            .flatten()
+                        let nav = crate::app::root_view(win, cx)
                             .map(|r| r.read(cx).services().nav.clone());
                         match nav {
                             Some(nav) => {

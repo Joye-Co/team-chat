@@ -44,7 +44,7 @@ use self::{
     state::{CardState, Viewer},
 };
 use crate::{
-    app::{Navigation, RightPane, RootView},
+    app::{Navigation, RightPane},
     copy::{cards_v2 as c, fill},
     data::{
         CardPressError, ChatProvider, MemberId, MemberLevel, Millis, SessionState,
@@ -584,10 +584,7 @@ impl Answerer {
 
     fn nav(&self, window: &mut Window, cx: &App) -> Option<Entity<Navigation>> {
         self.nav.clone().or_else(|| {
-            window
-                .root::<RootView>()
-                .flatten()
-                .map(|r| r.read(cx).services().nav.clone())
+            crate::app::root_view(window, cx).map(|r| r.read(cx).services().nav.clone())
         })
     }
 
@@ -622,10 +619,8 @@ impl Answerer {
     /// 停止… of the run `run_id` in the card's topic: the same alert and
     /// stop as the thread's working card (`process::stop_run`).
     pub fn stop_run(&self, run_id: &str, window: &mut Window, cx: &mut App) {
-        let Some(services) = window
-            .root::<RootView>()
-            .flatten()
-            .map(|r| r.read(cx).services().clone())
+        let Some(services) =
+            crate::app::root_view(window, cx).map(|r| r.read(cx).services().clone())
         else {
             return;
         };
