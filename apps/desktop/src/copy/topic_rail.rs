@@ -31,6 +31,15 @@ crate::copy! {
     // 1.1.1, the 群聊's title bar: start a 话题, or see the 群's 话题.
     TITLE_NEW_TOPIC = "新话题",
     TITLE_GROUP_TOPICS = "这个群的话题",
+    TITLE_DETAILS = "详情",
+    RAIL_EMPTY_REST = "还没有{names}，有了会出现在这里。",
+    RAIL_EMPTY_NAME_PLAN = "计划",
+    RAIL_EMPTY_NAME_CHANGES = "改动",
+    RAIL_EMPTY_NAME_OUTPUTS = "产出",
+    RAIL_EMPTY_NAME_DECISIONS = "用到的决定",
+    RAIL_EMPTY_NAME_WHERE = "电脑",
+    RAIL_EMPTY_NAME_COST = "用时",
+    TITLE_TOPICS_SHORT = "话题",
     // The 群聊's composer: plain chat, @ hands work to a member.
     CHAT_COMPOSER_PLACEHOLDER = "在 {group} 里说点什么，@ 成员交代…",
     CHAT_COMPOSER_PLACEHOLDER_DM = "说点什么…",
