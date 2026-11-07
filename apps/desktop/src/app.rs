@@ -1057,9 +1057,8 @@ impl Render for RootView {
         if window.focused(cx).is_none() || self.login.read(cx).has_focus(window, cx) {
             window.focus(&self.focus, cx);
         }
-        // v12/shell: the main window of NATIVE.md §2: the floating sidebar
-        // (traffic lights inside it), the content running under its 8 pt
-        // gap, the page column with its toolbar row, and the inspector
+        // v12/shell: the main window of NATIVE.md §2: the sidebar column
+        // flush with the window edge (traffic lights inside it), the page column with its toolbar row, and the inspector
         // edge to edge.
         use crate::views::columns::Column;
         let sidebar_w = self.columns.width(Column::Sidebar);
@@ -1093,7 +1092,7 @@ impl Render for RootView {
                 .overflow_hidden()
                 .flex()
                 .child(
-                    crate::ui::native::floating_sidebar(sidebar_w, cx)
+                    crate::ui::native::sidebar_panel(sidebar_w, cx)
                         .relative()
                         .child(crate::views::shell::chrome::menu_accent(self.rail.clone()))
                         .child(handle),
@@ -1142,11 +1141,11 @@ impl Render for RootView {
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
         let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
-        // v12/fx-shell: one leading content inset. The title starts 20 pt
-        // after the visible sidebar edge (`CONTENT_LEADING` from the page
-        // column), or past the traffic lights when the sidebar is hidden;
-        // then the page column shifts by the sidebar's 8 pt gap so lists
-        // still start 20 pt from the window edge.
+        // v12/fx-shell: one leading content inset. The title starts
+        // `CONTENT_LEADING` after the sidebar's trailing edge (where the page
+        // column starts), or past the traffic lights when the sidebar is
+        // hidden; then the page column shifts by `SIDEBAR_INSET` so lists
+        // still start `CONTENT_GAP` from the window edge.
         // While the sidebar slides, the title moves between its two places.
         let leading = if rail_shown {
             let shown = crate::ui::native::metrics::CONTENT_LEADING;
@@ -1273,7 +1272,7 @@ pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
         titlebar: Some(TitlebarOptions {
             title: Some(env!("PRODUCT_NAME").into()),
             // v12/shell: a full-size content view; the traffic lights sit
-            // inside the floating sidebar, on the toolbar row's centre line
+            // inside the sidebar, on the toolbar row's centre line
             // (NATIVE.md §2).
             appears_transparent: true,
             traffic_light_position: Some(point(theme::TRAFFIC_LIGHTS.0, theme::TRAFFIC_LIGHTS.1)),

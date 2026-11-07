@@ -1,4 +1,4 @@
-//! The floating sidebar (NATIVE.md §2, §9.1): the glass panel frame,
+//! The sidebar (NATIVE.md §2, §9.1): the flush sidebar column,
 //! section headers with a disclosure chevron on hover, and 32 pt rows with
 //! the Tahoe selection (gray fill, accent symbol and text) and the row hover
 //! (muted 50 %).
@@ -68,19 +68,21 @@ impl RowMenu {
     }
 }
 
-/// The floating sidebar panel (§2): inset 8 pt from the window's top,
-/// leading and bottom edges, radius 18, `sidebar` fill, 0.5 pt `glassEdge`
-/// and the `float` shadow. Children go inside; the traffic lights sit in
+/// The sidebar column (§2): flush with the window's top, leading and bottom
+/// edges, `sidebar` fill, a 1 px `separator` on its trailing edge, no
+/// radius and no shadow, so the window shows one outline only. Its rows sit
+/// in a `width` column padded 8 pt on each side; the traffic lights sit in
 /// its top row.
-pub fn floating_sidebar(width: gpui::Pixels, cx: &App) -> gpui::Div {
+pub fn sidebar_panel(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
-        .m(metrics::SIDEBAR_INSET)
-        .w(width)
-        .rounded(metrics::SIDEBAR_RADIUS)
+        .h_full()
+        .w(width + metrics::SIDEBAR_INSET * 2.)
+        .p(metrics::SIDEBAR_INSET)
         .bg(k.sidebar)
-        .shadow(k.glass())
+        .border_r(metrics::HAIRLINE)
+        .border_color(k.separator)
         .overflow_hidden()
         .flex()
         .flex_col()

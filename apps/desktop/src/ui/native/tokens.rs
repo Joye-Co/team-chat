@@ -540,8 +540,7 @@ pub mod radius {
     pub const CONTAINER: Pixels = px(10.);
     /// Card, inspector section card, media viewer.
     pub const CARD: Pixels = px(14.);
-    /// Window chrome: the inset sidebar and the Mac sheet window.
-    pub const SIDEBAR: Pixels = px(18.);
+    /// Window chrome: the Mac sheet window.
     pub const SHEET: Pixels = px(22.);
     /// Pills: badge, count, avatar, switch, search field.
     pub const FULL: Pixels = px(9999.);
@@ -899,15 +898,15 @@ pub mod metrics {
     pub const TOOLBAR_PILL: Pixels = height::SM;
     pub const TOOLBAR_PILL_INSET: Pixels = space::S4;
     pub const TOOLBAR_GROUP_GAP: Pixels = space::S8;
-    /// From the visible sidebar edge (x 256) to the content (x 288).
-    pub const CONTENT_GAP: Pixels = space::S32;
-    /// The gutter from the page column (x 264) to the content (x 288).
+    /// From the sidebar's trailing edge (x 264) to the content (x 288).
+    pub const CONTENT_GAP: Pixels = space::S24;
+    /// The gutter from the page column (x 264, the sidebar's trailing edge)
+    /// to the content (x 288).
     pub const CONTENT_LEADING: Pixels = space::S24;
     pub const TOOLBAR_LEADING: Pixels = CONTENT_LEADING;
     pub const TOOLBAR_TRAILING: Pixels = space::S16;
     pub const TOOLBAR_SYMBOL: Pixels = px(16.);
     pub const SIDEBAR_INSET: Pixels = space::S8;
-    pub const SIDEBAR_RADIUS: Pixels = radius::SIDEBAR;
     pub const SIDEBAR_WIDTH: Pixels = px(248.);
     pub const SIDEBAR_ROW: Pixels = height::ROW;
     pub const SIDEBAR_ROW_INSET: Pixels = space::S8;
@@ -1420,11 +1419,13 @@ mod tests {
 
     #[test]
     fn content_starts_at_the_gutter() {
-        // Page column x 264 + 24 = 288: 32 after the visible sidebar edge.
+        // The page column starts at the sidebar's trailing edge (x 264):
+        // content at 264 + 24 = 288.
         assert_eq!(
-            metrics::SIDEBAR_INSET + metrics::CONTENT_LEADING,
-            metrics::CONTENT_GAP
+            metrics::SIDEBAR_WIDTH + metrics::SIDEBAR_INSET * 2. + metrics::CONTENT_LEADING,
+            px(288.)
         );
+        assert_eq!(metrics::CONTENT_LEADING, metrics::CONTENT_GAP);
         assert_eq!(metrics::TOOLBAR_LEADING, metrics::CONTENT_LEADING);
         assert_eq!(metrics::PANE_TOP, metrics::TOOLBAR_ROW);
         assert_eq!(metrics::INSPECTOR_WIDTH, px(320.));
