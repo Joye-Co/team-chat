@@ -2,7 +2,7 @@
 //! `ui::native` in its states (rest, pressed, focused, disabled, selected,
 //! inactive window), on the real surfaces, in one window per page.
 //!
-//! Page 0 (`native-kit`): the window anatomy (floating sidebar, toolbar row
+//! Page 0 (`native-kit`): the window anatomy (sidebar, toolbar row
 //! active and inactive), push buttons, pop-ups, switches, checkboxes,
 //! radios, segmented controls, fields and a grouped form.
 //! Page 1 (`native-kit-2`): menus, a popover, the inspector, list rows,

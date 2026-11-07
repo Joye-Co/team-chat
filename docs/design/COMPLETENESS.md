@@ -9,7 +9,7 @@ Note: the audit folders named below (`completeness/shadcn-bar/`, `component-syst
 
 Scope: the macOS client (Rust GPUI + gpui-component 0.8.1), branch `origin/v12/native`. The style stays pure black and white, like shadcn/ui new-york-v4 neutral. This spec does not ask for a new style. It asks for **finish**: every region designed, every state drawn, every value on one scale, nothing that reads as a draft.
 
-Keep the Mac client structure: the separate Settings window (640 wide, toolbar tab strip), sheets that drop from the toolbar edge, the toolbar title, the inset sidebar with traffic lights. Section 2.1 gives the coordinates.
+Keep the Mac client structure: the separate Settings window (640 wide, toolbar tab strip), sheets that drop from the toolbar edge, the toolbar title, the flush sidebar with traffic lights. Section 2.1 gives the coordinates.
 
 All values are 1x px. "Muted" means the muted-foreground token. "Border" means the one border token.
 
@@ -27,7 +27,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D2 | Body text | 14. Settings, sheets, menus, lists, messages: all 14. | Measured 11 px text is the largest single "unfinished" signal (header subtitle, date, hints, button labels). |
 | D3 | Control heights | 3 steps: sm 28, default 32, lg 36. No 18, 20, 22, 24, 25, 26, 30, 31 or 47. | 32 = gpui-component md at rem 16 and the shadcn toolbar height. 28 fits inside a 44 form row. |
 | D4 | Toolbar items | 32 square ghost icon buttons, radius 8. The 36 glass circles with drop shadow go. | One toolbar baseline (bar: toolbar controls all h32). |
-| D5 | Radius | control 8, menu item and small box 6, checkbox 4, container 10, card and panel 14, full for pills. Window chrome keeps its own: inset sidebar 18, Mac sheet window 22. | shadcn new-york-v4 with --radius 10. |
+| D5 | Radius | control 8, menu item and small box 6, checkbox 4, container 10, card and panel 14, full for pills. Window chrome keeps its own: Mac sheet window 22 (the sidebar is flush, no radius). | shadcn new-york-v4 with --radius 10. |
 | D6 | Spacing | 2, 4, 6, 8, 12, 16, 24, 32, 48. No 20. | Bar scale. The 20 gutter and 20-22 group gaps in Settings become 24. |
 | D7 | Message avatar | 32. Text column = gutter + 32 + 12. | Avatar sizes 16/24/32/40/64 only. |
 | D8 | Form anatomy | One grouped FormRow in Settings **and** in every sheet (label left, control right). A textarea is a full-width row in the same group. | Settings and overlay audits both accept it; it keeps the Mac look. |
@@ -140,7 +140,7 @@ No 3, 5, 7, 9, 10, 14, 18 or 20 for layout gaps (today `gap 3` x9, `5` x3, `10` 
 | 10 | group box, table frame, tabs list, alert, empty state, toast, 40 icon box, composer |
 | 14 | card, inspector section card, media viewer |
 | full | badge, count pill, avatar (human), switch, presence dot, search field |
-| 18 / 22 | window chrome only: inset sidebar 18, Mac sheet window 22 |
+| 22 | window chrome only: Mac sheet window 22 |
 
 Agent avatars use a squircle at radius = size x 0.25 (8 at 32). Human avatars are circles.
 
@@ -222,7 +222,7 @@ x: 0 ───── 264 ──────────────────�
 y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 52 across 264-1440)
 ```
 
-- **Sidebar** (x 0-264): inset panel x 8-256, y 8-892, radius 18, fill sidebar, 1 px border. From top to bottom:
+- **Sidebar** (x 0-264): flush column x 0-264, y 0-900, no radius, fill sidebar, 1 px separator on the trailing edge; rows in x 8-256. From top to bottom:
   1. y 8-52: traffic lights band (Mac). Nothing else.
   2. Search field h32, mx 8.
   3. Groups. Each group: GroupLabel (h32, px8, 12 medium muted), then items h32 (p8, radius 8, gap 8, icon or avatar 16 at one x, 14 text that truncates with an ellipsis before the right column, right column right-aligned at x 238 for count pills, times or one badge). Hover (owner decision v15): muted at 50 % on rows that are not selected, drawn at once (no transition); every sidebar and list row uses it, through the one focusable row (`ui/native/focus.rs` `FocusRow`: tab stop, ring distinct from the selection, Enter / Space, ↑ / ↓). One right-column kind per group: a member group shows a StatusBadge on every busy member ("等你 2", else "在做 3"); an open member keeps its badge. Every group has a label, the agent group included. Inside one group either every item has a 16 media or none has. A collapsed tail ("空闲 · 3", "不在 · 2") is one "More" item at 70% opacity with a chevron.

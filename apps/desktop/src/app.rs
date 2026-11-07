@@ -228,6 +228,9 @@ pub struct Navigation {
     pub header_hovered: bool,
     /// ⌘⇧S hid the sidebar (§4.4).
     pub sidebar_hidden: bool,
+    /// The main window is in full screen: no traffic lights, so the sidebar
+    /// toggle moves to the leading edge (NATIVE.md §2).
+    pub fullscreen: bool,
     /// v2: the pane at the right of a 话题 page.
     pub right_pane: RightPane,
     /// v2: how the rail lists work.
@@ -288,6 +291,7 @@ impl Navigation {
             side_panel_auto_at: None,
             header_hovered: false,
             sidebar_hidden: false,
+            fullscreen: false,
             right_pane: RightPane::default(),
             rail_mode: RailMode::default(),
             artifact_return: None,
@@ -596,6 +600,29 @@ impl Navigation {
     }
 
     /// ⌘⇧S: hides or shows the sidebar.
+    /// Where the sidebar toggle sits: right after the traffic lights, or at
+    /// the leading edge in full screen. It stays there whether the sidebar is
+    /// shown or hidden.
+    pub fn sidebar_toggle_x(&self) -> gpui::Pixels {
+        if self.fullscreen {
+            theme::SIDEBAR_TOGGLE_X_FULLSCREEN
+        } else {
+            theme::SIDEBAR_TOGGLE_X
+        }
+    }
+
+    /// Where a page's title starts with the sidebar hidden: past the toggle.
+    pub fn sidebar_hidden_inset(&self) -> gpui::Pixels {
+        self.sidebar_toggle_x() + theme::SIDEBAR_TOGGLE_ROOM
+    }
+
+    pub fn set_fullscreen(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.fullscreen != on {
+            self.fullscreen = on;
+            cx.notify();
+        }
+    }
+
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_hidden = !self.sidebar_hidden;
         cx.notify();
@@ -870,7 +897,8 @@ impl RootView {
 }
 
 /// A side column that slides open and shut: its width goes 0 → 1 of its
-/// own over `motion::SLOW` on the on-screen movement curve; at once under
+/// own over `motion::COLUMN_OPEN` (shut: `COLUMN_CLOSE`) on the drawer
+/// curve; at once under
 /// Reduce Motion and on the first frame. A toggle in the middle starts from
 /// where the column is.
 #[derive(Default)]
@@ -901,12 +929,17 @@ impl Reveal {
         let Some(at) = self.at else {
             return (target, false);
         };
-        let t = at.elapsed().as_secs_f32() / theme::motion::SLOW.as_secs_f32();
+        let span = if target > 0.5 {
+            theme::motion::COLUMN_OPEN
+        } else {
+            theme::motion::COLUMN_CLOSE
+        };
+        let t = at.elapsed().as_secs_f32() / span.as_secs_f32();
         if t >= 1. {
             self.at = None;
             return (target, false);
         }
-        let e = theme::motion::moving().sample(t);
+        let e = theme::motion::drawer().sample(t);
         (self.from + (target - self.from) * e, true)
     }
 }
@@ -915,6 +948,41 @@ impl RootView {
     /// The sidebar's resize handle: an 8 pt strip on its trailing edge with
     /// the resize cursor. A drag resizes 1:1 (200–320 pt, rubber band past
     /// the bounds); a double-click resets the width.
+    /// The sidebar toggle (隐藏侧栏 / 显示侧栏, ⌃⌘S): one button at one place
+    /// over the window, right after the traffic lights (the leading edge in
+    /// full screen) on the toolbar row's center line, so it never moves when
+    /// the sidebar slides open or shut.
+    fn sidebar_toggle(&self, active: bool, cx: &App) -> AnyElement {
+        use crate::ui::native::metrics;
+        let nav = self.services.nav.clone();
+        let (x, open) = {
+            let n = nav.read(cx);
+            (n.sidebar_toggle_x(), !n.sidebar_hidden)
+        };
+        let name = if open {
+            crate::copy::nav::SIDEBAR_HIDE
+        } else {
+            crate::copy::nav::SIDEBAR_SHOW
+        };
+        div()
+            .absolute()
+            .left(x)
+            .top((metrics::TOOLBAR_ROW - metrics::TOOLBAR_ITEM) / 2.)
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                crate::ui::native::toolbar_item_sym(
+                    "sidebar-toggle",
+                    crate::ui::Sym::SidebarToggle,
+                    name,
+                    false,
+                    active,
+                    cx,
+                )
+                .on_click(move |_, _, cx| nav.update(cx, |nav, cx| nav.toggle_sidebar(cx))),
+            )
+            .into_any_element()
+    }
+
     fn sidebar_handle(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::views::columns::Column;
         div()
@@ -1057,11 +1125,15 @@ impl Render for RootView {
         if window.focused(cx).is_none() || self.login.read(cx).has_focus(window, cx) {
             window.focus(&self.focus, cx);
         }
-        // v12/shell: the main window of NATIVE.md §2: the floating sidebar
-        // (traffic lights inside it), the content running under its 8 pt
-        // gap, the page column with its toolbar row, and the inspector
-        // edge to edge.
+        // v12/shell: the main window of NATIVE.md §2: the sidebar column
+        // flush with the window edge (traffic lights inside it), the page
+        // column with its toolbar row, and the inspector edge to edge.
         use crate::views::columns::Column;
+        let fullscreen = window.is_fullscreen();
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.set_fullscreen(fullscreen, cx));
+        let hidden_inset = self.services.nav.read(cx).sidebar_hidden_inset();
         let sidebar_w = self.columns.width(Column::Sidebar);
         if self.columns.settling() {
             window.request_animation_frame();
@@ -1093,7 +1165,7 @@ impl Render for RootView {
                 .overflow_hidden()
                 .flex()
                 .child(
-                    crate::ui::native::floating_sidebar(sidebar_w, cx)
+                    crate::ui::native::sidebar_panel(sidebar_w, cx)
                         .relative()
                         .child(crate::views::shell::chrome::menu_accent(self.rail.clone()))
                         .child(handle),
@@ -1102,11 +1174,12 @@ impl Render for RootView {
         });
         // No 群 yet: the sidebar and the 首页 empty state (v12/fx-shell:
         // centered text and two push buttons, no illustration).
+        let toggle = self.sidebar_toggle(active, cx);
         if self.services.provider.groups().is_empty() {
             let leading = if rail_shown {
                 crate::ui::native::metrics::CONTENT_LEADING
             } else {
-                theme::SIDEBAR_HIDDEN_INSET
+                hidden_inset
             };
             // R2-02: while the first sync runs, the 群 may still arrive: the
             // 首页 skeleton, never "还没有加入群" and its create buttons.
@@ -1119,7 +1192,13 @@ impl Render for RootView {
             } else {
                 crate::views::shell::pages::empty_page(leading, active, window, cx)
             };
-            return root.flex().flex_row().children(rail).child(page);
+            return root
+                .flex()
+                .flex_row()
+                .relative()
+                .children(rail)
+                .child(page)
+                .child(toggle);
         }
         let page = nav.page();
         let pane = nav.visible_pane();
@@ -1142,34 +1221,20 @@ impl Render for RootView {
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
         let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
-        // v12/fx-shell: one leading content inset. The title starts 20 pt
-        // after the visible sidebar edge (`CONTENT_LEADING` from the page
-        // column), or past the traffic lights when the sidebar is hidden;
-        // then the page column shifts by the sidebar's 8 pt gap so lists
-        // still start 20 pt from the window edge.
-        // While the sidebar slides, the title moves between its two places.
+        // v12/fx-shell: one leading content inset. The title starts
+        // `CONTENT_LEADING` after the sidebar's trailing edge (where the page
+        // column starts), or past the sidebar toggle when the sidebar is
+        // hidden. While the sidebar slides, the title moves between its two
+        // places.
         let leading = if rail_shown {
             let shown = crate::ui::native::metrics::CONTENT_LEADING;
-            shown + (theme::SIDEBAR_HIDDEN_INSET - shown) * (1. - left)
+            shown + (hidden_inset - shown) * (1. - left)
         } else {
-            theme::SIDEBAR_HIDDEN_INSET - crate::ui::native::metrics::SIDEBAR_INSET
+            hidden_inset
         };
         let page_el = self
             .pages
             .render(page, &pane, leading, active, &self.services, window, cx);
-        let page_el = if rail_shown {
-            page_el
-        } else {
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .h_full()
-                .flex()
-                .pl(crate::ui::native::metrics::SIDEBAR_INSET)
-                .bg(crate::views::shell::chrome::colors(cx).content)
-                .child(page_el)
-                .into_any_element()
-        };
         let pane_el = if floats || right >= 1. {
             self.panes
                 .render(&drawn_pane, full_pane_w, floats, cx)
@@ -1195,32 +1260,6 @@ impl Render for RootView {
                         .into_any_element()
                 })
         };
-        // 显示侧栏: with the sidebar hidden, its toggle stays on screen right
-        // after the traffic lights, so the sidebar is one click away.
-        let show_sidebar = (!rail_shown).then(|| {
-            let nav = self.services.nav.clone();
-            div()
-                .absolute()
-                .left(theme::SIDEBAR_SHOW_X)
-                .top(
-                    (crate::ui::native::metrics::TOOLBAR_ROW
-                        - crate::ui::native::metrics::TOOLBAR_ITEM)
-                        / 2.,
-                )
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(
-                    crate::ui::native::toolbar_item_sym(
-                        "show-sidebar",
-                        crate::ui::Sym::SidebarToggle,
-                        crate::copy::nav::SIDEBAR_SHOW,
-                        false,
-                        active,
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| nav.update(cx, |nav, cx| nav.toggle_sidebar(cx))),
-                )
-                .into_any_element()
-        });
         root.flex()
             .flex_row()
             .relative()
@@ -1245,7 +1284,7 @@ impl Render for RootView {
             .children(rail)
             .child(page_el)
             .children(pane_el)
-            .children(show_sidebar)
+            .child(toggle)
     }
 }
 
@@ -1273,7 +1312,7 @@ pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
         titlebar: Some(TitlebarOptions {
             title: Some(env!("PRODUCT_NAME").into()),
             // v12/shell: a full-size content view; the traffic lights sit
-            // inside the floating sidebar, on the toolbar row's centre line
+            // inside the sidebar, on the toolbar row's centre line
             // (NATIVE.md §2).
             appears_transparent: true,
             traffic_light_position: Some(point(theme::TRAFFIC_LIGHTS.0, theme::TRAFFIC_LIGHTS.1)),
