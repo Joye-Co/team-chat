@@ -86,7 +86,7 @@ pub use sheet::{
 #[allow(unused_imports)]
 pub use sidebar::{
     RightColumn, SidebarFooter, SidebarGroup, SidebarMedia, SidebarRow, SidebarSection,
-    floating_sidebar,
+    sidebar_panel,
 };
 #[allow(unused_imports)]
 pub use toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize};

@@ -1,5 +1,5 @@
 //! The window chrome of the main window (NATIVE.md §2, §4, §7.3): the live
-//! native colors (with the system accent), the floating sidebar frame, the
+//! native colors (with the system accent), the sidebar column width, the
 //! inspector frame, the scroll edge under the toolbar and the scope that
 //! gives gpui-component's menus the accent highlight.
 //!
@@ -152,8 +152,8 @@ impl Element for MenuAccent {
     }
 }
 
-/// The width the floating sidebar takes from the window: the panel and
-/// its inset on both sides.
+/// The width the sidebar column takes from the window: its rows and the
+/// 8 pt padding on both sides.
 pub fn sidebar_room(width: Pixels) -> Pixels {
     width + metrics::SIDEBAR_INSET * 2.
 }

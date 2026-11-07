@@ -1,4 +1,4 @@
-//! The floating sidebar (NATIVE.md §2, §9.1): the glass panel frame,
+//! The sidebar (NATIVE.md §2, §9.1): the flush sidebar column,
 //! section headers with a disclosure chevron on hover, and 32 pt rows with
 //! the Tahoe selection (gray fill, accent symbol and text) and the row hover
 //! (muted 50 %).
@@ -68,19 +68,21 @@ impl RowMenu {
     }
 }
 
-/// The floating sidebar panel (§2): inset 8 pt from the window's top,
-/// leading and bottom edges, radius 18, `sidebar` fill, 0.5 pt `glassEdge`
-/// and the `float` shadow. Children go inside; the traffic lights sit in
+/// The sidebar column (§2): flush with the window's top, leading and bottom
+/// edges, `sidebar` fill, a 1 px `separator` on its trailing edge, no
+/// radius and no shadow, so the window shows one outline only. Its rows sit
+/// in a `width` column padded 8 pt on each side; the traffic lights sit in
 /// its top row.
-pub fn floating_sidebar(width: gpui::Pixels, cx: &App) -> gpui::Div {
+pub fn sidebar_panel(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
-        .m(metrics::SIDEBAR_INSET)
-        .w(width)
-        .rounded(metrics::SIDEBAR_RADIUS)
+        .h_full()
+        .w(width + metrics::SIDEBAR_INSET * 2.)
+        .p(metrics::SIDEBAR_INSET)
         .bg(k.sidebar)
-        .shadow(k.glass())
+        .border_r(metrics::HAIRLINE)
+        .border_color(k.separator)
         .overflow_hidden()
         .flex()
         .flex_col()
@@ -702,7 +704,7 @@ impl RenderOnce for SidebarRow {
 /// The account menu of the footer.
 pub type FooterMenu = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
-/// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
+/// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h56,
 /// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
 /// or workspace, or the offline state), `chevron.up.chevron.down` 16 at the
 /// right. A ghost button (gpui-component): it opens the account menu (the
@@ -797,8 +799,17 @@ impl RenderOnce for SidebarFooter {
                 k.secondary,
                 window,
             )));
+        // The footer reads as a sidebar row, not a push button: the row
+        // hover (muted 50 %) and, while its menu is open, the selected-row
+        // fill (muted), never the darker pressed fill.
+        let look = gpui_component::button::ButtonCustomVariant::new(cx)
+            .color(gpui::transparent_black())
+            .foreground(k.label)
+            .hover(k.fill.opacity(0.5))
+            .active(k.selection);
         let button = Button::new(self.id)
-            .custom(super::buttons::borderless_variant(cx))
+            .custom(look)
+            .py(px(0.))
             .with_size(gpui_component::Size::Medium)
             .w_full()
             .h(super::tokens::height::SIDEBAR_FOOTER - metrics::SIDEBAR_ROW_INSET * 2.)
@@ -809,7 +820,13 @@ impl RenderOnce for SidebarFooter {
         let trigger = match self.menu {
             Some(menu) => button
                 .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |m, window, cx| {
-                    menu(m, window, cx)
+                    // As wide as the footer button at the default sidebar
+                    // width, so the menu lines up with what opened it.
+                    menu(
+                        m.min_w(metrics::SIDEBAR_WIDTH - metrics::SIDEBAR_ROW_INSET * 2.),
+                        window,
+                        cx,
+                    )
                 })
                 .into_any_element(),
             None => button.into_any_element(),

@@ -514,8 +514,9 @@ pub mod height {
     pub const FOOTER_ROW: Pixels = px(40.);
     /// The palette input row.
     pub const PALETTE_INPUT: Pixels = px(48.);
-    /// The pinned sidebar user row.
-    pub const SIDEBAR_FOOTER: Pixels = px(48.);
+    /// The pinned sidebar user row: p 8 around a 40 button, so the 32
+    /// avatar and the two lines (20 + 16) fit without clipping.
+    pub const SIDEBAR_FOOTER: Pixels = px(56.);
     /// Badge, count pill, kbd, segmented trigger.
     pub const BADGE: Pixels = px(22.);
     pub const COUNT: Pixels = px(20.);
@@ -540,8 +541,7 @@ pub mod radius {
     pub const CONTAINER: Pixels = px(10.);
     /// Card, inspector section card, media viewer.
     pub const CARD: Pixels = px(14.);
-    /// Window chrome: the inset sidebar and the Mac sheet window.
-    pub const SIDEBAR: Pixels = px(18.);
+    /// Window chrome: the Mac sheet window.
     pub const SHEET: Pixels = px(22.);
     /// Pills: badge, count, avatar, switch, search field.
     pub const FULL: Pixels = px(9999.);
@@ -851,14 +851,19 @@ pub mod layout {
     pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
     pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
     pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-    pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
+    /// The red light's origin: the lights centre on the toolbar row's centre
+    /// line (y 32), with the page title and the sidebar toggle.
+    pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(25.));
     pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
-    /// With the sidebar hidden, the 显示侧栏 button sits right after the
-    /// traffic lights, on the toolbar row's center line.
-    pub const SIDEBAR_SHOW_X: Pixels = px(80.);
-    /// Where a page's title starts with the sidebar hidden: past the lights
-    /// and the 显示侧栏 button.
-    pub const SIDEBAR_HIDDEN_INSET: Pixels = px(80. + 32. + 8.);
+    /// The sidebar toggle (隐藏侧栏 / 显示侧栏) sits right after the traffic
+    /// lights, on the toolbar row's center line, and stays there whether the
+    /// sidebar is shown or hidden.
+    pub const SIDEBAR_TOGGLE_X: Pixels = px(80.);
+    /// In full screen (no traffic lights) it sits at the leading edge.
+    pub const SIDEBAR_TOGGLE_X_FULLSCREEN: Pixels = space::S16;
+    /// The toggle (32) and the gap before the page title (24): a page's
+    /// title starts this far past the toggle's x with the sidebar hidden.
+    pub const SIDEBAR_TOGGLE_ROOM: Pixels = px(32. + 24.);
     /// The message avatar (D7).
     pub const AVATAR_SIZE: Pixels = avatar::MD;
     pub const ROW_HEIGHT: Pixels = height::ROW;
@@ -899,15 +904,15 @@ pub mod metrics {
     pub const TOOLBAR_PILL: Pixels = height::SM;
     pub const TOOLBAR_PILL_INSET: Pixels = space::S4;
     pub const TOOLBAR_GROUP_GAP: Pixels = space::S8;
-    /// From the visible sidebar edge (x 256) to the content (x 288).
-    pub const CONTENT_GAP: Pixels = space::S32;
-    /// The gutter from the page column (x 264) to the content (x 288).
+    /// From the sidebar's trailing edge (x 264) to the content (x 288).
+    pub const CONTENT_GAP: Pixels = space::S24;
+    /// The gutter from the page column (x 264, the sidebar's trailing edge)
+    /// to the content (x 288).
     pub const CONTENT_LEADING: Pixels = space::S24;
     pub const TOOLBAR_LEADING: Pixels = CONTENT_LEADING;
     pub const TOOLBAR_TRAILING: Pixels = space::S16;
     pub const TOOLBAR_SYMBOL: Pixels = px(16.);
     pub const SIDEBAR_INSET: Pixels = space::S8;
-    pub const SIDEBAR_RADIUS: Pixels = radius::SIDEBAR;
     pub const SIDEBAR_WIDTH: Pixels = px(248.);
     pub const SIDEBAR_ROW: Pixels = height::ROW;
     pub const SIDEBAR_ROW_INSET: Pixels = space::S8;
@@ -1420,11 +1425,13 @@ mod tests {
 
     #[test]
     fn content_starts_at_the_gutter() {
-        // Page column x 264 + 24 = 288: 32 after the visible sidebar edge.
+        // The page column starts at the sidebar's trailing edge (x 264):
+        // content at 264 + 24 = 288.
         assert_eq!(
-            metrics::SIDEBAR_INSET + metrics::CONTENT_LEADING,
-            metrics::CONTENT_GAP
+            metrics::SIDEBAR_WIDTH + metrics::SIDEBAR_INSET * 2. + metrics::CONTENT_LEADING,
+            px(288.)
         );
+        assert_eq!(metrics::CONTENT_LEADING, metrics::CONTENT_GAP);
         assert_eq!(metrics::TOOLBAR_LEADING, metrics::CONTENT_LEADING);
         assert_eq!(metrics::PANE_TOP, metrics::TOOLBAR_ROW);
         assert_eq!(metrics::INSPECTOR_WIDTH, px(320.));

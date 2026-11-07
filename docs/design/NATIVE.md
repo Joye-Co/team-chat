@@ -2,7 +2,7 @@
 
 > The finish spec [COMPLETENESS.md](COMPLETENESS.md) is binding and wins over this file where they
 > differ (scale, colors, controls, anatomy, states). This file still owns the Mac structure: window,
-> toolbar, inset sidebar, sheets, the Settings window and behavior.
+> toolbar, sidebar, sheets, the Settings window and behavior.
 
 TeamChat is a Mac app. It must look and behave like a well-made macOS 26 (Tahoe) app, not like a
 web page in a window. This file overrides `docs/DESIGN.md` §1–§8 and §12–§13 where they differ.
@@ -61,14 +61,14 @@ for the AI-specific parts (composer pickers, inspector). Images:
 │  · topic      │                                               │             │
 │ 私聊 ▾        │   (+) [ 回复，或 @ 成员交代…            ] (↑)   │             │
 └──────────────┴───────────────────────────────────────────────┴─────────────┘
- floating sidebar   content (toolbar row is transparent)          inspector
+ sidebar column     content (toolbar row is transparent)          inspector
 ```
 
 | Part | Rule |
 | --- | --- |
 | Window | Min 960 × 620, default 1280 × 820. Content background `content` (§4). |
-| Sidebar | A floating panel inset 8 pt from the window's top, leading and bottom edges, width 248 (drag 200–320), corner radius 18 (concentric with the 26 pt window corner), fill `sidebar`, 0.5 pt edge `glassEdge`, shadow `float` (§4). The traffic lights sit inside it (system position: red light centre about 25, 26 pt from the window corner). The content background runs under the 8 pt gap. |
-| Toolbar row | 52 pt, transparent over the content. Leading: title (15 pt semibold) over subtitle (11 pt, `secondary`), starting 20 pt after the visible sidebar edge (`metrics::CONTENT_LEADING`, 12 pt from the page column, which starts in the sidebar's 8 pt gap). Trailing: toolbar groups (§5.1), 36 pt tall with 8 pt above and below, 12 pt from the inspector or window edge. At most three groups. |
+| Sidebar | A column flush with the window's top, leading and bottom edges (owner decision 2026-11-07: a floating panel drew a second outline inside the window frame; like Feishu, the window shows one outline). Rows 248 wide (drag 200–320) with 8 pt padding on each side, so the column is 264. Fill `sidebar`, no radius, no shadow, a 1 px `separator` on its trailing edge. The traffic lights sit inside it (red light centre about 25, 32 pt from the window corner: on the toolbar row's centre line, with the page title). The sidebar toggle (隐藏侧栏 / 显示侧栏, ⌃⌘S) is one 32 pt button at one place over the window, right after the lights (x 80), shown or hidden alike, so it never moves; with the sidebar hidden the page title starts 24 pt after it. In full screen (no lights) there is no lights row: the toggle sits at x 16 and the search row moves up onto the title line. The sidebar slides open over 340 ms and shut over 280 ms on the drawer curve `cubic-bezier(0.32, 0.72, 0, 1)` (instant under Reduce Motion). |
+| Toolbar row | 52 pt, transparent over the content. Leading: title (15 pt semibold) over subtitle (11 pt, `secondary`), starting 24 pt after the sidebar's trailing edge, where the page column starts (`metrics::CONTENT_LEADING`). Trailing: toolbar groups (§5.1), 36 pt tall with 8 pt above and below, 12 pt from the inspector or window edge. At most three groups. |
 | Scroll edge | Content that scrolls under the toolbar fades out over 24 pt (scroll edge effect); no hairline under the toolbar. |
 | Content inset | One leading edge for the whole content column: the toolbar title, list headers and rows, transcript avatars and detail titles all start at `metrics::CONTENT_LEADING` (20 pt after the sidebar). With the sidebar hidden the shell shifts the page so content still starts 20 pt from the window edge. |
 | Inspector | Width 280 (`metrics::INSPECTOR_WIDTH`), full height edge to edge (Tahoe inspectors do not float), fill `sidebar`, a 1 px `separator` on its leading edge. Toggle with the toolbar item `sidebar.trailing` and ⌥⌘I (View menu). |

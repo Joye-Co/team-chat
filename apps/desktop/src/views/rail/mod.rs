@@ -28,7 +28,7 @@ use std::{collections::HashSet, rc::Rc};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ListAlignment, ListState, ParentElement, Render, SharedString, Styled, Subscription,
-    WeakEntity, Window, div, list, px,
+    WeakEntity, Window, div, list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     button::Button,
@@ -71,9 +71,17 @@ struct Cache {
     has_topics: bool,
 }
 
-/// The traffic-light row at the top of the sidebar panel: the lights are
-/// centred on it (18 pt into the panel, 26 pt from the window top).
-const LIGHTS_ROW: gpui::Pixels = px(36.);
+/// The traffic-light row at the top of the sidebar, under its 8 pt top
+/// padding: centred on the toolbar row's centre line (32 pt from the window
+/// top), so the lights, 隐藏侧栏 and the page title share one line.
+/// `TOOLBAR_ROW` (64) less the padding above and below (2 × 8).
+const LIGHTS_ROW: gpui::Pixels = px(48.);
+/// Full screen, no lights row: the search row's top margin under the
+/// sidebar's 8 pt padding, so the 32 pt row centres on the title line (32).
+const FULLSCREEN_SEARCH_TOP: gpui::Pixels = px(8.);
+/// Full screen: the search field starts 8 pt past the sidebar toggle
+/// (x 16–48), measured from the sidebar's 8 pt padding.
+const FULLSCREEN_SEARCH_LEADING: gpui::Pixels = px(48.);
 /// The sidebar tools in that row (filter, 新话题): 28 pt circles.
 const TOOL: gpui::Pixels = px(28.);
 
@@ -544,6 +552,7 @@ impl Render for RailView {
                 |n, cx| n.open_members(None, cx),
             ),
         ];
+        let fullscreen = self.services.nav.read(cx).fullscreen;
         let filter = self.filter_button(mode, cx);
         let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
         let first_sync = syncing;
@@ -598,51 +607,37 @@ impl Render for RailView {
             .on_action(
                 cx.listener(|this, _: &OpenSelected, window, cx| this.list_key(0, window, cx)),
             )
-            // §2.1: the traffic-light band holds the lights only (drawn by
-            // the system). Dragging it moves the window, as a title bar does.
-            .child(
-                div()
-                    .id("rail-lights-row")
-                    .flex_none()
-                    .h(LIGHTS_ROW)
-                    .pr(metrics::SIDEBAR_ROW_INSET)
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
-                        if event.click_count >= 2 {
-                            window.titlebar_double_click();
-                        } else {
-                            window.start_window_move();
-                        }
-                    })
-                    // 隐藏侧栏 (⌃⌘S), at the trailing end of the lights row as
-                    // in Mail and Notes; a press here never moves the window.
-                    .child(
-                        div()
-                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation()
-                            })
-                            .child({
-                                let nav = self.services.nav.clone();
-                                self.tool(
-                                    "rail-hide-sidebar",
-                                    Sym::SidebarToggle,
-                                    crate::copy::nav::SIDEBAR_HIDE,
-                                    cx,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    nav.update(cx, |nav, cx| nav.toggle_sidebar(cx))
-                                })
-                            }),
-                    ),
-            )
+            // §2.1: the traffic-light band holds the lights and, over them,
+            // the shell's sidebar toggle (it stays put while the sidebar
+            // slides). Dragging it moves the window, as a title bar does. In
+            // full screen there are no lights, so there is no band: the
+            // search row moves up onto the title line instead.
+            .when(!fullscreen, |el| {
+                el.child(
+                    div()
+                        .id("rail-lights-row")
+                        .flex_none()
+                        .h(LIGHTS_ROW)
+                        .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                            if event.click_count >= 2 {
+                                window.titlebar_double_click();
+                            } else {
+                                window.start_window_move();
+                            }
+                        }),
+                )
+            })
             // The search field, then the filter pull-down and 新话题 on its
             // center line.
             .child(
                 div()
                     .flex_none()
                     .pr(metrics::SIDEBAR_ROW_INSET)
+                    // Full screen: centred on the title line, past the
+                    // sidebar toggle at the leading edge.
+                    .when(fullscreen, |el| {
+                        el.mt(FULLSCREEN_SEARCH_TOP).pl(FULLSCREEN_SEARCH_LEADING)
+                    })
                     .flex()
                     .items_center()
                     .gap(space::S4)
@@ -732,15 +727,28 @@ fn account_menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     use crate::ui::native::{NativeType as _, native_colors};
+    use gpui::prelude::FluentBuilder as _;
     let accounts = services.provider.accounts();
-    for account in accounts {
+    // §2.1: the second line is the role. The server shows only to tell
+    // apart two accounts with the same name.
+    let same_name = |name: &str| accounts.iter().filter(|a| a.name == name).count() > 1;
+    let lines: Vec<Option<SharedString>> = accounts
+        .iter()
+        .map(|account| {
+            let role = account.role.clone().filter(|r| !r.trim().is_empty());
+            let host = same_name(&account.name)
+                .then(|| crate::views::login::server_host(&account.server_url).to_string());
+            match (role, host) {
+                (Some(role), Some(host)) => Some(format!("{role} · {host}").into()),
+                (Some(role), None) => Some(role.into()),
+                (None, Some(host)) => Some(host.into()),
+                (None, None) => None,
+            }
+        })
+        .collect();
+    for (account, line) in accounts.iter().zip(lines) {
         let k = native_colors(cx);
-        let host = crate::views::login::server_host(&account.server_url).to_string();
         let name = SharedString::from(account.name.clone());
-        let line = SharedString::from(match &account.role {
-            Some(role) => format!("{role} · {host}"),
-            None => host,
-        });
         let services = services.clone();
         let id = account.id.clone();
         menu = menu.item(
@@ -755,11 +763,13 @@ fn account_menu(
                             .n_body()
                             .text_color(k.label),
                     )
-                    .child(
-                        crate::ui::truncate::TruncText::new(line.clone())
-                            .n_footnote()
-                            .text_color(k.secondary),
-                    )
+                    .when_some(line.clone(), |d, line| {
+                        d.child(
+                            crate::ui::truncate::TruncText::new(line)
+                                .n_footnote()
+                                .text_color(k.secondary),
+                        )
+                    })
             })
             .checked(account.active)
             .on_click(move |_, _, _| services.provider.switch_account(&id)),
@@ -967,6 +977,25 @@ mod tests {
         data::{Change, ChatProvider},
         fake::v2::V2Samples,
     };
+
+    /// The lights row centres on the toolbar row's centre line, as do the
+    /// traffic lights (14 pt tall) the system draws at `TRAFFIC_LIGHTS`.
+    #[test]
+    fn the_lights_row_shares_the_title_line() {
+        let centre = metrics::TOOLBAR_ROW / 2.;
+        assert_eq!(metrics::SIDEBAR_INSET + LIGHTS_ROW / 2., centre);
+        assert_eq!(crate::theme::TRAFFIC_LIGHTS.1 + px(7.), centre);
+        // Full screen: the 32 pt search row centres on the same line, and
+        // starts 8 pt past the toggle.
+        assert_eq!(
+            metrics::SIDEBAR_INSET + FULLSCREEN_SEARCH_TOP + metrics::SEARCH_SIDEBAR / 2.,
+            centre
+        );
+        assert_eq!(
+            metrics::SIDEBAR_INSET + FULLSCREEN_SEARCH_LEADING,
+            crate::theme::SIDEBAR_TOGGLE_X_FULLSCREEN + metrics::TOOLBAR_ITEM + px(8.)
+        );
+    }
 
     /// B's pull-down offers the 群 filter: 全部 first, then every 群 of the
     /// rail.
