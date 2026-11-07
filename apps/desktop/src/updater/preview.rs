@@ -168,6 +168,131 @@ pub fn open_up_to_date(
     open_settings_with(Phase::UpToDate, services, cx)
 }
 
+// --- product updates: the sidebar card and the notes sheets ---
+
+/// The main window (no topic open) with the sidebar card in `phase`.
+fn open_card(
+    phase: Phase,
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(phase, services, content, cx)
+}
+
+pub fn open_card_available(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_card(Phase::Available(sample()), services, content, cx)
+}
+
+pub fn open_card_downloading(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let info = sample();
+    let total = info.size;
+    open_card(
+        Phase::Downloading {
+            info,
+            done: total * 42 / 100,
+            total,
+        },
+        services,
+        content,
+        cx,
+    )
+}
+
+pub fn open_card_failed(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_card(
+        Phase::Failed {
+            info: Some(sample()),
+            failure: super::Failure::Download,
+        },
+        services,
+        content,
+        cx,
+    )
+}
+
+pub fn open_card_manual(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_card(Phase::Manual(sample()), services, content, cx)
+}
+
+/// 「{version} 更新内容」 over the main window, with 更新到 ….
+pub fn open_notes_sheet(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let mut info = sample();
+    info.notes = sample_notes(&info.version);
+    info.published_at = 1_794_000_000_000;
+    set_phase(Phase::Available(info.clone()), cx);
+    let handle = open_main(services, content, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            super::notes::open_notes(info, super::notes::Place::Main, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    // The sheet reads the updater when it draws: the global stays for this
+    // scene (the next scene sets its own).
+    Ok(handle)
+}
+
+/// 「已更新到 {version}」 over the main window, from the bundled notes.
+pub fn open_whats_new(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open_main(services, content, cx)?;
+    let notes = super::notes::bundled(super::version::CURRENT)
+        .unwrap_or_else(|| super::notes::Notes::parse("", crate::copy::update::PREVIEW_NOTES));
+    handle
+        .update(cx, |_, window, cx| {
+            super::notes::open_whats_new(notes, super::notes::Place::Main, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// 更新记录 over Settings › 通用.
+pub fn open_changelog(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open_settings_with(Phase::UpToDate, services, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            super::notes::open_changelog(super::notes::Place::Settings, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// Notes in the release-notes Markdown, from the newest bundled version
+/// (the sample has to look like a real one).
+fn sample_notes(version: &str) -> String {
+    super::notes::RELEASES
+        .first()
+        .map(|(v, text)| text.replace(v, version))
+        .unwrap_or_else(|| crate::copy::update::PREVIEW_NOTES.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

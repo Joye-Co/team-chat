@@ -370,7 +370,54 @@ impl GeneralPage {
                 None,
                 window,
                 cx,
-                move |window, cx| open_notes(info.clone(), window, cx),
+                move |window, cx| {
+                    updater::notes::open_notes(
+                        info.clone(),
+                        updater::notes::Place::Settings,
+                        window,
+                        cx,
+                    )
+                },
+            ));
+        }
+        let p = prefs::get();
+        rows.push(
+            FormRow::new(u::AUTO_DOWNLOAD)
+                .control(
+                    NativeSwitch::new("general-auto-download", p.auto_download)
+                        .name(u::AUTO_DOWNLOAD)
+                        .on_change(|next, window, _| {
+                            prefs::update(|p| p.auto_download = next);
+                            window.refresh();
+                        }),
+                )
+                .into_any_element(),
+        );
+        rows.push(
+            FormRow::new(u::SHOW_WHATS_NEW)
+                .detail(u::SHOW_WHATS_NEW_HINT)
+                .min_height(height::FORM_ROW_TWO)
+                .control(
+                    NativeSwitch::new("general-whats-new", p.show_whats_new)
+                        .name(u::SHOW_WHATS_NEW)
+                        .on_change(|next, window, _| {
+                            prefs::update(|p| p.show_whats_new = next);
+                            window.refresh();
+                        }),
+                )
+                .into_any_element(),
+        );
+        let versions = updater::notes::history().len();
+        if versions > 0 {
+            rows.push(nav_row(
+                "about-changelog",
+                u::CHANGELOG,
+                Some(fill(u::CHANGELOG_COUNT, &[("n", &versions.to_string())])),
+                window,
+                cx,
+                |window, cx| {
+                    updater::notes::open_changelog(updater::notes::Place::Settings, window, cx)
+                },
             ));
         }
         rows
@@ -378,7 +425,7 @@ impl GeneralPage {
 }
 
 /// Megabytes with one decimal under 10 MB (2.21: tabular, separators).
-fn megabytes(bytes: u64) -> String {
+pub(crate) fn megabytes(bytes: u64) -> String {
     let mb = bytes as f64 / (1024. * 1024.);
     if mb < 10. {
         format!("{mb:.1}")
@@ -439,46 +486,6 @@ pub fn nav_row(
                 )),
         )
         .into_any_element()
-}
-
-/// 查看更新内容: the notes of an update in a sheet.
-fn open_notes(info: chat_core::proto::UpdateInfo, window: &mut Window, cx: &mut App) {
-    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
-    widgets::open_sheet(
-        window,
-        cx,
-        SheetWidth::Form,
-        crate::ui::native::tokens::layout::WINDOW_MIN_HEIGHT * 0.66,
-        move |dialog, _, cx| {
-            let k = native_colors(cx);
-            let notes = info.notes.trim().to_string();
-            dialog.on_ok(|_, _, _| true).child(
-                SheetLayout::new(fill(u::NOTES_TITLE, &[("version", &info.version)]))
-                    .explanation(u::NOTES_DESCRIPTION)
-                    .body(
-                        div()
-                            .id("update-notes")
-                            .w_full()
-                            .max_h(metrics::SHEET_WIDE / 2.)
-                            .overflow_y_scroll()
-                            .p(metrics::FORM_ROW_INSET)
-                            .rounded(metrics::GROUP_RADIUS)
-                            .bg(k.group)
-                            .n_body()
-                            .text_color(k.label)
-                            .child(notes),
-                    )
-                    .buttons([push_button(
-                        "update-notes-ok",
-                        u::NOTES_OK,
-                        PushStyle::Default,
-                        PushSize::Regular,
-                        cx,
-                    )
-                    .on_click(|_, window, cx| window.close_dialog(cx))]),
-            )
-        },
-    );
 }
 
 impl Render for GeneralPage {
