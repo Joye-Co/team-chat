@@ -850,7 +850,9 @@ pub mod layout {
     pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
     pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
     pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-    pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
+    /// The red light's origin: the lights centre on the toolbar row's centre
+    /// line (y 32), with the page title and the sidebar toggle.
+    pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(25.));
     pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
     /// With the sidebar hidden, the 显示侧栏 button sits right after the
     /// traffic lights, on the toolbar row's center line.

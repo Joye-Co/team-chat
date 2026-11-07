@@ -71,9 +71,11 @@ struct Cache {
     has_topics: bool,
 }
 
-/// The traffic-light row at the top of the sidebar panel: the lights are
-/// centred on it (18 pt into the panel, 26 pt from the window top).
-const LIGHTS_ROW: gpui::Pixels = px(36.);
+/// The traffic-light row at the top of the sidebar, under its 8 pt top
+/// padding: centred on the toolbar row's centre line (32 pt from the window
+/// top), so the lights, 隐藏侧栏 and the page title share one line.
+/// `TOOLBAR_ROW` (64) less the padding above and below (2 × 8).
+const LIGHTS_ROW: gpui::Pixels = px(48.);
 /// The sidebar tools in that row (filter, 新话题): 28 pt circles.
 const TOOL: gpui::Pixels = px(28.);
 
@@ -967,6 +969,15 @@ mod tests {
         data::{Change, ChatProvider},
         fake::v2::V2Samples,
     };
+
+    /// The lights row centres on the toolbar row's centre line, as do the
+    /// traffic lights (14 pt tall) the system draws at `TRAFFIC_LIGHTS`.
+    #[test]
+    fn the_lights_row_shares_the_title_line() {
+        let centre = metrics::TOOLBAR_ROW / 2.;
+        assert_eq!(metrics::SIDEBAR_INSET + LIGHTS_ROW / 2., centre);
+        assert_eq!(crate::theme::TRAFFIC_LIGHTS.1 + px(7.), centre);
+    }
 
     /// B's pull-down offers the 群 filter: 全部 first, then every 群 of the
     /// rail.
