@@ -228,9 +228,6 @@ impl RenderOnce for SidebarSection {
                             k.secondary,
                             window,
                         )))
-                    })
-                    .when(unread, |d| {
-                        d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
                     }),
             )
             .child(
@@ -308,6 +305,9 @@ pub enum RightColumn {
     Status(BadgeState, SharedString),
     /// A time, 12 muted tabular.
     Time(SharedString),
+    /// Only the 12 mark of a state (a 私聊 that waits on me): the words
+    /// are in the row's tooltip and on the page it opens.
+    Mark(BadgeState),
 }
 
 /// What sits in the 16 leading slot of a sidebar row.
@@ -559,6 +559,12 @@ impl RenderOnce for SidebarRow {
                 ),
             ),
             RightColumn::Time(t) => (Some(t), None, None),
+            RightColumn::Mark(state) => (
+                None,
+                None,
+                crate::ui::native::badge::state_mark(state, &k)
+                    .map(|m| div().flex_none().child(m).into_any_element()),
+            ),
         };
         let (count, trailing_el) = match (self.disclosure, trailing_el, count) {
             (Some(_), None, Some(n)) => (None, Some(count_capsule(n, cx).into_any_element())),
@@ -637,7 +643,8 @@ impl RenderOnce for SidebarRow {
             })
             .child(
                 // D10: the selected item is the muted fill and 500; unread
-                // is 600 with the 8 info dot by the title (§2.12, T-20). A
+                // is 600, with no dot: weight alone says unread (owner
+                // decision, 2026-11-08: one signal per row). A
                 // cut title shows the whole title in a tooltip.
                 div()
                     .flex_1()
@@ -664,9 +671,6 @@ impl RenderOnce for SidebarRow {
                             },
                             window,
                         )))
-                    })
-                    .when(self.unread, |d| {
-                        d.child(div().flex_none().size(px(8.)).rounded_full().bg(k.blue))
                     }),
             )
             .when_some(trailing_text, |d, t| {

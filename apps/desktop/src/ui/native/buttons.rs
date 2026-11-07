@@ -812,6 +812,52 @@ pub fn toolbar_item(
     styled(b, style, cx).child(symbol(sf, icon::MD, Weight::Regular, ink, window))
 }
 
+/// A toolbar item with its word (owner decision, 2026-11-08): h32, radius
+/// 8, px 10, a 15 symbol and the label in 13 medium, gap 6. The item of the
+/// open pane takes the `muted` fill, the rest are ghost. `name` is the
+/// tooltip and the VoiceOver label.
+#[allow(clippy::too_many_arguments)]
+pub fn toolbar_labeled_item(
+    id: impl Into<ElementId>,
+    sf: Sf,
+    label: impl Into<SharedString>,
+    name: impl Into<SharedString>,
+    toggled: bool,
+    emphasized: bool,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let (style, ink) = match (toggled, emphasized) {
+        (true, _) => (PushStyle::Secondary, k.label),
+        (false, true) => (PushStyle::Ghost, k.secondary),
+        (false, false) => (PushStyle::Ghost, k.secondary),
+    };
+    let b = Button::new(id)
+        .with_size(metrics::TOOLBAR_ITEM)
+        .h(metrics::TOOLBAR_ITEM)
+        .px(px(10.))
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, style, cx).child(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(symbol(sf, px(15.), Weight::Regular, ink, window))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(ink)
+                    .whitespace_nowrap()
+                    .child(label.into()),
+            ),
+    )
+}
+
 /// A toolbar item drawn with an app concept (no window at hand): the same
 /// 32 ghost square as [`toolbar_item`]; `toggled` takes the `muted` fill.
 pub fn toolbar_item_sym(

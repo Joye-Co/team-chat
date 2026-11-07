@@ -566,21 +566,38 @@ impl Render for RailView {
             cx,
         )
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
-            let go = |label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
+            // Each item with its symbol, no separator: three ways to start
+            // something, one list (owner decision, 2026-11-08).
+            let go = |sym: Sym, label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
                 PopupMenuItem::new(label)
+                    .icon(gpui_component::Icon::new(sym))
                     .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
             };
-            menu.min_w(px(180.))
-                .item(go(c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
-                .separator()
-                .item(go(c::RAIL_NEW_GROUP, || {
+            menu.min_w(px(200.))
+                .item(go(Sym::Compose, c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
+                .item(go(Sym::Topic, c::RAIL_NEW_GROUP, || {
                     Box::new(crate::views::nav::NewGroup)
                 }))
-                .item(go(c::RAIL_START_DM, || {
+                .item(go(Sym::Person, c::RAIL_START_DM, || {
                     Box::new(crate::views::nav::StartDm)
                 }))
         });
         let sidebar_fill = crate::views::shell::chrome::colors(cx).sidebar;
+        // Owner decision (2026-11-08): the tools sit at the trailing end of
+        // the traffic-light row, so the search field has the whole width
+        // and every way to start something new is in one place. Full
+        // screen has no lights row: they stay beside the search field.
+        let tools = div()
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .child(filter)
+            .child(new_topic);
+        let (row_tools, search_tools) = if fullscreen {
+            (None, Some(tools))
+        } else {
+            (Some(tools), None)
+        };
         div()
             .id("rail")
             .size_full()
@@ -618,17 +635,32 @@ impl Render for RailView {
                         .id("rail-lights-row")
                         .flex_none()
                         .h(LIGHTS_ROW)
+                        .relative()
                         .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
                             if event.click_count >= 2 {
                                 window.titlebar_double_click();
                             } else {
                                 window.start_window_move();
                             }
-                        }),
+                        })
+                        .children(row_tools.map(|tools| {
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .right(metrics::SIDEBAR_ROW_INSET)
+                                .flex()
+                                .items_center()
+                                // A click on a tool never drags the window.
+                                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .child(tools)
+                        })),
                 )
             })
-            // The search field, then the filter pull-down and 新话题 on its
-            // center line.
+            // The search field (full width; in full screen the tools sit
+            // beside it).
             .child(
                 div()
                     .flex_none()
@@ -642,8 +674,7 @@ impl Render for RailView {
                     .items_center()
                     .gap(space::S4)
                     .child(div().flex_1().min_w_0().child(self.search_field()))
-                    .child(filter)
-                    .child(new_topic),
+                    .children(search_tools),
             )
             .child(
                 div()
