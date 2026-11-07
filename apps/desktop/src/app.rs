@@ -948,6 +948,34 @@ impl RootView {
             .into_any_element()
     }
 
+    /// The 产出 pane's resize handle: an 8 pt strip centred on its leading edge with the
+    /// resize cursor. A drag to the left widens the pane (400–960 pt, rubber band past the
+    /// bounds); a double-click resets the width.
+    fn artifact_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::views::columns::Column;
+        div()
+            .id("artifact-pane-resize")
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(px(-4.))
+            .w(px(8.))
+            .cursor(gpui::CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if e.click_count >= 2 {
+                        this.columns.reset(Column::ArtifactPane);
+                    } else {
+                        this.columns.start_drag(Column::ArtifactPane, e.position.x);
+                    }
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
     /// K-10, E3: F6 / ⌥Tab move the focus to the next region of the window
     /// (⇧ to the previous one): the sidebar, then on a 话题 page the thread
     /// and its composer, so a list is a keystroke away, not 26 Tabs.
@@ -1143,9 +1171,15 @@ impl Render for RootView {
         } else {
             px(0.)
         };
-        let full_pane_w = self
-            .panes
-            .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx);
+        let artifact_pane = matches!(drawn_pane, RightPane::Artifact { .. });
+        let full_pane_w = if artifact_pane {
+            // The 产出 pane takes the width it was dragged to.
+            self.columns
+                .width(crate::views::columns::Column::ArtifactPane)
+        } else {
+            self.panes
+                .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx)
+        };
         let pane_w = full_pane_w * right;
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
@@ -1202,6 +1236,20 @@ impl Render for RootView {
                         .child(div().flex_none().w(full_pane_w).h_full().child(el))
                         .into_any_element()
                 })
+        };
+        // The 产出 pane's leading edge resizes it (a page needs room for its own layout).
+        let pane_el = match pane_el {
+            Some(el) if artifact_pane && !floats && right >= 1. => Some(
+                div()
+                    .relative()
+                    .flex_none()
+                    .h_full()
+                    .flex()
+                    .child(el)
+                    .child(self.artifact_pane_handle(cx))
+                    .into_any_element(),
+            ),
+            el => el,
         };
         // 显示侧栏: with the sidebar hidden, its toggle stays on screen right
         // after the traffic lights, so the sidebar is one click away.

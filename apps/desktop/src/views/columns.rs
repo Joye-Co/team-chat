@@ -1,6 +1,6 @@
-//! Widths of the sidebar and the topic list (DESIGN.md §4.4): a drag on the
-//! hairline between two columns resizes the column on its left 1:1 with the
-//! pointer, with rubber-band resistance past the bounds and a settle back on
+//! Widths of the sidebar, the topic list and the 产出 pane (DESIGN.md §4.4): a drag on
+//! the hairline between two columns resizes the column on its left (the 产出 pane: on its
+//! right, the pane grows as the pointer moves left) 1:1 with the pointer, with rubber-band resistance past the bounds and a settle back on
 //! release; a double-click resets the default. The widths are kept in
 //! `layout.json` under the data root, for the app only (never in self-tests).
 
@@ -25,13 +25,33 @@ pub const SETTLE: Duration = theme::motion::SLOW;
 pub enum Column {
     Sidebar,
     TopicList,
+    /// The 产出 pane beside a 话题: a web page needs more than the 400 pt of the other
+    /// wide panes, so it takes the width the person drags it to.
+    ArtifactPane,
 }
+
+/// The 产出 pane's default width: a page's tabs and two-column layouts fit.
+pub const ARTIFACT_PANE_WIDTH: Pixels = px(520.);
+/// The widest 产出 pane.
+pub const ARTIFACT_PANE_MAX_WIDTH: Pixels = px(960.);
 
 impl Column {
     pub fn bounds(self) -> (Pixels, Pixels) {
         match self {
             Column::Sidebar => (theme::SIDEBAR_MIN_WIDTH, theme::SIDEBAR_MAX_WIDTH),
             Column::TopicList => (theme::TOPIC_LIST_MIN_WIDTH, theme::TOPIC_LIST_MAX_WIDTH),
+            Column::ArtifactPane => (
+                crate::ui::native::metrics::WIDE_PANE_WIDTH,
+                ARTIFACT_PANE_MAX_WIDTH,
+            ),
+        }
+    }
+
+    /// A drag to the right widens a column left of its divider and narrows the pane right of it.
+    fn sign(self) -> f32 {
+        match self {
+            Column::ArtifactPane => -1.,
+            _ => 1.,
         }
     }
 
@@ -39,6 +59,7 @@ impl Column {
         match self {
             Column::Sidebar => theme::SIDEBAR_WIDTH,
             Column::TopicList => theme::TOPIC_LIST_WIDTH,
+            Column::ArtifactPane => ARTIFACT_PANE_WIDTH,
         }
     }
 }
@@ -64,6 +85,7 @@ pub struct Settle {
 pub struct Columns {
     pub sidebar: Pixels,
     pub topic_list: Pixels,
+    pub artifact_pane: Pixels,
     pub drag: Option<Drag>,
     pub settle: Option<Settle>,
     /// Save changes to `layout.json` (the app, not a self-test).
@@ -74,6 +96,7 @@ pub struct Columns {
 struct Saved {
     sidebar: Option<f32>,
     topic_list: Option<f32>,
+    artifact_pane: Option<f32>,
 }
 
 impl Default for Columns {
@@ -81,6 +104,7 @@ impl Default for Columns {
         Self {
             sidebar: theme::SIDEBAR_WIDTH,
             topic_list: theme::TOPIC_LIST_WIDTH,
+            artifact_pane: ARTIFACT_PANE_WIDTH,
             drag: None,
             settle: None,
             persist: false,
@@ -120,6 +144,7 @@ impl Columns {
         Self {
             sidebar: width(saved.sidebar, Column::Sidebar),
             topic_list: width(saved.topic_list, Column::TopicList),
+            artifact_pane: width(saved.artifact_pane, Column::ArtifactPane),
             persist: true,
             ..Self::default()
         }
@@ -133,6 +158,10 @@ impl Columns {
         crate::views::shell::layout::merge(&[
             ("sidebar", serde_json::json!(f32::from(self.sidebar))),
             ("topic_list", serde_json::json!(f32::from(self.topic_list))),
+            (
+                "artifact_pane",
+                serde_json::json!(f32::from(self.artifact_pane)),
+            ),
         ]);
     }
 
@@ -140,6 +169,7 @@ impl Columns {
         match column {
             Column::Sidebar => &mut self.sidebar,
             Column::TopicList => &mut self.topic_list,
+            Column::ArtifactPane => &mut self.artifact_pane,
         }
     }
 
@@ -153,6 +183,7 @@ impl Columns {
         match column {
             Column::Sidebar => self.sidebar,
             Column::TopicList => self.topic_list,
+            Column::ArtifactPane => self.artifact_pane,
         }
     }
 
@@ -182,7 +213,10 @@ impl Columns {
         let Some(d) = self.drag else {
             return false;
         };
-        let w = rubber_width(d.start + (x - d.grab_x), d.column.bounds());
+        let w = rubber_width(
+            d.start + (x - d.grab_x) * d.column.sign(),
+            d.column.bounds(),
+        );
         let slot = self.width_mut(d.column);
         let changed = *slot != w;
         *slot = w;
@@ -271,6 +305,26 @@ impl Columns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_artifact_pane_grows_as_its_left_edge_moves_left() {
+        let mut c = Columns::default();
+        assert_eq!(c.width(Column::ArtifactPane), ARTIFACT_PANE_WIDTH);
+        c.start_drag(Column::ArtifactPane, px(900.));
+        c.drag_to(px(800.));
+        assert_eq!(
+            c.width(Column::ArtifactPane),
+            ARTIFACT_PANE_WIDTH + px(100.)
+        );
+        c.drag_to(px(1000.));
+        assert_eq!(
+            c.width(Column::ArtifactPane),
+            ARTIFACT_PANE_WIDTH - px(100.)
+        );
+        c.end_drag(true);
+        c.reset(Column::ArtifactPane);
+        assert_eq!(c.width(Column::ArtifactPane), ARTIFACT_PANE_WIDTH);
+    }
 
     #[test]
     fn drag_tracks_the_pointer_and_resists_past_the_bounds() {
