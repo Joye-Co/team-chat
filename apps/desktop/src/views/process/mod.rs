@@ -8,7 +8,7 @@
 pub mod preview;
 mod steps;
 
-pub use steps::{error_line, glyph as step_glyph, step_line};
+pub use steps::{error_line, glyph as step_glyph, live_action, step_line};
 
 use std::{path::PathBuf, time::Duration};
 
