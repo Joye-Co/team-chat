@@ -702,7 +702,7 @@ impl RenderOnce for SidebarRow {
 /// The account menu of the footer.
 pub type FooterMenu = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
-/// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h48,
+/// The pinned user footer of the sidebar (COMPLETENESS.md §2.1, F04): h56,
 /// p 8, a 32 avatar, the name 14 medium over a 12 muted second line (role
 /// or workspace, or the offline state), `chevron.up.chevron.down` 16 at the
 /// right. A ghost button (gpui-component): it opens the account menu (the
@@ -797,8 +797,17 @@ impl RenderOnce for SidebarFooter {
                 k.secondary,
                 window,
             )));
+        // The footer reads as a sidebar row, not a push button: the row
+        // hover (muted 50 %) and, while its menu is open, the selected-row
+        // fill (muted), never the darker pressed fill.
+        let look = gpui_component::button::ButtonCustomVariant::new(cx)
+            .color(gpui::transparent_black())
+            .foreground(k.label)
+            .hover(k.fill.opacity(0.5))
+            .active(k.selection);
         let button = Button::new(self.id)
-            .custom(super::buttons::borderless_variant(cx))
+            .custom(look)
+            .py(px(0.))
             .with_size(gpui_component::Size::Medium)
             .w_full()
             .h(super::tokens::height::SIDEBAR_FOOTER - metrics::SIDEBAR_ROW_INSET * 2.)
@@ -809,7 +818,13 @@ impl RenderOnce for SidebarFooter {
         let trigger = match self.menu {
             Some(menu) => button
                 .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |m, window, cx| {
-                    menu(m, window, cx)
+                    // As wide as the footer button at the default sidebar
+                    // width, so the menu lines up with what opened it.
+                    menu(
+                        m.min_w(metrics::SIDEBAR_WIDTH - metrics::SIDEBAR_ROW_INSET * 2.),
+                        window,
+                        cx,
+                    )
                 })
                 .into_any_element(),
             None => button.into_any_element(),
