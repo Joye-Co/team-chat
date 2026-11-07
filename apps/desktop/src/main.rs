@@ -241,6 +241,8 @@ fn main() {
                 cx,
             );
             provider::app_glue::install(core, services.clone(), cx);
+        } else if args.fake {
+            updater::preview::install_for_fake(cx);
         }
 
         if let Some(n) = args.selftest_timeline {
