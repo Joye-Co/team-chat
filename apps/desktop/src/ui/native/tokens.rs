@@ -854,12 +854,15 @@ pub mod layout {
     /// line (y 32), with the page title and the sidebar toggle.
     pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(25.));
     pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
-    /// With the sidebar hidden, the 显示侧栏 button sits right after the
-    /// traffic lights, on the toolbar row's center line.
-    pub const SIDEBAR_SHOW_X: Pixels = px(80.);
-    /// Where a page's title starts with the sidebar hidden: past the lights
-    /// and the 显示侧栏 button.
-    pub const SIDEBAR_HIDDEN_INSET: Pixels = px(80. + 32. + 8.);
+    /// The sidebar toggle (隐藏侧栏 / 显示侧栏) sits right after the traffic
+    /// lights, on the toolbar row's center line, and stays there whether the
+    /// sidebar is shown or hidden.
+    pub const SIDEBAR_TOGGLE_X: Pixels = px(80.);
+    /// In full screen (no traffic lights) it sits at the leading edge.
+    pub const SIDEBAR_TOGGLE_X_FULLSCREEN: Pixels = space::S16;
+    /// The toggle (32) and the gap before the page title (24): a page's
+    /// title starts this far past the toggle's x with the sidebar hidden.
+    pub const SIDEBAR_TOGGLE_ROOM: Pixels = px(32. + 24.);
     /// The message avatar (D7).
     pub const AVATAR_SIZE: Pixels = avatar::MD;
     pub const ROW_HEIGHT: Pixels = height::ROW;

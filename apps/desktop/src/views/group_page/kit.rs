@@ -37,8 +37,9 @@ pub const PREVIEW_HEIGHT: Pixels = px(76.);
 /// The inset at the start of a title bar: the traffic lights when the rail
 /// is hidden.
 pub fn leading(services: &Services, cx: &App) -> Pixels {
-    if services.nav.read(cx).sidebar_hidden {
-        theme::SIDEBAR_HIDDEN_INSET
+    let nav = services.nav.read(cx);
+    if nav.sidebar_hidden {
+        nav.sidebar_hidden_inset()
     } else {
         px(0.)
     }

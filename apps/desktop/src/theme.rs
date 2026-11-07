@@ -608,6 +608,11 @@ pub mod motion {
     pub const FAST: Duration = Duration::from_millis(120);
     pub const NORMAL: Duration = Duration::from_millis(160);
     pub const SLOW: Duration = Duration::from_millis(200);
+    /// A side column (the sidebar, the right pane) sliding open: long enough
+    /// to read as a drawer, not a jump (review-animations: drawers 200–500).
+    pub const COLUMN_OPEN: Duration = Duration::from_millis(340);
+    /// …and shut: exits run a little faster than enters.
+    pub const COLUMN_CLOSE: Duration = Duration::from_millis(280);
     /// Exit of menus, popovers and dialogs.
     pub const EXIT: Duration = Duration::from_millis(150);
     /// Menus, popovers and selects enter.
@@ -646,6 +651,13 @@ pub mod motion {
     /// `cubic-bezier(0.77, 0, 0.175, 1)`: movement on screen.
     pub fn moving() -> Easing {
         Easing::cubic_bezier(0.77, 0.0, 0.175, 1.0).expect("valid curve")
+    }
+
+    /// `cubic-bezier(0.32, 0.72, 0, 1)`: a drawer (the iOS sheet curve). It
+    /// leaves at once and settles softly, so a column follows the click
+    /// without the slow start of `moving`.
+    pub fn drawer() -> Easing {
+        Easing::cubic_bezier(0.32, 0.72, 0.0, 1.0).expect("valid curve")
     }
 
     /// The out curve as a function, for `with_animation`.

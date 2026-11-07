@@ -28,7 +28,7 @@ use std::{collections::HashSet, rc::Rc};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ListAlignment, ListState, ParentElement, Render, SharedString, Styled, Subscription,
-    WeakEntity, Window, div, list, px,
+    WeakEntity, Window, div, list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     button::Button,
@@ -76,6 +76,12 @@ struct Cache {
 /// top), so the lights, 隐藏侧栏 and the page title share one line.
 /// `TOOLBAR_ROW` (64) less the padding above and below (2 × 8).
 const LIGHTS_ROW: gpui::Pixels = px(48.);
+/// Full screen, no lights row: the search row's top margin under the
+/// sidebar's 8 pt padding, so the 32 pt row centres on the title line (32).
+const FULLSCREEN_SEARCH_TOP: gpui::Pixels = px(8.);
+/// Full screen: the search field starts 8 pt past the sidebar toggle
+/// (x 16–48), measured from the sidebar's 8 pt padding.
+const FULLSCREEN_SEARCH_LEADING: gpui::Pixels = px(48.);
 /// The sidebar tools in that row (filter, 新话题): 28 pt circles.
 const TOOL: gpui::Pixels = px(28.);
 
@@ -546,6 +552,7 @@ impl Render for RailView {
                 |n, cx| n.open_members(None, cx),
             ),
         ];
+        let fullscreen = self.services.nav.read(cx).fullscreen;
         let filter = self.filter_button(mode, cx);
         let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
         let first_sync = syncing;
@@ -600,51 +607,37 @@ impl Render for RailView {
             .on_action(
                 cx.listener(|this, _: &OpenSelected, window, cx| this.list_key(0, window, cx)),
             )
-            // §2.1: the traffic-light band holds the lights only (drawn by
-            // the system). Dragging it moves the window, as a title bar does.
-            .child(
-                div()
-                    .id("rail-lights-row")
-                    .flex_none()
-                    .h(LIGHTS_ROW)
-                    .pr(metrics::SIDEBAR_ROW_INSET)
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
-                        if event.click_count >= 2 {
-                            window.titlebar_double_click();
-                        } else {
-                            window.start_window_move();
-                        }
-                    })
-                    // 隐藏侧栏 (⌃⌘S), at the trailing end of the lights row as
-                    // in Mail and Notes; a press here never moves the window.
-                    .child(
-                        div()
-                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation()
-                            })
-                            .child({
-                                let nav = self.services.nav.clone();
-                                self.tool(
-                                    "rail-hide-sidebar",
-                                    Sym::SidebarToggle,
-                                    crate::copy::nav::SIDEBAR_HIDE,
-                                    cx,
-                                )
-                                .on_click(move |_, _, cx| {
-                                    nav.update(cx, |nav, cx| nav.toggle_sidebar(cx))
-                                })
-                            }),
-                    ),
-            )
+            // §2.1: the traffic-light band holds the lights and, over them,
+            // the shell's sidebar toggle (it stays put while the sidebar
+            // slides). Dragging it moves the window, as a title bar does. In
+            // full screen there are no lights, so there is no band: the
+            // search row moves up onto the title line instead.
+            .when(!fullscreen, |el| {
+                el.child(
+                    div()
+                        .id("rail-lights-row")
+                        .flex_none()
+                        .h(LIGHTS_ROW)
+                        .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                            if event.click_count >= 2 {
+                                window.titlebar_double_click();
+                            } else {
+                                window.start_window_move();
+                            }
+                        }),
+                )
+            })
             // The search field, then the filter pull-down and 新话题 on its
             // center line.
             .child(
                 div()
                     .flex_none()
                     .pr(metrics::SIDEBAR_ROW_INSET)
+                    // Full screen: centred on the title line, past the
+                    // sidebar toggle at the leading edge.
+                    .when(fullscreen, |el| {
+                        el.mt(FULLSCREEN_SEARCH_TOP).pl(FULLSCREEN_SEARCH_LEADING)
+                    })
                     .flex()
                     .items_center()
                     .gap(space::S4)
@@ -977,6 +970,16 @@ mod tests {
         let centre = metrics::TOOLBAR_ROW / 2.;
         assert_eq!(metrics::SIDEBAR_INSET + LIGHTS_ROW / 2., centre);
         assert_eq!(crate::theme::TRAFFIC_LIGHTS.1 + px(7.), centre);
+        // Full screen: the 32 pt search row centres on the same line, and
+        // starts 8 pt past the toggle.
+        assert_eq!(
+            metrics::SIDEBAR_INSET + FULLSCREEN_SEARCH_TOP + metrics::SEARCH_SIDEBAR / 2.,
+            centre
+        );
+        assert_eq!(
+            metrics::SIDEBAR_INSET + FULLSCREEN_SEARCH_LEADING,
+            crate::theme::SIDEBAR_TOGGLE_X_FULLSCREEN + metrics::TOOLBAR_ITEM + px(8.)
+        );
     }
 
     /// B's pull-down offers the 群 filter: 全部 first, then every 群 of the
