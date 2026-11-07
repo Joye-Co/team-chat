@@ -3,6 +3,23 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.4 (unreleased)
+
+Notes: [docs/releases/1.2.4.md](docs/releases/1.2.4.md). No D1 migration, no protocol change, no
+server redeploy. 1.2.3 clients and daemons keep working.
+
+- Card 产出 rows and the card 停止 button work again: they find the main view inside the window's
+  root wrapper.
+- The 产出 pane is 520 pt wide by default and its left edge drags it from 400 to 960 pt
+  (double-click resets; saved in `layout.json`).
+- Done cards lead with their 产出 as full-width rows and fold passed checks into 已检查 N 项.
+- Working cards with no plan step name the member's live action from the process log.
+- The daemon's agent note: pages open about 400 pt wide, use `window.teamchat` for state, and the
+  final message is one or two sentences.
+- Flush sidebar with one separator, traffic lights and sidebar toggle centered on the title line,
+  the toggle pinned after the traffic lights when the sidebar is hidden, slower sidebar slide,
+  calmer account footer hover and a narrower account menu.
+
 ## 1.2.3 (2026-11-06)
 
 Notes: [docs/releases/1.2.3.md](docs/releases/1.2.3.md). No D1 migration. Protocol: wording only
