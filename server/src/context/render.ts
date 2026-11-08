@@ -116,6 +116,12 @@ function bytes(n: number): string {
   return `${(n / 1024 ** 2).toFixed(1)} MB`;
 }
 
+/** The topic lines with the rolling summary in front, when messages were left out. */
+export function withSummary(sel: Pick<Selection, "text" | "omitted">, summary?: { text: string; uptoSeq: number }): string {
+  if (!summary || sel.omitted === 0) return sel.text;
+  return `Summary of the topic up to #${summary.uptoSeq} (the messages left out are in it):\n${summary.text}\n\n${sel.text}`;
+}
+
 export interface Selection {
   /** Lines in topic order. */
   text: string;

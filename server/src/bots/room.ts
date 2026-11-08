@@ -78,6 +78,8 @@ export interface ClaimResult {
   newest?: ContextRow[];
   /** Messages of the topic (not deleted). */
   total?: number;
+  /** The topic's rolling summary (summary/), when it has one. */
+  summary?: { text: string; uptoSeq: number };
   /** The topic is a side chat about this topic (1.1, `Topic.contextOf`). */
   contextOf?: TopicContext;
   /** With `contextOf`: the side chat's own person (the DM's other member), the asker. */
@@ -165,6 +167,14 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
   out.newest = contextRows(room.sql, actor.id, topicId, "", [], "DESC", CONTEXT_SCAN);
   out.first = contextRows(room.sql, actor.id, topicId, "", [], "ASC", 1)[0];
   out.total = topicCount(room.sql, topicId);
+  try {
+    const s = room.sql
+      .exec<{ text: string; upto_seq: number }>("SELECT text, upto_seq FROM topic_summaries WHERE topic_id = ? AND text != ''", topicId)
+      .toArray()[0];
+    if (s) out.summary = { text: s.text, uptoSeq: s.upto_seq };
+  } catch {
+    // No summary table (a room before summary-1 runs its migrations): no summary.
+  }
   // Only a DM topic can be a side chat (the room checks this when it stores the context).
   if (topic.context && room.groupKind === "dm") {
     out.contextOf = JSON.parse(topic.context) as TopicContext;
