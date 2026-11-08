@@ -255,6 +255,12 @@ pub async fn supervise(ctx: RunCtx) {
             let mut env = build_env(&cfg, &rt, &assign);
             // Marks the run's processes, also tools that leave the CLI's tree (proctree).
             env.push((proctree::ENV_FOLDER.into(), dir.display().to_string()));
+            let gate = Arc::new(crate::secrets::Gate::for_run(
+                &cfg.gated_env,
+                &assign.env_allowlist,
+                aside,
+            ));
+            outputs.set_gate(gate.clone());
             // Lives until the CLI is done; dropping it removes the socket.
             let chat_run = if aside {
                 None
@@ -280,7 +286,10 @@ pub async fn supervise(ctx: RunCtx) {
                 run_dir: dir.clone(),
                 env,
                 aside,
-                note: chat_run.as_ref().map(|_| crate::chat_run::note()),
+                note: chat_run.as_ref().map(|_| match gate.note() {
+                    Some(n) => format!("{}\n\n{n}", crate::chat_run::note()),
+                    None => crate::chat_run::note(),
+                }),
                 resume_session_id: assign
                     .resume_session_id
                     .clone()
@@ -288,7 +297,16 @@ pub async fn supervise(ctx: RunCtx) {
                 exec: exec.clone(),
             };
             let work = spec.cwd.clone();
-            let res = run_runtime(&cfg, &assign, spec, control_rx, &event, exec.as_ref()).await;
+            let res = run_runtime(
+                &cfg,
+                &assign,
+                spec,
+                control_rx,
+                &event,
+                exec.as_ref(),
+                &gate,
+            )
+            .await;
             drop(chat_run);
             if aside {
                 workspace::set_read_only(&work, false);
@@ -405,6 +423,7 @@ async fn run_runtime(
     mut control_rx: mpsc::UnboundedReceiver<RunCtl>,
     event: &impl Fn(RunEvent),
     exec: &dyn Executor,
+    secrets: &crate::secrets::Gate,
 ) -> (Outcome, bool) {
     let Some(rt) = runtime::for_kind(&spec.cfg.kind) else {
         return (
@@ -486,6 +505,16 @@ async fn run_runtime(
                                 input_id: format!("resume-{resumes}"),
                                 text,
                             });
+                        }
+                    }
+                    // An answer to `chat-run secret`: the daemon's own approval, not the CLI's.
+                    RunCtl::Runtime(Control::Approval { approval_id, approve })
+                        if secrets.owns(&approval_id) =>
+                    {
+                        if let Some(ev) = secrets.answer(&approval_id, approve, Instant::now()) {
+                            for ev in gate.push(ev) {
+                                event(ev);
+                            }
                         }
                     }
                     RunCtl::Runtime(c) => {

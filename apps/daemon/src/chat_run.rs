@@ -139,6 +139,8 @@ pub struct Outputs {
     local: OnceLock<Arc<crate::chat_run_files::Local>>,
     /// The run id: part of each output's idempotency key.
     run: String,
+    /// The run's gated secrets (`chat-run secret`).
+    gate: OnceLock<Arc<crate::secrets::Gate>>,
 }
 
 impl Outputs {
@@ -153,6 +155,11 @@ impl Outputs {
     /// Lets the run's `chat-run` upload files and make 产出 (see [`crate::chat_run_files`]).
     pub fn set_local(&self, local: crate::chat_run_files::Local) {
         let _ = self.local.set(Arc::new(local));
+    }
+
+    /// Lets the run's `chat-run secret` ask for the gate's secrets.
+    pub fn set_gate(&self, gate: Arc<crate::secrets::Gate>) {
+        let _ = self.gate.set(gate);
     }
 
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
@@ -495,6 +502,22 @@ pub async fn handle(
         Ok(v) => v,
         Err(e) => return error("invalid", None, format!("request is not JSON: {e}")),
     };
+    if req["op"] == crate::secrets::OP {
+        let Some(gate) = outputs.gate.get() else {
+            return error("not_allowed", None, "this run has no secrets to ask for");
+        };
+        let answer = gate.get(&req["body"], emit, std::time::Instant::now());
+        eprintln!(
+            "{} chat-run secret: {}",
+            crate::proto::now_ms(),
+            if answer["ok"] == json!(true) {
+                "ok".to_string()
+            } else {
+                safe_word(answer["error"]["code"].as_str().unwrap_or("failed"))
+            }
+        );
+        return answer;
+    }
     let local_op = req["op"]
         .as_str()
         .filter(|o| crate::chat_run_files::OPS.contains(o));
@@ -686,6 +709,7 @@ pub const USAGE: &str = "usage:
   chat-run artifact data --artifact <artifactId> --version <n> --file data.json [--base-data-rev <n>] [--cause <eventId>]
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
   chat-run desk note --text <text>
+  chat-run secret <NAME>
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
@@ -697,7 +721,8 @@ patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, f
 says otherwise. Each command waits up to 15 s (file upload and artifact create/version: 5
 minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
-sandbox.blocked.";
+sandbox.blocked. `chat-run secret` prints only the value (exit 0), or the error on standard
+error (exit 1); the first call asks a person to approve and fails with pending.";
 
 /// Flags of one command; each flag at most once.
 struct Flags(HashMap<String, String>);
@@ -758,6 +783,14 @@ fn read_json(path: &str) -> Result<Value, String> {
 
 /// The `{op, body}` of a command line (without the program name).
 pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
+    if args.first().map(String::as_str) == Some("secret") {
+        return match args {
+            [_, name] if !name.starts_with('-') => {
+                Ok((crate::secrets::OP, json!({ "name": name })))
+            }
+            _ => Err("usage: chat-run secret <NAME>".into()),
+        };
+    }
     let words: Vec<&str> = args.iter().take(2).map(String::as_str).collect();
     let (op, rest, allowed): (&'static str, &[String], &[&str]) = match words.as_slice() {
         ["card", "post"] => (output_op::CARD_POST, &args[2..], &["file", "cause"]),
@@ -1099,6 +1132,23 @@ pub fn main(args: Vec<String>) -> i32 {
             );
         }
     };
+    // A secret goes to standard output alone, so `$(chat-run secret NAME)` is the value.
+    if op == crate::secrets::OP {
+        return match answer {
+            Ok(v) if v["ok"] == json!(true) => {
+                println!("{}", v["result"].as_str().unwrap_or_default());
+                0
+            }
+            Ok(v) => {
+                eprintln!("{v}");
+                1
+            }
+            Err(e) => {
+                eprintln!("{}", error("unavailable", None, e));
+                1
+            }
+        };
+    }
     match answer {
         Ok(v) if v["ok"] == json!(true) => {
             println!("{}", v["result"]);
@@ -1405,6 +1455,36 @@ mod tests {
             json!({ "eventId": "E", "result": "ignored" }),
         );
         assert_eq!(res, json!({ "eventId": "E", "result": "ignored" }));
+    }
+
+    #[test]
+    fn secret_command_takes_one_name() {
+        let (op, body) = request(&args(&["secret", "CF_PROD"])).unwrap();
+        assert_eq!(op, crate::secrets::OP);
+        assert_eq!(body, json!({ "name": "CF_PROD" }));
+        assert!(request(&args(&["secret"])).is_err());
+        assert!(request(&args(&["secret", "--name", "X"])).is_err());
+        assert!(request(&args(&["secret", "A", "B"])).is_err());
+    }
+
+    #[tokio::test]
+    async fn secret_requests_go_to_the_gate_not_the_server() {
+        let outputs = Outputs::new("r1");
+        let sent = Arc::new(Mutex::new(vec![]));
+        let s2 = sent.clone();
+        let emit = move |e: RunEvent| s2.lock().unwrap().push(e);
+        let line = br#"{"op":"secret.get","body":{"name":"CF_PROD"}}"#;
+        // Without a gate the run has no secrets.
+        let none = handle(line, &outputs, &emit, Duration::from_millis(1)).await;
+        assert_eq!(none["error"]["code"], "not_allowed");
+        outputs.set_gate(Arc::new(crate::secrets::Gate::new(vec!["CF_PROD".into()])));
+        let first = handle(line, &outputs, &emit, Duration::from_millis(1)).await;
+        assert_eq!(first["error"]["code"], "pending");
+        let sent = sent.lock().unwrap();
+        assert!(matches!(
+            sent.as_slice(),
+            [RunEvent::ApprovalRequest { .. }]
+        ));
     }
 
     #[tokio::test]

@@ -16,6 +16,7 @@ pub mod proto;
 pub mod redact;
 pub mod run;
 pub mod runtime;
+pub mod secrets;
 pub mod selfupdate;
 pub mod service;
 pub mod upload;

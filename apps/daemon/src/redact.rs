@@ -122,11 +122,13 @@ impl Redactor {
         Redactor { exact }
     }
 
-    /// The machine token and the values of every `env_passthrough` variable in this process.
+    /// The machine token and the values of every `env_passthrough` and `gated_env` variable in
+    /// this process.
     pub fn for_daemon(cfg: &Config, token: &str) -> Redactor {
         let mut values: Vec<String> = cfg
             .env_passthrough
             .iter()
+            .chain(&cfg.gated_env)
             .filter_map(|k| std::env::var(k).ok())
             .collect();
         values.push(token.to_string());

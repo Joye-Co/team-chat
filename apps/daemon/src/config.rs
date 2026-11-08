@@ -36,6 +36,10 @@ pub struct Config {
     /// Environment variables an assignment may ask for through `envAllowlist`.
     #[serde(default)]
     pub env_passthrough: Vec<String>,
+    /// Variables a run gets only after a person approves (`chat-run secret`, see
+    /// [`crate::secrets`]); an assignment's `envAllowlist` picks from these too.
+    #[serde(default)]
+    pub gated_env: Vec<String>,
     #[serde(default = "default_heartbeat_secs")]
     pub heartbeat_secs: u64,
     /// Screen sharing address people use for 接管 (e.g. `vnc://mac-mini.tailnet`), reported in
@@ -243,6 +247,15 @@ impl Config {
                 out.push(format!("runtime {name}: command is required"));
             }
         }
+        for k in self
+            .gated_env
+            .iter()
+            .filter(|k| self.env_passthrough.contains(k))
+        {
+            out.push(format!(
+                "{k} is in both env_passthrough and gated_env: a gated variable must not be passed through"
+            ));
+        }
         if let Some(p) = self.takeover_url.as_deref().and_then(takeover_url_problem) {
             out.push(p.into());
         }
@@ -287,6 +300,7 @@ min_free_gb = 10
 stall_minutes = 5
 repo_roots = []                     # e.g. ["~/code"]; empty allows any local repo path
 env_passthrough = []                # e.g. ["GITHUB_TOKEN"]; assignments pick from these
+gated_env = []                      # e.g. ["CLOUDFLARE_API_TOKEN"]; only after approval (chat-run secret)
 # takeover_url = "vnc://mac-mini.tailnet"   # 接管: Screen Sharing address (turn Sharing on by hand; no passwords)
 
 # AI members always run with every permission (no approvals); there is nothing to set.
