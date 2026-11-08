@@ -11,6 +11,7 @@ pub mod doctor;
 pub mod executor;
 pub mod health;
 pub mod input;
+pub mod models;
 pub mod proctree;
 pub mod product;
 pub mod proto;

@@ -23,6 +23,8 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
             args: args.iter().map(|s| s.to_string()).collect(),
             env: BTreeMap::new(),
             model: None,
+            models: None,
+            efforts: None,
             approval_policy: Some("on-request".into()),
             sandbox: None,
             permission_mode: None,
@@ -30,6 +32,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         },
         prompt: prompt.into(),
         model: None,
+        effort: None,
         cwd,
         run_dir: dir.to_path_buf(),
         env: vec![
@@ -790,4 +793,139 @@ fn claude_resume_copies_the_session_into_this_project() {
     assert_eq!(std::fs::read_to_string(copied).unwrap(), "{}\n");
     assert!(!runtime::claude::prepare_resume(&cfg, &cwd, "s2"));
     assert!(!runtime::claude::prepare_resume(&cfg, &cwd, "../s1"));
+}
+
+/// Feature `effort`: Claude Code gets `--effort <effort>` as its own arguments after `--model`;
+/// Codex gets `effort` in each `turn/start`. No effort, no flag.
+#[test]
+fn effort_reaches_claude_args_and_codex_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "claude", "claude", &[], "x");
+    assert!(runtime::claude::model_args(&s).is_empty());
+    s.model = Some("opus".into());
+    s.effort = Some("xhigh".into());
+    assert_eq!(
+        runtime::claude::model_args(&s),
+        ["--model", "opus", "--effort", "xhigh"]
+    );
+    let p = runtime::codex::turn_start_params("th", "hi", Some("high"));
+    assert_eq!(p["effort"], "high");
+    assert_eq!(p["threadId"], "th");
+    assert!(
+        runtime::codex::turn_start_params("th", "hi", None)
+            .get("effort")
+            .is_none()
+    );
+}
+
+/// Codex gets the run's effort on the first turn and on the turn a late follow-up starts.
+#[tokio::test]
+async fn codex_effort_on_every_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        dir.path(),
+        "codex",
+        &fake("fake_codex.py"),
+        &[],
+        "late work",
+    );
+    s.effort = Some("high".into());
+    let mut steered = false;
+    let (o, _) = drive(s, |e| match e {
+        RunEvent::MessageDelta { .. } if !steered => {
+            steered = true;
+            Some(Control::Input {
+                input_id: "in1".into(),
+                text: "also docs".into(),
+            })
+        }
+        _ => None,
+    })
+    .await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let seen: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("work/efforts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(seen, serde_json::json!(["high", "high"]));
+}
+
+/// `hello` discovery: Codex through `model/list` (two pages, a hidden model, a notification in
+/// between), Claude Code through its aliases, `settings.json` and `--help`, and daemon.toml
+/// lists replacing what a CLI reported.
+#[tokio::test]
+async fn discovery_reports_models_and_efforts() {
+    let dir = tempfile::tempdir().unwrap();
+    let claude_dir = dir.path().join("claude");
+    std::fs::create_dir_all(&claude_dir).unwrap();
+    std::fs::write(claude_dir.join("settings.json"), r#"{"model":"sonnet"}"#).unwrap();
+    let cfg = daemon::config::Config::parse(&format!(
+        r#"
+server_url = "http://127.0.0.1:1"
+token_file = "{token}"
+[runtimes.cx]
+kind = "codex"
+command = "{codex}"
+[runtimes.cl]
+kind = "claude"
+command = "{claude}"
+env = {{ CLAUDE_CONFIG_DIR = "{claude_dir}" }}
+[runtimes.fixed]
+kind = "codex"
+command = "{codex}"
+models = ["fake-codex", "other"]
+[runtimes.sh]
+kind = "pty"
+command = "/bin/sh"
+"#,
+        token = dir.path().join("token").display(),
+        codex = fake("fake_codex.py"),
+        claude = fake("fake_claude.py"),
+        claude_dir = claude_dir.display(),
+    ))
+    .unwrap();
+    let clis = daemon::health::discover_clis(&cfg).await;
+    let get = |n: &str| clis.iter().find(|c| c.runtime == n).unwrap();
+    let ids = |n: &str| {
+        get(n)
+            .models
+            .iter()
+            .flatten()
+            .map(|m| m.id.clone())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(ids("cx"), ["fake-codex", "fake-mini"]);
+    let cx = get("cx").models.as_ref().unwrap();
+    assert_eq!(cx[0].name.as_deref(), Some("FAKE-CODEX"));
+    assert_eq!(cx[0].is_default, Some(true));
+    assert_eq!(cx[0].default_effort.as_deref(), Some("low"));
+    assert_eq!(cx[1].is_default, None);
+    assert_eq!(
+        get("cx").efforts.as_deref().unwrap(),
+        ["low", "high", "minimal"]
+    );
+
+    assert_eq!(ids("cl"), ["fable", "opus", "sonnet", "haiku"]);
+    let cl = get("cl").models.as_ref().unwrap();
+    assert_eq!(
+        cl.iter()
+            .filter(|m| m.is_default == Some(true))
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["sonnet"]
+    );
+    assert_eq!(
+        get("cl").efforts.as_deref().unwrap(),
+        ["low", "medium", "high", "xhigh", "max"]
+    );
+
+    // daemon.toml `models` replaces the list; an id Codex listed keeps its details.
+    assert_eq!(ids("fixed"), ["fake-codex", "other"]);
+    let fixed = get("fixed").models.as_ref().unwrap();
+    assert_eq!(fixed[0].name.as_deref(), Some("FAKE-CODEX"));
+    assert_eq!(fixed[1].name, None);
+
+    assert_eq!(get("sh").models, None);
+    assert_eq!(get("sh").efforts, None);
 }

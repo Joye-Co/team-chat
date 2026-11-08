@@ -292,6 +292,15 @@ fn text_input(text: &str) -> Value {
     json!([{ "type": "text", "text": text, "text_elements": [] }])
 }
 
+/// `turn/start` params: the thread, the text and, on every turn, the run's effort.
+pub fn turn_start_params(thread_id: &str, text: &str, effort: Option<&str>) -> Value {
+    let mut params = json!({ "threadId": thread_id, "input": text_input(text) });
+    if let Some(e) = effort {
+        params["effort"] = json!(e);
+    }
+    params
+}
+
 async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
     let args = match app_server_args(&spec) {
@@ -339,8 +348,14 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                 let id = ids.next_id();
                 pending.insert(id, Pending::TurnStart);
                 turn_running = true;
-                let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": {
-                    "threadId": thread_id.clone().unwrap_or_default(), "input": text_input(&text) } })).await;
+                let params = turn_start_params(
+                    thread_id.as_deref().unwrap_or_default(),
+                    &text,
+                    spec.effort.as_deref(),
+                );
+                let _ = p
+                    .write_json(&json!({ "id": id, "method": "turn/start", "params": params }))
+                    .await;
             } else {
                 outcome_status = if norm.last_turn_status.as_deref() == Some("completed") {
                     Status::Succeeded
@@ -429,8 +444,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 let id = ids.next_id();
                                 pending.insert(id, Pending::TurnStart);
                                 turn_running = true;
-                                let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": {
-                                    "threadId": tid, "input": text_input(&spec.prompt) } })).await;
+                                let params = turn_start_params(&tid, &spec.prompt, spec.effort.as_deref());
+                                let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": params })).await;
                             }
                             Pending::TurnStart => {
                                 if active_turn.is_none() {

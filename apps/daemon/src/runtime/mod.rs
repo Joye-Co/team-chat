@@ -31,6 +31,9 @@ pub struct RunSpec {
     pub cfg: RuntimeConfig,
     pub prompt: String,
     pub model: Option<String>,
+    /// `run.assign.effort`, only when the CLI reported it (checked when the run is accepted):
+    /// Claude Code `--effort`, Codex `turn/start.effort`. Other runtimes ignore it.
+    pub effort: Option<String>,
     /// The CLI's working directory (worktree or scratch folder).
     pub cwd: PathBuf,
     /// The run folder: raw stream and stderr are written here.

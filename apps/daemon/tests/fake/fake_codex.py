@@ -8,7 +8,9 @@ runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DI
 `CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json; "chatcard" posts a card from
 `chat-run card schema` twice and patches it, with the answers in chatcard.json. `thread/resume` knows only
 the thread "th-old" (any other id is an error, like a thread Codex no longer has); each thread
-call goes to threads.json."""
+call goes to threads.json; each turn/start's `effort` (null when absent) goes to efforts.json.
+`model/list` answers two pages (cursor "p2"), with a hidden model and a configWarning
+notification before the first page."""
 import json, os, subprocess, sys, threading, time
 
 assert sys.argv[1:2] == ["app-server"]
@@ -103,7 +105,20 @@ for line in sys.stdin:
         open("threads.json", "w").write(json.dumps(calls + [[meth, None]]))
         assert m["params"]["cwd"] == os.getcwd() or os.path.realpath(m["params"]["cwd"]) == os.path.realpath(os.getcwd())
         out({"id": mid, "result": {"thread": {"id": thread, "path": os.path.realpath(path)}, "model": "fake-codex"}})
+    elif meth == "model/list":
+        def m_(id, efforts, **kw):
+            return dict({"id": id, "model": id, "displayName": id.upper(), "hidden": False,
+                         "supportedReasoningEfforts": [{"reasoningEffort": e, "description": e} for e in efforts],
+                         "defaultReasoningEffort": efforts[0], "isDefault": False}, **kw)
+        if m["params"].get("cursor") == "p2":
+            out({"id": mid, "result": {"data": [m_("fake-mini", ["minimal", "low"])], "nextCursor": None}})
+        else:
+            out({"method": "configWarning", "params": {"summary": "fake"}})
+            out({"id": mid, "result": {"data": [m_("fake-codex", ["low", "high"], isDefault=True),
+                                                m_("fake-hidden", ["xhigh"], hidden=True)], "nextCursor": "p2"}})
     elif meth == "turn/start":
+        seen = json.load(open("efforts.json")) if os.path.exists("efforts.json") else []
+        open("efforts.json", "w").write(json.dumps(seen + [m["params"].get("effort")]))
         state["n"] += 1
         tid = "tu-%d" % state["n"]
         with lock:

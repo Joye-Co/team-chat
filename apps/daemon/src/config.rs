@@ -95,6 +95,15 @@ pub struct RuntimeConfig {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Model ids this runtime reports in `hello` (feature `effort`), replacing the list the daemon
+    /// finds: for ACP agents and the PTY, which report none otherwise, or to narrow a list.
+    /// Empty reports no list.
+    #[serde(default)]
+    pub models: Option<Vec<String>>,
+    /// Efforts this runtime reports and runs with (`low`, `high`, ...), replacing the ones the
+    /// daemon finds. Empty reports none.
+    #[serde(default)]
+    pub efforts: Option<Vec<String>>,
     /// Ignored since 1.2.1: an AI member always has every permission (codex approval `never`,
     /// sandbox `danger-full-access`; claude `bypassPermissions`). Kept so old configs parse.
     #[serde(default)]
@@ -199,6 +208,8 @@ impl Config {
                             args: vec![],
                             env: BTreeMap::new(),
                             model: None,
+                            models: None,
+                            efforts: None,
                             approval_policy: None,
                             sandbox: None,
                             permission_mode: None,
@@ -314,6 +325,8 @@ kind = "claude"
 # kind = "acp"
 # command = "gemini"
 # args = ["--acp"]
+# models = ["gemini-2.5-pro"]       # what settings offer; replaces the list the daemon finds
+# efforts = ["low", "high"]
 
 # [runtimes.shell]
 # kind = "pty"
