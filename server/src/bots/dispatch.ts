@@ -35,6 +35,8 @@ export const TEXT = {
   noMachine: "现在没有空闲的电脑能接手，请稍后再 @我。",
   lost: "卡住了：处理中断了（电脑离线太久），这次没有完成。需要的话请再 @我。",
   stalled: "卡住了：10 分钟没有进展。",
+  /** After the desk's own tries (盯活): told once. */
+  gaveUp: "卡住了：我自己试了几次（提醒、换电脑重来）还是没有进展，需要你看一下。",
   progress: "进行中…",
   done: "完成了。",
   failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),
@@ -262,6 +264,8 @@ export function buildPrompt(opts: {
   contextTools?: boolean;
   /** The front desk's work order (agent/frontdesk.ts `briefText`). */
   brief?: string;
+  /** 沉淀: the memory index (memory/inject.ts), reference material. */
+  memory?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
@@ -270,6 +274,7 @@ export function buildPrompt(opts: {
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
     ...(opts.rules ? [opts.rules] : []),
+    ...(opts.memory ? ["", opts.memory] : []),
     "",
     ...(opts.context !== undefined
       ? [

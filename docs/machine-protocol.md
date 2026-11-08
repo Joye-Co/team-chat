@@ -623,6 +623,29 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
 - A daemon with this feature reports `context`; the server's prompt then names these commands for
   messages it left out. The `chat-run` note lists them.
 
+### Memory notes (`chat-run`, daemon over HTTP; planned)
+
+A run can keep something for later (docs/protocol.md, "Memory"). The server route is live; the
+daemon's `chat-run memory note` command comes later and will answer the `output` op
+`memory.note` itself over HTTP with the machine token, like the context ops.
+
+| `op` | `body` | `chat-run` command |
+| --- | --- | --- |
+| `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K [--when W] TEXT` → `MemoryItem` |
+
+```ts
+POST /v1/machine/runs/:id/memories   body MachineMemoryNoteRequest -> MemoryItem (status "pending")
+MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryKind, text /* 1..500 */, when? /* <= 300 */ }
+```
+
+- The run must be on the calling machine, active and not a side chat, as for files.
+- `member` is the run's AI member (its lessons and playbooks), `person` the person who asked for the
+  run (their preferences), `group` the run's group (conventions people said in the group; a direct
+  conversation has none: `forbidden`). Teams' memory is never written by a run.
+- The memory is `pending` with source `{ kind: "run", ids: [runId] }` until the daily
+  consolidation. The member's own pending lessons are already in its next runs' prompts.
+- Text is redacted before it is stored. At most 10 notes per run (`rate_limited` after that).
+
 ## Raw session upload
 
 After `run.done` the daemon uploads the CLI's own raw session file, so the process view and

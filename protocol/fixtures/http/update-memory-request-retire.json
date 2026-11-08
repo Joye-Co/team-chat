@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemoryRequest",
+  "valid": true,
+  "description": "停用",
+  "value": {
+    "status": "retired"
+  }
+}

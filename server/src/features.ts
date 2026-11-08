@@ -16,3 +16,4 @@ import "./desknote";
 import "./email";
 import "./aiservice";
 import "./autotitle";
+import "./memory";

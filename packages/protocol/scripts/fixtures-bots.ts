@@ -147,6 +147,13 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/front-desk-decisions-response-fallback.json", "FrontDeskDecisionsResponse", { decisions: [{ ...decision, confidence: 0.5, reason: "", brief: undefined, fallback: "model error: 500 overloaded" }] }, "the model failed: the request became a run");
   bad("http/front-desk-decisions-response-bad-action.json", "FrontDeskDecisionsResponse", { decisions: [{ ...decision, action: "escalate" }] }, "unknown action");
 
+  ok("http/bot-metrics.json", "BotMetrics", {
+    since: T0,
+    frontDesk: { decisions: 40, byAction: { reply: 14, dispatch: 22, ask: 3, skip: 1 }, fallbacks: 2, p50Ms: 1800, p95Ms: 4200, inputTokens: 36000, outputTokens: 2400 },
+    runs: { total: 25, done: 21, failed: 1, blocked: 1, cancelled: 0, restarted: 2, continued: 1, interventions: 5, p50Ms: 420000, p95Ms: 1800000 },
+  });
+  bad("http/bot-metrics-negative.json", "BotMetrics", { since: T0, frontDesk: { decisions: -1 }, runs: {} }, "counts are not negative");
+
   // Models and effort (feature "effort")
   const codexCli = {
     runtime: "codex",

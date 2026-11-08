@@ -37504,6 +37504,163 @@
         "decisions"
       ]
     },
+    "BotMetrics": {
+      "type": "object",
+      "properties": {
+        "since": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "frontDesk": {
+          "type": "object",
+          "properties": {
+            "decisions": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "byAction": {
+              "type": "object",
+              "properties": {
+                "reply": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "dispatch": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ask": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "skip": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "reply",
+                "dispatch",
+                "ask",
+                "skip"
+              ]
+            },
+            "fallbacks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "p50Ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "p95Ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "inputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "outputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "decisions",
+            "byAction",
+            "fallbacks",
+            "p50Ms",
+            "p95Ms",
+            "inputTokens",
+            "outputTokens"
+          ]
+        },
+        "runs": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "done": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "blocked": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cancelled": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "restarted": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "continued": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "interventions": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "p50Ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "p95Ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "total",
+            "done",
+            "failed",
+            "blocked",
+            "cancelled",
+            "restarted",
+            "continued",
+            "interventions",
+            "p50Ms",
+            "p95Ms"
+          ]
+        }
+      },
+      "required": [
+        "since",
+        "frontDesk",
+        "runs"
+      ]
+    },
     "SetBotRunnerRequest": {
       "type": "object",
       "properties": {
@@ -61199,6 +61356,966 @@
           ]
         }
       }
+    },
+    "MemoryItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "convention",
+            "fact",
+            "decision",
+            "preference",
+            "lesson",
+            "playbook"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "when": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "message",
+                "run",
+                "card",
+                "manual"
+              ]
+            },
+            "ids": {
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "ids"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "human": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "retired",
+            "pending"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "uses": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lastUsedAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "kind",
+        "text",
+        "source",
+        "authorId",
+        "human",
+        "status",
+        "confidence",
+        "uses",
+        "lastUsedAt",
+        "version",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CreateMemoryRequest": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "convention",
+            "fact",
+            "decision",
+            "preference",
+            "lesson",
+            "playbook"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "when": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "message",
+                "run",
+                "card",
+                "manual"
+              ]
+            },
+            "ids": {
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "ids"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "kind",
+        "text"
+      ]
+    },
+    "UpdateMemoryRequest": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "convention",
+            "fact",
+            "decision",
+            "preference",
+            "lesson",
+            "playbook"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "when": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "retired"
+          ]
+        }
+      }
+    },
+    "MemoriesResponse": {
+      "type": "object",
+      "properties": {
+        "memories": {
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scope": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "convention",
+                  "fact",
+                  "decision",
+                  "preference",
+                  "lesson",
+                  "playbook"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "when": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "message",
+                      "run",
+                      "card",
+                      "manual"
+                    ]
+                  },
+                  "ids": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ids"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "authorId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "human": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "retired",
+                  "pending"
+                ]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "uses": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastUsedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "createdAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "updatedAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id",
+              "scope",
+              "kind",
+              "text",
+              "source",
+              "authorId",
+              "human",
+              "status",
+              "confidence",
+              "uses",
+              "lastUsedAt",
+              "version",
+              "createdAt",
+              "updatedAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "memories"
+      ]
+    },
+    "MemoryVersionsResponse": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "memoryId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "item": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "convention",
+                      "fact",
+                      "decision",
+                      "preference",
+                      "lesson",
+                      "playbook"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "when": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "message",
+                          "run",
+                          "card",
+                          "manual"
+                        ]
+                      },
+                      "ids": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "ids"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "authorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "human": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "retired",
+                      "pending"
+                    ]
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "uses": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "lastUsedAt": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "createdAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "updatedAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "id",
+                  "scope",
+                  "kind",
+                  "text",
+                  "source",
+                  "authorId",
+                  "human",
+                  "status",
+                  "confidence",
+                  "uses",
+                  "lastUsedAt",
+                  "version",
+                  "createdAt",
+                  "updatedAt"
+                ]
+              },
+              "by": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "memoryId",
+              "version",
+              "item",
+              "by",
+              "at"
+            ]
+          }
+        }
+      },
+      "required": [
+        "versions"
+      ]
+    },
+    "MemoryUpdatesResponse": {
+      "type": "object",
+      "properties": {
+        "day": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updates": {
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "day": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "scope": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+              },
+              "memoryId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "change": {
+                "type": "string",
+                "enum": [
+                  "added",
+                  "changed",
+                  "retired",
+                  "flagged"
+                ]
+              },
+              "before": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "scope": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "convention",
+                          "fact",
+                          "decision",
+                          "preference",
+                          "lesson",
+                          "playbook"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "when": {
+                        "type": "string",
+                        "maxLength": 300
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "message",
+                              "run",
+                              "card",
+                              "manual"
+                            ]
+                          },
+                          "ids": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "ids"
+                        ]
+                      },
+                      "note": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "authorId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "human": {
+                        "type": "boolean"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "retired",
+                          "pending"
+                        ]
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "uses": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "lastUsedAt": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "createdAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "updatedAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "scope",
+                      "kind",
+                      "text",
+                      "source",
+                      "authorId",
+                      "human",
+                      "status",
+                      "confidence",
+                      "uses",
+                      "lastUsedAt",
+                      "version",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "after": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "scope": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "pattern": "^(team|(group|member|person):[A-Za-z0-9_-]+)$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "convention",
+                          "fact",
+                          "decision",
+                          "preference",
+                          "lesson",
+                          "playbook"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "when": {
+                        "type": "string",
+                        "maxLength": 300
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "message",
+                              "run",
+                              "card",
+                              "manual"
+                            ]
+                          },
+                          "ids": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "ids"
+                        ]
+                      },
+                      "note": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "authorId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "human": {
+                        "type": "boolean"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "active",
+                          "retired",
+                          "pending"
+                        ]
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "uses": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "lastUsedAt": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "createdAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "updatedAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "scope",
+                      "kind",
+                      "text",
+                      "source",
+                      "authorId",
+                      "human",
+                      "status",
+                      "confidence",
+                      "uses",
+                      "lastUsedAt",
+                      "version",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "note": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "undoneAt": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id",
+              "day",
+              "scope",
+              "memoryId",
+              "change",
+              "before",
+              "after",
+              "undoneAt",
+              "at"
+            ]
+          }
+        }
+      },
+      "required": [
+        "day",
+        "updates"
+      ]
+    },
+    "MachineMemoryNoteRequest": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "member",
+            "person",
+            "group"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "convention",
+            "fact",
+            "decision",
+            "preference",
+            "lesson",
+            "playbook"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "when": {
+          "type": "string",
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "scope",
+        "kind",
+        "text"
+      ]
     }
   }
 }

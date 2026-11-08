@@ -1,0 +1,12 @@
+{
+  "kind": "BotMetrics",
+  "valid": false,
+  "description": "counts are not negative",
+  "value": {
+    "since": 1762128000000,
+    "frontDesk": {
+      "decisions": -1
+    },
+    "runs": {}
+  }
+}

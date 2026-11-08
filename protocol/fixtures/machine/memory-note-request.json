@@ -1,0 +1,10 @@
+{
+  "kind": "MachineMemoryNoteRequest",
+  "valid": true,
+  "value": {
+    "scope": "member",
+    "kind": "lesson",
+    "text": "这个仓库的测试要先 bun install",
+    "when": "跑测试之前"
+  }
+}

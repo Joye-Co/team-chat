@@ -1,0 +1,10 @@
+{
+  "kind": "CreateMemoryRequest",
+  "valid": false,
+  "description": "unknown kind",
+  "value": {
+    "scope": "team",
+    "kind": "rumor",
+    "text": "x"
+  }
+}

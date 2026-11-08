@@ -501,6 +501,58 @@ impl CoreProvider {
             .contains(run_id)
     }
 
+    /// The run's prompt and what it carried, as `<run id>-context.txt` in `dir`.
+    pub(super) fn download_context_inner(&self, run_id: &str, dir: PathBuf) -> SessionDownload {
+        let (tx, rx) = oneshot::channel();
+        let Some(account) = self.account() else {
+            let _ = tx.send(Err(RunLoadError::Offline));
+            return rx;
+        };
+        let http = account.client.http();
+        let id = run_id.to_string();
+        account.client.spawn(async move {
+            let result = match http.run_context(&id).await {
+                Ok(ctx) => {
+                    let path = dir.join(format!("{id}-context.txt"));
+                    let mut text = context_text(&ctx);
+                    // The front desk's decisions in the run's topic, when it has any.
+                    if let Ok(run) = http.run(&id).await
+                        && let Ok(d) = http.bot_decisions(&run.bot_id, &run.topic_id).await
+                        && !d.decisions.is_empty()
+                    {
+                        text.push_str("\n----- front desk (newest first) -----\n");
+                        for x in &d.decisions {
+                            text.push_str(&format!(
+                                "{:?} conf {:.2} · {} ms · {}+{} tokens{} · m {}: {}\n",
+                                x.action,
+                                x.confidence,
+                                x.ms,
+                                x.input_tokens,
+                                x.output_tokens,
+                                x.fallback
+                                    .as_deref()
+                                    .map(|f| format!(" · fallback: {f}"))
+                                    .unwrap_or_default(),
+                                x.message_id,
+                                x.reason
+                            ));
+                        }
+                    }
+                    std::fs::create_dir_all(&dir)
+                        .and_then(|_| std::fs::write(&path, text))
+                        .map(|_| path)
+                        .map_err(|e| {
+                            tracing::warn!(error = %e, "cannot save a run context");
+                            RunLoadError::Failed
+                        })
+                }
+                Err(e) => Err(load_error(&ClientError::Api(e))),
+            };
+            let _ = tx.send(result);
+        });
+        rx
+    }
+
     pub(super) fn download_session_inner(&self, run_id: &str, dir: PathBuf) -> SessionDownload {
         let (tx, rx) = oneshot::channel();
         let Some(account) = self.account() else {
@@ -603,5 +655,47 @@ mod tests {
         assert_eq!(load_error(&e), RunLoadError::NotFound);
         let e = ClientError::Api(ApiError::Unexpected { status: 403 });
         assert_eq!(load_error(&e), RunLoadError::Forbidden);
+    }
+}
+
+/// A run context as a text file: the manifest on top, then the prompt as the CLI got it.
+fn context_text(ctx: &chat_core::proto::RunContext) -> String {
+    let m = &ctx.manifest;
+    let span = match (m.first_seq, m.last_seq) {
+        (Some(a), Some(b)) => format!("seq {a}..{b}"),
+        _ => "no messages".to_string(),
+    };
+    format!(
+        "resumed: {}\nmessages: {} ({span}), left out: {}, chars: {}\nfiles: {}, cards: {}, refs: {}\n\n----- prompt -----\n{}\n",
+        m.resumed, m.messages, m.omitted, m.chars, m.files, m.cards, m.refs, ctx.prompt
+    )
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::context_text;
+    use chat_core::proto::{RunContext, RunContextManifest};
+
+    #[test]
+    fn a_run_context_file_shows_the_manifest_then_the_prompt() {
+        let ctx = RunContext {
+            prompt: "You are dev…".into(),
+            manifest: RunContextManifest {
+                resumed: false,
+                chars: 1830,
+                first_seq: Some(1),
+                last_seq: Some(212),
+                messages: 41,
+                omitted: 170,
+                files: 2,
+                cards: 1,
+                refs: 0,
+            },
+        };
+        let text = context_text(&ctx);
+        assert!(text.starts_with(
+            "resumed: false\nmessages: 41 (seq 1..212), left out: 170, chars: 1830\n"
+        ));
+        assert!(text.ends_with("----- prompt -----\nYou are dev…\n"));
     }
 }

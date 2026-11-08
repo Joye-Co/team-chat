@@ -167,6 +167,36 @@ impl HttpClient {
         .await
     }
 
+    /// Owner: what the run's prompt carried (docs/protocol.md, "Run context"). 404 for older runs.
+    pub async fn run_context(&self, run_id: &str) -> ApiResult<crate::proto::RunContext> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/runs/{}/context", enc(run_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Owner: the front desk's decisions in a topic, newest first.
+    pub async fn bot_decisions(
+        &self,
+        bot_id: &str,
+        topic_id: &str,
+    ) -> ApiResult<crate::proto::FrontDeskDecisionsResponse> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!(
+                "/v1/bots/{}/decisions?topicId={}",
+                enc(bot_id),
+                enc(topic_id)
+            ),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Owner: the raw CLI session of a run (gzip). 404 until the daemon uploaded it.
     pub async fn run_session(&self, run_id: &str) -> ApiResult<Vec<u8>> {
         let resp = self

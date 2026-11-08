@@ -1,0 +1,10 @@
+{
+  "kind": "MachineMemoryNoteRequest",
+  "valid": false,
+  "description": "a run never writes team memory",
+  "value": {
+    "scope": "team",
+    "kind": "convention",
+    "text": "x"
+  }
+}

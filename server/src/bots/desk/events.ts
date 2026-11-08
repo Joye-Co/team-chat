@@ -8,12 +8,19 @@ import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
-import { DeskRuns } from "./runs";
+import { DeskRuns, type RunRequest } from "./runs";
+import { briefText } from "../../agent/frontdesk";
+import { retroAfterRun } from "../../memory/retro";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
+  /** 盯活 (stall.ts): a tool call of the run (loops). */
+  protected abstract watchTool(r: RunRow, title: string): Promise<void>;
+  /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
+  protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
+
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {
     return this.serial(runId, async () => {
@@ -62,8 +69,9 @@ export abstract class DeskEvents extends DeskRuns {
       if (stallReported) await this.markStalled(r);
       return;
     }
-    this.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", now, r.id);
+    this.sql.exec("UPDATE runs SET last_event_at = ?, nudged = 0 WHERE id = ?", now, r.id);
     r.last_event_at = now;
+    r.nudged = 0;
     if (r.stalled) {
       this.sql.exec("UPDATE runs SET stalled = 0 WHERE id = ?", r.id);
       r.stalled = 0;
@@ -88,6 +96,7 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "tool.call":
           progress.tool(String(ev.title || ev.tool || ""));
+          await this.watchTool(r, String(ev.title || ev.tool || ""));
           break;
         case "approval.request": {
           await this.flush(r, progress);
@@ -338,6 +347,8 @@ export abstract class DeskEvents extends DeskRuns {
       // The acceptance block is shown by the done card: the posted text leaves it out.
       const result = stripAcceptance(raw) || stripAcceptance((f.summary ?? "").trim()) || TEXT.done;
       await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
+      // 盯活: the CLI only promised the work and stopped. The desk continues it (at most 3 times).
+      if (await this.continuePromise(r, raw)) return;
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
     } else {
@@ -423,9 +434,33 @@ export abstract class DeskEvents extends DeskRuns {
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
     await this.topic(r, topicStatus);
+    this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+  }
+
+  /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */
+  protected retro(r: RunRow, status: RunStatus, result: string): void {
+    if (!r.machine_id || r.external || r.kind === RUN_KIND_ASIDE) return;
+    try {
+      const raw = this.meta(`request:${r.id}`);
+      if (raw === null) return;
+      const req = JSON.parse(raw) as RunRequest;
+      const input = {
+        botId: this.botId as string,
+        runId: r.id,
+        status,
+        requesterId: req.m.authorId,
+        request: [req.m.body, ...req.followUps.map((f) => f.body)].join("\n\n"),
+        ...(req.brief ? { brief: briefText(req.brief) } : {}),
+        progress: r.progress_text,
+        result,
+      };
+      this.ctx.waitUntil(retroAfterRun(this.env, input).catch((err) => this.log.warn("run review failed", { runId: r.id, err })));
+    } catch (err) {
+      this.log.warn("run review failed", { runId: r.id, err });
+    }
   }
 
   /**
