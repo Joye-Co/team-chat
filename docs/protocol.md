@@ -934,6 +934,11 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
   between them, one line says how many and, for a machine with feature `context`, how to read them
   (`chat-run topic history --before <seq>`).
+- **Summary.** With an AI service, a topic of 60 messages or more keeps a rolling summary that the
+  team's model updates every 40 new messages (asks, decisions and reasons, constraints, open
+  questions, who does what, ids worth reading). When the budget leaves messages out, the summary
+  goes in front of the lines ("Summary of the topic up to #seq"). The front desk reads it too. It
+  lives in the group room (`topic_summaries`) and is not sent to clients.
 - **Resume sends only what is new.** Each run keeps the highest seq its prompt covered. A run that
   continues the session of the topic's last run (`resumeSessionId`) gets only messages after that
   seq that are not the bot's own, then the request; at most the same budget.

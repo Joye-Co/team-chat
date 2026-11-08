@@ -5,7 +5,7 @@
 import { isMainTopicId } from "@chat/protocol";
 import { loadModelConfig } from "../../aiservice";
 import { type Decision, FRONT_DESK_CHARS, decide } from "../../agent/frontdesk";
-import { selectLines } from "../../context/render";
+import { selectLines, withSummary } from "../../context/render";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import type { ClaimResult, TopicMessage } from "../room";
@@ -62,7 +62,7 @@ export abstract class DeskFront extends DeskStall {
         botName: name(botId),
         role: member?.role ?? null,
         title: peek.title,
-        context: sel.text,
+        context: withSummary(sel, peek.summary),
         requester: name(m.authorId),
         request: m.body,
         dm: false,
