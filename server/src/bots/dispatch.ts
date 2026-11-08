@@ -21,8 +21,14 @@ export const MAX_RUN_MS = 2 * 60 * 60_000;
 export const MAX_PROGRESS_CHARS = 30_000;
 /** Longest result message body. */
 export const MAX_RESULT_CHARS = 30_000;
-/** Messages of the topic given to the CLI as context. */
+/** Messages of the topic given to the CLI as context (side chats and the `messages` list). */
 export const CONTEXT_MESSAGES = 30;
+/** Characters of topic lines in a run's prompt (docs/protocol.md, "Run context"). */
+export const CONTEXT_CHARS = 24_000;
+
+/** How a run with the `context` feature reads what the prompt left out. */
+export const CONTEXT_TOOLS_RULE =
+  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>`, search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>`. Look things up instead of guessing.";
 
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {
@@ -220,6 +226,10 @@ export function buildPrompt(opts: {
   rules?: string;
   /** The daemon reads acceptance blocks (feature "acceptance"): the prompt says how to write them. */
   acceptance?: boolean;
+  /** Topic lines (context/render.ts); replaces `messages`. */
+  context?: string;
+  /** The machine answers chat-run context ops (feature "context"). */
+  contextTools?: boolean;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
@@ -229,14 +239,42 @@ export function buildPrompt(opts: {
     ...(opts.refs ? [REFS_RULE] : []),
     ...(opts.rules ? [opts.rules] : []),
     "",
-    "Recent messages of the topic, oldest first:",
-    ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`),
+    ...(opts.context !== undefined
+      ? [
+          "The topic, oldest first. Each message is `[#seq m id · author · time]`; files, 产出, quotes and cards follow it on indented lines:",
+          opts.context,
+          ...(opts.contextTools ? ["", CONTEXT_TOOLS_RULE] : []),
+        ]
+      : ["Recent messages of the topic, oldest first:", ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`)]),
     "",
     `Request from ${name(opts.request.authorId)}:`,
     opts.request.body,
   ];
   if (opts.refs) lines.push("", opts.refs);
   for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
+  return lines.join("\n");
+}
+
+/**
+ * The prompt of a run that continues the CLI session of the topic's last run: the session has
+ * the rest, so only what is new since then, and the request.
+ */
+export function buildResumePrompt(opts: {
+  names: Map<string, string>;
+  /** New topic lines since the last run (context/render.ts), or "" when there are none. */
+  context: string;
+  request: ContextMessage;
+  followUps?: ContextMessage[];
+  refs?: string;
+  contextTools?: boolean;
+}): string {
+  const name = (id: string) => opts.names.get(id) ?? id;
+  const lines: string[] = [];
+  if (opts.context !== "") lines.push("New in the topic since your last turn, oldest first:", opts.context, "");
+  lines.push(`Request from ${name(opts.request.authorId)}:`, opts.request.body);
+  if (opts.refs) lines.push("", REFS_RULE, "", opts.refs);
+  for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
+  if (opts.contextTools) lines.push("", CONTEXT_TOOLS_RULE);
   return lines.join("\n");
 }
 

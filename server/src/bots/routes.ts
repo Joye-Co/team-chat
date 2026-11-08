@@ -53,7 +53,7 @@ async function visibleRun(db: D1Database, auth: AuthContext, runId: string) {
  * active, not a side chat, and its runner member still in the group. The member writes, with
  * `machine:{id}` as the audit credential.
  */
-async function machineRun(request: Request, env: Parameters<typeof deskStub>[0], runId: string) {
+export async function machineRun(request: Request, env: Parameters<typeof deskStub>[0], runId: string) {
   const machine = await authenticateMachine(request, env.DB);
   const run = await runIndex(env.DB, runId);
   if (!run || run.machine_id !== machine.id) throw new ApiError("not_found", "run not found");

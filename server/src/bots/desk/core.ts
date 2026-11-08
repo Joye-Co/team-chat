@@ -94,6 +94,11 @@ export type RunRow = {
   pause_gen: number;
   /** `paused: true` events the daemon reported for this run (at most `pause_gen`). */
   pause_seen: number;
+  // desk-8-context (Run context)
+  /** The highest topic seq the run's prompt covered, or null (runs before it). */
+  context_seq: number | null;
+  /** 1: the run must start a new CLI session (a new request in the 群聊). */
+  fresh: number;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -319,6 +324,15 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `
             ALTER TABLE runs ADD COLUMN pause_gen INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE runs ADD COLUMN pause_seen INTEGER NOT NULL DEFAULT 0;
+          `,
+        },
+        {
+          // Run context: the cursor a resumed run continues from, and the 群聊 rule that a new
+          // request does not continue another request's session. Old rows: NULL / 0.
+          name: "desk-8-context",
+          up: `
+            ALTER TABLE runs ADD COLUMN context_seq INTEGER;
+            ALTER TABLE runs ADD COLUMN fresh INTEGER NOT NULL DEFAULT 0;
           `,
         },
       ]);
