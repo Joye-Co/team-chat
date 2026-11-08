@@ -58,6 +58,39 @@ pub fn mention_query(text: &str, cursor: usize) -> Option<MentionQuery> {
     })
 }
 
+/// The `@name` that ends at `cursor`, with the one space after it when the
+/// cursor follows that space: Backspace there deletes the mention whole.
+/// `names` are the members a body can mention; the longest match wins, and
+/// the `@` follows the same rule as [`mention_query`].
+pub fn mention_before(
+    text: &str,
+    cursor: usize,
+    names: &[String],
+) -> Option<std::ops::Range<usize>> {
+    if cursor > text.len() || !text.is_char_boundary(cursor) {
+        return None;
+    }
+    let before = &text[..cursor];
+    let core = before.strip_suffix(' ').unwrap_or(before);
+    names
+        .iter()
+        .filter(|name| !name.is_empty() && core.ends_with(name.as_str()))
+        .filter_map(|name| {
+            let name_start = core.len() - name.len();
+            let (at_start, at) = core[..name_start].char_indices().next_back()?;
+            if !is_at(at) {
+                return None;
+            }
+            if let Some(prev) = core[..at_start].chars().next_back()
+                && prev.is_ascii_alphanumeric()
+            {
+                return None;
+            }
+            Some(at_start..cursor)
+        })
+        .min_by_key(|range| range.start)
+}
+
 /// Members for the @ list: active, not me, in the 群 when its members are
 /// known, whose name or 岗位 contains the query. Names that start with the
 /// query come first.
@@ -272,6 +305,31 @@ mod tests {
             member("b-coder", "Coder", "写代码", MemberKind::Bot),
             gone,
         ]
+    }
+
+    #[test]
+    fn backspace_takes_a_mention_whole() {
+        let names: Vec<String> = ["小王", "小王五", "Li", "Lisa"]
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let at = |text: &str| mention_before(text, text.len(), &names);
+        // With the space the mention ends in, and without it.
+        assert_eq!(at("@小王 "), Some(0.."@小王 ".len()));
+        assert_eq!(at("请@小王"), Some("请".len().."请@小王".len()));
+        // The longest name wins.
+        assert_eq!(at("@小王五 "), Some(0.."@小王五 ".len()));
+        assert_eq!(at("＠Lisa "), Some(0.."＠Lisa ".len()));
+        // Not a mention: a word, an e-mail, two spaces, an unknown name.
+        assert_eq!(at("@小王 好"), None);
+        assert_eq!(at("a@Li"), None);
+        assert_eq!(at("@小王  "), None);
+        assert_eq!(at("@小张 "), None);
+        assert_eq!(at(""), None);
+        // In the middle of the text, at the caret.
+        let text = "@Li 你好";
+        assert_eq!(mention_before(text, "@Li ".len(), &names), Some(0..4));
+        assert_eq!(mention_before(text, 2, &names), None);
     }
 
     #[test]
