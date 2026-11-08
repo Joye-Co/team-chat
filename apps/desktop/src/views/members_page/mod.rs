@@ -83,7 +83,30 @@ pub struct MembersPage {
     /// first answer.
     approvals: Option<Result<ApprovalDefaults, AdminError>>,
     approvals_loading: bool,
+    /// 记得的事 of the AI member on show (沉淀), made when its page opens.
+    memory: Option<gpui::Entity<crate::views::memory::MemoryBoard>>,
+    /// The detail's scroll, so a scene can show 记得的事.
+    detail_scroll: gpui::ScrollHandle,
+    /// Where the 记得的事 card starts in the window, as last laid out.
+    memory_top: std::rc::Rc<std::cell::Cell<gpui::Pixels>>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// Where a screenshot scene scrolls the detail once 记得的事 has its answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SceneScroll {
+    None = 0,
+    /// The 记得的事 card at the top of the detail.
+    Memory = 1,
+    /// The end of the detail.
+    End = 2,
+}
+
+static SCENE_SCROLL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Set by a screenshot scene before the page opens.
+pub fn set_scene_scroll(to: SceneScroll) {
+    SCENE_SCROLL.store(to as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// What the list knows of one member.
@@ -111,6 +134,9 @@ impl MembersPage {
             retry_errors: HashMap::new(),
             approvals: None,
             approvals_loading: false,
+            memory: None,
+            detail_scroll: gpui::ScrollHandle::new(),
+            memory_top: std::rc::Rc::new(std::cell::Cell::new(gpui::Pixels::ZERO)),
         }
     }
 
@@ -1808,11 +1834,56 @@ impl MembersPage {
         }
         let approvals = self.approvals(e, cx);
         let tools = self.tools(e, cx);
+        let memory = self.memory_board(e, cx);
         body.child(pair(now, Some(week)))
             .child(deliveries)
             .child(pair(problems, Some(workplace)))
             .child(pair(approvals, Some(tools)))
             .child(pair(plan, Some(decisions)))
+            .child(
+                div()
+                    .relative()
+                    .child(memory)
+                    // Measures where the card starts (a scene scrolls to it).
+                    .child({
+                        let top = self.memory_top.clone();
+                        gpui::canvas(
+                            move |bounds, _, _| top.set(bounds.origin.y),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                    }),
+            )
+    }
+
+    /// 记得的事 (沉淀) of an AI member: one board per member on show, read again when
+    /// another member is picked.
+    fn memory_board(
+        &mut self,
+        e: &Entry,
+        cx: &mut Context<Self>,
+    ) -> gpui::Entity<crate::views::memory::MemoryBoard> {
+        use crate::{data::memory::MemoryScope, views::memory};
+        let scope = MemoryScope::Member(e.member.id.clone());
+        if let Some(b) = self
+            .memory
+            .as_ref()
+            .filter(|b| *b.read(cx).scope() == scope)
+        {
+            return b.clone();
+        }
+        let services = self.services.clone();
+        let name = crate::ui::avatar::name_beside_avatar(&e.member.name).to_string();
+        let board = gpui::AppContext::new(cx, |cx| {
+            memory::MemoryBoard::new(services, scope, memory::Host::Page, name, cx)
+        });
+        // The page draws again when the board's answers arrive (scroll of a scene).
+        cx.observe(&board, |_, _, cx| cx.notify()).detach();
+        self.memory = Some(board.clone());
+        board
     }
 
     /// The detail while the first sync runs: the header block and two
@@ -1975,6 +2046,27 @@ impl Render for MembersPage {
             .as_deref()
             .and_then(|id| entries.iter().find(|e| e.member.id == id))
             .filter(|_| load == PageLoad::Ready);
+        // A scene's scroll: kept until 记得的事 has its answer, since the page grows
+        // when it arrives.
+        let to = SCENE_SCROLL.load(std::sync::atomic::Ordering::Relaxed);
+        if let Some(board) = &self.memory
+            && to != SceneScroll::None as u8
+        {
+            if board.read(cx).loaded() {
+                set_scene_scroll(SceneScroll::None);
+            }
+            let scroll = self.detail_scroll.clone();
+            let top = self.memory_top.clone();
+            window.on_next_frame(move |window, _| {
+                if to == SceneScroll::End as u8 {
+                    scroll.scroll_to_bottom();
+                } else {
+                    let y = top.get() - scroll.bounds().origin.y - scroll.offset().y;
+                    scroll.set_offset(gpui::point(gpui::Pixels::ZERO, -(y - page::m::GUTTER)));
+                }
+                window.refresh();
+            });
+        }
         crate::selftest::drawn::mark(
             "members-page",
             format!(
@@ -1983,12 +2075,14 @@ impl Render for MembersPage {
                 entry.map_or("", |e| e.member.name.as_str())
             ),
         );
-        let scroll = |body: gpui::Div| {
+        let detail_scroll = self.detail_scroll.clone();
+        let scroll = move |body: gpui::Div| {
             div()
                 .id("member-detail")
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
+                .track_scroll(&detail_scroll)
                 .px(page::m::EDGE)
                 .pt(page::m::GUTTER)
                 .pb(page::m::GUTTER)

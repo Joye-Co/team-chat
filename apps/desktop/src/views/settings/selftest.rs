@@ -632,6 +632,49 @@ scene_opener!(open_profile, Page::Account);
 scene_opener!(open_members, Page::Members);
 scene_opener!(open_machines, Page::Machines);
 scene_opener!(open_notifications, Page::Notifications);
+scene_opener!(open_memory, Page::Memory);
+
+/// 团队约定 scrolled to its end: the kind groups and 已停用.
+pub fn open_memory_end(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Memory, cx)?;
+    after_fit(handle, cx, move |_, cx| view.read(cx).scroll_to_end());
+    Ok(handle)
+}
+
+fn open_memory_sheet(
+    edit: bool,
+    services: Services,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Memory, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let board = view.read(cx).memory().clone();
+        board.update(cx, |b, cx| b.open_for_scene(edit, window, cx));
+    });
+    Ok(handle)
+}
+
+/// 团队约定 with the 记一条 sheet open.
+pub fn open_memory_add(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_memory_sheet(false, services, cx)
+}
+
+/// 团队约定 with the 编辑 sheet of the newest convention open.
+pub fn open_memory_edit(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_memory_sheet(true, services, cx)
+}
 /// 通用 after 检查更新 (the version row says 已是最新版本), so it differs
 /// from `settings-general`.
 pub fn open_about(

@@ -29,6 +29,7 @@ pub mod desk;
 pub mod group_page;
 pub mod live;
 pub mod members_page;
+pub mod memory;
 pub mod rail;
 // --- inc-base: 引用提问 entry point (inc-refs implements it).
 pub mod refs;

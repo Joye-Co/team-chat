@@ -59,17 +59,20 @@ pub enum Page {
     Account,
     Notifications,
     Members,
+    /// 团队约定 (沉淀, team scope).
+    Memory,
     Machines,
     Appearance,
     Shortcuts,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::General,
         Page::Account,
         Page::Notifications,
         Page::Members,
+        Page::Memory,
         Page::Machines,
         Page::Appearance,
         Page::Shortcuts,
@@ -82,6 +85,7 @@ impl Page {
             Page::Account => s::PANE_ACCOUNT,
             Page::Notifications => s::PANE_NOTIFICATIONS,
             Page::Members => s::PANE_MEMBERS,
+            Page::Memory => crate::copy::memory::TEAM_TITLE,
             Page::Machines => s::PANE_MACHINES,
             Page::Appearance => s::PANE_APPEARANCE,
             Page::Shortcuts => s::PANE_SHORTCUTS,
@@ -95,6 +99,7 @@ impl Page {
             Page::Account => Sym::Account,
             Page::Notifications => Sym::Bell,
             Page::Members => Sym::Members,
+            Page::Memory => Sym::Book,
             // desktopcomputer: its ink fills the 18 box; macmini is 22 × 10
             // (2.19, C1-09).
             Page::Machines => Sym::Computer,
@@ -110,6 +115,7 @@ impl Page {
             Page::Account => "account",
             Page::Notifications => "notifications",
             Page::Members => "members",
+            Page::Memory => "memory",
             Page::Machines => "machines",
             Page::Appearance => "appearance",
             Page::Shortcuts => "shortcuts",
@@ -153,6 +159,7 @@ pub struct SettingsView {
     account: Entity<AccountPage>,
     notifications: Entity<NotificationsPage>,
     members: Entity<MembersPage>,
+    memory: Entity<crate::views::memory::MemoryBoard>,
     machines: Entity<MachinesPage>,
     appearance: Entity<AppearancePage>,
     shortcuts: Entity<ShortcutsPage>,
@@ -185,6 +192,15 @@ impl SettingsView {
         let account = cx.new(|cx| AccountPage::new(services.clone(), window, cx));
         let notifications = cx.new(|cx| NotificationsPage::new(services.clone(), window, cx));
         let members = cx.new(|cx| MembersPage::new(services.clone(), window, cx));
+        let memory = cx.new(|cx| {
+            crate::views::memory::MemoryBoard::new(
+                services.clone(),
+                crate::data::memory::MemoryScope::Team,
+                crate::views::memory::Host::Settings,
+                String::new(),
+                cx,
+            )
+        });
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
         let shortcuts = cx.new(|cx| ShortcutsPage::new(window, cx));
@@ -196,6 +212,7 @@ impl SettingsView {
             account,
             notifications,
             members,
+            memory,
             machines,
             appearance,
             shortcuts,
@@ -246,6 +263,7 @@ impl SettingsView {
             }),
             Page::Notifications => self.notifications.update(cx, |n, cx| n.refresh(cx)),
             Page::Members => self.members.update(cx, |m, cx| m.refresh_rules(window, cx)),
+            Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
             _ => {}
         }
         cx.notify();
@@ -279,6 +297,10 @@ impl SettingsView {
         &self.members
     }
 
+    pub fn memory(&self) -> &Entity<crate::views::memory::MemoryBoard> {
+        &self.memory
+    }
+
     pub fn machines(&self) -> &Entity<MachinesPage> {
         &self.machines
     }
@@ -289,6 +311,7 @@ impl SettingsView {
             Page::Account => self.account.clone().into_any_element(),
             Page::Notifications => self.notifications.clone().into_any_element(),
             Page::Members => self.members.clone().into_any_element(),
+            Page::Memory => self.memory.clone().into_any_element(),
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Appearance => self.appearance.clone().into_any_element(),
             Page::Shortcuts => self.shortcuts.clone().into_any_element(),
