@@ -276,6 +276,13 @@ impl TimelineView {
         // inc-refs: the body without the quote lines of its references (drawn as chips).
         let shown_body = crate::views::refs::chips::shown_body(message, &self.services.provider);
         let edited = message.edited_at.is_some() && !deleted;
+        // ⌘F: the find marks of this row, and a band when the current match
+        // cannot be marked in the text (code, a link, a jumbo emoji).
+        let find_marks = (!deleted)
+            .then(|| self.find_marked_body(key, shown_body, cx))
+            .flatten();
+        let find_band = find_marks.as_ref().is_some_and(|(_, unmarked)| *unmarked)
+            || (model::is_jumbo(shown_body) && self.is_find_current_row(key));
         // The mark follows the last line (§7.5, U12): inside the body text
         // when it can, on its own line only after a code block or a table.
         let mut mark_inline = false;
@@ -356,9 +363,10 @@ impl TimelineView {
             });
             // The message a search opened at: its matched words in bold
             // and underlined while the search bar shows (§2.17).
-            let body_source = match self.search_query_for(&message.id) {
-                Some(query) => markdown::mark_query(shown_body, &query),
-                None => shown_body.to_string(),
+            let body_source = match (self.search_query_for(&message.id), find_marks) {
+                (Some(query), _) => markdown::mark_query(shown_body, &query),
+                (None, Some((marked, _))) => marked,
+                (None, None) => shown_body.to_string(),
             };
             let (view, inline) = markdown::message_body_refs(
                 ElementId::Name(format!("body-{key}").into()),
@@ -580,16 +588,15 @@ impl TimelineView {
                 .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .when_some(mention, |el, (id, name)| {
                     let tip: SharedString = fill(t::AVATAR_MENTION_TIP, &[("name", &name)]).into();
-                    el.cursor_pointer()
-                        .tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(m) = &quoted {
-                                this.quote(m, cx);
-                            }
-                            this.mention(&id, cx)
-                        }))
+                    el.tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(m) = &quoted {
+                            this.quote(m, cx);
+                        }
+                        this.mention(&id, cx)
+                    }))
                 })
                 .child(if v2 {
                     // v2: tiles and circles only; presence lives in the rail.
@@ -643,6 +650,10 @@ impl TimelineView {
             // focus ring (R1-01), distinct from the hover band.
             .when(hovered && self.keyboard_row && self.key_focused, |el| {
                 el.shadow(crate::ui::native::row_focus_ring(cx))
+            })
+            // ⌘F: the current match's row, when its text has no mark.
+            .when(find_band, |el| {
+                el.bg(crate::ui::native::native_colors(cx).fill)
             })
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {

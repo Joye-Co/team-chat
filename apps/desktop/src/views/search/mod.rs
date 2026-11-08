@@ -1,5 +1,7 @@
 //! Message search lives in the one switcher (DESIGN.md §7.12, U35): Cmd+F
-//! opens it scoped to the current 群 with a removable `在 qqbot 研发` token,
+//! (on a page with no 话题 open; in a 话题 it finds in the transcript,
+//! `timeline::find`) opens it scoped to the current 群 with a removable
+//! `在 qqbot 研发` token,
 //! Cmd+Shift+F opens it over all of mine. The switcher asks the server
 //! through [`crate::data::ChatProvider::search`] and Enter on a hit opens
 //! the topic at that message (`Navigation::open_message`).
@@ -19,10 +21,10 @@ gpui::actions!(search, [SearchInGroup, SearchEverywhere]);
 
 /// Key bindings and the two global actions. Call once after `nav::install`.
 pub fn install(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-f", SearchInGroup, None),
-        KeyBinding::new("cmd-shift-f", SearchEverywhere, None),
-    ]);
+    // ⌘F finds in the open 话题 and falls back to SearchInGroup elsewhere
+    // (`timeline::find`).
+    cx.bind_keys([KeyBinding::new("cmd-shift-f", SearchEverywhere, None)]);
+    crate::views::timeline::find::install(cx);
     cx.on_action(|_: &SearchInGroup, cx| open_deferred(false, cx));
     cx.on_action(|_: &SearchEverywhere, cx| open_deferred(true, cx));
 }

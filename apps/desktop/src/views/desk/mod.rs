@@ -292,7 +292,6 @@ impl DeskPage {
             };
             page::list_footer(SharedString::from(format!("{id}-more")), text, None, cx)
                 .focus_row(false, cx)
-                .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if !this.expanded.remove(id) {
                         this.expanded.insert(id);

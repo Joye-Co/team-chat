@@ -32,6 +32,7 @@ use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, Po
 
 use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
+use crate::views::files::export::FileItem as _;
 use crate::{
     app::{Place, Services},
     copy::{artifact_page as c, fill},
@@ -1566,7 +1567,6 @@ impl ArtifactPage {
                             .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                             .min_w_0()
                             .overflow_hidden()
-                            .cursor_pointer()
                             .child(thumbnail(&self.services, a, cx))
                             .child(
                                 div()
@@ -1601,9 +1601,22 @@ impl ArtifactPage {
                                     .build(window, cx)
                             })
                             .on_click(opener)
+                            // Space previews the focused or hovered tile; it drags
+                            // out to Finder as the file.
+                            .file_item(
+                                crate::views::files::export::FileRef::artifact(
+                                    &self.services.provider,
+                                    &a.id,
+                                    &a.title,
+                                ),
+                                kind_sym(a.kind),
+                            )
                             .context_menu({
                                 let (services, a) = (self.services.clone(), a.clone());
-                                move |menu, _, _| artifact_menu(menu, &services, &a)
+                                move |menu, window, _| {
+                                    let at = window.mouse_position();
+                                    artifact_menu(menu, &services, &a, at)
+                                }
                             })
                     });
                     let count = tiles.len();
@@ -1684,9 +1697,13 @@ impl ArtifactPage {
                             window,
                             cx,
                         )
-                        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-                            artifact_menu(menu.min_w(px(128.)), &services, &art)
-                        })
+                        .dropdown_menu_with_anchor(
+                            gpui::Anchor::TopRight,
+                            move |menu, window, _| {
+                                let at = window.mouse_position();
+                                artifact_menu(menu.min_w(px(128.)), &services, &art, at)
+                            },
+                        )
                         .into_any_element()
                     };
                     let click: Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)> =
@@ -1942,12 +1959,16 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
 
 // --- v12/behavior ---
 /// The context menu of a 产出 row: 打开, 在新窗口打开 and 分享 (it copies
-/// the line the 分享 button copies), as on the 产出's own page (§7.3).
+/// the line the 分享 button copies), as on the 产出's own page (§7.3); then
+/// 快速查看, 共享… (the system share picker at `at`) and 存储为….
 fn artifact_menu(
     menu: PopupMenu,
     services: &Services,
     a: &crate::data::ArtifactSummary,
+    at: gpui::Point<Pixels>,
 ) -> PopupMenu {
+    let target =
+        crate::views::files::export::FileRef::artifact(&services.provider, &a.id, &a.title);
     let (nav, id) = (services.nav.clone(), a.id.clone());
     let (provider, window_id) = (services.provider.clone(), a.id.clone());
     let share_text = fill(
@@ -1971,5 +1992,6 @@ fn artifact_menu(
             cx.write_to_clipboard(ClipboardItem::new_string(share_text.clone()))
         }),
     )
+    .map(|menu| crate::views::files::export::menu_items(menu, &target, at))
 }
 // --- end v12/behavior ---

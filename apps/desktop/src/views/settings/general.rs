@@ -535,18 +535,31 @@ impl Render for GeneralPage {
             SectionTitle::new(s::SECTION_STARTUP),
             GroupedForm::new()
                 .row(FormRow::new(s::ON_LAUNCH).control(launch))
-                .row(FormRow::new(s::LAUNCH_AT_LOGIN).control(switch(
-                    "general-login",
-                    p.launch_at_login,
-                    s::LAUNCH_AT_LOGIN,
-                    |p, v| p.launch_at_login = v,
-                )))
-                .row(FormRow::new(s::MENU_BAR).control(switch(
-                    "general-menu-bar",
-                    p.menu_bar,
-                    s::MENU_BAR,
-                    |p, v| p.menu_bar = v,
-                ))),
+                // The system owns the login item: show what it says.
+                .row(
+                    FormRow::new(s::LAUNCH_AT_LOGIN).control(
+                        NativeSwitch::new(
+                            "general-login",
+                            super::login_item::shown_on(p.launch_at_login),
+                        )
+                        .name(s::LAUNCH_AT_LOGIN)
+                        .on_change(|next, window, _| {
+                            super::login_item::set(next);
+                            window.refresh();
+                        }),
+                    ),
+                )
+                .row(
+                    FormRow::new(s::MENU_BAR).control(
+                        NativeSwitch::new("general-menu-bar", p.menu_bar)
+                            .name(s::MENU_BAR)
+                            .on_change(|next, window, cx| {
+                                prefs::update(|p| p.menu_bar = next);
+                                crate::views::nav::show_status_item(next, cx);
+                                window.refresh();
+                            }),
+                    ),
+                ),
         );
         let alerts = widgets::section(
             SectionTitle::new(s::SECTION_ALERTS),

@@ -1360,11 +1360,19 @@ impl RootView {
 /// Options of the main window. `focus: false` keeps self-tests from taking focus.
 pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
     WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(theme::WINDOW_DEFAULT_WIDTH, theme::WINDOW_DEFAULT_HEIGHT),
-            cx,
-        ))),
+        // The app opens where it was closed; self-tests always centred.
+        window_bounds: Some(
+            focus
+                .then(|| crate::views::shell::window_frame::saved(cx))
+                .flatten()
+                .unwrap_or_else(|| {
+                    WindowBounds::Windowed(Bounds::centered(
+                        None,
+                        size(theme::WINDOW_DEFAULT_WIDTH, theme::WINDOW_DEFAULT_HEIGHT),
+                        cx,
+                    ))
+                }),
+        ),
         titlebar: Some(TitlebarOptions {
             title: Some(env!("PRODUCT_NAME").into()),
             // v12/shell: a full-size content view; the traffic lights sit
@@ -1402,8 +1410,12 @@ pub fn open_main_window(
         }
         let view = cx.new(|cx| RootView::new(services, first_frame, window, cx));
         if focus {
-            view.update(cx, |v, _| {
-                v.columns = crate::views::columns::Columns::load()
+            view.update(cx, |v, cx| {
+                v.columns = crate::views::columns::Columns::load();
+                cx.observe_window_bounds(window, |_, window, cx| {
+                    crate::views::shell::window_frame::note_change(window, cx)
+                })
+                .detach();
             });
         }
         view
@@ -1437,6 +1449,7 @@ pub fn bind_view_keys(cx: &mut App) {
     crate::views::timeline::bind_keys(cx);
     crate::views::members_page::bind_keys(cx);
     // --- end v12/behavior ---
+    crate::views::files::export::bind_keys(cx);
 }
 
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.

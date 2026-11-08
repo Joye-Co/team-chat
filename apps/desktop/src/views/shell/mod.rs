@@ -28,6 +28,7 @@ pub mod layout;
 pub mod pages;
 pub mod panes;
 pub mod title_bar;
+pub mod window_frame;
 
 use gpui::{App, Div, ParentElement, Pixels, Render, Styled, div};
 
