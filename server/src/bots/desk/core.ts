@@ -6,6 +6,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Approver } from "@chat/protocol";
 import { effectivePolicy } from "../../settings/approvals";
+import { approverOf } from "../../settings/rules";
 import {
   AcceptanceItem,
   type BotRun,
@@ -520,18 +521,63 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return r.requested_by === ANONYMOUS_ID ? [] : [r.requested_by];
   }
 
-  /** settings: who answers this bot's approvals (谁可以批准): the team policy's approver. */
-  protected async approver(): Promise<Approver> {
-    return (await effectivePolicy(this.env.DB)).approver;
+  /**
+   * settings: who answers this bot's approvals (谁可以批准): the approver of the gated kind
+   * (每类的批准人) when the approval has one, else the team policy's approver.
+   */
+  protected async approver(kind?: string | null): Promise<Approver> {
+    return approverOf(await effectivePolicy(this.env.DB), kind);
+  }
+
+  /** The gated kind of the run's open approval (feature "gates"), or null. */
+  protected approvalKind(r: Pick<RunRow, "id" | "approval_id">): string | null {
+    const raw = this.meta(`approval:${r.id}`);
+    if (!raw || !r.approval_id) return null;
+    try {
+      const v = JSON.parse(raw) as { approvalId?: string; kind?: string };
+      return v.approvalId === r.approval_id && typeof v.kind === "string" ? v.kind : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The gated kinds a person approved for the whole piece of work (这件事里都同意), kept in the
+   * run's request (meta `request:{runId}`) and carried to its follow-ups and retries.
+   */
+  protected approvedGates(runId: string | null | undefined): string[] {
+    const raw = runId ? this.meta(`request:${runId}`) : null;
+    if (!raw) return [];
+    try {
+      const v = (JSON.parse(raw) as { approvedGates?: unknown }).approvedGates;
+      return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Adds `kind` to the run's request's approved gates. */
+  protected approveGateForWork(runId: string, kind: string): void {
+    const raw = this.meta(`request:${runId}`);
+    if (!raw) return;
+    try {
+      const req = JSON.parse(raw) as { approvedGates?: string[] };
+      const kinds = new Set(this.approvedGates(runId));
+      kinds.add(kind);
+      req.approvedGates = [...kinds];
+      this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `request:${runId}`, JSON.stringify(req));
+    } catch {
+      // A request that does not parse keeps no approvals.
+    }
   }
 
   /**
    * settings: the people to mention and wait on for an approval: the requester, or the active
-   * human owners in the run's group when the policy says owners approve (mentions must be group
-   * members; owners outside the group can still answer).
+   * human owners in the run's group when the policy (or the kind's approver) says owners approve
+   * (mentions must be group members; owners outside the group can still answer).
    */
-  protected async approvers(r: Pick<RunRow, "requested_by" | "group_id">): Promise<string[]> {
-    if ((await this.approver()) !== "owners") return this.requester(r);
+  protected async approvers(r: Pick<RunRow, "requested_by" | "group_id">, kind?: string | null): Promise<string[]> {
+    if ((await this.approver(kind)) !== "owners") return this.requester(r);
     const owners = await this.env.DB.prepare(
       `SELECT m.id FROM members m JOIN group_members g ON g.member_id = m.id AND g.group_id = ?
        WHERE m.level = 'owner' AND m.kind = 'human' AND m.deactivated = 0 ORDER BY m.id LIMIT 20`,

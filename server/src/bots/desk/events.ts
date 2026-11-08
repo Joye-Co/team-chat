@@ -68,7 +68,7 @@ export abstract class DeskEvents extends DeskRuns {
       this.sql.exec("UPDATE runs SET stalled = 0 WHERE id = ?", r.id);
       r.stalled = 0;
       await this.setStatus(r, r.approval_id ? "waiting" : "running");
-      await this.topic(r, r.approval_id ? "waiting_answer" : "in_progress", r.approval_id ? await this.approvers(r) : []);
+      await this.topic(r, r.approval_id ? "waiting_answer" : "in_progress", r.approval_id ? await this.approvers(r, this.approvalKind(r)) : []);
     } else if (r.status === "created") {
       await this.setStatus(r, "running", { started_at: now });
     }
@@ -91,7 +91,9 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "approval.request": {
           await this.flush(r, progress);
-          await this.askApproval(r, String(ev.approvalId), String(ev.title ?? ""), ev.detail ? String(ev.detail) : undefined);
+          // Feature "gates": the daemon stopped a command of a gated kind.
+          const gate = typeof ev.kind === "string" && ev.kind !== "" ? { kind: cut(ev.kind, 32), command: typeof ev.command === "string" ? ev.command : undefined } : undefined;
+          await this.askApproval(r, String(ev.approvalId), String(ev.title ?? ""), ev.detail ? String(ev.detail) : undefined, gate);
           break;
         }
         case "status":
@@ -102,6 +104,7 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "approval.resolved":
           if (r.approval_id === ev.approvalId) {
+            this.sql.exec("DELETE FROM meta WHERE key = ?", `approval:${r.id}`);
             this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
             r.approval_id = null;
             await this.setStatus(r, "running");
@@ -215,22 +218,32 @@ export abstract class DeskEvents extends DeskRuns {
     }
   }
 
-  protected async askApproval(r: RunRow, approvalId: string, title: string, detail?: string): Promise<void> {
+  /**
+   * Posts the approval card (and its text form) to the approver. `gate` (feature "gates"): the
+   * daemon stopped a command of that kind; the card names the kind, shows the command, goes to
+   * the kind's approver and offers 这件事里都同意.
+   */
+  protected async askApproval(r: RunRow, approvalId: string, title: string, detail?: string, gate?: { kind: string; command?: string }): Promise<void> {
     this.sql.exec("UPDATE runs SET approval_id = ? WHERE id = ?", approvalId, r.id);
     r.approval_id = approvalId;
-    const body = TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
+    if (gate) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `approval:${r.id}`, JSON.stringify({ approvalId, kind: gate.kind }));
+    else this.sql.exec("DELETE FROM meta WHERE key = ?", `approval:${r.id}`);
+    const shown = gate ? (TEXT.gateKinds[gate.kind] ?? title) : title;
+    const what = gate ? (gate.command ?? detail) : detail;
+    const body = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
     const card: Card = {
       v: 1,
-      title: cut(`需要你确认：${title}`, 200),
+      title: cut(`需要你确认：${shown}`, 200),
       tone: "warning",
-      blocks: detail ? [{ type: "code", text: cut(detail, 8000) }] : [],
+      blocks: what ? [{ type: "code", text: cut(what, 8000) }] : [],
       actions: [
         { id: cut(`approve:${approvalId}`, 64), label: TEXT.approve, style: "primary" },
+        ...(gate ? [{ id: cut(`approveall:${approvalId}`, 64), label: TEXT.approveRun, confirm: TEXT.approveRunConfirm }] : []),
         { id: cut(`deny:${approvalId}`, 64), label: TEXT.deny, style: "danger" },
       ],
     };
     const cmid = `run:${r.id}:approval:${cut(approvalId, 24)}`;
-    const askWho = await this.approvers(r);
+    const askWho = await this.approvers(r, gate?.kind);
     try {
       await this.post(r, cmid, body, { card, mentions: askWho });
     } catch (err) {

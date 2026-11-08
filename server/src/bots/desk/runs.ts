@@ -5,8 +5,8 @@ import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
-import { policyPrompt } from "../../settings/rules";
-import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, hasFeature, pickMachine } from "../dispatch";
+import { policyPrompt, runGates } from "../../settings/rules";
+import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine } from "../dispatch";
 import { type ContextRow, type Selection, selectLines } from "../../context/render";
 import { type Brief, briefText } from "../../agent/frontdesk";
 import { linkStub } from "../env";
@@ -45,6 +45,8 @@ export interface RunRequest {
   followUps: { authorId: string; body: string }[];
   /** The front desk's work order (交代单), when it dispatched the request. */
   brief?: Brief;
+  /** Gated kinds a person approved for the whole piece of work (这件事里都同意). */
+  approvedGates?: string[];
 }
 
 export abstract class DeskRuns extends DeskCore {
@@ -92,8 +94,14 @@ export abstract class DeskRuns extends DeskCore {
     const quotesBot = m.replyToAuthorId === botId || (m.refs ?? []).some((x) => x.fromId === botId);
     if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
-    // The request as it came, so the run can be retried with the same one.
-    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `request:${runId}`, JSON.stringify({ m, followUps, ...(brief ? { brief } : {}) } satisfies RunRequest));
+    // The request as it came, so the run can be retried with the same one. A follow-up or a
+    // retry is the same piece of work: it keeps the kinds a person approved for all of it.
+    const approvedGates = this.approvedGates(followUpOf?.id ?? retryOf);
+    this.sql.exec(
+      "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+      `request:${runId}`,
+      JSON.stringify({ m, followUps, ...(brief ? { brief } : {}), ...(approvedGates.length > 0 ? { approvedGates } : {}) } satisfies RunRequest),
+    );
     const r = this.run(runId) as RunRow;
     await this.serial(runId, async () => {
       try {
@@ -120,11 +128,15 @@ export abstract class DeskRuns extends DeskCore {
 
         // A queued run gets its machine later: use a feature when any machine has it.
         const feature = (f: string) => (machine ? hasFeature(machine, f) : machines.some((x) => hasFeature(x, f)));
+        // The prompt tells the CLI the machine asks for approvals only when it surely will: the
+        // run's machine stops gated commands, or (queued) every machine with the runtime does.
+        const able = machines.filter((x) => hasRuntime(x, runner.runtime));
+        const gated = machine ? gatesRuntime(machine, runner.runtime) : able.length > 0 && able.every((x) => gatesRuntime(x, runner.runtime));
         let prompt: string;
         if (claim.contextOf) {
           prompt = await this.asidePrompt(m, claim, claim.contextOf, followUps);
         } else {
-          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief);
+          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated);
           prompt = p.prompt;
           this.storeContext(r.id, p);
         }
@@ -232,6 +244,7 @@ export abstract class DeskRuns extends DeskCore {
     acceptance = false,
     contextTools = false,
     brief?: Brief,
+    gated = false,
   ): Promise<Prompts> {
     const botId = this.botId as string;
     const notRequest = (x: ContextRow) => x.id !== m.messageId;
@@ -274,7 +287,7 @@ export abstract class DeskRuns extends DeskCore {
       followUps,
       refs,
       // settings: who must approve what (merge to main, publish, spend over the limit).
-      rules: policyPrompt(await effectivePolicy(this.env.DB)),
+      rules: policyPrompt(await effectivePolicy(this.env.DB), gated),
       acceptance,
       ...(brief ? { brief: briefText(brief) } : {}),
     });
@@ -379,6 +392,12 @@ export abstract class DeskRuns extends DeskCore {
 
   protected async assign(r: RunRow, runner: BotRunner, machine: MachineView, prompt: string): Promise<void> {
     const frame = this.assignFrame(r, runner, prompt, machine);
+    // Gated actions: the team's checked kinds, to a machine whose CLI stops them; kinds a person
+    // approved for this piece of work are left out.
+    if (r.kind !== RUN_KIND_ASIDE && gatesRuntime(machine, runner.runtime)) {
+      const gates = runGates(await effectivePolicy(this.env.DB), this.approvedGates(r.id));
+      if (gates.length > 0) frame.gates = gates;
+    }
     // A resumed session gets only what it has not seen (Run context).
     const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
     if (resumePrompt !== null) frame.prompt = resumePrompt;
