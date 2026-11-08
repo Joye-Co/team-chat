@@ -101,6 +101,17 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/run-events-response.json", "RunEventsResponse", { run, entries, hasMore: false, lastSeq: 4 });
   ok("http/run-events-response-empty.json", "RunEventsResponse", { run: created, entries: [], hasMore: false, lastSeq: 0 });
 
+  // Run context
+  const manifest = { resumed: false, chars: 1830, firstSeq: 1, lastSeq: 212, messages: 41, omitted: 170, files: 2, cards: 1, refs: 0 };
+  ok("http/run-context.json", "RunContext", { prompt: "You are 小克, a member of a team chat. …", manifest });
+  ok("http/run-context-resumed.json", "RunContext", { prompt: "Request from 张三:\n继续", manifest: { resumed: true, chars: 0, messages: 0, omitted: 0, files: 0, cards: 0, refs: 0 } }, "nothing new since the last run");
+  bad("http/run-context-missing-manifest.json", "RunContext", { prompt: "x" }, "manifest is required");
+  const cm = { id: ID.msg, seq: 150, authorId: ID.owner, authorName: "张三", at: T0, text: `[#150 m ${ID.msg} · 张三 · 11-08 14:02] 看下这张图\n  [file f 01JBX0FILE00000000000000AA · 设计稿.png · image/png · 210 KB · 1280×720]` };
+  ok("http/topic-history-response.json", "TopicHistoryResponse", { messages: [cm], hasMore: true });
+  ok("http/topic-message-response.json", "TopicMessageResponse", { message: cm });
+  ok("http/context-search-response.json", "ContextSearchResponse", { hits: [{ messageId: ID.msg, topicId: ID.topic, topicTitle: "发布", seq: 150, authorName: "张三", at: T0, snippet: "看下这张图" }] });
+  bad("http/context-search-response-missing-snippet.json", "ContextSearchResponse", { hits: [{ messageId: ID.msg, topicId: ID.topic, seq: 1, authorName: "x", at: T0 }] }, "snippet is required");
+
   // Runner-backed bots
   ok("http/set-bot-runner-request.json", "SetBotRunnerRequest", { runtime: "codex", labels: ["mac", "main"], repo: { url: "https://github.com/Joye-Co/team-chat" }, baseBranch: "main", model: "gpt-5.5", envAllowlist: ["GITHUB_TOKEN"] });
   ok("http/set-bot-runner-request-minimal.json", "SetBotRunnerRequest", { runtime: "claude" }, "scratch folder, any machine");

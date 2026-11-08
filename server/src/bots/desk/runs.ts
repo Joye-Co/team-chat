@@ -1,17 +1,42 @@
 // BotDesk runs: starting a run from a mention (claim, ack, machine, prompt, assign) and the
 // MachineLink answers to an assignment (accepted, rejected, lost).
-import { type BotRunner, RUN_KIND_ASIDE, type RunAssignFrame, type TopicContext } from "@chat/protocol";
+import { type BotRunner, isMainTopicId, RUN_KIND_ASIDE, type RunAssignFrame, type RunContextManifest, type TopicContext } from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt } from "../../settings/rules";
-import { LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, candidates, cut, hasFeature, pickMachine } from "../dispatch";
+import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, hasFeature, pickMachine } from "../dispatch";
+import { type ContextRow, type Selection, selectLines } from "../../context/render";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+
+/** The prompts of a run (Run context): the full one, and the one for a resumed session. */
+interface Prompts {
+  prompt: string;
+  manifest: RunContextManifest;
+  resume?: { prompt: string; manifest: RunContextManifest };
+}
+
+function manifestOf(sel: Selection, resumed: boolean): RunContextManifest {
+  const out: RunContextManifest = {
+    resumed,
+    chars: sel.chars,
+    messages: sel.rows.length,
+    omitted: sel.omitted,
+    files: sel.stats.files,
+    cards: sel.stats.cards,
+    refs: sel.stats.refs,
+  };
+  if (sel.rows.length > 0) {
+    out.firstSeq = sel.rows[0].seq;
+    out.lastSeq = sel.rows[sel.rows.length - 1].seq;
+  }
+  return out;
+}
 
 /** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
 export interface RunRequest {
@@ -53,6 +78,11 @@ export abstract class DeskRuns extends DeskCore {
       kind,
       retryOf ?? null,
     );
+    // Run context: in the 群聊 only a follow-up, or a request that quotes this bot, continues
+    // the bot's last session; any other request is a new piece of work.
+    const quotesBot = m.replyToAuthorId === botId || (m.refs ?? []).some((x) => x.fromId === botId);
+    if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
+    if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one.
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `request:${runId}`, JSON.stringify({ m, followUps } satisfies RunRequest));
     const r = this.run(runId) as RunRow;
@@ -79,15 +109,16 @@ export abstract class DeskRuns extends DeskCore {
           return this.end(r, "failed", why, "blocked", why);
         }
 
-        const prompt = claim.contextOf
-          ? await this.asidePrompt(m, claim, claim.contextOf, followUps)
-          : await this.topicPrompt(
-              m,
-              claim,
-              followUps,
-              // A queued run gets its machine later: ask for the block when any machine reads it.
-              machine ? hasFeature(machine, "acceptance") : machines.some((x) => hasFeature(x, "acceptance")),
-            );
+        // A queued run gets its machine later: use a feature when any machine has it.
+        const feature = (f: string) => (machine ? hasFeature(machine, f) : machines.some((x) => hasFeature(x, f)));
+        let prompt: string;
+        if (claim.contextOf) {
+          prompt = await this.asidePrompt(m, claim, claim.contextOf, followUps);
+        } else {
+          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"));
+          prompt = p.prompt;
+          this.storeContext(r.id, p);
+        }
         // Sources of refs the run saw: later run.input texts give their context only once.
         if (m.refs && m.refs.length > 0) {
           this.seeRefs(runId, [...claim.messages.map((x) => x.id), ...m.refs.map((x) => x.messageId)]);
@@ -170,6 +201,7 @@ export abstract class DeskRuns extends DeskCore {
 
   /** The topic's last ended run of the same kind and runtime with a CLI session, if any. */
   protected lastSession(r: RunRow, runner: BotRunner): RunRow | undefined {
+    if (r.fresh) return undefined;
     const prev = this.sql
       .exec<RunRow>(
         "SELECT * FROM runs WHERE topic_id = ? AND id != ? AND ended_at IS NOT NULL AND kind IS ? ORDER BY created_at DESC LIMIT 1",
@@ -181,24 +213,88 @@ export abstract class DeskRuns extends DeskCore {
     return prev?.session_id && prev.machine_id && prev.runtime === runner.runtime && !prev.external ? prev : undefined;
   }
 
-  protected async topicPrompt(m: TopicMessage, claim: ClaimResult, followUps: { authorId: string; body: string }[], acceptance = false): Promise<string> {
+  /** The run's prompts (Run context): the topic within the budget, and what is new for a resumed session. */
+  protected async topicPrompts(
+    r: RunRow,
+    runner: BotRunner,
+    m: TopicMessage,
+    claim: ClaimResult,
+    followUps: { authorId: string; body: string }[],
+    acceptance = false,
+    contextTools = false,
+  ): Promise<Prompts> {
     const botId = this.botId as string;
+    const notRequest = (x: ContextRow) => x.id !== m.messageId;
+    const first = claim.first && notRequest(claim.first) ? claim.first : undefined;
+    const newest = (claim.newest ?? []).filter(notRequest);
+    const total = Math.max(0, (claim.total ?? 0) - (claim.newest ?? []).length + newest.length);
+    const prev = this.lastSession(r, runner);
+    let since: { newest: ContextRow[]; total: number } | undefined;
+    if (prev && prev.context_seq !== null) {
+      since = unwrap(
+        await roomStub(this.env, m.groupId).rpc(m.groupId, "bots.since", this.actor(), {
+          topicId: m.topicId,
+          afterSeq: prev.context_seq,
+          exceptAuthor: botId,
+        }),
+      ) as { newest: ContextRow[]; total: number };
+      since = { newest: since.newest.filter(notRequest), total: since.total - (since.newest.length - since.newest.filter(notRequest).length) };
+    }
     const refIds = (m.refs ?? []).map((x) => x.fromId).filter((x): x is string => Boolean(x));
-    const names = await this.names([...claim.messages.map((x) => x.authorId), m.authorId, botId, ...refIds]);
-    const seen = new Set(claim.messages.map((x) => x.id).filter((x): x is string => Boolean(x)));
-    const refs = m.refs && m.refs.length > 0 ? refsText(names.get(m.authorId) ?? m.authorId, m.refs, names, seen) : undefined;
-    return buildPrompt({
-      botName: names.get(botId) ?? "bot",
+    const authors = [first, ...newest, ...(since?.newest ?? [])].flatMap((x) => (x ? [x.authorId, x.ext.replyTo?.authorId ?? x.authorId, ...(x.ext.cardState?.answers ?? []).map((a) => a.actorId)] : []));
+    const names = await this.names([...new Set([...authors, m.authorId, botId, ...refIds])]);
+    const name = (id: string) => names.get(id) ?? id;
+    const lines = {
+      more: (x: ContextRow) => (contextTools ? `rest: chat-run topic message --id ${x.id}` : ""),
+      gap: (n: number, before: number) =>
+        contextTools ? `[… ${n} messages left out; read them with chat-run topic history --before ${before}]` : `[… ${n} messages left out …]`,
+    };
+    const sel = selectLines(first, newest, total, name, CONTEXT_CHARS, lines);
+    const seen = new Set(sel.rows.map((x) => x.id));
+    const refs = m.refs && m.refs.length > 0 ? refsText(name(m.authorId), m.refs, names, seen) : undefined;
+    const request = { authorId: m.authorId, body: m.body };
+    const prompt = buildPrompt({
+      botName: name(botId),
       title: claim.title,
-      messages: claim.messages.filter((x) => x.body !== "" && x.id !== m.messageId),
+      messages: [],
+      context: sel.text,
+      contextTools,
       names,
-      request: { authorId: m.authorId, body: m.body },
+      request,
       followUps,
       refs,
       // settings: who must approve what (merge to main, publish, spend over the limit).
       rules: policyPrompt(await effectivePolicy(this.env.DB)),
       acceptance,
     });
+    const out: Prompts = { prompt, manifest: manifestOf(sel, false) };
+    if (since) {
+      const delta = selectLines(undefined, since.newest, since.total, name, CONTEXT_CHARS, lines);
+      out.resume = {
+        prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools }),
+        manifest: manifestOf(delta, true),
+      };
+    }
+    return out;
+  }
+
+  /** Keeps a run's prompts for its assignment and `GET /v1/runs/:id/context`. */
+  protected storeContext(runId: string, p: Prompts): void {
+    const put = (k: string, v: string) => this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", k, v);
+    put(`context:${runId}`, JSON.stringify({ full: p.manifest, resume: p.resume?.manifest }));
+    if (p.resume) put(`prompt_resume:${runId}`, p.resume.prompt);
+  }
+
+  /** What the run's prompt carried (docs/protocol.md, "Run context"), or null for older runs. */
+  async runContext(botId: string, runId: string): Promise<{ prompt: string; manifest: RunContextManifest } | null> {
+    this.bind(botId);
+    const ctx = this.meta(`context:${runId}`);
+    if (ctx === null) return null;
+    const m = JSON.parse(ctx) as { full: RunContextManifest; resume?: RunContextManifest };
+    const resumed = this.meta(`sent:${runId}`) === "resume" && m.resume !== undefined;
+    const prompt = resumed ? this.meta(`prompt_resume:${runId}`) : this.meta(`prompt:${runId}`);
+    if (prompt === null) return null;
+    return { prompt, manifest: resumed ? (m.resume as RunContextManifest) : m.full };
   }
 
   /** Remembers source messages a run saw (prompt messages and refs with their context). */
@@ -270,6 +366,10 @@ export abstract class DeskRuns extends DeskCore {
 
   protected async assign(r: RunRow, runner: BotRunner, machine: MachineView, prompt: string): Promise<void> {
     const frame = this.assignFrame(r, runner, prompt, machine);
+    // A resumed session gets only what it has not seen (Run context).
+    const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
+    if (resumePrompt !== null) frame.prompt = resumePrompt;
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${r.id}`, resumePrompt !== null ? "resume" : "full");
     this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;

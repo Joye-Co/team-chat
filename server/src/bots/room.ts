@@ -14,13 +14,14 @@ import {
   registerRoomRpc,
 } from "../core/registry";
 import { storedCard } from "../cards2/decisions";
-import { ANONYMOUS_ID, storedPrivacy } from "../cards2/privacy";
+import { ANONYMOUS_ID, storedPrivacy, viewMessage } from "../cards2/privacy";
 import type { AnswerData } from "./answers";
 import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
 import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
+import { type ContextRow, parseExt } from "../context/render";
 
 registerRoomMigration({
   name: "bots-1",
@@ -71,6 +72,12 @@ export interface ClaimResult {
   botId: string;
   title: string;
   messages: ContextMessage[];
+  /** The topic's first message (Run context). */
+  first?: ContextRow;
+  /** The newest messages, newest first (at most `CONTEXT_SCAN`). */
+  newest?: ContextRow[];
+  /** Messages of the topic (not deleted). */
+  total?: number;
   /** The topic is a side chat about this topic (1.1, `Topic.contextOf`). */
   contextOf?: TopicContext;
   /** With `contextOf`: the side chat's own person (the DM's other member), the asker. */
@@ -81,6 +88,45 @@ export interface ClaimResult {
 export interface SourceContext {
   title: string;
   messages: ContextMessage[];
+}
+
+/** Newest messages read for a run's prompt; the character budget picks from these. */
+export const CONTEXT_SCAN = 400;
+
+type ContextDbRow = { id: string; created_seq: number; author_id: string; created_at: number; body: string; kind: string | null; ext: string | null };
+const CONTEXT_COLS = "id, created_seq, author_id, created_at, body, kind, ext";
+
+function toContextRow(r: ContextDbRow): ContextRow {
+  return { id: r.id, seq: r.created_seq, authorId: r.author_id, at: r.created_at, body: r.body, kind: r.kind ?? "text", ext: parseExt(r.ext) };
+}
+
+/**
+ * Messages of a topic as context rows, as `viewerId` may see them (private cards hide their
+ * voters): `where` adds conditions on top of topic and not deleted.
+ */
+export function contextRows(sql: SqlStorage, viewerId: string, topicId: string, where: string, params: unknown[], order: "ASC" | "DESC", limit: number): ContextRow[] {
+  return sql
+    .exec<ContextDbRow>(
+      `SELECT ${CONTEXT_COLS} FROM messages WHERE topic_id = ? AND deleted_at IS NULL ${where} ORDER BY created_seq ${order} LIMIT ?`,
+      topicId,
+      ...params,
+      limit,
+    )
+    .toArray()
+    .map((r) => {
+      const row = toContextRow(r);
+      if (row.ext.cardState) {
+        const seen = viewMessage({ id: row.id, cardState: row.ext.cardState } as unknown as Message, viewerId, sql);
+        row.ext = { ...row.ext, cardState: seen.cardState as ContextRow["ext"]["cardState"] };
+      }
+      return row;
+    });
+}
+
+function topicCount(sql: SqlStorage, topicId: string, where = "", params: unknown[] = []): number {
+  return (
+    sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM messages WHERE topic_id = ? AND deleted_at IS NULL ${where}`, topicId, ...params).toArray()[0]?.n ?? 0
+  );
 }
 
 /** Messages of a side chat's source topic given to the aside run. */
@@ -115,6 +161,9 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
   const out: ClaimResult = { botId: main ? actor.id : (claimedBot(room.sql, topicId) as string), title: topic.title, messages };
+  out.newest = contextRows(room.sql, actor.id, topicId, "", [], "DESC", CONTEXT_SCAN);
+  out.first = contextRows(room.sql, actor.id, topicId, "", [], "ASC", 1)[0];
+  out.total = topicCount(room.sql, topicId);
   // Only a DM topic can be a side chat (the room checks this when it stores the context).
   if (topic.context && room.groupKind === "dm") {
     out.contextOf = JSON.parse(topic.context) as TopicContext;
@@ -146,6 +195,51 @@ registerRoomRpc("bots.context", (room, actor, args): SourceContext => {
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
   return { title: topic.title, messages };
+});
+
+/**
+ * Messages of a topic after `afterSeq` that are not `exceptAuthor`'s, newest first (a resumed
+ * run's new input), with how many there are.
+ */
+registerRoomRpc("bots.since", (room, actor, args) => {
+  const { topicId, afterSeq, exceptAuthor } = args as { topicId: string; afterSeq: number; exceptAuthor: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  const where = "AND created_seq > ? AND author_id != ?";
+  return {
+    newest: contextRows(room.sql, actor.id, topicId, where, [afterSeq, exceptAuthor], "DESC", CONTEXT_SCAN),
+    total: topicCount(room.sql, topicId, where, [afterSeq, exceptAuthor]),
+  };
+});
+
+/** A page of a topic for chat-run `topic.history`, oldest first (machine-protocol.md, "Topic context"). */
+registerRoomRpc("bots.history", (room, actor, args) => {
+  const { topicId, before, after, limit } = args as { topicId: string; before?: number; after?: number; limit: number };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (before !== undefined) {
+    conds.push("AND created_seq < ?");
+    params.push(before);
+  }
+  if (after !== undefined) {
+    conds.push("AND created_seq > ?");
+    params.push(after);
+  }
+  // Reading forward (after) goes oldest first; otherwise the newest page before the point.
+  const forward = after !== undefined && before === undefined;
+  const rows = contextRows(room.sql, actor.id, topicId, conds.join(" "), params, forward ? "ASC" : "DESC", limit + 1);
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  return { rows: forward ? page : page.reverse(), hasMore };
+});
+
+/** One message of a topic, whole (chat-run `topic.message`). */
+registerRoomRpc("bots.message", (room, actor, args) => {
+  const { topicId, messageId } = args as { topicId: string; messageId: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  const row = contextRows(room.sql, actor.id, topicId, "AND id = ?", [messageId], "ASC", 1)[0];
+  if (!row) throw new ApiError("not_found", "message not found");
+  return { row };
 });
 
 /** The author and body of a message that started a run (retrying a run made before 1.1). */
@@ -213,6 +307,8 @@ export interface TopicMessage {
   ackMessageId?: string;
   /** 1.1 (引用提问): the message's refs, resolved by the room. */
   refs?: RefSource[];
+  /** Author of the message this one quotes (`replyTo`), if any. */
+  replyToAuthorId?: string;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */
@@ -422,6 +518,9 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     args.body = stripRefPrefix(m.body, m.blockRefs);
     args.refs = resolveRefs(c.sql, m.blockRefs);
   }
+  const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
+  const quoted = parseExt(ext).replyTo?.authorId;
+  if (quoted) args.replyToAuthorId = quoted;
   await deskStub(c.env, target).onMessage(target, args);
 }
 

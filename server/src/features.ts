@@ -6,6 +6,7 @@ import "./ops";
 import "./search";
 import "./integrations";
 import "./bots";
+import "./context";
 import "./reactions";
 import "./cards2";
 import "./sidechat";

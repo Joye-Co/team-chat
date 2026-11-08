@@ -1,0 +1,17 @@
+{
+  "kind": "ContextSearchResponse",
+  "valid": true,
+  "value": {
+    "hits": [
+      {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "topicTitle": "发布",
+        "seq": 150,
+        "authorName": "张三",
+        "at": 1762128000000,
+        "snippet": "看下这张图"
+      }
+    ]
+  }
+}

@@ -77,7 +77,11 @@ it). To deliver a \
 page or a file as a 产出 (a deliverable people open in the group), write it in your working \
 folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--file <path>`; \
 `chat-run artifact version --artifact <id> --dir <folder>` adds a version); `chat-run file \
-upload --file <path>` uploads one file. Each prints the JSON result and exits 0, or prints the \
+upload --file <path>` uploads one file. The prompt carries only part of the topic: read older \
+messages, whole messages, search and files with `chat-run topic history [--before <seq>] \
+[--after <seq>] [--limit <n>]`, `chat-run topic message --id <messageId>`, `chat-run search \
+--query <text> [--group] [--limit <n>]` and `chat-run file get --id <fileId> [--out <path>]`. \
+Each prints the JSON result and exits 0, or prints the \
 error with its reason and exits 1. A page opens beside the conversation in a pane about 400 pt \
 wide: make it work at that width (a row of tabs wraps or scrolls sideways, nothing is cut off). \
 When what people do on a page should be kept or seen by others (a checklist, a vote, a choice), \
@@ -135,7 +139,7 @@ struct Pending {
 pub struct Outputs {
     pending: Mutex<HashMap<String, Pending>>,
     next: AtomicU64,
-    /// What the daemon needs for the ops it answers itself (files and 产出).
+    /// What the daemon needs for the ops it answers itself (files, 产出, topic context).
     local: OnceLock<Arc<crate::chat_run_files::Local>>,
     /// The run id: part of each output's idempotency key.
     run: String,
@@ -518,9 +522,9 @@ pub async fn handle(
         );
         return answer;
     }
-    let local_op = req["op"]
-        .as_str()
-        .filter(|o| crate::chat_run_files::OPS.contains(o));
+    let local_op = req["op"].as_str().filter(|o| {
+        crate::chat_run_files::OPS.contains(o) || crate::chat_run_context::OPS.contains(o)
+    });
     let Some(op) = req["op"]
         .as_str()
         .filter(|o| OPS.contains(o) || local_op.is_some())
@@ -529,9 +533,10 @@ pub async fn handle(
             "invalid",
             None,
             format!(
-                "op must be one of {}, {}",
+                "op must be one of {}, {}, {}",
                 OPS.join(", "),
-                crate::chat_run_files::OPS.join(", ")
+                crate::chat_run_files::OPS.join(", "),
+                crate::chat_run_context::OPS.join(", ")
             ),
         );
     };
@@ -539,16 +544,20 @@ pub async fn handle(
     if !body.is_object() {
         return error("invalid", None, "body must be a JSON object");
     }
-    // Files and 产出: the daemon answers them itself over HTTP.
+    // Files, 产出 and topic context: the daemon answers them itself over HTTP.
     if local_op.is_some() {
         let Some(local) = outputs.local.get().cloned() else {
             return error(
                 "unavailable",
                 None,
-                "this run cannot send files (no server connection is set up for it)",
+                "this run cannot reach the server over HTTP (no server connection is set up for it)",
             );
         };
-        let answer = crate::chat_run_files::handle(op, &body, &local).await;
+        let answer = if crate::chat_run_context::OPS.contains(&op) {
+            crate::chat_run_context::handle(op, &body, &local).await
+        } else {
+            crate::chat_run_files::handle(op, &body, &local).await
+        };
         eprintln!(
             "{} chat-run {op}: {}",
             crate::proto::now_ms(),
@@ -713,13 +722,20 @@ pub const USAGE: &str = "usage:
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
+  chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>]
+  chat-run topic message --id <messageId>
+  chat-run search --query <text> [--group] [--limit <1-50>]
+  chat-run file get --id <fileId> [--out <path>]
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
 prints its JSON Schema (no daemon needed). ops.json is a list of
 patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, folders and
 产出 come from the run's working folder only; a folder's entry is index.html unless --entry
-says otherwise. Each command waits up to 15 s (file upload and artifact create/version: 5
-minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
+says otherwise. The prompt carries only part of the topic: topic history (oldest first, seqs
+exclusive), topic message (the whole message), search (this topic, or every topic of the
+group with --group) and file get (into --out, else .chat-files/<fileId>/ of the working
+folder) read the rest. Each command waits up to 15 s (topic and search: 30 s; file
+upload/get and artifact create/version: 5 minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
 sandbox.blocked. `chat-run secret` prints only the value (exit 0), or the error on standard
 error (exit 1); the first call asks a person to approve and fails with pending.";
@@ -791,6 +807,16 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             _ => Err("usage: chat-run secret <NAME>".into()),
         };
     }
+    // `search --group` is the one flag without a value.
+    let group = args.first().map(String::as_str) == Some("search")
+        && args.iter().skip(1).any(|a| a == "--group");
+    let without_group: Vec<String>;
+    let args = if group {
+        without_group = args.iter().filter(|a| *a != "--group").cloned().collect();
+        &without_group[..]
+    } else {
+        args
+    };
     let words: Vec<&str> = args.iter().take(2).map(String::as_str).collect();
     let (op, rest, allowed): (&'static str, &[String], &[&str]) = match words.as_slice() {
         ["card", "post"] => (output_op::CARD_POST, &args[2..], &["file", "cause"]),
@@ -834,6 +860,22 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
                 "artifact", "dir", "file", "entry", "title", "note", "events", "media", "data",
             ],
         ),
+        ["topic", "history"] => (
+            crate::chat_run_context::TOPIC_HISTORY,
+            &args[2..],
+            &["before", "after", "limit"],
+        ),
+        ["topic", "message"] => (crate::chat_run_context::TOPIC_MESSAGE, &args[2..], &["id"]),
+        ["search", ..] => (
+            crate::chat_run_context::CONTEXT_SEARCH,
+            &args[1..],
+            &["query", "limit"],
+        ),
+        ["file", "get"] => (
+            crate::chat_run_context::FILE_GET,
+            &args[2..],
+            &["id", "out"],
+        ),
         _ => return Err("unknown command".into()),
     };
     let f = Flags::parse(rest, allowed)?;
@@ -841,7 +883,54 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
     let mut put = |k: &str, v: Value| {
         body.insert(k.to_string(), v);
     };
+    let id = |f: &Flags| -> Result<String, String> {
+        let id = f.req("id")?;
+        if !crate::chat_run_context::valid_id(id) {
+            return Err("--id must be an id (letters, digits, - and _)".into());
+        }
+        Ok(id.to_string())
+    };
+    let limit = |f: &Flags, max: u64| -> Result<Option<u64>, String> {
+        let n = f.num("limit")?;
+        if n.is_some_and(|n| !(1..=max).contains(&n)) {
+            return Err(format!("--limit must be from 1 to {max}"));
+        }
+        Ok(n)
+    };
     match op {
+        crate::chat_run_context::TOPIC_HISTORY => {
+            for k in ["before", "after"] {
+                if let Some(n) = f.num(k)? {
+                    put(k, json!(n));
+                }
+            }
+            if let Some(n) = limit(&f, crate::chat_run_context::MAX_HISTORY_LIMIT)? {
+                put("limit", json!(n));
+            }
+        }
+        crate::chat_run_context::TOPIC_MESSAGE => put("messageId", json!(id(&f)?)),
+        crate::chat_run_context::CONTEXT_SEARCH => {
+            let q = f.req("query")?;
+            if q.trim().is_empty() {
+                return Err("--query is required".into());
+            }
+            put("query", json!(q));
+            if group {
+                put("scope", json!("group"));
+            }
+            if let Some(n) = limit(&f, crate::chat_run_context::MAX_SEARCH_LIMIT)? {
+                put("limit", json!(n));
+            }
+        }
+        crate::chat_run_context::FILE_GET => {
+            put("fileId", json!(id(&f)?));
+            if let Some(out) = f.opt("out") {
+                if out.is_empty() {
+                    return Err("--out needs a path".into());
+                }
+                put("out", json!(absolute_new(out)?));
+            }
+        }
         crate::chat_run_files::FILE_UPLOAD => {
             put("path", json!(absolute(f.req("file")?)?));
             for k in ["name", "mime"] {
@@ -976,6 +1065,16 @@ fn absolute(path: &str) -> Result<String, String> {
     std::fs::canonicalize(path)
         .map(|p| p.display().to_string())
         .map_err(|e| format!("cannot read {path}: {e}"))
+}
+
+/// `path` (which need not exist yet) made absolute against the current folder; a trailing `/`
+/// (a folder) is kept. The daemon resolves links and checks it is in the working folder.
+fn absolute_new(path: &str) -> Result<String, String> {
+    if Path::new(path).is_absolute() {
+        return Ok(path.to_string());
+    }
+    let cwd = std::env::current_dir().map_err(|e| format!("no current folder: {e}"))?;
+    Ok(format!("{}/{path}", cwd.display()))
 }
 
 /// Sends one request to the run's socket and reads the answer line.
@@ -1119,6 +1218,8 @@ pub fn main(args: Vec<String>) -> i32 {
     // The daemon answers within TIMEOUT (uploads: their own); the extra time covers a slow machine.
     let wait = if crate::chat_run_files::OPS.contains(&op) {
         crate::chat_run_files::TIMEOUT
+    } else if crate::chat_run_context::OPS.contains(&op) {
+        crate::chat_run_context::timeout(op)
     } else {
         TIMEOUT
     } + Duration::from_secs(5);
@@ -1465,6 +1566,99 @@ mod tests {
         assert!(request(&args(&["secret"])).is_err());
         assert!(request(&args(&["secret", "--name", "X"])).is_err());
         assert!(request(&args(&["secret", "A", "B"])).is_err());
+    }
+
+    #[test]
+    fn topic_context_commands_build_their_bodies() {
+        let r = |a: &[&str]| request(&args(a));
+        assert_eq!(
+            r(&["topic", "history"]).unwrap(),
+            ("topic.history", json!({}))
+        );
+        assert_eq!(
+            r(&[
+                "topic", "history", "--before", "40", "--after", "2", "--limit", "100"
+            ])
+            .unwrap(),
+            (
+                "topic.history",
+                json!({ "before": 40, "after": 2, "limit": 100 })
+            )
+        );
+        assert_eq!(
+            r(&["topic", "message", "--id", "01HXM"]).unwrap(),
+            ("topic.message", json!({ "messageId": "01HXM" }))
+        );
+        assert_eq!(
+            r(&["search", "--query", "上线 日期"]).unwrap(),
+            ("context.search", json!({ "query": "上线 日期" }))
+        );
+        assert_eq!(
+            r(&["search", "--group", "--query", "x", "--limit", "50"]).unwrap(),
+            (
+                "context.search",
+                json!({ "query": "x", "scope": "group", "limit": 50 })
+            )
+        );
+        assert_eq!(
+            r(&["file", "get", "--id", "F1"]).unwrap(),
+            ("file.get", json!({ "fileId": "F1" }))
+        );
+        let (op, body) = r(&["file", "get", "--id", "F1", "--out", "/w/a.pdf"]).unwrap();
+        assert_eq!(op, "file.get");
+        assert_eq!(body["out"], "/w/a.pdf");
+        // A relative out is made absolute against the current folder, a folder keeps its `/`.
+        let (_, body) = r(&["file", "get", "--id", "F1", "--out", "in/"]).unwrap();
+        let out = body["out"].as_str().unwrap();
+        assert!(out.starts_with('/') && out.ends_with("/in/"), "{out}");
+        assert!(crate::chat_run_context::OPS.contains(&op));
+
+        for bad in [
+            &["topic", "history", "--limit", "0"][..],
+            &["topic", "history", "--limit", "101"],
+            &["topic", "history", "--before", "x"],
+            &["topic", "history", "--group"],
+            &["topic", "message"],
+            &["topic", "message", "--id", ""],
+            &["topic", "message", "--id", "../M"],
+            &["topic", "list"],
+            &["search"],
+            &["search", "--query", " "],
+            &["search", "--query", "x", "--limit", "51"],
+            &["search", "--query", "x", "--limit", "0"],
+            &["file", "get"],
+            &["file", "get", "--id", "F/1"],
+            &["file", "get", "--id", "F1", "--out", ""],
+        ] {
+            assert!(r(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn topic_context_ops_go_to_the_daemon_not_the_server() {
+        let outputs = Outputs::new("r1");
+        let emitted = Arc::new(Mutex::new(0));
+        let e2 = emitted.clone();
+        let emit = move |_: RunEvent| *e2.lock().unwrap() += 1;
+        // No HTTP set up for this run: answered at once, nothing is sent as an output.
+        let v = handle(
+            br#"{"op":"topic.history","body":{}}"#,
+            &outputs,
+            &emit,
+            TIMEOUT,
+        )
+        .await;
+        assert_eq!(v["error"]["code"], "unavailable");
+        assert_eq!(*emitted.lock().unwrap(), 0);
+        let n = note();
+        for c in [
+            "chat-run topic history",
+            "chat-run topic message",
+            "chat-run search",
+            "chat-run file get",
+        ] {
+            assert!(n.contains(c) && USAGE.contains(c), "{c}");
+        }
     }
 
     #[tokio::test]

@@ -820,7 +820,8 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "acceptance",
                         "interact",
                         "output",
-                        "resume"
+                        "resume",
+                        "context"
                     ]
                     .map(String::from)[..]
                 )
