@@ -295,6 +295,23 @@ registerEventImporter((event, sql) => {
   );
 });
 
+/** 转交: the calling bot gives its topic to another bot (delegate.ts). The 群聊 has no claim. */
+registerRoomRpc("bots.transfer", (room, actor, args) => {
+  const { topicId, to } = args as { topicId: string; to: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  if (!room.isMember(to)) throw new ApiError("forbidden", "not a member of this group");
+  if (isMainTopicId(topicId)) return { transferred: false };
+  const owner = claimedBot(room.sql, topicId);
+  if (owner && owner !== actor.id) throw new ApiError("forbidden", "only the responsible member hands a topic over");
+  room.sql.exec(
+    "INSERT INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?) ON CONFLICT (topic_id) DO UPDATE SET bot_id = excluded.bot_id, claimed_at = excluded.claimed_at",
+    topicId,
+    to,
+    Date.now(),
+  );
+  return { transferred: true };
+});
+
 /** Removes a bot's topic claims in this group (the bot was deactivated). Internal. */
 registerRoomRpc("bots.release", (room, actor, args) => {
   const { botId } = args as { botId: string };
