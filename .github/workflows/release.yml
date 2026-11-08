@@ -149,6 +149,11 @@ jobs:
         with:
           shared-key: macos-release
 
+      - name: Fetch the crates
+        # release.sh runs `cargo update --workspace --offline`, which needs the crates locally.
+        if: inputs.mode != 'upload-only'
+        run: cargo fetch --locked
+
       - name: Set the git author
         run: |
           git config user.name "github-actions[bot]"
