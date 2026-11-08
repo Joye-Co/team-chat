@@ -5,15 +5,20 @@
 # the server so the app can update itself.
 #
 # Usage: scripts/release.sh <version> [--env staging|production] [--notes <file>]
-#                           [--dry-run] [--upload-only]
+#                           [--dry-run [--build]] [--upload-only] [--same-as <dmg>]
 #   --env          server to upload to (default production)
 #   --notes        Markdown release notes (default: notes that GitHub generates)
 #   --dry-run      run the checks and print the plan; change nothing
+#   --build        with --dry-run: also set the version in the working tree, build and check the
+#                  DMG and the daemon into dist/, then restore Cargo.toml, Cargo.lock, CHANGELOG.md
+#   --same-as      also check that the new DMG has the same designated requirement as <dmg>
+#                  (the previous release), as scripts/test-dmg.sh --same-as does
 #   --upload-only  only upload the existing dist/<name>-<version>.dmg to the server
 #                  (retry after the endpoint was missing or the upload failed)
 # Env: CHAT_API_BASE overrides the server URL. The admin secret is read from
 #      ~/.config/team-chat/<env>/admin-secret (TEAM_CHAT_CONFIG_DIR overrides
-#      ~/.config/team-chat) and is never printed.
+#      ~/.config/team-chat) and is never printed. The Release workflow
+#      (.github/workflows/release.yml) runs this script on a macOS runner.
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -23,6 +28,8 @@ ENV_NAME=production
 NOTES=""
 DRY_RUN=0
 UPLOAD_ONLY=0
+BUILD=0
+SAME_AS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_NAME="${2:-}"; shift 2 ;;
@@ -31,13 +38,17 @@ while [ $# -gt 0 ]; do
     --notes=*) NOTES="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --upload-only) UPLOAD_ONLY=1; shift ;;
-    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
+    --build) BUILD=1; shift ;;
+    --same-as) SAME_AS="${2:-}"; shift 2 ;;
+    --same-as=*) SAME_AS="${1#*=}"; shift ;;
+    -h | --help) sed -n '2,23p' "$0"; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac
 done
 
-[ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] [--dry-run] [--upload-only]"
+[ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] [--dry-run [--build]] [--upload-only] [--same-as <dmg>]"
+[ "$BUILD" = 0 ] || [ "$DRY_RUN" = 1 ] || die "--build goes with --dry-run (a real run always builds)"
 VERSION="${VERSION#v}"
 valid_semver "$VERSION" || die "version '$VERSION' is not semver (for example 0.2.0 or 0.2.0-rc.1)"
 # The server takes only MAJOR.MINOR.PATCH for app updates. A prerelease goes to GitHub only.
@@ -48,6 +59,7 @@ if ! valid_release_version "$VERSION"; then
   SERVER_UPLOAD=0
 fi
 case "$ENV_NAME" in staging | production) ;; *) die "--env must be staging or production" ;; esac
+if [ -n "$SAME_AS" ]; then [ -r "$SAME_AS" ] || die "cannot read $SAME_AS"; SAME_AS="$(cd "$(dirname "$SAME_AS")" && pwd)/$(basename "$SAME_AS")"; fi
 if [ -n "$NOTES" ]; then [ -r "$NOTES" ] || die "cannot read notes file $NOTES"; NOTES="$(cd "$(dirname "$NOTES")" && pwd)/$(basename "$NOTES")"; fi
 
 need git jq curl shasum base64
@@ -56,7 +68,8 @@ TAG="v$VERSION"
 DMG="$DIST/$NAME-$VERSION.dmg"
 SECRET_FILE="${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/$ENV_NAME/admin-secret"
 
-BASE="$(env_base "$ENV_NAME")"
+# Empty when this machine has no ops checkout; the upload and the preflight report it.
+BASE="$(env_base "$ENV_NAME" 2>/dev/null || true)"
 
 # release_notes_b64: notes for the server header, base64 on one line, at most ~6 KB of text.
 release_notes_b64() {
@@ -81,6 +94,7 @@ upload_to_server() {
   if [ -n "$(find "$SECRET_FILE" -perm -004 2>/dev/null)" ]; then log "warning: $SECRET_FILE is world-readable; run chmod 600"; fi
 
   local sha hdr resp code
+  [ -n "$BASE" ] || die "no server URL for $ENV_NAME: set TC_OPS_DIR (deploy/servers.json) or CHAT_API_BASE"
   sha="$(shasum -a 256 "$DMG" | awk '{ print $1 }')"
   hdr="$(mktemp)"
   resp="$(mktemp)"
@@ -141,6 +155,40 @@ grep -qE "^## ${VERSION//./\\.} \((unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})\)$" CH
 if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
+# require_ops: the operator's build needs the ops checkout. apps/desktop/build.rs embeds the
+# character pack and the server URLs from it; a release without them would ship initials and no
+# server menu.
+require_ops() {
+  local ops
+  ops="$(ops_dir)"
+  [ -n "$ops" ] && [ -f "$ops/characters/boxes.json" ] && [ -f "$ops/deploy/servers.json" ] \
+    || die "release needs the ops checkout (TC_OPS_DIR) with characters/ and deploy/servers.json"
+  export TC_OPS_DIR="$ops"
+}
+
+restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
+
+# set_version_and_build: sets the version and the CHANGELOG date in the working tree, checks the
+# release metadata, builds and checks the DMG and the daemon. Sets DAEMON.
+set_version_and_build() {
+  need cargo
+  require_ops
+  log "setting version $VERSION"
+  set_workspace_version "$VERSION"
+  cargo_env
+  cargo update --workspace --offline --manifest-path "$ROOT/Cargo.toml"
+  # "## <version> (unreleased)" gets today's date (UTC).
+  sed -i '' "s/^## ${VERSION//./\\.} (unreleased)\$/## $VERSION ($(date -u +%Y-%m-%d))/" CHANGELOG.md
+  "$ROOT/scripts/release-check.sh" "$VERSION" || die "release metadata of $VERSION is not final"
+
+  "$ROOT/scripts/build-dmg.sh"
+  local same_as=()
+  if [ -n "$SAME_AS" ]; then same_as=(--same-as "$SAME_AS"); fi
+  "$ROOT/scripts/test-dmg.sh" "$DMG" ${same_as[@]+"${same_as[@]}"}
+  DAEMON="$("$ROOT/scripts/build-daemon.sh" | tail -n 1)"
+  [ -f "$DMG" ] && [ -f "$DAEMON" ] || die "build outputs are missing"
+}
+
 if [ "$DRY_RUN" = 1 ]; then
   cat >&2 <<PLAN
 Release plan (dry run, nothing changed):
@@ -155,36 +203,23 @@ Release plan (dry run, nothing changed):
   admin secret   $SECRET_FILE ($([ -s "$SECRET_FILE" ] && echo present || echo missing))
 PLAN
   if [ "$problems" -gt 0 ]; then log "dry run found $problems problem(s); a real run would stop"; else log "dry run: all checks passed"; fi
+  if [ "$BUILD" = 1 ]; then
+    trap 'restore' EXIT
+    set_version_and_build
+    log "dry run: built and checked $(basename "$DMG") and $(basename "$DAEMON") in $DIST; nothing committed, tagged or uploaded"
+  fi
   exit 0
 fi
 
-need cargo
-# The operator's build: the character pack and the server URLs come from the ops checkout
-# (apps/desktop/build.rs). A release without them would ship monograms and no server menu.
-OPS="$(ops_dir)"
-[ -n "$OPS" ] && [ -f "$OPS/characters/boxes.json" ] && [ -f "$OPS/deploy/servers.json" ] \
-  || die "release needs the ops checkout (TC_OPS_DIR) with characters/ and deploy/servers.json"
-export TC_OPS_DIR="$OPS"
-log "setting version $VERSION"
-restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
-trap 'restore' ERR
-set_workspace_version "$VERSION"
-cargo_env
-cargo update --workspace --offline --manifest-path "$ROOT/Cargo.toml"
-# "## <version> (unreleased)" gets today's date (UTC).
-sed -i '' "s/^## ${VERSION//./\\.} (unreleased)\$/## $VERSION ($(date -u +%Y-%m-%d))/" CHANGELOG.md
-"$ROOT/scripts/release-check.sh" "$VERSION" || die "release metadata of $VERSION is not final"
-
-"$ROOT/scripts/build-dmg.sh"
-"$ROOT/scripts/test-dmg.sh" "$DMG"
-DAEMON="$("$ROOT/scripts/build-daemon.sh" | tail -n 1)"
-[ -f "$DMG" ] && [ -f "$DAEMON" ] || die "build outputs are missing"
+# Restore the version files on any failure before the release commit.
+trap 'restore' EXIT
+set_version_and_build
 
 if ! git diff --quiet -- Cargo.toml Cargo.lock CHANGELOG.md; then
   git add Cargo.toml Cargo.lock CHANGELOG.md
   git commit --quiet -m "chore(release): $TAG"
 fi
-trap - ERR
+trap - EXIT
 git tag -a "$TAG" -m "$NAME $VERSION"
 git fetch --quiet origin main || true
 if git merge-base --is-ancestor HEAD origin/main; then

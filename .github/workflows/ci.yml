@@ -85,6 +85,7 @@ jobs:
               - *rust
               - apps/desktop/**
               - assets/**
+              - third_party/**
 
   packages:
     name: Packages (bun)

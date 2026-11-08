@@ -78,7 +78,15 @@ Tests:
 
 ## Release
 
-On the Mac that holds `~/.config/team-chat/production/admin-secret` and the signing files:
+From GitHub Actions (no Mac needed; secrets and modes in
+[docs/RUNBOOK.md](docs/RUNBOOK.md#release-from-github-actions)):
+
+```sh
+gh workflow run release.yml --ref main -f version=1.2.3                 # dry run: builds, changes nothing
+gh workflow run release.yml --ref main -f version=1.2.3 -f mode=release
+```
+
+Or on the Mac that holds `~/.config/team-chat/production/admin-secret` and the signing files:
 
 ```sh
 scripts/release.sh 1.2.3 --dry-run                      # checks only; prints the plan
