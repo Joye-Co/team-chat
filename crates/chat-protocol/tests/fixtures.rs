@@ -74,7 +74,12 @@ check!(
     PutDeskNoteRequest,
     EmailCodeRequest,
     EmailSignInRequest,
-    VerifyEmailRequest
+    VerifyEmailRequest,
+    MemoryItem,
+    CreateMemoryRequest,
+    UpdateMemoryRequest,
+    MemoryUpdatesResponse,
+    MachineMemoryNoteRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -127,6 +132,16 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("UploadPartResponse", plain::<UploadPartResponse>),
     ("ArtifactEventsResponse", plain::<ArtifactEventsResponse>),
     ("PutDeskNoteRequest", validated::<PutDeskNoteRequest>),
+    ("MemoryItem", validated::<MemoryItem>),
+    ("CreateMemoryRequest", validated::<CreateMemoryRequest>),
+    ("UpdateMemoryRequest", validated::<UpdateMemoryRequest>),
+    ("MemoriesResponse", plain::<MemoriesResponse>),
+    ("MemoryVersionsResponse", plain::<MemoryVersionsResponse>),
+    ("MemoryUpdatesResponse", validated::<MemoryUpdatesResponse>),
+    (
+        "MachineMemoryNoteRequest",
+        validated::<MachineMemoryNoteRequest>,
+    ),
     ("PutDeskNoteResponse", plain::<PutDeskNoteResponse>),
     ("DeskNotesResponse", plain::<DeskNotesResponse>),
     ("Artifact", plain::<Artifact>),

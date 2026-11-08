@@ -6,6 +6,7 @@ import { isMainTopicId } from "@chat/protocol";
 import { loadModelConfig } from "../../aiservice";
 import { type Decision, FRONT_DESK_CHARS, decide } from "../../agent/frontdesk";
 import { selectLines } from "../../context/render";
+import { FRONT_DESK_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import type { ClaimResult, TopicMessage } from "../room";
@@ -66,6 +67,7 @@ export abstract class DeskFront extends DeskStall {
         requester: name(m.authorId),
         request: m.body,
         dm: false,
+        memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: FRONT_DESK_MEMORY_BYTES }),
       });
       this.sql.exec(
         `INSERT OR IGNORE INTO decisions (message_id, group_id, topic_id, author_id, action, decision, fallback, model, ms, input_tokens, output_tokens, at, system, input)

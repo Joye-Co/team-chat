@@ -1,0 +1,9 @@
+{
+  "kind": "CreateMemoryRequest",
+  "valid": true,
+  "value": {
+    "scope": "person:01JBX0ALICE0000000000000AB",
+    "kind": "preference",
+    "text": "回复要短"
+  }
+}

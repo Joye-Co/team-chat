@@ -1,0 +1,10 @@
+{
+  "kind": "CreateMemoryRequest",
+  "valid": false,
+  "description": "text is required",
+  "value": {
+    "scope": "team",
+    "kind": "fact",
+    "text": ""
+  }
+}

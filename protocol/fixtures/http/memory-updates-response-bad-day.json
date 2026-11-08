@@ -1,0 +1,9 @@
+{
+  "kind": "MemoryUpdatesResponse",
+  "valid": false,
+  "description": "day is YYYY-MM-DD",
+  "value": {
+    "day": "9 Nov",
+    "updates": []
+  }
+}
