@@ -1349,6 +1349,11 @@ impl ComposerView {
         cx.notify();
     }
 
+    /// The caret into the field, at the end of the draft.
+    pub fn focus_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_at_end(window, cx);
+    }
+
     fn focus_at_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let len = self.text(cx).len();
         self.input.update(cx, |state, cx| {

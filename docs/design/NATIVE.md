@@ -227,6 +227,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Search | `magnifyingglass` |
 | Filter | `line.3.horizontal.decrease` |
 | 单独问 | `bubble.left.and.text.bubble.right` |
+| 开个话题 (a 群聊 message's hover toolbar) | `text.bubble` |
 | PR | `arrow.triangle.pull` |
 | Inspector toggle | `sidebar.trailing` |
 | Sidebar toggle | `sidebar.leading` |

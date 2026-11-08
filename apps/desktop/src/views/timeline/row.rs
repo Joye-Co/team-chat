@@ -203,14 +203,14 @@ impl TimelineView {
             return div()
                 .id(ElementId::Name(format!("special-{key}").into()))
                 .child(row)
-                .context_menu(move |menu, window, cx| {
+                .context_menu(move |menu, _, cx| {
                     super::menu::build(
                         menu,
                         view.clone(),
                         &menu_message,
                         can_edit,
                         can_recall,
-                        window,
+                        false,
                         cx,
                     )
                 })
@@ -224,7 +224,9 @@ impl TimelineView {
             .find(|m| m.id == message.author_id)
             .cloned();
         let deleted = message.deleted_at.is_some();
-        let hovered = self.hovered.as_deref() == Some(key);
+        // A row whose 更多 menu is open keeps its hover look and toolbar.
+        let hovered =
+            self.hovered.as_deref() == Some(key) || self.menu_open.as_deref() == Some(key);
         let editing = self
             .editing
             .as_ref()
@@ -483,14 +485,14 @@ impl TimelineView {
                         ui::native::IconSize::Small,
                     )
                     .named(t::MORE)
-                    .dropdown_menu(move |menu, window, cx| {
+                    .dropdown_menu(move |menu, _, cx| {
                         super::menu::build(
                             menu,
                             view.clone(),
                             &menu_message,
                             can_edit,
                             can_recall,
-                            window,
+                            false,
                             cx,
                         )
                     }),
@@ -627,6 +629,7 @@ impl TimelineView {
         let hover_key: SharedString = key.to_string().into();
         div()
             .id(ElementId::Name(key.to_string().into()))
+            .debug_selector(|| "message-row".into())
             .relative()
             .w_full()
             .px(ROW_INSET)
@@ -716,14 +719,14 @@ impl TimelineView {
                     .children(failed),
             )
             .children(toolbar)
-            .context_menu(move |menu, window, cx| {
+            .context_menu(move |menu, _, cx| {
                 super::menu::build(
                     menu,
                     view.clone(),
                     &menu_message,
                     can_edit,
                     can_recall,
-                    window,
+                    false,
                     cx,
                 )
             })
@@ -732,9 +735,10 @@ impl TimelineView {
 
     /// The hover toolbar (§7.5): a level-1 capsule 18 pt above the row, at
     /// the right edge of the content box: my three most used emoji (one click
-    /// reacts), add reaction (the emoji picker, most used first), reply (a
-    /// quote chip in the composer) and more (the row menu, which holds only
-    /// what the toolbar does not).
+    /// reacts), add reaction (the emoji picker, most used first), then in the
+    /// 群聊 开个话题 (starts the 话题 and opens it; a double-click replies) and in a
+    /// 话题 reply (a quote chip in the composer), and more (the row menu,
+    /// which holds only what the toolbar does not).
     fn render_hover_toolbar(
         &self,
         message: &Message,
@@ -742,6 +746,7 @@ impl TimelineView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sent = !message.id.is_empty();
+        let in_chat = sent && crate::data::is_main_topic(&message.topic_id);
         let menu_message = message.clone();
         let view = cx.entity().downgrade();
         let can_edit = self.can_edit(message);
@@ -788,30 +793,48 @@ impl TimelineView {
                     tool("react", Sym::Emoji).named(t::ADD_REACTION),
                     cx,
                 ))
-                .child(
+                // In the 群聊 a double-click replies, so the slot after the
+                // emoji opens a 话题 from the message; a 话题 keeps 回复.
+                .child(if in_chat {
+                    let (services, m) = (self.services.clone(), message.clone());
+                    tool("open-topic", Sym::OpenTopic)
+                        .named(t::MENU_OPEN_TOPIC)
+                        .on_click(move |_, window, cx| {
+                            crate::views::nav::new_topic::start_from(&services, &m, window, cx)
+                        })
+                } else {
                     tool("reply", Sym::Reply)
                         .named(t::REPLY)
                         .on_click(cx.listener({
                             let m = message.clone();
                             move |this, _, _, cx| this.quote(&m, cx)
-                        })),
-                )
+                        }))
+                })
             })
-            .child(
+            .child({
+                let (open_view, open_key) = (cx.entity().downgrade(), key.to_string());
                 tool("more", Sym::More)
                     .named(t::MORE)
-                    .dropdown_menu(move |menu, window, cx| {
+                    .debug_selector(|| "hover-toolbar-more".into())
+                    .dropdown_menu(move |menu, _, cx| {
                         super::menu::build(
                             menu,
                             view.clone(),
                             &menu_message,
                             can_edit,
                             can_recall,
-                            window,
+                            true,
                             cx,
                         )
-                    }),
-            )
+                    })
+                    .on_open_change(move |open, _, cx| {
+                        let key = open_key.clone();
+                        let open = *open;
+                        open_view
+                            .update(cx, |this, cx| this.set_menu_open(&key, open, cx))
+                            .ok();
+                    })
+            })
             .into_any_element()
     }
 
@@ -1007,6 +1030,18 @@ impl TimelineView {
     /// The pointer entered or left the hover toolbar's add reaction
     /// (`slot` 0, which opens the picker) or its picker (`slot` 1). Once it
     /// is over neither, the picker closes after [`theme::motion::HOVER_LEAVE`].
+    /// The hover toolbar's 更多 menu of row `key` opened or closed. While it
+    /// is open the row keeps its toolbar, so the menu anchored to it stays
+    /// when the pointer leaves the row for the menu below.
+    pub(super) fn set_menu_open(&mut self, key: &str, open: bool, cx: &mut Context<Self>) {
+        if open {
+            self.menu_open = Some(key.to_string());
+        } else if self.menu_open.as_deref() == Some(key) {
+            self.menu_open = None;
+        }
+        cx.notify();
+    }
+
     fn react_pointer(&mut self, slot: usize, hovered: bool, key: &str, cx: &mut Context<Self>) {
         self.react_pointer[slot] = hovered;
         let want = Some((key.to_string(), false));

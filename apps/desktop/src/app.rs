@@ -46,6 +46,8 @@ gpui::actions!(
         ToggleSidebar,
         NewTopic,
         MentionInComposer,
+        // 开个话题: the caret into the composer of the 话题 just opened.
+        FocusComposer,
         FocusNext,
         FocusPrev,
         // K-10: F6 / ⌥Tab jump between the window's regions.
@@ -1165,6 +1167,10 @@ impl Render for RootView {
                 .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
                     this.composer
                         .update(cx, |composer, cx| composer.insert_text("@", window, cx));
+                }))
+                .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
+                    this.composer
+                        .update(cx, |composer, cx| composer.focus_end(window, cx));
                 }));
         if !matches!(
             self.services.provider.session(),

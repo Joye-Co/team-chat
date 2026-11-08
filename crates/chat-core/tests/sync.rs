@@ -989,6 +989,25 @@ fn followup(body: &str) -> chat_core::SendRequest {
     }
 }
 
+/// 开个话题: a new topic that quotes a message may start without a note (the
+/// server titles it from the quote); any other empty message is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_new_topic_quoting_a_message_may_have_an_empty_body() {
+    let server = server_with_group().await;
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    assert!(h.client.send(followup("")).is_err(), "empty and no quote");
+    let quoted = chat_core::SendRequest {
+        reply_to: Some("m-quoted".into()),
+        ..followup("")
+    };
+    h.client.send(quoted).unwrap();
+    assert_eq!(h.client.pending_new_topics(G1).unwrap().len(), 1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn follow_ups_into_a_new_topic_survive_a_quit_and_go_out_after_the_root() {
     let server = server_with_group().await;

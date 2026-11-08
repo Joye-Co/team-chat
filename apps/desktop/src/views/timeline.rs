@@ -172,6 +172,10 @@ pub struct TimelineView {
     /// The emoji picker is open for this message row: from the hover
     /// toolbar (`false`) or from the add pill under the reactions (`true`).
     reacting: Option<(String, bool)>,
+    /// The hover toolbar's 更多 menu is open for this message row: the row
+    /// keeps its toolbar (and the menu, anchored to it) while the pointer
+    /// travels down into the menu, off the row.
+    menu_open: Option<String>,
     /// The pointer is over the hover toolbar's add reaction (`0`) or over
     /// its open picker (`1`); when both clear, `react_leave` closes it.
     react_pointer: [bool; 2],
@@ -340,6 +344,7 @@ impl TimelineView {
             keyboard_row: false,
             key_focused: false,
             reacting: None,
+            menu_open: None,
             react_pointer: [false; 2],
             react_leave: None,
             runs: Vec::new(),
@@ -1429,6 +1434,64 @@ mod keyboard_tests {
                 body: mine.body.clone(),
                 mentions: mine.mentions.clone(),
             }]
+        );
+    }
+
+    /// The hover toolbar's 更多 menu stays open while the pointer travels
+    /// from ⋯ down into the menu, off the message row (the row used to drop
+    /// its toolbar on leave, and the menu anchored to it with it).
+    #[gpui::test]
+    fn the_more_menu_stays_when_the_pointer_leaves_the_row(cx: &mut gpui::TestAppContext) {
+        use gpui::{Modifiers, point, px};
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let chat = crate::data::main_topic_id(DEV);
+        provider.send(crate::data::SendRequest {
+            group_id: DEV.into(),
+            topic_id: chat,
+            body: "111".into(),
+            mentions: Vec::new(),
+            quote_of: None,
+        });
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services
+                .nav
+                .update(cx, |nav, cx| nav.open_group_chat(DEV.into(), cx));
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let key = view.read_with(cx, |this, _| {
+            model::key(this.messages.last().expect("the message")).to_string()
+        });
+        let row = cx.debug_bounds("message-row").expect("the row is drawn");
+        cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+        cx.run_until_parked();
+        let more = cx
+            .debug_bounds("hover-toolbar-more")
+            .expect("the toolbar shows under the pointer");
+        cx.simulate_click(more.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(
+            view.read_with(cx, |this, _| this.menu_open.clone()),
+            Some(key.clone()),
+            "⋯ opened the menu"
+        );
+        // Down toward the menu, below the row.
+        let below = point(more.center().x, row.bottom() + px(40.));
+        cx.simulate_mouse_move(below, None, Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds("hover-toolbar-more").is_some(),
+            "the toolbar (and its menu) stays"
+        );
+        assert_eq!(
+            view.read_with(cx, |this, _| this.menu_open.clone()),
+            Some(key),
+            "the menu is still open"
         );
     }
 }

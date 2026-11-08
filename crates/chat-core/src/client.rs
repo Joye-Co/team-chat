@@ -679,7 +679,11 @@ impl Client {
         Self::check_title(req.title.as_deref())?;
         crate::proto::check_block_refs(req.block_refs.as_deref())
             .map_err(|_| ClientError::Invalid("bad block refs"))?;
+        // 开个话题: a new topic that quotes a 群聊 message may come without a
+        // note; the server titles it from the quote.
+        let quotes_into_new_topic = req.topic_id.is_none() && req.reply_to.is_some();
         if req.body.trim().is_empty()
+            && !quotes_into_new_topic
             && req.block_refs.is_none()
             && !req.streaming
             && req.card.is_none()
