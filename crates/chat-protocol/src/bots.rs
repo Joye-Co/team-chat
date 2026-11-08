@@ -11,6 +11,16 @@ use crate::serde_util::{non_null, nullable};
 
 pub const MAX_LABELS: usize = 20;
 
+/// A 思考强度 name: `[a-z][a-z0-9_-]{0,31}`.
+pub fn is_effort(e: &str) -> bool {
+    let b = e.as_bytes();
+    !b.is_empty()
+        && b.len() <= 32
+        && b[0].is_ascii_lowercase()
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+}
+
 fn fail(field: &'static str, message: impl Into<String>) -> Validation {
     Err(ValidationError {
         field,
@@ -635,6 +645,14 @@ impl SetBotRunnerRequest {
             && r.url.is_some() == r.path.is_some()
         {
             return fail("repo", "repo needs url or path, not both");
+        }
+        if let Some(Some(e)) = &self.effort
+            && !is_effort(e)
+        {
+            return fail(
+                "effort",
+                "lower-case letters, digits, _ and -, 1..32 characters",
+            );
         }
         Ok(())
     }

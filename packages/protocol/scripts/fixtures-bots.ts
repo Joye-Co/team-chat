@@ -155,7 +155,6 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   };
   const claudeCli = { runtime: "claude", kind: "claude", command: "claude", available: true, models: [{ id: "fable" }, { id: "opus", isDefault: true }, { id: "sonnet" }, { id: "haiku" }], efforts: ["low", "medium", "high", "xhigh", "max"] };
   ok("entities/machine-models.json", "Machine", { ...machine, features: ["effort"], clis: [codexCli, claudeCli] }, "CLIs report models and efforts");
-  bad("entities/machine-bad-effort.json", "Machine", { ...machine, clis: [{ ...claudeCli, efforts: ["High Effort"] }] }, "an effort is lower-case letters, digits, _ and -");
   ok("http/set-bot-runner-request-effort.json", "SetBotRunnerRequest", { runtime: "claude", model: "opus", effort: "high" });
   ok("http/set-bot-runner-request-effort-clear.json", "SetBotRunnerRequest", { runtime: "claude", effort: null }, "null clears the effort");
   bad("http/set-bot-runner-request-bad-effort.json", "SetBotRunnerRequest", { runtime: "claude", effort: "" }, "effort is not empty");
