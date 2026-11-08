@@ -38,7 +38,7 @@ pub struct Local {
     pub redactor: Arc<Redactor>,
 }
 
-fn err(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value {
+pub(crate) fn err(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value {
     let mut e = json!({ "code": code, "message": message.into() });
     if let Some(r) = reason {
         e["reason"] = json!(r);
@@ -47,7 +47,7 @@ fn err(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value {
 }
 
 /// A path inside the run's working folder, resolved (symbolic links included).
-fn inside(root: &Path, path: &str) -> Result<PathBuf, Value> {
+pub(crate) fn inside(root: &Path, path: &str) -> Result<PathBuf, Value> {
     let root = std::fs::canonicalize(root).map_err(|e| {
         err(
             "unavailable",
@@ -112,14 +112,14 @@ pub fn mime_of(name: &str) -> &'static str {
     }
 }
 
-fn client() -> Result<reqwest::Client, Value> {
+pub(crate) fn client(timeout: Duration) -> Result<reqwest::Client, Value> {
     reqwest::Client::builder()
-        .timeout(TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| err("unavailable", None, e.to_string()))
 }
 
-fn url(local: &Local, path: &str) -> Result<String, Value> {
+pub(crate) fn url(local: &Local, path: &str) -> Result<String, Value> {
     let u = format!("{}{path}", local.server_url.trim_end_matches('/'));
     // The machine token goes only to the configured server.
     if !same_origin(&u, &local.server_url) {
@@ -129,7 +129,7 @@ fn url(local: &Local, path: &str) -> Result<String, Value> {
 }
 
 /// The answer of a server call as `{ok, result}` / `{ok: false, error}`.
-async fn answer(res: Result<reqwest::Response, reqwest::Error>) -> Value {
+pub(crate) async fn answer(res: Result<reqwest::Response, reqwest::Error>) -> Value {
     match res {
         Err(e) => err(
             "unavailable",
@@ -187,7 +187,7 @@ async fn upload(
     let sha = hex(&Sha256::digest(&bytes));
     let mime = mime.unwrap_or_else(|| mime_of(name));
     let target = url(local, &format!("/v1/machine/runs/{}/files", local.run_id))?;
-    let res = client()?
+    let res = client(TIMEOUT)?
         .put(target)
         .bearer_auth(local.token.as_str())
         .header("Content-Type", mime)
@@ -205,7 +205,7 @@ async fn upload(
 }
 
 /// Percent-encodes a file name for the `X-File-Name` header.
-fn encode(s: &str) -> String {
+pub(crate) fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
@@ -376,7 +376,7 @@ pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
                 Ok(u) => u,
                 Err(e) => return e,
             };
-            let c = match client() {
+            let c = match client(TIMEOUT) {
                 Ok(c) => c,
                 Err(e) => return e,
             };

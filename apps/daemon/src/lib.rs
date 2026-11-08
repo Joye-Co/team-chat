@@ -3,6 +3,7 @@
 
 pub mod acceptance;
 pub mod chat_run;
+pub mod chat_run_context;
 pub mod chat_run_files;
 pub mod config;
 pub mod daemon;
