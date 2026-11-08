@@ -49,6 +49,8 @@ struct Data {
     recording: Option<u64>,
     /// The members the cards name.
     members: HashMap<MemberId, Member>,
+    /// Everyone in the 话题's 群 (成员): every member of a 群 sees its 话题.
+    group_members: Vec<Member>,
 }
 
 impl Data {
@@ -105,6 +107,7 @@ impl Data {
             preview,
             decisions,
             members,
+            group_members: crate::views::topic_menu::group_members(services, g),
         }
     }
 
@@ -548,9 +551,9 @@ impl Render for TopicRail {
         );
         let owner = topic.and_then(|t| t.owner_id.clone());
         let by = topic
-            .filter(|x| owner.as_deref() != Some(x.created_by.as_str()))
-            .map(|x| (x.created_by.clone(), x.created_at));
-        sections.push(self.native_owner(&d, owner.as_deref(), by, cx));
+            .map(|x| x.created_by.clone())
+            .filter(|by| !by.is_empty() && owner.as_deref() != Some(by.as_str()));
+        sections.push(self.native_owner(&d, owner.as_deref(), by.as_deref(), cx));
         let mut empty: Vec<&'static str> = Vec::new();
         let mut add =
             |el: Option<AnyElement>, name: &'static str, sections: &mut Vec<AnyElement>| match el {

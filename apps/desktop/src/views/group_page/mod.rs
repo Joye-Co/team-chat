@@ -1,17 +1,16 @@
 //! 群 page (NATIVE.md §1, §9.4 lists, §9.3 inspector). 1.1.1: a click on a
 //! 群 opens its 群聊 (the 话题 page of the 群's chat); this page is the
-//! secondary view of its 话题, opened from the 群聊's `这个群的话题`, with a
+//! secondary view of its 话题, opened from the 群聊's `话题`, with a
 //! `回到群里聊` item back. The toolbar row says
 //! the 群's name and purpose; the content is a Mail-like list of 进行中 and
-//! 最近完成 话题 (a 话题 starts from `square.and.pencil` in the toolbar or
-//! the sidebar, or ⌘N, which open the 新话题 sheet preset to this 群; there
-//! is no inline post box); the inspector is
-//! the 群's info like a Contacts group: 成员, 群里的决定 (记一条… opens a
-//! sheet), 最近的产出 and 在哪干活.
+//! 最近完成 话题 (a 话题 starts from 新话题 in the toolbar or the sidebar, or
+//! ⌘N, which open the 新话题 sheet preset to this 群; there is no inline
+//! post box). The page shows only 话题: the 群's info (成员, 通知, 群里的决定 …)
+//! is 群资料, the 群聊's 详情 pane ([`info`]).
 //!
-//! The page draws its own toolbar row ([`PageView::draws_own_header`]): the
-//! inspector runs from the top of the window.
+//! The page draws its own toolbar row ([`PageView::draws_own_header`]).
 
+pub mod info;
 pub mod kit;
 pub mod rows;
 pub mod scenes;
@@ -24,7 +23,6 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
-use crate::ui::native::FocusRow as _;
 use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
@@ -32,8 +30,8 @@ use crate::{
     data::{ArtifactKind, BotRunSummary, PlanState, Topic, TopicStatus},
     ui::{
         native::{
-            InspectorSection, NativeType as _, PushSize, PushStyle, ToolbarGroup, ToolbarItemKind,
-            ToolbarRow, borderless_button, emphasized, inspector_column, metrics, native_colors,
+            PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
+            native_colors,
             page::{self, PageLoad, Status},
             push_button, toolbar_item,
         },
@@ -49,7 +47,6 @@ use rows::line;
 
 pub struct GroupPage {
     services: Services,
-    aside_open: bool,
     /// 进行中 shows every 话题 (`看全部`), not the first [`ACTIVE_ROWS`].
     show_all: bool,
     _subscriptions: Vec<Subscription>,
@@ -66,7 +63,6 @@ impl GroupPage {
         Self {
             _subscriptions: watch(&services, cx),
             services,
-            aside_open: true,
             show_all: false,
         }
     }
@@ -196,8 +192,8 @@ const COLUMNS: page::Columns = page::Columns {
 };
 
 impl GroupPage {
-    /// The toolbar row: the 群's name over its purpose; 产出 and 群设置, the
-    /// primary `新话题`, then the right-pane toggle.
+    /// The toolbar row: the 群's name over its purpose; 产出 and 群设置, then
+    /// `新话题`.
     fn toolbar(
         &self,
         g: &str,
@@ -207,7 +203,7 @@ impl GroupPage {
     ) -> AnyElement {
         let p = &self.services.provider;
         let group = p.groups().into_iter().find(|x| x.id == g);
-        // The same members the inspector lists, so the count matches it.
+        // The same members 群资料 lists, so the count matches it.
         // §2.14, A5: the count shows once the 群 is synced (the cache has
         // only me before that); offline the subtitle says 离线.
         let n = self.listed_members(g).len();
@@ -296,29 +292,7 @@ impl GroupPage {
                         nav.update(cx, |n, cx| n.open_artifacts(cx))
                     })]))
                     .group(rows::toolbar_capsule(more, cx))
-                    .group(new_topic)
-                    .group(rows::toolbar_separator(cx))
-                    .group(ToolbarGroup::new([toolbar_item(
-                        "group-inspector",
-                        Sf::PaneRight,
-                        if self.aside_open {
-                            c::GROUP_PAGE_COLLAPSE
-                        } else {
-                            c::GROUP_PAGE_EXPAND
-                        },
-                        if self.aside_open {
-                            ToolbarItemKind::Toggled
-                        } else {
-                            ToolbarItemKind::Plain
-                        },
-                        active,
-                        window,
-                        cx,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.aside_open = !this.aside_open;
-                        cx.notify();
-                    }))])),
+                    .group(new_topic),
             )
             .into_any_element()
     }
@@ -526,446 +500,9 @@ impl GroupPage {
         (rows, total)
     }
 
-    /// The members the inspector lists (and the subtitle counts): known,
-    /// not deactivated.
+    /// The members 群资料 lists (and the subtitle counts).
     fn listed_members(&self, g: &str) -> Vec<crate::data::Member> {
-        let p = &self.services.provider;
-        p.groups()
-            .into_iter()
-            .find(|x| x.id == g)
-            .map(|x| x.member_ids)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|id| p.member(id))
-            .filter(|m| !m.deactivated)
-            .collect()
-    }
-
-    /// The right pane (§2.5): the header band `群资料`, then 通知, 成员, 群里的决定,
-    /// 最近的产出 and 在哪干活, each with a compact empty when it has nothing.
-    /// `loading` draws skeleton rows instead.
-    fn inspector(
-        &self,
-        g: &str,
-        load: PageLoad,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let k = native_colors(cx);
-        let p = self.services.provider.clone();
-        // Skeletons only while the page loads (§2.14); a failed load shows
-        // one compact line per section, never pulsing bones (§2.15).
-        let loading = load == PageLoad::Loading;
-        let failed = load == PageLoad::Failed;
-        let offline =
-            |sym: Sym, cx: &App| page::compact_empty(sym, c::GROUP_PAGE_OFFLINE, None, cx);
-        let header = div()
-            .flex_none()
-            .h(metrics::TOOLBAR_ROW)
-            .px(metrics::INSPECTOR_PAD)
-            .border_b_1()
-            .border_color(k.separator)
-            .flex()
-            .items_center()
-            .gap(tsp::S8)
-            .child(
-                div()
-                    .flex_none()
-                    .n_title3()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(k.label)
-                    .child(c::GROUP_PAGE_INFO),
-            )
-            .child(
-                div()
-                    .n_subheadline()
-                    .text_color(k.secondary)
-                    .child(c::GROUP_PAGE_INFO_LINE),
-            );
-        let mut col = div()
-            .id("group-inspector")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .pb(tsp::S24)
-            .flex()
-            .flex_col()
-            // Pull the first GroupLabel up so its ink starts at y 68 (B2):
-            // the section's own 16 top sits under the header band.
-            .child(div().flex_none().mt(-tsp::S12));
-
-        // 通知: how this 群 reminds me (静音, 提醒); it is this 群's own
-        // setting, so it sits here and not in the settings window.
-        if !loading && !failed {
-            col = col.child(crate::views::nav::notify::group_section(
-                &self.services,
-                g,
-                cx,
-            ));
-        }
-
-        // 成员: the name keeps its room; the 岗位 truncates first, and both
-        // show in full in the tooltip.
-        let members = self.listed_members(g);
-        let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE);
-        if loading {
-            sec = sec.row(page::skeleton_rows(
-                "group-sk-m",
-                page::SkeletonKind::Compact,
-                4,
-                cx,
-            ));
-        } else if failed {
-            sec = sec.row(offline(Sym::Members, cx));
-        } else if members.is_empty() {
-            sec = sec.row(page::compact_empty(
-                Sym::Members,
-                c::GROUP_PAGE_MEMBERS_EMPTY,
-                None,
-                cx,
-            ));
-        }
-        for m in members.into_iter().filter(|_| !loading && !failed) {
-            let nav = self.services.nav.clone();
-            let id = m.id.clone();
-            let full = match &m.role {
-                Some(r) if !r.is_empty() => format!("{} · {r}", m.name),
-                _ => m.name.clone(),
-            };
-            sec = sec.row(
-                div()
-                    .id(SharedString::from(format!("group-member-{}", m.id)))
-                    .focus_row(false, cx)
-                    .h(tsp::S32)
-                    .flex()
-                    .items_center()
-                    .gap(tsp::S8)
-                    .n_body()
-                    .child(rows::avatar(Some(&m), tsp::S16, cx))
-                    // §2.21: the role truncates first; it shows only when
-                    // a few glyphs of it fit beside the whole name (never a
-                    // lone "…"), else the name takes the row. Both are in
-                    // the tip.
-                    .map(|d| {
-                        let name = crate::ui::avatar::name_beside_avatar(&m.name).to_string();
-                        if crate::views::artifact_page::role_fits(&name) {
-                            d.child(
-                                line(name)
-                                    .flex_none()
-                                    .max_w(gpui::relative(0.72))
-                                    .text_color(k.label),
-                            )
-                            .child(
-                                line(m.role.clone().unwrap_or_default())
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_color(k.secondary),
-                            )
-                        } else {
-                            d.child(line(name).flex_1().min_w_0().text_color(k.label))
-                        }
-                    })
-                    .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
-                    })
-                    .on_click(move |_, _, cx| {
-                        let id = id.clone();
-                        nav.update(cx, |n, cx| n.open_members(Some(id), cx))
-                    }),
-            );
-        }
-        col = col.child(sec);
-
-        // 群里的决定.
-        let decisions = if loading || failed {
-            Vec::new()
-        } else {
-            p.group_decisions(g)
-        };
-        let now = p.clock_now();
-        let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS);
-        if p.can_record_decision(g) && !loading && !failed {
-            let services = self.services.clone();
-            let group = g.to_string();
-            sec = sec.action(
-                borderless_button(
-                    "group-record",
-                    Sf::Plus,
-                    c::GROUP_PAGE_RECORD_MORE,
-                    window,
-                    cx,
-                )
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    open_record_sheet(services.clone(), group.clone(), window, cx)
-                }),
-            );
-        }
-        if loading {
-            sec = sec.row(page::skeleton_rows(
-                "group-sk-d",
-                page::SkeletonKind::Compact,
-                2,
-                cx,
-            ));
-        } else if failed {
-            sec = sec.row(offline(Sym::List, cx));
-        } else if decisions.is_empty() {
-            // A neutral icon: a check would read as a done item.
-            let record = p.can_record_decision(g).then(|| {
-                let services = self.services.clone();
-                let group = g.to_string();
-                crate::ui::native::borderless_text("group-record-empty", c::GROUP_PAGE_RECORD, cx)
-                    .on_click(move |_, window, cx| {
-                        open_record_sheet(services.clone(), group.clone(), window, cx)
-                    })
-                    .into_any_element()
-            });
-            sec = sec.row(page::compact_empty(
-                Sym::List,
-                c::GROUP_PAGE_DECISIONS_EMPTY,
-                record,
-                cx,
-            ));
-        }
-        for (i, d) in decisions.into_iter().enumerate() {
-            let who = p.member(&d.by);
-            let date = if now - d.at < 60_000 {
-                c::GROUP_PAGE_JUST_NOW.to_string()
-            } else {
-                kit::month_day(d.at)
-            };
-            sec = sec.row(
-                div()
-                    .id(SharedString::from(format!("group-decision-{i}")))
-                    .py(tsp::S6)
-                    .flex()
-                    .flex_col()
-                    .gap(tsp::S2)
-                    .child(kit::decision_text(&d.text, k.label))
-                    .child(
-                        div()
-                            .n_subheadline()
-                            .n_figures()
-                            .text_color(k.secondary)
-                            .child(format!(
-                                "{} · {date}",
-                                who.map(
-                                    |m| crate::ui::avatar::name_beside_avatar(&m.name).to_string()
-                                )
-                                .unwrap_or_default()
-                            )),
-                    )
-                    .tooltip({
-                        let text = d.text.clone();
-                        move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
-                        }
-                    }),
-            );
-        }
-        col = col.child(sec);
-
-        // 最近的产出.
-        let outputs: Vec<_> = if loading || failed {
-            Vec::new()
-        } else {
-            p.group_artifacts(g).into_iter().take(3).collect()
-        };
-        let mut sec = InspectorSection::new("group-ins-outputs", c::GROUP_PAGE_RECENT_OUTPUTS);
-        if loading {
-            sec = sec.row(page::skeleton_rows(
-                "group-sk-o",
-                page::SkeletonKind::Compact,
-                2,
-                cx,
-            ));
-        } else if failed {
-            sec = sec.row(offline(Sym::Document, cx));
-        } else if outputs.is_empty() {
-            sec = sec.row(page::compact_empty(
-                Sym::Document,
-                c::GROUP_PAGE_OUTPUTS_EMPTY,
-                None,
-                cx,
-            ));
-        }
-        for a in outputs {
-            let nav = self.services.nav.clone();
-            let id = a.id.clone();
-            let glyph = match a.kind {
-                ArtifactKind::Image => Sym::Image,
-                ArtifactKind::File => Sym::File,
-                _ => Sym::Document,
-            };
-            let title = a.title.clone();
-            sec = sec.row(
-                div()
-                    .id(SharedString::from(format!("group-output-{}", a.id)))
-                    .focus_row(false, cx)
-                    .py(tsp::S6)
-                    .flex()
-                    .items_start()
-                    .gap(tsp::S8)
-                    .child(div().pt(tsp::S2).child(page::row_icon(glyph, k.secondary)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(line(a.title.clone()).n_body().text_color(k.label))
-                            .child(
-                                line(fill(
-                                    c::GROUP_PAGE_ARTIFACT_META,
-                                    &[
-                                        ("v", &a.version.to_string()),
-                                        ("kind", kind_label(a.kind)),
-                                        (
-                                            "name",
-                                            crate::ui::avatar::name_beside_avatar(&member_name(
-                                                &self.services,
-                                                &a.created_by,
-                                            )),
-                                        ),
-                                    ],
-                                ))
-                                .n_subheadline()
-                                .text_color(k.secondary),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .n_subheadline()
-                            .n_figures()
-                            .text_color(k.secondary)
-                            .child(short_time(p.clock_now(), a.updated_at)),
-                    )
-                    .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
-                    })
-                    .on_click(move |_, _, cx| {
-                        let id = id.clone();
-                        nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
-                    }),
-            );
-        }
-        col = col.child(sec);
-
-        // 在哪干活: the team computer a member of this 群 works on now.
-        let run = if loading || failed {
-            None
-        } else {
-            p.topics(g)
-                .into_iter()
-                .flat_map(|t| p.runs(g, &t.id))
-                .filter(|r| r.status.is_active())
-                // A run that names its computer first; a run with no known
-                // computer still shows (未知电脑), never "no computer" while
-                // a member works (A5).
-                .max_by_key(|r| (r.machine_name.is_some(), r.updated_at))
-        };
-        let mut sec = InspectorSection::new("group-ins-where", c::GROUP_PAGE_WHERE);
-        match run {
-            None if loading => {
-                sec = sec.row(page::skeleton_rows(
-                    "group-sk-w",
-                    page::SkeletonKind::Compact,
-                    1,
-                    cx,
-                ));
-            }
-            None if failed => {
-                sec = sec.row(offline(Sym::Computer, cx));
-            }
-            None => {
-                sec = sec.row(page::compact_empty(
-                    Sym::Computer,
-                    c::GROUP_PAGE_WHERE_EMPTY,
-                    None,
-                    cx,
-                ));
-            }
-            Some(run) => {
-                let who = crate::ui::avatar::name_beside_avatar(&member_name(
-                    &self.services,
-                    &run.bot_id,
-                ))
-                .to_string();
-                let users = fill(c::GROUP_PAGE_MACHINE_USERS, &[("names", &who)]);
-                let known = run.machine_name.is_some();
-                let step = run
-                    .plan
-                    .iter()
-                    .find(|s| s.state == PlanState::Current)
-                    .map(|s| format!("{who} {}", s.text))
-                    .unwrap_or_else(|| who.clone());
-                let nav = self.services.nav.clone();
-                let (gid, tid, rid) = (run.group_id.clone(), run.topic_id.clone(), run.id.clone());
-                let name = run
-                    .machine_name
-                    .clone()
-                    .unwrap_or_else(|| c::GROUP_PAGE_UNKNOWN_MACHINE.to_string());
-                let glyph = kit::machine_sym(&name, run.machine_id.as_deref());
-                let tip = format!("{name} · {step}");
-                sec = sec
-                    .action(
-                        borderless_button(
-                            "group-machine-open",
-                            Sf::Open,
-                            fill(c::GROUP_PAGE_SEE_COMPUTER, &[("name", &who)]),
-                            window,
-                            cx,
-                        )
-                        .on_click(move |_, _, cx| {
-                            cx.stop_propagation();
-                            let (gid, tid, rid) = (gid.clone(), tid.clone(), rid.clone());
-                            nav.update(cx, |nav, cx| {
-                                nav.open_topic(gid, tid, cx);
-                                nav.set_right_pane(RightPane::Live(rid), cx);
-                            })
-                        }),
-                    )
-                    .row(
-                        div()
-                            .id("group-machine")
-                            .focus_row(false, cx)
-                            .py(tsp::S6)
-                            .flex()
-                            .items_center()
-                            .gap(tsp::S8)
-                            .child(page::row_icon(glyph, k.secondary))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .child(line(name).n_body().text_color(k.label))
-                                    .child(line(users).n_subheadline().text_color(k.secondary)),
-                            )
-                            // §2.12: a known computer is 在线 (the run's own
-                            // state is on its 话题 row); 未知电脑 has no
-                            // presence badge (B1-44, one recipe with 首页).
-                            .when(known, |el| {
-                                el.child(page::status_badge(
-                                    Status::Online,
-                                    c::GROUP_PAGE_IN_USE,
-                                    cx,
-                                ))
-                            })
-                            .tooltip(move |window, cx| {
-                                gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                            }),
-                    );
-            }
-        }
-        col = col.child(sec);
-        inspector_column(cx)
-            .child(header)
-            .child(col)
-            .into_any_element()
+        info::listed_members(&self.services, g)
     }
 }
 
@@ -1163,9 +700,6 @@ impl Render for GroupPage {
             .min_h_0()
             .overflow_y_scroll()
             .child(content);
-        let inspector = self
-            .aside_open
-            .then(|| self.inspector(&g, load, window, cx));
         div()
             .size_full()
             .flex()
@@ -1180,7 +714,6 @@ impl Render for GroupPage {
                     .child(toolbar)
                     .child(list),
             )
-            .children(inspector)
             .into_any_element()
     }
 }

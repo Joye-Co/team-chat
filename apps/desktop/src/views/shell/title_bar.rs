@@ -50,10 +50,8 @@ pub enum TitleButtonKind {
     /// Only when a member's computer is active.
     Machine,
     Changes,
-    /// The inspector toggle (`sidebar.trailing`).
+    /// 详情 (`sidebar.trailing`): the inspector of a 话题, 群资料 of a 群聊.
     Rail,
-    /// 1.1.1, the 群聊: opens the 新话题 sheet for this 群 (no pane).
-    NewTopic,
     /// 1.1.1, the 群聊: opens the 群 page with its 话题 lists (no pane).
     GroupTopics,
 }
@@ -67,7 +65,6 @@ impl TitleButtonKind {
             TitleButtonKind::Machine => Sf::Computer,
             TitleButtonKind::Changes => Sf::Changes,
             TitleButtonKind::Rail => Sf::PaneRight,
-            TitleButtonKind::NewTopic => Sf::NewTopic,
             TitleButtonKind::GroupTopics => Sf::Group,
         }
     }
@@ -79,7 +76,6 @@ impl TitleButtonKind {
             TitleButtonKind::Machine => c::TITLE_MACHINE,
             TitleButtonKind::Changes => c::TITLE_CHANGES,
             TitleButtonKind::Rail => c::TITLE_TOGGLE_RAIL,
-            TitleButtonKind::NewTopic => c::TITLE_NEW_TOPIC,
             TitleButtonKind::GroupTopics => c::TITLE_GROUP_TOPICS,
         }
     }
@@ -102,7 +98,6 @@ impl TitleButtonKind {
             TitleButtonKind::Machine => "machine",
             TitleButtonKind::Changes => "changes",
             TitleButtonKind::Rail => "rail",
-            TitleButtonKind::NewTopic => "new-topic",
             TitleButtonKind::GroupTopics => "group-topics",
         }
     }
@@ -117,7 +112,6 @@ impl TitleButtonKind {
             TitleButtonKind::Changes => 3,
             TitleButtonKind::Machine => 4,
             TitleButtonKind::GroupTopics => 5,
-            TitleButtonKind::NewTopic => 6,
         }
     }
 }
@@ -492,12 +486,9 @@ pub fn render(
                     window,
                     cx,
                 )
-                .on_click(move |_, window, cx| {
+                .on_click(move |_, _window, cx| {
                     cx.stop_propagation();
                     match kind {
-                        TitleButtonKind::NewTopic => {
-                            window.dispatch_action(Box::new(crate::app::NewTopic), cx)
-                        }
                         TitleButtonKind::GroupTopics => nav.update(cx, |nav, cx| {
                             if let Some(g) = nav.current_group() {
                                 nav.open_group_page(g, cx);

@@ -12,6 +12,7 @@ use crate::{
     ui::native::metrics,
     views::{
         artifact_page::pane::ArtifactPane,
+        group_page::info::GroupInfoPane,
         live::LivePane,
         side_chat::SideChat,
         topic_rail::{ChangesPane, TopicRail},
@@ -35,6 +36,7 @@ pub struct Panes {
     pub side_chat: Entity<SideChat>,
     pub live: Entity<LivePane>,
     pub artifact: Entity<ArtifactPane>,
+    pub group_info: Entity<GroupInfoPane>,
 }
 
 impl Panes {
@@ -46,6 +48,7 @@ impl Panes {
             side_chat: cx.new(|cx| SideChat::new(services.clone(), window, cx)),
             live: cx.new(|cx| LivePane::new(services.clone(), cx)),
             artifact: cx.new(|cx| ArtifactPane::new(services.clone(), cx)),
+            group_info: cx.new(|cx| GroupInfoPane::new(services.clone(), cx)),
         }
     }
 
@@ -66,6 +69,7 @@ impl Panes {
             RightPane::SideChat(_) => self.side_chat.clone().into(),
             RightPane::Live(_) => self.live.clone().into(),
             RightPane::Artifact { .. } => self.artifact.clone().into(),
+            RightPane::GroupInfo => self.group_info.clone().into(),
         })
     }
 
@@ -100,6 +104,7 @@ impl Panes {
             RightPane::SideChat(_) => "side-chat",
             RightPane::Live(_) => "live",
             RightPane::Artifact { .. } => "artifact",
+            RightPane::GroupInfo => "group-info",
         };
         // Content starts below the toolbar row (coordinator decision). A
         // pane with its own header (单独问, 实时查看, the 产出 pane) draws it
@@ -152,9 +157,10 @@ impl Panes {
 pub fn pane_width(pane: &RightPane) -> Pixels {
     match pane {
         RightPane::None => gpui::px(0.),
-        RightPane::TopicRail | RightPane::Changes | RightPane::SideChat(_) => {
-            metrics::INSPECTOR_WIDTH
-        }
+        RightPane::TopicRail
+        | RightPane::Changes
+        | RightPane::SideChat(_)
+        | RightPane::GroupInfo => metrics::INSPECTOR_WIDTH,
         RightPane::Live(_) | RightPane::Artifact { .. } => metrics::WIDE_PANE_WIDTH,
     }
 }
@@ -164,6 +170,7 @@ pub fn pane_width(pane: &RightPane) -> Pixels {
 fn pane_title(pane: &RightPane) -> &'static str {
     match pane {
         RightPane::Changes => crate::copy::topic_rail::TITLE_CHANGES,
+        RightPane::GroupInfo => crate::copy::group_page::GROUP_PAGE_INFO,
         _ => crate::copy::common::PANE_TOPIC,
     }
 }
@@ -208,7 +215,10 @@ fn pane_header(title: &'static str, nav: Entity<crate::app::Navigation>, cx: &Ap
 }
 
 fn header_less(pane: &RightPane) -> bool {
-    matches!(pane, RightPane::TopicRail | RightPane::Changes)
+    matches!(
+        pane,
+        RightPane::TopicRail | RightPane::Changes | RightPane::GroupInfo
+    )
 }
 
 #[cfg(test)]
@@ -227,5 +237,9 @@ mod tests {
         assert_eq!(pane_width(&RightPane::Live("r-1".into())), gpui::px(400.));
         assert_eq!(pane_width(&RightPane::None), gpui::px(0.));
         assert!(header_less(&RightPane::TopicRail));
+        // 群资料 is the 群聊's 详情: the inspector width, the shell's header.
+        assert_eq!(pane_width(&RightPane::GroupInfo), gpui::px(320.));
+        assert!(header_less(&RightPane::GroupInfo));
+        assert_eq!(pane_title(&RightPane::GroupInfo), "群资料");
     }
 }

@@ -448,10 +448,11 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
 pub fn pane_buttons(services: &Services, group_id: &str, topic_id: &str) -> Vec<TitleButton> {
     let p = &services.provider;
     let mut out = Vec::new();
-    // 1.1.1, the 群聊: 新话题 and the 群's 话题; a member's computer while
-    // one works here. No 单独问 and no inspector: it is a chat, not work.
+    // The 群聊: 详情 (群资料: 成员, 通知, 决定 …) and the 群's 话题; a member's
+    // computer while one works here. No 单独问 and no inspector: it is a
+    // chat, not work. 新话题 is on the 话题 page, ⌘N and a message's menu.
     if crate::data::is_main_topic(topic_id) {
-        out.push(TitleButton::of(TitleButtonKind::NewTopic, RightPane::None));
+        out.push(TitleButton::of(TitleButtonKind::Rail, RightPane::GroupInfo));
         out.push(TitleButton::of(
             TitleButtonKind::GroupTopics,
             RightPane::None,

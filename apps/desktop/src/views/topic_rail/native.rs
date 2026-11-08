@@ -47,6 +47,9 @@ fn mark(sym: Sym, color: Hsla) -> AnyElement {
 /// px 16, the group's px 14, the 112 label column, its gap, and the avatar
 /// 16 with its gap 8.
 const VALUE_ROOM: f32 = 320. - 32. - 28. - 112. - 8. - 24.;
+/// The room of a person on a whole row: the 320 pane less its px 16, the
+/// group's px 14, and the avatar 16 with its gap 8.
+const ROW_ROOM: f32 = 320. - 32. - 28. - 24.;
 /// A time after the person (`提出 … 09:30`) and its gap.
 const TAIL_ROOM: f32 = 48.;
 
@@ -195,6 +198,18 @@ impl TopicRail {
         tail: Option<AnyElement>,
         cx: &App,
     ) -> AnyElement {
+        self.person_in(id, member, tail, VALUE_ROOM, cx)
+    }
+
+    /// [`Self::person`] in a row `room` wide (less the avatar).
+    fn person_in(
+        &self,
+        id: &str,
+        member: Option<&crate::data::Member>,
+        tail: Option<AnyElement>,
+        room: f32,
+        cx: &App,
+    ) -> AnyElement {
         let k = native_colors(cx);
         // X-01, C5: beside its avatar a name drops its leading emoji. An
         // RTL name sits in an LTR line: a cut keeps the start of the name
@@ -205,7 +220,7 @@ impl TopicRail {
             .unwrap_or_default();
         // R2-14, §2.21: the role truncates first, and goes when fewer than
         // 2 of its characters would fit (never a lone `…`).
-        let room = VALUE_ROOM - if tail.is_some() { TAIL_ROOM } else { 0. };
+        let room = room - if tail.is_some() { TAIL_ROOM } else { 0. };
         let role = member
             .and_then(|m| m.role.clone())
             .filter(|r| !r.trim().is_empty())
@@ -245,45 +260,89 @@ impl TopicRail {
             .into_any_element()
     }
 
-    /// 成员 (§2.5): 负责 and 提出 as DescriptionList rows of people. The
-    /// state is in 状态 only; this section never repeats it.
+    /// 成员 (§2.5): everyone in the 话题's 群 (they all see it), the one who
+    /// is 负责 first and the one who 提出 it next, each marked so; then the
+    /// rest, people before bots. A click opens the member. The state is in
+    /// 状态 only; this section never repeats it.
     pub(super) fn native_owner(
         &self,
         d: &Data,
         owner: Option<&str>,
-        by: Option<(String, i64)>,
+        by: Option<&str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
+        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
         // R2-17, §2.13: no owner is a compact empty (icon and muted line),
         // and the section header offers the ghost 指派 (§2.5).
-        let owner_value: AnyElement = match owner {
-            Some(id) => self.person(id, d.member(id).as_ref(), None, cx),
-            None => EmptyLine::new(c::RAIL_EMPTY_OWNER)
-                .icon(Sym::Person)
-                .into_any_element(),
-        };
-        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
-        if owner.is_none()
-            && let Some(t) = d.topic.as_ref()
-        {
-            section = section.action(self.assign_button(t, cx));
+        if owner.is_none() {
+            if let Some(t) = d.topic.as_ref() {
+                section = section.action(self.assign_button(t, cx));
+            }
+            section = section.row(EmptyLine::new(c::RAIL_EMPTY_OWNER).icon(Sym::Person));
         }
-        let mut section = section.row(label_value(c::INSPECTOR_OWNER, owner_value, cx));
-        if let Some((id, at)) = by {
-            // The time keeps a fixed tabular slot; the name truncates first.
-            let time = div()
-                .flex_none()
-                .n_subheadline()
-                .n_figures()
-                .text_color(k.secondary)
-                .child(clock(at))
-                .into_any_element();
-            section = section.row(label_value(
-                c::INSPECTOR_ASKED,
-                self.person(&format!("by-{id}"), d.member(&id).as_ref(), Some(time), cx),
-                cx,
-            ));
+        let mut people: Vec<(crate::data::Member, Option<&'static str>)> = Vec::new();
+        let lead = |id: Option<&str>, tag: &'static str, people: &mut Vec<_>| {
+            let Some(id) = id else { return };
+            if people
+                .iter()
+                .any(|(m, _): &(crate::data::Member, _)| m.id == id)
+            {
+                return;
+            }
+            let m = d
+                .group_members
+                .iter()
+                .find(|m| m.id == id)
+                .cloned()
+                .or_else(|| d.member(id));
+            if let Some(m) = m {
+                people.push((m, Some(tag)));
+            }
+        };
+        lead(owner, c::INSPECTOR_OWNER, &mut people);
+        lead(by, c::INSPECTOR_ASKED, &mut people);
+        for m in &d.group_members {
+            if !people.iter().any(|(x, _)| x.id == m.id) {
+                people.push((m.clone(), None));
+            }
+        }
+        for (m, tag) in people {
+            // The mark sits at the row's trailing edge, apart from the 岗位
+            // (`Joye 负责人 … 负责` never reads as one phrase).
+            let mark = tag.map(|t| {
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .child(t)
+            });
+            let room = ROW_ROOM - if tag.is_some() { TAIL_ROOM } else { 0. };
+            let nav = self.services.nav.clone();
+            let id = m.id.clone();
+            section = section.row(
+                div()
+                    .id(SharedString::from(format!("rail-member-{}", m.id)))
+                    .w_full()
+                    .min_h(px(28.))
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .n_body()
+                    .cursor_pointer()
+                    .child(div().flex_1().min_w(px(0.)).child(self.person_in(
+                        &m.id,
+                        Some(&m),
+                        None,
+                        room,
+                        cx,
+                    )))
+                    .children(mark)
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |n, cx| n.open_members(Some(id), cx))
+                    }),
+            );
         }
         section.into_any_element()
     }
