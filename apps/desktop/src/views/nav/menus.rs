@@ -1,8 +1,10 @@
-//! The macOS app menus: the app menu (about, settings, hide, quit), 编辑 (so
-//! text inputs get undo, cut, copy, paste and select all), 前往 (navigation
-//! shortcuts), 显示 and 窗口.
+//! The macOS app menus: the app menu (about, settings, 服务, hide, quit),
+//! 文件 (new things, close), 编辑 (so text inputs get undo, cut, copy, paste,
+//! select all and 表情与符号), 前往 (navigation shortcuts), 显示, 窗口 (with
+//! the system's window list) and 帮助 (with the system's menu search), plus
+//! the Dock icon's menu.
 
-use gpui::{App, KeyBinding, Menu, MenuItem, OsAction};
+use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 use super::{
@@ -26,7 +28,8 @@ gpui::actions!(
         CloseWindow,
         Zoom,
         ToggleFullScreen,
-        BringAllToFront
+        BringAllToFront,
+        ShowCharacterPalette
     ]
 );
 
@@ -50,11 +53,20 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::action(settings::MENU_SETTINGS, OpenSettings),
             server_menu(),
             MenuItem::separator(),
+            MenuItem::os_submenu(nav::MENU_SERVICES, SystemMenuType::Services),
+            MenuItem::separator(),
             MenuItem::action(product(nav::MENU_HIDE), Hide),
             MenuItem::action(nav::MENU_HIDE_OTHERS, HideOthers),
             MenuItem::action(nav::MENU_SHOW_ALL, ShowAll),
             MenuItem::separator(),
             MenuItem::action(settings::MENU_QUIT, Quit),
+        ]),
+        Menu::new(nav::MENU_FILE).items([
+            MenuItem::action(nav::MENU_NEW_TOPIC, NewTopic),
+            MenuItem::action(nav::MENU_NEW_GROUP, NewGroup),
+            MenuItem::action(nav::MENU_START_DM, StartDm),
+            MenuItem::separator(),
+            MenuItem::action(nav::MENU_CLOSE_WINDOW, CloseWindow),
         ]),
         Menu::new(nav::MENU_EDIT).items([
             MenuItem::os_action(nav::MENU_UNDO, Undo, OsAction::Undo),
@@ -64,6 +76,21 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::os_action(nav::MENU_COPY, Copy, OsAction::Copy),
             MenuItem::os_action(nav::MENU_PASTE, Paste, OsAction::Paste),
             MenuItem::os_action(nav::MENU_SELECT_ALL, SelectAll, OsAction::SelectAll),
+            MenuItem::separator(),
+            MenuItem::action(
+                crate::copy::timeline::MENU_FIND,
+                crate::views::timeline::find::FindInTopic,
+            ),
+            MenuItem::action(
+                crate::copy::timeline::MENU_FIND_NEXT,
+                crate::views::timeline::find::FindNext,
+            ),
+            MenuItem::action(
+                crate::copy::timeline::MENU_FIND_PREVIOUS,
+                crate::views::timeline::find::FindPrevious,
+            ),
+            MenuItem::separator(),
+            MenuItem::action(nav::MENU_EMOJI, ShowCharacterPalette),
         ]),
         Menu::new(nav::MENU_GO).items([
             MenuItem::action(nav::MENU_QUICK_SWITCH, QuickSwitch),
@@ -71,10 +98,6 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::action(rail::RAIL_DESK, OpenDesk),
             MenuItem::action(rail::RAIL_ARTIFACTS, OpenArtifacts),
             MenuItem::action(rail::RAIL_MEMBERS, OpenMembers),
-            MenuItem::separator(),
-            MenuItem::action(nav::MENU_NEW_TOPIC, NewTopic),
-            MenuItem::action(nav::MENU_NEW_GROUP, NewGroup),
-            MenuItem::action(nav::MENU_START_DM, StartDm),
             MenuItem::separator(),
             MenuItem::action(nav::MENU_NEXT_UNREAD, NextUnreadTopic),
             MenuItem::action(nav::MENU_PREVIOUS_UNREAD, PreviousUnreadTopic),
@@ -99,14 +122,71 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::action(nav::MENU_FULL_SCREEN, ToggleFullScreen),
         ]),
         Menu::new(nav::MENU_WINDOW).items([
-            MenuItem::action(nav::MENU_CLOSE_WINDOW, CloseWindow),
             MenuItem::action(nav::MENU_MINIMIZE, Minimize),
             MenuItem::action(nav::MENU_ZOOM, Zoom),
             MenuItem::separator(),
             MenuItem::action(nav::MENU_SHOW_MAIN, ShowMainWindow),
             MenuItem::action(nav::MENU_BRING_ALL_TO_FRONT, BringAllToFront),
         ]),
+        // Empty on purpose: macOS puts its menu search here once it is the
+        // app's help menu (`register_system_menus`).
+        Menu::new(nav::MENU_HELP),
     ]
+}
+
+/// The Dock icon's menu (right click on the icon).
+fn dock_menu() -> Vec<MenuItem> {
+    vec![
+        MenuItem::action(nav::MENU_NEW_TOPIC, NewTopic),
+        MenuItem::action(nav::MENU_NEW_GROUP, NewGroup),
+        MenuItem::action(nav::MENU_START_DM, StartDm),
+        MenuItem::separator(),
+        MenuItem::action(nav::MENU_SHOW_MAIN, ShowMainWindow),
+    ]
+}
+
+/// Sets the menu bar and tells AppKit which menus are 窗口 and 帮助: GPUI
+/// only knows an English "Window" menu and no help menu, so without this the
+/// window list and the menu search are missing.
+fn set_menus(menus: Vec<Menu>, cx: &mut App) {
+    cx.set_menus(menus);
+    register_system_menus();
+}
+
+#[cfg(target_os = "macos")]
+fn register_system_menus() {
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::NSString;
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let Some(main) = app.mainMenu() else {
+        return;
+    };
+    let submenu = |title: &str| {
+        main.itemWithTitle(&NSString::from_str(title))
+            .and_then(|item| item.submenu())
+    };
+    if let Some(menu) = submenu(nav::MENU_WINDOW) {
+        app.setWindowsMenu(Some(&menu));
+    }
+    if let Some(menu) = submenu(nav::MENU_HELP) {
+        app.setHelpMenu(Some(&menu));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn register_system_menus() {}
+
+/// 编辑 › 表情与符号: the system's character viewer, which types into the
+/// focused field.
+fn show_character_palette(cx: &mut App) {
+    let _ = cx;
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        objc2_app_kit::NSApplication::sharedApplication(mtm).orderFrontCharacterPalette(None);
+    }
 }
 
 /// Sets the menus and the bindings and handlers of the menu-only actions.
@@ -117,6 +197,7 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-m", Minimize, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
+        KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, None),
     ]);
     install_server_actions(cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
@@ -131,7 +212,9 @@ pub fn install(cx: &mut App) {
         with_key_window(cx, |window| window.toggle_fullscreen())
     });
     cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
-    cx.set_menus(app_menus());
+    cx.on_action(|_: &ShowCharacterPalette, cx| show_character_palette(cx));
+    set_menus(app_menus(), cx);
+    cx.set_dock_menu(dock_menu());
 }
 
 /// Runs `f` on the main GPUI window. When a 产出 window (not a GPUI window)
@@ -198,7 +281,7 @@ thread_local! {
 /// Sets the menus again with the current check marks, so they show the
 /// shortcuts as now bound (after a change in Settings › 快捷键).
 pub fn refresh(cx: &mut App) {
-    cx.set_menus(app_menus_with(LAST_STATE.with(|s| s.get())));
+    set_menus(app_menus_with(LAST_STATE.with(|s| s.get())), cx);
 }
 
 /// The app menu's update item: 检查更新…, the download's progress, or
@@ -228,7 +311,7 @@ pub fn refresh_menus(cx: &mut App) {
         changed
     });
     if changed {
-        cx.set_menus(app_menus_with(LAST_STATE.with(|s| s.get())));
+        set_menus(app_menus_with(LAST_STATE.with(|s| s.get())), cx);
     }
 }
 
@@ -308,7 +391,7 @@ pub fn refresh_server_menu(cx: &mut App) {
     let current = nav.services.provider.current_server();
     let changed = CURRENT_SERVER.with(|c| c.replace(current.clone()) != current);
     if changed {
-        cx.set_menus(app_menus_with(LAST_STATE.with(|s| s.get())));
+        set_menus(app_menus_with(LAST_STATE.with(|s| s.get())), cx);
     }
 }
 
@@ -344,7 +427,7 @@ pub fn watch_menu_state<V: 'static>(
             let state = menu_state(&services, &rail, cx);
             if last.replace(state) != state {
                 LAST_STATE.with(|s| s.set(state));
-                cx.set_menus(app_menus_with(state));
+                set_menus(app_menus_with(state), cx);
             }
         })
     };

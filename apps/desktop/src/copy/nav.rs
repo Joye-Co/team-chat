@@ -125,6 +125,10 @@ crate::copy! {
     MENU_VIEW = "显示",
     MENU_SIDE_PANEL = "话题详情",
     MENU_FULL_SCREEN = "切换全屏幕",
+    MENU_FILE = "文件",
+    MENU_HELP = "帮助",
+    MENU_SERVICES = "服务",
+    MENU_EMOJI = "表情与符号",
     // --- v12/behavior ---
     MENU_SIDEBAR = "侧栏",
     SIDEBAR_HIDE = "隐藏侧栏",
