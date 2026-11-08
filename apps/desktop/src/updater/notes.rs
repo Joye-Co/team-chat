@@ -533,7 +533,12 @@ pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut 
                             .child(notes.headline.clone()),
                     )
                 })
-                .child(div().pt(space::S24).w_full().child(scroll("whats-new", list)))
+                .child(
+                    div()
+                        .pt(space::S24)
+                        .w_full()
+                        .child(scroll("whats-new", list)),
+                )
                 .child(
                     div().pt(space::S32).w_full().child(
                         push_button(

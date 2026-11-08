@@ -35,8 +35,7 @@ use crate::{
     ui::{
         native::{
             CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
-            ToolbarItemKind, ToolbarRow, borderless_button, emphasized,
-            native_colors,
+            ToolbarItemKind, ToolbarRow, borderless_button, emphasized, native_colors,
             page::{self, PageLoad, Status},
             push_button, toolbar_item,
         },
