@@ -1,11 +1,12 @@
 //! Extension point: the context menu of a message row, and in-place edit.
 //!
-//! Items: 开个话题 (a message of the 群聊: opens the 开个话题 sheet quoting
-//! it), 复制 (the Markdown source), 复制链接 (a link with the product URL
-//! scheme), 编辑 (my sent messages), 撤回 (my own, within 24 hours of sending;
-//! asks first; nobody takes back someone else's message; the tombstone then
-//! offers 重新编辑), and 重试 for a failed send. Reply and reactions live on the hover
-//! toolbar only, so no action shows twice on a hovered row.
+//! Items: 开个话题 (a message of the 群聊: starts the 话题 and opens it; the
+//! hover toolbar's 更多 leaves it out, the toolbar has its own button), 回复
+//! (in the 群聊, where the toolbar's slot is 开个话题), 复制 (the Markdown
+//! source), 复制链接 (a link with the product URL scheme), 编辑 (my sent
+//! messages), 撤回 (my own, within 24 hours of sending; asks first; nobody
+//! takes back someone else's message; the tombstone then offers 重新编辑),
+//! and 重试 for a failed send. Reactions live on the hover toolbar only.
 //! To add an item, add it in [`build`]; anything that changes data calls the
 //! provider.
 
@@ -42,7 +43,8 @@ pub(super) fn build(
     message: &Message,
     can_edit: bool,
     can_recall: bool,
-    _window: &mut Window,
+    // The hover toolbar's 更多: 开个话题 is the toolbar's own button there.
+    from_toolbar: bool,
     _cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let sent = !message.id.is_empty() && message.deleted_at.is_none();
@@ -56,7 +58,15 @@ pub(super) fn build(
             let Some(services) = view.upgrade().map(|v| v.read(cx).services.clone()) else {
                 return;
             };
-            crate::views::nav::new_topic::open_new_topic_from(services, &m, window, cx);
+            crate::views::nav::new_topic::start_from(&services, &m, window, cx);
+        })
+    };
+    // In the 群聊 the toolbar has 开个话题 where a 话题 has 回复, so 回复 is
+    // here (a double-click on the message does the same).
+    let reply = {
+        let (view, m) = (view.clone(), m.clone());
+        PopupMenuItem::new(t::REPLY).on_click(move |_, _, cx| {
+            let _ = view.update(cx, |this, cx| this.quote(&m, cx));
         })
     };
     let edit = {
@@ -88,7 +98,8 @@ pub(super) fn build(
             let _ = view.update(cx, |this, _| this.retry(&m));
         })
     };
-    menu.when(in_chat, |menu| menu.item(open_topic))
+    menu.when(in_chat && !from_toolbar, |menu| menu.item(open_topic))
+        .when(in_chat, |menu| menu.item(reply))
         .when(failed, |menu| menu.item(retry))
         .when(m.deleted_at.is_none(), |menu| menu.item(copy_text))
         .when(sent, |menu| menu.item(copy_link))

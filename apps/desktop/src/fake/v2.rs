@@ -1278,8 +1278,97 @@ impl ChatProvider for V2Samples {
         }]);
         id
     }
+    /// A quote from another 话题 (开个话题 quotes the 群聊): any message of the
+    /// sample team.
+    fn quoted_message(
+        &self,
+        _group_id: &str,
+        _quoting_id: &str,
+        quoted_id: &str,
+    ) -> Option<QuotedMessage> {
+        self.with(|d| {
+            d.messages
+                .values()
+                .flatten()
+                .find(|m| m.id == quoted_id)
+                .map(|m| QuotedMessage {
+                    author_id: m.author_id.clone(),
+                    body: m.body.clone(),
+                    deleted: m.deleted_at.is_some(),
+                })
+        })
+    }
+    /// A 话题 of the sample team: new or 开个话题 (its first message quotes a
+    /// 群聊 message, and an empty note takes the title from the quote).
     fn start_topic(&self, request: StartTopicRequest) -> ClientMsgId {
-        self.inner.start_topic(request)
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
+        let started = self.with(|d| {
+            if !d.groups.iter().any(|g| g.id == request.group_id) {
+                return None;
+            }
+            let quoted = request.quote_of.as_ref().and_then(|q| {
+                d.messages
+                    .values()
+                    .flatten()
+                    .find(|m| m.id == *q)
+                    .map(|m| m.body.clone())
+            });
+            let first_line = |text: &str| -> String {
+                let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                line.trim().chars().take(80).collect()
+            };
+            let title = request
+                .title
+                .clone()
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| {
+                    let own = first_line(&request.body);
+                    if own.is_empty() {
+                        quoted.as_deref().map(first_line).unwrap_or_default()
+                    } else {
+                        own
+                    }
+                });
+            let n = d.topics.len() + 1;
+            let id = format!("t-v2-new-{n}");
+            let mut m = message(&request.group_id, &id, 1, ME, now, &request.body);
+            m.client_msg_id = format!("v2-c-{id}");
+            m.quote_of = request.quote_of.clone();
+            m.mentions = request.mentions.clone();
+            let cid = m.client_msg_id.clone();
+            d.messages.insert(id.clone(), vec![m]);
+            d.topics.push(Topic {
+                id: id.clone(),
+                group_id: request.group_id.clone(),
+                title,
+                status: TopicStatus::Open,
+                waiting_on: Vec::new(),
+                owner_id: Some(ME.into()),
+                created_by: ME.into(),
+                created_at: now,
+                root_message_id: format!("{id}-m1"),
+                last_seq: 1,
+                last_activity_at: now,
+                message_count: 1,
+                unread: 0,
+                mentions: 0,
+            });
+            Some((id, cid))
+        });
+        let Some((topic_id, cid)) = started else {
+            return self.inner.start_topic(request);
+        };
+        self.emit(vec![
+            Change::Topics {
+                group_id: request.group_id.clone(),
+            },
+            Change::Messages {
+                group_id: request.group_id,
+                topic_id,
+            },
+            Change::Groups,
+        ]);
+        cid
     }
     fn edit(&self, _group_id: &str, _message_id: &str, _body: String) {}
     fn delete(&self, _group_id: &str, _message_id: &str) {}

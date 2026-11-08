@@ -149,13 +149,17 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "new-topic-from",
-        about: "开个话题: the sheet from a 群聊 message, quoting it, the title its first line",
-        start: Start::SignedIn,
-        setup: |s, cx| {
-            s.nav
-                .update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx))
-        },
-        open: crate::views::nav::selftest::scenes::new_topic_from,
+        about: "开个话题 from a one-line message of the 群聊 of 开发: the 话题 opens at once, its first message the quote",
+        start: Start::V2,
+        setup: |s, cx| open_topic_from(s, "下午的会我晚 10 分钟到", cx),
+        open: open_main,
+    },
+    Scene {
+        name: "new-topic-from-long",
+        about: "开个话题 from a long Markdown message: the 话题 opens with the message quoted",
+        start: Start::V2,
+        setup: |s, cx| open_topic_from(s, LONG_MARKDOWN, cx),
+        open: open_main,
     },
     Scene {
         name: "todo",
@@ -1486,6 +1490,47 @@ pub fn capture_bounds(content: Size<Pixels>, cx: &App) -> Bounds<Pixels> {
 }
 
 /// The main window (login or chat) without focus, at `content`.
+/// 开个话题 in the 群聊 of 开发 (the v2 sample team, what `--fake` shows;
+/// its 群聊 starts empty): from `body`, sent there first; the 话题 opens.
+fn open_topic_from(s: &Services, body: &str, cx: &mut App) {
+    let group = crate::fake::v2::DEV.to_string();
+    s.nav
+        .update(cx, |nav, cx| nav.open_group_chat(group.clone(), cx));
+    let chat = crate::data::main_topic_id(&group);
+    s.provider.send(crate::data::SendRequest {
+        group_id: group.clone(),
+        topic_id: chat.clone(),
+        body: body.to_string(),
+        mentions: Vec::new(),
+        quote_of: None,
+    });
+    let me = s.me();
+    let Some(m) = s
+        .provider
+        .messages(&group, &chat, 50)
+        .messages
+        .into_iter()
+        .rev()
+        .find(|m| Some(&m.author_id) == me.as_ref())
+    else {
+        return;
+    };
+    crate::views::nav::new_topic::open_started_from(s, &m, cx);
+}
+
+/// A long Markdown message (break-ui): headings in bold, code, a list and
+/// long lines.
+const LONG_MARKDOWN: &str = "我把仓库大致看了一遍，没改任何东西。\n\n**这是什么**\n\
+    一个给小团队用的 macOS 工作聊天，人和 bot 都是平等的成员。消息都挂在「群 → 话题」下面，\
+    bot 被 @ 后接活，边做边汇报进度，最后把产出交回来。\n\n**技术栈和代码量**\n\
+    - **服务端**（`server/`，约 2.1 万行 TS）：Cloudflare Workers + Durable Objects\n\
+    - **桌面端**（`apps/desktop`，约 17 万行 Rust）：GPUI\n\
+    - **其他组件**：`crates/chat-core` 本地 SQLite 缓存和同步，`crates/chat-protocol` 协议类型\n\n\
+    **值得注意的几点**\n\
+    1. `docs/V1-CHECKLIST.md` 写于 11-03，已经过时了\n\
+    2. 还有几项从来没验证过：真机 Mac 睡眠和断网、离线一天后的同步\n\
+    3. 有几个文件特别大：`chat-protocol/src/card2.rs` 4600 行\n\n接下来要我做哪一块，告诉我就行。";
+
 pub fn open_main(
     services: Services,
     content: Size<Pixels>,

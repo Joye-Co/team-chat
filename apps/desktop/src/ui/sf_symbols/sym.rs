@@ -54,6 +54,8 @@ concepts! {
     Filter = "line.3.horizontal.decrease";
     /// 单独问.
     AskAside = "bubble.left.and.text.bubble.right";
+    /// 开个话题 from a 群聊 message (the message's hover toolbar).
+    OpenTopic = "text.bubble";
     PullRequest = "arrow.triangle.pull";
     Branch = "arrow.triangle.branch";
     Merge = "arrow.triangle.merge";
