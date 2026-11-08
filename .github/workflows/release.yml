@@ -54,10 +54,11 @@ jobs:
       MODE: ${{ inputs.mode }}
       INPUT_VERSION: ${{ inputs.version }}
       GH_TOKEN: ${{ github.token }}
-      RCODESIGN_VERSION: 0.29.0
+      # Not RCODESIGN_*: rcodesign reads every RCODESIGN_* variable as a setting and fails on unknown ones.
+      CODESIGN_TOOL_VERSION: 0.29.0
       # SHA-256 of apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz (GitHub release of
       # indygreg/apple-platform-rs, tag apple-codesign/0.29.0).
-      RCODESIGN_SHA256: d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a
+      CODESIGN_TOOL_SHA256: d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a
     steps:
       - name: Check the inputs
         run: |
@@ -130,11 +131,11 @@ jobs:
         if: inputs.mode != 'upload-only'
         run: |
           [ "$(uname -m)" = arm64 ] || { echo "::error::expected an arm64 runner"; exit 1; }
-          name="apple-codesign-$RCODESIGN_VERSION-aarch64-apple-darwin"
+          name="apple-codesign-$CODESIGN_TOOL_VERSION-aarch64-apple-darwin"
           cd "$RUNNER_TEMP"
           curl -fsSL -o "$name.tar.gz" \
-            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$RCODESIGN_VERSION/$name.tar.gz"
-          echo "$RCODESIGN_SHA256  $name.tar.gz" | shasum -a 256 -c -
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$CODESIGN_TOOL_VERSION/$name.tar.gz"
+          echo "$CODESIGN_TOOL_SHA256  $name.tar.gz" | shasum -a 256 -c -
           tar xzf "$name.tar.gz"
           mkdir -p bin && mv "$name/rcodesign" bin/
           echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
