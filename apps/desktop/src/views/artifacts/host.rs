@@ -1495,7 +1495,6 @@ pub fn reference_row(
         // A button (E3): a Tab stop with the focus ring, Return and Space act,
         // hover muted 50 % (the kit's row recipe).
         .focus_row(false, cx)
-        .cursor_pointer()
         .on_click(move |_, _, cx| focus_pane(&target, cx))
         .w_full()
         .h(crate::ui::native::tokens::height::FOOTER_ROW)

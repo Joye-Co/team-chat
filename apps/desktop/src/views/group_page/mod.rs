@@ -1098,7 +1098,6 @@ impl Render for GroupPage {
                             None,
                             cx,
                         )
-                        .cursor_pointer()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.show_all = !this.show_all;
                             cx.notify();

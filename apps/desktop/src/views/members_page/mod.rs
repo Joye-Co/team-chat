@@ -845,7 +845,6 @@ impl MembersPage {
                     true,
                     cx,
                 )
-                .cursor_pointer()
                 .on_click(move |_, _, cx| {
                     let (g, t) = (g.clone(), t.clone());
                     nav.update(cx, |n, cx| n.open_topic(g, t, cx))
@@ -914,12 +913,11 @@ impl MembersPage {
             body = body.child(match q.topic.clone() {
                 Some((g, t)) => {
                     let nav = self.services.nav.clone();
-                    row.cursor_pointer()
-                        .on_click(move |_, _, cx| {
-                            let (g, t) = (g.clone(), t.clone());
-                            nav.update(cx, |n, cx| n.open_topic(g, t, cx))
-                        })
-                        .into_any_element()
+                    row.on_click(move |_, _, cx| {
+                        let (g, t) = (g.clone(), t.clone());
+                        nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                    })
+                    .into_any_element()
                 }
                 None => row.into_any_element(),
             });
@@ -973,7 +971,6 @@ impl MembersPage {
                     i + 1 == nw && said.is_none(),
                     cx,
                 )
-                .cursor_pointer()
                 .on_click(move |_, _, cx| {
                     let (g, t) = (g.clone(), tid.clone());
                     nav.update(cx, |n, cx| n.open_topic(g, t, cx))
@@ -1753,7 +1750,6 @@ impl MembersPage {
                         i + 1 == n,
                         cx,
                     )
-                    .cursor_pointer()
                     .on_click(move |_, _, cx| {
                         let g = g.clone();
                         match t.clone() {
