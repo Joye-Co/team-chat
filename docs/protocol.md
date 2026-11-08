@@ -857,6 +857,41 @@ Rules:
 - The raw session (the CLI's own file, gzip) is stored in R2 at `sessions/<runId>.jsonl.gz`.
   Only owners can download it.
 
+### Front desk
+
+With an AI service set (设置 › 通用 › AI 服务), a runner-backed bot's front desk reads each new
+human request before it becomes a run (docs/design/agent-harness.zh.md 3.1-3.2). It reads the
+topic (the first message and the newest lines, up to 12,000 characters, as in "Run context")
+and makes one forced tool call `decide`, which answers with one of four actions:
+
+- `reply`: the bot answers in the topic at once (conversation, a question the topic answers).
+  No run, no machine.
+- `dispatch`: a run as before. Its prompt carries the work order (`WorkBrief`: goal, done-when
+  checks, notes) after the request.
+- `ask`: the bot posts one question and becomes the topic's responsible bot. For an hour the
+  requester's next message in the topic counts as addressed to the bot without an @; the front
+  desk then decides again with the answer in the topic.
+- `skip`: nothing is posted.
+
+The 👀 reaction goes on the request while the front desk reads it. A decision is stored before
+it is acted on, so a retried delivery never posts twice. Any doubt becomes a `dispatch`: an
+invalid answer, `reply` or `ask` without text, confidence under 0.6, or a provider error
+(`fallback` says which). Without an AI service, and for card answers, live events, retries and
+side chats, requests become runs as before. A message to an active run never reaches the front
+desk.
+
+```ts
+WorkBrief = { goal, doneWhen: string[] /* <= 10 */, notes? }
+FrontDeskDecision = { messageId, topicId, authorId, action: "reply" | "dispatch" | "ask" | "skip",
+                      reason, confidence, reply?, brief?: WorkBrief, fallback?, model?, ms,
+                      inputTokens, outputTokens, replyMessageId?, at }
+FrontDeskDecisionsResponse = { decisions: FrontDeskDecision[] }   // newest first, at most 20
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `GET /v1/bots/:id/decisions?topicId=` | owner | `FrontDeskDecisionsResponse` |
+
 ### Run context
 
 What a run's prompt carries from its topic. The server builds the prompt; it is not a client

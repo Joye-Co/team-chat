@@ -37253,6 +37253,230 @@
         "hits"
       ]
     },
+    "FrontDeskDecision": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "reply",
+            "dispatch",
+            "ask",
+            "skip"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reply": {
+          "type": "string"
+        },
+        "brief": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "doneWhen": {
+              "maxItems": 10,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              }
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "required": [
+            "goal",
+            "doneWhen"
+          ]
+        },
+        "fallback": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "replyMessageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "messageId",
+        "topicId",
+        "authorId",
+        "action",
+        "reason",
+        "confidence",
+        "ms",
+        "inputTokens",
+        "outputTokens",
+        "at"
+      ]
+    },
+    "FrontDeskDecisionsResponse": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "reply",
+                  "dispatch",
+                  "ask",
+                  "skip"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "reply": {
+                "type": "string"
+              },
+              "brief": {
+                "type": "object",
+                "properties": {
+                  "goal": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "doneWhen": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 300
+                    }
+                  },
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "goal",
+                  "doneWhen"
+                ]
+              },
+              "fallback": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "inputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "outputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "replyMessageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "messageId",
+              "topicId",
+              "authorId",
+              "action",
+              "reason",
+              "confidence",
+              "ms",
+              "inputTokens",
+              "outputTokens",
+              "at"
+            ]
+          }
+        }
+      },
+      "required": [
+        "decisions"
+      ]
+    },
     "SetBotRunnerRequest": {
       "type": "object",
       "properties": {
@@ -37295,8 +37519,15 @@
           "maxLength": 200
         },
         "effort": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "envAllowlist": {
           "maxItems": 50,

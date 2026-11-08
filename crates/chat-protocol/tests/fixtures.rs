@@ -169,6 +169,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("TopicHistoryResponse", plain::<TopicHistoryResponse>),
     ("TopicMessageResponse", plain::<TopicMessageResponse>),
     ("ContextSearchResponse", plain::<ContextSearchResponse>),
+    (
+        "FrontDeskDecisionsResponse",
+        plain::<FrontDeskDecisionsResponse>,
+    ),
     ("SetBotRunnerRequest", validated::<SetBotRunnerRequest>),
     ("BotRunner", plain::<BotRunner>),
     ("RunPlan", plain::<Vec<RunPlanItem>>),

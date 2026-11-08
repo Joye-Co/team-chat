@@ -131,6 +131,39 @@ export const ContextHit = z.object({
 });
 export type ContextHit = z.infer<typeof ContextHit>;
 
+/** The front desk's work order (交代单) for the executor. */
+export const WorkBrief = z.object({
+  goal: z.string().min(1).max(1000),
+  doneWhen: z.array(z.string().min(1).max(300)).max(10),
+  notes: z.string().max(2000).optional(),
+});
+export type WorkBrief = z.infer<typeof WorkBrief>;
+
+/** One front desk decision (docs/protocol.md, "Front desk"). */
+export const FrontDeskDecision = z.object({
+  messageId: Id,
+  topicId: Id,
+  authorId: Id,
+  action: z.enum(["reply", "dispatch", "ask", "skip"]),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  reply: z.string().optional(),
+  brief: WorkBrief.optional(),
+  /** Why the desk did not take the model's answer as it was (it then dispatched). */
+  fallback: z.string().optional(),
+  model: z.string().optional(),
+  ms: Count,
+  inputTokens: Count,
+  outputTokens: Count,
+  replyMessageId: Id.optional(),
+  at: Millis,
+});
+export type FrontDeskDecision = z.infer<typeof FrontDeskDecision>;
+
+/** `GET /v1/bots/:id/decisions?groupId=&topicId=` (owner), newest first. */
+export const FrontDeskDecisionsResponse = z.object({ decisions: z.array(FrontDeskDecision).max(100) });
+export type FrontDeskDecisionsResponse = z.infer<typeof FrontDeskDecisionsResponse>;
+
 /** `GET /v1/machine/runs/:id/search` */
 export const ContextSearchResponse = z.object({ hits: z.array(ContextHit).max(50) });
 export type ContextSearchResponse = z.infer<typeof ContextSearchResponse>;
