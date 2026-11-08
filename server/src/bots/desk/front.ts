@@ -68,8 +68,8 @@ export abstract class DeskFront extends DeskStall {
         dm: false,
       });
       this.sql.exec(
-        `INSERT OR IGNORE INTO decisions (message_id, group_id, topic_id, author_id, action, decision, fallback, model, ms, input_tokens, output_tokens, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO decisions (message_id, group_id, topic_id, author_id, action, decision, fallback, model, ms, input_tokens, output_tokens, at, system, input)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         m.messageId,
         m.groupId,
         m.topicId,
@@ -82,6 +82,8 @@ export abstract class DeskFront extends DeskStall {
         res.usage?.inputTokens ?? 0,
         res.usage?.outputTokens ?? 0,
         Date.now(),
+        res.system,
+        res.prompt,
       );
       this.log.info("front desk decided", { messageId: m.messageId, action: res.decision.action, ms: res.ms, fallback: res.fallback });
       row = this.decisionRow(m.messageId) as DecisionRow;
@@ -112,6 +114,69 @@ export abstract class DeskFront extends DeskStall {
   /** 👀 on the request while the front desk reads it (the same reaction a run gives). */
   protected async react(m: TopicMessage): Promise<void> {
     await this.ack({ group_id: m.groupId, trigger_message_id: m.messageId } as never, m.messageId);
+  }
+
+  /** Decisions with what the model read, oldest first, for the replay set (M6). Owners only. */
+  async replayCases(botId: string, since: number, limit = 200): Promise<{ id: string; at: number; system: string; prompt: string; action: string; reason: string; model: string | null }[]> {
+    this.bind(botId);
+    return this.sql
+      .exec<{ message_id: string; at: number; system: string; input: string; action: string; decision: string; model: string | null }>(
+        "SELECT message_id, at, system, input, action, decision, model FROM decisions WHERE at >= ? AND input IS NOT NULL AND fallback IS NULL ORDER BY at LIMIT ?",
+        since,
+        Math.min(1000, Math.max(1, limit)),
+      )
+      .toArray()
+      .map((r) => ({ id: r.message_id, at: r.at, system: r.system, prompt: r.input, action: r.action, reason: (JSON.parse(r.decision) as { reason?: string }).reason ?? "", model: r.model }));
+  }
+
+  /** What the desk did lately (developer view, M6 metrics). */
+  async metrics(botId: string, since: number): Promise<Record<string, unknown>> {
+    this.bind(botId);
+    const pct = (xs: number[], p: number) => (xs.length === 0 ? 0 : xs[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))]);
+    const d = this.sql
+      .exec<{ action: string; ms: number; input_tokens: number; output_tokens: number; fallback: string | null }>(
+        "SELECT action, ms, input_tokens, output_tokens, fallback FROM decisions WHERE at >= ?",
+        since,
+      )
+      .toArray();
+    const ms = d.map((x) => x.ms).sort((a, b) => a - b);
+    const byAction: Record<string, number> = { reply: 0, dispatch: 0, ask: 0, skip: 0 };
+    for (const x of d) byAction[x.action] = (byAction[x.action] ?? 0) + 1;
+    const runs = this.sql
+      .exec<{ status: string; started_at: number | null; ended_at: number | null; interventions: number; summary: string | null; trigger_message_id: string }>(
+        "SELECT status, started_at, ended_at, interventions, summary, trigger_message_id FROM runs WHERE created_at >= ? AND external = 0",
+        since,
+      )
+      .toArray();
+    const durations = runs
+      .filter((r) => r.started_at !== null && r.ended_at !== null)
+      .map((r) => (r.ended_at as number) - (r.started_at as number))
+      .sort((a, b) => a - b);
+    const count = (f: (r: (typeof runs)[number]) => boolean) => runs.filter(f).length;
+    return {
+      since,
+      frontDesk: {
+        decisions: d.length,
+        byAction,
+        fallbacks: d.filter((x) => x.fallback !== null).length,
+        p50Ms: pct(ms, 50),
+        p95Ms: pct(ms, 95),
+        inputTokens: d.reduce((a, x) => a + x.input_tokens, 0),
+        outputTokens: d.reduce((a, x) => a + x.output_tokens, 0),
+      },
+      runs: {
+        total: runs.length,
+        done: count((r) => r.status === "done"),
+        failed: count((r) => r.status === "failed"),
+        blocked: count((r) => r.status === "blocked"),
+        cancelled: count((r) => r.status === "cancelled" && !(r.summary ?? "").startsWith("restarted:")),
+        restarted: count((r) => (r.summary ?? "").startsWith("restarted:")),
+        continued: count((r) => r.trigger_message_id.startsWith("continue:")),
+        interventions: runs.reduce((a, r) => a + r.interventions, 0),
+        p50Ms: pct(durations, 50),
+        p95Ms: pct(durations, 95),
+      },
+    };
   }
 
   /** The front desk's decisions in a topic, newest first (developer view). */

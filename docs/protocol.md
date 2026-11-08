@@ -907,11 +907,17 @@ FrontDeskDecision = { messageId, topicId, authorId, action: "reply" | "dispatch"
                       reason, confidence, reply?, brief?: WorkBrief, fallback?, model?, ms,
                       inputTokens, outputTokens, replyMessageId?, at }
 FrontDeskDecisionsResponse = { decisions: FrontDeskDecision[] }   // newest first, at most 20
+BotMetrics = { since, frontDesk: { decisions, byAction: { reply, dispatch, ask, skip }, fallbacks,
+               p50Ms, p95Ms, inputTokens, outputTokens },
+               runs: { total, done, failed, blocked, cancelled, restarted, continued, interventions,
+                       p50Ms, p95Ms } }
 ```
 
 | Method and path | Who | Response |
 | --- | --- | --- |
 | `GET /v1/bots/:id/decisions?topicId=` | owner | `FrontDeskDecisionsResponse` |
+| `GET /v1/bots/:id/decisions/export?since=` | owner | the decisions with what the front desk read (`system`, `prompt`), one JSON object per line (`application/x-ndjson`), to build a replay set; holds topic text |
+| `GET /v1/bots/:id/metrics?days=` | owner | `BotMetrics`: front desk decisions by action, fallbacks, latency p50/p95, tokens; runs by outcome, supervision restarts and continues, interventions, duration p50/p95 (default 30 days, 1..365) |
 
 ### Run context
 
