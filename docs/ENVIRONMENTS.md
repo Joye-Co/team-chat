@@ -55,6 +55,20 @@ Who reads what:
   same, inside `server/`: `bunx wrangler -c wrangler.deploy.jsonc <command> --env <env>`. The
   monitor works the same way with `deploy/monitor.wrangler.jsonc` in `ops/monitor/`.
 
+**Releases** need the ops checkout: `scripts/release.sh` stops without `characters/` and
+`deploy/servers.json`, so a release never ships without the character pack or the server menu.
+The Release workflow checks the ops repository out on the runner: set the repository variable
+`OPS_REPO` (`<owner>/<ops repo>`) and the secret `OPS_DEPLOY_KEY` (the private half of a
+read-only deploy key on the ops repository):
+
+```sh
+ssh-keygen -t ed25519 -N "" -C release-ops -f ops-deploy-key
+gh repo deploy-key add ops-deploy-key.pub -R <owner>/<ops repo> --title release   # read-only
+gh secret set OPS_DEPLOY_KEY < ops-deploy-key
+gh variable set OPS_REPO --body <owner>/<ops repo>
+rm ops-deploy-key ops-deploy-key.pub
+```
+
 The commands in these docs assume the copy exists. Make it by hand when you run wrangler
 without the deploy script:
 

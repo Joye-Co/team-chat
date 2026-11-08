@@ -1,73 +1,226 @@
-name: Release DMG
+name: Release
 
-# Releases are normally made locally with scripts/release.sh. This workflow rebuilds the DMG
-# on a macOS runner from a tag and attaches it to that tag's GitHub Release (it replaces a
-# DMG of the same name). Use it when no Mac is at hand or a release lacks its DMG.
+# Makes a desktop release on a macOS runner by running scripts/release.sh, the same script a
+# maintainer runs on a Mac: release-check, version and CHANGELOG date, build-dmg + test-dmg,
+# build-daemon, the chore(release) commit on main, the tag, the GitHub Release with the DMG, the
+# daemon and their .sha256 files, and PUT /v1/admin/releases/<version> on production.
+#
+# Manual only (Actions tab, or `gh workflow run release.yml -f version=1.2.6 -f mode=release`).
+# Not on a tag push: the release commit (version and CHANGELOG date) must come before the tag,
+# so a tag trigger would put that step back on somebody's Mac; and a dispatch can be a dry run.
+#
+# Modes:
+#   dry-run      (default, any branch) preflight and plan, then set the version in the working
+#                tree, build, sign and check the DMG and the daemon; commits, tags and uploads
+#                nothing. The built files are kept as a workflow artifact for 7 days.
+#   release      (main only) the whole release.
+#   upload-only  (main only) download the DMG from the GitHub Release v<version> and upload it to
+#                production again (retry after a failed or skipped upload).
+#
+# Secrets (docs/RUNBOOK.md, "Release from GitHub Actions"): SIGNING_KEY_PEM, SIGNING_CERT_PEM,
+# ADMIN_SECRET_PRODUCTION. A release refuses to run without them: an ad-hoc signature would
+# change the designated requirement and the Keychain would stop trusting the app.
 
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: Release tag, for example v0.2.0
+      version:
+        description: Version, for example 1.2.6 (notes in docs/releases/<version>.md)
         required: true
         type: string
-      create:
-        description: Create the release if the tag has none yet
-        type: boolean
-        default: false
+      mode:
+        description: dry-run builds and checks only; release and upload-only run on main
+        type: choice
+        options: [dry-run, release, upload-only]
+        default: dry-run
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release
   cancel-in-progress: false
 
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
 jobs:
-  dmg:
-    name: Build and attach the DMG
+  release:
+    name: Release ${{ inputs.version }} (${{ inputs.mode }})
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
-      TAG: ${{ inputs.tag }}
+      MODE: ${{ inputs.mode }}
+      INPUT_VERSION: ${{ inputs.version }}
       GH_TOKEN: ${{ github.token }}
+      RCODESIGN_VERSION: 0.29.0
+      # SHA-256 of apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz (GitHub release of
+      # indygreg/apple-platform-rs, tag apple-codesign/0.29.0).
+      RCODESIGN_SHA256: d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a
     steps:
-      - name: Check the tag name
+      - name: Check the inputs
         run: |
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::'$TAG' is not a release tag like v0.2.0"
+          version="${INPUT_VERSION#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$INPUT_VERSION' is not a version like 1.2.6 or 1.3.0-rc.1"
             exit 1
           fi
+          if [ "$MODE" != dry-run ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::mode $MODE runs only on main (this run is on $GITHUB_REF); use dry-run on a branch"
+            exit 1
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ inputs.tag }}
-      - name: Check that Cargo.toml has the tag's version
+          # release.sh compares HEAD with origin/main, checks tags and pushes the release commit.
+          fetch-depth: 0
+
+      - name: Check out the ops checkout
+        # The operator's private repo (vars.OPS_REPO, read with the deploy key secrets.OPS_DEPLOY_KEY):
+        # the character pack and the server URLs that apps/desktop/build.rs embeds and release.sh
+        # uploads to. Under .tmp/ so git ignores it and release.sh sees a clean tree.
+        if: vars.OPS_REPO != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ vars.OPS_REPO }}
+          ssh-key: ${{ secrets.OPS_DEPLOY_KEY }}
+          path: .tmp/ops
+          persist-credentials: false
+
+      - name: Use the ops checkout
         run: |
-          . scripts/lib.sh
-          version="$(workspace_version)"
-          if [ "v$version" != "$TAG" ]; then
-            echo "::error::Cargo.toml says $version but the tag is $TAG"
+          if [ ! -f .tmp/ops/deploy/servers.json ]; then
+            echo "::error::no ops checkout: set the repository variable OPS_REPO and the secret OPS_DEPLOY_KEY; see docs/ENVIRONMENTS.md"
             exit 1
           fi
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: macos-release
-      - name: Build the DMG
-        run: scripts/build-dmg.sh
-      - name: Check the DMG
-        run: scripts/test-dmg.sh
-      - name: Attach to the release
+          echo "TC_OPS_DIR=$GITHUB_WORKSPACE/.tmp/ops" >>"$GITHUB_ENV"
+
+      - name: Write the signing files
+        if: inputs.mode != 'upload-only'
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+          SIGNING_CERT_PEM: ${{ secrets.SIGNING_CERT_PEM }}
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            if [ "${{ inputs.create }}" = true ]; then
-              prerelease=()
-              if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
-              gh release create "$TAG" --verify-tag --generate-notes "${prerelease[@]}"
-            else
-              echo "::error::No release for $TAG. Run scripts/release.sh, or rerun with 'create' set."
+          if [ -z "$SIGNING_KEY_PEM" ] || [ -z "$SIGNING_CERT_PEM" ]; then
+            if [ "$MODE" = release ]; then
+              echo "::error::the secrets SIGNING_KEY_PEM and SIGNING_CERT_PEM are missing. A release signed ad hoc would lose the Keychain's trust; see docs/RUNBOOK.md"
               exit 1
             fi
+            echo "::warning::SIGNING_KEY_PEM or SIGNING_CERT_PEM is missing: this dry run signs ad hoc, and a release would refuse to run"
+            exit 0
           fi
-          gh release upload "$TAG" dist/*.dmg dist/*.dmg.sha256 --clobber
+          dir="$RUNNER_TEMP/signing"
+          (umask 077; mkdir -p "$dir"
+           printf '%s\n' "$SIGNING_KEY_PEM" >"$dir/key.pem"
+           printf '%s\n' "$SIGNING_CERT_PEM" >"$dir/cert.pem")
+          if ! openssl x509 -in "$dir/cert.pem" -noout 2>/dev/null; then
+            echo "::error::SIGNING_CERT_PEM is not a PEM certificate"; exit 1
+          fi
+          if [ "$(openssl pkey -in "$dir/key.pem" -pubout 2>/dev/null)" != "$(openssl x509 -in "$dir/cert.pem" -noout -pubkey)" ]; then
+            echo "::error::SIGNING_KEY_PEM is not the private key of SIGNING_CERT_PEM"; exit 1
+          fi
+          echo "SIGNING_DIR=$dir" >>"$GITHUB_ENV"
+          # The fingerprint is public: it is in every signed app's designated requirement.
+          . scripts/lib.sh
+          SIGNING_DIR="$dir" signing_cert_sha1 | sed 's/^/certificate leaf SHA-1: /'
+
+      - name: Write the admin secret
+        env:
+          ADMIN_SECRET_PRODUCTION: ${{ secrets.ADMIN_SECRET_PRODUCTION }}
+        run: |
+          prerelease=0
+          [[ "$VERSION" == *-* ]] && prerelease=1
+          if [ -z "$ADMIN_SECRET_PRODUCTION" ]; then
+            if [ "$MODE" = upload-only ] || { [ "$MODE" = release ] && [ "$prerelease" = 0 ]; }; then
+              echo "::error::the secret ADMIN_SECRET_PRODUCTION is missing, so the DMG cannot be uploaded to production; see docs/RUNBOOK.md"
+              exit 1
+            fi
+            [ "$MODE" = dry-run ] && echo "::warning::ADMIN_SECRET_PRODUCTION is missing: a release would refuse to run"
+            exit 0
+          fi
+          # release.sh reads $TEAM_CHAT_CONFIG_DIR/production/admin-secret and never prints it.
+          config="$RUNNER_TEMP/team-chat"
+          (umask 077; mkdir -p "$config/production"
+           printf '%s' "$ADMIN_SECRET_PRODUCTION" >"$config/production/admin-secret")
+          echo "TEAM_CHAT_CONFIG_DIR=$config" >>"$GITHUB_ENV"
+
+      - name: Install rcodesign
+        if: inputs.mode != 'upload-only'
+        run: |
+          [ "$(uname -m)" = arm64 ] || { echo "::error::expected an arm64 runner"; exit 1; }
+          name="apple-codesign-$RCODESIGN_VERSION-aarch64-apple-darwin"
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o "$name.tar.gz" \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$RCODESIGN_VERSION/$name.tar.gz"
+          echo "$RCODESIGN_SHA256  $name.tar.gz" | shasum -a 256 -c -
+          tar xzf "$name.tar.gz"
+          mkdir -p bin && mv "$name/rcodesign" bin/
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+          bin/rcodesign --version
+
+      - name: Install the toolchain from rust-toolchain.toml
+        if: inputs.mode != 'upload-only'
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: inputs.mode != 'upload-only'
+        with:
+          shared-key: macos-release
+
+      - name: Fetch the crates
+        # release.sh runs `cargo update --workspace --offline`, which needs the crates locally.
+        if: inputs.mode != 'upload-only'
+        run: cargo fetch --locked
+
+      - name: Set the git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Get the previous release's DMG
+        # test-dmg.sh --same-as then proves the new app keeps the designated requirement of the
+        # last release, so installed apps keep their Keychain access after the update.
+        if: inputs.mode != 'upload-only' && env.SIGNING_DIR != ''
+        run: |
+          prev="$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')"
+          if [ -z "$prev" ] || [ "$prev" = "v$VERSION" ]; then
+            echo "no earlier release to compare with"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/previous"
+          gh release download "$prev" --pattern '*.dmg' --dir "$RUNNER_TEMP/previous"
+          dmg="$(find "$RUNNER_TEMP/previous" -name '*.dmg' | head -n 1)"
+          echo "comparing with $prev: $(basename "$dmg")"
+          echo "SAME_AS_DMG=$dmg" >>"$GITHUB_ENV"
+
+      - name: Release (${{ inputs.mode }})
+        run: |
+          args=("$VERSION" --env production)
+          notes="docs/releases/$VERSION.md"
+          # Without the notes file the preflight reports it (dry run) or stops (release).
+          [ -f "$notes" ] && args+=(--notes "$notes")
+          [ -n "${SAME_AS_DMG:-}" ] && args+=(--same-as "$SAME_AS_DMG")
+          case "$MODE" in
+            dry-run) scripts/release.sh "${args[@]}" --dry-run --build ;;
+            release) scripts/release.sh "${args[@]}" ;;
+            upload-only)
+              mkdir -p dist
+              gh release download "v$VERSION" --pattern '*.dmg' --pattern '*.dmg.sha256' --dir dist
+              (cd dist && shasum -a 256 -c ./*.dmg.sha256)
+              scripts/release.sh "$VERSION" --env production --upload-only ;;
+          esac
+
+      - name: Keep the dry run's build
+        if: inputs.mode == 'dry-run'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dry-run-${{ env.VERSION }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove the secret files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/signing" "$RUNNER_TEMP/team-chat"
