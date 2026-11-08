@@ -591,8 +591,9 @@ impl RailView {
                     .selected(*selected)
                     .unread(*unread)
                     .muted(*muted)
+                    // One signal per row: the state's mark only.
                     .right(match line {
-                        Some(l) => RightColumn::Status(l.badge, l.short.clone().into()),
+                        Some(l) => RightColumn::Mark(l.badge),
                         None => RightColumn::None,
                     })
                     .on_click(move |_, _, cx| {

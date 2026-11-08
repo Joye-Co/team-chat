@@ -34,7 +34,7 @@ crate::copy! {
     CANCEL = "取消",
     SAVE = "保存",
     CLOSE = "关闭",
-    PANE_TOPIC = "话题信息",
+    PANE_TOPIC = "详情",
     MEMBER_DEACTIVATED = "已停用",
     MORE_ITEMS = "等 {n} 人",
     // --- v13/ux-pages: page states (COMPLETENESS.md §2.14, §2.15) ---
