@@ -75,6 +75,8 @@ pub struct Daemon {
     last_rx: Instant,
     link_tx: mpsc::UnboundedSender<LinkEvent>,
     run_tx: mpsc::UnboundedSender<(String, RunMsg)>,
+    /// Where runs execute.
+    exec: Arc<dyn crate::executor::Executor>,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -101,6 +103,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         last_rx: Instant::now(),
         link_tx,
         run_tx,
+        exec: crate::executor::local(),
     };
     d.recover();
     {
@@ -178,44 +181,6 @@ const UPDATE_CHECK: Duration = Duration::from_secs(60);
 /// (the server may not have acked their last frames).
 const RECOVER_FINISHED_MS: u64 = 3_600_000;
 
-/// Stops a CLI process group a crashed daemon left behind. A pid can be reused, so a live
-/// group leader must still name the CLI program; while any member of the group lives, its id
-/// is not reused.
-fn kill_leftover(meta: &crate::workspace::RunMeta) {
-    let Some(pgid) = meta.pgid.filter(|p| *p > 1) else {
-        return;
-    };
-    // SAFETY: signal 0 only probes whether the group exists.
-    if unsafe { libc::kill(-pgid, 0) } != 0 {
-        return;
-    }
-    // SAFETY: probe of the leader pid.
-    if unsafe { libc::kill(pgid, 0) } == 0 {
-        let name = meta
-            .program
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let cmd = std::process::Command::new("ps")
-            .args(["-p", &pgid.to_string(), "-o", "command="])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_default();
-        if name.is_empty() || !cmd.contains(&name) {
-            return;
-        }
-    }
-    log!(
-        "run {}: stopping CLI left by the previous daemon",
-        meta.run_id
-    );
-    // SAFETY: plain syscall; a negative pid addresses the process group.
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
-    }
-}
-
 impl Daemon {
     /// Rebuilds run state after a restart from `run.json` and `events.jsonl`: stops CLIs left
     /// running, ends unfinished runs with `run.done` (failed: daemon restarted) and a failed
@@ -243,7 +208,7 @@ impl Daemon {
                 continue;
             }
             if unfinished {
-                kill_leftover(&meta);
+                self.exec.kill_leftover(&meta);
             }
             let log_path = dir.join("events.jsonl");
             let mut buffer: VecDeque<(u64, bool, String)> = VecDeque::new();
@@ -729,6 +694,7 @@ impl Daemon {
             out: self.run_tx.clone(),
             redactor: self.redactor.clone(),
             outputs,
+            exec: self.exec.clone(),
         }));
     }
 

@@ -1,7 +1,7 @@
 //! Restart on a new version: when the daemon's own program file is replaced (the app updated
 //! itself, or someone copied a new binary over it), the running process still runs the old
-//! code. The daemon notices the new file and, once no run is active, exits so that launchd
-//! (`KeepAlive`) starts the new version. Nobody has to restart anything by hand.
+//! code. The daemon notices the new file and, once no run is active, exits so that the service
+//! manager (launchd `KeepAlive`, systemd `Restart=always`) starts the new version. Nobody has to restart anything by hand.
 
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};

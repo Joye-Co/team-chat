@@ -1,6 +1,7 @@
 //! One run from accept to session upload.
 
 use crate::config::{Config, RuntimeConfig};
+use crate::executor::{Executor, Stopped};
 use crate::proto::{RunAssign, RunDone, RunEvent, RunSession, Up, now_ms, truncate};
 use crate::redact::DeltaGate;
 use crate::runtime::{self, Control, Outcome, RunSpec, Status};
@@ -120,6 +121,8 @@ pub struct RunCtx {
     pub redactor: Arc<crate::redact::Redactor>,
     /// `chat-run` outputs waiting for `run.output.result` (shared with the daemon loop).
     pub outputs: Arc<crate::chat_run::Outputs>,
+    /// Where the run's CLI executes.
+    pub exec: Arc<dyn Executor>,
 }
 
 /// The `chat-run` transport of one run. Dropping it removes the socket or the folder.
@@ -213,6 +216,7 @@ pub async fn supervise(ctx: RunCtx) {
         out,
         redactor,
         outputs,
+        exec,
     } = ctx;
     let run_id = assign.run_id.clone();
     let started = Instant::now();
@@ -251,6 +255,12 @@ pub async fn supervise(ctx: RunCtx) {
             let mut env = build_env(&cfg, &rt, &assign);
             // Marks the run's processes, also tools that leave the CLI's tree (proctree).
             env.push((proctree::ENV_FOLDER.into(), dir.display().to_string()));
+            let gate = Arc::new(crate::secrets::Gate::for_run(
+                &cfg.gated_env,
+                &assign.env_allowlist,
+                aside,
+            ));
+            outputs.set_gate(gate.clone());
             // Lives until the CLI is done; dropping it removes the socket.
             let chat_run = if aside {
                 None
@@ -276,14 +286,27 @@ pub async fn supervise(ctx: RunCtx) {
                 run_dir: dir.clone(),
                 env,
                 aside,
-                note: chat_run.as_ref().map(|_| crate::chat_run::note()),
+                note: chat_run.as_ref().map(|_| match gate.note() {
+                    Some(n) => format!("{}\n\n{n}", crate::chat_run::note()),
+                    None => crate::chat_run::note(),
+                }),
                 resume_session_id: assign
                     .resume_session_id
                     .clone()
                     .filter(|s| runtime::valid_session_id(s)),
+                exec: exec.clone(),
             };
             let work = spec.cwd.clone();
-            let res = run_runtime(&cfg, &assign, spec, control_rx, &event).await;
+            let res = run_runtime(
+                &cfg,
+                &assign,
+                spec,
+                control_rx,
+                &event,
+                exec.as_ref(),
+                &gate,
+            )
+            .await;
             drop(chat_run);
             if aside {
                 workspace::set_read_only(&work, false);
@@ -380,24 +403,17 @@ pub async fn supervise(ctx: RunCtx) {
 /// Pause state of a run (接管).
 struct Paused {
     since: Instant,
-    /// The CLI's process group that got SIGSTOP (None while the CLI has not started yet).
-    stopped: Option<i32>,
-    /// The tool groups below the CLI that got SIGSTOP.
-    tools: Vec<proctree::Target>,
+    /// The stopped CLI and its tools (None while the CLI has not started yet).
+    stopped: Option<Box<dyn Stopped>>,
 }
 
 impl Paused {
-    /// SIGCONT the CLI and its tools.
+    /// Lets the CLI and its tools continue.
     fn resume(&self) {
-        if let Some(pgid) = self.stopped {
-            proctree::resume(pgid, &self.tools);
+        if let Some(s) = &self.stopped {
+            s.resume();
         }
     }
-}
-
-/// The CLI's process group, from `run.json` (written when the runtime spawned the CLI).
-fn run_pgid(run_dir: &std::path::Path) -> Option<i32> {
-    workspace::read_meta(run_dir)?.pgid.filter(|p| *p > 1)
 }
 
 async fn run_runtime(
@@ -406,6 +422,8 @@ async fn run_runtime(
     spec: RunSpec,
     mut control_rx: mpsc::UnboundedReceiver<RunCtl>,
     event: &impl Fn(RunEvent),
+    exec: &dyn Executor,
+    secrets: &crate::secrets::Gate,
 ) -> (Outcome, bool) {
     let Some(rt) = runtime::for_kind(&spec.cfg.kind) else {
         return (
@@ -434,11 +452,8 @@ async fn run_runtime(
     let mut gate = DeltaGate::default();
     let outcome = loop {
         // A pause that came before the CLI started stops it as soon as its group is known.
-        if let Some(p) = paused.as_mut().filter(|p| p.stopped.is_none())
-            && let Some(pgid) = run_pgid(&run_dir)
-        {
-            proctree::stop(pgid, &run_dir, &mut p.tools);
-            p.stopped = Some(pgid);
+        if let Some(p) = paused.as_mut().filter(|p| p.stopped.is_none()) {
+            p.stopped = exec.stop(&run_dir);
         }
         let hold_until = gate
             .deadline()
@@ -467,12 +482,7 @@ async fn run_runtime(
                             }
                             continue;
                         }
-                        let pgid = run_pgid(&run_dir);
-                        let mut tools = vec![];
-                        if let Some(pgid) = pgid {
-                            proctree::stop(pgid, &run_dir, &mut tools);
-                        }
-                        paused = Some(Paused { since: Instant::now(), stopped: pgid, tools });
+                        paused = Some(Paused { since: Instant::now(), stopped: exec.stop(&run_dir) });
                         for ev in gate.push(RunEvent::Paused { paused: true, by }) {
                             event(ev);
                         }
@@ -495,6 +505,16 @@ async fn run_runtime(
                                 input_id: format!("resume-{resumes}"),
                                 text,
                             });
+                        }
+                    }
+                    // An answer to `chat-run secret`: the daemon's own approval, not the CLI's.
+                    RunCtl::Runtime(Control::Approval { approval_id, approve })
+                        if secrets.owns(&approval_id) =>
+                    {
+                        if let Some(ev) = secrets.answer(&approval_id, approve, Instant::now()) {
+                            for ev in gate.push(ev) {
+                                event(ev);
+                            }
                         }
                     }
                     RunCtl::Runtime(c) => {

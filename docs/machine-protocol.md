@@ -219,8 +219,9 @@ RunEvent =
 - Input that reaches the daemon after the run's last turn has ended and the CLI exits is not
   taken: no `input.accepted` comes, `run.done` follows. BotDesk must then start a new run for
   that input (with the topic context in its prompt).
-- `approval.request` comes from CLIs that ask (ACP `session/request_permission`). The server
-  answers `run.approval`; the daemon answers the CLI and emits `approval.resolved`. Since 1.2.1
+- `approval.request` comes from CLIs that ask (ACP `session/request_permission`) and from
+  `chat-run secret` (see **Environment**). The server answers `run.approval`; the daemon
+  answers the CLI (or keeps the secret's answer) and emits `approval.resolved`. Since 1.2.1
   an AI member always has every permission and nothing in `daemon.toml` narrows it: Claude Code
   runs with `--permission-mode bypassPermissions` and `--allowedTools` for the shell, edit, web,
   todo and task tools and `Bash(chat-run:*)` (`-p` has nobody to ask); Codex runs with sandbox
@@ -547,9 +548,16 @@ the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
 processes for pause and cancel); 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
 (Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
 
+Names in `envAllowlist` that the config lists in `gated_env` are never in the environment. The
+CLI asks for one with `chat-run secret <NAME>`: the first call sends `approval.request` (title
+`使用 <NAME>`) and fails with `pending`; after `run.approval approve` the daemon emits
+`approval.resolved` and the same command prints the value for 30 minutes; after `deny` it fails
+with `denied` for the rest of the run. The daemon answers these approvals itself, the CLI never
+sees them. Side chat runs get no gated variables.
+
 Group members read run events, so the daemon redacts every frame before it sends or stores
-it, and the session file before upload: the exact values of the `env_passthrough` variables
-and the machine token, known token formats (`tc_`, `whk_`, `tm_`, GitHub, OpenAI, Anthropic,
+it, and the session file before upload: the exact values of the `env_passthrough` and
+`gated_env` variables and the machine token, known token formats (`tc_`, `whk_`, `tm_`, GitHub, OpenAI, Anthropic,
 AWS, Slack, Google keys, bearer values, private key blocks, URL passwords, secret query
 parameters, invite codes) and secret-named `key=value` pairs become `<redacted>`.
 `message.delta` text is released per line (or after 1 s, all but its last two words), so a
@@ -569,7 +577,7 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
+`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.

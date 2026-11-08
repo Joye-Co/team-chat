@@ -56,18 +56,33 @@ fn main() {
         }
         "install-service" => {
             let _ = load_cfg();
-            match daemon::service::install(
-                &daemon::service::agents_dir(),
-                &config_path,
-                &daemon::service::log_dir(),
-                load,
-            ) {
+            let res = if cfg!(target_os = "linux") {
+                daemon::service::install_systemd(
+                    &daemon::service::units_dir(),
+                    &config_path,
+                    &daemon::service::systemd_log_dir(),
+                    load,
+                )
+            } else {
+                daemon::service::install(
+                    &daemon::service::agents_dir(),
+                    &config_path,
+                    &daemon::service::log_dir(),
+                    load,
+                )
+            };
+            match res {
                 Ok(p) => println!("installed {}", p.display()),
                 Err(e) => exit_with(&e),
             }
         }
         "uninstall-service" => {
-            match daemon::service::uninstall(&daemon::service::agents_dir(), load) {
+            let res = if cfg!(target_os = "linux") {
+                daemon::service::uninstall_systemd(&daemon::service::units_dir(), load)
+            } else {
+                daemon::service::uninstall(&daemon::service::agents_dir(), load)
+            };
+            match res {
                 Ok(p) => println!("removed {}", p.display()),
                 Err(e) => exit_with(&e),
             }
