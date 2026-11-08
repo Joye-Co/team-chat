@@ -56,10 +56,12 @@ jobs:
               - *js
               - packages/**
               - protocol/**
+              - scripts/sandbox/**
             server:
               - *js
               - server/**
               - packages/**
+              - scripts/sandbox/**
             rust: &rust
               - *common
               - Cargo.toml
@@ -120,6 +122,13 @@ jobs:
         run: scripts/ci-run.sh typecheck server
       - name: Test
         run: scripts/ci-run.sh test server
+      # The local sandbox (bun run dev:desktop): wrangler dev, every migration and the sample team
+      # through the public API. A wire change that breaks the samples fails here.
+      - name: Sandbox seed
+        run: bun scripts/sandbox/up.ts --reset && bun scripts/sandbox/up.ts --stop
+      - name: Sandbox server log
+        if: failure()
+        run: tail -n 200 .tmp/sandbox/server.log || true
 
   rust:
     name: Rust (protocol, core, daemon)

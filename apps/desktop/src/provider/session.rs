@@ -31,6 +31,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::{Credential, LoginError};
 
+static DATA_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Keeps every file of this run under `root` instead of Application Support (the local
+/// sandbox, `desktop --sandbox`). Call it before anything reads the data root.
+pub fn use_data_root(root: PathBuf) {
+    let _ = DATA_ROOT.set(root);
+}
+
 /// Where tokens are kept.
 #[derive(Clone)]
 pub enum TokenStorage {
@@ -38,6 +46,9 @@ pub enum TokenStorage {
     Keychain,
     /// Process memory only (self-tests).
     Memory(Arc<Mutex<Option<String>>>),
+    /// Files of mode 600 in this folder, one per server (the local sandbox, so a debug
+    /// build signs in without Keychain prompts).
+    Files(PathBuf),
     /// Tests: reads fail while the flag is set, as when the Keychain prompt
     /// is denied; otherwise the slot.
     /// Tests: one memory slot per Keychain account.
@@ -67,6 +78,13 @@ impl TokenStorage {
                 default_data_root().join("token"),
             )),
             TokenStorage::Memory(slot) => Box::new(MemoryTokenStore(slot.clone())),
+            TokenStorage::Files(dir) => {
+                let name: String = server_url
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                    .collect();
+                Box::new(chat_core::FileTokenStore::new(dir.join(name)))
+            }
             #[cfg(test)]
             TokenStorage::Keyed(map) => Box::new(KeyedTokenStore(map.clone(), server_url.into())),
             #[cfg(test)]
@@ -146,6 +164,9 @@ pub const fn app_id() -> &'static str {
 
 /// `~/Library/Application Support/<app id>`.
 pub fn default_data_root() -> PathBuf {
+    if let Some(root) = DATA_ROOT.get() {
+        return root.clone();
+    }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);

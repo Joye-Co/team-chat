@@ -4,16 +4,33 @@
 # GPUI has no hot reload, so a change shows up in a fresh window a few seconds
 # after the save (a failed build keeps the old window and prints the error).
 #
-#   scripts/dev-desktop.sh            fake data (no server, no sign-in)
-#   scripts/dev-desktop.sh --real     the real app (sign in to a server)
+#   scripts/dev-desktop.sh            the real app on this worktree's local sandbox: the
+#                                     real server with the sample team (scripts/sandbox/),
+#                                     signed in, nothing touches your own accounts
+#   scripts/dev-desktop.sh --reset    the same, with the sample data made again
+#   scripts/dev-desktop.sh --real     the real app (sign in to a server yourself)
+#   scripts/dev-desktop.sh --fake     the in-process samples of the screenshot self-tests
 #
-# Ctrl-C stops the watcher and closes the window.
+# Ctrl-C stops the watcher, closes the window and stops the sandbox server (its data stays in
+# .tmp/sandbox/ for the next start).
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-args=(--fake)
-[[ "${1:-}" == "--real" ]] && args=()
+mode=sandbox
+reset=()
+case "${1:-}" in
+  --real) mode=real ;;
+  --fake) mode=fake ;;
+  --reset) reset=(--reset) ;;
+  "") ;;
+  *) die "unknown argument: $1 (use --reset, --real or --fake)" ;;
+esac
+case "$mode" in
+  sandbox) args=(--sandbox "$ROOT/.tmp/sandbox") ;;
+  fake) args=(--fake) ;;
+  real) args=() ;;
+esac
 
 [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
 need cargo
@@ -34,7 +51,16 @@ stop_app() {
   fi
   pid=""
 }
-trap 'stop_app; exit 0' INT TERM
+stop_all() {
+  stop_app
+  [[ "$mode" == sandbox ]] && bun "$ROOT/scripts/sandbox/up.ts" --stop || true
+}
+trap 'stop_all; exit 0' INT TERM
+
+if [[ "$mode" == sandbox ]]; then
+  need bun
+  bun "$ROOT/scripts/sandbox/up.ts" ${reset[@]+"${reset[@]}"} || die "the sandbox did not start"
+fi
 
 # A fingerprint of every watched file's path and modification time.
 fingerprint() {

@@ -10,6 +10,7 @@ and secrets outside it (see [Ops checkout](#ops-checkout)). The names below (`ch
 | Env | URL | Worker | D1 | R2 bucket | Use |
 | --- | --- | --- | --- | --- | --- |
 | local | `http://127.0.0.1:<port>` | `wrangler dev` | local | local | development |
+| sandbox | `http://127.0.0.1:<port>` (`.tmp/sandbox/port`) | `wrangler dev` per worktree | local, in `.tmp/sandbox/state` | local | `bun run dev:desktop`: the real app on the sample team of `scripts/sandbox/seed.ts`; secrets in `.tmp/sandbox/` (mode 600) |
 | e2e | `https://chat-api-e2e.<your-subdomain>.workers.dev` | `chat-api-e2e` | `chat-e2e` | `chat-files-e2e` | `tools/e2e` runs; data is disposable |
 | staging | `https://chat-api-staging.<your-subdomain>.workers.dev` | `chat-api-staging` | `chat-staging` | `chat-files-staging` | team trial before production |
 | production | `https://chat-api-prod.<your-subdomain>.workers.dev` | `chat-api-prod` | `chat-prod` | `chat-files-prod` | daily use |

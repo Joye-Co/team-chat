@@ -22,7 +22,9 @@ Build: `. "$HOME/.cargo/env"; export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6; c
 
 | Command | What it does |
 | --- | --- |
-| `desktop` | Opens the app with the fake provider (until the chat-core provider lands). |
+| `desktop` | Opens the real app (sign in to a server). |
+| `desktop --sandbox <dir>` | The real app on the local sandbox server whose `server-url` and `owner-token` are in `<dir>`, signed in as the sample owner; its files and token stay under `<dir>/app` (no Keychain, no Application Support). `bun run dev:desktop` starts the server (`scripts/sandbox/up.ts`), seeds it once (`scripts/sandbox/seed.ts`) and opens the app this way, again on every save. |
+| `desktop --fake` | The in-process samples of the screenshot self-tests (`src/fake/v2.rs`); not kept in step with every server feature. Use the sandbox to look at UI work. |
 | `desktop --signed-out` | Starts at the login view. Any code signs in except `0000-0000` (and the legacy `WRONG-CODE-0000`). |
 | `desktop --screenshot <dir> [--theme light\|dark\|both] [--scenes a,b] [--worst-case] [--size WxH]` | Captures each scene window in each theme to `<dir>/<scene>-<theme>[-worst].png` plus `screenshots.json`, without focus, and exits. `desktop --list-scenes` lists scenes; add one in `src/selftest/scenes.rs`. |
 | `desktop --selftest-live <url> --token-file <path> --report <path> [--read-only]` | Signs in to a real server with the token, starts a topic and sends a message, then restores the session. `--read-only` only connects and catches up every group (no window, no writes): safe against production. |

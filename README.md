@@ -59,8 +59,9 @@ bunx wrangler dev --port 8789 --inspector-port 9789
 cd ..
 bun server/scripts/admin.ts bootstrap --env local --url http://127.0.0.1:8789 --name <owner>
 
-# Desktop app (fake data; --signed-out starts at the login view)
-cargo run -p desktop --release
+# Desktop app for UI work: the real app on a local server with a sample team, signed in,
+# rebuilt and reopened on every save (scripts/sandbox/; --reset makes the samples again)
+bun run dev:desktop
 # Release DMG: dist/<name>-<version>.dmg
 scripts/build-dmg.sh && scripts/test-dmg.sh
 ```

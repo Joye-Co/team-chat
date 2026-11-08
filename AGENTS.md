@@ -62,6 +62,12 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   shows your worktree path.
 - **Tooling**: bun for JS packages (`bun install`, `bun run`), cargo for Rust, and wrangler from
   the server package (`bunx wrangler` inside `server/`).
+- **Look at UI work in the sandbox**: `bun run dev:desktop` opens the real app (the real provider,
+  nothing faked) on this worktree's local server with the sample team of
+  `scripts/sandbox/seed.ts`, signed in, and reopens it on every save. When a feature needs data
+  the samples lack, add it to `seed.ts` through the public API in the same change; CI seeds a
+  fresh server on every PR. Do not add features to the in-process fake (`src/fake/`): it only
+  feeds the screenshot self-tests.
 - **Tests**: server with vitest and `@cloudflare/vitest-pool-workers` (`bun run test` in
   `server/`); Rust with `cargo test`; end-to-end with `tools/e2e` against `wrangler dev`, the
   e2e environment or staging. A change is done when its tests pass and you ran them.
