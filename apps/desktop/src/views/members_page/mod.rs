@@ -35,8 +35,7 @@ use crate::{
     ui::{
         native::{
             CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
-            ToolbarItemKind, ToolbarRow, borderless_button, disabled_push, emphasized,
-            native_colors,
+            ToolbarItemKind, ToolbarRow, borderless_button, emphasized, native_colors,
             page::{self, PageLoad, Status},
             push_button, toolbar_item,
         },
@@ -706,21 +705,12 @@ impl MembersPage {
         }
         let mut actions: Vec<AnyElement> = Vec::new();
         if m.is_bot() {
-            let side = {
+            // 单独问 needs a running 话题: without one it is left out, not
+            // drawn as a faded button beside 交代.
+            if let Some(r) = e.run.clone() {
                 let nav = self.services.nav.clone();
-                let run = e.run.clone();
                 let member = m.id.clone();
-                move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
-                    let Some(r) = run.clone() else { return };
-                    let member = member.clone();
-                    nav.update(cx, |nav, cx| {
-                        nav.open_topic(r.group_id, r.topic_id, cx);
-                        nav.set_right_pane(RightPane::SideChat(member), cx);
-                    })
-                }
-            };
-            actions.push(
-                disabled_push(
+                actions.push(
                     push_button(
                         "member-side-chat",
                         c::MEMBERS_SIDE_CHAT,
@@ -728,12 +718,16 @@ impl MembersPage {
                         PushSize::Small,
                         cx,
                     )
-                    .on_click(side),
-                    e.run.is_none(),
-                    cx,
-                )
-                .into_any_element(),
-            );
+                    .on_click(move |_, _, cx| {
+                        let (r, member) = (r.clone(), member.clone());
+                        nav.update(cx, |nav, cx| {
+                            nav.open_topic(r.group_id, r.topic_id, cx);
+                            nav.set_right_pane(RightPane::SideChat(member), cx);
+                        })
+                    })
+                    .into_any_element(),
+                );
+            }
             actions.push(
                 push_button(
                     "member-hand-over",

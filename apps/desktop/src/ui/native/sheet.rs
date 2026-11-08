@@ -178,7 +178,10 @@ impl RenderOnce for SheetLayout {
                     .flex()
                     .items_center()
                     .gap(metrics::SHEET_BUTTON_GAP)
-                    .children(self.leading_button)
+                    .children(
+                        self.leading_button
+                            .map(|b| b.min_w(metrics::SHEET_BUTTON_MIN_WIDTH)),
+                    )
                     .children(self.status.map(|el| {
                         div()
                             .min_w(px(0.))
@@ -187,7 +190,11 @@ impl RenderOnce for SheetLayout {
                             .child(el)
                     }))
                     .child(div().flex_1())
-                    .children(self.buttons),
+                    .children(
+                        self.buttons
+                            .into_iter()
+                            .map(|b| b.min_w(metrics::SHEET_BUTTON_MIN_WIDTH)),
+                    ),
             )
     }
 }
