@@ -263,6 +263,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Quote | `text.quote` |
 | Lists | `list.bullet`, `list.number`, `checklist`, outline `list.bullet.indent`; grid `square.grid.2x2`; table `tablecells` |
 | Download / upload | `square.and.arrow.down` / `square.and.arrow.up` |
+| Share (共享…, the system share symbol) | `square.and.arrow.up` |
 | Diagram | `point.3.connected.trianglepath.dotted` |
 | Media | video `video`, audio `waveform`, `play`, `pause`, volume `speaker.wave.2`, `pip`, zoom `plus.magnifyingglass` / `minus.magnifyingglass` |
 | Pointer (实时查看 cursor) | `cursorarrow` |

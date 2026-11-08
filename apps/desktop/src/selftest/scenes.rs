@@ -402,6 +402,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open,
     },
     Scene {
+        name: "files-menu",
+        about: "The files scene with the image's context menu: 打开, 在访达中显示, 快速查看, 共享…, 存储为…",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_menu,
+    },
+    Scene {
         name: "cards",
         about: "The 话题 of sample cards: status, fields, table, progress, list, code and actions",
         start: Start::SignedIn,
@@ -534,6 +541,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: crate::views::search::preview::open_far_hit,
         open: open_main,
+    },
+    Scene {
+        name: "topic-find",
+        about: "⌘F in 开发 / 断线重连后消息重复: the find bar with 重连 typed, every match marked, the current one stronger",
+        start: Start::V2,
+        setup: |s, cx| v2_open_topic(s, crate::fake::v2::DEV, crate::fake::v2::T_RECONNECT, cx),
+        open: crate::views::timeline::find::open_scene,
     },
     Scene {
         name: "process",

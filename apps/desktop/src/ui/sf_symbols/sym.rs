@@ -159,6 +159,8 @@ concepts! {
     Table = "tablecells";
     Download = "square.and.arrow.down";
     Upload = "square.and.arrow.up";
+    /// 共享… (the system share symbol).
+    Share = "square.and.arrow.up";
     Diagram = "point.3.connected.trianglepath.dotted";
     Video = "video";
     Audio = "waveform";

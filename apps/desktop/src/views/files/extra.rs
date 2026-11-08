@@ -18,8 +18,9 @@ use gpui_component::{
 };
 
 use super::{
-    AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text, open_file,
-    preview_size, size_text,
+    AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text,
+    export::{self, FileItem as _, FileRef},
+    open_file, preview_size, size_text,
 };
 use crate::{
     copy::{files as f, fill},
@@ -194,6 +195,9 @@ fn image_preview(
         (None, Some(s @ TransferState::Running { .. })) => Some(s.percent()),
         _ => None,
     };
+    let target = FileRef::attachment(provider, &g, &t, file);
+    let menu_target = target.clone();
+    let (provider3, file3, g3, t3) = (provider.clone(), file.clone(), g.clone(), t.clone());
     let provider = provider.clone();
     let file2 = file.clone();
     div()
@@ -212,6 +216,20 @@ fn image_preview(
         .when_some(progress, |el, p| el.child(track(p, cx)))
         .tooltip(move |window, cx| Tooltip::new(f::OPEN_IMAGE).build(window, cx))
         .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file2, OpenAction::Open, cx))
+        .file_item(target, Sym::Image)
+        .context_menu(move |menu, window, _| {
+            let at = window.mouse_position();
+            let item = |label: &'static str, what: OpenAction| {
+                let (provider, file) = (provider3.clone(), file3.clone());
+                let (g, t) = (g3.clone(), t3.clone());
+                PopupMenuItem::new(label)
+                    .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
+            };
+            let menu = menu
+                .item(item(f::OPEN, OpenAction::Open))
+                .item(item(f::REVEAL, OpenAction::RevealInFinder));
+            export::menu_items(menu, &menu_target, at)
+        })
         .into_any_element()
 }
 
@@ -552,11 +570,18 @@ pub fn file_row_in(
     .when(!running, |el| {
         el.on_click(move |_, _, cx| open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx))
     })
+    // Space previews it, and it drags out to Finder as the file.
+    .file_item(
+        FileRef::attachment(provider, group_id, topic_id, file),
+        file_icon(file),
+    )
     // v12/behavior: the row's buttons as a context menu (§7.3).
     .context_menu({
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
-        move |menu, _, _| {
+        let target = FileRef::attachment(&provider, &g, &t, &file);
+        move |menu, window, _| {
+            let at = window.mouse_position();
             let item = |label: &'static str, what: OpenAction| {
                 let (provider, g, t, file) = (provider.clone(), g.clone(), t.clone(), file.clone());
                 PopupMenuItem::new(label)
@@ -571,8 +596,10 @@ pub fn file_row_in(
             } else if failed {
                 menu.item(item(f::RETRY, OpenAction::Open))
             } else {
-                menu.item(item(f::OPEN, OpenAction::Open))
-                    .item(item(f::REVEAL, OpenAction::RevealInFinder))
+                let menu = menu
+                    .item(item(f::OPEN, OpenAction::Open))
+                    .item(item(f::REVEAL, OpenAction::RevealInFinder));
+                export::menu_items(menu, &target, at)
             }
         }
     })

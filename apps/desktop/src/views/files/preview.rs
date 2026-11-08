@@ -327,3 +327,58 @@ pub fn open(
         .update(cx, |nav, cx| nav.set_side_panel_open(true, cx));
     open_main(services, content, cx)
 }
+
+/// The `files-menu` scene: the `files` scene with the image's context menu open
+/// (打开, 在访达中显示, 快速查看, 共享…, 存储为…), opened by a right-click once drawn.
+pub fn open_menu(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open(services, content, cx)?;
+    handle
+        .update(cx, |_, window, _| right_click_after(3, window))
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// Right-clicks the inline image after `frames` frames (the timeline has laid out).
+fn right_click_after(frames: u32, window: &mut gpui::Window) {
+    window.on_next_frame(move |window, cx| {
+        if frames > 0 {
+            right_click_after(frames - 1, window);
+            window.refresh();
+            return;
+        }
+        let position = gpui::point(gpui::px(650.), gpui::px(290.));
+        let modifiers = gpui::Modifiers::default();
+        window.dispatch_event(
+            gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                position,
+                pressed_button: None,
+                modifiers,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                button: gpui::MouseButton::Right,
+                position,
+                modifiers,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                button: gpui::MouseButton::Right,
+                position,
+                modifiers,
+                click_count: 1,
+            }),
+            cx,
+        );
+        window.refresh();
+    });
+}

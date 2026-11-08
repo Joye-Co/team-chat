@@ -10,7 +10,10 @@ use gpui::{
     PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
     WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::Disableable as _;
+use gpui_component::{
+    Disableable as _,
+    menu::{ContextMenuExt as _, PopupMenuItem},
+};
 
 use super::window;
 use crate::ui::NamedButton as _;
@@ -24,7 +27,12 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{self, Sym},
     views::{
-        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify_error, size_text},
+        files::{
+            PANEL_ROW_H, error_text,
+            export::{self, FileItem as _, FileRef},
+            extra::file_row_in,
+            notify_error, size_text,
+        },
         time_text,
     },
 };
@@ -209,6 +217,8 @@ impl Render for TopicOutputs {
                 let (id, id2) = (a.id.clone(), a.id.clone());
                 let group = SharedString::from(format!("panel-artifact-{}", a.id));
                 let provider = provider.clone();
+                let target = FileRef::artifact(&provider, &a.id, &a.title);
+                let (open_provider, open_id) = (provider.clone(), a.id.clone());
                 div()
                     .id(ElementId::Name(group.clone()))
                     .group(group.clone())
@@ -281,6 +291,18 @@ impl Render for TopicOutputs {
                         gpui_component::tooltip::Tooltip::new(author.clone()).build(window, cx)
                     })
                     .on_click(move |_, _, cx| window::open_artifact(&provider, &id, None, cx))
+                    // Space previews it, it drags out to Finder, and its menu opens,
+                    // previews, shares and saves it.
+                    .file_item(target.clone(), glyph)
+                    .context_menu(move |menu, window, _| {
+                        let at = window.mouse_position();
+                        let (provider, id) = (open_provider.clone(), open_id.clone());
+                        let menu =
+                            menu.item(PopupMenuItem::new(f::OPEN).on_click(move |_, _, cx| {
+                                window::open_artifact(&provider, &id, None, cx)
+                            }));
+                        export::menu_items(menu, &target, at)
+                    })
                     .into_any_element()
             })
             .collect();

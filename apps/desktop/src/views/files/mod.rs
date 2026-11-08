@@ -6,7 +6,9 @@
 //! file into its cache ([`ChatProvider::fetch_file`]) and the view opens the
 //! path it gets back on the main thread.
 
+pub mod export;
 pub mod extra;
+pub mod native;
 pub mod preview;
 
 use std::{path::Path, sync::Arc};

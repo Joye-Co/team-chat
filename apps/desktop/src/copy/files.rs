@@ -41,4 +41,10 @@ crate::copy! {
     // --- v12/fx-pages ---
     ALERT_OK = "好",
     // --- end v12/fx-pages ---
+    // --- mac-files: Quick Look, share, save as ---
+    QUICK_LOOK = "快速查看",
+    SHARE = "共享…",
+    SAVE_AS = "存储为…",
+    SAVE_FAILED = "无法存储「{name}」：{reason}",
+    // --- end mac-files ---
 }
