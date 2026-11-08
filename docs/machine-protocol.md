@@ -379,6 +379,8 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 | `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
 | `artifact.reply` | `{ eventId, ok: true, payload? }` or `{ eventId, ok: false, error: { code: "declined", message } }` | `chat-run artifact reply --event ev --file reply.json` or `--decline "…"` |
 | `desk.note` (1.1) | `{ text }`: the bot's desk note in the run's group, with the rules of `PUT /v1/desk-note` (protocol.md "Desk notes"); result `{ seq }` | `chat-run desk note --text "…"` (`""` clears) |
+| `member.handoff` | `{ member, goal, doneWhen?, notes? }`: 转交 to another AI member (protocol.md "Delegation"); result `{ member, topicId, runId }` | `chat-run handoff --member <name> --goal "…" [--done-when "a; b"] [--notes "…"]` |
+| `member.assign` | the same body: 分出去 into a new topic; result `{ member, topicId, runId }` | `chat-run assign --member <name> --goal "…" [--done-when "a; b"] [--notes "…"]` |
 
 `chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
 `<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs

@@ -410,6 +410,8 @@ export abstract class DeskInteract extends DeskTakeover {
   protected async performOutput(r: RunRow, op: string, outputId: string, body: unknown): Promise<Result<unknown>> {
     return result(async () => {
       if (r.kind === "aside") throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
+      // 转交 / 分出去 (delegate.ts): desk to desk, not a client frame.
+      if (op === "member.handoff" || op === "member.assign") return this.delegate(r, op, body);
       // 1.1: the desk note has no WebSocket frame; it is `PUT /v1/desk-note` in the run's group.
       if (op === "desk.note") {
         const text = (body as { text?: unknown } | null)?.text;

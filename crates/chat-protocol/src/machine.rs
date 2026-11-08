@@ -319,6 +319,10 @@ pub mod output_op {
     pub const ARTIFACT_REPLY: &str = "artifact.reply";
     /// 1.1: the bot's desk note in the run's group, body `{ text }` (as `PUT /v1/desk-note`).
     pub const DESK_NOTE: &str = "desk.note";
+    /// 转交: the whole piece of work goes to another AI member, body `{ member, goal, doneWhen?, notes? }`.
+    pub const MEMBER_HANDOFF: &str = "member.handoff";
+    /// 分出去: a part goes to another AI member in a new topic; the result comes back.
+    pub const MEMBER_ASSIGN: &str = "member.assign";
 }
 
 /// An event from an interactive 产出 page given to a run (`run.input.artifactEvent`).
