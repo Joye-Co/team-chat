@@ -12,6 +12,7 @@ import { addSettingsFixtures } from "./fixtures-settings.ts";
 import { addGapFixtures } from "./fixtures-v11-gaps.ts";
 import { addFilesFixtures } from "./fixtures-v11-files.ts";
 import { addMemberFixtures } from "./fixtures-members.ts";
+import { addMemoryFixtures } from "./fixtures-memory.ts";
 
 type Fixture = {
   kind: string;
@@ -355,6 +356,7 @@ addSettingsFixtures({ ok, bad, T0, ID, base });
 addGapFixtures({ ok, bad, T0, ID, base, message });
 addFilesFixtures({ ok, bad, T0, ID, base, message });
 addMemberFixtures({ ok, bad, T0, ID, base, message });
+addMemoryFixtures({ ok, bad, T0, ID });
 
 // ---------------------------------------------------------------------------
 

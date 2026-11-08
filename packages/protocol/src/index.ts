@@ -136,6 +136,15 @@ import {
   UpdateApprovalPolicyRequest,
   UpdateNotifySettingsRequest,
 } from "./settings.ts";
+import {
+  CreateMemoryRequest,
+  MachineMemoryNoteRequest,
+  MemoriesResponse,
+  MemoryItem,
+  MemoryUpdatesResponse,
+  MemoryVersionsResponse,
+  UpdateMemoryRequest,
+} from "./memory.ts";
 
 export * from "./common.ts";
 export * from "./characters.ts";
@@ -147,6 +156,7 @@ export * from "./pattern.ts";
 export * from "./diagram.ts";
 export * from "./media.ts";
 export * from "./desk.ts";
+export * from "./memory.ts";
 export * from "./links.ts";
 export * from "./message.ts";
 export * from "./files.ts";
@@ -826,6 +836,14 @@ export const schemas = {
   MyEmailResponse,
   PutArtifactMediaRequest,
   PutArtifactMediaResponse,
+  // memory (沉淀)
+  MemoryItem,
+  CreateMemoryRequest,
+  UpdateMemoryRequest,
+  MemoriesResponse,
+  MemoryVersionsResponse,
+  MemoryUpdatesResponse,
+  MachineMemoryNoteRequest,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

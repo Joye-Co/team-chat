@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemoryRequest",
+  "valid": false,
+  "description": "a person cannot make a memory pending",
+  "value": {
+    "status": "pending"
+  }
+}
