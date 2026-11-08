@@ -108,5 +108,6 @@ cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
   `~/.config/team-chat/<env>/admin-secret` (mode 600). Run it with `--dry-run` first. If the
   upload fails or the server has no release endpoint yet, retry later with
   `scripts/release.sh <version> --env <env> --upload-only`.
-- The **Release DMG** workflow (Actions tab, manual) rebuilds the DMG from a tag on a macOS
-  runner and attaches it to that tag's release.
+- The **Release** workflow (Actions tab, manual) runs `scripts/release.sh` on a macOS runner:
+  a dry run on any branch, the whole release or an upload retry on main. Its secrets and modes
+  are in [RUNBOOK.md](RUNBOOK.md#release-from-github-actions).

@@ -125,6 +125,45 @@ so the previous version normally does).
 
 The monitor rolls back the same way: `cd ops/monitor && bunx wrangler rollback <version-id>`.
 
+## Release from GitHub Actions
+
+The **Release** workflow (`.github/workflows/release.yml`, Actions tab, manual) runs
+`scripts/release.sh` on a macOS runner, so a release needs no particular Mac. Write
+`docs/releases/<v>.md` and the `## <v> (unreleased)` CHANGELOG section on `main` first, as for a
+local release.
+
+```sh
+gh workflow run release.yml --ref <branch> -f version=<v>                 # dry run on any branch
+gh workflow run release.yml --ref main -f version=<v> -f mode=release     # the release
+gh workflow run release.yml --ref main -f version=<v> -f mode=upload-only # upload again
+```
+
+- `dry-run` (default): preflight and plan, then builds, signs and checks the DMG and the daemon
+  (against the previous release's DMG too) and keeps them as a workflow artifact for 7 days.
+  Nothing is committed, tagged or uploaded. "would stop" lines name what a release would refuse.
+- `release` (main only): `chore(release): v<v>` on `main`, tag `v<v>`, GitHub Release with the
+  DMG, the daemon and the `.sha256` files, then `PUT /v1/admin/releases/<v>` on production.
+  The release commit is pushed with the workflow token, which starts no CI run on `main`.
+- `upload-only` (main only): downloads the DMG of release `v<v>`, checks its `.sha256` and uploads
+  it to production again.
+
+Repository secrets (Settings, Secrets and variables, Actions). The workflow never prints them:
+
+| Secret | Value |
+| --- | --- |
+| `SIGNING_CERT_PEM` | the whole of `~/.config/team-chat/signing/cert.pem` |
+| `SIGNING_KEY_PEM` | the whole of `~/.config/team-chat/signing/key.pem` |
+| `ADMIN_SECRET_PRODUCTION` | the content of `~/.config/team-chat/production/admin-secret` |
+
+Add them from the files, so they never pass through the clipboard or the shell history:
+`gh secret set SIGNING_CERT_PEM < ~/.config/team-chat/signing/cert.pem`, the same for
+`SIGNING_KEY_PEM` with `key.pem` and `ADMIN_SECRET_PRODUCTION` with `production/admin-secret`.
+A release refuses to run without the two signing secrets (an ad-hoc signature changes the
+designated requirement and the Keychain stops trusting the app) or with a key that does not
+belong to the certificate; a non-prerelease release and `upload-only` also refuse without
+`ADMIN_SECRET_PRODUCTION`. A dry run only warns and signs ad hoc. After rotating `ADMIN_SECRET`
+(below), set `ADMIN_SECRET_PRODUCTION` again.
+
 ## Bad app release
 
 A release that breaks the app (crash at launch, lost sign-in) must stop being offered at once:
@@ -136,7 +175,8 @@ every client checks for updates every 6 hours.
 2. Tell the people who installed it in the `运维` group: download the previous DMG from the
    GitHub release of that version and drag it over the app. The app does not go back by
    itself, and it never offers an older version as an update.
-3. Fix forward: release a higher version with `scripts/release.sh`; it is offered to everyone.
+3. Fix forward: release a higher version with `scripts/release.sh` or the Release workflow; it
+   is offered to everyone.
 4. A withdrawn version cannot be uploaded again. `withdraw-release ... --restore` offers it
    again if it was withdrawn by mistake.
 
@@ -147,7 +187,9 @@ every client checks for updates every 6 hours.
 1. `(umask 077; openssl rand -base64 32 | tr -d '\n' > ~/.config/team-chat/production/admin-secret.new)`
    (the file is mode 600 from the start; `ops/restore` refuses a secret file with another mode)
 2. `cd server && bunx wrangler secret put ADMIN_SECRET --env production < ~/.config/team-chat/production/admin-secret.new`
-3. `mv ~/.config/team-chat/production/admin-secret.new ~/.config/team-chat/production/admin-secret`
+3. `mv ~/.config/team-chat/production/admin-secret.new ~/.config/team-chat/production/admin-secret`,
+   then `gh secret set ADMIN_SECRET_PRODUCTION < ~/.config/team-chat/production/admin-secret`
+   for the Release workflow.
 4. Check: `curl -s -o /dev/null -w '%{http_code}\n' -H @<(printf 'x-admin-secret: %s' "$(cat ~/.config/team-chat/production/admin-secret)") https://chat-api-prod.huangdeshiou.workers.dev/v1/admin/import/d1` prints 200.
 
 **A member's or bot's token** (lost Mac, leaked token):
