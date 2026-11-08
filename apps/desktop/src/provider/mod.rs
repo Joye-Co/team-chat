@@ -45,6 +45,7 @@ mod realtime_live;
 #[cfg(test)]
 mod search_live;
 // v13/wire: the pages' backend data against a live server.
+pub mod sandbox;
 pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;

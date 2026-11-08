@@ -3,6 +3,8 @@
 //! Usage:
 //!   desktop                          open the app on the chat-core provider (signs in, or
 //!                                    restores the saved session)
+//!   desktop --sandbox <dir>          the real app on the local sandbox server in <dir>
+//!                                    (`bun run dev:desktop` starts it; scripts/sandbox/)
 //!   desktop --fake                   open the app with the sample team (fake data, 产出 included)
 //!   desktop --signed-out             start at the login view (fake provider)
 //!   desktop --selftest-smoke --report <path>
@@ -87,6 +89,7 @@ struct Args {
     report: Option<PathBuf>,
     signed_out: bool,
     fake: bool,
+    sandbox: Option<PathBuf>,
     hold_ms: u64,
     live_url: Option<String>,
     token_file: Option<PathBuf>,
@@ -113,6 +116,7 @@ fn parse_args() -> Result<Args, String> {
             "--report" => args.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--signed-out" => args.signed_out = true,
             "--fake" => args.fake = true,
+            "--sandbox" => args.sandbox = Some(it.next().ok_or("--sandbox needs a folder")?.into()),
             "--selftest-live" => {
                 args.live_url = Some(it.next().ok_or("--selftest-live needs a server URL")?)
             }
@@ -178,7 +182,7 @@ fn main() {
                 eprintln!("{error}");
             }
             eprintln!(
-                "usage: desktop [--fake | --signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path> [--read-only | --interact <dir>]"
+                "usage: desktop [--fake | --signed-out | --sandbox <dir>] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path> [--read-only | --interact <dir>]"
             );
             std::process::exit(2);
         }
@@ -209,8 +213,21 @@ fn main() {
             || args.selftest_nav
             || args.selftest_cards
             || args.selftest_timeline.is_some();
-        let core =
-            (!fake_data).then(|| provider::CoreProvider::new(provider::ProviderConfig::app()));
+        let sandbox = args.sandbox.as_deref().map(|dir| {
+            provider::sandbox::Sandbox::open(dir).unwrap_or_else(|error| {
+                eprintln!("{error}");
+                std::process::exit(2)
+            })
+        });
+        let core = (!fake_data).then(|| {
+            let config = sandbox
+                .as_ref()
+                .map_or_else(provider::ProviderConfig::app, |s| s.config());
+            provider::CoreProvider::new(config)
+        });
+        if let (Some(sandbox), Some(core)) = (&sandbox, &core) {
+            sandbox.sign_in(core);
+        }
         let provider: Arc<dyn ChatProvider> = if let Some(n) = args.selftest_timeline {
             views::timeline::selftest::provider(n)
         } else if let Some(core) = &core {
