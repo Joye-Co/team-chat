@@ -215,6 +215,7 @@ impl SettingsView {
             ],
         };
         window_fit::dim_window_buttons(window);
+        window_fit::pin_content_to_top(window);
         window_fit::hide_until_fitted(window);
         this.show(page, window, cx);
         this
@@ -402,15 +403,16 @@ impl Render for SettingsView {
                         div()
                             .w_full()
                             .relative()
-                            // A pane fades in with a 4 pt rise when the tab
-                            // changes, instead of swapping in one frame.
-                            .child(crate::ui::motion::enter(
+                            // A pane fades in when the tab changes, instead
+                            // of swapping in one frame. It does not rise: the
+                            // window's height already moves, and a second
+                            // motion under it read as a jitter.
+                            .child(crate::ui::motion::fade_in(
                                 gpui::ElementId::Name(
                                     format!("settings-pane-{}", self.page.slug()).into(),
                                 ),
                                 crate::theme::motion::NORMAL,
                                 div().relative().w_full().child(self.render_page()),
-                                |el, t| el.top(crate::theme::motion::TRAVEL * (1. - t)),
                                 cx,
                             ))
                             // Measures the pane as laid out; the window then

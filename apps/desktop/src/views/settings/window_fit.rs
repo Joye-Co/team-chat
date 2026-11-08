@@ -184,6 +184,44 @@ fn reveal(ns_window: NsWindow) {
 #[cfg(not(target_os = "macos"))]
 fn reveal(_: NsWindow) {}
 
+/// Pins the drawn frame to the window's top edge, unscaled. The layer's
+/// default gravity stretches the last frame over the new size until the app
+/// draws again, so while the height animates a stale frame squeezed or
+/// stretched the whole pane and it jumped by a few points. The top edge stays
+/// where it is during a resize, so a stale frame pinned there only shows
+/// less or more of its bottom.
+#[cfg(target_os = "macos")]
+pub fn pin_content_to_top(window: &Window) {
+    use objc2::{msg_send, runtime::AnyObject};
+    use objc2_foundation::NSString;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return;
+    };
+    let view = appkit.ns_view.as_ptr().cast::<AnyObject>();
+    // SAFETY: GPUI's AppKit handle points at the window's live content view;
+    // `layer` and `contentsAreFlipped` are getters and `setContentsGravity:`
+    // a setter, on the main thread.
+    unsafe {
+        let layer: *mut AnyObject = msg_send![view, layer];
+        if layer.is_null() {
+            return;
+        }
+        // The gravity names follow the layer's y axis: in a flipped layer
+        // "bottom" is the top of the screen.
+        let flipped: bool = msg_send![layer, contentsAreFlipped];
+        let gravity = NSString::from_str(if flipped { "bottom" } else { "top" });
+        let _: () = msg_send![layer, setContentsGravity: &*gravity];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn pin_content_to_top(_window: &Window) {}
+
 /// Dims the minimize and zoom buttons (§8): the window has one size.
 #[cfg(target_os = "macos")]
 pub fn dim_window_buttons(window: &Window) {
