@@ -10,7 +10,7 @@ export interface MemberRow {
   avatar_url: string | null;
   deactivated: number;
   created_at: number;
-  /** jojo-friends character id (migration 0004); absent before it ran. */
+  /** Character id (migration 0004); absent before it ran. */
   character?: string | null;
   /** 1.1 (migration 0008): 汇报给 and the weekly spending limit; absent before it ran. */
   reports_to?: string | null;

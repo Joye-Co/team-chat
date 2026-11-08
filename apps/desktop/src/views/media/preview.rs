@@ -169,7 +169,7 @@ fn title(s: Sample) -> &'static str {
             "WebSocket 断线重连后消息重复的完整复盘：时间线、根因、修复方案、回归测试和后续待办"
         }
         Sample::Markdown => "重连重复问题复盘",
-        Sample::Images => "夹夹 3.0 配图",
+        Sample::Images => "拾光 3.0 配图",
         Sample::Video | Sample::States => "重连测试录屏",
         Sample::Audio => "周会录音 11-03",
         Sample::Pdf => "巡检报告-11-03",
@@ -993,8 +993,8 @@ fn open_states(
             "m-alex",
             "发布会的稿子，先看一眼。",
             file_name(
-                "夹夹 3.0 发布会.pdf",
-                "夹夹 3.0 发布会_全渠道版_含演讲者备注和全部动画_最终确认版本_请勿再改.pdf",
+                "拾光 3.0 发布会.pdf",
+                "拾光 3.0 发布会_全渠道版_含演讲者备注和全部动画_最终确认版本_请勿再改.pdf",
             ),
             bytes(18_600_000, 1),
             None,
@@ -1389,7 +1389,7 @@ fn report_pdf() -> Vec<u8> {
 
 fn channels_csv() -> String {
     let mut s = String::from("日期,渠道,新增群,新增用户,日活,花费\n");
-    let chans = [("小红书", 105), ("B 站", 61), ("抖音", 81), ("群内邀请", 0)];
+    let chans = [("微博", 105), ("B 站", 61), ("抖音", 81), ("群内邀请", 0)];
     let mut n = 0;
     for d in 1..=31 {
         for (i, (c, cost)) in chans.iter().enumerate() {
@@ -1415,7 +1415,7 @@ const DEMO_MP4: &[u8] = include_bytes!("preview/demo.mp4");
 
 const CHAPTERS_VTT: &str = "WEBVTT\n\n00:00.000 --> 00:08.000\n两个窗口都在线\n\n00:08.000 --> 00:15.000\n断网 5 秒\n\n00:15.000 --> 00:24.000\n重连，指数退避\n\n00:24.000 --> 00:33.000\n补发 3 条，没有重复\n\n00:33.000 --> 00:42.000\n合盖休眠后再试\n";
 
-const TRANSCRIPT_VTT: &str = "WEBVTT\n\n00:04.000 --> 00:11.000\n<v Joye>这周先把断线重连的 PR 合了，Forge 的录屏我看过了。\n\n00:11.000 --> 00:19.000\n<v 小王>我本地也试了，合盖之后没再重复。\n\n00:19.000 --> 00:30.000\n<v Joye>qqbot v2.14 等 Scout 在 staging 验收完就发。\n\n00:30.000 --> 00:44.000\n<v 李雪>夹夹 3.0 的小红书定在周四 20:00，配图 Taro 改好了。\n\n00:44.000 --> 00:58.000\n<v Joye>B 站的预算我在月报里选了，Ledger 接着算一个方案。\n\n00:58.000 --> 01:10.000\n<v 李雪>抖音那边先停一周，看看每个新增的成本。\n\n01:10.000 --> 01:24.000\n<v 小王>下周我补一个多端同时在线的测试。\n";
+const TRANSCRIPT_VTT: &str = "WEBVTT\n\n00:04.000 --> 00:11.000\n<v Joye>这周先把断线重连的 PR 合了，Forge 的录屏我看过了。\n\n00:11.000 --> 00:19.000\n<v 小王>我本地也试了，合盖之后没再重复。\n\n00:19.000 --> 00:30.000\n<v Joye>orderbot v2.14 等 Scout 在 staging 验收完就发。\n\n00:30.000 --> 00:44.000\n<v 李雪>拾光 3.0 的微博定在周四 20:00，配图 Taro 改好了。\n\n00:44.000 --> 00:58.000\n<v Joye>B 站的预算我在月报里选了，Ledger 接着算一个方案。\n\n00:58.000 --> 01:10.000\n<v 李雪>抖音那边先停一周，看看每个新增的成本。\n\n01:10.000 --> 01:24.000\n<v 小王>下周我补一个多端同时在线的测试。\n";
 
 const RECONNECT_TS: &str = r#"import { Message, SyncState } from "./types";
 
@@ -1492,13 +1492,13 @@ td{font-family:ui-monospace,Menlo,monospace}td:first-child{font-family:inherit}
 .q{margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}.q p{margin:0 0 8px;color:var(--t2)}
 .o{display:grid;grid-template-columns:1fr 1fr;gap:6px}.o span{border:1px solid var(--line);border-radius:7px;padding:5px 9px}.o .on{border-color:var(--t1);font-weight:600}
 </style></head><body><div class="w">
-<h1>10 月数据月报</h1><div class="s">夹夹 · 10 月 1 日–31 日 · Ledger 整理</div>
+<h1>10 月数据月报</h1><div class="s">拾光 · 10 月 1 日–31 日 · Ledger 整理</div>
 <div class="k"><div><i>新增群</i><b>38</b><em>+12%</em></div><div><i>日活</i><b>2,340</b><em>+4%</em></div><div><i>平均回复</i><b>1.2 秒</b><em>-0.3 秒 · 更快</em></div></div>
 <h2>四周走势 — 日活 — 新增群</h2>
 <svg viewBox="0 0 400 110" preserveAspectRatio="none"><path d="M0 80 L60 70 L120 74 L180 55 L240 48 L300 40 L360 30 L400 26" fill="none" stroke="currentColor" stroke-width="2"/><path d="M0 96 L60 94 L120 90 L180 92 L240 86 L300 84 L360 80 L400 78" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="1.5"/></svg>
 <h2>渠道拆分 · v3 新加</h2>
 <table><tr><th>渠道</th><th>新增群</th><th>新增用户</th><th>花费</th><th>每个新增</th></tr>
-<tr><td>小红书</td><td>14</td><td>612</td><td>¥3,200</td><td>¥5.2</td></tr><tr><td>B 站</td><td>9</td><td>488</td><td>¥1,800</td><td>¥3.7</td></tr>
+<tr><td>微博</td><td>14</td><td>612</td><td>¥3,200</td><td>¥5.2</td></tr><tr><td>B 站</td><td>9</td><td>488</td><td>¥1,800</td><td>¥3.7</td></tr>
 <tr><td>抖音</td><td>6</td><td>301</td><td>¥2,400</td><td>¥8.0</td></tr><tr><td>群内邀请</td><td>9</td><td>396</td><td>¥0</td><td>–</td></tr></table>
-<div class="q"><p>下个月加预算投哪个渠道？</p><div class="o"><span>A 小红书</span><span class="on">B B 站</span><span>C 抖音</span><span>D 群内邀请</span></div></div>
+<div class="q"><p>下个月加预算投哪个渠道？</p><div class="o"><span>A 微博</span><span class="on">B B 站</span><span>C 抖音</span><span>D 群内邀请</span></div></div>
 </div></body></html>"##;

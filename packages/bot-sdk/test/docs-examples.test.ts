@@ -40,7 +40,7 @@ async function run(source: string) {
   // The rows the example reads from its own data source: 渠道, 新增群, 占比, and the total as a
   // normal last row (Card v2 has no summaryRow).
   const channelRows = async () => [
-    ["小红书", "15", "39%"],
+    ["微博", "15", "39%"],
     ["邀请", "11", "29%"],
     ["B 站", "7", "18%"],
     ["抖音", "5", "13%"],

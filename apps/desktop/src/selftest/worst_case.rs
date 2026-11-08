@@ -618,7 +618,7 @@ impl ChatProvider for WorstCase {
                     r.source.label = crate::views::refs::label::build(
                         "第四季度各渠道新增群和留存的完整月报（含去重说明）",
                         Some("按渠道和来源拆开的明细表"),
-                        Some("小红书 · 品牌合作 · 新增群（去重后，含邀请回流） 14"),
+                        Some("微博 · 品牌合作 · 新增群（去重后，含邀请回流） 14"),
                     )
                     .text;
                 }

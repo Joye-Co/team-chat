@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Adds the production GitHub hook of the 开发 group as a webhook on the GitHub repository, then
-# checks that GitHub's ping delivery succeeded. Run it only after Joye said yes.
+# Adds a group's GitHub hook (POST /v1/hooks, kind github) as a webhook on a GitHub repository,
+# then checks that GitHub's ping delivery succeeded. Run it only after the repo owner said yes.
 #
-#   scripts/github-webhook.sh                         # Joye-Co/team-chat, production hook file
+#   scripts/github-webhook.sh                         # this repo, production hook file
 #   scripts/github-webhook.sh --repo <owner/name> --hook-file <file>
 #   scripts/github-webhook.sh --body-out <file>       # only write the request body (mode 600), no GitHub call
 #
 # The hook file is JSON with `url` and `secret` (made by POST /v1/hooks, kind github; see
-# docs/USER-ACTIONS.md). The secret goes from that file into a temp file (mode 600) that
+# docs/integrations.md). The secret goes from that file into a temp file (mode 600) that
 # `gh api --input` reads, and the temp file is deleted. The script never prints the secret.
 set -euo pipefail
 

@@ -146,14 +146,14 @@ describe("SF-2 page log", () => {
     expect(made.status, JSON.stringify(made.body)).toBe(200);
     const id = made.body.artifact.id as string;
     const first = await ca.ok({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { channel: "bili" }, clientEventId: clientMsgId() });
-    const second = await ca.ok({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { channel: "xhs" } });
+    const second = await ca.ok({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { channel: "weibo" } });
     ca.close();
     // Another member on another computer, after a restart: the log comes from the server.
     const list = await api(`/v1/artifacts/${id}/events`, { token: owner.token });
     expect(list.status, JSON.stringify(list.body)).toBe(200);
     expect(list.body.hasMore).toBe(false);
     expect(list.body.events.map((e: any) => [e.eventId, e.payload])).toEqual([
-      [second.eventId, { channel: "xhs" }],
+      [second.eventId, { channel: "weibo" }],
       [first.eventId, { channel: "bili" }],
     ]);
     expect(list.body.events[0]).toMatchObject({ artifactId: id, version: 1, name: "pick", kind: "emit", actorId: alice.id });
@@ -198,15 +198,15 @@ describe("SF-8 / SF-9 group purpose and rename order", () => {
     const b = await createMember();
     const gid = await createGroup(a, [b.id], "开发");
     const { c: cb } = await Client.connect(b.token);
-    const r = await patch(gid, a.token, { purpose: "  qqbot、夹夹和　TeamChat 的开发 " });
+    const r = await patch(gid, a.token, { purpose: "  orderbot、拾光和　TeamChat 的开发 " });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.body.group).toMatchObject({ name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" });
+    expect(r.body.group).toMatchObject({ name: "开发", purpose: "orderbot、拾光和 TeamChat 的开发" });
     const ev = await cb.waitEvent((e) => e.groupId === gid && e.type === "group.updated");
-    expect(ev.data).toEqual({ name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" });
+    expect(ev.data).toEqual({ name: "开发", purpose: "orderbot、拾光和 TeamChat 的开发" });
     const list = await api("/v1/groups", { token: b.token });
-    expect(list.body.find((s: any) => s.group.id === gid).group.purpose).toBe("qqbot、夹夹和 TeamChat 的开发");
+    expect(list.body.find((s: any) => s.group.id === gid).group.purpose).toBe("orderbot、拾光和 TeamChat 的开发");
     // A rename alone keeps the purpose and sends only the name.
-    expect((await patch(gid, a.token, { name: "研发" })).body.group).toMatchObject({ name: "研发", purpose: "qqbot、夹夹和 TeamChat 的开发" });
+    expect((await patch(gid, a.token, { name: "研发" })).body.group).toMatchObject({ name: "研发", purpose: "orderbot、拾光和 TeamChat 的开发" });
     const renamed = await cb.waitEvent((e) => e.groupId === gid && e.type === "group.updated" && e.data.name === "研发");
     expect(renamed.data).toEqual({ name: "研发" });
     // Clear it.

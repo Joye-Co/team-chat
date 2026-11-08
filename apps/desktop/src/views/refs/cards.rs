@@ -676,7 +676,7 @@ mod tests {
             "fallback": "f",
             "blocks": [
                 { "id": "by", "type": "table", "columns": ["来源", "新增群"],
-                  "rows": [["夹夹教程视频", "5"], ["UP 主合作", "3"]],
+                  "rows": [["拾光教程视频", "5"], ["UP 主合作", "3"]],
                   "rowKeys": ["tutorial", "up"], "select": "multiple" }
             ]
         }))

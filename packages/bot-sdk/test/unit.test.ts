@@ -437,7 +437,7 @@ describe("answers", () => {
     const card = report();
     const mid = "01JC0MSG000000000000000099";
     store.save({ v: 1, memberId: BOT_ID, cursors: { [GROUP_ID]: 0 }, following: {}, cards: { [mid]: { groupId: GROUP_ID, topicId: TOPIC_ID } } });
-    server.groups = [{ group: { id: GROUP_ID, kind: "group", name: "夹夹增长", createdAt: 1 }, lastSeq: 1, readSeq: 0, unread: 0, mentions: 0 }];
+    server.groups = [{ group: { id: GROUP_ID, kind: "group", name: "拾光增长", createdAt: 1 }, lastSeq: 1, readSeq: 0, unread: 0, mentions: 0 }];
     server.on("fetch", () => ({
       ok: true,
       result: {
@@ -620,7 +620,7 @@ describe("page events", () => {
       eventId,
       name,
       kind,
-      payload: "xhs",
+      payload: "weibo",
       actorId: HUMAN_ID,
       at: Date.now(),
     });
@@ -629,7 +629,7 @@ describe("page events", () => {
     server.transient(ev("report.ask", "ask", "PE3"));
     const data = await server.next((f) => f.t === "artifact.data");
     expect(data.cause).toBe("PE1");
-    expect(data.data).toEqual({ channel: "xhs" });
+    expect(data.data).toEqual({ channel: "weibo" });
     const reply = await server.next((f) => f.t === "artifact.reply" && f.eventId === "PE1");
     expect(reply.ok).toBe(true);
     expect(reply.payload).toEqual({ rows: 4 });
@@ -649,7 +649,7 @@ describe("refs (引用提问)", () => {
       intent: "info",
       title: "10 月数据月报",
       blocks: [
-        blocks.table({ id: "channels", title: "渠道表", columns: ["渠道", "新增群"], rows: [["小红书", "14"], ["B 站", "9"]], rowKeys: ["xhs", "bili"] }),
+        blocks.table({ id: "channels", title: "渠道表", columns: ["渠道", "新增群"], rows: [["微博", "14"], ["B 站", "9"]], rowKeys: ["weibo", "bili"] }),
         blocks.diagram({ id: "flow", source: "flowchart LR\n  a[收到消息] --> b{要回复吗}\n  b --> c[回复]" }),
       ],
     });
@@ -693,7 +693,7 @@ describe("refs (引用提问)", () => {
   });
 
   test("markdown block counter: headings, lists, fences and tables", () => {
-    const md = "# 标题\n\n第一段\n继续\n\n- a\n- b\n\n  - c\n\n```mermaid\nflowchart LR\n\n  a --> b\n```\n\n| 渠道 | 新增群 |\n| --- | --- |\n| 小红书 | 14 |\n\n---\n> 引用";
+    const md = "# 标题\n\n第一段\n继续\n\n- a\n- b\n\n  - c\n\n```mermaid\nflowchart LR\n\n  a --> b\n```\n\n| 渠道 | 新增群 |\n| --- | --- |\n| 微博 | 14 |\n\n---\n> 引用";
     expect(markdownBlocks(md).map((b) => b.kind)).toEqual(["heading", "paragraph", "list", "code", "table", "rule", "quote"]);
     expect(markdownBlocks(md)[3]?.lang).toBe("mermaid");
   });

@@ -3,7 +3,7 @@
 //! symbol or avatar (话题, 群, 私聊, 成员, 消息), matches in Semibold. With no
 //! query it shows 最近 (five topics), then 群 and 私聊. Picking a member opens
 //! (or starts) the DM with them; picking a message opens its topic at that
-//! message. ⌘F scopes it to one 群 (a removable `在 qqbot 研发` token): its
+//! message. ⌘F scopes it to one 群 (a removable `在 orderbot 研发` token): its
 //! topics and messages only. ↑/↓ move the choice, Return opens it; the
 //! pointer moves the choice only when it really moves.
 

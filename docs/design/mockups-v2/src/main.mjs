@@ -240,7 +240,7 @@ ${avatar(m(t.owner) ?? t.ownerM, 36, mode, { presence: false, sel: t.selected })
 <div class="body"><div class="l1"><span class="tt ell">${lead(esc(fit(t.title, base - 8 - [...t.time].length * 8, 14)))}</span><span class="tm">${esc(t.time)}</span></div>
 <div class="l2"><span class="pv">${esc(`${t.who}：${t.text}`)}</span>${trail}</div></div></div>`;
   }).join("");
-  const g = opt.group ?? { name: "qqbot 研发", counts: [9, 3, 2] };
+  const g = opt.group ?? { name: "orderbot 研发", counts: [9, 3, 2] };
   const fmt = cap;
   return `<section class="tl"><div class="hdr"><span class="ttl ell">${esc(fit(g.name, (opt.tlw ?? 320) - 76, 16))}</span><span class="ib" title="新话题 ⌘N">${icon("square-pen", 18)}</span></div>
 <div class="tabs"><span class="tab on">全部</span><span class="tab">未读${g.counts[1] ? `<span class="n">${fmt(g.counts[1])}</span>` : ""}</span><span class="tab">等我${g.counts[2] ? `<span class="n">${fmt(g.counts[2])}</span>` : ""}</span></div>
@@ -294,7 +294,7 @@ export function mainWindow(mode, o) {
 <div class="lights"><span></span><span></span><span></span></div>
 ${sidebarHtml(mode, o)}
 ${topicListHtml(mode, o)}
-<main class="tv">${headerHtml(mode, tv, (o.group ?? { name: "qqbot 研发" }).name)}
+<main class="tv">${headerHtml(mode, tv, (o.group ?? { name: "orderbot 研发" }).name)}
 <div class="tv-scroll"><div class="tv-inner box bottom">${start}${msgs}</div></div>
 ${composerHtml(mode, tv.composer ?? {})}</main>
 ${panel}

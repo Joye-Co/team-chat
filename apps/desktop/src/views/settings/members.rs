@@ -511,16 +511,21 @@ impl MembersPage {
             let menu = if member.is_bot() {
                 let (edit_page, edit_member) = (page.clone(), member.clone());
                 let (page, member) = (page.clone(), member.clone());
-                menu.item(PopupMenuItem::new(s::EDIT).on_click(move |_, window, cx| {
+                let menu = menu.item(PopupMenuItem::new(s::EDIT).on_click(move |_, window, cx| {
                     let services = edit_page.read(cx).services.clone();
                     open_edit_bot(services, &edit_member, window, cx);
-                }))
-                .item(
-                    PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(move |_, window, cx| {
-                        let services = page.read(cx).services.clone();
-                        open_character(services, &member, window, cx);
-                    }),
-                )
+                }));
+                // No look to change without the character pack.
+                if characters::available() {
+                    menu.item(PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(
+                        move |_, window, cx| {
+                            let services = page.read(cx).services.clone();
+                            open_character(services, &member, window, cx);
+                        },
+                    ))
+                } else {
+                    menu
+                }
             } else {
                 menu
             };
@@ -2001,7 +2006,8 @@ impl Render for BotForm {
             );
         }
         // The look of an existing member changes in its own sheet (更换形象…).
-        if self.editing.is_none() {
+        // A build without the character pack has no looks to pick from.
+        if self.editing.is_none() && characters::available() {
             body = body.child(
                 div()
                     .flex()
@@ -2299,10 +2305,9 @@ mod tests {
     #[test]
     fn a_new_bot_always_gets_a_character() {
         // The roster wins, even when another member uses that look.
-        assert_eq!(
-            default_character("Jojo", &[CharacterId::Jojo]),
-            CharacterId::Jojo
-        );
+        if let Some(c) = characters::roster_character("Jojo") {
+            assert_eq!(default_character("Jojo", &[c]), c);
+        }
         // A name outside the roster gets the first free look.
         let all = CharacterId::ALL;
         assert_eq!(default_character("新机器人", &[]), all[0]);

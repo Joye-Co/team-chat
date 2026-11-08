@@ -823,13 +823,13 @@ mod tests {
     fn row_keys_fall_back_to_the_index() {
         let rows = vec![vec!["a".to_string()], vec!["b".to_string()]];
         assert_eq!(row_keys(&rows, None), ["0", "1"]);
-        let keys = vec!["xhs".to_string(), "bili".to_string()];
-        assert_eq!(row_keys(&rows, Some(&keys)), ["xhs", "bili"]);
+        let keys = vec!["weibo".to_string(), "bili".to_string()];
+        assert_eq!(row_keys(&rows, Some(&keys)), ["weibo", "bili"]);
     }
 
     #[test]
     fn numbers_sort_as_numbers() {
-        let rows: Vec<Vec<String>> = [["小红书", "14"], ["抖音", "5"], ["B 站", "9"]]
+        let rows: Vec<Vec<String>> = [["微博", "14"], ["抖音", "5"], ["B 站", "9"]]
             .iter()
             .map(|r| r.iter().map(|s| s.to_string()).collect())
             .collect();

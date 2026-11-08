@@ -12,7 +12,7 @@
     "event": "chart.select",
     "value": {
       "series": "groups",
-      "x": "小红书",
+      "x": "微博",
       "y": 14,
       "index": 0
     },
@@ -20,7 +20,7 @@
       "kind": "bar",
       "keys": {
         "series": "groups",
-        "x": "小红书"
+        "x": "微博"
       }
     },
     "actorId": "01JBX0ALICE0000000000000AB",

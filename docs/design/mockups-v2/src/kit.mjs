@@ -1,13 +1,20 @@
 // Shared CSS and render helpers for the v2.1 mockups. Every page is self-contained: system fonts,
-// inline Lucide SVG icons (the same set gpui-kit ships, plus `type`), and the jojo-friends
-// character SVGs from apps/desktop/assets/characters embedded as data URIs.
-import { readFileSync } from "node:fs";
+// inline Lucide SVG icons (the same set gpui-kit ships, plus `type`), and the optional character
+// pack (TC_OPS_DIR/characters, else ~/.config/team-chat/ops/characters) embedded as data URIs.
+// Without the pack a bot's tile shows its initials.
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cssVars, dark, light } from "./tokens.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = join(HERE, "../../../..");
+export const CHAR_DIR = join(
+  process.env.TC_OPS_DIR ?? join(process.env.TEAM_CHAT_CONFIG_DIR ?? join(homedir(), ".config/team-chat"), "ops"),
+  "characters",
+);
+const HAS_ART = existsSync(CHAR_DIR);
 const ICONS = JSON.parse(readFileSync(join(HERE, "icons.json"), "utf8"));
 
 export const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -65,7 +72,7 @@ export function character(id, status = "idle", size = 32, { fit = false, fill = 
   const small = size <= 64;
   const key = `${id}/${status}-${file}-${small}-${fit}-${fill}`;
   if (!charCache.has(key)) {
-    let svg = readFileSync(join(REPO, `apps/desktop/assets/characters/${id}/${status}-${file}.svg`), "utf8");
+    let svg = readFileSync(join(CHAR_DIR, `${id}/${status}-${file}.svg`), "utf8");
     if (small) svg = smallArt(svg);
     const b = BOXES[`${id}__idle`];
     if (fit && b) {
@@ -116,12 +123,14 @@ const tint = (id) => {
  */
 export function avatar(m, size, mode, { presence = true, ring = "var(--content)", pip: showPip = true, sel = false } = {}) {
   let inner;
-  if (m.char) {
+  if (m.char && HAS_ART) {
     inner = `<span class="tile b${tint(m.char)}${sel ? " on-sel" : ""}" style="border-radius:${Math.round(size * 0.25)}px">${character(m.char, m.state ?? "idle", size, { fit: true, fill: 0.62 })}</span>`;
   } else {
     const ini = initials(m.name, size);
     const fs = size <= 24 ? 12 : Math.round(size * (ini.length > 1 ? 0.38 : 0.44));
-    inner = `<span class="mono${size <= 24 ? " s" : ""}" style="font-size:${fs}px">${esc(ini)}</span>`;
+    inner = m.char
+      ? `<span class="tile b${tint(m.char)}${sel ? " on-sel" : ""}" style="border-radius:${Math.round(size * 0.25)}px;font-size:${fs}px">${esc(ini)}</span>`
+      : `<span class="mono${size <= 24 ? " s" : ""}" style="font-size:${fs}px">${esc(ini)}</span>`;
   }
   const d = size >= 32 ? 10 : 8;
   const off = size >= 32 ? -1 : -3;

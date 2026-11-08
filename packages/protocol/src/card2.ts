@@ -182,7 +182,7 @@ export const AskFrom = z.string().min(1).max(64);
 export const AskIrreversible = z.object({
   /** The action, e.g. "发布". */
   verb: Short(40),
-  /** What it acts on, e.g. "qqbot 1.4 到正式环境". */
+  /** What it acts on, e.g. "orderbot 1.4 到正式环境". */
   target: Short(200),
   /** What cannot be undone. */
   consequence: Short(500),

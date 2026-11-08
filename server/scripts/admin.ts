@@ -9,7 +9,7 @@
 //   bootstrap --name <ownerName>       make the first owner, save its token
 //   invite --name <n> [--kind human|bot] [--level member|owner] [--role <r>]
 //   bot --name <n> [--role <r>] [--character <id>]
-//                                      make a bot member, save its token; <id> is a jojo-friends id
+//                                      make a bot member, save its token; <id> is a character id
 //   set-member --member <id> [--character <id>|none] [--role <r>|none] [--level member|owner]
 //                                      change a member's character, 岗位 or level (owner token)
 //   revoke --member <id>               revoke every token of a member
@@ -29,6 +29,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { deployedServer } from "../../scripts/servers";
 
 const ENVS = ["local", "e2e", "staging", "production"] as const;
 type EnvName = (typeof ENVS)[number];
@@ -87,12 +88,9 @@ function readSecret(path: string, what: string): string {
 function baseUrl(env: EnvName, flag?: string): string {
   if (flag) return flag.replace(/\/+$/, "");
   if (env === "local") return LOCAL_URL;
-  const product = JSON.parse(readFileSync(join(ROOT, "product.json"), "utf8")) as {
-    servers?: Record<string, string>;
-  };
-  const url = product.servers?.[env];
-  if (!url) fail(`no server URL for ${env} in product.json; pass --url`);
-  return url.replace(/\/+$/, "");
+  const url = deployedServer(env);
+  if (!url) fail(`no server URL for ${env} (TC_OPS_DIR deploy/servers.json); pass --url`);
+  return url;
 }
 
 function slug(s: string): string {

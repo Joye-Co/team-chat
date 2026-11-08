@@ -5,7 +5,7 @@ When this file and the snapshot disagree, this file wins for V1.
 
 ## What it is
 
-A macOS work chat for one small team: Joye, 4 to 10 interns, and about 5 bots. People and bots
+A macOS work chat for one small team: an owner, 4 to 10 people, and about 5 bots. People and bots
 are equal members. Development, product and other work are discussed, assigned and delivered
 here, so the team stops using Feishu and Slack. Each 群 is a chat first (its 群聊); a topic opens
 from it when a piece of work needs its own thread, like a Feishu topic in a group chat.
@@ -16,13 +16,13 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 
 | UI word | Code name | Means | Merges these developer words |
 | --- | --- | --- | --- |
-| 成员 | `Member` | A person or a bot. Shows name, avatar and 岗位 (role). A bot's avatar is its jojo-friends character with its live status signal, and its 岗位 tag carries a small bot glyph; no other mark (Joye, 2026-11-03). | agent, bot, teammate |
+| 成员 | `Member` | A person or a bot. Shows name, avatar and 岗位 (role). A bot's avatar is its character (or a monogram) with its live status signal, and its 岗位 tag carries a small bot glyph; no other mark. | agent, bot, teammate |
 | 群 | `Group` | Where members talk. A DM is a 群 of two people. | chat, channel, DM |
 | 话题 | `Topic` | One piece of work: discussion, progress, questions and 产出 hang under it. | thread, task, ticket, session |
 | 产出 | `Artifact`, `File` | What a topic produces: pages (HTML), files, decisions. | artifact, attachment |
 
 - Topic status, `waitingOn` and the members working on it follow the work (runs, cards, results);
-  nobody sets them by hand. The topic menu only has 重命名 and 关注 (Joye, 2026-11-05). Bots are
+  nobody sets them by hand. The topic menu only has 重命名 and 关注. Bots are
   members: there is no 暂停 for a member; you tell it in the topic, and 停止 ends one run.
 - Topic status chips say who is waited on and for what:
 
@@ -81,7 +81,7 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
     who is working, waiting on someone, done today). A filter shows only the topics I take part in.
   - **B 以「需要我」为中心**: sections 需要你, 在做, 等别人, 做完了 · 今天; 群 are filter chips.
   - **C 以成员为中心**: each member with the topics it is doing, then people.
-- **首页**: Jojo's one-line priority for today (only when Jojo wrote one), 需要你拍板 (every card and
+- **首页**: the main bot's one-line priority for today (only when it wrote one), 需要你拍板 (every card and
   topic that waits on me, answerable in place), 做完了 today with proof, and a column 正在做 with
   each active run, its plan progress and, when it uses its computer, a live thumbnail; 排队 when
   runs are queued.
@@ -90,14 +90,14 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
   On the right, the topic rail: 负责, 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card with no
   data is hidden.
-- **单独问** (⌘;): a side chat with a member (Jojo by default) beside a topic. The member has read
+- **单独问** (⌘;): a side chat with a member (the main bot by default) beside a topic. The member has read
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic
   only when I press its button.
 - **实时查看 + 接管**: a member's computer beside the topic while it works: its terminal rebuilt from
   the run's steps, the plan, 验收标准, and 回放 by step. 接管 pauses the member so I can act; 交还 lets
   it continue from that step; 停止 cancels the run.
 - **⌘K 交代或搜索**: one field to hand work to a member (交给 <member> starts a topic addressed to
-  it in the chosen 群; ⌘↵ hands it to Jojo) or to find 话题, 产出 and 成员.
+  it in the chosen 群; ⌘↵ hands it to the main bot) or to find 话题, 产出 and 成员.
 - **群**: opening a 群 (or a 私聊) shows its 群聊: one chat timeline with the composer at the
   bottom, where plain messages stay and @mentioning a member hands it work whose result comes back
   there. The title bar has 新话题 and 这个群的话题; a message's menu has 开个话题, which starts a 话题
@@ -175,8 +175,8 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   post them; every interaction (not only answers) goes back to the card's author, which may change
   the card in place. Only people send interactions; a bot's message never starts a run. Clients
   before 1.1.0 see a v1 card that the server derives and refreshes on every change.
-- Permissions: levels `owner` (Joye and the bots at Joye's level) and `member` (interns and
-  their bots). Clients and bots use the same API. Every write is audited with who asked, who
+- Permissions: levels `owner` (the team lead and the bots at that level) and `member` (everyone
+  else and their bots). Clients and bots use the same API. Every write is audited with who asked, who
   did it, which credential, and what changed.
 - Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. After that a
   member can add a sign-in email in 账号 and sign in on any Mac with a 6-digit code sent there.
@@ -185,26 +185,18 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - Distribution: a DMG signed with the team's own certificate (not notarized). GitHub Releases keeps every build; the server also serves the
   latest DMG to holders of an invite code and to members, and the app updates itself from it.
 
-## Bot members (first roster)
+## Bot members
 
-Every bot's look is a character from Joye's jojo-friends family (his private personal IP,
-`/Users/joye/Documents/code/jojo-friends`; use it only inside this private product, never publish
-the source or the art elsewhere). A bot's avatar shows its live state with the character's
-status signal: idle, working, needs-input, success, error, offline. The main bot is Jojo. The
-other bots and their duties are copied from the team's Notion roster (团队名册) for now; Joye
-will adjust them. The roster lives in [`docs/ROSTER.md`](ROSTER.md) and `assets/bots/roster.json` (named
-ROSTER, not BOTS, because macOS file names ignore case and `docs/bots.md` exists).
+Bots are members like people: same API, same 群 and 话题, a name, avatar and 岗位. Which bots a
+team runs, and what each one does, is the operator's choice, not part of the product; add them
+as in [bots.md](bots.md). The main bot is the active bot named Jojo, else the oldest active bot
+(see [protocol.md](protocol.md)): it gets the first DM of a new member and is the default for
+单独问 and ⌘↵.
 
-| Bot | Character | 岗位 | Level | Reports to | Duties (from Notion) |
-| --- | --- | --- | --- | --- | --- |
-| Jojo | `jojo` Jojo | 主助手 | owner | Joye | The team's main bot: the default entry point, routes work to the right member, does general work; runs on the Mac mini |
-| Tata | `o03` 塔塔 | 产品负责人 | member | Joye | qqbot lead and product; jiajia.fun and share.jiajia.fun; the growth group (data flywheel); R2 buckets |
-| Pocket | `o05` 兜兜 | 幕僚长 | member | Joye | Joye's single entry point (mail, calendar, todos, reminders, morning brief), routes to the right bot; keeps the roster; decision and merge cards; blog, GitHub and personal brand |
-| Forge | `o08` 薇薇 | 开发 | member | Tata | qqbot development: issues, coding runs, PR review, test debt, CI failures |
-| Watch | `o11` 蒂奇 | 运维 | member | Tata | qqbot operations: alerts, staging checks, incident reviews, cloud moves, secret and permission checks; asks Joye before production |
-| Scout | `o07` 点点 | 测试验收 | member | Tata | qqbot QA: a daily read-only patrol of staging; checks each batch on staging before production |
-| Ledger | `h02` 便当 | 数据 | member | Tata | qqbot data: reports, tracking, the knowledge base and review queue, evals, cost |
-| Taro | `h03` 芋圆 | 社媒发布 | member | Pocket | Social posts: rewrites Joye's blog, projects and views and schedules them on X, the blog, Bilibili, Xiaohongshu and Douyin; Joye confirms each post first |
+A bot's avatar shows its live state with a status signal: idle, working, needs-input, success,
+error, offline. With the optional character pack (`characters/` in the operator's ops checkout,
+see [ENVIRONMENTS.md](ENVIRONMENTS.md#ops-checkout)) each bot can have a character; without it,
+avatars are monograms.
 
 ## V1: production use by 5 people and 5 bots
 
@@ -219,7 +211,7 @@ V1 is not an MVP. The team works in it every day, stably. Done when all of these
    delivery, search, catch-up, reconnects, mention notifications and the 100 MB upload; the
    rest is not measured yet (see docs/RUNBOOK.md, Quality smoke).
 3. **Bots**: external bots join with a bot token and the TypeScript bot SDK. Runner-backed bots
-   run coding CLIs (Codex, Claude Code) through the machine daemon on the Mac mini: they
+   run coding CLIs (Codex, Claude Code) through the machine daemon on a team machine: they
    acknowledge once, stream progress, post results, take follow-ups in the topic, and stalls are
    detected. Every bot run is captured (normalized events plus the CLI's raw session in R2) and
    visible in the process view.
@@ -233,7 +225,7 @@ V1 is not an MVP. The team works in it every day, stably. Done when all of these
    posts alerts into an ops 群; a daily R2 archive of every group log and of D1; a restore tool
    and runbook that were tested.
 8. **Distribution**: a DMG on GitHub Releases and on the server; in-app update; Chinese install
-   and onboarding guides for interns.
+   and onboarding guides for new members.
 9. **Security**: hashed tokens and invite codes, authorization on every frame and route,
    sandboxed 产出, rate limits, audited admin actions, webhook signatures checked.
 10. **Design**: first-class visual design, on par with the best macOS apps, in light and dark

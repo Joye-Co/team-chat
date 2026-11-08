@@ -2,7 +2,10 @@
 //! centered state in the content area, instead of an empty topic list, an
 //! empty timeline and an empty sidebar section side by side.
 
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px};
+use gpui::{
+    App, IntoElement, ParentElement, RenderOnce, Styled, Window, div, prelude::FluentBuilder as _,
+    px,
+};
 
 use crate::{
     characters::{self, CharacterId, CharacterStatus},
@@ -32,11 +35,14 @@ impl RenderOnce for Welcome {
                     .flex_col()
                     .items_center()
                     .text_center()
-                    .child(characters::image(
-                        CharacterId::Jojo,
-                        CharacterStatus::Idle,
-                        px(64.),
-                    ))
+                    // The character pack is optional: no art, no picture.
+                    .when(characters::has_art(CharacterId::Jojo), |el| {
+                        el.child(characters::image(
+                            CharacterId::Jojo,
+                            CharacterStatus::Idle,
+                            px(64.),
+                        ))
+                    })
                     .child(
                         div()
                             .pt(px(16.))

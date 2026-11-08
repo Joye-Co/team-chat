@@ -1,6 +1,6 @@
 # Design v3
 
-**v3 is the design of TeamChat 1.1.0.** It replaces v2.2. Joye found v2 "太朴素、太草稿了，不像
+**v3 is the design of TeamChat 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
 production-ready" and asked for a polished, finished feel, more motion, a rethought left side and a
 right side modeled on Claude Desktop. v3 keeps the v2 rules that worked (96 pt composer, closed
 type scale, hover states on everything, color means something) and changes the rest: an ink-on-paper
@@ -45,13 +45,13 @@ Units: pt. A web px at device scale 1 equals one macOS pt.
 | Screen | We follow | Why | Rejected |
 | --- | --- | --- | --- |
 | Shell | **Claude Desktop**: left rail · page · right pane. The topic-list column is removed | Topics live in the rail with their live state; the page gets the width | v2's four columns (sidebar, topic list, topic, side panel) |
-| Left rail | **Claude Desktop** list of work, in three modes the user picks (A work, B attention, C members) | Joye: "直接放人，然后接话题产出，感觉怪怪的"; each mode has a real tradeoff (§8.2), so it is a setting | One fixed rail; people-first sidebar sections |
+| Left rail | **Claude Desktop** list of work, in three modes the user picks (A work, B attention, C members) | Owner feedback: "直接放人，然后接话题产出，感觉怪怪的"; each mode has a real tradeoff (§8.2), so it is a setting | One fixed rail; people-first sidebar sections |
 | 首页 | A desk: what needs you, what is done, what is moving | Opening the app answers "what do I do now" without a click | 待办 as a sidebar section |
 | Topic page | **Slack** rows + **Claude Desktop** session rail on the right | Context (owner, plan, change, 产出, cost) beside the conversation, not in it | v2's closed-by-default side panel |
 | 单独问 | **Claude Desktop** side chat (⌘;) | Ask a member about a topic without noise in the topic | A DM that loses the topic context |
 | 实时查看 | **Claude Desktop** panes; the member's screen with 回放 and 接管 | Trust comes from seeing the work, and from stopping it | A tool log in the timeline |
 | Cards | **Feishu** fields + **GrokBot** ask and draft + **Slack** Block Kit, as **Card v2** | One spec for 首页, 话题, 群 and notifications | Members that format their own messages |
-| Card composition | Semantic containers (上下叠, 并排, 分组, 对比, 标签页, 问卷) and more choice forms, with a status band on every card | Joye: 「组合有无限的可能」, yet it must not look like AI slop: the member picks structure, TeamChat picks the look | Members that set widths, colors or styles |
+| Card composition | Semantic containers (上下叠, 并排, 分组, 对比, 标签页, 问卷) and more choice forms, with a status band on every card | Owner feedback: 「组合有无限的可能」, yet it must not look like AI slop: the member picks structure, TeamChat picks the look | Members that set widths, colors or styles |
 | Interaction | **Claude Artifacts**: every click in a card or a 产出 page goes back to the member, which changes it in place | The member does the work, so it answers the gesture; one shared card per 话题 | A static card that only answers once |
 | 引用提问 | Point at one part (cell, point, step, node) and ask | The member knows exactly what is asked and the value that was seen | Describing the part in words |
 | ⌘K | **Linear** command bar: hand off work or search in one field | Handing off work is the main action; it deserves the main shortcut | A separate search dialog |
@@ -153,7 +153,7 @@ Each member with a character has a named tint; the character art is drawn in `ti
 | `ph-1` / `ph-2` / `ph-3` | `#D9D3C7` / `#C9D5D3` / `#E2D2C4` | `#4A463F` / `#3D4645` / `#4E463F` |
 
 Dark tints stay mid tones, lighter than every dark surface, so the navy art stays visible. A member
-added later without a named tint takes the tint of the roster character it uses, else `c-tata`.
+added later without a named tint takes the tint of the character it uses, else `c-tata`.
 `ph-*` are photo placeholders inside draft previews only.
 
 ### 2.6 Shadows
@@ -471,9 +471,9 @@ Topic rail cards, in this order:
   initial. A photo replaces the circle fill. Away people: avatar at 50 %, name `ink-3`. No presence
   dots and no typing dots.
 - **Members with a character**: a rounded-square tile, radius ≈ 0.3 × size (16→5, 20→6, 24→7, 28→8,
-  40→12, 48→14), filled with the member's tint (§2.5), `tile-edge`. The jojo-friends character art
-  for the member's current status sits centered at **72 %** of the tile (rules and art in
-  docs/ROSTER.md and `apps/desktop/assets/characters/`). The tile is `aria-hidden`; the name is
+  40→12, 48→14), filled with the member's tint (§2.5), `tile-edge`. The character art from the
+  optional character pack for the member's current status sits centered at **72 %** of the tile
+  (without the pack, the member gets a monogram). The tile is `aria-hidden`; the name is
   always text beside it.
 - **Status art** by context: a working dot → `working`; a waiting dot or an ask to the viewer →
   `needs-input`; a finished result in that spot (做完了 rows and cards, answered states, proof) →
@@ -518,7 +518,7 @@ section on 首页, `需要你拍板` only for the asked viewer), `done` (`✓ �
 | --- | --- |
 | Fields | Key-value grid: key 56 `ink-3`, value `ink`, `ui` 13/20, row gap 6; a check glyph in `ok` may lead a value |
 | Decision (选择) | 2 short options: one row of option buttons (36, radius 9, 1 pt `line-2`, key letter tile 20 on `sunken` + label), a press answers. 3–6 options: a column, one marked `推荐` (`meta` `ink-3` tag), an optional `补充一句` field, footer `提交` disabled until chosen. A recommendation line under the options: `Forge 推荐 A：…` `meta` `ink-3`. Chosen: 1 pt `ink` border + `check` at the right |
-| Approval (批准) | Fields (包含, 验收, 影响) + primary verb (`发布到生产`). Pressing opens a confirm dialog: title, one sentence, a field `输入 qqbot-prod 确认`, `确认发布` disabled until the name matches, `取消`; Esc cancels |
+| Approval (批准) | Fields (包含, 验收, 影响) + primary verb (`发布到生产`). Pressing opens a confirm dialog: title, one sentence, a field `输入 orderbot-prod 确认`, `确认发布` disabled until the name matches, `取消`; Esc cancels |
 | Form (表单) | Max 8 fields, 36 pt, labels above (`meta` 500 `ink-2`); chips for multi-select (selected `ink` border); footer `提交` disabled with a note `还差名字、岗位、入职日期` |
 | Draft (草稿) | The real object in a `raised` well, radius 10, padding 12: images (radius 6), title `ui` 600, body `ui` `ink-2`. `改一下` turns the well into fields with counters (`18/20`) in place; `改好了，确认发布` replaces the whole draft |
 | Plan (计划) | The rail plan list (§7.8), with mono durations and a `看 Forge 的电脑` / `实时查看` action; a waiting step says `· 等 Joye 拍板` + `看问题` |
@@ -549,14 +549,14 @@ section on 首页, `需要你拍板` only for the asked viewer), `done` (`✓ �
 everyone sees the same card. **v1 fallback**: 1.0.x clients get the server-derived v1 card (title,
 fallback text, fields, v1 buttons).
 
-**Notifications** (系统通知): only 做完了 and 需要你拍板. Title `Watch：把 qqbot v2.14 发布到生产吗？`,
+**Notifications** (系统通知): only 做完了 and 需要你拍板. Title `Watch：把 orderbot v2.14 发布到生产吗？`,
 one line of fields, the same two actions on hover; an irreversible action opens the app's confirm
 step instead of acting.
 
 ### 7.11 ⌘K 交代或搜索
 
 Overlay 640 wide, 96 pt from the window top, radius 16, `bg`, `pop`, scrim. Query row 52: `search`
-18 + query `body` 15/22 with the caret + a destination chip at the right (`发到 夹夹增长 ▾`, 28 pt,
+18 + query `body` 15/22 with the caret + a destination chip at the right (`发到 拾光增长 ▾`, 28 pt,
 1 pt `line-2`). Sections (label 28 pt `meta` 500 `ink-3`): **交代** first when the query reads as a
 request: `交给 Ledger` (40 tile, name + 岗位 tag, line 2 `开一个话题：拉一下 10 月各渠道的新增`, right
 the member's state `○ 空闲` / `● 在做 本周周报` + kbd `↵`) and `交给 Jojo 安排` (kbd `⌘↵`); then 话题, 产出,
@@ -807,7 +807,7 @@ default A. All three keep the header, search, destinations, team strip and foote
 
 | Mode | List | Tradeoff (the caption on the setting) |
 | --- | --- | --- |
-| **A 以工作为中心** (default) | `话题` header with `我参与的 ▾` filter; topics grouped by 群 (开发, 运维, 夹夹增长, 全员), then 私聊; each row with its state slot (§7.3) | 话题按群排，每行带一个状态，找某件事最快。缺点是等你的事散在各个群里，要靠琥珀色的点去扫 |
+| **A 以工作为中心** (default) | `话题` header with `我参与的 ▾` filter; topics grouped by 群 (开发, 运维, 拾光增长, 全员), then 私聊; each row with its state slot (§7.3) | 话题按群排，每行带一个状态，找某件事最快。缺点是等你的事散在各个群里，要靠琥珀色的点去扫 |
 | **B 以「需要我」为中心** | A row of 群 filter chips (`全部` selected `sel`, then each 群; 28 pt, `ui`); sections `需要你 4` (amber dot in the header), `在做 3`, `等别人 1`, `做完了 · 今天 3` (collapsed by default); rows show the 群 name at the right in `meta` `ink-3` | 一打开就先看到等你拍板的事。缺点是同一个群的话题被拆进三段，群只能当筛选用 |
 | **C 以成员为中心** | Destinations become 首页, 话题, 产出; `成员` header with `先看在忙的 ▾`; each member row (24 tile with ring + name + 岗位 `meta` + right `● 等你 2` / `2/4`) expands to its topics (indented 30 pt rows with their state and `等你` in `you-ink`); one collapsed row for idle members (`空闲 · Ledger、Scout、Pocket` with 16 tiles); then `同事` (people, same rows) and one row for absent people (`不在 · Alex Chen、陈晨`) | 谁在忙、谁在等你，一眼就清楚。缺点是一个话题有几位成员时会重复出现，找事情要先想是谁在做 |
 
@@ -887,7 +887,7 @@ name + mono date), 最近的产出 (thumbnail 44 × 48 + name + `v2 · 网页 ·
 A list column (340, `bg`, 1 pt `line` right): title `成员 13` + `+ 添加` secondary; tabs `全部 13`,
 `在做事 3`, `等人 2` (segmented, selected `sel`); sections `● 等你 2`, `在做事 3`, `空闲 3`, `同事 5`; rows
 48 pt: 28 avatar with ring, name `ui` 500 + 岗位, right `本周 5 个话题` `meta` `ink-3`, line 2 state
-(`等你 · 批准 qqbot v2.14 发布到生产` with `等你` in `you-ink`; `话题列表虚拟滚动 · 在跑压测 · 3/5`). Selected
+(`等你 · 批准 orderbot v2.14 发布到生产` with `等你` in `you-ink`; `话题列表虚拟滚动 · 在跑压测 · 3/5`). Selected
 row `sel`. **Detail** (max 480): header 48 tile with ring + name `card-title` + 岗位 tag + line `向 Tata 汇报
 · 在开发、运维两个群`; actions `暂停` secondary + `交代给 Forge` primary. Sections: **现在** (`在做 1 · 排队 1`; a
 card with title, `● 在跑…`, labeled plan segments, an 排队 row), **这周** (three stat cells: 完成的话题
@@ -903,7 +903,7 @@ the client runs cache and `BotRun.usage`.
 Title bar per §7.2. The page sits in a frame (radius 12, 1 pt `line`, `lift`, max 800, 24 pt
 margins): embedded when the child WKWebView works, else a snapshot with `打开` (native window).
 Choices inside a member-made page are forwarded to that member (`artifact.event`); the page shows
-the record `你选了「B 站」· 10:12 · 已发给 Ledger`. Right pane **来龙去脉**: 来自话题 (check + topic + `夹夹增长 ·
+the record `你选了「B 站」· 10:12 · 已发给 Ledger`. Right pane **来龙去脉**: 来自话题 (check + topic + `拾光增长 ·
 做完了 09:40` + chevron; 做的人 / 要求 rows with tiles and tags), 版本 (rows `v3 加了渠道拆分 今天 09:40`, selected
 `sel`; `和 v2 对比`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
 per version.

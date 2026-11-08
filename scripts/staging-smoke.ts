@@ -31,6 +31,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { deployedServer } from "./servers";
 
 const ROOT = join(import.meta.dir, "..");
 const args = process.argv.slice(2);
@@ -39,8 +40,7 @@ const opt = (name: string, dflt?: string): string | undefined => {
   return i >= 0 ? args[i + 1] : dflt;
 };
 const ENV = opt("env", "staging")!;
-const product = JSON.parse(readFileSync(join(ROOT, "product.json"), "utf8")) as { servers: Record<string, string> };
-const BASE = (opt("base") ?? product.servers[ENV] ?? "").replace(/\/$/, "");
+const BASE = (opt("base") ?? deployedServer(ENV) ?? "").replace(/\/$/, "");
 if (!BASE) throw new Error(`no base URL for env ${ENV}; pass --base`);
 const CONF = join(process.env.TEAM_CHAT_CONFIG_DIR ?? join(homedir(), ".config/team-chat"), ENV);
 const newestBot = (): string => {

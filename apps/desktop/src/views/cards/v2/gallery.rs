@@ -518,7 +518,7 @@ impl CardsGallery {
                                 editing: true,
                                 values: vec![(
                                     "title",
-                                    Val::Text("夹夹 3.0｜群里的照片一键分享回群".into()),
+                                    Val::Text("拾光 3.0｜群里的照片一键分享回群".into()),
                                 )],
                                 ..Default::default()
                             }),
@@ -734,7 +734,7 @@ impl CardsGallery {
             &action,
             msg.card.ask.as_ref().and_then(|a| a.irreversible.as_ref()),
         );
-        let field = confirm::field_box(div().child("qqbot-pr").into_any_element(), cx);
+        let field = confirm::field_box(div().child("orderbot-pr").into_any_element(), cx);
         div()
             .rounded(theme::radius::LG)
             .bg(theme::card_v2::alpha(k.ink, 0.18))

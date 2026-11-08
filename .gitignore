@@ -10,3 +10,4 @@ build/
 .env
 .env.*
 .tmp/
+wrangler.deploy.jsonc

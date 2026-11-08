@@ -4,10 +4,15 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (layout, components, environments) and
 [docs/protocol.md](docs/protocol.md) (wire contract) before you change code.
 
+- **Public repo**: this repo is public open source (AGPL-3.0). Never commit an operator's
+  deployment details (server URLs, D1/Worker ids, member/group/bot ids, who runs which bot on
+  which machine, rosters, private assets, local paths). They live in the private ops checkout
+  (`TC_OPS_DIR`, see [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)); docs use placeholders.
 - **Product name**: only in `product.json`. The server imports it, `apps/desktop/build.rs`
   exports it as compile-time constants, scripts read it with bun or jq. Never type the product
   name in code or UI strings. Infra ids (Worker, D1, crate and package names) use neutral names
-  and do not change when the product is renamed.
+  and do not change when the product is renamed. Server URLs are not in `product.json`: the app and the
+  scripts read them from `deploy/servers.json` in the ops checkout.
 - **Interface text**: Simplified Chinese, only from the desktop copy catalog, only the four
   product nouns 成员, 群, 话题, 产出 (see PRODUCT.md). Developer words stay in the developer view
   and in logs. The catalog test enforces this.
@@ -40,7 +45,8 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   independent features may share a number. Feature code lives in its own folder
   (`server/src/<feature>/`) and plugs into the core through the hooks the core exposes.
 - **Secrets**: never print, log or commit tokens, invite codes or secrets. Use
-  `wrangler secret put` for Worker secrets, files under `~/.config/team-chat/<env>/` (mode 600)
+  `wrangler secret put` for Worker secrets (`-c wrangler.deploy.jsonc --env <env>` on a deployed
+  env), files under `~/.config/team-chat/<env>/` (mode 600)
   for local copies, and the macOS Keychain on the client. Redact them on every log path.
 - **Rust builds**: every worktree uses its own `CARGO_TARGET_DIR` and shares compiled
   dependencies through sccache: `export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6`. Run

@@ -7,7 +7,7 @@
     "catalog": "tc.card/2.1",
     "rev": 1,
     "intent": "ask",
-    "title": "夹夹 4.0 首页用哪个方案？",
+    "title": "拾光 4.0 首页用哪个方案？",
     "fallback": "Pixel 做了两个首页方案，请选一个。",
     "ask": {
       "from": [

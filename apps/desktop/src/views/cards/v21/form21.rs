@@ -317,7 +317,7 @@ mod tests {
                   "allowOther": { "label": "其他" } },
                 { "type": "decision", "id": "where", "label": "发哪几个平台？", "multiple": true,
                   "minSelect": 2, "maxSelect": 3, "fallbackText": "f",
-                  "options": [{ "id": "x", "label": "小红书" }, { "id": "y", "label": "B 站" },
+                  "options": [{ "id": "x", "label": "微博" }, { "id": "y", "label": "B 站" },
                               { "id": "z", "label": "抖音" }, { "id": "w", "label": "即刻" }] },
                 { "type": "rank", "id": "order", "label": "排序", "fallbackText": "f",
                   "items": [{ "id": "p", "label": "照片" }, { "id": "s", "label": "分享" }] },

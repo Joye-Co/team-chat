@@ -68,18 +68,8 @@ TAG="v$VERSION"
 DMG="$DIST/$NAME-$VERSION.dmg"
 SECRET_FILE="${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/$ENV_NAME/admin-secret"
 
-server_base() {
-  local base="${CHAT_API_BASE:-}"
-  if [ -z "$base" ]; then base="$(jq -r --arg e "$ENV_NAME" '.servers[$e] // empty' "$ROOT/product.json")"; fi
-  if [ -z "$base" ]; then
-    case "$ENV_NAME" in
-      staging) base="https://chat-api-staging.huangdeshiou.workers.dev" ;;
-      production) base="https://chat-api-prod.huangdeshiou.workers.dev" ;;
-    esac
-  fi
-  printf '%s' "${base%/}"
-}
-BASE="$(server_base)"
+# Empty when this machine has no ops checkout; the upload and the preflight report it.
+BASE="$(env_base "$ENV_NAME" 2>/dev/null || true)"
 
 # release_notes_b64: notes for the server header, base64 on one line, at most ~6 KB of text.
 release_notes_b64() {
@@ -104,6 +94,7 @@ upload_to_server() {
   if [ -n "$(find "$SECRET_FILE" -perm -004 2>/dev/null)" ]; then log "warning: $SECRET_FILE is world-readable; run chmod 600"; fi
 
   local sha hdr resp code
+  [ -n "$BASE" ] || die "no server URL for $ENV_NAME: set TC_OPS_DIR (deploy/servers.json) or CHAT_API_BASE"
   sha="$(shasum -a 256 "$DMG" | awk '{ print $1 }')"
   hdr="$(mktemp)"
   resp="$(mktemp)"
@@ -164,12 +155,24 @@ grep -qE "^## ${VERSION//./\\.} \((unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})\)$" CH
 if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
+# release_ops: a release embeds only the server URLs (the 正式服务器 / 测试服务器 menu), never
+# the local character pack or roster. Builds against an ops dir that holds servers.json alone,
+# from TC_SERVERS_JSON (the Release workflow) or the ops checkout's deploy/servers.json.
+release_ops() {
+  local dir="$ROOT/.tmp/release-ops"
+  rm -rf "$dir" && mkdir -p "$dir/deploy"
+  servers_json >"$dir/deploy/servers.json" \
+    || die "release needs the server URLs: TC_SERVERS_JSON, or TC_OPS_DIR with deploy/servers.json"
+  export TC_OPS_DIR="$dir"
+}
+
 restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
 
 # set_version_and_build: sets the version and the CHANGELOG date in the working tree, checks the
 # release metadata, builds and checks the DMG and the daemon. Sets DAEMON.
 set_version_and_build() {
   need cargo
+  release_ops
   log "setting version $VERSION"
   set_workspace_version "$VERSION"
   cargo_env

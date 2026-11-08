@@ -1,7 +1,8 @@
 // Every deployed Worker env has Workers logs on and the crons the ops jobs need.
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { opsDir } from "../../scripts/servers";
 import { ROOT } from "./lib";
 
 /** JSONC -> JSON: drops comments outside strings. */
@@ -28,13 +29,23 @@ function parseJsonc(text: string): any {
 }
 
 function envs(path: string): [string, any][] {
-  const cfg = parseJsonc(readFileSync(join(ROOT, path), "utf8"));
+  const cfg = parseJsonc(readFileSync(path.startsWith("/") ? path : join(ROOT, path), "utf8"));
   return [["(top level)", cfg], ...Object.entries<any>(cfg.env ?? {})];
 }
 
+/** The operator's deploy config in the private ops checkout, when this machine has it. */
+function deployConfig(name: "server" | "monitor"): string | undefined {
+  const dir = opsDir();
+  const file = dir && join(dir, `deploy/${name}.wrangler.jsonc`);
+  return file && existsSync(file) ? file : undefined;
+}
+
 test("API Worker: logs on and the daily archive cron in every env", () => {
-  const list = envs("server/wrangler.jsonc");
-  expect(list.map(([n]) => n)).toEqual(["(top level)", "e2e", "staging", "production"]);
+  const committed = envs("server/wrangler.jsonc");
+  // Deployed envs are not committed (they are the operator's, in the ops checkout).
+  expect(committed.map(([n]) => n)).toEqual(["(top level)"]);
+  const deploy = deployConfig("server");
+  const list = [...committed, ...(deploy ? envs(deploy) : [])];
   for (const [name, e] of list) {
     expect(e.observability?.enabled, name).toBe(true);
     expect(e.observability?.logs?.enabled, name).toBe(true);
@@ -51,7 +62,8 @@ test("API Worker: the archive cron matches the code", () => {
 });
 
 test("Monitor Worker: logs on, 5-minute cron, targets with secrets named, never a token in vars", () => {
-  for (const [name, e] of envs("ops/monitor/wrangler.jsonc")) {
+  const deploy = deployConfig("monitor");
+  for (const [name, e] of [...envs("ops/monitor/wrangler.jsonc"), ...(deploy ? envs(deploy) : [])]) {
     expect(e.observability?.logs?.enabled, name).toBe(true);
     expect(e.triggers?.crons, name).toEqual(["*/5 * * * *"]);
     const targets = JSON.parse(e.vars.TARGETS);

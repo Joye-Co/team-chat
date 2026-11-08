@@ -1,7 +1,7 @@
 //! Message search lives in the one switcher (DESIGN.md §7.12, U35): Cmd+F
 //! (on a page with no 话题 open; in a 话题 it finds in the transcript,
 //! `timeline::find`) opens it scoped to the current 群 with a removable
-//! `在 qqbot 研发` token,
+//! `在 orderbot 研发` token,
 //! Cmd+Shift+F opens it over all of mine. The switcher asks the server
 //! through [`crate::data::ChatProvider::search`] and Enter on a hit opens
 //! the topic at that message (`Navigation::open_message`).

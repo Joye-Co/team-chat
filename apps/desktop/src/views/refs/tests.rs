@@ -28,7 +28,7 @@ fn channel() -> (Vec<String>, Vec<Vec<String>>) {
     (
         s(&["渠道", "新增群", "占比"]),
         vec![
-            s(&["小红书", "14", "37%"]),
+            s(&["微博", "14", "37%"]),
             s(&["群内邀请", "10", "26%"]),
             s(&["B 站", "9", "24%"]),
         ],
@@ -40,7 +40,7 @@ fn channel() -> (Vec<String>, Vec<Vec<String>>) {
 #[test]
 fn the_worked_example_label_is_exact() {
     let (columns, rows) = channel();
-    let ids = ["xhs".to_string(), "invite".into(), "bili".into()];
+    let ids = ["weibo".to_string(), "invite".into(), "bili".into()];
     let data = TableData {
         columns: &columns,
         rows: &rows,
@@ -198,7 +198,7 @@ fn table_rows_and_columns() {
         row_keys: None,
     };
     let row = parts::table(&data, TablePick::Row(0)).unwrap();
-    assert_eq!(row.text.as_deref(), Some("小红书 · 整行"));
+    assert_eq!(row.text.as_deref(), Some("微博 · 整行"));
     assert_eq!(row.value.unwrap()["cells"]["占比"], "37%");
     let col = parts::table(&data, TablePick::Column(2)).unwrap();
     assert_eq!(col.text.as_deref(), Some("占比 · 整列"));

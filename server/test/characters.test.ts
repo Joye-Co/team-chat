@@ -16,7 +16,7 @@ async function lastAudit(action: string, target: string) {
 }
 
 describe("member characters", () => {
-  it("knows the 26 jojo-friends ids", () => {
+  it("knows the 26 character ids", () => {
     expect(CHARACTER_IDS).toHaveLength(26);
     expect(new Set(CHARACTER_IDS).size).toBe(26);
   });

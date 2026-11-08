@@ -8,8 +8,10 @@
 //!   24 pt and below; a leading emoji is skipped. A presence dot shows for
 //!   people who are online; offline shows no dot.
 //! - Bots are rounded-square tiles (radius 0.25 x size) in the bot's tint,
-//!   with its jojo-friends character at its live status fitted inside
-//!   (`characters::tile`). The status shows as a pip with the size and
+//!   with its character at its live status fitted inside
+//!   (`characters::tile`). A member whose character has no art in this
+//!   build (no optional character pack) draws its initial, as if it had no
+//!   character: a bot in its squircle, a person in its circle. The status shows as a pip with the size and
 //!   offset of a person's presence dot, only for working, needs-input and
 //!   error; callers that already show a status label skip `presence`.
 //!
@@ -79,7 +81,12 @@ impl MemberAvatar {
             surface: None,
             selected: false,
             dimmed: member.is_some_and(|m| m.deactivated),
-            character: member.and_then(|m| m.character.map(|c| (c, m.clone()))),
+            // Only a character this build has art for; else the initial.
+            character: member.and_then(|m| {
+                m.character
+                    .filter(|&c| characters::has_art(c))
+                    .map(|c| (c, m.clone()))
+            }),
             status_override: None,
             ring: None,
         }
@@ -552,6 +559,28 @@ mod tests {
         // One character, or a non-Han second character.
         assert_eq!(monogram("小", size), "小");
         assert_eq!(monogram("小A", size), "小");
+    }
+
+    #[test]
+    fn a_character_without_art_draws_the_initial() {
+        let member = Member {
+            id: "m-bot".into(),
+            kind: crate::data::MemberKind::Bot,
+            name: "Forge".into(),
+            role: None,
+            level: crate::data::MemberLevel::Member,
+            avatar_url: None,
+            deactivated: false,
+            online: true,
+            character: Some(characters::CharacterId::O08),
+        };
+        let avatar = MemberAvatar::new(Some(&member), px(32.));
+        assert!(avatar.bot);
+        assert_eq!(
+            avatar.character.is_some(),
+            characters::has_art(characters::CharacterId::O08)
+        );
+        assert_eq!(monogram(&avatar.name, px(32.)), "F");
     }
 
     #[test]

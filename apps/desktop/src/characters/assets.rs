@@ -1,6 +1,7 @@
-//! The bundled character SVGs, embedded by `build.rs` from
-//! `apps/desktop/assets/characters/`. `ui::AppAssets` serves them; gpui's
-//! `img()` renders them in full color (resvg).
+//! The bundled character SVGs, embedded by `build.rs` from the optional
+//! character pack (from TC_OPS_DIR); empty in a build without it.
+//! `ui::AppAssets` serves them; gpui's `img()` renders them in full color
+//! (resvg).
 
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/character_assets.rs"));
@@ -25,8 +26,16 @@ pub fn list(prefix: &str) -> impl Iterator<Item = &'static str> + '_ {
         .filter(move |p| p.starts_with(prefix))
 }
 
+/// Whether any file of the character `id` is bundled.
+pub fn has_character(id: &str) -> bool {
+    let prefix = format!("characters/{id}/");
+    let at = embedded::FILES.partition_point(|(p, _)| *p < prefix.as_str());
+    embedded::FILES
+        .get(at)
+        .is_some_and(|(p, _)| p.starts_with(&prefix))
+}
+
 /// How many files are bundled.
-#[cfg(test)]
 pub fn count() -> usize {
     embedded::FILES.len()
 }

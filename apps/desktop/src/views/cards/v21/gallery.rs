@@ -260,7 +260,7 @@ impl Gallery21 {
                             me,
                             preset(vec![(
                                 "where",
-                                Val::Choice(vec!["xhs".into(), "bili".into()])
+                                Val::Choice(vec!["weibo".into(), "bili".into()])
                             ),]),
                             "a"
                         ),

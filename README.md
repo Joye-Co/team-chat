@@ -14,32 +14,35 @@ Server: Cloudflare Workers, Durable Objects, D1 and R2. The product name is a va
 
 ## Install the app
 
-Latest release: <https://github.com/Joye-Co/team-chat/releases/latest> (private repository).
-Interns get a download link with their invite code from Joye.
+Latest release: <https://github.com/Joye-Co/team-chat/releases/latest>. A team's owner sends each
+new member a download link with their invite code.
 
-- Interns (Chinese): [docs/ONBOARDING.zh.md](docs/ONBOARDING.zh.md) (download, first open,
+- New members (Chinese): [docs/ONBOARDING.zh.md](docs/ONBOARDING.zh.md) (download, first open,
   sign in, 群, 话题, 待办, 产出, @ a bot, notifications, diagnostics) and
   [docs/INSTALL.zh.md](docs/INSTALL.zh.md) (install, update, uninstall).
 - English: [docs/INSTALL.md](docs/INSTALL.md).
 
 The app needs an Apple silicon Mac with macOS 13 or later. It is not notarized: the first open
 goes through System Settings > Privacy & Security > Open Anyway. In-app updates do not ask again.
-The default server is production (`product.json` `servers.production`).
+Server URLs are not part of this repository: a build takes the staging and production URLs from
+the operator's private ops checkout (`deploy/servers.json`, see
+[docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md#ops-checkout)) and offers them as 正式服务器 and
+测试服务器. A build without them asks for the server URL at sign-in.
 
 ## Environments
 
 | Env | API | Used by |
 | --- | --- | --- |
 | local | `wrangler dev` on `http://127.0.0.1:<port>` | development |
-| e2e | `https://chat-api-e2e.huangdeshiou.workers.dev` | `tools/e2e` runs |
-| staging | `https://chat-api-staging.huangdeshiou.workers.dev` | checks before production, `--selftest-live` |
-| production | `https://chat-api-prod.huangdeshiou.workers.dev` | the team |
+| e2e | `https://chat-api-e2e.<your-subdomain>.workers.dev` | `tools/e2e` runs |
+| staging | `https://chat-api-staging.<your-subdomain>.workers.dev` | checks before production, `--selftest-live` |
+| production | `https://chat-api-prod.<your-subdomain>.workers.dev` | the team |
 
 Deploy the server with `cd server && bun run deploy:<e2e|staging|production>`
-(`scripts/deploy-server.sh`: D1 migrations, then the Worker; `/v1/health` reports
+(`scripts/deploy-server.sh`: the Worker config from your ops checkout, D1 migrations, then the Worker; `/v1/health` reports
 `DEPLOY_VERSION`, else the `v<semver>` tag at HEAD, else the short commit). Secrets, setup and
 the deploy steps: [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md). Incidents and rollback:
-[docs/RUNBOOK.md](docs/RUNBOOK.md). What only Joye can do: [docs/USER-ACTIONS.md](docs/USER-ACTIONS.md).
+[docs/RUNBOOK.md](docs/RUNBOOK.md). Bots and the machines that run them: [docs/bots.md](docs/bots.md).
 
 ## Quick start
 
