@@ -11,5 +11,5 @@
     "erasableSyntaxOnly": true,
     "types": ["bun"]
   },
-  "include": ["src", "test", "../../examples/*.ts"]
+  "include": ["src", "test", "../../examples/*.ts", "../../scripts/sandbox/*.ts"]
 }
