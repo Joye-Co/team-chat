@@ -230,6 +230,8 @@ export function buildPrompt(opts: {
   context?: string;
   /** The machine answers chat-run context ops (feature "context"). */
   contextTools?: boolean;
+  /** The front desk's work order (agent/frontdesk.ts `briefText`). */
+  brief?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
@@ -250,6 +252,7 @@ export function buildPrompt(opts: {
     `Request from ${name(opts.request.authorId)}:`,
     opts.request.body,
   ];
+  if (opts.brief) lines.push("", opts.brief);
   if (opts.refs) lines.push("", opts.refs);
   for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
   return lines.join("\n");
@@ -267,11 +270,13 @@ export function buildResumePrompt(opts: {
   followUps?: ContextMessage[];
   refs?: string;
   contextTools?: boolean;
+  brief?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines: string[] = [];
   if (opts.context !== "") lines.push("New in the topic since your last turn, oldest first:", opts.context, "");
   lines.push(`Request from ${name(opts.request.authorId)}:`, opts.request.body);
+  if (opts.brief) lines.push("", opts.brief);
   if (opts.refs) lines.push("", REFS_RULE, "", opts.refs);
   for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
   if (opts.contextTools) lines.push("", CONTEXT_TOOLS_RULE);

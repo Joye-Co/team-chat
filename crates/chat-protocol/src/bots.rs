@@ -551,6 +551,59 @@ pub struct ContextHit {
     pub snippet: String,
 }
 
+/// The front desk's work order (交代单) for the executor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkBrief {
+    pub goal: String,
+    pub done_when: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+/// "reply" | "dispatch" | "ask" | "skip"
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FrontDeskAction {
+    Reply,
+    Dispatch,
+    Ask,
+    Skip,
+}
+
+/// One front desk decision (docs/protocol.md, "Front desk").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontDeskDecision {
+    pub message_id: String,
+    pub topic_id: String,
+    pub author_id: String,
+    pub action: FrontDeskAction,
+    pub reason: String,
+    pub confidence: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<WorkBrief>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub ms: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_message_id: Option<String>,
+    pub at: Millis,
+}
+
+/// `GET /v1/bots/:id/decisions?groupId=&topicId=` (owner), newest first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontDeskDecisionsResponse {
+    pub decisions: Vec<FrontDeskDecision>,
+}
+
 /// `GET /v1/machine/runs/:id/search`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

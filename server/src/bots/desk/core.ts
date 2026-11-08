@@ -32,6 +32,7 @@ import { ROOM_REACT_RPC } from "../../reactions";
 import type { BotsEnv } from "../env";
 import { ACK_EMOJI } from "../proof";
 import type { TopicMessage } from "../room";
+import type { Brief } from "../../agent/frontdesk";
 
 export type RunRow = {
   id: string;
@@ -335,6 +336,29 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN fresh INTEGER NOT NULL DEFAULT 0;
           `,
         },
+        {
+          // The front desk (agent/frontdesk.ts): each decision is stored before it is acted on.
+          name: "desk-9-front",
+          up: `
+            CREATE TABLE decisions (
+              message_id TEXT PRIMARY KEY,
+              group_id TEXT NOT NULL,
+              topic_id TEXT NOT NULL,
+              author_id TEXT NOT NULL,
+              action TEXT NOT NULL,
+              decision TEXT NOT NULL,
+              fallback TEXT,
+              model TEXT,
+              ms INTEGER NOT NULL DEFAULT 0,
+              input_tokens INTEGER NOT NULL DEFAULT 0,
+              output_tokens INTEGER NOT NULL DEFAULT 0,
+              reply_message_id TEXT,
+              answered INTEGER NOT NULL DEFAULT 0,
+              at INTEGER NOT NULL
+            );
+            CREATE INDEX decisions_topic ON decisions(topic_id, at);
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -593,7 +617,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
-  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[], retryOf?: string): Promise<void>;
+  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[], retryOf?: string, brief?: Brief): Promise<void>;
   /** A RunEvent `output` (`chat-run`, 1.1): performed and answered by the interaction module. */
   protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, f: { at: number; serverAt?: number }): Promise<void>;
 }

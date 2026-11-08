@@ -1,0 +1,23 @@
+{
+  "kind": "FrontDeskDecisionsResponse",
+  "valid": true,
+  "description": "the model failed: the request became a run",
+  "value": {
+    "decisions": [
+      {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "authorId": "01JBX0OWNER0000000000000AA",
+        "action": "dispatch",
+        "reason": "",
+        "confidence": 0.5,
+        "model": "deepseek-chat",
+        "ms": 1800,
+        "inputTokens": 900,
+        "outputTokens": 60,
+        "at": 1762128000000,
+        "fallback": "model error: 500 overloaded"
+      }
+    ]
+  }
+}

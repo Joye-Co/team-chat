@@ -137,12 +137,13 @@ export const SIDE_CHAT_CONTEXT_MESSAGES = 60;
  * has no responsible bot: every bot it mentions may work there (docs/protocol.md, "群聊").
  */
 registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
-  const { topicId } = args as { topicId: string };
+  // peek: read the topic without becoming its responsible bot (the front desk reads first).
+  const { topicId, peek } = args as { topicId: string; peek?: boolean };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
   const topic = room.sql.exec<{ title: string; context: string | null }>("SELECT title, context FROM topics WHERE id = ?", topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
   const main = isMainTopicId(topicId);
-  if (!main) {
+  if (!main && !peek) {
     room.sql.exec(
       "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
       topicId,
@@ -160,7 +161,7 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .toArray()
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
-  const out: ClaimResult = { botId: main ? actor.id : (claimedBot(room.sql, topicId) as string), title: topic.title, messages };
+  const out: ClaimResult = { botId: main ? actor.id : (claimedBot(room.sql, topicId) ?? actor.id), title: topic.title, messages };
   out.newest = contextRows(room.sql, actor.id, topicId, "", [], "DESC", CONTEXT_SCAN);
   out.first = contextRows(room.sql, actor.id, topicId, "", [], "ASC", 1)[0];
   out.total = topicCount(room.sql, topicId);

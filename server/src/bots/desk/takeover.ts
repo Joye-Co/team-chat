@@ -102,7 +102,7 @@ export abstract class DeskTakeover extends DeskInput {
       // A key of its own: the original message already started a run.
       const key = `retry:${ulid()}`;
       const ack = request.m.ackMessageId ?? (r.trigger_message_id.includes(":") ? undefined : r.trigger_message_id);
-      await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, request.followUps, r.id);
+      await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, request.followUps, r.id, request.brief);
       const started = this.sql.exec<RunRow>("SELECT * FROM runs WHERE trigger_message_id = ?", key).toArray()[0] as RunRow | undefined;
       if (!started) throw new ApiError("conflict", "the member takes no runs in this topic");
       this.log.info("run retried", { runId, retryId: started.id, actorId: actor.id });
