@@ -232,6 +232,8 @@ export function buildPrompt(opts: {
   contextTools?: boolean;
   /** The front desk's work order (agent/frontdesk.ts `briefText`). */
   brief?: string;
+  /** 沉淀: the memory index (memory/inject.ts), reference material. */
+  memory?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
@@ -240,6 +242,7 @@ export function buildPrompt(opts: {
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
     ...(opts.rules ? [opts.rules] : []),
+    ...(opts.memory ? ["", opts.memory] : []),
     "",
     ...(opts.context !== undefined
       ? [

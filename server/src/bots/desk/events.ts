@@ -8,7 +8,9 @@ import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
-import { DeskRuns } from "./runs";
+import { DeskRuns, type RunRequest } from "./runs";
+import { briefText } from "../../agent/frontdesk";
+import { retroAfterRun } from "../../memory/retro";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
@@ -410,9 +412,33 @@ export abstract class DeskEvents extends DeskRuns {
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
     await this.topic(r, topicStatus);
+    this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+  }
+
+  /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */
+  protected retro(r: RunRow, status: RunStatus, result: string): void {
+    if (!r.machine_id || r.external || r.kind === RUN_KIND_ASIDE) return;
+    try {
+      const raw = this.meta(`request:${r.id}`);
+      if (raw === null) return;
+      const req = JSON.parse(raw) as RunRequest;
+      const input = {
+        botId: this.botId as string,
+        runId: r.id,
+        status,
+        requesterId: req.m.authorId,
+        request: [req.m.body, ...req.followUps.map((f) => f.body)].join("\n\n"),
+        ...(req.brief ? { brief: briefText(req.brief) } : {}),
+        progress: r.progress_text,
+        result,
+      };
+      this.ctx.waitUntil(retroAfterRun(this.env, input).catch((err) => this.log.warn("run review failed", { runId: r.id, err })));
+    } catch (err) {
+      this.log.warn("run review failed", { runId: r.id, err });
+    }
   }
 
   /**
