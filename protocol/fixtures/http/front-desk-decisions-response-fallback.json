@@ -10,7 +10,7 @@
         "authorId": "01JBX0OWNER0000000000000AA",
         "action": "dispatch",
         "reason": "",
-        "confidence": 0,
+        "confidence": 0.5,
         "model": "deepseek-chat",
         "ms": 1800,
         "inputTokens": 900,
