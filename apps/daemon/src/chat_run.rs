@@ -83,6 +83,10 @@ upload --file <path>` uploads one file. The prompt carries only part of the topi
 messages, whole messages, search and files with `chat-run topic history [--before <seq>] \
 [--after <seq>] [--limit <n>]`, `chat-run topic message --id <messageId>`, `chat-run search \
 --query <text> [--group] [--limit <n>]` and `chat-run file get --id <fileId> [--out <path>]`. \
+Keep what will matter in later work with `chat-run memory note --scope member|person|group --kind \
+lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>]`: member for your \
+own lessons and how-tos, person for the requester's preferences, group for conventions people said \
+here. Notes are reviewed once a day; the team's memory is never written by a run. \
 When another AI member of the group should do the work, hand it over with `chat-run handoff \
 --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]` (then stop), or give \
 a part out with `chat-run assign --member <name> --goal <text> ...`: it gets its own topic and its \
@@ -758,6 +762,7 @@ pub const USAGE: &str = "usage:
   chat-run topic message --id <messageId>
   chat-run search --query <text> [--group] [--limit <1-50>]
   chat-run file get --id <fileId> [--out <path>]
+  chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>]
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
 prints its JSON Schema (no daemon needed). ops.json is a list of
@@ -913,6 +918,11 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &args[1..],
             &["query", "limit"],
         ),
+        ["memory", "note"] => (
+            crate::chat_run_context::MEMORY_NOTE,
+            &args[2..],
+            &["scope", "kind", "when", "text"],
+        ),
         ["file", "get"] => (
             crate::chat_run_context::FILE_GET,
             &args[2..],
@@ -951,6 +961,22 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             }
         }
         crate::chat_run_context::TOPIC_MESSAGE => put("messageId", json!(id(&f)?)),
+        crate::chat_run_context::MEMORY_NOTE => {
+            let mut b =
+                json!({ "scope": f.req("scope")?, "kind": f.req("kind")?, "text": f.req("text")? });
+            if let Some(w) = f.opt("when") {
+                b["when"] = json!(w);
+            }
+            let b = crate::chat_run_context::memory_body(&b).map_err(|e| {
+                e["error"]["message"]
+                    .as_str()
+                    .unwrap_or("invalid")
+                    .to_string()
+            })?;
+            for (k, v) in b.as_object().into_iter().flatten() {
+                put(k, v.clone());
+            }
+        }
         crate::chat_run_context::CONTEXT_SEARCH => {
             let q = f.req("query")?;
             if q.trim().is_empty() {
@@ -1349,6 +1375,42 @@ mod tests {
             json!({ "text": "" })
         );
         assert!(request(&args(&["desk", "note"])).is_err());
+        let (op, body) = request(&args(&[
+            "memory",
+            "note",
+            "--scope",
+            "person",
+            "--kind",
+            "preference",
+            "--text",
+            "PR 标题用英文",
+            "--when",
+            "开 PR 时",
+        ]))
+        .unwrap();
+        assert_eq!(op, crate::chat_run_context::MEMORY_NOTE);
+        assert_eq!(
+            body,
+            json!({ "scope": "person", "kind": "preference", "text": "PR 标题用英文", "when": "开 PR 时" })
+        );
+        assert!(
+            request(&args(&[
+                "memory", "note", "--scope", "team", "--kind", "fact", "--text", "x"
+            ]))
+            .is_err()
+        );
+        assert!(
+            request(&args(&[
+                "memory", "note", "--scope", "member", "--kind", "gossip", "--text", "x"
+            ]))
+            .is_err()
+        );
+        assert!(
+            request(&args(&[
+                "memory", "note", "--scope", "member", "--kind", "lesson", "--text", " "
+            ]))
+            .is_err()
+        );
         let (op, body) = request(&args(&[
             "handoff",
             "--member",

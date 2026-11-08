@@ -7,7 +7,7 @@ import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
 import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine } from "../dispatch";
-import { type ContextRow, type Selection, selectLines } from "../../context/render";
+import { type ContextRow, type Selection, selectLines, withSummary } from "../../context/render";
 import { type Brief, briefText } from "../../agent/frontdesk";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
@@ -295,7 +295,7 @@ export abstract class DeskRuns extends DeskCore {
       botName: name(botId),
       title: claim.title,
       messages: [],
-      context: sel.text,
+      context: withSummary(sel, claim.summary),
       contextTools,
       names,
       request,

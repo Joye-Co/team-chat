@@ -372,7 +372,8 @@ describe("SF-10 rate limit answers", () => {
       expect(a.error.retryAfterMs).toBeLessThanOrEqual(1000);
     }
     // After the wait, the next send goes through at once (no 2 s turn wait for the refused ones).
-    await new Promise((r) => setTimeout(r, Math.max(...limited.map((a) => a.error.retryAfterMs))));
+    // A small margin: the bucket refills on the server's clock, and timers are not exact.
+    await new Promise((r) => setTimeout(r, Math.max(...limited.map((a) => a.error.retryAfterMs)) + 100));
     const t0 = Date.now();
     await c.ok({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "after" });
     expect(Date.now() - t0).toBeLessThan(1500);
