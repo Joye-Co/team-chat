@@ -59,6 +59,8 @@ const OPS: &[&str] = &[
     output_op::ARTIFACT_DATA,
     output_op::ARTIFACT_REPLY,
     output_op::DESK_NOTE,
+    output_op::MEMBER_HANDOFF,
+    output_op::MEMBER_ASSIGN,
 ];
 
 /// The note the CLI gets in its system prompt (Claude Code `--append-system-prompt`, Codex
@@ -81,6 +83,10 @@ upload --file <path>` uploads one file. The prompt carries only part of the topi
 messages, whole messages, search and files with `chat-run topic history [--before <seq>] \
 [--after <seq>] [--limit <n>]`, `chat-run topic message --id <messageId>`, `chat-run search \
 --query <text> [--group] [--limit <n>]` and `chat-run file get --id <fileId> [--out <path>]`. \
+When another AI member of the group should do the work, hand it over with `chat-run handoff \
+--member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]` (then stop), or give \
+a part out with `chat-run assign --member <name> --goal <text> ...`: it gets its own topic and its \
+result comes back to you as input. \
 Each prints the JSON result and exits 0, or prints the \
 error with its reason and exits 1. A page opens beside the conversation in a pane about 400 pt \
 wide: make it work at that width (a row of tabs wraps or scrolls sideways, nothing is cut off). \
@@ -718,6 +724,8 @@ pub const USAGE: &str = "usage:
   chat-run artifact data --artifact <artifactId> --version <n> --file data.json [--base-data-rev <n>] [--cause <eventId>]
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
   chat-run desk note --text <text>
+  chat-run handoff --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]
+  chat-run assign --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]
   chat-run secret <NAME>
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
@@ -841,6 +849,16 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &["event", "file", "decline"],
         ),
         ["desk", "note"] => (output_op::DESK_NOTE, &args[2..], &["text"]),
+        ["handoff", ..] => (
+            output_op::MEMBER_HANDOFF,
+            &args[1..],
+            &["member", "goal", "done-when", "notes"],
+        ),
+        ["assign", ..] => (
+            output_op::MEMBER_ASSIGN,
+            &args[1..],
+            &["member", "goal", "done-when", "notes"],
+        ),
         ["file", "upload"] => (
             crate::chat_run_files::FILE_UPLOAD,
             &args[2..],
@@ -1029,6 +1047,27 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             }
             if let Some(c) = f.opt("cause") {
                 put("cause", json!(c));
+            }
+        }
+        output_op::MEMBER_HANDOFF | output_op::MEMBER_ASSIGN => {
+            let member = f.req("member")?.trim();
+            let goal = f.req("goal")?.trim();
+            if member.is_empty() || goal.is_empty() {
+                return Err("--member and --goal are required".into());
+            }
+            put("member", json!(member));
+            put("goal", json!(goal));
+            if let Some(d) = f.opt("done-when") {
+                // Checks separated by ; or new lines.
+                let checks: Vec<&str> = d
+                    .split([';', '\n'])
+                    .map(str::trim)
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                put("doneWhen", json!(checks));
+            }
+            if let Some(n) = f.opt("notes") {
+                put("notes", json!(n));
             }
         }
         output_op::DESK_NOTE => {
@@ -1282,6 +1321,28 @@ mod tests {
             json!({ "text": "" })
         );
         assert!(request(&args(&["desk", "note"])).is_err());
+        let (op, body) = request(&args(&[
+            "handoff",
+            "--member",
+            "qa",
+            "--goal",
+            "补测试",
+            "--done-when",
+            "测试通过; CI 绿",
+            "--notes",
+            "看 m 01X",
+        ]))
+        .unwrap();
+        assert_eq!(op, output_op::MEMBER_HANDOFF);
+        assert_eq!(
+            body,
+            json!({ "member": "qa", "goal": "补测试", "doneWhen": ["测试通过", "CI 绿"], "notes": "看 m 01X" })
+        );
+        let (op, body) = request(&args(&["assign", "--member", "qa", "--goal", "写文档"])).unwrap();
+        assert_eq!(op, output_op::MEMBER_ASSIGN);
+        assert_eq!(body, json!({ "member": "qa", "goal": "写文档" }));
+        assert!(request(&args(&["assign", "--member", "qa"])).is_err());
+        assert!(request(&args(&["handoff", "--goal", "x"])).is_err());
         let long = "长".repeat(141);
         assert!(request(&args(&["desk", "note", "--text", &long])).is_err());
         assert!(OPS.contains(&"desk.note"));

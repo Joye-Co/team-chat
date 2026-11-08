@@ -878,6 +878,25 @@ stops trying, and the topic gets one note.
   bot from the run's state (minutes, plan, last step). The CLI is not interrupted, and the message
   counts as a taken input.
 
+### Delegation (转交 and 分出去)
+
+A run hands work to another AI member of its group with `chat-run handoff` or `chat-run assign`
+(machine-protocol.md, `member.handoff` / `member.assign`). `member` is the other member's name or
+id. It must be a bot member of the group with an enabled runner. An unknown name gets
+`not_found` (`delegation.unknown_member`), and the message lists the members the run can name.
+Bots' own messages never start runs, so the hand-over goes desk to desk, and a visible message says
+who took what.
+
+- **转交** (`member.handoff`): the other member becomes the topic's responsible member, and the
+  calling bot posts "@B 转交给你：goal". B starts a run in the same topic, whose prompt carries the
+  work order (`goal`, `doneWhen`, `notes`). The calling run should stop.
+- **分出去** (`member.assign`): the calling bot opens a new topic with "@B goal". B works there.
+  When B's run ends (done, failed or blocked), its result goes back to the giver's topic: as
+  `run.input` to the giver's active run (`inputId` `desk-part-…`), or else as a follow-up run.
+- **Limits**: hand-overs chain at most 3 deep (`delegation.too_deep`). One piece of work gives out
+  at most 8 parts (`delegation.too_many`). A member that is already working in the topic refuses
+  (`delegation.refused`).
+
 ### Front desk
 
 With an AI service set (设置 › 通用 › AI 服务), a runner-backed bot's front desk reads each new
