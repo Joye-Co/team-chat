@@ -69,6 +69,9 @@ fn problem_text(p: AiDraftProblem, switched: bool) -> &'static str {
 
 pub struct AiServicePanel {
     services: Services,
+    /// Whether I am an owner, read when the session or the members change
+    /// rather than on every frame (`session()` reads the store).
+    owner: bool,
     /// What the server keeps; `None` until it is read.
     saved: Option<AiServiceSettings>,
     load: Status,
@@ -111,13 +114,21 @@ impl AiServicePanel {
             window,
             |this, _, changes: &crate::app::Changes, window, cx| {
                 if changes.any(|c| matches!(c, Change::Session)) {
+                    this.owner = super::i_am_owner(&this.services);
                     this.saved = None;
                     this.load = Status::Idle;
                     this.refresh(window, cx);
+                } else if changes.any(|c| matches!(c, Change::Members)) {
+                    let owner = super::i_am_owner(&this.services);
+                    if owner != this.owner {
+                        this.owner = owner;
+                        cx.notify();
+                    }
                 }
             },
         ));
         Self {
+            owner: super::i_am_owner(&services),
             services,
             saved: None,
             load: Status::Idle,
@@ -141,7 +152,7 @@ impl AiServicePanel {
 
     /// Reads the team's AI 服务 (once per window, and after a failure on 重试).
     pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.load.busy() || !super::i_am_owner(&self.services) {
+        if self.load.busy() || !self.owner {
             return;
         }
         self.load = Status::Busy(s::AI_LOADING.into());
@@ -346,7 +357,7 @@ impl AiServicePanel {
 
     /// The section; `None` for a member who is not an owner.
     pub fn section(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Div> {
-        if !super::i_am_owner(&self.services) {
+        if !self.owner {
             return None;
         }
         if self.saved.is_none() && matches!(self.load, Status::Idle) {

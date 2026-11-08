@@ -32,8 +32,33 @@ use crate::{
 
 pub const DIAGNOSTICS_MAX: usize = 2000;
 
+/// What the pane shows about my session, read when the session or the
+/// members change rather than on every frame: `session()` reads the store.
+#[derive(Default)]
+struct Me {
+    server: String,
+    id: String,
+    owner: bool,
+}
+
+impl Me {
+    fn read(services: &Services) -> Self {
+        match services.provider.session() {
+            SessionState::SignedIn { me, server_url } => Me {
+                owner: me.level == crate::data::MemberLevel::Owner,
+                id: me.id,
+                server: server_url,
+            },
+            _ => Me::default(),
+        }
+    }
+}
+
 pub struct GeneralPage {
     services: Services,
+    me: Me,
+    /// How many versions 更新记录 lists (fixed for this build).
+    versions: usize,
     /// AI 服务, shown to owners only.
     ai: Entity<super::ai_service::AiServicePanel>,
     updater: Option<Entity<updater::Updater>>,
@@ -51,8 +76,11 @@ impl GeneralPage {
         });
         let updater = updater::global(cx);
         let mut subscriptions = vec![
-            cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-                if changes.any(|c| matches!(c, Change::Session | Change::Connection)) {
+            cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
+                if changes.any(|c| matches!(c, Change::Session | Change::Members)) {
+                    this.me = Me::read(&this.services);
+                    cx.notify();
+                } else if changes.any(|c| matches!(c, Change::Connection)) {
                     cx.notify();
                 }
             }),
@@ -69,6 +97,8 @@ impl GeneralPage {
         }
         let ai = cx.new(|cx| super::ai_service::AiServicePanel::new(services.clone(), window, cx));
         Self {
+            me: Me::read(&services),
+            versions: updater::notes::history_len(),
             services,
             ai,
             updater,
@@ -91,11 +121,8 @@ impl GeneralPage {
             .update(cx, |st, cx| st.set_value(text.to_string(), window, cx));
     }
 
-    fn server(&self) -> String {
-        match self.services.provider.session() {
-            SessionState::SignedIn { server_url, .. } => server_url,
-            _ => String::new(),
-        }
+    fn server(&self) -> &str {
+        &self.me.server
     }
 
     pub fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -407,7 +434,7 @@ impl GeneralPage {
                 )
                 .into_any_element(),
         );
-        let versions = updater::notes::history().len();
+        let versions = self.versions;
         if versions > 0 {
             rows.push(nav_row(
                 "about-changelog",
@@ -493,7 +520,7 @@ impl Render for GeneralPage {
         let k = native_colors(cx);
         let p = prefs::get();
         let developer = self.services.nav.read(cx).developer_view;
-        let server = self.server();
+        let server = self.server().to_string();
         let launch_title = if p.launch_last_topic {
             s::ON_LAUNCH_LAST
         } else {
@@ -615,10 +642,7 @@ impl Render for GeneralPage {
                 StatusBadge::new(state, word).into_any_element(),
                 cx,
             ));
-            let me = match provider.session() {
-                SessionState::SignedIn { me, .. } => me.id,
-                _ => String::new(),
-            };
+            let me = self.me.id.clone();
             // 服务器 is already in 版本与服务器 with its copy button: one
             // place per fact on a screen (A5, review 3 C1-06).
             dev_group = dev_group.row(dev_row(
@@ -670,7 +694,7 @@ impl Render for GeneralPage {
                 }),
         );
         let _ = k;
-        let owner = super::i_am_owner(&self.services);
+        let owner = self.me.owner;
         widgets::pane()
             .child(startup)
             .child(alerts)
