@@ -14,7 +14,10 @@ mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and 
 `chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json;
 "chatcard" reads `chat-run card schema`, posts a card built from it with `chat-run card post`,
 posts it again (a retry: the idempotency key gives the same message), patches the posted card
-with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json.
+with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json;
+"gated" calls the Bash tool with `gh pr merge 12 --squash` and `ls` ("gated twice": and
+`gh pr merge 13`), each after the PreToolUse hooks of --settings, and writes what the hooks
+decided to gate-<n>.json.
 The arguments are written to argv.json in the working directory (in the run folder above it, with
 the failed write's errno in aside-write.json, when the working directory is read-only); with --settings, the settings
 and the ASIDE_PROBE variable they set go to settings-seen.json.
@@ -43,11 +46,34 @@ except OSError as e:
     rec = ".."
     open(os.path.join(rec, "aside-write.json"), "w").write(json.dumps({"errno": e.errno, "name": errno.errorcode.get(e.errno)}))
     open(os.path.join(rec, "argv.json"), "w").write(json.dumps(args))
-# Like Claude Code: the env of --settings applies to the session (a side chat run's auth).
+# Like Claude Code: the env of --settings applies to the session (a side chat run's auth), and
+# its PreToolUse hooks run before each tool whose name the matcher matches.
+hooks = []
 if "--settings" in args:
     seen = json.load(open(args[args.index("--settings") + 1]))
     os.environ.update(seen.get("env", {}))
     open(os.path.join(rec, "settings-seen.json"), "w").write(json.dumps({"settings": seen, "probe": os.environ.get("ASIDE_PROBE")}))
+    hooks = seen.get("hooks", {}).get("PreToolUse", [])
+
+
+def pre_tool_use(tool, tool_input):
+    """Runs the PreToolUse hooks like Claude Code: the hook input on stdin; a deny decision on
+    stdout blocks the tool. Returns the deny reason, or None."""
+    for group in hooks:
+        if not re.fullmatch(group.get("matcher", ""), tool):
+            continue
+        for h in group.get("hooks", []):
+            hook_in = {"hook_event_name": "PreToolUse", "session_id": sid, "cwd": os.getcwd(),
+                       "tool_name": tool, "tool_input": tool_input}
+            r = subprocess.run(h["command"], shell=True, input=json.dumps(hook_in), capture_output=True,
+                               text=True, timeout=h.get("timeout", 60))
+            if r.returncode == 2:
+                return r.stderr
+            if r.stdout.strip():
+                o = json.loads(r.stdout).get("hookSpecificOutput", {})
+                if o.get("permissionDecision") == "deny":
+                    return o.get("permissionDecisionReason", "denied")
+    return None
 cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.environ["HOME"], ".claude")
 proj = os.path.join(cfg, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(os.getcwd())))
 os.makedirs(proj, exist_ok=True)
@@ -126,6 +152,20 @@ for line in sys.stdin:
         open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "key tm_fakefakefakefakefakefake01"}}]))
         patch = run("card", "patch", "--message", mid, "--base-rev", str(rev), "--ops", "ops.json")
         open("chatcard-%d.json" % n, "w").write(json.dumps({"kinds": kinds, "post": post, "again": again, "patch": patch}))
+    if "gated" in cue:
+        # Bash tool calls a team gates; "gated twice" makes two. Each goes through the hooks.
+        cmds = ["gh pr merge 12 --squash", "ls"] + (["gh pr merge 13"] if "twice" in cue else [])
+        seen_cmds = []
+        for i, cmd in enumerate(cmds):
+            tid = "toolu_g%d_%d" % (n, i)
+            out({"type": "assistant", "message": {"id": mid, "content": [{"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": cmd}}]}, "session_id": sid})
+            denied = pre_tool_use("Bash", {"command": cmd})
+            seen_cmds.append({"command": cmd, "denied": denied})
+            result = {"type": "tool_result", "tool_use_id": tid, "content": denied or "ran: " + cmd}
+            if denied:
+                result["is_error"] = True
+            out({"type": "user", "message": {"content": [result]}, "session_id": sid})
+        open("gate-%d.json" % n, "w").write(json.dumps({"hooks": len(hooks), "commands": seen_cmds}))
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in cue else 2

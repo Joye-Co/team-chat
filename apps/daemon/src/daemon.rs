@@ -35,6 +35,7 @@ pub const FEATURES: &[&str] = &[
     feature::RESUME,
     feature::CONTEXT,
     feature::EFFORT,
+    feature::GATES,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).
@@ -541,15 +542,14 @@ impl Daemon {
                 run_id,
                 approval_id,
                 decision,
+                scope,
             } => {
                 if let Some(r) = self.runs.get(&run_id) {
-                    let _ = r.control.send(
-                        Control::Approval {
-                            approval_id,
-                            approve: decision == "approve",
-                        }
-                        .into(),
-                    );
+                    let _ = r.control.send(RunCtl::Approval {
+                        approval_id,
+                        approve: decision == "approve",
+                        all: scope.as_deref() == Some(APPROVAL_SCOPE_RUN),
+                    });
                 }
             }
             Down::RunCancel { run_id, .. } => {

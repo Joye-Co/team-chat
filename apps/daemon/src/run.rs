@@ -34,6 +34,13 @@ pub enum RunCtl {
     Resume {
         note: Option<String>,
     },
+    /// `run.approval`: the daemon's own approvals (gated secrets and actions) are answered
+    /// here, the CLI's go to the runtime. `all` = scope "run" (这件事里都同意).
+    Approval {
+        approval_id: String,
+        approve: bool,
+        all: bool,
+    },
 }
 
 impl From<Control> for RunCtl {
@@ -274,8 +281,21 @@ pub async fn supervise(ctx: RunCtx) {
                     root: cwd.clone(),
                     redactor: redactor.clone(),
                 });
-                start_chat_run(&dir, &cwd, files, &run_id, &out, outputs, &mut env)
+                start_chat_run(&dir, &cwd, files, &run_id, &out, outputs.clone(), &mut env)
             };
+            // Gated actions: only runtimes that can stop a command get them (the server sends
+            // them only for CLIs that report `gates`), never a side chat.
+            let gates = Arc::new(crate::gates::Gates::new(
+                assign
+                    .gates
+                    .as_deref()
+                    .filter(|_| !aside && crate::gates::enforced_by(&rt.kind))
+                    .unwrap_or_default(),
+            ));
+            outputs.set_gates(gates.clone());
+            let gate_hook =
+                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::NAME));
+            let notes: Vec<String> = [gate.note(), gates.note()].into_iter().flatten().collect();
             let spec = RunSpec {
                 run_id: run_id.clone(),
                 runtime_name: assign.runtime.clone(),
@@ -287,27 +307,41 @@ pub async fn supervise(ctx: RunCtx) {
                 run_dir: dir.clone(),
                 env,
                 aside,
-                note: chat_run.as_ref().map(|_| match gate.note() {
-                    Some(n) => format!("{}\n\n{n}", crate::chat_run::note()),
-                    None => crate::chat_run::note(),
+                note: chat_run.as_ref().map(|_| {
+                    std::iter::once(crate::chat_run::note())
+                        .chain(notes)
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
                 }),
                 resume_session_id: assign
                     .resume_session_id
                     .clone()
                     .filter(|s| runtime::valid_session_id(s)),
+                gate_hook,
                 exec: exec.clone(),
             };
             let work = spec.cwd.clone();
-            let res = run_runtime(
-                &cfg,
-                &assign,
-                spec,
-                control_rx,
-                &event,
-                exec.as_ref(),
-                &gate,
-            )
-            .await;
+            // The hook asks through chat-run: a gated run never goes on without it.
+            let res = if spec.gate_hook.is_some() && chat_run.is_none() {
+                (
+                    Outcome::failed("cannot ask for approvals: chat-run did not start"),
+                    false,
+                )
+            } else {
+                run_runtime(
+                    &cfg,
+                    &assign,
+                    spec,
+                    control_rx,
+                    &event,
+                    exec.as_ref(),
+                    Own {
+                        secrets: &gate,
+                        gates: &gates,
+                    },
+                )
+                .await
+            };
             drop(chat_run);
             if aside {
                 workspace::set_read_only(&work, false);
@@ -417,6 +451,12 @@ impl Paused {
     }
 }
 
+/// The approvals the daemon answers itself: gated secrets and gated actions.
+struct Own<'a> {
+    secrets: &'a crate::secrets::Gate,
+    gates: &'a crate::gates::Gates,
+}
+
 async fn run_runtime(
     cfg: &Config,
     assign: &RunAssign,
@@ -424,7 +464,7 @@ async fn run_runtime(
     mut control_rx: mpsc::UnboundedReceiver<RunCtl>,
     event: &impl Fn(RunEvent),
     exec: &dyn Executor,
-    secrets: &crate::secrets::Gate,
+    own: Own<'_>,
 ) -> (Outcome, bool) {
     let Some(rt) = runtime::for_kind(&spec.cfg.kind) else {
         return (
@@ -508,13 +548,26 @@ async fn run_runtime(
                             });
                         }
                     }
-                    // An answer to `chat-run secret`: the daemon's own approval, not the CLI's.
-                    RunCtl::Runtime(Control::Approval { approval_id, approve })
-                        if secrets.owns(&approval_id) =>
-                    {
-                        if let Some(ev) = secrets.answer(&approval_id, approve, Instant::now()) {
-                            for ev in gate.push(ev) {
-                                event(ev);
+                    // An answer to `chat-run secret` or to a gated command: the daemon's own
+                    // approvals, not the CLI's.
+                    RunCtl::Approval { approval_id, approve, all } => {
+                        let answered = if own.secrets.owns(&approval_id) {
+                            Some(own.secrets.answer(&approval_id, approve, Instant::now()))
+                        } else if own.gates.owns(&approval_id) {
+                            Some(own.gates.answer(&approval_id, approve, all))
+                        } else {
+                            None
+                        };
+                        match answered {
+                            Some(resolved) => {
+                                for ev in resolved.into_iter().flat_map(|ev| gate.push(ev)) {
+                                    event(ev);
+                                }
+                                // The wait is over: the stall clock starts again.
+                                last = Instant::now();
+                            }
+                            None => {
+                                let _ = rt_tx.send(Control::Approval { approval_id, approve });
                             }
                         }
                     }
@@ -538,6 +591,10 @@ async fn run_runtime(
             _ = tick.tick() => {
                 if paused.is_some() {
                     continue;
+                }
+                // A command waiting for a person is not stuck (the server shows waiting_answer).
+                if own.gates.waiting() {
+                    last = Instant::now();
                 }
                 if !stalled && last.elapsed() >= stall {
                     stalled = true;

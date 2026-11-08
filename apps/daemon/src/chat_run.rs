@@ -145,6 +145,8 @@ pub struct Outputs {
     run: String,
     /// The run's gated secrets (`chat-run secret`).
     gate: OnceLock<Arc<crate::secrets::Gate>>,
+    /// The run's gated actions (`chat-run gate`, the CLI's hook).
+    gates: OnceLock<Arc<crate::gates::Gates>>,
 }
 
 impl Outputs {
@@ -164,6 +166,11 @@ impl Outputs {
     /// Lets the run's `chat-run secret` ask for the gate's secrets.
     pub fn set_gate(&self, gate: Arc<crate::secrets::Gate>) {
         let _ = self.gate.set(gate);
+    }
+
+    /// Lets the run's hook (`chat-run gate`) check commands against the run's gates.
+    pub fn set_gates(&self, gates: Arc<crate::gates::Gates>) {
+        let _ = self.gates.set(gates);
     }
 
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
@@ -522,6 +529,22 @@ pub async fn handle(
         );
         return answer;
     }
+    if req["op"] == crate::gates::OP {
+        // A run without gates lets every command run.
+        let Some(gates) = outputs.gates.get().cloned() else {
+            return json!({ "ok": true, "result": { "decision": "allow" } });
+        };
+        let answer = gates.check(&req["body"], emit).await;
+        if let Some(kind) = answer["result"]["kind"].as_str() {
+            eprintln!(
+                "{} chat-run gate {}: {}",
+                crate::proto::now_ms(),
+                safe_word(kind),
+                safe_word(answer["result"]["decision"].as_str().unwrap_or("failed"))
+            );
+        }
+        return answer;
+    }
     let local_op = req["op"].as_str().filter(|o| {
         crate::chat_run_files::OPS.contains(o) || crate::chat_run_context::OPS.contains(o)
     });
@@ -719,6 +742,7 @@ pub const USAGE: &str = "usage:
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
   chat-run desk note --text <text>
   chat-run secret <NAME>
+  chat-run gate   (the CLI's PreToolUse hook; reads the hook input on standard input)
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
@@ -1202,6 +1226,10 @@ pub fn main(args: Vec<String>) -> i32 {
     if args.len() == 2 && args[0] == "card" && args[1] == "schema" {
         println!("{CARD_SCHEMA}");
         return 0;
+    }
+    // The CLI's PreToolUse hook (the daemon installs it; the hook input is on standard input).
+    if args.len() == 1 && args[0] == "gate" {
+        return crate::gates::hook_main();
     }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));

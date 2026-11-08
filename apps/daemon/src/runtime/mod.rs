@@ -48,6 +48,9 @@ pub struct RunSpec {
     /// `run.assign.resumeSessionId`: the CLI session to continue (Claude Code `--resume`, Codex
     /// `thread/resume`). A session the CLI no longer has starts a new one.
     pub resume_session_id: Option<String>,
+    /// The run's `chat-run` link when the run has gated actions (`run.assign.gates`): Claude
+    /// Code gets a PreToolUse hook that runs `<link> gate` (see [`crate::gates`]).
+    pub gate_hook: Option<PathBuf>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
 }
