@@ -525,7 +525,11 @@ describe("runner-backed bots", () => {
     d2.close();
     await waitUntil(() => d2.closed, 5000, "closed");
 
-    // Away past the lease: the run is blocked with one note, never run again.
+    // Away past the lease: the run is blocked with one note, never run again. (盯活 first runs
+    // it again elsewhere by itself, supervise.test.ts; here its tries are spent.)
+    await runInDurableObject(deskOf(w.bot.id), (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET interventions = 3 WHERE id = ?", runId);
+    });
     await runInDurableObject(linkOf(w.machineId), (_o, state) => {
       state.storage.sql.exec("UPDATE runs SET lease_until = ? WHERE run_id = ?", Date.now() - 1, runId);
     });
@@ -559,7 +563,7 @@ describe("runner-backed bots", () => {
     d2.close();
   });
 
-  it("detect a stall after 10 minutes without events and recover on the next event", async () => {
+  it("detect a stall after 10 minutes without events once the desk's own tries are spent, and recover on the next event", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
     const { c } = await Client.connect(w.human.token);
@@ -568,18 +572,18 @@ describe("runner-backed bots", () => {
     d.send({ t: "run.accept", runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
     const alarm = await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
-      state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ?, interventions = 3 WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
       return state.storage.getAlarm();
     });
     expect(alarm).toBeTypeOf("number");
     await runDurableObjectAlarm(deskOf(w.bot.id));
-    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.stalled), 5000, "stall note");
+    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.gaveUp), 5000, "stall note");
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "blocked", 5000, "blocked");
     // A second alarm does not post a second note.
     await runDurableObjectAlarm(deskOf(w.bot.id));
     d.event(runId, { type: "status", state: "running" });
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "in_progress", 5000, "recovered");
-    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.body === TEXT.stalled)).toHaveLength(1);
+    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.body === TEXT.gaveUp)).toHaveLength(1);
     c.close();
     d.close();
   });
@@ -1012,7 +1016,7 @@ describe("runner-backed bots: review fixes", () => {
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
     const before = Date.now() - 6 * 60_000;
     await runInDurableObject(deskOf(w.bot.id), (_o, state) => {
-      state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", before, runId);
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ?, interventions = 3 WHERE id = ?", before, runId);
     });
     const s = d.event(runId, { type: "status", state: "stalled" });
     await d.acked(runId, s);

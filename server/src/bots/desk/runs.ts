@@ -48,6 +48,9 @@ export interface RunRequest {
 }
 
 export abstract class DeskRuns extends DeskCore {
+  /** 盯活 (stall.ts): ends the run quietly and starts the same request again; false when out of tries. */
+  protected abstract restartElsewhere(r: RunRow, why: string): Promise<boolean>;
+
   // -------------------------------------------------------------------------
   // Starting a run
   // -------------------------------------------------------------------------
@@ -150,6 +153,17 @@ export abstract class DeskRuns extends DeskCore {
       }
       await this.scheduleStall();
     });
+  }
+
+  /** The request a run started with (meta `request:{runId}`), or null for runs before it. */
+  protected requestOf(r: RunRow): RunRequest | null {
+    const raw = this.meta(`request:${r.id}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as RunRequest;
+    } catch {
+      return null;
+    }
   }
 
   /** A machine would take the run but has no free slot (`maxParallelRuns`). */
@@ -427,6 +441,8 @@ export abstract class DeskRuns extends DeskCore {
     await this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r || r.ended_at !== null || r.machine_id !== machineId) return;
+      // 盯活: the work goes on on another computer while the desk has tries left.
+      if (await this.restartElsewhere(r, "machine lost")) return;
       await this.end(r, "blocked", TEXT.lost, "blocked", TEXT.lost);
     });
   }
