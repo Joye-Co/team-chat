@@ -3,6 +3,27 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.5 (unreleased)
+
+Notes: [docs/releases/1.2.5.md](docs/releases/1.2.5.md). No D1 migration, no protocol change, no
+server redeploy. 1.2.4 clients and daemons keep working.
+
+- Product updates: a sidebar update card that follows download and install, the 更新内容 sheet,
+  已更新到 on the first start of a new version, and 设置 › 通用 › 更新记录 from bundled notes.
+- Sidebar rows carry one state mark and a Semibold title for unread; 新建 and the filter sit in
+  the traffic-light row.
+- Labeled toolbar items, the 群 as a path before the 话题 title, and a settings-style 详情
+  inspector with a 提醒 select.
+- 登录时启动 registers through SMAppService, 菜单栏里显示 hides the status item, 声音 controls
+  the notification sound, the Dock badge shows unread, and read groups' notifications are
+  withdrawn.
+- 文件 and 帮助 menus, 查找 and 表情与符号 in 编辑, 服务 in the app menu, a registered 窗口
+  menu and a Dock menu.
+- The main window reopens at its saved frame (in `layout.json`).
+- ⌘F / ⌘G / ⇧⌘G find in a 话题 or chat.
+- Quick Look on Space, 共享…, 存储为… and drag-out for files and 产出.
+- The pointing hand is kept for links and mentions only.
+
 ## 1.2.4 (2026-11-07)
 
 Notes: [docs/releases/1.2.4.md](docs/releases/1.2.4.md). No D1 migration, no protocol change, no
