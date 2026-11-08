@@ -17,7 +17,24 @@ pub const TOPIC_HISTORY: &str = "topic.history";
 pub const TOPIC_MESSAGE: &str = "topic.message";
 pub const CONTEXT_SEARCH: &str = "context.search";
 pub const FILE_GET: &str = "file.get";
-pub const OPS: &[&str] = &[TOPIC_HISTORY, TOPIC_MESSAGE, CONTEXT_SEARCH, FILE_GET];
+/// Keeps something for later (docs/machine-protocol.md, "Memory notes"): POST, pending until the daily consolidation.
+pub const MEMORY_NOTE: &str = "memory.note";
+pub const OPS: &[&str] = &[
+    TOPIC_HISTORY,
+    TOPIC_MESSAGE,
+    CONTEXT_SEARCH,
+    FILE_GET,
+    MEMORY_NOTE,
+];
+/// Memory kinds a run may write (protocol `MemoryKind`).
+pub const MEMORY_KINDS: &[&str] = &[
+    "convention",
+    "fact",
+    "decision",
+    "preference",
+    "lesson",
+    "playbook",
+];
 
 /// `topic.history` page size: 1-100.
 pub const MAX_HISTORY_LIMIT: u64 = 100;
@@ -344,9 +361,61 @@ async fn get(local: &Local, body: &Value) -> Value {
 }
 
 /// Answers one of [`OPS`].
+/// The `memory.note` body the server takes, or the error for a bad one.
+pub fn memory_body(body: &Value) -> Result<Value, Value> {
+    let scope = body["scope"].as_str().unwrap_or("");
+    if !matches!(scope, "member" | "person" | "group") {
+        return Err(err("invalid", None, "scope is member, person or group"));
+    }
+    let kind = body["kind"].as_str().unwrap_or("");
+    if !MEMORY_KINDS.contains(&kind) {
+        return Err(err(
+            "invalid",
+            None,
+            format!("kind is one of {}", MEMORY_KINDS.join(", ")),
+        ));
+    }
+    let text = body["text"].as_str().unwrap_or("").trim();
+    if text.is_empty() || text.chars().count() > 500 {
+        return Err(err("invalid", None, "text is 1..500 characters"));
+    }
+    let mut out = serde_json::json!({ "scope": scope, "kind": kind, "text": text });
+    if let Some(w) = body["when"]
+        .as_str()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+    {
+        if w.chars().count() > 300 {
+            return Err(err("invalid", None, "when is at most 300 characters"));
+        }
+        out["when"] = Value::from(w);
+    }
+    Ok(out)
+}
+
 pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
     if op == FILE_GET {
         return get(local, body).await;
+    }
+    if op == MEMORY_NOTE {
+        let note = match memory_body(body) {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let path = format!("/v1/machine/runs/{}/memories", local.run_id);
+        let (u, c) = match (url(local, &path), client(READ_TIMEOUT)) {
+            (Ok(u), Ok(c)) => (u, c),
+            (Err(e), _) | (_, Err(e)) => return e,
+        };
+        return answer(
+            c.post(u)
+                .bearer_auth(local.token.as_str())
+                .header("content-type", "application/json")
+                .body(note.to_string())
+                .send()
+                .await,
+        )
+        .await;
     }
     let path = match read_path(&local.run_id, op, body) {
         Ok(p) => p,

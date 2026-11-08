@@ -569,15 +569,15 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
 - A daemon with this feature reports `context`; the server's prompt then names these commands for
   messages it left out. The `chat-run` note lists them.
 
-### Memory notes (`chat-run`, daemon over HTTP; planned)
+### Memory notes (`chat-run`, daemon over HTTP; feature `context`)
 
-A run can keep something for later (docs/protocol.md, "Memory"). The server route is live; the
-daemon's `chat-run memory note` command comes later and will answer the `output` op
-`memory.note` itself over HTTP with the machine token, like the context ops.
+A run can keep something for later (docs/protocol.md, "Memory"). The daemon answers `chat-run
+memory note` itself over HTTP with the machine token, like the context ops; it checks scope, kind
+and lengths before it calls the server.
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K [--when W] TEXT` → `MemoryItem` |
+| `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K --text T [--when W]` → `MemoryItem` |
 
 ```ts
 POST /v1/machine/runs/:id/memories   body MachineMemoryNoteRequest -> MemoryItem (status "pending")
