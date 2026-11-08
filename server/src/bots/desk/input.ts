@@ -11,6 +11,7 @@ import { refsText } from "../refs";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskFront } from "./front";
+import { isProgressQuestion, progressAnswer } from "../../agent/supervise";
 
 export abstract class DeskInput extends DeskFront {
   // -------------------------------------------------------------------------
@@ -111,6 +112,8 @@ export abstract class DeskInput extends DeskFront {
       await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision } as never);
       return;
     }
+    // 盯活: "进展怎么样了" is answered from the run's own state; the CLI is not interrupted.
+    if (!r.approval_id && isProgressQuestion(m.body)) return this.answerProgress(r, m);
     const inputId = ulid();
     const text = await this.inputText(r, m);
     this.sql.exec(
@@ -123,6 +126,27 @@ export abstract class DeskInput extends DeskFront {
       Date.now(),
     );
     if (link) await link.toRun({ t: "run.input", runId: r.id, inputId, text, authorId: m.authorId } as never);
+  }
+
+  protected async answerProgress(r: RunRow, m: TopicMessage): Promise<void> {
+    // Kept as a taken input, so a retried delivery does not answer twice and no follow-up starts.
+    this.sql.exec(
+      "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
+      ulid(),
+      r.id,
+      m.messageId,
+      m.authorId,
+      m.body,
+      Date.now(),
+    );
+    const plan = r.plan ? (JSON.parse(r.plan) as { text: string; state: string }[]) : [];
+    const lastTool = r.progress_text
+      .split("\n")
+      .reverse()
+      .find((l) => l.startsWith("· "))
+      ?.slice(2);
+    const text = progressAnswer({ startedAt: r.started_at, now: Date.now(), plan, status: r.status, ...(lastTool ? { lastTool } : {}) });
+    await this.post(r, `progress:${m.messageId}`, text);
   }
 
   /**

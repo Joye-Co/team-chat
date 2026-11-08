@@ -14,6 +14,11 @@ import { DeskRuns } from "./runs";
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
+  /** 盯活 (stall.ts): a tool call of the run (loops). */
+  protected abstract watchTool(r: RunRow, title: string): Promise<void>;
+  /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
+  protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
+
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {
     return this.serial(runId, async () => {
@@ -62,8 +67,9 @@ export abstract class DeskEvents extends DeskRuns {
       if (stallReported) await this.markStalled(r);
       return;
     }
-    this.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", now, r.id);
+    this.sql.exec("UPDATE runs SET last_event_at = ?, nudged = 0 WHERE id = ?", now, r.id);
     r.last_event_at = now;
+    r.nudged = 0;
     if (r.stalled) {
       this.sql.exec("UPDATE runs SET stalled = 0 WHERE id = ?", r.id);
       r.stalled = 0;
@@ -88,6 +94,7 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "tool.call":
           progress.tool(String(ev.title || ev.tool || ""));
+          await this.watchTool(r, String(ev.title || ev.tool || ""));
           break;
         case "approval.request": {
           await this.flush(r, progress);
@@ -325,6 +332,8 @@ export abstract class DeskEvents extends DeskRuns {
       // The acceptance block is shown by the done card: the posted text leaves it out.
       const result = stripAcceptance(raw) || stripAcceptance((f.summary ?? "").trim()) || TEXT.done;
       await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
+      // 盯活: the CLI only promised the work and stopped. The desk continues it (at most 3 times).
+      if (await this.continuePromise(r, raw)) return;
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
     } else {
