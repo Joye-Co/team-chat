@@ -364,13 +364,26 @@ impl ProcessView {
     }
 
     fn download_session(&mut self, cx: &mut Context<Self>) {
+        self.save_run_file(false, cx);
+    }
+
+    fn download_context(&mut self, cx: &mut Context<Self>) {
+        self.save_run_file(true, cx);
+    }
+
+    /// Saves the run's raw session, or what its prompt carried, into ~/Downloads.
+    fn save_run_file(&mut self, context: bool, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {
             return;
         };
         let dir = std::env::var_os("HOME")
             .map(|h| PathBuf::from(h).join("Downloads"))
             .unwrap_or_else(std::env::temp_dir);
-        let reply = self.services.provider.download_run_session(&id, dir);
+        let reply = if context {
+            self.services.provider.download_run_context(&id, dir)
+        } else {
+            self.services.provider.download_run_session(&id, dir)
+        };
         self.download = Download::Running;
         cx.spawn(async move |this, cx| {
             let result = reply.await.unwrap_or(Err(RunLoadError::Failed));
@@ -714,6 +727,20 @@ impl ProcessView {
                     cx,
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.download_session(cx))),
+            )
+            .child(
+                disabled_push(
+                    push_button(
+                        "download-context",
+                        p::DEV_CONTEXT,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    ),
+                    matches!(self.download, Download::Running),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.download_context(cx))),
             )
             .when_some(download_line, |el, line| {
                 el.child(div().text_color(colors.text_2).child(line))
