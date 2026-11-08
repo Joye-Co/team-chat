@@ -594,6 +594,13 @@ pub struct SetBotRunnerRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub model: Option<String>,
+    /// Absent keeps the stored effort; `Some(None)` = `null` clears it.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub effort: Option<Option<String>>,
     #[serde(
         default,
         deserialize_with = "non_null",
@@ -658,6 +665,12 @@ pub struct BotRunner {
         skip_serializing_if = "Option::is_none"
     )]
     pub model: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub effort: Option<String>,
     pub env_allowlist: Vec<String>,
     pub enabled: bool,
     pub updated_at: Millis,

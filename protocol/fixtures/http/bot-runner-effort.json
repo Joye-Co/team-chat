@@ -1,0 +1,14 @@
+{
+  "kind": "BotRunner",
+  "valid": true,
+  "value": {
+    "botId": "01JBX0BOT000000000000000AC",
+    "runtime": "claude",
+    "labels": [],
+    "model": "opus",
+    "effort": "high",
+    "envAllowlist": [],
+    "enabled": true,
+    "updatedAt": 1762128000000
+  }
+}

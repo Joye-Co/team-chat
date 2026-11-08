@@ -1,0 +1,9 @@
+{
+  "kind": "SetBotRunnerRequest",
+  "valid": false,
+  "description": "effort is not empty",
+  "value": {
+    "runtime": "claude",
+    "effort": ""
+  }
+}
