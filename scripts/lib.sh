@@ -111,17 +111,25 @@ ops_dir() {
   if [ -d "$d" ]; then printf '%s' "$d"; fi
 }
 
-# env_base <env>: the API base URL of a deployed env, from <ops>/deploy/servers.json.
-# CHAT_API_BASE overrides it.
-env_base() {
-  local base="${CHAT_API_BASE:-}" ops
-  if [ -z "$base" ]; then
-    ops="$(ops_dir)"
-    if [ -n "$ops" ] && [ -f "$ops/deploy/servers.json" ]; then
-      base="$(jq -r --arg e "$1" '.[$e] // empty' "$ops/deploy/servers.json")"
-    fi
+# servers_json: the server URLs as JSON ({ "e2e", "staging", "production" }): TC_SERVERS_JSON
+# when set (CI), else <ops>/deploy/servers.json. Fails when there are none.
+servers_json() {
+  local ops
+  if [ -n "${TC_SERVERS_JSON:-}" ]; then
+    printf '%s' "$TC_SERVERS_JSON" | jq -e 'if type == "object" then . else error("not an object") end'
+    return
   fi
-  [ -n "$base" ] || die "no API base URL for env '$1': set CHAT_API_BASE, or TC_OPS_DIR with deploy/servers.json"
+  ops="$(ops_dir)"
+  [ -n "$ops" ] && [ -f "$ops/deploy/servers.json" ] && jq -e 'if type == "object" then . else error("not an object") end' "$ops/deploy/servers.json"
+}
+
+# env_base <env>: the API base URL of a deployed env, from servers_json. CHAT_API_BASE overrides it.
+env_base() {
+  local base="${CHAT_API_BASE:-}"
+  if [ -z "$base" ]; then
+    base="$(servers_json 2>/dev/null | jq -r --arg e "$1" '.[$e] // empty')" || base=""
+  fi
+  [ -n "$base" ] || die "no API base URL for env '$1': set CHAT_API_BASE, TC_SERVERS_JSON, or TC_OPS_DIR with deploy/servers.json"
   printf '%s' "${base%/}"
 }
 

@@ -35,7 +35,7 @@ this repository.
 | `deploy/servers.json` | `{ "e2e": "<url>", "staging": "<url>", "production": "<url>" }`: the base URLs of the deployed envs |
 | `deploy/server.wrangler.jsonc` | the full API Worker config: the top level as `server/wrangler.jsonc`, plus one `env.<name>` block per deployed env (Worker name, D1 id, R2 bucket, `EMAIL_FROM`, `VERSION`) |
 | `deploy/monitor.wrangler.jsonc` | the full monitor Worker config (`TARGETS` with your URLs and group names, service bindings) |
-| `characters/` | optional: the character pack, embedded by `apps/desktop/build.rs` when present; without it, bot avatars are monograms |
+| `characters/` | optional, local development only: the character pack, embedded by `apps/desktop/build.rs` in local builds; releases and builds without it draw bot avatars as monograms |
 | `roster/roster.json` | optional: your team's bots (name, character, 岗位, level) for your own scripts and notes |
 | `docs/` | optional: your own runbook notes, deploy state and to-dos |
 
@@ -55,18 +55,14 @@ Who reads what:
   same, inside `server/`: `bunx wrangler -c wrangler.deploy.jsonc <command> --env <env>`. The
   monitor works the same way with `deploy/monitor.wrangler.jsonc` in `ops/monitor/`.
 
-**Releases** need the ops checkout: `scripts/release.sh` stops without `characters/` and
-`deploy/servers.json`, so a release never ships without the character pack or the server menu.
-The Release workflow checks the ops repository out on the runner: set the repository variable
-`OPS_REPO` (`<owner>/<ops repo>`) and the secret `OPS_DEPLOY_KEY` (the private half of a
-read-only deploy key on the ops repository):
+**Releases** embed the server URLs only. The character pack and the roster are for local
+development and are never part of a release: `scripts/release.sh` builds against a folder that
+holds just `deploy/servers.json`, taken from `TC_SERVERS_JSON` when set, else from the ops
+checkout. The Release workflow sets `TC_SERVERS_JSON` from the repository variable
+`SERVERS_JSON`:
 
 ```sh
-ssh-keygen -t ed25519 -N "" -C release-ops -f ops-deploy-key
-gh repo deploy-key add ops-deploy-key.pub -R <owner>/<ops repo> --title release   # read-only
-gh secret set OPS_DEPLOY_KEY < ops-deploy-key
-gh variable set OPS_REPO --body <owner>/<ops repo>
-rm ops-deploy-key ops-deploy-key.pub
+gh variable set SERVERS_JSON --body '{"staging":"<url>","production":"<url>"}'
 ```
 
 The commands in these docs assume the copy exists. Make it by hand when you run wrangler

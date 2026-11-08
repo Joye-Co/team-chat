@@ -77,25 +77,18 @@ jobs:
           # release.sh compares HEAD with origin/main, checks tags and pushes the release commit.
           fetch-depth: 0
 
-      - name: Check out the ops checkout
-        # The operator's private repo (vars.OPS_REPO, read with the deploy key secrets.OPS_DEPLOY_KEY):
-        # the character pack and the server URLs that apps/desktop/build.rs embeds and release.sh
-        # uploads to. Under .tmp/ so git ignores it and release.sh sees a clean tree.
-        if: vars.OPS_REPO != ''
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ vars.OPS_REPO }}
-          ssh-key: ${{ secrets.OPS_DEPLOY_KEY }}
-          path: .tmp/ops
-          persist-credentials: false
-
-      - name: Use the ops checkout
+      - name: Check the server URLs
+        # The URLs the app's server menu offers and release.sh uploads to: the repository variable
+        # SERVERS_JSON, { "staging": "<url>", "production": "<url>" }. Releases embed nothing else
+        # from an ops checkout (no character pack).
+        env:
+          TC_SERVERS_JSON: ${{ vars.SERVERS_JSON }}
         run: |
-          if [ ! -f .tmp/ops/deploy/servers.json ]; then
-            echo "::error::no ops checkout: set the repository variable OPS_REPO and the secret OPS_DEPLOY_KEY; see docs/ENVIRONMENTS.md"
+          if ! printf '%s' "$TC_SERVERS_JSON" | jq -e '.production | strings' >/dev/null 2>&1; then
+            echo "::error::set the repository variable SERVERS_JSON to {\"staging\": \"<url>\", \"production\": \"<url>\"}; see docs/ENVIRONMENTS.md"
             exit 1
           fi
-          echo "TC_OPS_DIR=$GITHUB_WORKSPACE/.tmp/ops" >>"$GITHUB_ENV"
+          echo "TC_SERVERS_JSON=$(printf '%s' "$TC_SERVERS_JSON" | jq -c .)" >>"$GITHUB_ENV"
 
       - name: Write the signing files
         if: inputs.mode != 'upload-only'

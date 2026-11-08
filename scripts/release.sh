@@ -155,15 +155,15 @@ grep -qE "^## ${VERSION//./\\.} \((unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})\)$" CH
 if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
-# require_ops: the operator's build needs the ops checkout. apps/desktop/build.rs embeds the
-# character pack and the server URLs from it; a release without them would ship initials and no
-# server menu.
-require_ops() {
-  local ops
-  ops="$(ops_dir)"
-  [ -n "$ops" ] && [ -f "$ops/characters/boxes.json" ] && [ -f "$ops/deploy/servers.json" ] \
-    || die "release needs the ops checkout (TC_OPS_DIR) with characters/ and deploy/servers.json"
-  export TC_OPS_DIR="$ops"
+# release_ops: a release embeds only the server URLs (the 正式服务器 / 测试服务器 menu), never
+# the local character pack or roster. Builds against an ops dir that holds servers.json alone,
+# from TC_SERVERS_JSON (the Release workflow) or the ops checkout's deploy/servers.json.
+release_ops() {
+  local dir="$ROOT/.tmp/release-ops"
+  rm -rf "$dir" && mkdir -p "$dir/deploy"
+  servers_json >"$dir/deploy/servers.json" \
+    || die "release needs the server URLs: TC_SERVERS_JSON, or TC_OPS_DIR with deploy/servers.json"
+  export TC_OPS_DIR="$dir"
 }
 
 restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
@@ -172,7 +172,7 @@ restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/nu
 # release metadata, builds and checks the DMG and the daemon. Sets DAEMON.
 set_version_and_build() {
   need cargo
-  require_ops
+  release_ops
   log "setting version $VERSION"
   set_workspace_version "$VERSION"
   cargo_env
