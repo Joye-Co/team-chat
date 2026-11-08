@@ -382,6 +382,14 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN auto_continues INTEGER NOT NULL DEFAULT 0;
           `,
         },
+        {
+          // M6 replay: what the front desk read, so a decision can be replayed on another model.
+          name: "desk-11-replay",
+          up: `
+            ALTER TABLE decisions ADD COLUMN system TEXT;
+            ALTER TABLE decisions ADD COLUMN input TEXT;
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
