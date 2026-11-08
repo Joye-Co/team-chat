@@ -10,7 +10,7 @@
 mod account;
 pub mod ai_service;
 pub mod appearance;
-mod general;
+pub(crate) mod general;
 mod machines;
 mod members;
 // pages track: the 成员 page reuses the invite and add-member forms.

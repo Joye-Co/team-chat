@@ -33,6 +33,12 @@ pub struct LocalPrefs {
     /// Shortcuts changed in 快捷键: a menu action's name → its keystroke
     /// ("cmd-shift-k"), or "" when the shortcut was removed.
     pub shortcuts: std::collections::BTreeMap<String, String>,
+    /// 有新版本时自动下载.
+    pub auto_download: bool,
+    /// 更新后告诉我改了什么: the 已更新到 sheet after an update.
+    pub show_whats_new: bool,
+    /// The version this Mac last opened, so the 已更新到 sheet shows once.
+    pub last_seen_version: Option<String>,
 }
 
 impl Default for LocalPrefs {
@@ -45,6 +51,9 @@ impl Default for LocalPrefs {
             message_size: MESSAGE_SIZE_DEFAULT,
             last_pane: None,
             shortcuts: Default::default(),
+            auto_download: true,
+            show_whats_new: true,
+            last_seen_version: None,
         }
     }
 }
@@ -108,5 +117,7 @@ mod tests {
         assert!(p.menu_bar);
         assert_eq!(p.message_size, MESSAGE_SIZE_DEFAULT);
         assert_eq!(p.last_pane, None);
+        assert!(p.auto_download && p.show_whats_new);
+        assert_eq!(p.last_seen_version, None);
     }
 }

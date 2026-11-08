@@ -15,6 +15,7 @@
 
 pub mod banner;
 pub mod install;
+pub mod notes;
 pub mod preview;
 pub mod selftest;
 pub mod version;
@@ -115,6 +116,9 @@ pub struct Updater {
     postponed: Option<(String, Instant)>,
     /// The running download, so 取消下载 can stop it.
     download: Option<tokio::task::AbortHandle>,
+    /// `--fake` with `UPDATE_PREVIEW`: 更新 and 重启安装 play the flow
+    /// without a server (see `preview::install_for_fake`).
+    demo: bool,
 }
 
 struct UpdaterGlobal(Entity<Updater>);
@@ -204,8 +208,19 @@ fn on_update_command(cx: &mut App) {
     }
 }
 
+/// True when this start finishes an update the app installed itself (its
+/// marker names the running version), so 已更新到 may show.
+static JUST_UPDATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn just_updated() -> bool {
+    JUST_UPDATED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity<Updater> {
     let marker = marker_path(&data_root);
+    if install::marker_version(&marker).as_deref() == Some(version::CURRENT) {
+        JUST_UPDATED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     cx.background_executor()
         .spawn(async move {
             let bundle = running_bundle();
@@ -221,6 +236,7 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
         last_attempt: None,
         postponed: None,
         download: None,
+        demo: false,
     });
     cx.set_global(UpdaterGlobal(updater.clone()));
     cx.on_action(|_: &UpdateCommand, cx| on_update_command(cx));
@@ -333,10 +349,11 @@ impl Updater {
                 };
                 let found = matches!(phase, Phase::Available(_));
                 u.set_phase(phase, cx);
-                // A found update downloads in the background; its progress
-                // shows in Settings › 通用 and the app menu, and a sheet asks
-                // for 重启安装 once it is ready.
-                if found {
+                // A found update downloads in the background (unless 有新版本时
+                // 自动下载 is off); its progress shows in the sidebar card,
+                // Settings › 通用 and the app menu, and an alert asks for
+                // 重启安装 once it is ready.
+                if found && crate::views::settings::prefs::get().auto_download {
                     u.start_update(cx);
                 }
             });
@@ -402,6 +419,11 @@ impl Updater {
                 | Phase::Installing(_)
                 | Phase::WaitingForSends(_)
         ) {
+            return;
+        }
+        if self.demo {
+            self.postponed = None;
+            preview::play_download(info, cx);
             return;
         }
         let Some(client) = (self.source)() else {
@@ -514,6 +536,10 @@ impl Updater {
     pub fn install_now(&mut self, cx: &mut Context<Self>) {
         if let Phase::Ready { info, dmg } = self.phase.clone() {
             self.postponed = None;
+            if self.demo {
+                preview::play_install(self, info, cx);
+                return;
+            }
             self.install_when_idle(info, dmg, cx);
         }
     }

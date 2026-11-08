@@ -339,6 +339,12 @@ shape. The text inside every control is Body 13 pt unless noted.
 - No in-UI keyboard hint lines either: shortcuts live in the menu bar.
 - Inline status in the place it changed (a row shows 已发送 / 没有发出 · 重试), a sidebar count, or a
   system notification when the app is in the background. Errors that block use an alert.
+- Product updates (owner decision, 2026-11-08): a found update shows as one quiet card at the
+  bottom of the sidebar, above the account footer (新版本 → 正在下载 → 已经下载好了, plus 没能更新
+  and 需要手动安装); only its 16 pt icon carries a state color. The one alert of the flow is
+  重启安装, once per downloaded version. 改了什么 opens 「{version} 更新内容」; after an update the
+  first start shows 「已更新到 {version}」 once (设置 › 通用 can turn it off); 设置 › 通用 › 更新记录
+  lists every version, read from `docs/releases/*.md` bundled at build time.
 
 ## 8. Settings window
 
