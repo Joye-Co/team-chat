@@ -87,4 +87,14 @@ crate::copy! {
     CHAT_START_DM = "在这里直接聊；要做一件事时，开个话题",
     START_NEW_TOPIC = "新话题",
     MENU_OPEN_TOPIC = "开个话题",
+    // ⌘F: the find bar of the open 话题 (or 群聊, 私聊), and its 编辑 menu items.
+    FIND_PLACEHOLDER = "查找",
+    FIND_POSITION = "{n} / {total}",
+    FIND_NOT_FOUND = "未找到",
+    FIND_PREVIOUS = "上一个",
+    FIND_NEXT = "下一个",
+    FIND_DONE = "完成",
+    MENU_FIND = "查找…",
+    MENU_FIND_NEXT = "查找下一个",
+    MENU_FIND_PREVIOUS = "查找上一个",
 }

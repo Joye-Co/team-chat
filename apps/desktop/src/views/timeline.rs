@@ -19,6 +19,7 @@
 //! [`TimelineEvent::Quote`] for the composer.
 
 pub mod extras;
+pub mod find;
 mod focus;
 mod header;
 mod live;
@@ -157,6 +158,8 @@ pub struct TimelineView {
     activation: Option<Subscription>,
     /// Search: scroll to a message and highlight it (`timeline/focus.rs`).
     focus: focus::FocusState,
+    /// ⌘F: the find bar and its matches (`timeline/find.rs`).
+    find: Option<find::FindState>,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
     /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
@@ -331,6 +334,7 @@ impl TimelineView {
             probe: None,
             activation: None,
             focus: focus::FocusState::default(),
+            find: None,
             hovered: None,
             key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             keyboard_row: false,
@@ -566,6 +570,7 @@ impl TimelineView {
         {
             self.editing = None;
         }
+        self.refresh_find();
         self.track_live(self.live_quiet, _cx);
         self.continue_focus(_cx);
     }
@@ -919,6 +924,7 @@ impl Render for TimelineView {
                 )
         });
         let search_bar = self.render_search_bar(cx);
+        let find_bar = self.render_find_bar(cx);
         let jump_unread = self.first_unread_above().then(|| {
             div()
                 .absolute()
@@ -1034,6 +1040,7 @@ impl Render for TimelineView {
                     .then(|| self.render_header(&topic, window, cx)),
             )
             .children(search_bar)
+            .children(find_bar)
             .child(match empty {
                 Some(empty) => div().flex_1().min_h(px(0.)).child(empty),
                 None => div()

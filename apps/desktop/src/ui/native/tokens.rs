@@ -454,6 +454,25 @@ pub fn emphasized(window: &Window) -> bool {
     crate::ui::rows::selection_emphasized(window)
 }
 
+/// Find in a 话题 (⌘F): the fill behind the matched words. Neutral like the
+/// rest of the palette: `foreground` at a low alpha behind every match, and
+/// a stronger one behind the current match, so the text keeps its own color
+/// and contrast in both modes.
+pub mod find {
+    use super::Palette;
+    use gpui::Hsla;
+
+    /// The fill behind every match that is not the current one.
+    pub fn match_fill(p: &Palette) -> Hsla {
+        p.foreground.opacity(if p.dark { 0.18 } else { 0.10 })
+    }
+
+    /// The fill behind the current match.
+    pub fn current_fill(p: &Palette) -> Hsla {
+        p.foreground.opacity(if p.dark { 0.40 } else { 0.28 })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Scales (§1.4–§1.8)
 
@@ -711,6 +730,8 @@ pub mod size {
     pub const SELECT_WIDTH: Pixels = px(160.);
     /// A pop-up button whose choices are names (a computer, with 这台电脑 after it).
     pub const SELECT_WIDE: Pixels = px(280.);
+    /// The search field of the find bar of a 话题 (⌘F).
+    pub const FIND_FIELD_WIDTH: Pixels = px(240.);
     /// Invite code box: 40 × 48.
     pub const INVITE_BOX: (Pixels, Pixels) = (px(40.), px(48.));
     /// Composer: p 8 + one 20 line + 8 + the h28 action row + p 8.
