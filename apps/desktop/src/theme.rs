@@ -150,7 +150,47 @@ pub fn set_theme_choice(choice: ThemeChoice) {
         ThemeChoice::Dark => 2,
     };
     THEME_CHOICE.store(v, Ordering::Relaxed);
+    set_app_appearance(choice);
 }
+
+/// Gives every window the system appearance of the choice, so what AppKit
+/// draws itself (the window's edge and background, menus, the traffic
+/// lights) matches the theme: a dark theme in a light system left a white
+/// line along the top of the settings window. 跟随系统 hands it back.
+#[cfg(target_os = "macos")]
+fn set_app_appearance(choice: ThemeChoice) {
+    use objc2::{
+        MainThreadMarker, msg_send,
+        runtime::{AnyClass, AnyObject},
+    };
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::NSString;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let name = match choice {
+        ThemeChoice::System => None,
+        ThemeChoice::Light => Some("NSAppearanceNameAqua"),
+        ThemeChoice::Dark => Some("NSAppearanceNameDarkAqua"),
+    };
+    // SAFETY: `+[NSAppearance appearanceNamed:]` returns a shared appearance
+    // or nil; `setAppearance:` takes one or nil, on the main thread.
+    unsafe {
+        let appearance: *mut AnyObject = match (name, AnyClass::get(c"NSAppearance")) {
+            (Some(name), Some(class)) => {
+                let name = NSString::from_str(name);
+                msg_send![class, appearanceNamed: &*name]
+            }
+            _ => std::ptr::null_mut(),
+        };
+        let _: () = msg_send![&app, setAppearance: appearance];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_app_appearance(_choice: ThemeChoice) {}
 
 /// Applies the theme choice in `window` now.
 pub fn apply_theme_choice(window: &mut Window, cx: &mut App) {

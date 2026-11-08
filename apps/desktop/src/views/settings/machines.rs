@@ -53,8 +53,12 @@ pub struct MachinesPage {
     this_machine: Option<String>,
     /// 用这台电脑 in progress or failed.
     using: Status,
+    /// Whether I am an owner, read when the session or the members change
+    /// rather than on every frame (`session()` reads the store).
+    owner: bool,
     /// The periodic reload; dropped with the pane.
     _poll: Task<()>,
+    _owner: gpui::Subscription,
 }
 
 impl MachinesPage {
@@ -74,7 +78,26 @@ impl MachinesPage {
         });
         let this_mac = services.provider.this_mac();
         let this_machine = services.provider.this_machine_id();
+        let owner_sub = cx.subscribe(
+            &services.hub,
+            |this, _, changes: &crate::app::Changes, cx| {
+                if changes.any(|c| {
+                    matches!(
+                        c,
+                        crate::data::Change::Members | crate::data::Change::Session
+                    )
+                }) {
+                    let owner = i_am_owner(&this.services);
+                    if owner != this.owner {
+                        this.owner = owner;
+                        cx.notify();
+                    }
+                }
+            },
+        );
         Self {
+            owner: i_am_owner(&services),
+            _owner: owner_sub,
             services,
             machines: None,
             status: Status::Idle,
@@ -197,8 +220,8 @@ impl MachinesPage {
         let this = self.this_machine.as_deref() == Some(m.id.as_str());
         // This Mac's own daemon can be restarted here (an old one that does not restart
         // itself after an app update, or one that is stuck).
-        let restart = (this && i_am_owner(&self.services) && self.this_mac == ThisMac::Working)
-            .then(|| cx.entity());
+        let restart =
+            (this && self.owner && self.this_mac == ThisMac::Working).then(|| cx.entity());
         let more = crate::views::settings::widgets::more_button(
             ElementId::Name(format!("machine-more-{}", m.id).into()),
             window,
@@ -249,7 +272,7 @@ impl MachinesPage {
 
 impl Render for MachinesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = i_am_owner(&self.services);
+        let owner = self.owner;
         let page = cx.entity();
         let add = owner.then(|| {
             push_button(

@@ -94,13 +94,30 @@ mod imp {
     }
 }
 
-/// What the system says, or `None` when this process has no login item
+thread_local! {
+    /// What the system said last; `None` until it is asked. Asking is a
+    /// synchronous XPC call to the system (about 1.5 ms), too slow for every
+    /// frame of the 通用 pane, so the pane asks again only when it is shown,
+    /// when its window comes to the front and after the switch changes it.
+    static LAST: std::cell::Cell<Option<Option<Status>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Asks the system again (the person may have changed it in 系统设置 ›
+/// 登录项), and keeps the answer for [`status`].
+pub fn refresh() -> Option<Status> {
+    let now = if super::prefs::saving() {
+        imp::status()
+    } else {
+        None
+    };
+    LAST.with(|l| l.set(Some(now)));
+    now
+}
+
+/// What the system said last, or `None` when this process has no login item
 /// (no bundle, self-tests).
 pub fn status() -> Option<Status> {
-    if !super::prefs::saving() {
-        return None;
-    }
-    imp::status()
+    LAST.with(|l| l.get()).unwrap_or_else(refresh)
 }
 
 /// Whether the switch shows on: the system's state, else the saved choice.
@@ -124,6 +141,7 @@ pub fn set(on: bool) {
             imp::status().is_some_and(Status::is_on)
         }
     };
+    refresh();
     super::prefs::update(|p| p.launch_at_login = now);
 }
 

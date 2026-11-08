@@ -220,6 +220,15 @@ pub fn history() -> Vec<(String, Notes)> {
         .collect()
 }
 
+/// How many versions [`history`] lists, without parsing their notes (the 通用
+/// pane shows the count on every frame).
+pub fn history_len() -> usize {
+    RELEASES
+        .iter()
+        .filter(|(v, _)| !version::is_newer(v, version::CURRENT))
+        .count()
+}
+
 /// Whether the 已更新到 sheet is due: the running version has notes, the
 /// person did not turn it off, and this Mac last opened another version
 /// (or none, right after an update the app installed itself). Records the
@@ -717,6 +726,11 @@ mod tests {
         assert_eq!(n.headline, "");
         assert_eq!(n.count(), 2);
         assert_eq!(n.plain(), "· 消息列表滚动更顺\n· 产出页可以按话题筛选");
+    }
+
+    #[test]
+    fn history_len_counts_history() {
+        assert_eq!(history_len(), history().len());
     }
 
     #[test]

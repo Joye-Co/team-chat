@@ -96,8 +96,72 @@ fn spend_text(n: Option<u32>) -> String {
     n.map(|n| widgets::grouped(n.into())).unwrap_or_default()
 }
 
+/// What the 成员 pane draws, read from the provider when it changes rather
+/// than on every frame: the members come from the store, and each AI
+/// member's word reads the asks and the runs (scrolling redraws the pane
+/// every frame).
+#[derive(Default)]
+struct Roster {
+    owner: bool,
+    me: Option<String>,
+    /// Sorted for the pane (`sorted`).
+    members: Vec<Member>,
+    /// Lowercased one-line names that more than one member has.
+    same_names: std::collections::HashSet<String>,
+    /// An AI member's word (等你, 在做 n/m, 空闲) by member id.
+    words: std::collections::HashMap<String, String>,
+}
+
+impl Roster {
+    fn read(services: &Services) -> Self {
+        let me = services.me();
+        let members = sorted(services.provider.members(), me.as_deref());
+        let mut seen = std::collections::HashMap::<String, usize>::new();
+        for m in &members {
+            *seen.entry(one_line(&m.name).to_lowercase()).or_default() += 1;
+        }
+        let same_names = seen
+            .into_iter()
+            .filter(|(_, n)| *n > 1)
+            .map(|(name, _)| name)
+            .collect();
+        let words = Self::words(services, me.as_deref(), &members);
+        Roster {
+            owner: i_am_owner(services),
+            me,
+            members,
+            same_names,
+            words,
+        }
+    }
+
+    fn words(
+        services: &Services,
+        me: Option<&str>,
+        members: &[Member],
+    ) -> std::collections::HashMap<String, String> {
+        members
+            .iter()
+            .filter(|m| m.is_bot() && !m.deactivated)
+            .map(|m| {
+                let word = crate::views::members_page::ai_member_word(
+                    services.provider.as_ref(),
+                    me,
+                    &m.id,
+                );
+                (m.id.clone(), word)
+            })
+            .collect()
+    }
+
+    fn same_name(&self, m: &Member) -> bool {
+        self.same_names.contains(&one_line(&m.name).to_lowercase())
+    }
+}
+
 pub struct MembersPage {
     services: Services,
+    roster: Roster,
     /// The last row request's result (level or deactivate).
     status: Status,
     rules: Option<ApprovalDefaults>,
@@ -118,9 +182,26 @@ impl MembersPage {
                     cx.notify();
                 }
             }),
-            cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
+            cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
                 if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                    this.roster = Roster::read(&this.services);
                     cx.notify();
+                } else if changes.any(|c| {
+                    matches!(
+                        c,
+                        Change::Todo | Change::Runs { .. } | Change::Messages { .. }
+                    )
+                }) {
+                    // An AI member's word follows its asks and runs.
+                    let words = Roster::words(
+                        &this.services,
+                        this.roster.me.as_deref(),
+                        &this.roster.members,
+                    );
+                    if words != this.roster.words {
+                        this.roster.words = words;
+                        cx.notify();
+                    }
                 }
             }),
             inline_commit(&spend, window, cx, |this, text, window, cx| {
@@ -128,6 +209,7 @@ impl MembersPage {
             }),
         ];
         Self {
+            roster: Roster::read(&services),
             services,
             status: Status::Idle,
             rules: None,
@@ -313,12 +395,7 @@ impl MembersPage {
         let state: Option<String> = if m.deactivated {
             None
         } else if m.is_bot() {
-            let p = &self.services.provider;
-            Some(crate::views::members_page::ai_member_word(
-                p.as_ref(),
-                me,
-                &m.id,
-            ))
+            Some(self.roster.words.get(&m.id).cloned().unwrap_or_default())
         } else if m.online {
             Some(s::MEMBER_ONLINE.to_string())
         } else {
@@ -591,15 +668,10 @@ impl MembersPage {
 
 impl Render for MembersPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = i_am_owner(&self.services);
-        let me = self.services.me();
-        let members = sorted(self.services.provider.members(), me.as_deref());
-        // Names that more than one member has.
-        let mut seen = std::collections::HashMap::<String, usize>::new();
-        for m in &members {
-            *seen.entry(one_line(&m.name).to_lowercase()).or_default() += 1;
-        }
-        let same_name = |m: &Member| seen.get(&one_line(&m.name).to_lowercase()).copied() > Some(1);
+        let owner = self.roster.owner;
+        let me = self.roster.me.clone();
+        let members = &self.roster.members;
+        let same_name = |m: &Member| self.roster.same_name(m);
         let query = self.filter.read(cx).value().trim().to_lowercase();
         let matches = |m: &Member| {
             query.is_empty()

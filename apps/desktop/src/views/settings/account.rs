@@ -90,6 +90,9 @@ fn device_symbol(kind: DeviceKind) -> Sym {
 
 pub struct AccountPage {
     services: Services,
+    /// My member row, read when the session or the members change rather
+    /// than on every frame (`session()` reads the store).
+    me: Option<Member>,
     name: Entity<InputState>,
     role: Entity<InputState>,
     /// The values the fields were last filled from, to keep edits on refresh.
@@ -125,6 +128,13 @@ pub struct AccountPage {
     _subscriptions: Vec<Subscription>,
 }
 
+fn read_me(services: &Services) -> Option<Member> {
+    match services.provider.session() {
+        SessionState::SignedIn { me, .. } => Some(me),
+        _ => None,
+    }
+}
+
 /// The text of a refused email request in 账号.
 fn email_error_text(e: EmailError) -> &'static str {
     match e {
@@ -153,6 +163,7 @@ impl AccountPage {
                 window,
                 |this, _, changes: &Changes, window, cx| {
                     if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                        this.me = read_me(&this.services);
                         this.fill_from_me(window, cx);
                         cx.notify();
                     }
@@ -185,6 +196,7 @@ impl AccountPage {
             cx.subscribe_in(&role, window, Self::on_input),
         ];
         let mut this = Self {
+            me: read_me(&services),
             services,
             name,
             role,
@@ -686,10 +698,7 @@ impl AccountPage {
     }
 
     fn me(&self) -> Option<Member> {
-        match self.services.provider.session() {
-            SessionState::SignedIn { me, .. } => Some(me),
-            _ => None,
-        }
+        self.me.clone()
     }
 
     /// Fills the fields from my member row unless they were edited.
@@ -1352,7 +1361,7 @@ impl AccountPage {
 
 impl Render for AccountPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let signed_in = self.me().is_some();
+        let signed_in = self.me.is_some();
         let sign_out_page = cx.entity();
         widgets::pane()
             .child(GroupedForm::new().row(self.header(cx)))

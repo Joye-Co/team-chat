@@ -164,6 +164,9 @@ pub struct SettingsView {
     /// Tab goes through the `FocusNext` handler to the first control (it is
     /// not a tab stop itself).
     focus: gpui::FocusHandle,
+    /// The pane whose name the window title shows, so the title is set when
+    /// the pane changes, not on every frame.
+    titled: Option<Page>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -199,9 +202,20 @@ impl SettingsView {
             scroll: gpui::ScrollHandle::new(),
             fit: Rc::new(window_fit::Fit::default()),
             focus,
-            _subscriptions: vec![theme::follow_system(window, cx)],
+            titled: None,
+            _subscriptions: vec![
+                theme::follow_system(window, cx),
+                // Back in front: the login item may have changed in 系统设置.
+                cx.observe_window_activation(window, |this, window, cx| {
+                    if window.is_window_active() && this.page == Page::General {
+                        login_item::refresh();
+                        cx.notify();
+                    }
+                }),
+            ],
         };
         window_fit::dim_window_buttons(window);
+        window_fit::pin_content_to_top(window);
         window_fit::hide_until_fitted(window);
         this.show(page, window, cx);
         this
@@ -219,8 +233,12 @@ impl SettingsView {
         }
         self.page = page;
         window.set_window_title(page.title());
+        self.titled = Some(page);
         prefs::update(|p| p.last_pane = Some(page.slug().to_string()));
         match page {
+            Page::General => {
+                login_item::refresh();
+            }
             Page::Machines => self.machines.update(cx, |m, cx| m.refresh(cx)),
             Page::Account => self.account.update(cx, |a, cx| {
                 a.refresh_devices(cx);
@@ -298,7 +316,10 @@ impl Render for SettingsView {
         let k = native_colors(cx);
         let active = emphasized(window);
         // The self-test walks the panes without the window: keep the title.
-        window.set_window_title(self.page.title());
+        if self.titled != Some(self.page) {
+            window.set_window_title(self.page.title());
+            self.titled = Some(self.page);
+        }
         let tabs: Vec<Button> = Page::ALL
             .into_iter()
             .map(|p| self.tab(p, window, cx))
@@ -382,15 +403,16 @@ impl Render for SettingsView {
                         div()
                             .w_full()
                             .relative()
-                            // A pane fades in with a 4 pt rise when the tab
-                            // changes, instead of swapping in one frame.
-                            .child(crate::ui::motion::enter(
+                            // A pane fades in when the tab changes, instead
+                            // of swapping in one frame. It does not rise: the
+                            // window's height already moves, and a second
+                            // motion under it read as a jitter.
+                            .child(crate::ui::motion::fade_in(
                                 gpui::ElementId::Name(
                                     format!("settings-pane-{}", self.page.slug()).into(),
                                 ),
                                 crate::theme::motion::NORMAL,
                                 div().relative().w_full().child(self.render_page()),
-                                |el, t| el.top(crate::theme::motion::TRAVEL * (1. - t)),
                                 cx,
                             ))
                             // Measures the pane as laid out; the window then
