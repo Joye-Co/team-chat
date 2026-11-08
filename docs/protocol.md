@@ -769,9 +769,9 @@ RunLogEntry = run.event | run.done | run.session frames of machine-protocol.md, 
 RunEventsResponse = { run: BotRun, entries: RunLogEntry[], hasMore: boolean, lastSeq: number }
 
 SetBotRunnerRequest = { runtime, labels?: string[], repo?: { url } | { path }, baseBranch?,
-                        model?, envAllowlist?: string[], enabled? /* absent = true */,
+                        model?, effort?: string | null /* 思考强度; absent keeps, null clears */, envAllowlist?: string[], enabled? /* absent = true */,
                         machineId?: Id | null /* 1.2.2: absent keeps, null clears */ }
-BotRunner = { botId, runtime, labels, repo?, baseBranch?, model?, envAllowlist, enabled, updatedAt,
+BotRunner = { botId, runtime, labels, repo?, baseBranch?, model?, effort?, envAllowlist, enabled, updatedAt,
               machineId? /* 1.2.2 */ }
 Machine = { id, name, labels, createdBy, createdAt, revoked?, connected, healthy,
             lastHeartbeatAt?, daemonVersion?, os?, arch?, maxParallelRuns?, health?: Health,
@@ -801,6 +801,10 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 
 Rules:
 
+- `model` and `effort` go to the CLI as `run.assign.model` and `run.assign.effort` (effort only to
+  a machine with feature `effort`). Settings offer the models and efforts the machines report in
+  `Machine.clis[].models` / `efforts` (machine-protocol.md, "Models and effort"); `effort` is
+  `[a-z][a-z0-9_-]{0,31}`.
 - Labels are 1..64 of `[A-Za-z0-9_.:-]`, at most 20. A machine shows its owner labels plus the
   labels its daemon reports, but only owner labels route runs. A machine qualifies for a bot when it has all of the bot's
   labels, reports the bot's `runtime` as available, is connected with a heartbeat in the last

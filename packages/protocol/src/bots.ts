@@ -2,7 +2,7 @@
 // status events in the group log and the run log. See docs/protocol.md, "Bot runs".
 import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
-import { AcceptanceItem, CliInfo, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunLogEntry, Usage } from "./machine.ts";
+import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunLogEntry, Usage } from "./machine.ts";
 import { RunPlan } from "./plan.ts";
 
 /** `BotRun.kind` of a side chat run. */
@@ -183,6 +183,9 @@ export const SetBotRunnerRequest = z.object({
   repo: RunnerRepo.optional(),
   baseBranch: z.string().min(1).max(200).optional(),
   model: z.string().min(1).max(200).optional(),
+  /** Thinking effort (思考强度) as the CLI spells it. Absent keeps the stored one (clients before
+   * it send none); null clears it (the CLI's default). */
+  effort: Effort.nullable().optional(),
   envAllowlist: z.array(EnvName).max(50).optional(),
   /** Absent = true. */
   enabled: z.boolean().optional(),
@@ -200,6 +203,7 @@ export const BotRunner = z.object({
   repo: RunnerRepo.optional(),
   baseBranch: z.string().optional(),
   model: z.string().optional(),
+  effort: z.string().optional(),
   envAllowlist: z.array(z.string()),
   enabled: z.boolean(),
   updatedAt: Millis,

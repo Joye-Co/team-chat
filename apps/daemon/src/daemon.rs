@@ -34,13 +34,15 @@ pub const FEATURES: &[&str] = &[
     feature::OUTPUT,
     feature::RESUME,
     feature::CONTEXT,
+    feature::EFFORT,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).
 const MAX_RESUME_NOTE: usize = 2000;
 
 enum LinkEvent {
-    Up(u64, mpsc::UnboundedSender<String>),
+    /// The link is up, with the CLIs found for its `hello`.
+    Up(u64, mpsc::UnboundedSender<String>, Vec<CliInfo>),
     Frame(u64, String),
     Closed(u64, String),
 }
@@ -63,6 +65,7 @@ pub struct Daemon {
     token: Arc<String>,
     /// Masks secrets in every frame a run sends (run events, run.done, run.session).
     redactor: Arc<crate::redact::Redactor>,
+    /// The CLIs of the last `hello`; a run's effort must be one its CLI reported there.
     clis: Vec<CliInfo>,
     runs: HashMap<String, RunEntry>,
     recent: VecDeque<String>,
@@ -83,7 +86,6 @@ pub struct Daemon {
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
     let token = cfg.read_token()?;
     let _ = std::fs::create_dir_all(crate::workspace::runs_dir(&cfg));
-    let clis = health::discover_clis(&cfg).await;
     let (link_tx, mut link_rx) = mpsc::unbounded_channel();
     let (run_tx, mut run_rx) = mpsc::unbounded_channel();
     let redactor = Arc::new(crate::redact::Redactor::for_daemon(&cfg, &token));
@@ -91,7 +93,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         cfg: Arc::new(cfg),
         token: Arc::new(token),
         redactor,
-        clis,
+        clis: vec![],
         runs: HashMap::new(),
         recent: VecDeque::new(),
         recent_set: HashSet::new(),
@@ -130,7 +132,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let mut update_check =
         tokio::time::interval_at(tokio::time::Instant::now() + UPDATE_CHECK, UPDATE_CHECK);
     tokio::pin!(shutdown);
-    log!("daemon started: {} runtimes", d.clis.len());
+    log!("daemon started: {} runtimes", d.cfg.runtimes.len());
     loop {
         let reconnect_at = d.next_connect;
         tokio::select! {
@@ -354,7 +356,11 @@ impl Daemon {
         let url = self.cfg.ws_url();
         let token = self.token.clone();
         let tx = self.link_tx.clone();
+        let cfg = self.cfg.clone();
         tokio::spawn(async move {
+            // Each hello reports what the CLIs can run now (feature `effort`): asked before the
+            // link opens, so the server never waits for the hello.
+            let clis = health::discover_clis(&cfg).await;
             let mut req = match url.as_str().into_client_request() {
                 Ok(r) => r,
                 Err(e) => {
@@ -385,7 +391,7 @@ impl Daemon {
             };
             let (mut sink, mut stream) = ws.split();
             let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
-            let _ = tx.send(LinkEvent::Up(epoch, out_tx));
+            let _ = tx.send(LinkEvent::Up(epoch, out_tx, clis));
             let writer = tokio::spawn(async move {
                 while let Some(s) = out_rx.recv().await {
                     if sink.send(Message::text(s)).await.is_err() {
@@ -431,8 +437,9 @@ impl Daemon {
 
     fn on_link(&mut self, ev: LinkEvent) {
         match ev {
-            LinkEvent::Up(epoch, tx) if epoch == self.epoch => {
+            LinkEvent::Up(epoch, tx, clis) if epoch == self.epoch => {
                 self.connecting = false;
+                self.clis = clis;
                 self.link = Some(tx);
                 self.last_rx = Instant::now();
                 let hello = Up::Hello {
@@ -616,7 +623,7 @@ impl Daemon {
         });
     }
 
-    fn on_assign(&mut self, a: RunAssign) {
+    fn on_assign(&mut self, mut a: RunAssign) {
         let id = a.run_id.clone();
         if !valid_run_id(&id) {
             return self.reject(&id, "invalid", "runId must be 1-64 of [A-Za-z0-9_-]");
@@ -668,6 +675,19 @@ impl Daemon {
             }
             // A kind this daemon does not know could need a mode it cannot enforce.
             Some(_) => return self.reject(&id, "invalid", "unknown run kind"),
+        }
+        // An effort the CLI did not report is not passed: the run goes on with its default.
+        if let Some(e) = a.effort.take() {
+            let cli = self.clis.iter().find(|c| c.runtime == a.runtime);
+            if crate::models::accepts_effort(cli, &e) {
+                a.effort = Some(e);
+            } else {
+                log!(
+                    "run {id}: runtime {} did not report effort {}; it runs with its default",
+                    crate::chat_run::safe_word(&a.runtime),
+                    crate::chat_run::safe_word(&e)
+                );
+            }
         }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         let outputs = Arc::new(crate::chat_run::Outputs::new(&id));

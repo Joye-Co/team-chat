@@ -42,8 +42,52 @@ fn sample_runners() -> HashMap<String, RunnerSetup> {
             repo: Some("https://github.com/example/app".into()),
             base_branch: Some("main".into()),
             machine_id: None,
+            model: Some("opus".into()),
+            effort: Some("high".into()),
         },
     )])
+}
+
+/// What the office Mac's CLIs report (feature "effort").
+fn sample_clis() -> Vec<crate::data::CliChoice> {
+    use crate::data::{CliChoice, ModelChoice};
+    let levels = |l: &[&str]| l.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let model = |id: &str, name: Option<&str>, efforts: &[&str], default: bool| ModelChoice {
+        id: id.into(),
+        name: name.map(str::to_string),
+        efforts: levels(efforts),
+        is_default: default,
+    };
+    vec![
+        CliChoice {
+            runtime: "claude".into(),
+            models: vec![
+                model("fable", None, &[], false),
+                model("opus", None, &[], true),
+                model("sonnet", None, &[], false),
+                model("haiku", None, &[], false),
+            ],
+            efforts: levels(&["low", "medium", "high", "xhigh", "max"]),
+        },
+        CliChoice {
+            runtime: "codex".into(),
+            models: vec![
+                model(
+                    "gpt-6-astra",
+                    Some("GPT-6-Astra"),
+                    &["low", "medium", "high", "xhigh", "max"],
+                    true,
+                ),
+                model(
+                    "gpt-6-sol",
+                    Some("GPT-6-Sol"),
+                    &["low", "medium", "high"],
+                    false,
+                ),
+            ],
+            efforts: levels(&["low", "medium", "high", "xhigh", "max"]),
+        },
+    ]
 }
 
 fn sample_machines() -> Vec<MachineInfo> {
@@ -61,6 +105,7 @@ fn sample_machines() -> Vec<MachineInfo> {
             active_runs: 1,
             max_parallel_runs: Some(2),
             runtimes: vec!["claude".into(), "codex".into()],
+            clis: sample_clis(),
         },
         MachineInfo {
             id: "mc-old".into(),
@@ -75,6 +120,7 @@ fn sample_machines() -> Vec<MachineInfo> {
             active_runs: 0,
             max_parallel_runs: Some(1),
             runtimes: Vec::new(),
+            ..Default::default()
         },
     ]
 }

@@ -1,6 +1,6 @@
 //! Machine health and CLI discovery.
 
-use crate::config::Config;
+use crate::config::{Config, RuntimeConfig};
 use crate::proto::{CliInfo, Health};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -41,24 +41,30 @@ pub async fn cli_version(cmd: &str) -> Option<String> {
         .filter(|l| !l.is_empty())
 }
 
+/// Every configured runtime: whether its CLI is installed, its version and what it can run
+/// ([`crate::models`]), asked of all CLIs at once.
 pub async fn discover_clis(cfg: &Config) -> Vec<CliInfo> {
-    let mut out = vec![];
-    for (name, rt) in &cfg.runtimes {
-        let command = rt.command();
-        let found = which(&command);
-        let version = match &found {
-            Some(p) if rt.kind != "pty" => cli_version(&p.to_string_lossy()).await,
-            _ => None,
-        };
-        out.push(CliInfo {
-            runtime: name.clone(),
-            kind: rt.kind.clone(),
-            command,
-            version,
-            available: found.is_some(),
-        });
+    futures_util::future::join_all(cfg.runtimes.iter().map(|(name, rt)| discover_cli(name, rt)))
+        .await
+}
+
+async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
+    let command = rt.command();
+    let found = which(&command);
+    let version = match &found {
+        Some(p) if rt.kind != "pty" => cli_version(&p.to_string_lossy()).await,
+        _ => None,
+    };
+    let can_run = crate::models::discover(rt, found.as_deref()).await;
+    CliInfo {
+        runtime: name.to_string(),
+        kind: rt.kind.clone(),
+        command,
+        version,
+        available: found.is_some(),
+        models: can_run.models,
+        efforts: can_run.efforts,
     }
-    out
 }
 
 pub fn disk(path: &Path) -> (u64, u64) {

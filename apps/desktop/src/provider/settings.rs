@@ -15,9 +15,9 @@ use chat_core::{
 
 use super::{CoreProvider, convert};
 use crate::data::{
-    AdminError, AdminReply, BotCreated, BotMemberEdit, Change, CharacterId, GroupKind, GroupPrefs,
-    InviteCreated, InviteRequest, MachineCreated, MachineInfo, Member, MemberKind, MemberLevel,
-    NotifyLevel, RunnerChange, RunnerSetup, SecretText, reply_now,
+    AdminError, AdminReply, BotCreated, BotMemberEdit, Change, CharacterId, CliChoice, GroupKind,
+    GroupPrefs, InviteCreated, InviteRequest, MachineCreated, MachineInfo, Member, MemberKind,
+    MemberLevel, ModelChoice, NotifyLevel, RunnerChange, RunnerSetup, SecretText, reply_now,
 };
 
 /// Largest avatar the server takes.
@@ -113,6 +113,9 @@ fn runner_request(runner: RunnerSetup) -> SetBotRunnerRequest {
         base_branch: non_empty(runner.base_branch),
         // Always sent: `null` lets any computer run it again.
         machine_id: Some(non_empty(runner.machine_id)),
+        model: non_empty(runner.model),
+        // Always sent: `null` goes back to the CLI's default.
+        effort: Some(non_empty(runner.effort)),
         ..Default::default()
     }
 }
@@ -128,6 +131,8 @@ pub(super) fn runner_setup(r: &proto::BotRunner) -> RunnerSetup {
             .and_then(|repo| repo.url.clone().or_else(|| repo.path.clone())),
         base_branch: r.base_branch.clone(),
         machine_id: r.machine_id.clone(),
+        model: r.model.clone(),
+        effort: r.effort.clone(),
     }
 }
 
@@ -157,6 +162,27 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
             .max(m.running_runs.len() as u32),
         max_parallel_runs: m.max_parallel_runs,
         runtimes,
+        clis: m
+            .clis
+            .iter()
+            .flatten()
+            .filter(|c| c.available)
+            .map(|c| CliChoice {
+                runtime: c.runtime.clone(),
+                models: c
+                    .models
+                    .iter()
+                    .flatten()
+                    .map(|x| ModelChoice {
+                        id: x.id.clone(),
+                        name: x.name.clone(),
+                        efforts: x.efforts.clone().unwrap_or_default(),
+                        is_default: x.is_default == Some(true),
+                    })
+                    .collect(),
+                efforts: c.efforts.clone().unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 

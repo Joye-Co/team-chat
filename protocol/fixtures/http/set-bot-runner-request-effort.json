@@ -1,0 +1,9 @@
+{
+  "kind": "SetBotRunnerRequest",
+  "valid": true,
+  "value": {
+    "runtime": "claude",
+    "model": "opus",
+    "effort": "high"
+  }
+}

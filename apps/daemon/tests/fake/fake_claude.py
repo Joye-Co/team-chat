@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fake Claude Code headless CLI: stream-json in and out, as the CLI docs describe.
+"""Fake Claude Code headless CLI: stream-json in and out, as the CLI docs describe. `--help`
+prints the `--effort` option and its list.
 
 Prompt words: "slow" streams 5 deltas 0.3 s apart; "hang" writes fake.pid and sleeps; "tick"
 writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped process stops ticking);
@@ -22,6 +23,12 @@ The session file goes to $CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics
 import errno, json, os, re, subprocess, sys, time
 
 args = sys.argv[1:]
+if args == ["--help"]:
+    # Like Claude Code: the effort list wraps to the line below the option.
+    print("Options:\n  --effort <level>          Effort level for the current session\n"
+          "                            (low, medium, high, xhigh, max)\n"
+          "  --model <model>           Model for the current session")
+    sys.exit(0)
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else "fake-session"
 if "--resume" in args:
     # Like Claude Code: the session must be in the project folder of the working directory.

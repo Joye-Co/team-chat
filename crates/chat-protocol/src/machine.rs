@@ -29,6 +29,23 @@ pub mod feature {
     pub const RESUME: &str = "resume";
     /// chat-run topic context ops: `topic.history`, `topic.message`, `context.search`, `file.get`.
     pub const CONTEXT: &str = "context";
+    /// `CliInfo.models` / `efforts` and `run.assign.effort`.
+    pub const EFFORT: &str = "effort";
+}
+
+/// A model a CLI can run (machine-protocol.md, "Models and effort").
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub efforts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_default: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,6 +79,12 @@ pub struct CliInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub available: bool,
+    /// Models the CLI can run (feature "effort"); `None` = unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<CliModel>>,
+    /// Efforts the CLI takes (feature "effort").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub efforts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -125,6 +148,9 @@ pub struct RunAssign {
     pub prompt: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Thinking effort (feature "effort").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<RepoSpec>,
     #[serde(default)]

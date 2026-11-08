@@ -454,6 +454,20 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
     args
 }
 
+/// `--model` (the assignment's, else `daemon.toml`'s) and `--effort`, each value one argument.
+pub fn model_args(spec: &RunSpec) -> Vec<String> {
+    let mut args = vec![];
+    if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
+        args.push("--model".into());
+        args.push(m);
+    }
+    if let Some(e) = &spec.effort {
+        args.push("--effort".into());
+        args.push(e.clone());
+    }
+    args
+}
+
 /// The permission mode of every run that is not an aside: everything allowed.
 pub const PERMISSION_MODE: &str = "bypassPermissions";
 
@@ -533,10 +547,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         args.push("--append-system-prompt".into());
         args.push(n.clone());
     }
-    if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
-        args.push("--model".into());
-        args.push(m);
-    }
+    args.extend(model_args(&spec));
     let program = spec.cfg.command();
     // The settings file holds auth values: it goes when the run ends, however it ends.
     let _settings = aside_settings.map(RemoveOnDrop);

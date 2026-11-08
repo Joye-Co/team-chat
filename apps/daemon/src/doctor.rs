@@ -45,6 +45,24 @@ pub async fn report(cfg: &Config) -> (String, bool) {
                 "NOT FOUND".into()
             }
         );
+        if c.models.is_some() || c.efforts.is_some() {
+            let models: Vec<&str> = c.models.iter().flatten().map(|m| m.id.as_str()).collect();
+            let efforts = c.efforts.as_deref().unwrap_or_default();
+            let _ = writeln!(
+                s,
+                "             models: {}; efforts: {}",
+                if models.is_empty() {
+                    "-".into()
+                } else {
+                    models.join(", ")
+                },
+                if efforts.is_empty() {
+                    "-".into()
+                } else {
+                    efforts.join(", ")
+                }
+            );
+        }
         ok &= c.available;
     }
     if h.disk_free_bytes < cfg.min_free_gb * (1 << 30) {

@@ -88,15 +88,18 @@ export function registerBotRoutes(): void {
       const a = auth as AuthContext;
       // machineId: absent keeps the stored machine (clients before 1.2.2 send none), null clears.
       const keepMachine = req.machineId === undefined ? 1 : 0;
+      // effort: the same rule (absent keeps, null clears).
+      const keepEffort = req.effort === undefined ? 1 : 0;
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO bot_runners (member_id, runtime, labels, repo_url, repo_path, base_branch, model, env_allowlist, enabled, updated_by, updated_at, machine_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO bot_runners (member_id, runtime, labels, repo_url, repo_path, base_branch, model, env_allowlist, enabled, updated_by, updated_at, machine_id, effort)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (member_id) DO UPDATE SET runtime = excluded.runtime, labels = excluded.labels,
              repo_url = excluded.repo_url, repo_path = excluded.repo_path, base_branch = excluded.base_branch,
              model = excluded.model, env_allowlist = excluded.env_allowlist, enabled = excluded.enabled,
              updated_by = excluded.updated_by, updated_at = excluded.updated_at,
-             machine_id = CASE WHEN ? = 1 THEN bot_runners.machine_id ELSE excluded.machine_id END`,
+             machine_id = CASE WHEN ? = 1 THEN bot_runners.machine_id ELSE excluded.machine_id END,
+             effort = CASE WHEN ? = 1 THEN bot_runners.effort ELSE excluded.effort END`,
         ).bind(
           params.id,
           req.runtime,
@@ -110,7 +113,9 @@ export function registerBotRoutes(): void {
           a.memberId,
           now,
           req.machineId ?? null,
+          req.effort ?? null,
           keepMachine,
+          keepEffort,
         ),
         auditStatement(env.DB, a, { action: "bot.runner.set", target: params.id, details: { ...req } }, now),
       ]);

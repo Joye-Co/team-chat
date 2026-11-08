@@ -282,6 +282,7 @@ pub async fn supervise(ctx: RunCtx) {
                 cfg: rt.clone(),
                 prompt: assign.prompt.clone(),
                 model: assign.model.clone(),
+                effort: assign.effort.clone(),
                 cwd,
                 run_dir: dir.clone(),
                 env,

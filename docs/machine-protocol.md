@@ -85,6 +85,7 @@ KnownRun = { runId, ackedSeq: number }
   runtime: string,                 // a CliInfo.runtime of this machine
   prompt: string,                  // full prompt, including the topic context BotDesk chose
   model?: string,
+  effort?: string,                 // feature "effort", see "Models and effort"
   repo?: { url?: string, path?: string, baseBranch?: string },   // url xor path; none = scratch folder
   envAllowlist: string[],          // names of daemon env vars the CLI may see (see Environment)
   leaseMs: number,                 // e.g. 600000
@@ -245,6 +246,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
+| `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
 | `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`), see "Topic context". |
 
 How the 1.1 daemon does each one:
@@ -497,6 +499,34 @@ the group. A version is added only to a 产出 of the run's group, and its `runI
 run. The member's file limits and quota apply. The audit log has `file.create`, `file.upload`,
 `artifact.create` and `artifact.version.add` with the member as the actor and
 `machine:{machineId}` as the credential.
+
+### Models and effort (feature `effort`)
+
+```ts
+CliInfo += { models?: CliModel[] /* <= 50 */, efforts?: string[] /* <= 10 */ }
+CliModel = { id, name?, efforts?: string[], defaultEffort?, isDefault?: boolean }
+run.assign += { effort?: string }   // only to a daemon with feature "effort"
+```
+
+The daemon reports what each CLI can run, so settings offer a list instead of a text field. It
+finds the list when it connects (each `hello`), with a 15 s limit per CLI; a CLI it cannot ask
+reports no `models`, and settings then let the owner type a model id.
+
+- **Codex**: a short `codex app-server` session: `initialize`, `initialized`, `model/list`. Each
+  model that is not `hidden` becomes a `CliModel` (`id`, `displayName` as `name`,
+  `supportedReasoningEfforts[].reasoningEffort` as `efforts`, `defaultReasoningEffort`,
+  `isDefault`). `efforts` of the CLI is the union of its models' efforts.
+- **Claude Code**: no list command. `models` holds the aliases `--model` takes (`fable`, `opus`,
+  `sonnet`, `haiku`), and the `model` of the user's `settings.json` (`$CLAUDE_CONFIG_DIR`, default
+  `~/.claude`) as `isDefault` when it is set. `efforts` is the list `claude --help` prints for
+  `--effort` (`low, medium, high, xhigh, max` today), or none when the flag is missing.
+- **daemon.toml** may set `models = ["id", …]` and `efforts = […]` on a runtime: they replace what
+  the daemon found (for ACP agents and the PTY, which report none otherwise).
+
+`run.assign.effort` names one of the CLI's efforts: Claude Code gets `--effort <effort>`, Codex
+`turn/start.effort` on every turn. An effort the CLI did not report is not passed (the run goes on
+with the CLI's default and the daemon logs it). Ids and efforts are passed as one argument, never
+through a shell. The `session` run event's `model` reports the model the CLI really used.
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 

@@ -20,6 +20,8 @@ export interface RunnerRow {
   updated_at: number;
   /** 1.2.2 (migration 0010); undefined on a database before it. */
   machine_id?: string | null;
+  /** Migration 0011; undefined on a database before it. */
+  effort?: string | null;
 }
 
 export function toRunner(r: RunnerRow): BotRunner {
@@ -36,6 +38,7 @@ export function toRunner(r: RunnerRow): BotRunner {
   if (r.base_branch) out.baseBranch = r.base_branch;
   if (r.model) out.model = r.model;
   if (r.machine_id) out.machineId = r.machine_id;
+  if (r.effort) out.effort = r.effort;
   return out;
 }
 

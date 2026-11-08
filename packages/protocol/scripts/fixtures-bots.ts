@@ -140,6 +140,25 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   const offline = { id: R.machine, name: "laptop", labels: [], createdBy: ID.owner, createdAt: T0, connected: false, healthy: false, runningRuns: [] };
   ok("entities/machine.json", "Machine", machine);
   ok("entities/machine-never-connected.json", "Machine", offline, "made, daemon never connected");
+  // Models and effort (feature "effort")
+  const codexCli = {
+    runtime: "codex",
+    kind: "codex",
+    command: "codex",
+    version: "codex-cli 0.159.0",
+    available: true,
+    models: [
+      { id: "gpt-6-astra", name: "GPT-6-Astra", efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "low", isDefault: true },
+      { id: "gpt-6-sol", name: "GPT-6-Sol", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
+    ],
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+  };
+  const claudeCli = { runtime: "claude", kind: "claude", command: "claude", available: true, models: [{ id: "fable" }, { id: "opus", isDefault: true }, { id: "sonnet" }, { id: "haiku" }], efforts: ["low", "medium", "high", "xhigh", "max"] };
+  ok("entities/machine-models.json", "Machine", { ...machine, features: ["effort"], clis: [codexCli, claudeCli] }, "CLIs report models and efforts");
+  ok("http/set-bot-runner-request-effort.json", "SetBotRunnerRequest", { runtime: "claude", model: "opus", effort: "high" });
+  ok("http/set-bot-runner-request-effort-clear.json", "SetBotRunnerRequest", { runtime: "claude", effort: null }, "null clears the effort");
+  bad("http/set-bot-runner-request-bad-effort.json", "SetBotRunnerRequest", { runtime: "claude", effort: "" }, "effort is not empty");
+  ok("http/bot-runner-effort.json", "BotRunner", { botId: ID.bot, runtime: "claude", labels: [], model: "opus", effort: "high", envAllowlist: [], enabled: true, updatedAt: T0 });
   ok("http/create-machine-request.json", "CreateMachineRequest", { name: "mac-mini", labels: ["mac", "main"] });
   bad("http/create-machine-request-bad-label.json", "CreateMachineRequest", { name: "mac-mini", labels: ["has space"] }, "label with a space");
   ok("http/create-machine-response.json", "CreateMachineResponse", { machine: offline, token: "tm_MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM" }, "token is a fake placeholder");

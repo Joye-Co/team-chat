@@ -216,6 +216,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
         runtime: runtime.into(),
         prompt: prompt.into(),
         model: None,
+        effort: None,
         repo: None,
         env_allowlist: vec![],
         lease_ms: 600_000,
@@ -821,7 +822,8 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "interact",
                         "output",
                         "resume",
-                        "context"
+                        "context",
+                        "effort"
                     ]
                     .map(String::from)[..]
                 )
@@ -1673,6 +1675,67 @@ async fn a_follow_up_run_resumes_the_session() {
     )
     .unwrap();
     assert!(argv.iter().any(|a| a == "--session-id"));
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// Feature `effort`: hello reports the CLI's models and efforts; a run with an effort the CLI
+/// reported starts it with `--effort`, one with an effort it did not report runs without.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runs_get_an_effort_the_cli_reported() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(20), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match next(&mut ws).await {
+        Up::Hello { clis, .. } => {
+            let ids: Vec<&str> = clis[0]
+                .models
+                .iter()
+                .flatten()
+                .map(|m| m.id.as_str())
+                .collect();
+            assert_eq!(ids, ["fable", "opus", "sonnet", "haiku"]);
+            assert_eq!(
+                clis[0].efforts.as_deref().unwrap(),
+                ["low", "medium", "high", "xhigh", "max"]
+            );
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+
+    for (run, effort, want) in [("e1", "max", true), ("e2", "turbo", false)] {
+        let mut a = assign(run, "fake", "hello", None);
+        if let Down::RunAssign(r) = &mut a {
+            r.effort = Some(effort.into());
+        }
+        send(&mut ws, &a).await;
+        let fr = collect(&mut ws, run, true, |f| matches!(f, Up::RunDone(_))).await;
+        assert_eq!(done(&fr).status, "succeeded");
+        let argv: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(tmp.path().join(format!("work/runs/{run}/work/argv.json")))
+                .unwrap(),
+        )
+        .unwrap();
+        let i = argv.iter().position(|a| a == "--effort");
+        assert_eq!(i.is_some(), want, "{argv:?}");
+        if let Some(i) = i {
+            assert_eq!(argv[i + 1], effort);
+        }
+    }
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

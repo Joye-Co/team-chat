@@ -19,7 +19,7 @@ export const Labels = z.array(Label).max(MAX_LABELS);
 export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
-export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context"] as const;
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort"] as const;
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -38,6 +38,25 @@ export const MachineInfo = z.object({
 export type MachineInfo = z.infer<typeof MachineInfo>;
 
 export const CliKind = z.enum(["codex", "claude", "acp", "pty"]);
+/** A thinking effort name (思考强度), as the CLI spells it: "low", "high", "max"… */
+export const Effort = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
+export const MAX_CLI_MODELS = 50;
+export const MAX_EFFORTS = 10;
+
+/** A model a CLI can run (machine-protocol.md, "Models and effort"). */
+export const CliModel = z.object({
+  /** What `run.assign.model` and `SetBotRunnerRequest.model` carry. */
+  id: z.string().min(1).max(200),
+  /** The CLI's display name. */
+  name: z.string().max(200).optional(),
+  /** The efforts this model takes; absent = the CLI's `efforts`. */
+  efforts: z.array(Effort).max(MAX_EFFORTS).optional(),
+  defaultEffort: Effort.optional(),
+  /** The CLI's default model (what runs without `model`). */
+  isDefault: z.boolean().optional(),
+});
+export type CliModel = z.infer<typeof CliModel>;
+
 export const CliInfo = z.object({
   /** The runtime name configured on the machine; `run.assign.runtime` names one. */
   runtime: z.string().min(1).max(64),
@@ -45,6 +64,10 @@ export const CliInfo = z.object({
   command: z.string().max(1024),
   version: z.string().max(200).optional(),
   available: z.boolean(),
+  /** Models the CLI can run (feature "effort"); absent = unknown, any id may be typed. */
+  models: z.array(CliModel).max(MAX_CLI_MODELS).optional(),
+  /** Efforts the CLI takes (feature "effort"); absent or empty = no effort setting. */
+  efforts: z.array(Effort).max(MAX_EFFORTS).optional(),
 });
 export type CliInfo = z.infer<typeof CliInfo>;
 
@@ -245,6 +268,8 @@ export const RunAssignFrame = z.object({
   runtime: z.string().min(1).max(64),
   prompt: z.string(),
   model: z.string().optional(),
+  /** Thinking effort (思考强度); sent only to a daemon with feature "effort". */
+  effort: Effort.optional(),
   repo: RepoSpec.optional(),
   envAllowlist: z.array(z.string()),
   leaseMs: z.int().positive(),
