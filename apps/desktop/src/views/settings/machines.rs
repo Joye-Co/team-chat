@@ -752,6 +752,7 @@ mod tests {
             active_runs: 0,
             max_parallel_runs: None,
             runtimes: Vec::new(),
+            ..Default::default()
         }
     }
 

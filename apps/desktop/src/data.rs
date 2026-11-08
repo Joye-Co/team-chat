@@ -1184,6 +1184,10 @@ pub struct RunnerSetup {
     pub base_branch: Option<String>,
     /// The one computer that runs this member (1.2.2); `None` = any computer with the labels.
     pub machine_id: Option<String>,
+    /// The model id the CLI runs; `None` = the CLI's default.
+    pub model: Option<String>,
+    /// 思考强度 as the CLI spells it; `None` = the CLI's default.
+    pub effort: Option<String>,
 }
 
 /// What a save of the AI member edit sheet changes; a `None` field stays as it is.
@@ -1227,6 +1231,26 @@ pub struct MachineInfo {
     pub max_parallel_runs: Option<u32>,
     /// Runtime names it can run.
     pub runtimes: Vec<String>,
+    /// What each available runtime reports it can run (feature "effort").
+    pub clis: Vec<CliChoice>,
+}
+
+/// The models and 思考强度 one runtime of a computer offers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CliChoice {
+    pub runtime: String,
+    /// Empty = the computer did not say: the model is typed.
+    pub models: Vec<ModelChoice>,
+    pub efforts: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub id: String,
+    pub name: Option<String>,
+    /// Empty = the runtime's efforts.
+    pub efforts: Vec<String>,
+    pub is_default: bool,
 }
 
 /// Whether this Mac is one of the team's computers (设置 › 机器 › 用这台电脑).

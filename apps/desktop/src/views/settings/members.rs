@@ -29,7 +29,8 @@ use crate::{
     copy::{common, fill, settings as s},
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, BotMemberEdit, Change, InviteCreated,
-        InviteRequest, MachineInfo, Member, MemberKind, MemberLevel, RunnerChange, RunnerSetup,
+        InviteRequest, MachineInfo, Member, MemberKind, MemberLevel, ModelChoice, RunnerChange,
+        RunnerSetup,
     },
     theme,
     ui::{
@@ -1350,7 +1351,79 @@ fn clean_runner(r: &RunnerSetup) -> RunnerSetup {
         repo: text(&r.repo),
         base_branch: text(&r.base_branch),
         machine_id: text(&r.machine_id),
+        model: text(&r.model),
+        effort: text(&r.effort),
     }
+}
+
+/// The models and 思考强度 a runtime offers on the computers that can run the member: the
+/// picked computer only, else every computer that has the runtime. Models keep their first
+/// report; efforts are the union in order.
+fn cli_choices(
+    machines: &[MachineInfo],
+    runtime: &str,
+    machine: Option<&str>,
+) -> (Vec<ModelChoice>, Vec<String>) {
+    let mut models: Vec<ModelChoice> = Vec::new();
+    let mut efforts: Vec<String> = Vec::new();
+    let clis = machines
+        .iter()
+        .filter(|m| machine.is_none_or(|id| m.id == id))
+        .flat_map(|m| m.clis.iter())
+        .filter(|c| c.runtime == runtime);
+    for c in clis {
+        for m in &c.models {
+            if !models.iter().any(|x| x.id == m.id) {
+                models.push(m.clone());
+            }
+        }
+        for e in &c.efforts {
+            if !efforts.contains(e) {
+                efforts.push(e.clone());
+            }
+        }
+    }
+    (models, efforts)
+}
+
+/// The 思考强度 levels for a model: its own list, else the runtime's. With no model picked,
+/// the default model's.
+fn effort_options(models: &[ModelChoice], efforts: &[String], model: Option<&str>) -> Vec<String> {
+    let chosen = match model {
+        Some(id) => models.iter().find(|m| m.id == id),
+        None => models.iter().find(|m| m.is_default),
+    };
+    match chosen {
+        Some(m) if !m.efforts.is_empty() => m.efforts.clone(),
+        _ => efforts.to_vec(),
+    }
+}
+
+fn model_text(m: &ModelChoice) -> String {
+    m.name.clone().unwrap_or_else(|| m.id.clone())
+}
+
+/// 默认, with the default model's name when a computer said which it is.
+fn default_model_text(models: &[ModelChoice]) -> String {
+    match models.iter().find(|m| m.is_default) {
+        Some(m) => s::RUNNER_MODEL_DEFAULT_NAMED.replace("{name}", &model_text(m)),
+        None => s::RUNNER_MODEL_DEFAULT.to_string(),
+    }
+}
+
+/// A 思考强度 level in words; one this build does not know shows as the CLI spells it.
+fn effort_text(e: &str) -> String {
+    match e {
+        "minimal" => s::EFFORT_MINIMAL,
+        "low" => s::EFFORT_LOW,
+        "medium" => s::EFFORT_MEDIUM,
+        "high" => s::EFFORT_HIGH,
+        "xhigh" => s::EFFORT_XHIGH,
+        "max" => s::EFFORT_MAX,
+        "ultra" => s::EFFORT_ULTRA,
+        other => return other.to_string(),
+    }
+    .to_string()
 }
 
 /// How 在哪台电脑干活 names a choice: 任意一台空闲的电脑, a computer by name (this Mac
@@ -1432,6 +1505,12 @@ pub struct BotForm {
     this_machine: Option<String>,
     /// The one computer picked to run this member; `None` = any free computer.
     machine: Option<String>,
+    /// The model picked from the computers' list; `None` = the CLI's default.
+    model: Option<String>,
+    /// The model typed when no computer reported a list.
+    model_input: Entity<InputState>,
+    /// 思考强度 picked; `None` = the CLI's default.
+    effort: Option<String>,
     /// The character picked by hand; until then [`default_character`] for the typed name.
     character: Option<CharacterId>,
     status: Status,
@@ -1467,6 +1546,7 @@ impl BotForm {
         // The roster's character follows the name as it is typed.
         let role = input(s::ROLE_PLACEHOLDER, window, cx);
         let runtime = input(s::RUNNER_RUNTIME_PLACEHOLDER, window, cx);
+        let model_input = input(s::RUNNER_MODEL_PLACEHOLDER, window, cx);
         let notify =
             |_: &mut Self, _: Entity<InputState>, e: &InputEvent, cx: &mut Context<Self>| {
                 if matches!(e, InputEvent::Change) {
@@ -1477,6 +1557,7 @@ impl BotForm {
             cx.subscribe(&name, notify),
             cx.subscribe(&role, notify),
             cx.subscribe(&runtime, notify),
+            cx.subscribe(&model_input, notify),
         ];
         Self {
             name,
@@ -1491,6 +1572,9 @@ impl BotForm {
             machines: Vec::new(),
             this_machine,
             machine: None,
+            model: None,
+            model_input,
+            effort: None,
             character: None,
             status: Status::Idle,
             created: None,
@@ -1571,6 +1655,14 @@ impl BotForm {
         set(&self.runtime, r.runtime.clone(), window, cx);
         set(&self.labels, r.labels.join(", "), window, cx);
         self.machine = r.machine_id.clone();
+        self.model = r.model.clone();
+        self.effort = r.effort.clone();
+        set(
+            &self.model_input,
+            r.model.clone().unwrap_or_default(),
+            window,
+            cx,
+        );
         set(&self.repo, r.repo.clone().unwrap_or_default(), window, cx);
         set(
             &self.branch,
@@ -1602,7 +1694,24 @@ impl BotForm {
             repo: (!repo.is_empty()).then_some(repo),
             base_branch: (!branch.is_empty()).then_some(branch),
             machine_id: self.machine.clone(),
+            model: self.model_value(cx),
+            effort: self.effort.clone(),
         })
+    }
+
+    /// The model the sheet shows: picked from the list, or typed when no computer reported one.
+    fn model_value(&self, cx: &App) -> Option<String> {
+        let (models, _) = cli_choices(
+            &self.machines,
+            &self.value(&self.runtime, cx),
+            self.machine.as_deref(),
+        );
+        if models.is_empty() {
+            let typed = self.value(&self.model_input, cx);
+            (!typed.is_empty()).then_some(typed)
+        } else {
+            self.model.clone()
+        }
     }
 
     /// What saving the edit sheet now would change; `None` until the runner
@@ -1913,6 +2022,7 @@ impl Render for BotForm {
             // 运行方式: picked from what the team's computers have; typed only
             // when no computer has reported yet.
             let current = self.value(&self.runtime, cx);
+            let (models, efforts) = cli_choices(&self.machines, &current, self.machine.as_deref());
             let mut known = self.known_runtimes.clone();
             if !current.is_empty() && !known.contains(&current) {
                 known.insert(0, current.clone());
@@ -1962,6 +2072,86 @@ impl Render for BotForm {
                 )
             }));
             let form = cx.entity();
+            // 模型 and 思考强度: what the computers that can run it report.
+            let model: gpui::AnyElement = if models.is_empty() {
+                NativeTextField::new("member-model", &self.model_input)
+                    .full_width()
+                    .into_any_element()
+            } else {
+                let picked = self.model.clone();
+                let mut options: Vec<(Option<String>, String)> =
+                    vec![(None, default_model_text(&models))];
+                if let Some(p) = picked
+                    .as_ref()
+                    .filter(|p| !models.iter().any(|m| &m.id == *p))
+                {
+                    options.push((Some(p.clone()), p.clone()));
+                }
+                options.extend(models.iter().map(|m| (Some(m.id.clone()), model_text(m))));
+                let shown = options
+                    .iter()
+                    .find(|(id, _)| *id == picked)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or_default();
+                let form = form.clone();
+                widgets::popup_fixed("member-model", shown, SELECT_WIDTH, window, cx)
+                    .dropdown_menu(move |menu, _, _| {
+                        options.iter().fold(menu, |menu, (id, text)| {
+                            let (id, form) = (id.clone(), form.clone());
+                            menu.item(
+                                PopupMenuItem::new(text.clone())
+                                    .checked(id == picked)
+                                    .on_click(move |_, _, cx| {
+                                        form.update(cx, |f, cx| {
+                                            f.model = id.clone();
+                                            cx.notify();
+                                        })
+                                    }),
+                            )
+                        })
+                    })
+                    .into_any_element()
+            };
+            let model_id = if models.is_empty() {
+                let typed = self.value(&self.model_input, cx);
+                (!typed.is_empty()).then_some(typed)
+            } else {
+                self.model.clone()
+            };
+            let levels = effort_options(&models, &efforts, model_id.as_deref());
+            let effort: Option<gpui::AnyElement> = (!levels.is_empty() || self.effort.is_some())
+                .then(|| {
+                    let picked = self.effort.clone();
+                    let mut options: Vec<(Option<String>, String)> =
+                        vec![(None, s::RUNNER_EFFORT_DEFAULT.to_string())];
+                    if let Some(p) = picked.as_ref().filter(|p| !levels.contains(p)) {
+                        options.push((Some(p.clone()), effort_text(p)));
+                    }
+                    options.extend(levels.iter().map(|e| (Some(e.clone()), effort_text(e))));
+                    let shown = options
+                        .iter()
+                        .find(|(id, _)| *id == picked)
+                        .map(|(_, t)| t.clone())
+                        .unwrap_or_default();
+                    let form = form.clone();
+                    widgets::popup_fixed("member-effort", shown, SELECT_WIDTH, window, cx)
+                        .dropdown_menu(move |menu, _, _| {
+                            options.iter().fold(menu, |menu, (id, text)| {
+                                let (id, form) = (id.clone(), form.clone());
+                                menu.item(
+                                    PopupMenuItem::new(text.clone())
+                                        .checked(id == picked)
+                                        .on_click(move |_, _, cx| {
+                                            form.update(cx, |f, cx| {
+                                                f.effort = id.clone();
+                                                cx.notify();
+                                            })
+                                        }),
+                                )
+                            })
+                        })
+                        .into_any_element()
+                });
             let machine =
                 widgets::popup_fixed("member-machine", shown, MACHINE_SELECT_WIDTH, window, cx)
                     .dropdown_menu(move |menu, _, _| {
@@ -1988,6 +2178,8 @@ impl Render for BotForm {
                         sheet_form()
                             .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
                             .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
+                            .child(sheet_form_row(s::RUNNER_MODEL, model, cx))
+                            .children(effort.map(|e| sheet_form_row(s::RUNNER_EFFORT, e, cx)))
                             .child(field_row(
                                 s::RUNNER_REPO,
                                 "member-repo",
@@ -2191,6 +2383,88 @@ pub fn open_character(services: Services, member: &Member, window: &mut Window, 
 mod tests {
     use super::*;
 
+    fn cli(
+        runtime: &str,
+        models: &[(&str, &[&str], bool)],
+        efforts: &[&str],
+    ) -> crate::data::CliChoice {
+        crate::data::CliChoice {
+            runtime: runtime.into(),
+            models: models
+                .iter()
+                .map(|(id, e, d)| ModelChoice {
+                    id: (*id).into(),
+                    name: None,
+                    efforts: e.iter().map(|x| x.to_string()).collect(),
+                    is_default: *d,
+                })
+                .collect(),
+            efforts: efforts.iter().map(|x| x.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn models_and_efforts_come_from_the_computers_that_can_run_it() {
+        let a = MachineInfo {
+            id: "a".into(),
+            clis: vec![
+                cli(
+                    "codex",
+                    &[("gpt-6-astra", &["low", "max"], true)],
+                    &["low", "max"],
+                ),
+                cli("claude", &[("opus", &[], true)], &["low", "high"]),
+            ],
+            ..Default::default()
+        };
+        let b = MachineInfo {
+            id: "b".into(),
+            clis: vec![cli(
+                "codex",
+                &[
+                    ("gpt-6-astra", &["low"], false),
+                    ("gpt-6-sol", &["medium"], false),
+                ],
+                &["medium"],
+            )],
+            ..Default::default()
+        };
+        let all = [a, b];
+        let (models, efforts) = cli_choices(&all, "codex", None);
+        assert_eq!(
+            models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["gpt-6-astra", "gpt-6-sol"]
+        );
+        assert_eq!(efforts, ["low", "max", "medium"]);
+        // A picked computer narrows the list to its own.
+        let (only_b, _) = cli_choices(&all, "codex", Some("b"));
+        assert_eq!(only_b.len(), 2);
+        assert!(!only_b[0].is_default);
+        // No model picked: the default model's levels; a model without its own: the runtime's.
+        assert_eq!(effort_options(&models, &efforts, None), ["low", "max"]);
+        assert_eq!(
+            effort_options(&models, &efforts, Some("gpt-6-sol")),
+            ["medium"]
+        );
+        let (claude, ce) = cli_choices(&all, "claude", None);
+        assert_eq!(effort_options(&claude, &ce, Some("opus")), ["low", "high"]);
+        assert!(cli_choices(&all, "acp", None).0.is_empty());
+    }
+
+    #[test]
+    fn efforts_and_the_default_model_read_as_words() {
+        assert_eq!(effort_text("high"), s::EFFORT_HIGH);
+        assert_eq!(effort_text("turbo"), "turbo");
+        let m = ModelChoice {
+            id: "opus".into(),
+            name: None,
+            efforts: vec![],
+            is_default: true,
+        };
+        assert_eq!(default_model_text(&[m]), "默认（opus）");
+        assert_eq!(default_model_text(&[]), s::RUNNER_MODEL_DEFAULT);
+    }
+
     /// The look grid in a bare window with the app's Tab keys; its root
     /// holds the focus, as the app's windows do.
     struct Grid(gpui::FocusHandle);
@@ -2334,6 +2608,7 @@ mod tests {
             repo: repo.map(str::to_string),
             base_branch: None,
             machine_id: None,
+            ..Default::default()
         }
     }
 
@@ -2352,6 +2627,7 @@ mod tests {
             active_runs: 0,
             max_parallel_runs: None,
             runtimes: Vec::new(),
+            ..Default::default()
         };
         let list = [m("a", "macbook-pro"), m("b", "mac-mini")];
         assert_eq!(
