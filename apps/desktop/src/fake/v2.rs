@@ -859,6 +859,31 @@ impl V2Samples {
                 ),
             ],
         );
+        // The 群聊 of 开发: plain chat to reply to (a quote, its @, the keys).
+        let chat = crate::data::main_topic_id(DEV);
+        messages.insert(
+            chat.clone(),
+            vec![
+                message(
+                    DEV,
+                    &chat,
+                    1,
+                    XIAOWANG,
+                    at(8, 50),
+                    "大家早，今天先把 PR #61 合了？",
+                ),
+                message(DEV, &chat, 2, ME, at(8, 55), "@Forge 你先简单看下这个 repo"),
+                message(
+                    DEV,
+                    &chat,
+                    3,
+                    FORGE,
+                    at(8, 58),
+                    "看了：结构清楚，重连那块可以先从 seq 去重入手。",
+                ),
+                message(DEV, &chat, 4, ALEX, at(9, 5), "我下午有空，可以帮忙验收。"),
+            ],
+        );
 
         let runs = vec![
             run(RunSpec {
@@ -1241,6 +1266,8 @@ impl ChatProvider for V2Samples {
                 &request.body,
             );
             m.client_msg_id = format!("v2-c{seq}");
+            m.mentions = request.mentions.clone();
+            m.quote_of = request.quote_of.clone();
             let id = m.client_msg_id.clone();
             list.push(m);
             id
@@ -1271,6 +1298,22 @@ impl ChatProvider for V2Samples {
     }
     fn save_draft_text(&self, key: &DraftKey, body: String, mentions: Vec<MemberId>) {
         self.inner.save_draft_text(key, body, mentions)
+    }
+    // The quote and the pending files live in the wrapped draft, like the text.
+    fn set_quote(&self, key: &DraftKey, quote_of: Option<MessageId>) {
+        self.inner.set_quote(key, quote_of);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+    fn attach_files(&self, key: &DraftKey, files: Vec<NewFile>) {
+        self.inner.attach_files(key, files);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+    fn remove_file(&self, key: &DraftKey, file_id: &str) {
+        self.inner.remove_file(key, file_id);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+    fn take_rejected_files(&self, key: &DraftKey) -> Vec<RejectedFile> {
+        self.inner.take_rejected_files(key)
     }
     fn group_muted(&self, group_id: &str) -> bool {
         self.with(|d| d.muted_groups.contains(group_id))
@@ -2396,6 +2439,34 @@ mod tests {
             .expect("the decision");
         assert_eq!(msgs[i].quote_of.as_ref(), Some(&msgs[i - 1].id));
         assert_eq!(msgs[i - 1].author_id, FORGE);
+    }
+
+    /// `--fake` replies like the real app: the 群聊 of 开发 has messages, a
+    /// quote sticks to the draft, and the sent message carries it.
+    #[test]
+    fn the_group_chat_quotes_and_sends_the_quote() {
+        let p = V2Samples::new();
+        let chat = crate::data::main_topic_id(DEV);
+        let said = p.messages(DEV, &chat, 50).messages;
+        let target = said
+            .iter()
+            .find(|m| m.author_id == FORGE)
+            .expect("a message");
+        let key = DraftKey::topic(DEV, &chat);
+        p.set_quote(&key, Some(target.id.clone()));
+        assert_eq!(p.draft(&key).quote_of.as_ref(), Some(&target.id));
+        p.send(SendRequest {
+            group_id: DEV.into(),
+            topic_id: chat.clone(),
+            body: "收到".into(),
+            mentions: vec![FORGE.into()],
+            quote_of: Some(target.id.clone()),
+        });
+        let sent = p.messages(DEV, &chat, 50).messages.pop().expect("sent");
+        assert_eq!(sent.quote_of.as_ref(), Some(&target.id));
+        assert_eq!(sent.mentions, vec![FORGE.to_string()]);
+        p.set_quote(&key, None);
+        assert_eq!(p.draft(&key).quote_of, None);
     }
 
     #[test]
