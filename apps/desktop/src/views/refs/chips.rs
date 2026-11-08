@@ -118,13 +118,15 @@ fn chip_text(r: &DraftRef) -> (String, String) {
 }
 
 /// One composer chip: `--sunken`, 12 pt, glyph, label on one line, `已更新` when the source
-/// changed, × to remove. A click on the body goes back to the part.
+/// changed, × to remove. A click on the body goes back to the part. `selected`: ⌘A
+/// selected it with the field's text.
 #[allow(clippy::too_many_arguments)]
 pub fn composer_chip(
     id: impl Into<ElementId>,
     r: &DraftRef,
     updated: bool,
     flashing: bool,
+    selected: bool,
     on_open: impl Fn(&mut Window, &mut App) + 'static,
     on_remove: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
@@ -148,6 +150,10 @@ pub fn composer_chip(
         .border_color(crate::ui::native::native_colors(cx).separator)
         .bg(crate::ui::native::native_colors(cx).content)
         .when(flashing, |d| d.bg(k.sel))
+        // ⌘A in the composer: the chip takes the text selection's fill.
+        .when(selected, |d| {
+            d.bg(gpui_component::ActiveTheme::theme(cx).selection)
+        })
         .text_size(crate::ui::native::tokens::text::UI.0)
         .line_height(px(18.))
         .text_color(k.ink_3)

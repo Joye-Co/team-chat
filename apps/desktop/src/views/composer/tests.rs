@@ -676,6 +676,84 @@ fn reply_quotes_a_message_of_the_open_topic_only(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, Some(TOPIC));
+    let key = DraftKey::topic(GROUP, TOPIC);
+    let target = h.last(TOPIC);
+    let author = h
+        .provider
+        .members()
+        .into_iter()
+        .find(|m| m.id == target.author_id)
+        .expect("the sender is a member");
+    let quote = |cx: &mut VisualTestContext| {
+        let (id, author_id) = (target.id.clone(), target.author_id.clone());
+        h.view.update_in(cx, |this, window, cx| {
+            this.quote_message(GROUP, TOPIC, id, Some(&author_id), window, cx)
+        });
+        cx.run_until_parked();
+    };
+    let quoted = |cx: &mut VisualTestContext| h.view.update(cx, |this, _| this.quote.is_some());
+    let at = format!("@{} ", author.name);
+
+    // One Backspace takes the whole @, the next one the quote.
+    quote(cx);
+    assert_eq!(h.text(cx), at);
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(h.text(cx), "");
+    assert_eq!(h.provider.draft(&key).body, "");
+    assert!(quoted(cx));
+    // A held key (clearing the text) stops at the empty field.
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("backspace").unwrap(),
+        is_held: true,
+        prefer_character_input: false,
+    });
+    assert!(quoted(cx));
+    cx.simulate_keystrokes("backspace");
+    assert!(!quoted(cx));
+    assert_eq!(h.provider.draft(&key).quote_of, None);
+
+    // The first ⌘A selects the text, the second the quote too; Backspace
+    // then removes both.
+    quote(cx);
+    cx.simulate_input("同意");
+    cx.simulate_keystrokes("cmd-a");
+    assert!(!h.view.update(cx, |this, _| this.chips_selected));
+    cx.simulate_keystrokes("cmd-a");
+    assert!(h.view.update(cx, |this, _| this.chips_selected));
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(h.text(cx), "");
+    assert!(!quoted(cx));
+    assert_eq!(h.provider.draft(&key).quote_of, None);
+
+    // A single ⌘A selects the text only: Backspace keeps the quote.
+    quote(cx);
+    cx.simulate_input("嗯");
+    cx.simulate_keystrokes("cmd-a backspace");
+    assert_eq!(h.text(cx), "");
+    assert!(quoted(cx));
+    h.view.update(cx, |this, cx| this.remove_quote(cx));
+
+    // ⌘A on an empty field: nothing more to select, the quote at once.
+    h.provider.set_quote(&key, Some(target.id.clone()));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("delete");
+    assert!(!quoted(cx));
+
+    // Moving the caret drops the chip selection: Backspace edits the text.
+    quote(cx);
+    cx.simulate_input("好");
+    cx.simulate_keystrokes("cmd-a cmd-a");
+    cx.simulate_keystrokes("right");
+    assert!(!h.view.update(cx, |this, _| this.chips_selected));
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(h.text(cx), at);
+    assert!(quoted(cx));
+}
+
+#[gpui::test]
 fn reedit_puts_the_recalled_text_back_after_the_draft(cx: &mut TestAppContext) {
     let (h, cx) = open(cx, Some(TOPIC));
     h.view.update_in(cx, |this, window, cx| {
