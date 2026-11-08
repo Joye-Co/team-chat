@@ -88,8 +88,9 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - **话题**: the timeline (virtualized, anchored at the bottom, Markdown, images inline, cards
   rendered natively), the newest decision that waits on me pinned above the composer, and the
   composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
-  On the right, the topic rail: 负责, 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card with no
-  data is hidden.
+  On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the one
+  who is 负责 and the one who 提出 it marked), 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card
+  with no data is hidden.
 - **单独问** (⌘;): a side chat with a member (the main bot by default) beside a topic. The member has read
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic
   only when I press its button.
@@ -100,10 +101,11 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   it in the chosen 群; ⌘↵ hands it to the main bot) or to find 话题, 产出 and 成员.
 - **群**: opening a 群 (or a 私聊) shows its 群聊: one chat timeline with the composer at the
   bottom, where plain messages stay and @mentioning a member hands it work whose result comes back
-  there. The title bar has 新话题 and 这个群的话题; a message's menu has 开个话题, which starts a 话题
-  whose first message quotes it. 这个群的话题 opens the 群 page: the topics 进行中 with live previews,
-  最近完成, 新话题, 回到群里聊, and a rail with
-  群里的决定 (recorded from answered decisions, or added with 记一条), 最近的产出 and the 电脑 in use.
+  there. The title bar has 详情 and 话题 (Joye, 2026-11-08); a message's menu has 开个话题, which
+  starts a 话题 whose first message quotes it. 详情 opens 群资料 beside the chat: 成员 first (who is
+  in this 群, 添加成员…), then 通知, 群里的决定 (recorded from answered decisions, or added with
+  记一条), 最近的产出 and the 电脑 in use. 话题 opens the 群 page, which shows only 话题: the
+  topics 进行中 with live previews, 最近完成, 新话题 and 回到群里聊.
 - **成员**: every member with filters (全部, 在做事, 等人); a member's page shows 现在, 这周 (topics,
   产出, cost), 最近交付, 需要批准的事, 能用的工具, 电脑 and 最近的问题. Changing a member opens the settings
   forms.

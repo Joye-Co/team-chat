@@ -107,11 +107,23 @@ pub const SCENES: &[Scene] = &[
     // 1.1.1: the 群's own chat.
     Scene {
         name: "group-chat",
-        about: "The 群聊 of 产品研发: plain chat with Jojo's answer, 新话题 and 这个群的话题 in the title bar",
+        about: "The 群聊 of 产品研发: plain chat with Jojo's answer, 详情 and 话题 in the title bar",
         start: Start::SignedIn,
         setup: |s, cx| {
             s.nav
                 .update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "group-chat-info",
+        about: "The 群聊 of 产品研发 with its 详情 open: 群资料 with 成员 first",
+        start: Start::SignedIn,
+        setup: |s, cx| {
+            s.nav.update(cx, |nav, cx| {
+                nav.open_group_chat("g-dev".into(), cx);
+                nav.set_right_pane(crate::app::RightPane::GroupInfo, cx);
+            })
         },
         open: open_main,
     },

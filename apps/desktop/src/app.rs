@@ -164,6 +164,9 @@ pub enum RightPane {
     },
     /// 改动 (the PR of the 话题).
     Changes,
+    /// 群资料 beside a 群聊: 成员, 通知, 群里的决定, 最近的产出, 在哪干活.
+    /// The 群聊's 详情, as the inspector is a 话题's.
+    GroupInfo,
 }
 
 impl RightPane {
@@ -373,8 +376,12 @@ impl Navigation {
     /// anywhere, else none.
     pub fn visible_pane(&self) -> RightPane {
         match (&self.right_pane, self.page()) {
-            // The 群聊 has no inspector (负责, 计划 … are a 话题's).
+            // The 群聊 has no inspector (负责, 计划 … are a 话题's); its
+            // 详情 is 群资料, which a 话题 shows as its own 详情.
             (RightPane::TopicRail, Page::Topic) if self.chat_open().is_some() => RightPane::None,
+            (RightPane::GroupInfo, Page::Topic) if self.chat_open().is_none() => {
+                RightPane::TopicRail
+            }
             (pane, Page::Topic) => pane.clone(),
             (RightPane::Artifact { .. }, _) => self.right_pane.clone(),
             _ => RightPane::None,
@@ -405,6 +412,16 @@ impl Navigation {
             pane
         };
         self.set_right_pane(next, cx);
+    }
+
+    /// 详情 (⌘⌥I): 群资料 beside a 群聊, the inspector beside a 话题.
+    pub fn toggle_details(&mut self, cx: &mut Context<Self>) {
+        let pane = if self.chat_open().is_some() {
+            RightPane::GroupInfo
+        } else {
+            RightPane::TopicRail
+        };
+        self.toggle_pane(pane, cx);
     }
 
     /// ⌘;: 单独问 with `member` (the default member when `None`).
@@ -1091,15 +1108,15 @@ impl Render for RootView {
         let root =
             crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
                 .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
-                    // v2: ⌘⌥I toggles the topic rail.
+                    // v2: ⌘⌥I toggles 详情 (群资料 beside a 群聊).
                     this.services
                         .nav
-                        .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
+                        .update(cx, |nav, cx| nav.toggle_details(cx));
                 }))
                 .on_action(cx.listener(|this, _: &ToggleTopicRail, _, cx| {
                     this.services
                         .nav
-                        .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
+                        .update(cx, |nav, cx| nav.toggle_details(cx));
                 }))
                 .on_action(cx.listener(|this, _: &ToggleSideChat, _, cx| {
                     let member = this.services.provider.side_chat_default_member();
@@ -1681,6 +1698,18 @@ mod tests {
             // The default pane is the inspector; the 群聊 shows none.
             assert_eq!(n.right_pane, RightPane::TopicRail);
             assert_eq!(n.visible_pane(), RightPane::None);
+            // 详情 in the 群聊 opens 群资料; a 话题 shows its own 详情.
+            nav.update(cx, |nav, cx| nav.toggle_details(cx));
+            assert_eq!(nav.read(cx).visible_pane(), RightPane::GroupInfo);
+            nav.update(cx, |nav, cx| nav.toggle_details(cx));
+            assert_eq!(nav.read(cx).visible_pane(), RightPane::None);
+            nav.update(cx, |nav, cx| nav.toggle_details(cx));
+            nav.update(cx, |nav, cx| {
+                nav.open_topic("g-dev".into(), "t-login".into(), cx)
+            });
+            assert_eq!(nav.read(cx).visible_pane(), RightPane::TopicRail);
+            nav.update(cx, |nav, cx| nav.open_group_chat("g-dev".into(), cx));
+            assert_eq!(nav.read(cx).visible_pane(), RightPane::GroupInfo);
             nav.update(cx, |nav, cx| nav.open_group("g-dev".into(), cx));
             assert_eq!(nav.read(cx).page(), Page::Topic, "same place: unchanged");
             // `这个群的话题` in the 群聊's title bar.
