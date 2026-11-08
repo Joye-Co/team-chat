@@ -1,4 +1,4 @@
-//! Protocol fixtures, config, launchd service, run folders and cleanup.
+//! Protocol fixtures, config, launchd and systemd services, run folders and cleanup.
 
 use daemon::config::Config;
 use daemon::proto::{Down, RepoSpec, Up};
@@ -136,6 +136,38 @@ fn launchd_plist_install_and_uninstall() {
         );
     }
     daemon::service::uninstall(&agents, false).unwrap();
+    assert!(!file.exists());
+}
+
+#[test]
+fn systemd_unit_install_and_uninstall() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("daemon.toml");
+    std::fs::write(&cfg, "").unwrap();
+    let units = dir.path().join("systemd/user");
+    let file =
+        daemon::service::install_systemd(&units, &cfg, &dir.path().join("logs"), false).unwrap();
+    assert!(
+        file.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with("-daemon.service")
+    );
+    let text = std::fs::read_to_string(&file).unwrap();
+    let cfg = std::fs::canonicalize(&cfg).unwrap();
+    let exec = text
+        .lines()
+        .find(|l| l.starts_with("ExecStart="))
+        .expect("ExecStart line");
+    assert!(exec.ends_with(&format!(" run --config \"{}\"", cfg.display())));
+    assert!(text.contains("\nEnvironment=\"PATH="));
+    assert!(text.contains("\nRestart=always\n"));
+    assert!(text.contains("\nWantedBy=default.target\n"));
+    assert!(text.contains(&format!(
+        "StandardOutput=append:{}",
+        dir.path().join("logs/daemon.log").display()
+    )));
+    daemon::service::uninstall_systemd(&units, false).unwrap();
     assert!(!file.exists());
 }
 

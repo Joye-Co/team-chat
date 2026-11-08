@@ -27,7 +27,12 @@ pub fn bundle_id() -> &'static str {
     product()["bundleId"].as_str().unwrap_or("chat")
 }
 
-/// launchd label of the daemon service.
+/// launchd label of the daemon service (macOS).
 pub fn service_label() -> String {
     format!("{}.daemon", bundle_id())
+}
+
+/// systemd user unit of the daemon service (Linux).
+pub fn systemd_unit() -> String {
+    format!("{}-daemon.service", slug())
 }
