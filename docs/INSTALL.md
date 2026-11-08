@@ -9,7 +9,7 @@ notarized by Apple, so macOS asks you to approve it once (step 3).
 
 Use one of these:
 
-- **Invite link**: open the link Joye sent you. It downloads the newest
+- **Invite link**: open the link your team's owner sent you. It downloads the newest
   `TeamChat-<version>.dmg`. Keep the invite code that came with it: you need it in step 4.
 - **GitHub Releases** (team members with repository access): open
   <https://github.com/Joye-Co/team-chat/releases>, pick the newest release, and download
@@ -55,7 +55,7 @@ xattr -dr com.apple.quarantine /Applications/TeamChat.app
 
 The invite code works once. The app swaps it for a sign-in token and keeps that token in your
 macOS Keychain, so you stay signed in after restarts. Do not share your invite code or post it
-in a chat. If it does not work, ask Joye for a new one.
+in a chat. If it does not work, ask your team's owner for a new one.
 
 ## 5. Updates
 
@@ -79,10 +79,10 @@ after you sign in.
 
 When something goes wrong, open **Settings → 诊断** and send the diagnostics. They contain the
 app version, macOS version, connection state and recent logs with tokens and invite codes
-removed; they do not contain your messages. Then tell Joye in the app what happened and at
+removed; they do not contain your messages. Then tell your team's owner in the app what happened and at
 what time.
 
-If the app does not start, zip the log folder and send it to Joye another way:
+If the app does not start, zip the log folder and send it to your team's owner another way:
 
 ```sh
 cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat

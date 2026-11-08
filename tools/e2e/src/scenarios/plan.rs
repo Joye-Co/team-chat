@@ -39,12 +39,7 @@ async fn run(c: &mut Ctx) -> Result<()> {
     let g = h.group(&a, "plan", &[&b, &k]).await?;
     let ca = h.client(&a, "a", None)?;
     ca.ready(&[&g]).await?;
-    ca.c.start_topic(
-        &g,
-        Some("周四小红书"),
-        "@bot 写一条小红书",
-        vec![k.id.clone()],
-    )?;
+    ca.c.start_topic(&g, Some("周四微博"), "@bot 写一条微博", vec![k.id.clone()])?;
     let topic = ca
         .wait(WAIT, "the topic", |cl| {
             cl.topics(&g, 10)

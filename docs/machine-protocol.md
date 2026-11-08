@@ -1,7 +1,7 @@
 # Machine protocol (version 1)
 
 The contract between the machine daemon (`apps/daemon`) and the server's **MachineLink**
-Durable Object (one per machine). The daemon runs on a team machine (the Mac mini, a member's
+Durable Object (one per machine). The daemon runs on a team machine (a shared Mac, a member's
 laptop, later a container), connects out to the server (no inbound ports), receives runs for
 bot members, runs a coding CLI for each run in its own folder, and streams normalized progress
 back. **BotDesk** (one per bot member) decides what to run and turns run events into topic
@@ -328,7 +328,7 @@ How the 1.1 daemon does each one:
   itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
   says how to write the block (format, states and limits); side chat prompts do not.
 
-`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://mac-mini.tailnet`).
+`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://build-mac.tailnet`).
 It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
 doctor` reports a bad one, and the daemon does not send it). A value that redaction would
 change is not sent either.

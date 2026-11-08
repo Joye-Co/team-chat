@@ -160,8 +160,8 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
                 "m-alex",
                 "10:13",
                 format!(
-                    "夹夹 4.0 的结构：\n\n{}",
-                    fence("mindmap\n  root((夹夹 4.0))\n    首页\n    群相册\n    分享")
+                    "拾光 4.0 的结构：\n\n{}",
+                    fence("mindmap\n  root((拾光 4.0))\n    首页\n    群相册\n    分享")
                 ),
             ),
             m(

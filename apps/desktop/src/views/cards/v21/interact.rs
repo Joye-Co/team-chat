@@ -1255,7 +1255,7 @@ mod tests {
                 { "id": "ok", "type": "confirm", "label": "可以吗", "yes": "可以", "no": "不行", "fallbackText": "f" },
                 { "id": "bars", "type": "chart", "kind": "bar", "x": ["a"], "series": [{ "name": "s", "values": [1] }],
                   "events": ["chart.select"] },
-                { "id": "t", "type": "table", "columns": ["渠道"], "rows": [["小红书"]] }
+                { "id": "t", "type": "table", "columns": ["渠道"], "rows": [["微博"]] }
             ]
         }))
         .unwrap();

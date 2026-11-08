@@ -78,7 +78,7 @@ crate::copy! {
     GROUP_PAGE_PURPOSE_TITLE = "群说明",
     GROUP_PAGE_PURPOSE_EXPLANATION = "写在群名下面，说这个群做什么。群里的人都能看到。",
     GROUP_PAGE_PURPOSE_LABEL = "说明",
-    GROUP_PAGE_PURPOSE_PLACEHOLDER = "比如：qqbot 的上线、巡检和告警",
+    GROUP_PAGE_PURPOSE_PLACEHOLDER = "比如：orderbot 的上线、巡检和告警",
     GROUP_PAGE_PURPOSE_TOO_LONG = "最多 200 个字",
     GROUP_PAGE_PURPOSE_REFUSED = "没能保存群说明",
     GROUP_PAGE_RECORD_REFUSED = "没能记下这条决定",

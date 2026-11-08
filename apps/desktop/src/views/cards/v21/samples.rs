@@ -196,10 +196,10 @@ fn questionnaire() -> Value {
                   "options": [
                     { "id": "same", "label": "和其他实习生一样：能看所有群，只在自己的话题里交代", "recommended": true },
                     { "id": "staging", "label": "再加 staging 只读，方便她看数据看板" },
-                    { "id": "growth", "label": "先只开「夹夹增长」一个群" } ],
+                    { "id": "growth", "label": "先只开「拾光增长」一个群" } ],
                   "help": "Pocket 推荐和其他实习生一样：李雪入职时也是这样，两周后再按需要加。" },
                 { "id": "groups", "type": "input", "kind": "chips", "label": "要进的群", "required": true,
-                  "options": [ { "id": "all", "label": "全员" }, { "id": "growth", "label": "夹夹增长" },
+                  "options": [ { "id": "all", "label": "全员" }, { "id": "growth", "label": "拾光增长" },
                                { "id": "dev", "label": "开发" }, { "id": "ops", "label": "运维" } ],
                   "default": ["all", "growth"] },
                 { "id": "hello", "type": "input", "kind": "textarea", "label": "想对她说的第一句话", "required": false,
@@ -216,9 +216,9 @@ fn questionnaire() -> Value {
 fn compare(rev: u32) -> Value {
     with(
         base(
-            "夹夹 4.0 首页用哪个方案？",
+            "拾光 4.0 首页用哪个方案？",
             "ask",
-            "Tata 在等你选夹夹 4.0 首页的方案",
+            "Tata 在等你选拾光 4.0 首页的方案",
         ),
         json!({
             "rev": rev,
@@ -279,9 +279,9 @@ fn report_rev1() -> Value {
 // notes cards keep the chart label `新增群 · 按渠道`.
 fn bars_block(labeled: bool) -> Value {
     let mut v = json!({ "id": "bars", "type": "chart", "kind": "bar",
-            "x": ["小红书", "群内邀请", "B 站", "抖音"],
+            "x": ["微博", "群内邀请", "B 站", "抖音"],
             "series": [ { "id": "groups", "name": "新增群", "values": [14, 10, 9, 5] } ],
-            "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
+            "summary": "微博 14、群内邀请 10、B 站 9、抖音 5。",
             "events": ["chart.select", "chart.clear"], "emitBy": "members" });
     if labeled {
         v["label"] = json!("新增群 · 按渠道");
@@ -298,7 +298,7 @@ fn bars_rev1_with(labeled: bool) -> Value {
         base(
             "新增群从哪来",
             "info",
-            "Ledger：10 月新增群 38 个，小红书最多（14 个）。",
+            "Ledger：10 月新增群 38 个，微博最多（14 个）。",
         ),
         json!({
             // The description sits above the chart, so a block's 重试 / 不等了 come
@@ -327,7 +327,7 @@ fn bars_rev2() -> Value {
                 bars_block(false),
                 { "id": "detail", "type": "group", "title": "B 站 · 按来源", "collapsible": false, "children": ["d_posts"] },
                 { "id": "d_posts", "type": "table", "columns": ["来源", "新增群", "比 9 月"],
-                  "rows": [ ["夹夹教程视频", "5", "+1"], ["UP 主合作", "3", "−1"], ["直播间", "1", "−1"], ["合计", "9", "−1"] ] },
+                  "rows": [ ["拾光教程视频", "5", "+1"], ["UP 主合作", "3", "−1"], ["直播间", "1", "−1"], ["合计", "9", "−1"] ] },
                 { "id": "follow", "type": "decision", "label": "UP 主合作少了 1 个群。要我查一下是哪位 UP 主停更了吗？",
                   "fallbackText": "好，去查 / 先不用", "deliver": "immediate",
                   "options": [ { "id": "yes", "label": "好，去查" }, { "id": "no", "label": "先不用" } ] }
@@ -380,7 +380,7 @@ pub fn all() -> Vec<Sample21> {
         with(
             base("本周周报，开发和运维写好了", "working", "Jojo 在写本周周报"),
             json!({
-                "summary": "夹夹增长那部分等 Ledger 的数，补完一起发给你。",
+                "summary": "拾光增长那部分等 Ledger 的数，补完一起发给你。",
                 "blocks": [
                     { "id": "dev", "type": "group", "title": "开发", "summary": "3 个话题", "children": ["dev_list"] },
                     { "id": "dev_list", "type": "list", "items": [
@@ -388,12 +388,12 @@ pub fn all() -> Vec<Sample21> {
                         { "text": "话题列表虚拟滚动 · Forge 在做 3/5", "status": "in_progress" },
                         { "text": "登录页支持邀请码 · 等 Joye 选输入框", "status": "todo" } ] },
                     { "id": "ops", "type": "group", "title": "运维", "summary": "v2.14 等发布 · 巡检 24 项都通过", "collapsed": true, "children": ["ops_text"] },
-                    { "id": "ops_text", "type": "text", "text": "qqbot v2.14 已在 staging 跑满 24 小时。" },
-                    { "id": "growth", "type": "group", "title": "夹夹增长", "summary": "Ledger 在补 10 月的数", "collapsed": true, "children": ["growth_text"] },
+                    { "id": "ops_text", "type": "text", "text": "orderbot v2.14 已在 staging 跑满 24 小时。" },
+                    { "id": "growth", "type": "group", "title": "拾光增长", "summary": "Ledger 在补 10 月的数", "collapsed": true, "children": ["growth_text"] },
                     { "id": "growth_text", "type": "text", "text": "10 月新增群和日活的数今天下午补齐。" },
                     { "id": "plan", "type": "plan", "items": [
                         { "text": "开发和运维写好了", "state": "done" },
-                        { "text": "Ledger 在补夹夹增长的数", "state": "current" },
+                        { "text": "Ledger 在补拾光增长的数", "state": "current" },
                         { "text": "一起发给 Joye", "state": "pending" } ] }
                 ],
                 "actions": [ { "id": "first", "label": "先看写好的两部分", "kind": "press" } ]
@@ -407,7 +407,7 @@ pub fn all() -> Vec<Sample21> {
         WATCH,
         at(10, 42),
         with(
-            base("staging 跑了 24 小时，可以发到生产吗？", "ask", "Watch 在等你批准 qqbot v2.14 上线"),
+            base("staging 跑了 24 小时，可以发到生产吗？", "ask", "Watch 在等你批准 orderbot v2.14 上线"),
             json!({
                 "summary": "发布前看一眼健康度",
                 "ask": { "from": [ME], "expiresAt": at(20, 0),
@@ -476,12 +476,12 @@ pub fn all() -> Vec<Sample21> {
         TARO,
         at(10, 26),
         with(
-            base("夹夹 3.0 这周发哪几个平台？", "ask", "Taro 在问夹夹 3.0 发哪几个平台"),
+            base("拾光 3.0 这周发哪几个平台？", "ask", "Taro 在问拾光 3.0 发哪几个平台"),
             json!({
                 "ask": { "from": [ME], "promise": "每个平台 Taro 都会先发草稿给你" },
                 "blocks": [
                     { "id": "where", "type": "decision", "multiple": true, "minSelect": 2, "maxSelect": 3, "fallbackText": "平台",
-                      "options": [ { "id": "xhs", "label": "小红书", "detail": "草稿已经写好" },
+                      "options": [ { "id": "weibo", "label": "微博", "detail": "草稿已经写好" },
                                    { "id": "bili", "label": "B 站", "detail": "10 月新增群最多" },
                                    { "id": "douyin", "label": "抖音" },
                                    { "id": "wx", "label": "微信视频号" },
@@ -498,13 +498,13 @@ pub fn all() -> Vec<Sample21> {
         TATA,
         at(10, 15),
         with(
-            base("夹夹 4.0 先做哪几件？排个顺序", "ask", "Tata 在问夹夹 4.0 的顺序"),
+            base("拾光 4.0 先做哪几件？排个顺序", "ask", "Tata 在问拾光 4.0 的顺序"),
             json!({
                 "ask": { "from": [ME], "promise": "只排前 3 个也行" },
                 "blocks": [
                     { "id": "order", "type": "rank", "label": "排个顺序", "fallbackText": "排序",
                       "items": [ { "id": "photos", "label": "按活动整理照片", "meta": "约 2 周" },
-                                 { "id": "share", "label": "群相册分享到小红书", "meta": "约 4 天" },
+                                 { "id": "share", "label": "群相册分享到微博", "meta": "约 4 天" },
                                  { "id": "birthday", "label": "生日提醒", "meta": "约 3 天" },
                                  { "id": "night", "label": "夜间消息汇总", "meta": "约 1 周" },
                                  { "id": "weekly", "label": "群主周报", "meta": "约 1 周" } ],
@@ -559,7 +559,7 @@ pub fn all() -> Vec<Sample21> {
         TARO,
         at(10, 24),
         with(
-            base("小红书封面用哪张？", "ask", "Taro 在问小红书封面用哪张"),
+            base("微博封面用哪张？", "ask", "Taro 在问微博封面用哪张"),
             json!({
                 "ask": { "from": [ME], "promise": "选好后草稿里的封面会换掉" },
                 "blocks": [
@@ -652,9 +652,9 @@ pub fn all() -> Vec<Sample21> {
         at(10, 8),
         with(
             base(
-                "qqbot 下个版本先做哪个？每人一票",
+                "orderbot 下个版本先做哪个？每人一票",
                 "ask",
-                "Jojo 发起投票：qqbot 下个版本先做哪个",
+                "Jojo 发起投票：orderbot 下个版本先做哪个",
             ),
             json!({
                 "ask": { "from": [ME, XIAOWANG, LIXUE, ALEX, CHENCHEN] },
@@ -707,7 +707,7 @@ pub fn all() -> Vec<Sample21> {
                     { "id": "page", "type": "embed", "artifactId": ART_REPORT, "version": 3, "height": 280,
                       "title": "渠道预算分配", "events": ["budget.submit"],
                       "fallbackText": "Ledger 做了一个预算分配页面，请在新版本里打开。" },
-                    { "id": "budget", "type": "input", "kind": "slider", "label": "小红书", "min": 0, "max": 20000, "step": 1000, "unit": "元", "default": 6000 }
+                    { "id": "budget", "type": "input", "kind": "slider", "label": "微博", "min": 0, "max": 20000, "step": 1000, "unit": "元", "default": 6000 }
                 ]
             }),
         ),
@@ -768,11 +768,11 @@ pub fn all() -> Vec<Sample21> {
                 "blocks": [
                     { "id": "tabs", "type": "tabs", "events": ["tab.open"], "tabs": [
                         { "id": "all", "label": "全部", "children": ["t_all"] },
-                        { "id": "xhs", "label": "小红书", "children": ["t_xhs"] },
+                        { "id": "weibo", "label": "微博", "children": ["t_weibo"] },
                         { "id": "bili", "label": "B 站", "children": ["t_bili"] } ] },
                     { "id": "t_all", "type": "chart", "kind": "bar", "label": "全部 · 每周新增群", "x": ["10-06", "10-13", "10-20", "10-27"],
                       "series": [ { "name": "新增群", "values": [9, 8, 10, 11] } ] },
-                    { "id": "t_xhs", "type": "chart", "kind": "bar", "label": "小红书 · 每周", "x": ["10-06", "10-13", "10-20", "10-27"],
+                    { "id": "t_weibo", "type": "chart", "kind": "bar", "label": "微博 · 每周", "x": ["10-06", "10-13", "10-20", "10-27"],
                       "series": [ { "name": "新增群", "values": [2, 3, 4, 5] } ] },
                     { "id": "t_bili", "type": "chart", "kind": "bar", "label": "B 站 · 每周", "x": ["10-06", "10-13", "10-20", "10-27"],
                       "series": [ { "name": "新增群", "values": [3, 2, 2, 2] } ] },

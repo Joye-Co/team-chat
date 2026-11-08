@@ -60,7 +60,7 @@ pub struct Member {
         skip_serializing_if = "Option::is_none"
     )]
     pub deactivated: Option<bool>,
-    /// jojo-friends character. `None` = omitted, `Some(None)` = `null`.
+    /// Character id. `None` = omitted, `Some(None)` = `null`.
     #[serde(
         default,
         deserialize_with = "nullable",

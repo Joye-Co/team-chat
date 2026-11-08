@@ -1,8 +1,8 @@
 //! Character art fitted into a bot tile (DESIGN.md §7.9).
 //!
 //! The tile draws the character cropped to the painted bounds of its idle
-//! pose (measured from pixels by `docs/design/mockups-v2/src/charbox.mjs`
-//! into `assets/characters/boxes.json`), fitted by the larger side to 62 % of
+//! pose (the character pack's `boxes.json`, embedded by `build.rs`; empty
+//! without the pack), fitted by the larger side to 62 % of
 //! the tile with its center 2 % above the middle. At 40 pt and below the
 //! status lamp, the question bubble, the working ring and the sleep marks are
 //! removed: at list sizes they read as notification badges.
@@ -30,7 +30,10 @@ const PREFIX: &str = "characters-tile/";
 /// The unfitted art without the marks (`characters::image`).
 const CLEAN_PREFIX: &str = "characters-clean/";
 
-static BOXES_JSON: &str = include_str!("../../assets/characters/boxes.json");
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/character_boxes.rs"));
+}
+use embedded::BOXES_JSON;
 
 fn boxes() -> &'static HashMap<String, [f32; 4]> {
     static B: OnceLock<HashMap<String, [f32; 4]>> = OnceLock::new();
@@ -272,6 +275,9 @@ mod tests {
 
     #[test]
     fn no_marks_up_to_64_pt() {
+        if !super::super::available() {
+            return;
+        }
         for &c in CharacterId::ALL {
             for s in CharacterStatus::ALL {
                 for size in [16., 20., 24., 32., 36., 48., 64.] {
@@ -309,6 +315,9 @@ mod tests {
         let Some(dir) = std::env::var_os("TILE_DUMP") else {
             return;
         };
+        if !super::super::available() {
+            return;
+        }
         std::fs::create_dir_all(&dir).unwrap();
         for &c in CharacterId::ALL {
             for s in CharacterStatus::ALL {
@@ -323,6 +332,9 @@ mod tests {
 
     #[test]
     fn a_tile_rasterizes_at_its_device_pixel_size() {
+        if !super::super::available() {
+            return;
+        }
         let path = device_path(
             tile_path(CharacterId::Jojo, CharacterStatus::Idle, px(28.)),
             px(28.),
@@ -336,7 +348,28 @@ mod tests {
     }
 
     #[test]
+    fn without_the_pack_no_tile_loads() {
+        if super::super::available() {
+            return;
+        }
+        assert!(boxes().is_empty());
+        let path = tile_path(CharacterId::Jojo, CharacterStatus::Idle, px(24.));
+        assert!(load(&path).is_none());
+        assert!(
+            load(&clean_path(
+                CharacterId::Jojo,
+                CharacterStatus::Idle,
+                px(24.)
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
     fn every_character_has_an_idle_box_and_a_tile() {
+        if !super::super::available() {
+            return;
+        }
         for &c in CharacterId::ALL {
             assert!(idle_box(c).is_some(), "no box for {}", c.as_str());
             let path = tile_path(c, CharacterStatus::NeedsInput, px(24.));

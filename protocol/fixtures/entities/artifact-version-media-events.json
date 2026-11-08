@@ -30,7 +30,7 @@
             "channel": {
               "enum": [
                 "all",
-                "xhs",
+                "weibo",
                 "douyin"
               ]
             }

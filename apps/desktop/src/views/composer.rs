@@ -131,6 +131,10 @@ pub struct ComposerView {
     files: Vec<PendingFile>,
     /// inc-refs: the reference chips of the draft (引用提问, REFS §A4).
     refs: Vec<DraftRef>,
+    /// A second ⌘A selected the chips (quote, references, files) with the text:
+    /// Backspace or Delete then removes them too. Typing, a click or a new
+    /// selection drops it.
+    chips_selected: bool,
     mention: Option<MentionPopup>,
     editing: Option<EditTarget>,
     typing: model::TypingThrottle,
@@ -207,6 +211,7 @@ impl ComposerView {
             quote: None,
             files: Vec::new(),
             refs: Vec::new(),
+            chips_selected: false,
             mention: None,
             editing: None,
             typing: model::TypingThrottle::default(),
@@ -379,8 +384,68 @@ impl ComposerView {
         cx.notify();
     }
 
-    /// Backspace at the start of an empty field removes the last chip.
-    fn on_refs_key(
+    /// The chips go with the keyboard alone (the actions run before the
+    /// field's own):
+    /// - after ⌘A selected the text and the chips, Backspace removes the
+    ///   chips with the text;
+    /// - Backspace right after an `@name` deletes the whole mention, so a
+    ///   quote's @ goes in one press.
+    fn on_backspace(
+        &mut self,
+        _: &gpui_component::input::Backspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.erase_selected_chips(cx) || self.composing(window, cx) {
+            return;
+        }
+        let (selected, cursor) = {
+            let state = self.input.read(cx);
+            (state.selected_range(), state.cursor())
+        };
+        if !selected.is_empty() {
+            return;
+        }
+        let text = self.text(cx);
+        if let Some(range) = model::mention_before(&text, cursor, &self.mention_names()) {
+            cx.stop_propagation();
+            self.input.update(cx, |state, cx| {
+                state.set_selected_range(range, cx);
+                state.replace("", window, cx);
+            });
+            // `replace` sends no change event.
+            self.on_text_changed(window, cx);
+        }
+    }
+
+    /// Delete after ⌘A: the chips go with the text.
+    fn on_delete(
+        &mut self,
+        _: &gpui_component::input::Delete,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.erase_selected_chips(cx);
+    }
+
+    /// Removes the chips ⌘A selected; the field then deletes its selected
+    /// text (an empty field has none, so the key stops here). False when no
+    /// chip was selected.
+    fn erase_selected_chips(&mut self, cx: &mut Context<Self>) -> bool {
+        if !std::mem::take(&mut self.chips_selected) {
+            return false;
+        }
+        self.remove_chips(cx);
+        if self.text(cx).is_empty() {
+            cx.stop_propagation();
+        }
+        true
+    }
+
+    /// Backspace in an empty field (the field passes it on) removes the
+    /// newest reference chip, then the quote. A held key stops at the empty
+    /// field, so holding it to clear the text keeps the chips.
+    fn on_chips_key(
         &mut self,
         event: &gpui::KeyDownEvent,
         window: &mut Window,
@@ -389,15 +454,86 @@ impl ComposerView {
         let k = &event.keystroke;
         if k.key != "backspace"
             || k.modifiers.modified()
-            || self.refs.is_empty()
+            || event.is_held
             || self.editing.is_some()
             || self.composing(window, cx)
             || !self.text(cx).is_empty()
         {
             return;
         }
-        cx.stop_propagation();
-        self.remove_ref(self.refs.len() - 1, cx);
+        if let Some(last) = self.refs.len().checked_sub(1) {
+            cx.stop_propagation();
+            self.remove_ref(last, cx);
+        } else if self.quote.is_some() {
+            cx.stop_propagation();
+            self.remove_quote(cx);
+        }
+    }
+
+    /// ⌘A selects the text (the action goes on to the field); a second ⌘A,
+    /// with all the text already selected, takes the chips above it too. An
+    /// empty field has nothing more to select, so its first ⌘A takes them.
+    fn on_select_all(
+        &mut self,
+        _: &gpui_component::input::SelectAll,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let all_text = {
+            let state = self.input.read(cx);
+            let range = state.selected_range();
+            range.start == 0 && range.end == state.value().len()
+        };
+        self.chips_selected = all_text && self.has_chips();
+        cx.notify();
+    }
+
+    /// The draft has a chip the field shows (none while editing).
+    fn has_chips(&self) -> bool {
+        self.editing.is_none()
+            && (self.quote.is_some() || !self.refs.is_empty() || !self.files.is_empty())
+    }
+
+    /// Removes every chip: the quote, the references and the files.
+    fn remove_chips(&mut self, cx: &mut Context<Self>) {
+        if self.quote.is_some() {
+            self.remove_quote(cx);
+        }
+        while let Some(last) = self.refs.len().checked_sub(1) {
+            self.remove_ref(last, cx);
+        }
+        for id in self.files.iter().map(|f| f.id.clone()).collect::<Vec<_>>() {
+            self.remove_file(&id, cx);
+        }
+        self.files.clear();
+    }
+
+    /// Names a body can @: the 群's active members and the ones picked.
+    fn mention_names(&self) -> Vec<String> {
+        let group = self.group_member_ids();
+        self.services
+            .provider
+            .members()
+            .into_iter()
+            .filter(|m| !m.deactivated && (group.contains(&m.id) || self.picked.contains(&m.id)))
+            .map(|m| m.name)
+            .collect()
+    }
+
+    /// The chip selection lasts while the field is focused with all its
+    /// text selected.
+    fn sync_chip_selection(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if !self.chips_selected {
+            return;
+        }
+        let all = {
+            let state = self.input.read(cx);
+            let range = state.selected_range();
+            range.start == 0 && range.end == state.value().len()
+        };
+        if !focused || !all || !self.has_chips() {
+            self.chips_selected = false;
+        }
     }
 
     fn render_refs(&self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
@@ -414,6 +550,7 @@ impl ComposerView {
                     r,
                     chips::updated(r, &provider),
                     chips::flashing(r, cx),
+                    self.chips_selected,
                     move |_, cx| chips::open_source(&open, cx),
                     move |_, cx| {
                         let _ = this.update(cx, |this, cx| this.remove_ref(i, cx));
@@ -574,6 +711,8 @@ impl ComposerView {
         }
         self.last_text = text.clone();
         self.too_long = false;
+        // Typing over a ⌘A selection replaces the text; the chips stay.
+        self.chips_selected = false;
         // Keep the @ list as it is while the IME composes (the marked text is
         // pinyin, not a name yet).
         if !self.composing(window, cx) {
@@ -1258,6 +1397,7 @@ impl ComposerView {
         // A quiet attachment row (NATIVE.md rule 4: no pills): `fill`,
         // radius 6, 24 pt, Callout text, a borderless remove `xmark`.
         let k = ui::native::native_colors(cx);
+        let selection = gpui_component::ActiveTheme::theme(&**cx).selection;
         div()
             .flex()
             .items_center()
@@ -1268,13 +1408,18 @@ impl ComposerView {
             .pr(px(2.))
             .rounded(crate::ui::native::tokens::radius::ITEM)
             .bg(k.fill)
+            // ⌘A: the chip takes the text selection's fill with the text.
+            .when(self.chips_selected, |d| d.bg(selection))
             .n_callout()
             .text_color(k.label)
             .child(ui::sym(glyph, ui::SymSize::INLINE_SMALL, k.secondary))
             .child(div().min_w(px(0.)).one_line().child(text))
             .child(
+                // The kit's square is 32; inside the 24 chip the hover must
+                // stay a 20 square, 2 in from the chip's edge.
                 ui::native::icon_button_bare(id, Sym::Close, ui::native::IconSize::Regular)
                     .with_size(px(20.))
+                    .size(px(20.))
                     .rounded(crate::ui::native::tokens::radius::ITEM)
                     .icon(ui::button_glyph(Sym::Close, px(11.), px(20.)))
                     .named(c::REMOVE)
@@ -1505,6 +1650,8 @@ impl ComposerView {
 
 impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let field_focused = self.input.read(cx).focus_handle(cx).is_focused(window);
+        self.sync_chip_selection(field_focused, cx);
         let working = self.working_member();
         if working != self.working {
             self.working = working;
@@ -1617,7 +1764,10 @@ impl Render for ComposerView {
                 .capture_action(cx.listener(Self::on_escape))
                 .capture_action(cx.listener(Self::on_paste))
                 .capture_key_down(cx.listener(Self::on_format_key))
-                .capture_key_down(cx.listener(Self::on_refs_key))
+                .capture_key_down(cx.listener(Self::on_chips_key))
+                .capture_action(cx.listener(Self::on_backspace))
+                .capture_action(cx.listener(Self::on_delete))
+                .capture_action(cx.listener(Self::on_select_all))
                 .child(editor),
         )
         .focused(focused && enabled)

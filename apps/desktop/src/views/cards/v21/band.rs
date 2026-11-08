@@ -594,11 +594,11 @@ mod tests {
             done: 0,
             total: 3,
             step: Some(1),
-            current: Some("Ledger 在补夹夹增长的数".into()),
+            current: Some("Ledger 在补拾光增长的数".into()),
             waiting: false,
         };
         // The count is in the badge (在做 done/total), never a second count here.
-        assert_eq!(working_detail(&p), "Ledger 在补夹夹增长的数");
+        assert_eq!(working_detail(&p), "Ledger 在补拾光增长的数");
         let bare = Progress {
             step: None,
             current: None,

@@ -158,9 +158,9 @@ fn draft_card() -> card::Card {
         "status": { "label": crate::copy::common::STATUS_WAITING_REVIEW_ME },
         "blocks": [
             { "type": "fields", "fields": [
-                { "label": "平台", "value": "小红书" },
+                { "label": "平台", "value": "微博" },
                 { "label": "时间", "value": "周四 20:00" },
-                { "label": "标题", "value": "夹夹 3.0：粉丝群的照片，一键分享回群里" }
+                { "label": "标题", "value": "拾光 3.0：用户群的照片，一键分享回群里" }
             ]},
             { "type": "text", "text": "以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群…" }
         ],
@@ -255,7 +255,7 @@ impl TopicSamples {
             &main,
         );
 
-        // short-topic-*: 周四小红书
+        // short-topic-*: 周四微博
         let t = SHORT;
         let mut short = vec![
             message(
@@ -263,7 +263,7 @@ impl TopicSamples {
                 1,
                 crate::fake::ME,
                 today_at(14, 5, 0),
-                "@Taro 把夹夹 3.0 上线写成一条小红书，周四晚上发。重点讲“一键分享到群”。",
+                "@Taro 把拾光 3.0 上线写成一条微博，周四晚上发。重点讲“一键分享到群”。",
             ),
             message(
                 t,
@@ -285,7 +285,7 @@ impl TopicSamples {
         cards.insert(short[2].id.clone(), Arc::new(draft_card()));
         let mut short_topic = topic(
             SHORT,
-            "周四小红书：夹夹 3.0 上线",
+            "周四微博：拾光 3.0 上线",
             TopicStatus::WaitingReview,
             "m-taro",
             &short,
@@ -416,7 +416,7 @@ impl TopicSamples {
                 id: SHORT_DRAFT.into(),
                 topic_id: SHORT.into(),
                 kind: ArtifactKind::Page,
-                title: "小红书草稿".into(),
+                title: "微博草稿".into(),
                 version: 3,
                 size_bytes: None,
                 created_by: "m-taro".into(),

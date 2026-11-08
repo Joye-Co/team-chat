@@ -961,8 +961,8 @@ fn members() -> Vec<Member> {
         online,
         character: None,
     };
-    // The bots are the first roster (assets/bots/roster.json): same names,
-    // characters and 岗位. The ids stay the sample ids the other samples use.
+    // Sample bots with sample names, characters and 岗位. The ids stay the
+    // sample ids the other samples use.
     let bot = |id: &str, name: &str, role: &str, level, character, online| Member {
         character: Some(character),
         ..m(id, MemberKind::Bot, name, role, level, online)

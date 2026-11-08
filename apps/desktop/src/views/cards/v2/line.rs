@@ -41,7 +41,7 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
 }
 
 /// The title and body of a system notification for a card: `Watch：把
-/// qqbot v2.14 发布到生产吗？` and the first line of its fallback.
+/// orderbot v2.14 发布到生产吗？` and the first line of its fallback.
 pub fn notification_text(msg: &CardV2Message, author: &str) -> (String, String) {
     let title = fill(
         c::NOTIFY_TITLE,

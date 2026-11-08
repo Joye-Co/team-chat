@@ -134,7 +134,7 @@ pub fn recent_done(group_id: &str) -> Vec<RecentDone> {
         ),
         done(
             "t-v2-album",
-            "qqbot 群相册分享",
+            "orderbot 群相册分享",
             "PR #412 已合并，等 v2.14 一起上线",
             days_ago_at(1, 11, 5),
         ),
@@ -159,7 +159,7 @@ pub fn extra_artifacts(group_id: &str) -> Vec<ArtifactSummary> {
             ART_RELEASE_NOTES,
             T_SEARCH,
             ArtifactKind::File,
-            "qqbot v2.14 改动说明",
+            "orderbot v2.14 改动说明",
             1,
             FORGE,
             days_ago_at(1, 16, 0),
@@ -207,7 +207,7 @@ pub fn thumb(artifact_id: &str) -> Option<ArtifactThumb> {
             ],
         },
         ART_V4 => ArtifactThumb {
-            title: "夹夹 4.0 需求".into(),
+            title: "拾光 4.0 需求".into(),
             rows: vec![
                 row("群相册", Some("P0"), false),
                 row("活动报名", Some("P1"), false),
@@ -230,8 +230,8 @@ pub fn member_extras(p: &V2Samples, member_id: &str) -> MemberExtras {
     let line = |s: &str| Some(s.to_string());
     let mut extras = MemberExtras {
         line: match member_id {
-            WATCH => line("批准 qqbot v2.14 发布到生产"),
-            TARO => line("确认小红书草稿，周四 20:00 发"),
+            WATCH => line("批准 orderbot v2.14 发布到生产"),
+            TARO => line("确认微博草稿，周四 20:00 发"),
             JOJO => line("分给了 Pocket 和 Ledger"),
             FORGE => line("在跑压测"),
             TATA => line("写第二版"),
@@ -241,7 +241,7 @@ pub fn member_extras(p: &V2Samples, member_id: &str) -> MemberExtras {
             // People have no run: their line says what they did last, so it
             // agrees with 现在没在做事 in their detail (A5).
             XIAOWANG => line("在线 · 10:12 看过断线重连的修复"),
-            LIXUE => line("在线 · 09:30 发了夹夹 3.0 的文案"),
+            LIXUE => line("在线 · 09:30 发了拾光 3.0 的文案"),
             ALEX => line("离开 · 08:50 后没回来"),
             CHENCHEN => line("离线 · 周三回来"),
             _ => None,
@@ -293,7 +293,7 @@ pub fn member_extras(p: &V2Samples, member_id: &str) -> MemberExtras {
         MemberTool {
             name: "GitHub".into(),
             access: Some("可以提 PR".into()),
-            detail: Some("qqbot、夹夹、TeamChat 三个仓库".into()),
+            detail: Some("orderbot、拾光、TeamChat 三个仓库".into()),
         },
         MemberTool {
             name: "Cloudflare".into(),

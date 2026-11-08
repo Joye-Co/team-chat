@@ -34,7 +34,7 @@
           ],
           "rows": [
             [
-              "小红书",
+              "微博",
               "14"
             ],
             [
@@ -43,7 +43,7 @@
             ]
           ],
           "rowKeys": [
-            "xhs",
+            "weibo",
             "douyin"
           ],
           "select": "multiple",

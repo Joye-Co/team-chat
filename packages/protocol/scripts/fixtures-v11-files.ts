@@ -42,10 +42,10 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
   bad("http/create-artifact-preview-long-label.json", "CreateArtifactRequest", { ...createHtml, preview: { metrics: [{ label: "x".repeat(41), value: "1" }] } }, "a figure label is at most 40 characters");
 
   // SF-8: a group's purpose line.
-  ok("entities/group-purpose.json", "Group", { id: ID.general, kind: "group", name: "开发", memberIds: [ID.owner, ID.alice, ID.bot], createdBy: ID.owner, createdAt: T0, purpose: "qqbot、夹夹和 TeamChat 的开发" });
-  ok("http/update-group-request-purpose.json", "UpdateGroupRequest", { purpose: "qqbot、夹夹和 TeamChat 的开发" }, "1.1: purpose only");
+  ok("entities/group-purpose.json", "Group", { id: ID.general, kind: "group", name: "开发", memberIds: [ID.owner, ID.alice, ID.bot], createdBy: ID.owner, createdAt: T0, purpose: "orderbot、拾光和 TeamChat 的开发" });
+  ok("http/update-group-request-purpose.json", "UpdateGroupRequest", { purpose: "orderbot、拾光和 TeamChat 的开发" }, "1.1: purpose only");
   ok("http/update-group-request-clear-purpose.json", "UpdateGroupRequest", { name: "开发", purpose: "" }, "1.1: rename and clear the purpose");
-  ok("events/group.updated-purpose.json", "Event", { ...base, seq: 70, type: "group.updated", data: { name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" } }, "1.1: the purpose changed");
+  ok("events/group.updated-purpose.json", "Event", { ...base, seq: 70, type: "group.updated", data: { name: "开发", purpose: "orderbot、拾光和 TeamChat 的开发" } }, "1.1: the purpose changed");
   ok("events/group.updated-purpose-cleared.json", "Event", { ...base, seq: 71, type: "group.updated", data: { name: "开发", purpose: "" } });
 
   // SF-4: a side chat answer posted to its source topic.

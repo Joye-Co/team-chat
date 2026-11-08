@@ -4,7 +4,7 @@
   "description": "cardV2ToV1 of card2-ask: no v1 actions, the card has inputs",
   "value": {
     "v": 1,
-    "title": "发布 qqbot 1.4 到正式环境？",
+    "title": "发布 orderbot 1.4 到正式环境？",
     "tone": "warning",
     "blocks": [
       {

@@ -271,7 +271,7 @@ describe("bot sdk e2e", () => {
   });
 
   test("sets the plan of its current run; a member sees it and an update replaces it", async () => {
-    const r = await human.startTopic(generalId, "周四小红书");
+    const r = await human.startTopic(generalId, "周四微博");
     const target = { groupId: generalId, topicId: r.message.topicId };
     const plan1 = [
       { text: "写标题和正文", state: "current" as const },
@@ -607,7 +607,7 @@ describe("1.1 cards, side chats and page events", () => {
     });
     const r = await bot.postCardV2(
       { groupId: generalId },
-      approvalCard({ title: "发布到正式环境?", text: "qqbot 1.4", from: ["owners"] }),
+      approvalCard({ title: "发布到正式环境?", text: "orderbot 1.4", from: ["owners"] }),
     );
     // No inputs: old clients may press its buttons.
     expect(r.message.card?.actions?.map((x) => x.id)).toEqual(["approve", "deny"]);
@@ -919,8 +919,8 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
               blocks.table({
                 id: "by_channel",
                 columns: ["渠道", "新增群", "占比", "比 9 月"],
-                rows: [["小红书", "14", "37%", "+6"], ["群内邀请", "10", "26%", "+1"], ["B 站", "9", "24%", "−1"], ["抖音", "5", "13%", "−2"]],
-                rowKeys: ["xhs", "invite", "bili", "douyin"],
+                rows: [["微博", "14", "37%", "+6"], ["群内邀请", "10", "26%", "+1"], ["B 站", "9", "24%", "−1"], ["抖音", "5", "13%", "−2"]],
+                rowKeys: ["weibo", "invite", "bili", "douyin"],
                 select: "multiple",
                 events: ["table.rowSelect"],
               }),
@@ -1026,7 +1026,7 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
         await ctx.pushData({ channel: ctx.payload });
         await ctx.reply({ rows: 4 });
       });
-      const ack = await frame({ t: "artifact.event", groupId: generalId, artifactId: v.artifact.id, version: v.version.version, clientEventId: clientEventId(), name: "filter.pick", kind: "ask", payload: "xhs" });
+      const ack = await frame({ t: "artifact.event", groupId: generalId, artifactId: v.artifact.id, version: v.version.version, clientEventId: clientEventId(), name: "filter.pick", kind: "ask", payload: "weibo" });
       const reply = await waitFor("artifact.reply to the asker", () =>
         transients.find((e): e is Extract<TransientEvent, { type: "artifact.reply" }> => e.type === "artifact.reply" && e.eventId === ack.eventId),
       );
@@ -1035,7 +1035,7 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
       const data = await waitFor("artifact.data to a second member", () =>
         watched.find((e): e is Extract<TransientEvent, { type: "artifact.data" }> => e.type === "artifact.data" && e.artifactId === v.artifact.id),
       );
-      expect(data.data).toEqual({ channel: "xhs" });
+      expect(data.data).toEqual({ channel: "weibo" });
       expect(data.cause).toBe(ack.eventId);
       expect(watched.some((e) => e.type === "artifact.reply")).toBe(false);
     } finally {
@@ -1084,7 +1084,7 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
       intent: "info",
       title: "10 月数据月报",
       blocks: [
-        blocks.table({ id: "channels", title: "渠道表", columns: ["渠道", "新增群"], rows: [["小红书", "14"], ["B 站", "9"]], rowKeys: ["xhs", "bili"] }),
+        blocks.table({ id: "channels", title: "渠道表", columns: ["渠道", "新增群"], rows: [["微博", "14"], ["B 站", "9"]], rowKeys: ["weibo", "bili"] }),
         blocks.diagram({ id: "flow", source: "flowchart LR\n  a[收到消息] --> b{要回复吗}\n  b --> c[回复]" }),
       ],
     });

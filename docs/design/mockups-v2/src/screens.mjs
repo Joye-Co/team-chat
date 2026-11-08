@@ -44,25 +44,25 @@ export const mainTopic = (mode) => ({
 
 // ---------- Short topic: no void; topic start fills the top; side panel open ----------
 export const shortTopic = (mode) => ({
-  title: "周四小红书：夹夹 3.0 上线",
+  title: "周四微博：拾光 3.0 上线",
   status: "waiting_review",
   you: true,
   owner: "taro",
   people: ["taro", "joye", "li"],
   start: "Joye 发起 · Taro 负责 · 今天 14:05",
   messages: [
-    { m: "joye", time: "14:05", text: `${mn("Taro")} 把夹夹 3.0 上线写成一条小红书，周四晚上发。重点讲“一键分享到群”。` },
+    { m: "joye", time: "14:05", text: `${mn("Taro")} 把拾光 3.0 上线写成一条微博，周四晚上发。重点讲“一键分享到群”。` },
     { m: "taro", time: "14:06", hover: true, noPip: true, text: "收到。先写两版标题，再配图。" },
     {
       m: "taro", time: "14:31", noPip: true,
       text: "<p><b>草稿好了</b>，按你上次喜欢的口吻写的。确认后我才会发出。</p>",
       after: `<div class="card you"><div class="ct">发布预览</div>
-<div class="dl"><div class="r"><span class="k">平台</span><span>小红书</span></div><div class="r"><span class="k">时间</span><span>周四 20:00</span></div><div class="r"><span class="k">标题</span><span class="ell">夹夹 3.0：粉丝群的照片，一键分享回群里</span></div>
+<div class="dl"><div class="r"><span class="k">平台</span><span>微博</span></div><div class="r"><span class="k">时间</span><span>周四 20:00</span></div><div class="r"><span class="k">标题</span><span class="ell">拾光 3.0：用户群的照片，一键分享回群里</span></div>
 <div class="body">以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群…</div></div>
 <div class="acts"><span class="btn primary">发布</span><span class="btn secondary">修改</span><span class="btn ghost">放弃</span></div></div>`,
     },
   ],
-  composer: { placeholder: "回复「周四小红书：夹夹 3.0 上线」" },
+  composer: { placeholder: "回复「周四微博：拾光 3.0 上线」" },
 });
 
 const shortPanel = (mode) => `<aside class="sp"><div class="sp-hdr"><div class="r1"><span class="t">话题详情</span><span class="ib">${icon("x", 18)}</span></div><div class="r2"><span class="ell">Taro 负责 · 周四 20:00 截止</span></div></div>
@@ -71,7 +71,7 @@ const shortPanel = (mode) => `<aside class="sp"><div class="sp-hdr"><div class="
 <div class="live-card"><div class="top">${avatar(m("taro"), 36, mode, { pip: false })}<div><div class="nm">Taro</div><div class="st">等你审发布预览</div></div></div>
 <div class="plan"><div class="s ok">${icon("circle-check", 16)}写标题和正文</div><div class="s ok">${icon("circle-check", 16)}生成 3 张配图</div><div class="s now">${icon("eye", 16)}等 Joye 确认</div><div class="s later">${icon("circle-dashed", 16)}周四 20:00 发出</div></div></div></div>
 <div class="sp-sec"><div class="h">产出 · 2</div>
-<div class="prow"><span class="ft">${icon("file-text", 16)}</span><div class="grow"><div class="a ell">小红书草稿</div><div class="b">网页 · v3 · 今天 14:31</div></div></div>
+<div class="prow"><span class="ft">${icon("file-text", 16)}</span><div class="grow"><div class="a ell">微博草稿</div><div class="b">网页 · v3 · 今天 14:31</div></div></div>
 <div class="prow"><span class="ft">${icon("file-image", 16)}</span><div class="grow"><div class="a ell">配图 3 张</div><div class="b">图片 · 2.4 MB</div></div></div></div>
 <div class="sp-sec"><div class="h">成员 · 3</div>
 ${["joye", "taro", "li"].map((k) => `<div class="mrow">${avatar(m(k), 24, mode, { pip: false })}<span>${esc(m(k).name)}</span><span class="grow"></span><span class="role">${m(k).char ? icon("bot", 12) : ""}${esc(m(k).role)}</span></div>`).join("")}
@@ -88,19 +88,19 @@ export function short(mode) {
     panel: shortPanel,
     tlw: 300,
     sidebar: {
-      todo: [{ icon: "eye", title: "周四小红书：夹夹 3.0 上线", ctx: "社媒 · Taro 等你审" }],
+      todo: [{ icon: "eye", title: "周四微博：拾光 3.0 上线", ctx: "社媒 · Taro 等你审" }],
       groups: [
-        { name: "qqbot 研发", palette: "sky" },
+        { name: "orderbot 研发", palette: "sky" },
         { name: "社媒", selected: true },
-        { name: "夹夹增长", palette: "sage" },
+        { name: "拾光增长", palette: "sage" },
         { name: "全员", muted: true },
       ],
       dms: [{ m: "pocket" }, { m: "li" }, { m: "jojo" }],
     },
     group: { name: "社媒", counts: [4, 0, 1] },
     topics: [
-      { title: "周四小红书：夹夹 3.0 上线", owner: "taro", who: "Taro", text: "草稿好了，按你上次喜欢的口吻写的", time: "14:31", status: "waiting_review", you: true, selected: true },
-      { title: "B 站视频：粉丝群剪辑", owner: "taro", who: "Taro", text: "已排期，周六 12:00 发", time: "昨天", status: "done" },
+      { title: "周四微博：拾光 3.0 上线", owner: "taro", who: "Taro", text: "草稿好了，按你上次喜欢的口吻写的", time: "14:31", status: "waiting_review", you: true, selected: true },
+      { title: "B 站视频：用户群剪辑", owner: "taro", who: "Taro", text: "已排期，周六 12:00 发", time: "昨天", status: "done" },
       { title: "博客改写：一个人带 5 个机器人", owner: "pocket", who: "Pocket", text: "初稿写到第三节", time: "周一", status: "in_progress" },
       { title: "X 上的回复要不要统一口吻", owner: "joye", who: "李雪", text: "我整理了 10 条例子", time: "10/27" },
     ],
@@ -162,9 +162,9 @@ export function switcher(mode) {
 <div class="sw-q">${icon("search", 20)}<span class="q">告警</span><span class="caret"></span><span class="grow"></span>${kbd("esc")}</div>
 <div class="sw-l">
 <div class="ph">话题</div>
-<div class="pr act">${lead("forge", true)}<div class="grow ell"><span class="b">夜间${hl}降噪：合并重复的 5xx</span><span class="g"> · qqbot 研发</span></div>${chip("waiting_answer", { you: true, row: true })}<span class="t3">${icon("corner-down-left", 16)}</span></div>
+<div class="pr act">${lead("forge", true)}<div class="grow ell"><span class="b">夜间${hl}降噪：合并重复的 5xx</span><span class="g"> · orderbot 研发</span></div>${chip("waiting_answer", { you: true, row: true })}<span class="t3">${icon("corner-down-left", 16)}</span></div>
 <div class="pr">${lead("li")}<div class="grow ell"><span class="b">${hl}值班表 11 月</span><span class="g"> · 运维告警</span></div></div>
-<div class="pr">${lead("watch")}<div class="grow ell"><span class="b">5xx ${hl}阈值调整</span><span class="g"> · qqbot 研发</span></div>${chip("done")}</div>
+<div class="pr">${lead("watch")}<div class="grow ell"><span class="b">5xx ${hl}阈值调整</span><span class="g"> · orderbot 研发</span></div>${chip("done")}</div>
 <div class="ph">群</div>
 <div class="pr">${hash}<div class="grow ell"><span class="b">运维${hl}</span><span class="g"> · 6 位成员</span></div></div>
 <div class="ph">消息</div>

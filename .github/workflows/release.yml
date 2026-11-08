@@ -78,6 +78,19 @@ jobs:
           # release.sh compares HEAD with origin/main, checks tags and pushes the release commit.
           fetch-depth: 0
 
+      - name: Check the server URLs
+        # The URLs the app's server menu offers and release.sh uploads to: the repository variable
+        # SERVERS_JSON, { "staging": "<url>", "production": "<url>" }. Releases embed nothing else
+        # from an ops checkout (no character pack).
+        env:
+          TC_SERVERS_JSON: ${{ vars.SERVERS_JSON }}
+        run: |
+          if ! printf '%s' "$TC_SERVERS_JSON" | jq -e '.production | strings' >/dev/null 2>&1; then
+            echo "::error::set the repository variable SERVERS_JSON to {\"staging\": \"<url>\", \"production\": \"<url>\"}; see docs/ENVIRONMENTS.md"
+            exit 1
+          fi
+          echo "TC_SERVERS_JSON=$(printf '%s' "$TC_SERVERS_JSON" | jq -c .)" >>"$GITHUB_ENV"
+
       - name: Write the signing files
         if: inputs.mode != 'upload-only'
         env:

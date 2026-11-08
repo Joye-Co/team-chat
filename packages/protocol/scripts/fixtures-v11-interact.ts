@@ -86,22 +86,22 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     rev: 2,
     intent: "info",
     title: "10 月新增群从哪来",
-    fallback: "Ledger：10 月新增群 38 个，小红书最多（14 个）。",
+    fallback: "Ledger：10 月新增群 38 个，微博最多（14 个）。",
     blocks: [
       {
         id: "bars",
         type: "chart",
         kind: "bar",
         label: "新增群 · 按渠道",
-        x: ["小红书", "群内邀请", "B 站", "抖音"],
+        x: ["微博", "群内邀请", "B 站", "抖音"],
         series: [{ id: "groups", name: "新增群", values: [14, 10, 9, 5] }],
-        summary: "小红书 14、群内邀请 10、B 站 9、抖音 5。",
+        summary: "微博 14、群内邀请 10、B 站 9、抖音 5。",
         events: ["chart.select", "chart.clear"],
         emitBy: "members",
       },
-      { id: "detail", type: "group", title: "小红书 · 14 个新增群", children: ["detail_row", "d_posts"] },
+      { id: "detail", type: "group", title: "微博 · 14 个新增群", children: ["detail_row", "d_posts"] },
       { id: "detail_row", type: "row", weights: [1, 2], children: ["d_metric", "d_weeks"] },
-      { id: "d_metric", type: "metric", label: "小红书新增群", value: 14, delta: 6, better: "up" },
+      { id: "d_metric", type: "metric", label: "微博新增群", value: 14, delta: 6, better: "up" },
       { id: "d_weeks", type: "chart", kind: "bar", label: "每周", x: ["10-06", "10-13", "10-20", "10-27"], series: [{ name: "新增群", values: [2, 3, 4, 5] }], summary: "每周都在涨，10-27 这周 5 个。" },
       {
         id: "d_posts",
@@ -126,7 +126,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     catalog: "tc.card/2.1",
     rev: 1,
     intent: "ask",
-    title: "夹夹 4.0 首页用哪个方案？",
+    title: "拾光 4.0 首页用哪个方案？",
     fallback: "Pixel 做了两个首页方案，请选一个。",
     ask: { from: [JOYE], blocking: true },
     blocks: [
@@ -223,7 +223,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     title: "10 月数据月报",
     fallback: "渠道表",
     blocks: [
-      { id: "channels", type: "table", title: "渠道表", columns: ["渠道", "新增群"], rows: [["小红书", "14"], ["B 站", "9"]], rowKeys: ["xhs", "bili"], select: "single" },
+      { id: "channels", type: "table", title: "渠道表", columns: ["渠道", "新增群"], rows: [["微博", "14"], ["B 站", "9"]], rowKeys: ["weibo", "bili"], select: "single" },
     ],
   }, "R4: table rowKeys (one key per row) is the row-key mechanism");
   ok("entities/card-v2-diagram.json", "CardV2", {
@@ -414,7 +414,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     createdBy: LEDGER,
     createdAt: T0,
     events: [
-      { name: "breakdown", kind: "ask", label: "按渠道筛选", schema: { type: "object", required: ["channel"], properties: { channel: { enum: ["all", "xhs", "douyin"] } } } },
+      { name: "breakdown", kind: "ask", label: "按渠道筛选", schema: { type: "object", required: ["channel"], properties: { channel: { enum: ["all", "weibo", "douyin"] } } } },
       { name: "report.problem", kind: "emit", label: "数据有问题" },
     ],
     media: { kind: "html", mime: "text/html", bytes: 12_000, posterFileId: FILE, preview: "ready" },
@@ -449,8 +449,8 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     clientEventId: CEV(2),
     blockId: "bars",
     event: "chart.select",
-    value: { series: "groups", x: "小红书", y: 14, index: 0 },
-    part: { kind: "bar", keys: { series: "groups", x: "小红书" } },
+    value: { series: "groups", x: "微博", y: 14, index: 0 },
+    part: { kind: "bar", keys: { series: "groups", x: "微博" } },
   }, "R3: a chart point event carries the part");
   ok("client/card.event-submit-inputs.json", "ClientFrame", {
     ...ce,
@@ -486,7 +486,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     clientPatchId: "01JC0PAT000000000000000001",
     ops: [
       { op: "insert", after: "main", block: { id: "drill", type: "group", title: "按渠道拆开", collapsible: false, children: [] } },
-      { op: "insert", parent: "drill", block: { id: "by_channel", type: "table", columns: ["渠道", "新增群"], rows: [["小红书", "14"], ["抖音", "5"]], rowKeys: ["xhs", "douyin"], select: "multiple", events: ["table.rowSelect"] } },
+      { op: "insert", parent: "drill", block: { id: "by_channel", type: "table", columns: ["渠道", "新增群"], rows: [["微博", "14"], ["抖音", "5"]], rowKeys: ["weibo", "douyin"], select: "multiple", events: ["table.rowSelect"] } },
       { op: "set", id: "m_groups", props: { value: 40, note: "已改正" } },
       { op: "replace", id: "note", block: { id: "note", type: "input", kind: "textarea", label: "哪一项不对？", maxLength: 300 } },
       { op: "remove", id: "full" },
@@ -633,7 +633,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   // Transient events (only to "interact/1" connections)
   // -------------------------------------------------------------------------
   ok("transient/card.event.json", "TransientEvent", { type: "card.event", groupId: G, topicId: T, messageId: M, eventId: EV(1), rev: 1, blockId: "check", event: "choice.change", value: { value: "wrong" }, actorId: JOYE, at: T0 + 1000 });
-  ok("transient/card.event-part.json", "TransientEvent", { type: "card.event", groupId: G, topicId: T, messageId: M, eventId: EV(10), rev: 1, blockId: "bars", event: "chart.select", value: { series: "groups", x: "小红书", y: 14, index: 0 }, part: { kind: "bar", keys: { series: "groups", x: "小红书" } }, actorId: ID.alice, at: T0 });
+  ok("transient/card.event-part.json", "TransientEvent", { type: "card.event", groupId: G, topicId: T, messageId: M, eventId: EV(10), rev: 1, blockId: "bars", event: "chart.select", value: { series: "groups", x: "微博", y: 14, index: 0 }, part: { kind: "bar", keys: { series: "groups", x: "微博" } }, actorId: ID.alice, at: T0 });
   ok("transient/interaction.resolved.json", "TransientEvent", { type: "interaction.resolved", groupId: G, eventId: EV(21), result: "replied", note: "看板里抖音的数改好了" });
   ok("transient/artifact.event.json", "TransientEvent", { type: "artifact.event", groupId: G, topicId: T, artifactId: ART, version: 1, eventId: EV(20), name: "breakdown", kind: "ask", payload: { channel: "douyin" }, actorId: JOYE, at: T0 });
   ok("transient/artifact.data-inline.json", "TransientEvent", { type: "artifact.data", groupId: G, artifactId: ART, version: 1, dataRev: 2, data: { channels: { douyin: 7 } }, cause: EV(21) });
@@ -660,11 +660,11 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     files: [{ path: "index.html", fileId: FILE }],
     note: "按渠道筛选；发现数不对可以直接告诉 Ledger。",
     events: [
-      { name: "breakdown", kind: "ask", label: "按渠道筛选", schema: { type: "object", required: ["channel"], properties: { channel: { enum: ["all", "xhs", "invite", "bili", "douyin"] } } } },
+      { name: "breakdown", kind: "ask", label: "按渠道筛选", schema: { type: "object", required: ["channel"], properties: { channel: { enum: ["all", "weibo", "invite", "bili", "douyin"] } } } },
       { name: "report.problem", kind: "emit", label: "数据有问题", schema: { type: "object", properties: { channel: { type: "string", maxLength: 32 }, note: { type: "string", maxLength: 300 } } } },
     ],
     media: { kind: "html", mime: "text/html", bytes: 12_000, preview: "pending" },
-    data: { asOf: "2026-10-31", channels: { all: 38, xhs: 14, invite: 10, bili: 9, douyin: 5 } },
+    data: { asOf: "2026-10-31", channels: { all: 38, weibo: 14, invite: 10, bili: 9, douyin: 5 } },
   };
   ok("http/create-artifact-media-data.json", "CreateArtifactRequest", createArt, "V11-INTERACT 7.3 (declarations on `events`, R5)");
   {

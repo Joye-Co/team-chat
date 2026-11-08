@@ -107,13 +107,14 @@ D1 migrations, both new tables only: `0009_email_sign_in` (`member_emails`, `ema
 `email_outbox`) and `0009_ai_service` (`ai_service`). Room Durable Objects add the named
 migration `messaging-2` (`topic_states.muted`, old rows read as not muted) on first access. No
 Durable Object class change. New Worker config in staging and production: the `send_email`
-binding `EMAIL` and the var `EMAIL_FROM = login@mail.joyehuang.dev` (Cloudflare Email Service).
+binding `EMAIL` and the var `EMAIL_FROM` (a sender on the operator's mail domain, Cloudflare
+Email Service).
 No new Worker secret: the AI 服务 key is encrypted with `HOOK_SECRET_KEY`; the
 `ANTHROPIC_API_KEY` secret from #54 is no longer read.
 
-Owner actions after the release: install the 1.2.0 daemon on the Mac mini (new runner permission
-defaults), and set the AI 服务 in 设置 › 通用 (without it, a new 话题 keeps its first line as the
-title).
+Operators after the release: install the 1.2.0 daemon on the machine that runs the bot (new runner
+permission defaults; see [docs/bots.md](docs/bots.md)), and set the AI 服务 in 设置 › 通用 (without
+it, a new 话题 keeps its first line as the title).
 
 - Email code sign-in (#52, #56): `POST /v1/auth/email/code`, `POST /v1/auth/email/sign-in` and
   `/v1/me/email`; 6-digit codes stored as SHA-256, single use, 10 minutes, 5 tries, rate limited.
@@ -161,10 +162,8 @@ Deferred to 1.2 (not in 1.1.0): real screen frames in 实时查看 (it shows the
 tool events), scheduled jobs, typed asks from CLIs through a daemon MCP tool server, secret inputs,
 cloud runners, enforcement of the weekly limit, and the landing page.
 
-Owner actions after the release: install the 1.1.0 daemon on the Mac mini and enable Jojo's
-runner (production has no machine and Jojo's runner is disabled, checked on 2026-11-05 with
-`admin.ts machines` and `GET /v1/bots/:id/runner`); see the notes and
-[docs/USER-ACTIONS.md](docs/USER-ACTIONS.md#3-install-the-daemon-on-the-mac-mini).
+Operators after the release: install the 1.1.0 daemon on the machine that runs the bot and enable
+the bot's runner (`admin.ts runner`); see the notes and [docs/bots.md](docs/bots.md).
 
 - Native Mac client (#6, [docs/design/NATIVE.md](docs/design/NATIVE.md)): the shell, sidebar,
   话题, 首页, 群, 成员, 产出, cards, sheets, alerts, settings window and login are rebuilt on a

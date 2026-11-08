@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { deployedServer } from "../../scripts/servers";
 
 export const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 export const ENVS = ["local", "e2e", "staging", "production"] as const;
@@ -49,10 +50,9 @@ export function readSecretFile(path: string, what: string): string {
 export function serverUrl(env: EnvName, override?: string): string {
   if (override) return override.replace(/\/+$/, "");
   if (env === "local") return LOCAL_URL;
-  const product = JSON.parse(readFileSync(join(ROOT, "product.json"), "utf8")) as { servers?: Record<string, string> };
-  const url = product.servers?.[env];
-  if (!url) fail(`no server URL for ${env} in product.json; pass the URL flag`);
-  return url.replace(/\/+$/, "");
+  const url = deployedServer(env);
+  if (!url) fail(`no server URL for ${env} (TC_OPS_DIR deploy/servers.json); pass the URL flag`);
+  return url;
 }
 
 /** One environment's admin API: base URL plus ADMIN_SECRET from <config>/<env>/admin-secret. */

@@ -660,6 +660,7 @@ impl SideChat {
                         r,
                         false,
                         crate::views::refs::chips::flashing(r, cx),
+                        false,
                         move |_, cx| crate::views::refs::chips::open_source(&open, cx),
                         move |_, cx| {
                             if let Some(k) = &k2 {

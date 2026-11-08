@@ -356,7 +356,10 @@ impl ComposerView {
                     .capture_action(cx.listener(Self::on_escape))
                     .capture_action(cx.listener(Self::on_paste))
                     .capture_key_down(cx.listener(Self::on_format_key))
-                    .capture_key_down(cx.listener(Self::on_refs_key))
+                    .capture_key_down(cx.listener(Self::on_chips_key))
+                    .capture_action(cx.listener(Self::on_backspace))
+                    .capture_action(cx.listener(Self::on_delete))
+                    .capture_action(cx.listener(Self::on_select_all))
                     .child(editor),
             )
             .child(

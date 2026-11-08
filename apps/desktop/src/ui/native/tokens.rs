@@ -631,6 +631,8 @@ pub mod icon {
     pub const SM: Pixels = px(12.);
     pub const MD: Pixels = px(16.);
     pub const LG: Pixels = px(24.);
+    /// The app icon at the top of a welcome sheet (已更新到 …).
+    pub const APP: Pixels = px(64.);
 
     // Older names, mapped onto the sizes.
     pub const HEADER: Pixels = MD;
@@ -1033,6 +1035,8 @@ pub mod metrics {
     pub const SHEET_PAD: Pixels = space::S24;
     pub const SHEET_BUTTON_EDGE: Pixels = space::S24;
     pub const SHEET_BUTTON_GAP: Pixels = space::S8;
+    /// A Mac dialog button is never narrower than this, so 「好」 is not a square.
+    pub const SHEET_BUTTON_MIN_WIDTH: Pixels = px(80.);
     pub const ALERT_WIDTH: Pixels = px(260.);
     pub const ALERT_ICON: Pixels = px(48.);
     pub const ALERT_PAD: Pixels = space::S16;

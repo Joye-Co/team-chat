@@ -817,7 +817,7 @@ pub fn open_email_code(
         let account = view.read(cx).account().clone();
         AccountPage::open_email_sheet(account.clone(), window, cx);
         account.update(cx, |p, cx| {
-            p.preview_email_sent("huangdeshiou.longname@example.com", window, cx)
+            p.preview_email_sent("example.longname@example.com", window, cx)
         });
     });
     Ok(handle)
@@ -1032,8 +1032,9 @@ pub fn open_character_dialog(
         services,
         Page::Members,
         |s, w, cx| {
+            // Without the character pack there is no look sheet: 成员 alone.
             let bot = s.provider.members().into_iter().find(|m| m.is_bot());
-            if let Some(bot) = bot {
+            if let Some(bot) = bot.filter(|_| crate::characters::available()) {
                 super::members::open_character(s, &bot, w, cx);
             }
         },

@@ -44,7 +44,7 @@ pub struct AskItem {
     /// Who asks.
     pub from: MemberId,
     pub kind: AskKind,
-    /// The question, as the asker wrote it ("把 qqbot v2.14 发布到生产吗？").
+    /// The question, as the asker wrote it ("把 orderbot v2.14 发布到生产吗？").
     pub title: String,
     pub at: Millis,
 }

@@ -7,9 +7,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REPO, smallArt } from "./kit.mjs";
+import { CHAR_DIR, smallArt } from "./kit.mjs";
 
-const DIR = join(REPO, "apps/desktop/assets/characters");
+const DIR = CHAR_DIR;
 const STATES = ["idle", "working", "needs-input", "success", "error", "offline"];
 const items = [];
 for (const id of readdirSync(DIR)) {

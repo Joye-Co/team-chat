@@ -286,12 +286,12 @@ fn choice_card(rev: u32) -> serde_json::Value {
 
 fn approve_card() -> serde_json::Value {
     json!({
-        "v": 2, "rev": 1, "intent": "ask", "title": "把 qqbot v2.14 发布到生产吗？",
+        "v": 2, "rev": 1, "intent": "ask", "title": "把 orderbot v2.14 发布到生产吗？",
         "fallback": "3 个 PR，Scout 09:10 已在 staging 验收通过。",
         "ask": { "from": [ME], "irreversible": {
-            "verb": "发布", "target": "qqbot v2.14 到生产",
+            "verb": "发布", "target": "orderbot v2.14 到生产",
             "consequence": "所有群会重启约 2 分钟。出问题可以一键回到 v2.13。",
-            "typeToConfirm": "qqbot-prod"
+            "typeToConfirm": "orderbot-prod"
         }},
         "blocks": [{ "type": "fields", "id": "what", "fields": [
             { "label": "包含", "value": "群相册分享、撤回同步、告警降噪，共 3 个 PR" },
@@ -313,7 +313,7 @@ fn draft_blocks() -> serde_json::Value {
         { "type": "image", "id": "img2", "fileId": "f-promo-2" },
         { "type": "image", "id": "img3", "fileId": "f-promo-3" },
         { "type": "draft", "id": "title", "label": "标题", "editable": true,
-          "text": "夹夹 3.0｜群里的照片，一键分享回群" },
+          "text": "拾光 3.0｜群里的照片，一键分享回群" },
         { "type": "draft", "id": "body", "label": "正文", "editable": true,
           "text": "以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。" }
     ]}])
@@ -322,9 +322,9 @@ fn draft_blocks() -> serde_json::Value {
 fn draft_card(rev: u32, title: &str) -> serde_json::Value {
     json!({
         "v": 2, "rev": rev, "intent": "ask", "title": title,
-        "fallback": "Taro 的小红书草稿等你确认",
+        "fallback": "Taro 的微博草稿等你确认",
         "ask": { "from": [ME], "irreversible": {
-            "verb": "发布", "target": "这条小红书", "consequence": "发出后不能撤回。"
+            "verb": "发布", "target": "这条微博", "consequence": "发出后不能撤回。"
         }},
         "blocks": draft_blocks(),
         "actions": [
@@ -351,7 +351,7 @@ fn form_card() -> serde_json::Value {
             { "type": "input", "id": "start", "kind": "date", "label": "入职日期", "required": true },
             { "type": "input", "id": "groups", "kind": "chips", "label": "要进的群", "options": [
                 { "id": "dev", "label": "开发" }, { "id": "ops", "label": "运维" },
-                { "id": "growth", "label": "夹夹增长" }, { "id": "all", "label": "全员" }
+                { "id": "growth", "label": "拾光增长" }, { "id": "all", "label": "全员" }
             ], "default": ["all"] }
         ],
         "actions": [{ "id": "submit", "label": "提交", "style": "primary" }]
@@ -468,8 +468,8 @@ fn all() -> Vec<Sample> {
         at(10, 14),
         Some(at(10, 17)),
         json!({
-            "v": 2, "rev": 2, "intent": "working", "title": "正在发布 qqbot v2.14",
-            "fallback": "正在发布 qqbot v2.14",
+            "v": 2, "rev": 2, "intent": "working", "title": "正在发布 orderbot v2.14",
+            "fallback": "正在发布 orderbot v2.14",
             "blocks": [
                 { "type": "plan", "id": "steps", "runId": RUN_RELEASE, "items": [
                     { "text": "构建镜像", "state": "done" },
@@ -492,7 +492,7 @@ fn all() -> Vec<Sample> {
         at(10, 14),
         Some(at(10, 19)),
         json!({
-            "v": 2, "rev": 3, "intent": "done", "title": "已发布 qqbot v2.14",
+            "v": 2, "rev": 3, "intent": "done", "title": "已发布 orderbot v2.14",
             "fallback": "10:19 上线",
             "blocks": [
                 { "type": "evidence", "id": "online", "label": "24/24 个群在线", "state": "pass" },
@@ -515,7 +515,7 @@ fn all() -> Vec<Sample> {
         TARO,
         at(10, 10),
         None,
-        draft_card(1, "这条小红书确认后，周四 20:00 发出"),
+        draft_card(1, "这条微博确认后，周四 20:00 发出"),
     ));
     let mut confirmed = sample(
         DRAFT_CONFIRMED,
@@ -524,12 +524,12 @@ fn all() -> Vec<Sample> {
         TARO,
         at(10, 10),
         Some(at(10, 18)),
-        draft_card(1, "周四 20:00 发出这条小红书"),
+        draft_card(1, "周四 20:00 发出这条微博"),
     );
     let mut a = answer(ME, 1, "publish", json!({}), at(10, 18));
     a.edited_values = Some(
         [
-            ("title".to_string(), "夹夹 3.0｜群里的照片一键分享回群".to_string()),
+            ("title".to_string(), "拾光 3.0｜群里的照片一键分享回群".to_string()),
             (
                 "body".to_string(),
                 "在群里找一张合照，以前要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。周四晚上 8 点，群里见。".to_string(),
@@ -547,7 +547,7 @@ fn all() -> Vec<Sample> {
         TARO,
         at(10, 10),
         Some(at(10, 16)),
-        draft_card(2, "这条小红书确认后，周四 20:00 发出"),
+        draft_card(2, "这条微博确认后，周四 20:00 发出"),
     );
     void.pending = Some(CardV2Pending {
         rev: 1,
@@ -664,7 +664,7 @@ fn all() -> Vec<Sample> {
             "v": 2, "rev": 1, "intent": "done", "title": "新增群从哪来",
             "fallback": "按渠道拆开",
             "blocks": [{ "type": "table", "id": "by", "columns": ["渠道", "新增群", "占比", "比 9 月"], "rows": [
-                ["小红书", "14", "37%", "+6"], ["群内邀请", "10", "26%", "+1"],
+                ["微博", "14", "37%", "+6"], ["群内邀请", "10", "26%", "+1"],
                 ["B 站", "9", "24%", "−1"], ["抖音", "5", "13%", "−2"], ["合计", "38", "100%", "+4"]
             ]}],
             "actions": [{ "id": "full", "label": "在产出里看完整月报", "kind": "link",
@@ -713,7 +713,7 @@ fn all() -> Vec<Sample> {
                 { "id": "approve", "label": "通过", "style": "primary" },
                 { "id": "changes", "label": "要改", "kind": "cancel" },
                 { "id": "github", "label": "在 GitHub 打开", "kind": "link",
-                  "target": { "kind": "pr", "url": "https://github.com/example/qqbot/pull/61", "number": 61 } }
+                  "target": { "kind": "pr", "url": "https://github.com/example/orderbot/pull/61", "number": 61 } }
             ]
         }),
     ));
@@ -729,13 +729,13 @@ fn all() -> Vec<Sample> {
             "fallback": "这周的 PR",
             "blocks": [
                 { "type": "ref", "id": "p61", "label": "重连后按 seq 去重", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3/3 项检查通过", "state": "等你审" } },
+                  "url": "https://github.com/example/orderbot/pull/61", "number": 61, "repo": "开发 · Forge · 3/3 项检查通过", "state": "等你审" } },
                 { "type": "ref", "id": "p62", "label": "话题列表虚拟滚动", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/62", "number": 62, "repo": "开发 · Forge", "state": "检查 2/3" } },
+                  "url": "https://github.com/example/orderbot/pull/62", "number": 62, "repo": "开发 · Forge", "state": "检查 2/3" } },
                 { "type": "ref", "id": "p59", "label": "话题加载提速", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/59", "number": 59, "repo": "开发 · Forge", "state": "1 项检查没过" } },
+                  "url": "https://github.com/example/orderbot/pull/59", "number": 59, "repo": "开发 · Forge", "state": "1 项检查没过" } },
                 { "type": "ref", "id": "p412", "label": "群相册分享", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/412", "number": 412, "repo": "运维 · Forge", "state": "已合并 11-02" } }
+                  "url": "https://github.com/example/orderbot/pull/412", "number": 412, "repo": "运维 · Forge", "state": "已合并 11-02" } }
             ]
         }),
     ));
@@ -754,7 +754,7 @@ fn all() -> Vec<Sample> {
                 { "type": "evidence", "id": "checks", "label": "3 项检查通过", "state": "pass" },
                 { "type": "evidence", "id": "lines", "label": "+38 −6 · 3 个文件" },
                 { "type": "ref", "id": "pr", "label": "撤回时同步删除通知", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/63", "number": 63, "repo": "fix/recall-notify → main" } }
+                  "url": "https://github.com/example/orderbot/pull/63", "number": 63, "repo": "fix/recall-notify → main" } }
             ],
             "actions": [
                 { "id": "approve", "label": "通过", "style": "primary" },
@@ -803,7 +803,7 @@ fn all() -> Vec<Sample> {
             "blocks": [
                 { "type": "text", "id": "what", "text": "同一个群 5 分钟内的重复告警，合并成一条再发。" },
                 { "type": "ref", "id": "p70", "label": "告警合并", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/70", "repo": "example/qqbot", "number": 70 } }
+                  "url": "https://github.com/example/orderbot/pull/70", "repo": "example/orderbot", "number": 70 } }
             ],
             "actions": [
                 { "id": "approve", "label": "通过", "style": "primary" },
@@ -843,10 +843,10 @@ fn all() -> Vec<Sample> {
             "fallback": "今天要看的四样",
             "blocks": [
                 { "type": "ref", "id": "pr", "label": "重连后按 seq 去重", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/61", "number": 61, "repo": "开发 · Forge · 3 项检查通过", "state": "等你审" } },
+                  "url": "https://github.com/example/orderbot/pull/61", "number": 61, "repo": "开发 · Forge · 3 项检查通过", "state": "等你审" } },
                 { "type": "ref", "id": "art", "label": "10 月数据月报", "target": { "kind": "artifact",
                   "artifactId": ART_REPORT, "version": 2 } },
-                { "type": "ref", "id": "topic", "label": "夹夹 4.0 需求", "target": { "kind": "topic",
+                { "type": "ref", "id": "topic", "label": "拾光 4.0 需求", "target": { "kind": "topic",
                   "groupId": GROWTH, "topicId": T_V4 } },
                 { "type": "ref", "id": "member", "label": "Ledger", "target": { "kind": "member", "memberId": LEDGER } }
             ]
@@ -864,8 +864,8 @@ fn all() -> Vec<Sample> {
             "fallback": "上周的告警改动",
             "blocks": [
                 { "type": "ref", "id": "pr", "label": "告警降噪", "target": { "kind": "pr",
-                  "url": "https://github.com/example/qqbot/pull/418", "number": 418, "repo": "运维 · Watch", "state": "已合并" } },
-                { "type": "ref", "id": "gone", "label": "qqbot 告警汇总", "target": { "kind": "artifact",
+                  "url": "https://github.com/example/orderbot/pull/418", "number": 418, "repo": "运维 · Watch", "state": "已合并" } },
+                { "type": "ref", "id": "gone", "label": "orderbot 告警汇总", "target": { "kind": "artifact",
                   "artifactId": "art-v2-gone" } }
             ]
         }),
@@ -968,8 +968,8 @@ fn all() -> Vec<Sample> {
                 { "type": "metric", "id": "groups", "label": "新增群", "value": 38 },
                 { "type": "metric", "id": "dau", "label": "日活", "value": 2340 },
                 { "type": "metric", "id": "reply", "label": "平均回复", "value": 1.2, "unit": "秒" },
-                { "type": "decision", "id": "channel", "default": ["xhs"], "options": [
-                    { "id": "xhs", "label": "小红书" }, { "id": "bili", "label": "B 站" },
+                { "type": "decision", "id": "channel", "default": ["weibo"], "options": [
+                    { "id": "weibo", "label": "微博" }, { "id": "bili", "label": "B 站" },
                     { "id": "douyin", "label": "抖音" }, { "id": "none", "label": "先不加，维持现状" }
                 ]}
             ],
