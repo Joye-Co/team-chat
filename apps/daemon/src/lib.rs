@@ -7,6 +7,7 @@ pub mod chat_run_files;
 pub mod config;
 pub mod daemon;
 pub mod doctor;
+pub mod executor;
 pub mod health;
 pub mod input;
 pub mod proctree;

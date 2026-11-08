@@ -10,16 +10,15 @@ pub mod codex;
 pub mod pty;
 
 use crate::config::RuntimeConfig;
-use crate::proctree;
+use crate::executor::{Executor, Process};
 use crate::proto::{RunEvent, Usage};
 use serde_json::Value;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::mpsc;
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
@@ -46,6 +45,8 @@ pub struct RunSpec {
     /// `run.assign.resumeSessionId`: the CLI session to continue (Claude Code `--resume`, Codex
     /// `thread/resume`). A session the CLI no longer has starts a new one.
     pub resume_session_id: Option<String>,
+    /// Where the CLI runs.
+    pub exec: Arc<dyn Executor>,
 }
 
 /// A session id the daemon passes on: 1-128 of `[A-Za-z0-9_-]` (it becomes a file name).
@@ -134,47 +135,26 @@ pub fn for_kind(kind: &str) -> Option<Box<dyn Runtime>> {
     }
 }
 
-/// A CLI child in its own process group that speaks JSON lines on stdio.
+/// A CLI that speaks JSON lines on stdio, started by the run's executor.
 pub struct Proc {
-    child: Child,
-    pgid: i32,
-    stdin: Option<ChildStdin>,
-    lines: tokio::io::Lines<BufReader<ChildStdout>>,
+    process: Box<dyn Process>,
+    stdin: Option<crate::executor::Stdin>,
+    lines: tokio::io::Lines<BufReader<crate::executor::Stdout>>,
     raw: Option<std::fs::File>,
     run_dir: PathBuf,
 }
 
 impl Proc {
     pub fn spawn(spec: &RunSpec, program: &str, args: &[String]) -> std::io::Result<Proc> {
-        let stderr = std::fs::File::create(spec.run_dir.join("stderr.log"))?;
         let raw = std::fs::File::create(spec.run_dir.join("stream.jsonl"))?;
-        let mut cmd = tokio::process::Command::new(program);
-        cmd.args(args)
-            .current_dir(&spec.cwd)
-            .env_clear()
-            .envs(spec.env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::from(stderr))
-            .process_group(0)
-            .kill_on_drop(true);
-        let mut child = cmd.spawn()?;
-        let pgid = child.id().map(|p| p as i32).unwrap_or(0);
-        crate::workspace::record_process(&spec.run_dir, pgid, program);
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take().expect("piped stdout");
+        let s = spec.exec.spawn(spec, program, args)?;
         Ok(Proc {
-            child,
-            pgid,
-            stdin,
-            lines: BufReader::with_capacity(1 << 16, stdout).lines(),
+            process: s.process,
+            stdin: s.stdin,
+            lines: BufReader::with_capacity(1 << 16, s.stdout).lines(),
             raw: Some(raw),
             run_dir: spec.run_dir.clone(),
         })
-    }
-
-    pub fn pid(&self) -> i32 {
-        self.pgid
     }
 
     /// Next stdout line, copied to the run's stream file. None at end of output.
@@ -210,66 +190,19 @@ impl Proc {
     }
 
     pub fn signal_group(&self, sig: i32) {
-        if self.pgid > 0 {
-            // SAFETY: plain syscall; a negative pid addresses the child's process group.
-            unsafe {
-                libc::kill(-self.pgid, sig);
-            }
-        }
+        self.process.signal(sig);
     }
 
-    /// The tool groups below the CLI (see [`crate::proctree`]) and the run's orphans (tools
-    /// that daemonized). Only orphans once the CLI is reaped: its pid may then belong to another
-    /// process.
-    fn tool_targets(&mut self) -> Vec<proctree::Target> {
-        match self.child.try_wait() {
-            Ok(None) => proctree::run_targets(self.pgid, &self.run_dir),
-            _ => proctree::orphans(&self.run_dir),
-        }
-    }
-
-    /// SIGTERM the process group and the tool groups below it, then SIGKILL after `grace`.
-    /// Returns the exit code.
+    /// SIGTERM the CLI and the tools below it, then SIGKILL after `grace`. Returns the exit
+    /// code.
     pub async fn kill_group(&mut self, grace: Duration) -> Option<i64> {
-        let mut tools = self.tool_targets();
-        self.signal_group(libc::SIGTERM);
-        proctree::signal(&tools, libc::SIGTERM);
-        // A stopped tool cannot handle SIGTERM.
-        proctree::signal(&tools, libc::SIGCONT);
-        match tokio::time::timeout(grace, self.child.wait()).await {
-            Ok(Ok(s)) => {
-                self.signal_group(libc::SIGKILL);
-                proctree::signal(&tools, libc::SIGKILL);
-                s.code().map(i64::from)
-            }
-            _ => {
-                for t in self.tool_targets() {
-                    if !tools.contains(&t) {
-                        tools.push(t);
-                    }
-                }
-                self.signal_group(libc::SIGKILL);
-                proctree::signal(&tools, libc::SIGKILL);
-                self.child
-                    .wait()
-                    .await
-                    .ok()
-                    .and_then(|s| s.code().map(i64::from))
-            }
-        }
+        self.process.kill(grace).await
     }
 
     /// Wait for the CLI to exit by itself for up to `limit`, then kill the group.
     pub async fn finish(&mut self, limit: Duration) -> Option<i64> {
         self.close_stdin();
-        match tokio::time::timeout(limit, self.child.wait()).await {
-            Ok(Ok(s)) => {
-                // Remove helpers the CLI left in its group.
-                self.signal_group(libc::SIGKILL);
-                s.code().map(i64::from)
-            }
-            _ => self.kill_group(Duration::from_secs(3)).await,
-        }
+        self.process.finish(limit).await
     }
 
     pub fn stderr_tail(&self) -> String {
@@ -279,9 +212,7 @@ impl Proc {
 
 impl Drop for Proc {
     fn drop(&mut self) {
-        let tools = self.tool_targets();
-        proctree::signal(&tools, libc::SIGKILL);
-        self.signal_group(libc::SIGKILL);
+        self.process.kill_now();
     }
 }
 
