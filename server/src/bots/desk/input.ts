@@ -10,10 +10,10 @@ import { answerText } from "../answers";
 import { refsText } from "../refs";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
-import { DeskFront } from "./front";
+import { DeskDelegate } from "./delegate";
 import { isProgressQuestion, progressAnswer } from "../../agent/supervise";
 
-export abstract class DeskInput extends DeskFront {
+export abstract class DeskInput extends DeskDelegate {
   // -------------------------------------------------------------------------
   // Messages from the topic
   // -------------------------------------------------------------------------

@@ -16,6 +16,8 @@ import { retroAfterRun } from "../../memory/retro";
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
+  /** 分出去 (delegate.ts): the result of a part goes back to the member that gave it out. */
+  protected abstract reportPart(r: RunRow, ok: boolean, result: string): Promise<void>;
   /** 盯活 (stall.ts): a tool call of the run (loops). */
   protected abstract watchTool(r: RunRow, title: string): Promise<void>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
@@ -434,6 +436,7 @@ export abstract class DeskEvents extends DeskRuns {
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
     await this.topic(r, topicStatus);
+    if (status !== "cancelled") await this.reportPart(r, success, body);
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
