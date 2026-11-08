@@ -32,7 +32,7 @@ export class Daemon {
 
   static async connect(
     token: string,
-    opts: { labels?: string[]; health?: Partial<typeof HEALTH>; runs?: { runId: string; lastSeq: number; done: boolean }[]; runtime?: string; features?: string[]; version?: string; maxParallelRuns?: number } = {},
+    opts: { labels?: string[]; health?: Partial<typeof HEALTH>; runs?: { runId: string; lastSeq: number; done: boolean }[]; runtime?: string; features?: string[]; version?: string; maxParallelRuns?: number; models?: unknown[]; efforts?: string[] } = {},
   ): Promise<{ d: Daemon; welcome: any }> {
     const res = await SELF.fetch(`${BASE}/v1/machine/ws`, { headers: { upgrade: "websocket", authorization: `Bearer ${token}` } });
     if (!res.webSocket) throw new Error(`upgrade failed: ${res.status}`);
@@ -42,7 +42,7 @@ export class Daemon {
       t: "hello",
       protocol: 1,
       machine: { name: "mac-mini", labels: opts.labels ?? ["mac"], daemonVersion: opts.version ?? "0.1.0", os: "macos", arch: "aarch64", maxParallelRuns: opts.maxParallelRuns ?? 2, ...(opts.features ? { features: opts.features } : {}) },
-      clis: [{ runtime: opts.runtime ?? "codex", kind: "codex", command: "codex", version: "0.159.0", available: true }],
+      clis: [{ runtime: opts.runtime ?? "codex", kind: "codex", command: "codex", version: "0.159.0", available: true, ...(opts.models ? { models: opts.models } : {}), ...(opts.efforts ? { efforts: opts.efforts } : {}) }],
       health: { ...HEALTH, ...opts.health },
       runs: opts.runs ?? [],
     });

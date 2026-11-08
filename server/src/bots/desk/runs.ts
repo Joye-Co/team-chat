@@ -356,6 +356,8 @@ export abstract class DeskRuns extends DeskCore {
       maxDurationMs: MAX_RUN_MS,
     };
     if (runner.model) frame.model = runner.model;
+    // 思考强度 only to a daemon that knows the field (an old one would ignore it silently).
+    if (runner.effort && machine && hasFeature(machine, "effort")) frame.effort = runner.effort;
     if (r.kind === RUN_KIND_ASIDE) frame.kind = RUN_KIND_ASIDE;
     if (runner.repo) frame.repo = { ...runner.repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
     // Continue the topic's last session when this run goes to the machine that has it.
