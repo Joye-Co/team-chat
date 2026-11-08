@@ -30,6 +30,7 @@ pub fn error_text(e: AdminError) -> &'static str {
         AdminError::Invalid => s::ERROR_INVALID,
         AdminError::TooLarge => s::ERROR_TOO_LARGE,
         AdminError::RateLimited => s::ERROR_RATE_LIMITED,
+        AdminError::Conflict => s::ERROR_CONFLICT,
         AdminError::Other => s::ERROR_OTHER,
     }
 }
@@ -1260,6 +1261,7 @@ mod tests {
             AdminError::Invalid,
             AdminError::TooLarge,
             AdminError::RateLimited,
+            AdminError::Conflict,
             AdminError::Other,
         ] {
             assert!(!error_text(e).is_empty());

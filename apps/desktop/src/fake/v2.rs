@@ -337,6 +337,13 @@ impl V2Samples {
         Self::wrap(FakeProvider::new())
     }
 
+    /// The sample team whose 记得的事 and 团队约定 answer as `shape` (memory scenes).
+    pub fn with_memory(shape: super::memory::MemoryShape) -> Arc<Self> {
+        let inner = FakeProvider::new();
+        inner.set_memory_shape(shape);
+        Self::wrap(inner)
+    }
+
     /// The sample team over `inner` (for its session, drafts and settings).
     pub fn wrap(inner: Arc<FakeProvider>) -> Arc<Self> {
         Arc::new(Self {
@@ -1742,6 +1749,37 @@ impl ChatProvider for V2Samples {
     }
     fn side_chat_default_member(&self) -> Option<MemberId> {
         Some(JOJO.into())
+    }
+    fn memories(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> crate::data::AdminReply<Vec<crate::data::memory::Memory>> {
+        self.inner.memories(scope)
+    }
+    fn memory_updates(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> crate::data::AdminReply<crate::data::memory::MemoryDay> {
+        self.inner.memory_updates(scope)
+    }
+    fn create_memory(
+        &self,
+        new: crate::data::memory::NewMemory,
+    ) -> crate::data::AdminReply<crate::data::memory::Memory> {
+        self.inner.create_memory(new)
+    }
+    fn update_memory(
+        &self,
+        memory_id: &str,
+        edit: crate::data::memory::MemoryEdit,
+    ) -> crate::data::AdminReply<crate::data::memory::Memory> {
+        self.inner.update_memory(memory_id, edit)
+    }
+    fn undo_memory_update(
+        &self,
+        update_id: &str,
+    ) -> crate::data::AdminReply<crate::data::memory::MemoryUpdate> {
+        self.inner.undo_memory_update(update_id)
     }
     /// 需要你批准的事 of the samples: the team's rules (`GET /v1/settings/approvals`).
     fn approval_defaults(&self) -> crate::data::AdminReply<crate::data::ApprovalDefaults> {

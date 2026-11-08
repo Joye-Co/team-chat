@@ -187,6 +187,7 @@ crate::copy! {
     ERROR_TOO_LARGE = "文件太大",
     ERROR_RATE_LIMITED = "操作太频繁，请稍后再试",
     ERROR_OTHER = "出了点问题，请稍后再试",
+    ERROR_CONFLICT = "刚有人改过，请再看一眼",
     NOT_AVAILABLE_YET = "这项功能还没有接通",
 
     // --- v12/settings track: the native settings window (NATIVE.md §8) ---
