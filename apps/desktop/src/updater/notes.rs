@@ -461,67 +461,108 @@ pub fn open_notes(
     });
 }
 
-/// 「已更新到 {version}」: the headline, the first items in full and the
-/// rest as one line, with 更新记录 at the leading edge.
+/// 「已更新到 {version}」, laid out like the What's New sheet of Apple's own
+/// apps: the app icon and title centered, the first items as plain rows (a
+/// title over its text, no box), the rest as one line, one wide 好, and
+/// 查看全部更新记录 as a link under it.
 pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut App) {
-    open_sheet(place, SheetWidth::List, window, cx, move |dialog, _, cx| {
+    open_sheet(place, SheetWidth::Form, window, cx, move |dialog, _, cx| {
         let k = native_colors(cx);
-        let n = notes.count();
         let shown: Vec<&Item> = notes.items().take(HIGHLIGHTS).collect();
         let rest: Vec<&str> = notes.items().skip(HIGHLIGHTS).map(Item::name).collect();
-        let explanation = if n > HIGHLIGHTS {
-            fill(u::WHATS_NEW_SOME, &[("n", &n.to_string())])
-        } else {
-            fill(u::WHATS_NEW_ALL_SHOWN, &[("n", &n.to_string())])
-        };
-        let body = div()
+        let list = div()
             .w_full()
             .flex()
             .flex_col()
-            .gap(space::S16)
-            .when(!notes.headline.is_empty(), |d| {
-                d.child(
-                    div()
-                        .n_message()
-                        .text_color(k.label)
-                        .child(notes.headline.clone()),
-                )
-            })
-            .child(GroupedForm::new().rows(shown.into_iter().map(|it| item_row(it, cx))))
+            .gap(space::S20)
+            .children(shown.into_iter().map(|it| {
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .when_some(it.title.clone(), |d, t| {
+                        d.child(div().n_headline().text_color(k.label).child(t))
+                    })
+                    .when(!it.body.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .n_body()
+                                .text_color(if it.title.is_some() {
+                                    k.secondary
+                                } else {
+                                    k.label
+                                })
+                                .child(it.body.clone()),
+                        )
+                    })
+            }))
             .when(!rest.is_empty(), |d| {
                 d.child(
                     div()
-                        .px(space::S4)
-                        .n_body()
-                        .text_color(k.secondary)
+                        .n_footnote()
+                        .text_color(k.tertiary)
                         .child(fill(u::WHATS_NEW_MORE, &[("titles", &rest.join("、"))])),
                 )
             });
         dialog.on_ok(|_, _, _| true).child(
-            SheetLayout::new(fill(u::WHATS_NEW_TITLE, &[("version", version::CURRENT)]))
-                .explanation(explanation)
-                .body(scroll("whats-new", body))
-                .leading_button(
-                    push_button(
-                        "whats-new-all",
-                        u::CHANGELOG,
-                        PushStyle::Ghost,
-                        PushSize::Regular,
-                        cx,
+            div()
+                .w_full()
+                .px(space::S32)
+                .pt(space::S32)
+                .pb(space::S24)
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(crate::ui::native::overlays::app_icon(icon::APP))
+                .child(
+                    div()
+                        .pt(space::S12)
+                        .n_title2()
+                        .text_color(k.label)
+                        .child(fill(u::WHATS_NEW_TITLE, &[("version", version::CURRENT)])),
+                )
+                .when(!notes.headline.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .pt(space::S6)
+                            .w_full()
+                            .text_center()
+                            .n_body()
+                            .text_color(k.secondary)
+                            .child(notes.headline.clone()),
                     )
-                    .on_click(move |_, window, cx| {
-                        window.close_dialog(cx);
-                        window.defer(cx, move |window, cx| open_changelog(place, window, cx));
-                    }),
+                })
+                .child(div().pt(space::S24).w_full().child(scroll("whats-new", list)))
+                .child(
+                    div().pt(space::S32).w_full().child(
+                        push_button(
+                            "whats-new-ok",
+                            u::WHATS_NEW_OK,
+                            PushStyle::Default,
+                            PushSize::Large,
+                            cx,
+                        )
+                        .w_full()
+                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
                 )
-                .buttons([push_button(
-                    "whats-new-ok",
-                    u::WHATS_NEW_OK,
-                    PushStyle::Default,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(|_, window, cx| window.close_dialog(cx))]),
+                .child(
+                    div().pt(space::S8).child(
+                        push_button(
+                            "whats-new-all",
+                            u::WHATS_NEW_ALL,
+                            PushStyle::Link,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .text_color(k.secondary)
+                        .on_click(move |_, window, cx| {
+                            window.close_dialog(cx);
+                            window.defer(cx, move |window, cx| open_changelog(place, window, cx));
+                        }),
+                    ),
+                ),
         )
     });
 }
