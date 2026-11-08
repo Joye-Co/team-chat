@@ -25,6 +25,7 @@ pub mod files;
 pub mod http;
 mod http_ext;
 pub mod logging;
+pub mod memory;
 pub mod proto;
 pub mod runs;
 pub mod search;
@@ -43,6 +44,7 @@ pub use client_ext::{ArtifactFolder, CancelRun};
 pub use client_v11::{CardEventRequest, CardEventSent, SideChatRequest, SideChatStarted};
 pub use files::{Phase, Progress, ProgressFn, UploadRequest, no_progress};
 pub use http::{ApiError, HttpClient};
+pub use memory::MemoryStatusFilter;
 pub use runs::{ProcessItem, ProcessView, TerminalLine, terminal_lines};
 pub use search::SearchError;
 pub use store::{
