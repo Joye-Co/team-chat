@@ -31,6 +31,8 @@ crate::copy! {
     MUTED = "已静音",
     // the 提醒 submenu of a 群 or 私聊 (how this one conversation reminds me)
     NOTIFY_LEVEL = "提醒",
+    NOTIFY_DEFAULT = "默认",
+    TOPIC_DEFAULT_HINT = "有人 @我 时提醒你。",
     NOTIFY_ALL = "所有消息",
     NOTIFY_MENTIONS = "只有 @我",
     // the 通知 section of a 群 / 话题 page's right pane

@@ -7,7 +7,7 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    SharedString, Styled, Window, div, px,
+    SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 
 use gpui_component::menu::PopupMenu;
@@ -15,7 +15,7 @@ use gpui_component::menu::PopupMenu;
 use super::{RailView, modes::TopicItem};
 use crate::ui::native::{
     SidebarRow, SidebarSection,
-    sidebar::{RightColumn, RowMenu, SidebarMedia},
+    sidebar::{RowMenu, SidebarMedia},
 };
 
 /// A row's click handler.
@@ -80,23 +80,28 @@ impl RailView {
                     .provider
                     .topic_muted(&topic.group_id, &topic.id),
             );
-        // §2.1: inside one group every item has a 16 media or none has; the
-        // 话题 under a member (indented) get the 话题 symbol, as the member
-        // rows of that group have avatars.
-        row = if *indent > px(0.) {
-            row.symbol(crate::ui::sf_symbols::Sf::Group)
-        } else {
-            row.media_kind(SidebarMedia::None)
-        };
-        // §2.1, T-08: one right-column kind in a group. The state badge wins;
-        // an unread 话题 shows the unread dot by its title, never a count
-        // pill beside the badges.
-        row = row.right(if line.short.is_empty() {
-            RightColumn::None
-        } else {
-            RightColumn::Status(line.badge, line.short.clone().into())
-        });
-        let _ = cx;
+        // Owner decision (2026-11-08): one signal per row. The state is
+        // the 12 mark in the leading slot (等你, 在做, 失败, 等别人), its
+        // words in the tooltip; unread is the Semibold title alone.
+        let k = crate::ui::native::native_colors(cx);
+        let mark = (!line.short.is_empty())
+            .then(|| crate::ui::native::badge::state_mark(line.badge, &k))
+            .flatten()
+            .map(|mark| {
+                let words = SharedString::from(line.short.clone());
+                div()
+                    .id(SharedString::from(format!("rail-mark-{key}-{}", topic.id)))
+                    .child(mark)
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(words.clone()).build(window, cx)
+                    })
+            });
+        row = match mark {
+            Some(mark) => row.leading(mark),
+            None if *indent > px(0.) => row.symbol(crate::ui::sf_symbols::Sf::Group),
+            None => row,
+        }
+        .media_kind(SidebarMedia::Avatar);
         let (services, menu_topic) = (self.services.clone(), topic.clone());
         let row = row
             .on_click(move |_, _, cx| {

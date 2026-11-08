@@ -10,7 +10,7 @@
 mod account;
 pub mod ai_service;
 pub mod appearance;
-mod general;
+pub(crate) mod general;
 pub mod login_item;
 mod machines;
 mod members;

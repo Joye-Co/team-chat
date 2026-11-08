@@ -24,8 +24,8 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            BadgeState, NativeColors, NativeType as _, StatusBadge, ToolbarGroup, ToolbarItemKind,
-            metrics, tokens::space, toolbar_item,
+            BadgeState, NativeColors, NativeType as _, StatusBadge, ToolbarGroup, metrics,
+            tokens::space, toolbar_labeled_item,
         },
         sf_symbols::Sf,
     },
@@ -84,6 +84,17 @@ impl TitleButtonKind {
         }
     }
 
+    /// The word on the item (owner decision, 2026-11-08: toolbar items
+    /// carry their name, so nothing has to be guessed from a glyph). The
+    /// longer [`Self::name`] stays the tooltip and the VoiceOver label.
+    fn label(self) -> &'static str {
+        match self {
+            TitleButtonKind::Rail => c::TITLE_DETAILS,
+            TitleButtonKind::GroupTopics => c::TITLE_TOPICS_SHORT,
+            other => other.name(),
+        }
+    }
+
     fn slug(self) -> &'static str {
         match self {
             TitleButtonKind::SideChat => "side-chat",
@@ -96,12 +107,17 @@ impl TitleButtonKind {
         }
     }
 
-    /// The capsule group of the item: the panes of the 话题 share one, the
-    /// inspector toggle has its own at the trailing edge.
-    fn group(self) -> usize {
+    /// Where the item sits in the one row of toolbar items: 详情 first,
+    /// then the panes, then the 群's own actions.
+    fn order(self) -> usize {
         match self {
-            TitleButtonKind::Rail => 1,
-            _ => 0,
+            TitleButtonKind::Rail => 0,
+            TitleButtonKind::Outputs => 1,
+            TitleButtonKind::SideChat => 2,
+            TitleButtonKind::Changes => 3,
+            TitleButtonKind::Machine => 4,
+            TitleButtonKind::GroupTopics => 5,
+            TitleButtonKind::NewTopic => 6,
         }
     }
 }
@@ -182,7 +198,13 @@ pub fn subtitle(spec: &TitleBarSpec, _k: &NativeColors) -> Option<Subtitle> {
         }
         text.push_str(part);
     };
-    if let Some(crumb) = spec.breadcrumb.as_deref().filter(|c| !c.is_empty()) {
+    // A 话题's 群 leads the title as a path (`产品研发 › 话题`), not the
+    // subtitle.
+    if let Some(crumb) = spec
+        .breadcrumb
+        .as_deref()
+        .filter(|c| !c.is_empty() && spec.style != TitleStyle::Topic)
+    {
         push(crumb, &mut text);
     }
     let state = spec
@@ -203,14 +225,16 @@ pub fn subtitle(spec: &TitleBarSpec, _k: &NativeColors) -> Option<Subtitle> {
     })
 }
 
+/// The toolbar items in one row (no capsules, no separator), 详情 first.
 pub fn groups(spec: &TitleBarSpec) -> Vec<Vec<TitleButtonKind>> {
-    let mut out: Vec<Vec<TitleButtonKind>> = vec![Vec::new(), Vec::new()];
-    for b in &spec.buttons {
-        out[b.kind.group()].push(b.kind);
+    let mut items: Vec<TitleButtonKind> = spec.buttons.iter().map(|b| b.kind).collect();
+    items.sort_by_key(|k| k.order());
+    items.dedup();
+    if items.is_empty() {
+        Vec::new()
+    } else {
+        vec![items]
     }
-    out.retain(|g| !g.is_empty());
-    out.truncate(3);
-    out
 }
 
 /// The title over the subtitle. `title` and `subtitle` receive the text
@@ -221,7 +245,7 @@ fn heading(
     window: &mut Window,
     cx: &App,
 ) -> (AnyElement, TextLayout, Option<TextLayout>) {
-    heading_with(spec, None, active, window, cx)
+    heading_with(spec, None, None, active, window, cx)
 }
 
 // --- v12/fx-shell: the connection state in the subtitle ---
@@ -268,6 +292,7 @@ const BADGE_MAX: Pixels = px(240.);
 fn heading_with(
     spec: &TitleBarSpec,
     over: Option<Subtitle>,
+    nav: Option<gpui::Entity<crate::app::Navigation>>,
     active: bool,
     window: &mut Window,
     cx: &App,
@@ -331,6 +356,49 @@ fn heading_with(
             }));
         (line, layout)
     });
+    // The 群 of a 话题 before its title, `产品研发 ›`, in `secondary`; a
+    // click opens the 群.
+    let crumb = spec
+        .breadcrumb
+        .clone()
+        .filter(|c| !c.is_empty() && spec.style == TitleStyle::Topic)
+        .map(|crumb| {
+            let nav = nav.clone();
+            div()
+                .id("toolbar-crumb")
+                .flex_none()
+                .max_w(px(160.))
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .mr(-space::S4)
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(move |_, _, cx| {
+                    if let Some(nav) = nav.clone() {
+                        nav.update(cx, |nav, cx| {
+                            if let Some(g) = nav.current_group() {
+                                nav.open_group_chat(g, cx);
+                            }
+                        });
+                    }
+                })
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .n_body()
+                        .text_color(k.secondary)
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(crumb),
+                )
+                .child(div().flex_none().child(ui::sym(
+                    Sym::ChevronRight,
+                    ui::SymSize::INLINE_SMALL,
+                    k.secondary,
+                )))
+        });
     let _ = window;
     let (sub_el, sub_layout) = match sub {
         Some((el, layout)) => (Some(el), Some(layout)),
@@ -345,6 +413,7 @@ fn heading_with(
         .flex()
         .items_center()
         .gap(space::S12)
+        .children(crumb)
         .child(
             div()
                 .flex_shrink_0()
@@ -380,7 +449,7 @@ pub fn render(
     let over = (signed_in && spec.state.is_none())
         .then(|| connection_subtitle(services.provider.connection(), &k))
         .flatten();
-    let (heading, _, _) = heading_with(spec, over, active, window, cx);
+    let (heading, _, _) = heading_with(spec, over, Some(services.nav.clone()), active, window, cx);
     let mut row = div()
         .id("toolbar-row")
         .flex_none()
@@ -404,18 +473,7 @@ pub fn render(
             }
         })
         .child(heading);
-    for (gix, group) in groups(spec).into_iter().enumerate() {
-        // §2.2: a vertical separator h16, mx 8, before the right-pane toggle.
-        if gix > 0 {
-            row = row.child(
-                div()
-                    .flex_none()
-                    .mx(space::S8)
-                    .w(px(1.))
-                    .h(ui::native::tokens::icon::MD)
-                    .bg(k.separator),
-            );
-        }
+    for group in groups(spec) {
         let items: Vec<gpui_component::button::Button> = group
             .into_iter()
             .filter_map(|kind| spec.buttons.iter().find(|b| b.kind == kind))
@@ -424,15 +482,12 @@ pub fn render(
                 let pane = b.pane.clone();
                 let kind = b.kind;
                 let nav = services.nav.clone();
-                toolbar_item(
+                toolbar_labeled_item(
                     gpui::SharedString::from(format!("toolbar-{}", b.kind.slug())),
                     b.kind.symbol(),
+                    b.kind.label(),
                     b.kind.name(),
-                    if shown {
-                        ToolbarItemKind::Toggled
-                    } else {
-                        ToolbarItemKind::Plain
-                    },
+                    shown,
                     active,
                     window,
                     cx,
@@ -490,7 +545,8 @@ mod tests {
         let k = NativeColors::dark();
         let s = subtitle(&live(), &k).expect("a subtitle");
         // §2.2: the state is a StatusBadge, not colored text in the line.
-        assert_eq!(s.text, "开发 · 跑一万条消息的压测");
+        // The 群 leads the title as a path, not the subtitle.
+        assert_eq!(s.text, "跑一万条消息的压测");
         assert_eq!(
             s.state,
             Some(("Forge 在做 3/5".to_string(), BadgeState::Working))
@@ -502,7 +558,7 @@ mod tests {
             ..live()
         };
         let s = subtitle(&you, &k).unwrap();
-        assert_eq!(s.text, "开发");
+        assert_eq!(s.text, "");
         assert_eq!(s.state.unwrap().1, BadgeState::NeedsYou);
         // Waiting on someone else: the queued clock.
         let quiet = TitleBarSpec {
@@ -542,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn the_panes_share_a_capsule_and_the_inspector_has_its_own() {
+    fn the_items_share_one_row_with_details_first() {
         let b = |kind| TitleButton::of(kind, RightPane::TopicRail);
         let spec = TitleBarSpec {
             buttons: vec![
@@ -555,10 +611,10 @@ mod tests {
             ..live()
         };
         let g = groups(&spec);
-        assert!(g.len() <= 3);
-        assert_eq!(g.len(), 2);
-        assert_eq!(g[1], vec![TitleButtonKind::Rail]);
-        assert_eq!(g[0].len(), 4);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0][0], TitleButtonKind::Rail);
+        assert_eq!(g[0][1], TitleButtonKind::Outputs);
+        assert_eq!(g[0].len(), 5);
         assert!(groups(&TitleBarSpec::page("成员")).is_empty());
     }
 

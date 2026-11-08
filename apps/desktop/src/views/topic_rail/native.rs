@@ -30,7 +30,6 @@ use crate::{
 };
 
 /// The sections, for their collapsed state.
-pub(super) const STATUS: &str = "status";
 pub(super) const OWNER: &str = "owner";
 pub(super) const PLAN: &str = "plan";
 pub(super) const CHANGES: &str = "changes";
@@ -45,8 +44,9 @@ fn mark(sym: Sym, color: Hsla) -> AnyElement {
 }
 
 /// The room of a person value in the inspector: the 320 pane less its
-/// px 16, the 112 label column, its gap, and the avatar 16 with its gap 8.
-const VALUE_ROOM: f32 = 320. - 32. - 112. - 8. - 24.;
+/// px 16, the group's px 14, the 112 label column, its gap, and the avatar
+/// 16 with its gap 8.
+const VALUE_ROOM: f32 = 320. - 32. - 28. - 112. - 8. - 24.;
 /// A time after the person (`提出 … 09:30`) and its gap.
 const TAIL_ROOM: f32 = 48.;
 
@@ -90,6 +90,7 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> InspectorSection {
         InspectorSection::new(ElementId::Name(format!("rail-{key}").into()), title)
+            .grouped()
             .collapsed(self.collapsed.contains(key))
             .on_toggle(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if !this.collapsed.remove(key) {
@@ -117,7 +118,9 @@ impl TopicRail {
 
     /// 状态: the one state of the 话题 (`topic_page::topic_state`, the same
     /// words as the title bar and the sidebar) as a StatusBadge, and the
-    /// step a member is on under it. Always shown, first.
+    /// step a member is on under it, on a group fill with no header (it is
+    /// what the 话题 is doing now). The step wraps: the pane never scrolls
+    /// sideways.
     pub(super) fn native_status(&self, d: &Data, cx: &mut Context<Self>) -> AnyElement {
         let k = native_colors(cx);
         let (badge, text, detail) = match d.state.as_ref() {
@@ -128,20 +131,33 @@ impl TopicRail {
                 None,
             ),
         };
-        let mut section = self
-            .section(STATUS, c::INSPECTOR_STATE, cx)
-            .row(row(cx).child(StatusBadge::new(badge, text).max_w(px(288.))));
-        if let Some(step) = detail {
-            section = section.row(
+        div()
+            .id("rail-status")
+            .w_full()
+            .min_w(px(0.))
+            .rounded(ui::native::metrics::GROUP_RADIUS)
+            .bg(k.group)
+            .px(px(14.))
+            .py(px(12.))
+            .flex()
+            .flex_col()
+            .gap(space::S8)
+            .child(
                 div()
+                    .flex()
+                    .child(StatusBadge::new(badge, text).max_w(px(260.))),
+            )
+            .children(detail.map(|step| {
+                div()
+                    .id("rail-state-detail")
                     .w_full()
-                    .pt(space::S4)
+                    .min_w(px(0.))
                     .n_body()
-                    .text_color(k.secondary)
-                    .child(crate::ui::truncate::TruncText::new(step).id("rail-state-detail")),
-            );
-        }
-        section.into_any_element()
+                    .text_color(k.label)
+                    .whitespace_normal()
+                    .child(step)
+            }))
+            .into_any_element()
     }
 
     /// A section with no data (§2.13 compact Empty): its header and one

@@ -445,6 +445,14 @@ pub enum Finish {
     NotForMe,
 }
 
+/// The version a pending update marker names, if one is there and readable.
+pub fn marker_version(marker_path: &Path) -> Option<String> {
+    let bytes = std::fs::read(marker_path).ok()?;
+    serde_json::from_slice::<Marker>(&bytes)
+        .ok()
+        .map(|m| m.version)
+}
+
 /// Runs in the new process at start: when the marker names this bundle and version,
 /// removes the old bundle and the marker. Also removes staging folders left by an
 /// install that stopped half way.

@@ -3,6 +3,8 @@
 //! PRODUCT_STAGING_URL and PRODUCT_PRODUCTION_URL (empty when not set yet).
 //! It also writes `character_assets.rs`: the bundled character SVGs (assets/characters/) as an
 //! embedded table that `src/characters/assets.rs` serves through the app's asset source.
+//! And it writes `release_notes.rs`: every `docs/releases/<version>.md`, newest first, which
+//! the 更新记录 and the 更新后 sheet of `src/updater/notes.rs` read without a network.
 
 use std::{env, fs, path::PathBuf};
 
@@ -31,6 +33,38 @@ fn main() {
         println!("cargo:rustc-env={var}={value}");
     }
     embed_characters(&manifest);
+    embed_release_notes(&manifest);
+}
+
+/// `(version, text)` for every `docs/releases/<MAJOR.MINOR.PATCH>.md`, newest first.
+fn embed_release_notes(manifest: &std::path::Path) {
+    let root = manifest.join("../../docs/releases");
+    println!("cargo:rerun-if-changed={}", root.display());
+    let mut notes = Vec::new();
+    if let Ok(dir) = fs::read_dir(&root) {
+        for file in dir.flatten() {
+            let path = file.path();
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let parts: Vec<u64> = stem.split('.').filter_map(|p| p.parse().ok()).collect();
+            if path.extension().is_some_and(|e| e == "md") && parts.len() == 3 {
+                println!("cargo:rerun-if-changed={}", path.display());
+                notes.push(((parts[0], parts[1], parts[2]), stem.to_string(), path));
+            }
+        }
+    }
+    notes.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out = String::from("pub static RELEASES: &[(&str, &str)] = &[\n");
+    for (_, version, path) in &notes {
+        out.push_str(&format!(
+            "    ({version:?}, include_str!({:?})),\n",
+            path.display().to_string()
+        ));
+    }
+    out.push_str("];\n");
+    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("release_notes.rs");
+    fs::write(dest, out).expect("write release_notes.rs");
 }
 
 /// `(asset path, bytes)` for every `assets/characters/<id>/<status>-<px>.svg`, sorted by path.
