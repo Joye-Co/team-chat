@@ -1733,6 +1733,12 @@ pub trait ChatProvider: Send + Sync + 'static {
         let _ = tx.send(Err(RunLoadError::Unavailable));
         rx
     }
+    /// Saves what a run's prompt carried (owners only) into `dir` as text.
+    fn download_run_context(&self, _run_id: &str, _dir: PathBuf) -> SessionDownload {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(Err(RunLoadError::Unavailable));
+        rx
+    }
 
     // --- settings window (all have defaults, so providers can add them later) ---
 
