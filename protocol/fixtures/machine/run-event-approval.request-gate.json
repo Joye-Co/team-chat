@@ -1,0 +1,13 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "description": "the daemon stopped a gated command",
+  "value": {
+    "type": "approval.request",
+    "approvalId": "daemon-gate-1",
+    "title": "合并到 main",
+    "detail": "gh pr merge 12 --squash",
+    "kind": "mergeMain",
+    "command": "gh pr merge 12 --squash"
+  }
+}

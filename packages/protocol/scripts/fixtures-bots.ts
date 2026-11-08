@@ -166,7 +166,12 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/set-bot-runner-request-effort-clear.json", "SetBotRunnerRequest", { runtime: "claude", effort: null }, "null clears the effort");
   bad("http/set-bot-runner-request-bad-effort.json", "SetBotRunnerRequest", { runtime: "claude", effort: "" }, "effort is not empty");
   ok("http/bot-runner-effort.json", "BotRunner", { botId: ID.bot, runtime: "claude", labels: [], model: "opus", effort: "high", envAllowlist: [], enabled: true, updatedAt: T0 });
-  ok("http/create-machine-request.json", "CreateMachineRequest", { name: "mac-mini", labels: ["mac", "main"] });
+  // Gated actions (feature "gates")
+  ok("entities/machine-gates.json", "Machine", { ...machine, features: ["effort", "gates"], clis: [codexCli, { ...claudeCli, gates: true }] }, "Claude Code runs stop at gated commands, Codex runs do not");
+  const gated = { t: "run.assign", runId: "r1", botMemberId: ID.bot, groupId: ID.general, topicId: ID.topic, runtime: "claude", prompt: "合并 PR 12", envAllowlist: [], leaseMs: 600_000 };
+  ok("machine/down-run.assign-gates.json", "MachineDownFrame", { ...gated, gates: [{ kind: "mergeMain", patterns: ["\\bgh pr merge\\b"] }, { kind: "deployProd", patterns: ["\\bfly(ctl)? deploy\\b", "\\bdeploy-prod\\.sh\\b"] }] }, "the team's active kinds with their patterns");
+  ok("machine/run-event-approval.request-gate.json", "RunEvent", { type: "approval.request", approvalId: "daemon-gate-1", title: "合并到 main", detail: "gh pr merge 12 --squash", kind: "mergeMain", command: "gh pr merge 12 --squash" }, "the daemon stopped a gated command");
+  ok("machine/down-run.approval-scope-run.json", "MachineDownFrame", { t: "run.approval", runId: "r1", approvalId: "daemon-gate-1", decision: "approve", scope: "run" }, "这件事里都同意");  ok("http/create-machine-request.json", "CreateMachineRequest", { name: "mac-mini", labels: ["mac", "main"] });
   bad("http/create-machine-request-bad-label.json", "CreateMachineRequest", { name: "mac-mini", labels: ["has space"] }, "label with a space");
   ok("http/create-machine-response.json", "CreateMachineResponse", { machine: offline, token: "tm_MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM" }, "token is a fake placeholder");
   ok("http/machines-response.json", "MachinesResponse", [machine, { ...offline, revoked: true }]);

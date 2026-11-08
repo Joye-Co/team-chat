@@ -1,0 +1,12 @@
+{
+  "kind": "UpdateApprovalPolicyRequest",
+  "valid": false,
+  "description": "a pattern is at most 200 characters",
+  "value": {
+    "patterns": {
+      "deleteData": [
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    }
+  }
+}

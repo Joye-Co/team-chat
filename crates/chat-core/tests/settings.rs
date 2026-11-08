@@ -108,6 +108,7 @@ async fn notify_settings_approval_rules_and_devices_over_http() {
         }),
         max_spend_cny: Some(None),
         approver: Some(Approver::Owners),
+        ..Default::default()
     };
     let p = client
         .update_approval_policy(up.clone())

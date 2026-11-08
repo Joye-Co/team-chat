@@ -1638,8 +1638,15 @@ ApprovalActions = { mergeMain, deployProd, prodConfig, deleteData, externalPubli
 ApprovalPolicy = { askBefore: ApprovalActions,
                    maxSpendCny: number | null,   // 单次花费超过, whole yuan 1..1000000; null = 不限; default 50
                    approver: "owners" | "requester", // who approves; default "requester"; open: Rust reads unknown as Unknown
-                   updatedAt: number }           // 0 = never changed
-UpdateApprovalPolicyRequest = { askBefore?: Partial<ApprovalActions>, maxSpendCny?: number | null, approver? }
+                   updatedAt: number,            // 0 = never changed
+                   patterns?: ApprovalPatterns,  // M4: the team's own matching rules; absent = none
+                   approvers?: ApprovalApprovers } // M4: who approves each kind; absent = approver
+GateKind = "mergeMain" | "deployProd" | "prodConfig" | "deleteData" | "externalPublish"  // the ApprovalActions keys
+ApprovalPatterns = { [k in GateKind]?: string[] }   // <= 20 per kind, each 1..200 characters
+ApprovalApprovers = { [k in GateKind]?: "owners" | "requester" }
+UpdateApprovalPolicyRequest = { askBefore?: Partial<ApprovalActions>, maxSpendCny?: number | null, approver?,
+                                patterns?: ApprovalPatterns,   // replaces the kinds given; [] clears one
+                                approvers?: ApprovalApprovers } // sets the kinds given
 ```
 
 | Method and path | Who | Body | Response |
@@ -1655,8 +1662,52 @@ Rules:
   wait. With `approver: "owners"`, only owners answer the run's approvals (card or 同意/拒绝),
   and the approval card mentions and waits on the active human owners in the group instead of
   the requester. With `"requester"` the released rule stays: the requester or an owner.
-- The server cannot tell which action an approval is for, so `approver` is one value for all
-  actions.
+- An approval without a kind (a CLI's own question, `chat-run secret`) is answered as above,
+  by `approver`.
+
+### Gated actions (M4, 要批准的动作)
+
+AI members run with every permission. Only the kinds checked in `askBefore` need a person, and
+only at the moment a command would run: the machine stops the command and asks
+(machine-protocol.md, "Gated actions"). Nothing else is stopped and no other card is shown.
+
+- A run whose machine has feature `gates` and whose CLI reports `gates: true` gets
+  `run.assign.gates`: each checked kind with the default patterns below and the team's own
+  `patterns` of that kind. Side chat runs get none. The run's prompt then says that the machine
+  asks for these and the CLI should ask in the topic only when it does such an action another
+  way (an API call, a web page) or spends over `maxSpendCny`. A run on a CLI that cannot stop
+  commands (Codex today) keeps the plain "Team rule" paragraph. A queued run gets the gated
+  wording only when every machine with its runtime stops commands.
+- Patterns are regular expressions matched case-insensitively against each simple command of a
+  shell line (split at newlines, `;`, `&&`, `||`, `|`; whitespace runs count as one space), and
+  against `<tool name> <input JSON>` of MCP tool calls. `PATCH` rejects a pattern that
+  JavaScript cannot compile or that uses lookaround, backreferences or possessive forms (Rust's
+  `regex` on the daemon does not have them). They are meant to be few and sure: a wrong match is
+  a useless card; GitHub branch protection and approval-gated deploy environments catch the rest.
+- Default patterns (`DEFAULT_GATE_PATTERNS` in `packages/protocol`):
+
+  | Kind | Matches |
+  | --- | --- |
+  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
+  | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
+  | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
+  | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
+  | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
+
+  A force push to a work branch is not gated (the agent rebases its own PR branch); a force push
+  to `main` is `mergeMain`. A plain `git push` while `main` is checked out is not seen.
+- The daemon's `approval.request` carries `kind` and `command` (redacted). BotDesk posts the
+  approval card titled `需要你确认：<kind's 设置 name>` with the command, mentions the kind's
+  approver (`approvers[kind]`, else `approver`) and has three actions: 同意 (`approve:<id>`),
+  这件事里都同意 (`approveall:<id>`) and 拒绝 (`deny:<id>`). Only that approver (or an owner)
+  answers, by card or by text (同意 / 拒绝 / 这件事里都同意 or 都同意).
+- 这件事里都同意 answers `run.approval { decision: "approve", scope: "run" }`: the daemon lets
+  later matches of that kind in the run pass, and BotDesk adds the kind to the run's request
+  (`approvedGates`), which follow-up runs and retries of it inherit; their `run.assign.gates`
+  leave the kind out. A new request starts with every kind gated again.
+- Approve lets the command run; deny blocks it and the CLI reads that a person declined and
+  should do the rest another way. While the command waits the run is `waiting` and the topic
+  `waiting_answer`, neither is marked stuck, and `run.cancel` ends the wait.
 
 ## AI 服务 (the team's model provider)
 

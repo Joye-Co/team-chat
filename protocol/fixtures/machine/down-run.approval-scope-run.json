@@ -1,0 +1,12 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "这件事里都同意",
+  "value": {
+    "t": "run.approval",
+    "runId": "r1",
+    "approvalId": "daemon-gate-1",
+    "decision": "approve",
+    "scope": "run"
+  }
+}

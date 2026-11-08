@@ -31,6 +31,21 @@ pub mod feature {
     pub const CONTEXT: &str = "context";
     /// `CliInfo.models` / `efforts` and `run.assign.effort`.
     pub const EFFORT: &str = "effort";
+    /// `run.assign.gates`, `CliInfo.gates`, `approval.request.kind`/`command` and
+    /// `run.approval.scope`: the run stops at gated commands for a person's approval.
+    pub const GATES: &str = "gates";
+}
+
+/// `run.approval.scope = "run"` (这件事里都同意): later matches of the same kind in the run pass.
+pub const APPROVAL_SCOPE_RUN: &str = "run";
+
+/// One gated action kind of a run (feature "gates"): before a tool runs a shell command that a
+/// pattern matches (case-insensitive regex), the daemon asks for approval and waits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGate {
+    pub kind: String,
+    pub patterns: Vec<String>,
 }
 
 /// A model a CLI can run (machine-protocol.md, "Models and effort").
@@ -85,6 +100,9 @@ pub struct CliInfo {
     /// Efforts the CLI takes (feature "effort").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub efforts: Option<Vec<String>>,
+    /// Feature "gates": runs of this CLI stop at `run.assign.gates` matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gates: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -166,6 +184,9 @@ pub struct RunAssign {
     /// 1.1 (feature "resume"): the CLI session of the topic's last run on this machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_session_id: Option<String>,
+    /// Feature "gates": the action kinds the run stops at for a person's approval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gates: Option<Vec<RunGate>>,
 }
 
 /// A Card v2 answer given to a run (`run.input.answer`).
@@ -435,6 +456,12 @@ pub enum RunEvent {
         title: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
+        /// Feature "gates": the gate kind the command matched.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        /// Feature "gates": the command the CLI was about to run (redacted).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
     },
     #[serde(rename = "approval.resolved", rename_all = "camelCase")]
     ApprovalResolved {
@@ -623,6 +650,9 @@ pub enum Down {
         approval_id: String,
         /// "approve" | "deny"
         decision: String,
+        /// Feature "gates": "run" = 这件事里都同意 ([`APPROVAL_SCOPE_RUN`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
     },
     #[serde(rename = "run.cancel", rename_all = "camelCase")]
     RunCancel {

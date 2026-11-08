@@ -341,6 +341,92 @@ fn check_spend(v: Option<u32>) -> Validation {
     }
 }
 
+/// The action kinds the machine stops at for approval (the [`ApprovalActions`] keys).
+pub const GATE_KINDS: [&str; 5] = [
+    "mergeMain",
+    "deployProd",
+    "prodConfig",
+    "deleteData",
+    "externalPublish",
+];
+/// Longest team pattern.
+pub const MAX_GATE_PATTERN_CHARS: usize = 200;
+/// Most team patterns per kind.
+pub const MAX_GATE_PATTERNS: usize = 20;
+
+/// One value per action kind (patterns, approvers); a kind left out is `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de>")
+)]
+pub struct PerAction<T> {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub merge_main: Option<T>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub deploy_prod: Option<T>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prod_config: Option<T>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub delete_data: Option<T>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub external_publish: Option<T>,
+}
+
+impl<T> PerAction<T> {
+    /// The values with their kind names ([`GATE_KINDS`] order).
+    pub fn entries(&self) -> [(&'static str, Option<&T>); 5] {
+        [
+            ("mergeMain", self.merge_main.as_ref()),
+            ("deployProd", self.deploy_prod.as_ref()),
+            ("prodConfig", self.prod_config.as_ref()),
+            ("deleteData", self.delete_data.as_ref()),
+            ("externalPublish", self.external_publish.as_ref()),
+        ]
+    }
+}
+
+/// The team's own patterns per kind (团队自己的匹配规则), added to the server's defaults.
+pub type ApprovalPatterns = PerAction<Vec<String>>;
+/// Who approves each kind (每类的批准人); a kind left out uses `approver`.
+pub type ApprovalApprovers = PerAction<Approver>;
+
+fn check_patterns(p: Option<&ApprovalPatterns>) -> Validation {
+    for (_, list) in p.map(|p| p.entries()).into_iter().flatten() {
+        let Some(list) = list else { continue };
+        if list.len() > MAX_GATE_PATTERNS {
+            return invalid("patterns", "at most 20 per kind");
+        }
+        if list
+            .iter()
+            .any(|x| x.is_empty() || x.chars().count() > MAX_GATE_PATTERN_CHARS)
+        {
+            return invalid("patterns", "1..200 characters");
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalPolicy {
@@ -350,6 +436,20 @@ pub struct ApprovalPolicy {
     pub approver: Approver,
     /// 0 = never changed.
     pub updated_at: Millis,
+    /// The team's own patterns per kind; `None` = none.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub patterns: Option<ApprovalPatterns>,
+    /// Who approves each kind; `None` or a kind left out = `approver`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub approvers: Option<ApprovalApprovers>,
 }
 
 impl Default for ApprovalPolicy {
@@ -359,13 +459,25 @@ impl Default for ApprovalPolicy {
             max_spend_cny: Some(50),
             approver: Approver::Requester,
             updated_at: 0,
+            patterns: None,
+            approvers: None,
         }
     }
 }
 
 impl ApprovalPolicy {
     pub fn validate(&self) -> Validation {
-        check_spend(self.max_spend_cny)
+        check_spend(self.max_spend_cny)?;
+        check_patterns(self.patterns.as_ref())
+    }
+
+    /// Who approves `kind` (a [`GATE_KINDS`] name): its own approver, else `approver`.
+    pub fn approver_of(&self, kind: &str) -> Approver {
+        self.approvers
+            .as_ref()
+            .and_then(|a| a.entries().into_iter().find(|(k, _)| *k == kind))
+            .and_then(|(_, v)| v.copied())
+            .unwrap_or(self.approver)
     }
 }
 
@@ -427,6 +539,20 @@ pub struct UpdateApprovalPolicyRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub approver: Option<Approver>,
+    /// Replaces the team patterns of each kind given (`[]` clears that kind).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub patterns: Option<ApprovalPatterns>,
+    /// Sets the approver of each kind given.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub approvers: Option<ApprovalApprovers>,
 }
 
 impl UpdateApprovalPolicyRequest {
@@ -434,7 +560,7 @@ impl UpdateApprovalPolicyRequest {
         if let Some(v) = self.max_spend_cny {
             check_spend(v)?;
         }
-        Ok(())
+        check_patterns(self.patterns.as_ref())
     }
 }
 
@@ -741,5 +867,26 @@ mod tests {
             serde_json::to_string(&o).unwrap(),
             r#"{"maxSpendCny":null}"#
         );
+    }
+
+    #[test]
+    fn approver_per_kind_falls_back_to_the_team_approver() {
+        let p: ApprovalPolicy = serde_json::from_str(
+            r#"{"askBefore":{"mergeMain":true,"deployProd":true,"prodConfig":true,"deleteData":true,"externalPublish":true},
+                "maxSpendCny":50,"approver":"requester","updatedAt":0,
+                "patterns":{"deployProd":["\\bdeploy\\.sh\\b"]},"approvers":{"deployProd":"owners"}}"#,
+        )
+        .unwrap();
+        assert!(p.validate().is_ok());
+        assert_eq!(p.approver_of("deployProd"), Approver::Owners);
+        assert_eq!(p.approver_of("mergeMain"), Approver::Requester);
+        let long = UpdateApprovalPolicyRequest {
+            patterns: Some(ApprovalPatterns {
+                merge_main: Some(vec!["x".repeat(201)]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(long.validate().is_err());
     }
 }

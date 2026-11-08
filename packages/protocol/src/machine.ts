@@ -19,7 +19,7 @@ export const Labels = z.array(Label).max(MAX_LABELS);
 export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
-export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort"] as const;
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort", "gates"] as const;
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -68,6 +68,8 @@ export const CliInfo = z.object({
   models: z.array(CliModel).max(MAX_CLI_MODELS).optional(),
   /** Efforts the CLI takes (feature "effort"); absent or empty = no effort setting. */
   efforts: z.array(Effort).max(MAX_EFFORTS).optional(),
+  /** Feature "gates": runs of this CLI stop at `run.assign.gates` matches; absent = they cannot. */
+  gates: z.boolean().optional(),
 });
 export type CliInfo = z.infer<typeof CliInfo>;
 
@@ -171,6 +173,10 @@ export const RunEvent = z.discriminatedUnion("type", [
     itemId: z.string().optional(),
     title: z.string(),
     detail: z.string().optional(),
+    /** Feature "gates": the gate kind the command matched (`RunGate.kind`). */
+    kind: z.string().min(1).max(32).optional(),
+    /** Feature "gates": the command the CLI was about to run (redacted, <= 4000). */
+    command: z.string().max(4000).optional(),
   }),
   z.object({ type: z.literal("approval.resolved"), approvalId: z.string().min(1), decision: z.enum(["approve", "deny"]) }),
   z.object({ type: z.literal("input.accepted"), inputId: z.string().min(1) }),
@@ -259,6 +265,18 @@ export type MachineUpFrame = z.infer<typeof MachineUpFrame>;
 // Server to daemon
 // ---------------------------------------------------------------------------
 
+/**
+ * One gated action kind of a run (feature "gates"): before a tool runs a shell command that a
+ * pattern matches (case-insensitive regex, the subset JavaScript and Rust share), the daemon asks
+ * for approval (`approval.request` with this `kind`) and waits.
+ */
+export const RunGate = z.object({
+  kind: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,31}$/),
+  patterns: z.array(z.string().min(1).max(200)).min(1).max(64),
+});
+export type RunGate = z.infer<typeof RunGate>;
+export const MAX_RUN_GATES = 16;
+
 export const RunAssignFrame = z.object({
   t: z.literal("run.assign"),
   runId: RunId,
@@ -279,6 +297,8 @@ export const RunAssignFrame = z.object({
   kind: z.string().min(1).max(32).optional(),
   /** 1.1 (feature "resume"): the CLI session of the topic's last run on this machine, to continue. */
   resumeSessionId: z.string().min(1).max(128).optional(),
+  /** Feature "gates": the action kinds the run stops at for a person's approval. */
+  gates: z.array(RunGate).max(MAX_RUN_GATES).optional(),
 });
 export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
 
@@ -385,7 +405,14 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     /** 1.1 (feature "answer"): an event from an interactive 产出 page. */
     artifactEvent: RunArtifactEvent.optional(),
   }),
-  z.object({ t: z.literal("run.approval"), runId: RunId, approvalId: z.string().min(1), decision: z.enum(["approve", "deny"]) }),
+  z.object({
+    t: z.literal("run.approval"),
+    runId: RunId,
+    approvalId: z.string().min(1),
+    decision: z.enum(["approve", "deny"]),
+    /** Feature "gates": "run" = 这件事里都同意, later matches of the same kind in this run pass. */
+    scope: z.enum(["run"]).optional(),
+  }),
   z.object({ t: z.literal("run.cancel"), runId: RunId, reason: z.string().optional() }),
   /** 1.1 (feature "pause"): stop the CLI (SIGSTOP of its process group) for 接管; deadlines stop too. */
   z.object({ t: z.literal("run.pause"), runId: RunId, by: Id.optional() }),
