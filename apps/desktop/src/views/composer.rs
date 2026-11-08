@@ -1273,8 +1273,11 @@ impl ComposerView {
             .child(ui::sym(glyph, ui::SymSize::INLINE_SMALL, k.secondary))
             .child(div().min_w(px(0.)).one_line().child(text))
             .child(
+                // The kit's square is 32; inside the 24 chip the hover must
+                // stay a 20 square, 2 in from the chip's edge.
                 ui::native::icon_button_bare(id, Sym::Close, ui::native::IconSize::Regular)
                     .with_size(px(20.))
+                    .size(px(20.))
                     .rounded(crate::ui::native::tokens::radius::ITEM)
                     .icon(ui::button_glyph(Sym::Close, px(11.), px(20.)))
                     .named(c::REMOVE)
