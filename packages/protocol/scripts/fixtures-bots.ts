@@ -142,6 +142,7 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("entities/machine-never-connected.json", "Machine", offline, "made, daemon never connected");
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
+  ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);
   ok("http/front-desk-decisions-response.json", "FrontDeskDecisionsResponse", { decisions: [decision, { ...decision, action: "reply", reason: "a greeting", brief: undefined, reply: "你好", replyMessageId: ID.msg2 }] });
   ok("http/front-desk-decisions-response-fallback.json", "FrontDeskDecisionsResponse", { decisions: [{ ...decision, confidence: 0.5, reason: "", brief: undefined, fallback: "model error: 500 overloaded" }] }, "the model failed: the request became a run");
   bad("http/front-desk-decisions-response-bad-action.json", "FrontDeskDecisionsResponse", { decisions: [{ ...decision, action: "escalate" }] }, "unknown action");
