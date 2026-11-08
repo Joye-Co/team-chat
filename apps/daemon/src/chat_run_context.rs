@@ -13,9 +13,6 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-/// The `hello.machine.features` name of these ops.
-pub const FEATURE: &str = "context";
-
 pub const TOPIC_HISTORY: &str = "topic.history";
 pub const TOPIC_MESSAGE: &str = "topic.message";
 pub const CONTEXT_SEARCH: &str = "context.search";

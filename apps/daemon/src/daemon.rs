@@ -33,7 +33,7 @@ pub const FEATURES: &[&str] = &[
     feature::INTERACT,
     feature::OUTPUT,
     feature::RESUME,
-    crate::chat_run_context::FEATURE,
+    feature::CONTEXT,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).
