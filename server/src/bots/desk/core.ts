@@ -100,6 +100,17 @@ export type RunRow = {
   context_seq: number | null;
   /** 1: the run must start a new CLI session (a new request in the 群聊). */
   fresh: number;
+  // desk-10-supervise (盯活, agent/supervise.ts)
+  /** Times the desk fixed this piece of work by itself (carried over to a restarted run). */
+  interventions: number;
+  /** Tool calls the run made. */
+  tool_calls: number;
+  /** 1 after the silence nudge; progress clears it. */
+  nudged: number;
+  loop_key: string | null;
+  loop_count: number;
+  /** Runs in a row the desk continued because the CLI only promised work. */
+  auto_continues: number;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -357,6 +368,26 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
               at INTEGER NOT NULL
             );
             CREATE INDEX decisions_topic ON decisions(topic_id, at);
+          `,
+        },
+        {
+          // 盯活: what the desk watches in a run and how often it stepped in. Old rows: 0 / NULL.
+          name: "desk-10-supervise",
+          up: `
+            ALTER TABLE runs ADD COLUMN interventions INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN nudged INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN loop_key TEXT;
+            ALTER TABLE runs ADD COLUMN loop_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN auto_continues INTEGER NOT NULL DEFAULT 0;
+          `,
+        },
+        {
+          // M6 replay: what the front desk read, so a decision can be replayed on another model.
+          name: "desk-11-replay",
+          up: `
+            ALTER TABLE decisions ADD COLUMN system TEXT;
+            ALTER TABLE decisions ADD COLUMN input TEXT;
           `,
         },
       ]);

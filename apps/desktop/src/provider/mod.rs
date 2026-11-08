@@ -1963,6 +1963,14 @@ impl ChatProvider for CoreProvider {
         self.download_session_inner(run_id, dir)
     }
 
+    fn download_run_context(
+        &self,
+        run_id: &str,
+        dir: std::path::PathBuf,
+    ) -> crate::data::SessionDownload {
+        self.download_context_inner(run_id, dir)
+    }
+
     fn cancel_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
         self.cancel_run_inner(group_id, topic_id, run_id)
     }

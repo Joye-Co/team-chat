@@ -5,8 +5,15 @@ and their `.sha256` files. Release notes for the team are in Chinese in `docs/re
 
 ## 1.2.6 (unreleased)
 
-Notes: [docs/releases/1.2.6.md](docs/releases/1.2.6.md). No D1 migration, no protocol change, no
-server redeploy. 1.2.5 clients and daemons keep working.
+Notes: [docs/releases/1.2.6.md](docs/releases/1.2.6.md). D1 migration `0011_runner_effort`.
+Protocol: additive (`CliInfo.models` / `efforts`, `run.assign.effort`, `BotRunner.effort`,
+`SetBotRunnerRequest.effort`, `RunContext` and the context routes). The server is redeployed
+before the release. 1.2.5 clients and daemons keep working.
+
+- Members pick a model and a 思考强度 from what their computer's CLIs report; the model is saved.
+- Run context: compact topic lines within a 24,000-character budget with the first message,
+  resumed sessions get only newer messages, a new 群聊 request starts a new session, and the
+  daemon adds `chat-run topic history|message`, `chat-run search` and `chat-run file get`.
 
 - A group chat message opens its 话题 in one click.
 - Group info beside the group chat; the whole 群 in the 话题 details.

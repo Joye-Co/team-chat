@@ -110,15 +110,6 @@ export abstract class DeskTakeover extends DeskInput {
     });
   }
 
-  protected requestOf(r: RunRow): RunRequest | null {
-    const raw = this.meta(`request:${r.id}`);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as RunRequest;
-    } catch {
-      return null;
-    }
-  }
 
   /** The request of a run made before requests were kept: its trigger message, from the room. */
   protected async requestFromRoom(r: RunRow): Promise<RunRequest | null> {

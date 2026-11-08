@@ -833,7 +833,7 @@ Rules:
   requester or an owner can answer, every answer is audited as `run.approval`; when the question
   cannot be posted the answer is no), `done` on success, `blocked` with one
   short note when the run fails, its machine stays away past the lease, or no event comes for
-  10 minutes (the daemon's own `status: stalled` report marks it blocked at once and does not
+  10 minutes, after the desk's own tries (see "Supervision") (the daemon's own `status: stalled` report marks it blocked at once and does not
   count as progress). A blocked run that sends events again goes back to `running`. A run that
   never reaches a machine ends as `failed` after 2 minutes.
 - 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), the run
@@ -856,6 +856,27 @@ Rules:
   `GET /v1/runs/:id/events`, paged by `seq` (gaps are normal: the daemon may drop deltas).
 - The raw session (the CLI's own file, gzip) is stored in R2 at `sessions/<runId>.jsonl.gz`.
   Only owners can download it.
+
+### Supervision (盯活)
+
+BotDesk watches every run on a machine and steps in by itself before it tells people
+(docs/design/agent-harness.zh.md 3.4; rules in `server/src/agent/supervise.ts`). Each run counts
+the desk's interventions, and a restarted or continued run carries the count. After 3 the desk
+stops trying, and the topic gets one note.
+
+- **Silent 5 minutes**: one `run.input` to the CLI (`inputId` `desk-nudge-…`) asking where it
+  stands. It is not a member's message, so it never starts a follow-up run. Any event clears it.
+- **Silent 10 minutes, the daemon's `stalled` report, or the machine gone** (no heartbeat for
+  2 minutes, or `runLost` past the lease): the run is cancelled without a message (`cancelled`,
+  summary `restarted: …`), and its request starts again with the same work order on a healthy
+  machine. The topic hears nothing. Out of tries, the old behavior applies: `blocked` with one
+  note ("我自己试了几次…还是没有进展").
+- **The same step 4 times in a row** (equal `tool.call` titles): one reminder (`desk-loop-…`).
+- **A promise without work**: a run that succeeds with a short result such as "我来看看" and called
+  no tool gets a follow-up run that continues its session ("do the work now"). At most 3 in a row.
+- **Progress questions**: a short "进展怎么样了" / "好了吗" while a run works is answered by the
+  bot from the run's state (minutes, plan, last step). The CLI is not interrupted, and the message
+  counts as a taken input.
 
 ### Front desk
 
@@ -886,11 +907,17 @@ FrontDeskDecision = { messageId, topicId, authorId, action: "reply" | "dispatch"
                       reason, confidence, reply?, brief?: WorkBrief, fallback?, model?, ms,
                       inputTokens, outputTokens, replyMessageId?, at }
 FrontDeskDecisionsResponse = { decisions: FrontDeskDecision[] }   // newest first, at most 20
+BotMetrics = { since, frontDesk: { decisions, byAction: { reply, dispatch, ask, skip }, fallbacks,
+               p50Ms, p95Ms, inputTokens, outputTokens },
+               runs: { total, done, failed, blocked, cancelled, restarted, continued, interventions,
+                       p50Ms, p95Ms } }
 ```
 
 | Method and path | Who | Response |
 | --- | --- | --- |
 | `GET /v1/bots/:id/decisions?topicId=` | owner | `FrontDeskDecisionsResponse` |
+| `GET /v1/bots/:id/decisions/export?since=` | owner | the decisions with what the front desk read (`system`, `prompt`), one JSON object per line (`application/x-ndjson`), to build a replay set; holds topic text |
+| `GET /v1/bots/:id/metrics?days=` | owner | `BotMetrics`: front desk decisions by action, fallbacks, latency p50/p95, tokens; runs by outcome, supervision restarts and continues, interventions, duration p50/p95 (default 30 days, 1..365) |
 
 ### Run context
 
