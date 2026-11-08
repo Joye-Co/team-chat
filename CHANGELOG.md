@@ -3,6 +3,24 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.6 (unreleased)
+
+Notes: [docs/releases/1.2.6.md](docs/releases/1.2.6.md). No D1 migration, no protocol change, no
+server redeploy. 1.2.5 clients and daemons keep working.
+
+- A group chat message opens its 话题 in one click.
+- Group info beside the group chat; the whole 群 in the 话题 details.
+- Backspace removes the @ and the quote in the composer, and a second ⌘A selects them; the quote
+  chip's remove hover stays inside the chip.
+- The 更新内容 sheet is redone in the Apple style; 单独问 is hidden without a run.
+- Settings panes read provider data on change, not every frame; the pane switch no longer
+  stretches or rises; the system appearance follows the theme choice.
+- The Dock reopen callback runs inside an app update, so the window opens at once.
+- Daemon: gated secrets reach a run only after approval through `chat-run secret`; on Linux the
+  service installs as a systemd user unit; CLIs start through an Executor (local backend).
+- The release runs from the Release workflow on GitHub Actions. The project is licensed
+  AGPL-3.0-only, and operator config lives in the ops checkout.
+
 ## 1.2.5 (2026-11-08)
 
 Notes: [docs/releases/1.2.5.md](docs/releases/1.2.5.md). No D1 migration, no protocol change, no
