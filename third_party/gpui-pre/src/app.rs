@@ -339,7 +339,10 @@ impl Application {
         let this = Rc::downgrade(&self.0);
         self.0.borrow_mut().platform.on_reopen(Box::new(move || {
             if let Some(app) = this.upgrade() {
-                callback(&mut app.borrow_mut());
+                // Run inside an update so effects the callback queues (`cx.defer`, notify)
+                // flush now. Called bare, they waited for the next unrelated event, so a
+                // Dock click after closing the last window opened nothing for a while.
+                app.borrow_mut().update(|cx| callback(cx));
             }
         }));
         self
