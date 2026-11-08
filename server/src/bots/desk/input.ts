@@ -10,9 +10,9 @@ import { answerText } from "../answers";
 import { refsText } from "../refs";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
-import { DeskStall } from "./stall";
+import { DeskFront } from "./front";
 
-export abstract class DeskInput extends DeskStall {
+export abstract class DeskInput extends DeskFront {
   // -------------------------------------------------------------------------
   // Messages from the topic
   // -------------------------------------------------------------------------
@@ -32,8 +32,9 @@ export abstract class DeskInput extends DeskStall {
       if (!(await this.botActive())) return;
       const active = this.activeRun(m.topicId);
       if (active) return await this.serial(active.id, () => this.toActive(active.id, m));
-      if (!m.mentioned) return;
-      await this.start(m);
+      // Without an @, only the answer to the front desk's open question counts.
+      if (!m.mentioned && !this.openAsk(m)) return;
+      await this.admit({ ...m, mentioned: true });
     } catch (err) {
       this.log.error("onMessage failed", { err, topicId: m.topicId });
       throw err;
@@ -47,7 +48,11 @@ export abstract class DeskInput extends DeskStall {
   protected handledMessage(messageId: string): boolean {
     return (
       this.sql.exec("SELECT 1 FROM runs WHERE trigger_message_id = ? LIMIT 1", messageId).toArray().length > 0 ||
-      this.sql.exec("SELECT 1 FROM inputs WHERE message_id = ? LIMIT 1", messageId).toArray().length > 0
+      this.sql.exec("SELECT 1 FROM inputs WHERE message_id = ? LIMIT 1", messageId).toArray().length > 0 ||
+      // A front desk decision that is fully acted on (a dispatch is a run, above).
+      this.sql
+        .exec("SELECT 1 FROM decisions WHERE message_id = ? AND (action = 'skip' OR reply_message_id IS NOT NULL) LIMIT 1", messageId)
+        .toArray().length > 0
     );
   }
 
@@ -85,7 +90,7 @@ export abstract class DeskInput extends DeskStall {
     if (!r) return;
     if (r.ended_at !== null) {
       // Ended meanwhile: treat as a new request when it mentions the bot.
-      if (m.mentioned) await this.start(m);
+      if (m.mentioned) await this.admit(m);
       return;
     }
     const link = r.machine_id ? linkStub(this.env, r.machine_id) : null;

@@ -8,6 +8,7 @@ import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt } from "../../settings/rules";
 import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, hasFeature, pickMachine } from "../dispatch";
 import { type ContextRow, type Selection, selectLines } from "../../context/render";
+import { type Brief, briefText } from "../../agent/frontdesk";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
@@ -42,6 +43,8 @@ function manifestOf(sel: Selection, resumed: boolean): RunContextManifest {
 export interface RunRequest {
   m: TopicMessage;
   followUps: { authorId: string; body: string }[];
+  /** The front desk's work order (交代单), when it dispatched the request. */
+  brief?: Brief;
 }
 
 export abstract class DeskRuns extends DeskCore {
@@ -49,7 +52,13 @@ export abstract class DeskRuns extends DeskCore {
   // Starting a run
   // -------------------------------------------------------------------------
 
-  protected async start(m: TopicMessage, followUpOf?: RunRow, followUps: { authorId: string; body: string }[] = [], retryOf?: string): Promise<void> {
+  protected async start(
+    m: TopicMessage,
+    followUpOf?: RunRow,
+    followUps: { authorId: string; body: string }[] = [],
+    retryOf?: string,
+    brief?: Brief,
+  ): Promise<void> {
     const botId = this.botId as string;
     const runner = await loadRunner(this.env.DB, botId);
     if (!runner?.enabled) return;
@@ -84,7 +93,7 @@ export abstract class DeskRuns extends DeskCore {
     if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one.
-    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `request:${runId}`, JSON.stringify({ m, followUps } satisfies RunRequest));
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `request:${runId}`, JSON.stringify({ m, followUps, ...(brief ? { brief } : {}) } satisfies RunRequest));
     const r = this.run(runId) as RunRow;
     await this.serial(runId, async () => {
       try {
@@ -115,7 +124,7 @@ export abstract class DeskRuns extends DeskCore {
         if (claim.contextOf) {
           prompt = await this.asidePrompt(m, claim, claim.contextOf, followUps);
         } else {
-          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"));
+          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief);
           prompt = p.prompt;
           this.storeContext(r.id, p);
         }
@@ -222,6 +231,7 @@ export abstract class DeskRuns extends DeskCore {
     followUps: { authorId: string; body: string }[],
     acceptance = false,
     contextTools = false,
+    brief?: Brief,
   ): Promise<Prompts> {
     const botId = this.botId as string;
     const notRequest = (x: ContextRow) => x.id !== m.messageId;
@@ -266,12 +276,13 @@ export abstract class DeskRuns extends DeskCore {
       // settings: who must approve what (merge to main, publish, spend over the limit).
       rules: policyPrompt(await effectivePolicy(this.env.DB)),
       acceptance,
+      ...(brief ? { brief: briefText(brief) } : {}),
     });
     const out: Prompts = { prompt, manifest: manifestOf(sel, false) };
     if (since) {
       const delta = selectLines(undefined, since.newest, since.total, name, CONTEXT_CHARS, lines);
       out.resume = {
-        prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools }),
+        prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools, ...(brief ? { brief: briefText(brief) } : {}) }),
         manifest: manifestOf(delta, true),
       };
     }
