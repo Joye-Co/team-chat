@@ -8,7 +8,7 @@ work needs. The wire contract is [protocol.md](protocol.md).
 
 | Path | What it holds |
 | --- | --- |
-| `product.json` | Product name, slug, bundle id, URL scheme, server URLs. The only place the product name lives. |
+| `product.json` | Product name, slug, bundle id, URL scheme. The only place the product name lives. Server URLs are not here: they come from the operator's ops checkout ([ENVIRONMENTS.md](ENVIRONMENTS.md#ops-checkout)). |
 | `docs/protocol.md` | Wire protocol contract |
 | `packages/protocol` | Zod schemas: the executable source of truth for the protocol |
 | `protocol/fixtures` | Golden JSON frames that both implementations must parse and re-serialize |
@@ -55,13 +55,14 @@ feature: `files/`, `search/`, `bots/`, `integrations/`, `ops/`, `notify/`, `sett
 | Env | Worker | D1 | R2 bucket | URL |
 | --- | --- | --- | --- | --- |
 | local | `wrangler dev` | local | local | `http://127.0.0.1:<port>` |
-| e2e | `chat-api-e2e` | `chat-e2e` | `chat-files-e2e` | `https://chat-api-e2e.huangdeshiou.workers.dev` |
-| staging | `chat-api-staging` | `chat-staging` | `chat-files-staging` | `https://chat-api-staging.huangdeshiou.workers.dev` |
-| production | `chat-api-prod` | `chat-prod` | `chat-files-prod` | `https://chat-api-prod.huangdeshiou.workers.dev` |
+| e2e | `chat-api-e2e` | `chat-e2e` | `chat-files-e2e` | `https://chat-api-e2e.<your-subdomain>.workers.dev` |
+| staging | `chat-api-staging` | `chat-staging` | `chat-files-staging` | `https://chat-api-staging.<your-subdomain>.workers.dev` |
+| production | `chat-api-prod` | `chat-prod` | `chat-files-prod` | `https://chat-api-prod.<your-subdomain>.workers.dev` |
 
-The three R2 buckets exist (made through the Cloudflare connector; the wrangler login has no R2
-scope, so do not run `wrangler r2` commands, but Worker R2 bindings work). Secret files live in
-`~/.config/team-chat/<env>/` (mode 600). Only the agents whose task says so deploy.
+`server/wrangler.jsonc` describes local development only. The deployed envs (Worker names, D1
+ids, R2 buckets, URLs) live in the operator's private ops checkout (`TC_OPS_DIR`); see
+[ENVIRONMENTS.md](ENVIRONMENTS.md). Secret files live in `~/.config/team-chat/<env>/` (mode 600).
+Only the agents whose task says so deploy.
 
 ## Client (macOS)
 

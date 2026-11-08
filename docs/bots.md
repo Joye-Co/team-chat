@@ -8,9 +8,10 @@ SDK is `packages/bot-sdk` (`@chat/bot-sdk`); it runs on Bun and on Node 22+.
 
 ## 1. Create a bot member and get its token file
 
-Only an owner can create a bot. The team's bots, their characters and the exact commands
-that create them are in [ROSTER.md](ROSTER.md); `--character <id>` gives a bot its
-jojo-friends look. With the owner token saved by `admin.ts bootstrap` (in
+Only an owner can create a bot. `--character <id>` gives a bot a look from the optional
+character pack (without the pack, avatars are monograms). Keep your own list of bots and the
+commands that made them in your ops checkout ([ENVIRONMENTS.md](ENVIRONMENTS.md#ops-checkout)).
+With the owner token saved by `admin.ts bootstrap` (in
 `~/.config/team-chat/<env>/owner-token`):
 
 ```sh
@@ -134,14 +135,14 @@ bot.onMention(async (ctx) => {
   await ctx.setPlan([
     { text: "写标题和正文", state: "current" },
     { text: "生成 3 张配图", state: "pending" },
-    { text: "等 Joye 确认", state: "pending" },
+    { text: "等负责人确认", state: "pending" },
     { text: "周四 20:00 发出", state: "pending" },
   ]);
   // ... write the draft ...
   await ctx.setPlan([
     { text: "写标题和正文", state: "done" },
     { text: "生成 3 张配图", state: "done" },
-    { text: "等 Joye 确认", state: "waiting" },
+    { text: "等负责人确认", state: "waiting" },
     { text: "周四 20:00 发出", state: "pending" },
   ]);
   await ctx.updateTopic({ status: "waiting_review", waitingOn: [ctx.message.authorId], ownerId: bot.me.id });
@@ -428,6 +429,33 @@ gets "unknown frame type") is skipped, and the run prints why. `bun test test/un
 the same SDK logic against a fake server, without wrangler. `bun test/node-smoke.ts` runs the
 echo example under Node.
 
+## 6. Runner-backed bots: a coding CLI on a machine
+
+A runner-backed bot does its work with a coding CLI (Claude Code, Codex, an ACP agent) on a
+machine that runs the machine daemon ([machine-protocol.md](machine-protocol.md)). Operators
+set it up once per machine:
+
+1. On the machine, install the coding CLI and sign in to it (`claude --version` or
+   `codex --version` works in a Terminal).
+2. Short way (1.2.1 and later): install the app on that machine, sign in as an owner, and click
+   用这台电脑 in 设置 › 机器. The app registers the machine, writes the daemon config and token,
+   installs the launchd service and updates the daemon with the app.
+3. Manual way: build the daemon (`scripts/build-daemon.sh`) or download it from a release,
+   register the machine (`bun server/scripts/admin.ts machine --env <env> --name <name> --labels <label>`
+   writes the machine token file), copy the binary and the token to the machine, write
+   `~/.config/team-chat/daemon.toml` (`team-chat-daemon example-config` prints an example; set
+   `server_url`, `token_file`, `name`, `labels` and the `[runtimes.<name>]` you use), then run
+   `team-chat-daemon doctor` and `team-chat-daemon install-service` from a Terminal where the
+   CLI is on `PATH`.
+4. Make the bot runner-backed:
+   `bun server/scripts/admin.ts runner --env <env> --bot <botId> --runtime <claude|codex> --labels <label>`
+   (add `--repo-url <git url>` or `--repo-path <path>` for a repository), and check
+   `bun server/scripts/admin.ts machines --env <env>` shows the machine healthy.
+5. Mention the bot in a topic: its reply streams in.
+
+To update a hand-installed daemon, wait until the machine has no running work (stopping the
+daemon cancels its runs), replace the binary, and run `doctor` and `install-service` again.
+
 ---
 
 # 机器人(中文)
@@ -570,3 +598,20 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
 不重复发消息,以及 1.1 的卡片回答、交付卡片、单独问、页面事件和交互闭环(服务器还没有的部分会
 跳过并打印原因)。`bun test test/unit.test.ts` 用假服务器检查同样的逻辑,不启动 wrangler。
 `bun test/node-smoke.ts` 用 Node 运行 echo 示例。
+
+## 6. 在电脑上干活的机器人(runner)
+
+这类机器人用一台装了机器 daemon 的电脑跑编程命令行工具(Claude Code、Codex 等),见
+[machine-protocol.md](machine-protocol.md)。每台电脑做一次:
+
+1. 在那台电脑上装好命令行工具并登录(终端里 `claude --version` 或 `codex --version` 能运行)。
+2. 简单做法(1.2.1 起):在那台电脑上装 App,用 owner 账号登录,在「设置 › 机器」里点「用这台电脑」。
+   App 会登记电脑、写好 daemon 配置和令牌、装好服务,以后跟着 App 自动更新。
+3. 手动做法:`scripts/build-daemon.sh` 编译(或从发布页下载)daemon,
+   `bun server/scripts/admin.ts machine --env <env> --name <名字> --labels <标签>` 登记电脑并保存令牌文件,
+   把程序和令牌拷到那台电脑,写 `~/.config/team-chat/daemon.toml`(`team-chat-daemon example-config`
+   打印示例),再在能找到命令行工具的终端里运行 `team-chat-daemon doctor` 和 `team-chat-daemon install-service`。
+4. 打开机器人的 runner:
+   `bun server/scripts/admin.ts runner --env <env> --bot <botId> --runtime <claude|codex> --labels <标签>`,
+   再用 `bun server/scripts/admin.ts machines --env <env>` 确认电脑健康。
+5. 在话题里 @ 这个机器人,它的回复会一段段出来。

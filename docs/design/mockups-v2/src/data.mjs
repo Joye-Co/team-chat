@@ -1,4 +1,4 @@
-// Sample data for the v2 mockups. Bots are the real roster (assets/bots/roster.json).
+// Sample data for the v2 mockups (made-up members and groups).
 export const M = {
   joye: { name: "Joye", online: true, role: "负责人" },
   li: { name: "李雪", online: true, role: "产品实习生" },
@@ -17,15 +17,15 @@ export const M = {
 
 export const sidebar = {
   todo: [
-    { icon: "circle-question-mark", title: "夜间告警降噪：合并重复的 5xx", ctx: "qqbot 研发 · Watch 等你回答" },
-    { icon: "eye", title: "周四小红书：夹夹 3.0 上线", ctx: "社媒 · Taro 等你审" },
-    { icon: "at-sign", title: "登录页支持粘贴邀请码", ctx: "qqbot 研发 · 李雪 @你" },
+    { icon: "circle-question-mark", title: "夜间告警降噪：合并重复的 5xx", ctx: "orderbot 研发 · Watch 等你回答" },
+    { icon: "eye", title: "周四微博：拾光 3.0 上线", ctx: "社媒 · Taro 等你审" },
+    { icon: "at-sign", title: "登录页支持粘贴邀请码", ctx: "orderbot 研发 · 李雪 @你" },
   ],
   groups: [
-    { name: "qqbot 研发", mention: 2, selected: true },
+    { name: "orderbot 研发", mention: 2, selected: true },
     { name: "运维告警", unread: true },
     { name: "社媒", unread: true },
-    { name: "夹夹增长", palette: "sage" },
+    { name: "拾光增长", palette: "sage" },
     { name: "产品周会", palette: "sand" },
     { name: "全员", muted: true },
   ],

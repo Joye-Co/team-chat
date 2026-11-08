@@ -264,8 +264,8 @@ const card = (rev = 1): CardV2 => ({
   title: "10 月数据月报",
   fallback: "10 月数据",
   blocks: [
-    { type: "chart", id: "trend", kind: "bar", x: ["B 站", "小红书"], series: [{ id: "new", name: "新增群", values: [9, 4] }], events: ["chart.select"] },
-    { type: "table", id: "channels", columns: ["渠道", "新增群"], rows: [["B 站", "9"], ["小红书", "4"]], rowKeys: ["bili", "xhs"] },
+    { type: "chart", id: "trend", kind: "bar", x: ["B 站", "微博"], series: [{ id: "new", name: "新增群", values: [9, 4] }], events: ["chart.select"] },
+    { type: "table", id: "channels", columns: ["渠道", "新增群"], rows: [["B 站", "9"], ["微博", "4"]], rowKeys: ["bili", "weibo"] },
   ],
 });
 
@@ -373,10 +373,10 @@ describe("BotDesk delivery", () => {
     expect(firstLive).toMatchObject({ runId, source: { kind: "card", messageId, blockId: "trend", rev: 1 }, event: "chart.select", actor: { id: w.human.id, name: "Alice" } });
     expect(typeof firstLive.eventId).toBe("string");
     expect(firstLive.fallback).toBeUndefined();
-    for (const x of ["小红书", "B 站", "小红书"]) {
+    for (const x of ["微博", "B 站", "微博"]) {
       await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "trend", { series: "new", x, y: 4, index: 1 }));
     }
-    await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["xhs"] }));
+    await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }));
     await sleep(200);
     expect(d.frames.filter((f) => f.t === "run.interaction")).toHaveLength(1);
     await sleep(3000);
@@ -387,8 +387,8 @@ describe("BotDesk delivery", () => {
     }, 5000);
     expect(live).toHaveLength(3);
     expect(live.slice(1).map((f) => [f.source.blockId, f.value])).toEqual([
-      ["trend", { series: "new", x: "小红书", y: 4, index: 1 }],
-      ["channels", { values: ["xhs"] }],
+      ["trend", { series: "new", x: "微博", y: 4, index: 1 }],
+      ["channels", { values: ["weibo"] }],
     ]);
 
     // Inside a turn the estimate is longer.
@@ -415,7 +415,7 @@ describe("BotDesk delivery", () => {
     // A daemon that reports 1.1.0 gets the typed frame without the feature list.
     const w2 = await world();
     const r2 = await runningRun(w2, { version: "1.1.0" });
-    await deskOf(w2.bot.id).interaction(w2.bot.id, interaction(w2, r2.topicId, ulid(), "channels", { values: ["xhs"] }));
+    await deskOf(w2.bot.id).interaction(w2.bot.id, interaction(w2, r2.topicId, ulid(), "channels", { values: ["weibo"] }));
     const typed = await r2.d.next((f) => f.t === "run.interaction");
     expect(typed.runId).toBe(r2.runId);
     void runId;
@@ -446,11 +446,11 @@ describe("BotDesk delivery", () => {
     await runInDurableObject(desk, async (_o, state) => {
       for (let i = 0; i < 5; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `x${i}`, `card:${messageId}`, Date.now());
     });
-    expect(await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["xhs"] }))).toEqual({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }))).toEqual({ mode: "none" });
     await runInDurableObject(desk, async (_o, state) => {
       for (let i = 0; i < 30; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `y${i}`, `card:other${i}`, Date.now());
     });
-    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["xhs"] }))).toEqual({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["weibo"] }))).toEqual({ mode: "none" });
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     // A stored answer still starts a run.
     expect(await desk.expectFor(w.bot.id, topicId)).toEqual({ mode: "starting", etaMs: 40_000 });
@@ -497,7 +497,7 @@ describe("BotDesk delivery", () => {
       fallback: "10 月数据",
       ask: { id: "verify", from: ["requester"], blocking: false },
       blocks: [
-        { type: "chart", id: "trend", kind: "bar", x: ["B 站", "小红书"], series: [{ id: "new", name: "新增群", values: [9, 4] }], events: ["chart.select"] },
+        { type: "chart", id: "trend", kind: "bar", x: ["B 站", "微博"], series: [{ id: "new", name: "新增群", values: [9, 4] }], events: ["chart.select"] },
         { type: "decision", id: "check", label: "这个数据对不对？", options: [{ id: "ok", label: "对" }, { id: "wrong", label: "有问题" }] },
       ],
       actions: [{ id: "send", label: "发给 dev", style: "primary", inputs: ["check"] }],
@@ -752,7 +752,7 @@ describe("refs in prompts", () => {
     const resolve = (refs: BlockRef[]) => runInDurableObject(roomOf(gid), (_o, state) => resolveRefs(state.storage.sql, refs));
     const [now] = await resolve([ref()]);
     expect(now).toMatchObject({ n: 1, fromId: bot.id, messageId: m.id, topic: "月报", block: { id: "channels", type: "table" }, changedSince: false });
-    expect((now.context as { rowKeys: string[] }).rowKeys).toEqual(["bili", "xhs"]);
+    expect((now.context as { rowKeys: string[] }).rowKeys).toEqual(["bili", "weibo"]);
     const [gone] = await resolve([ref({ part: { kind: "cell", keys: { row: "nope", col: 1 } } })]);
     expect(gone.changedSince).toBe(true);
     const [point] = await resolve([ref({ blockId: "trend", part: { kind: "bar", keys: { series: "new", x: "B 站" } } })]);
@@ -779,8 +779,8 @@ describe("refs in prompts", () => {
     expect(first.text).toContain('"from":"dev"');
     expect(first.text).toContain('"changedSince":true');
     expect(first.text).toContain('<teamchat-ref-context n="1">');
-    await desk.onMessage(w.bot.id, msg("那小红书呢？"));
-    const second = await d.next((f) => f.t === "run.input" && f.text.startsWith("那小红书呢？"));
+    await desk.onMessage(w.bot.id, msg("那微博呢？"));
+    const second = await d.next((f) => f.t === "run.input" && f.text.startsWith("那微博呢？"));
     expect(second.text).toContain("<teamchat-refs>");
     expect(second.text).not.toContain("teamchat-ref-context");
     void runId;

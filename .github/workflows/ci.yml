@@ -46,6 +46,7 @@ jobs:
               - .github/workflows/ci.yml
               - scripts/ci-run.sh
               - scripts/lib.sh
+              - scripts/servers.ts
             js: &js
               - *common
               - package.json

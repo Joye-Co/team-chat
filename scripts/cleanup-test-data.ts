@@ -19,6 +19,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { deployedServer } from "./servers";
 
 const ROOT = join(import.meta.dir, "..");
 const args = process.argv.slice(2);
@@ -33,12 +34,8 @@ if (ENV !== "e2e" && ENV !== "staging") {
 }
 const APPLY = args.includes("--apply");
 const KEEP = new Set((opt("keep") ?? "").split(",").filter(Boolean));
-const BASES: Record<string, string> = {
-  e2e: "https://chat-api-e2e.huangdeshiou.workers.dev",
-  staging: "https://chat-api-staging.huangdeshiou.workers.dev",
-};
-const product = JSON.parse(readFileSync(join(ROOT, "product.json"), "utf8")) as { servers: Record<string, string> };
-const BASE = (opt("base") ?? product.servers[ENV] ?? BASES[ENV]).replace(/\/$/, "");
+const BASE = (opt("base") ?? deployedServer(ENV) ?? "").replace(/\/$/, "");
+if (!BASE) throw new Error(`no base URL for env ${ENV} (TC_OPS_DIR deploy/servers.json); pass --base`);
 const CONF = join(process.env.TEAM_CHAT_CONFIG_DIR ?? join(homedir(), ".config/team-chat"), ENV);
 const TOKEN = readFileSync(join(CONF, "owner-token"), "utf8").trim();
 

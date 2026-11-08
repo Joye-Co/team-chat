@@ -105,7 +105,7 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/set-bot-runner-request.json", "SetBotRunnerRequest", { runtime: "codex", labels: ["mac", "main"], repo: { url: "https://github.com/Joye-Co/team-chat" }, baseBranch: "main", model: "gpt-5.5", envAllowlist: ["GITHUB_TOKEN"] });
   ok("http/set-bot-runner-request-minimal.json", "SetBotRunnerRequest", { runtime: "claude" }, "scratch folder, any machine");
   bad("http/set-bot-runner-request-missing-runtime.json", "SetBotRunnerRequest", { labels: ["mac"] }, "missing runtime");
-  ok("http/bot-runner.json", "BotRunner", { botId: ID.bot, runtime: "codex", labels: ["mac"], repo: { path: "/Users/joye/code/team-chat" }, baseBranch: "main", envAllowlist: [], enabled: true, updatedAt: T0 });
+  ok("http/bot-runner.json", "BotRunner", { botId: ID.bot, runtime: "codex", labels: ["mac"], repo: { path: "/Users/me/code/team-chat" }, baseBranch: "main", envAllowlist: [], enabled: true, updatedAt: T0 });
 
   // Machines
   const hello = lines("up.jsonl")[0] as { machine: Obj; health: Obj; clis: Obj[] };

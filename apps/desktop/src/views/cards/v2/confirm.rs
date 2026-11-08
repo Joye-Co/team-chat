@@ -1,6 +1,6 @@
 //! The confirm sheet before an irreversible answer (DESIGN.md §7.10
 //! "Approval"): the verb and target as the title, the consequence, and with
-//! `typeToConfirm` a field `输入 qqbot-prod 确认发布`; the primary stays
+//! `typeToConfirm` a field `输入 orderbot-prod 确认发布`; the primary stays
 //! disabled until the name matches. Esc and 取消 close it without sending.
 
 use std::cell::Cell;
@@ -265,8 +265,8 @@ mod tests {
 
     #[test]
     fn the_name_must_match_before_the_primary_unlocks() {
-        assert!(!matches("qqbot-pr", Some("qqbot-prod")));
-        assert!(matches(" qqbot-prod ", Some("qqbot-prod")));
+        assert!(!matches("orderbot-pr", Some("orderbot-prod")));
+        assert!(matches(" orderbot-prod ", Some("orderbot-prod")));
         assert!(matches("", None));
     }
 
@@ -284,15 +284,15 @@ mod tests {
         };
         let irr = AskIrreversible {
             verb: "发布".into(),
-            target: "qqbot v2.14 到生产".into(),
+            target: "orderbot v2.14 到生产".into(),
             consequence: "所有群会重启约 2 分钟。".into(),
-            type_to_confirm: Some("qqbot-prod".into()),
+            type_to_confirm: Some("orderbot-prod".into()),
         };
         let t = sheet_text(&action, Some(&irr));
-        assert_eq!(t.title, "发布 qqbot v2.14 到生产");
+        assert_eq!(t.title, "发布 orderbot v2.14 到生产");
         assert_eq!(
             t.type_to_confirm,
-            Some(("qqbot-prod".into(), "发布".into()))
+            Some(("orderbot-prod".into(), "发布".into()))
         );
         assert_eq!(t.ok, "发布到生产");
         let plain = sheet_text(&action, None);

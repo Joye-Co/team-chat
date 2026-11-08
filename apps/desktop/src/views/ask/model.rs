@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(w.ranges, vec![0..6]);
         assert_eq!(&"10 月数据月报"[w.ranges[0].clone()], "10 月");
         // One shared character is not a match.
-        assert!(weigh("夹夹 4.0 需求", ASK).is_none());
+        assert!(weigh("拾光 4.0 需求", ASK).is_none());
         // Two Latin letters of a sentence are not a match.
         assert!(weigh("Forge", ASK).is_none());
         assert!(weigh("Alex Chen", ASK).is_none());

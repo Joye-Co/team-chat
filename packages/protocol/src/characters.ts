@@ -1,8 +1,8 @@
-// Member characters: the look of a member's avatar, from the jojo-friends family.
+// Member characters: the look of a member's avatar, one of a fixed set of 26 ids.
 // See docs/protocol.md, "Entities" (Member.character).
 import { z } from "zod";
 
-/** The 26 known jojo-friends character ids. Clients bundle one image set per id. */
+/** The 26 known character ids. A client without art for an id draws the initial avatar. */
 export const CHARACTER_IDS = [
   "jojo",
   "h02",

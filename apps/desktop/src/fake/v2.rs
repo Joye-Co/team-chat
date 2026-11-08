@@ -1,5 +1,5 @@
 //! The v2 sample team (1.1.0 artboards, CONCEPT.md §4): Joye, four interns
-//! and the eight bots with their characters, the 群 开发 / 运维 / 夹夹增长 /
+//! and the eight bots with their characters, the 群 开发 / 运维 / 拾光增长 /
 //! 全员, their 话题 with runs, plans, cards, 产出, decisions, a 单独问 aside
 //! and a live screen. Every v2 screenshot scene starts from it, so all
 //! screens show the same consistent data.
@@ -55,15 +55,15 @@ pub const T_VIRTUAL: &str = "t-v2-virtual";
 pub const T_INVITE: &str = "t-v2-invite";
 /// 开发 / 搜索支持中文两字词: waits on 小王.
 pub const T_SEARCH: &str = "t-v2-search";
-/// 运维 / qqbot v2.14 上线: Watch asks me to approve the release.
+/// 运维 / orderbot v2.14 上线: Watch asks me to approve the release.
 pub const T_RELEASE: &str = "t-v2-release";
 /// 运维 / staging 每日巡检: Scout, done 09:12.
 pub const T_STAGING: &str = "t-v2-staging";
-/// 夹夹增长 / 夹夹 3.0 宣传: Taro's draft waits on me.
+/// 拾光增长 / 拾光 3.0 宣传: Taro's draft waits on me.
 pub const T_PROMO: &str = "t-v2-promo";
-/// 夹夹增长 / 10 月数据月报: Ledger, done 09:40.
+/// 拾光增长 / 10 月数据月报: Ledger, done 09:40.
 pub const T_REPORT: &str = "t-v2-report";
-/// 夹夹增长 / 夹夹 4.0 需求: Tata writes the second draft (2/4).
+/// 拾光增长 / 拾光 4.0 需求: Tata writes the second draft (2/4).
 pub const T_V4: &str = "t-v2-v4";
 /// 全员 / 本周周报: Jojo split it to Pocket and Ledger (1/3).
 pub const T_WEEKLY: &str = "t-v2-weekly";
@@ -73,7 +73,7 @@ pub const RUN_VIRTUAL: &str = "run-v2-virtual";
 /// Scout's check of the virtual list, beside Forge's run (`with_second_run`).
 pub const RUN_VIRTUAL_CHECK: &str = "run-v2-virtual-check";
 pub const RUN_V4: &str = "run-v2-v4";
-/// Watch's release of qqbot v2.14 that I approved (the Card v2 gallery only,
+/// Watch's release of orderbot v2.14 that I approved (the Card v2 gallery only,
 /// `with_release_run`).
 pub const RUN_RELEASE: &str = "run-v2-release";
 pub const RUN_WEEKLY: &str = "run-v2-weekly";
@@ -413,7 +413,7 @@ impl V2Samples {
             group(
                 GROWTH,
                 GroupKind::Group,
-                "夹夹增长",
+                "拾光增长",
                 &[ME, JOJO, TATA, LEDGER, TARO, LIXUE, CHENCHEN],
                 at(10, 20),
             ),
@@ -484,7 +484,7 @@ impl V2Samples {
             topic(TopicSpec {
                 id: T_RELEASE,
                 group: OPS,
-                title: "qqbot v2.14 上线",
+                title: "orderbot v2.14 上线",
                 status: S::WaitingAnswer,
                 waiting_on: &[ME],
                 owner: WATCH,
@@ -506,7 +506,7 @@ impl V2Samples {
             topic(TopicSpec {
                 id: T_PROMO,
                 group: GROWTH,
-                title: "夹夹 3.0 宣传",
+                title: "拾光 3.0 宣传",
                 status: S::WaitingReview,
                 waiting_on: &[ME],
                 owner: TARO,
@@ -528,7 +528,7 @@ impl V2Samples {
             topic(TopicSpec {
                 id: T_V4,
                 group: GROWTH,
-                title: "夹夹 4.0 需求",
+                title: "拾光 4.0 需求",
                 status: S::InProgress,
                 waiting_on: &[],
                 owner: TATA,
@@ -682,7 +682,7 @@ impl V2Samples {
                 ),
             ],
         );
-        // 运维 / qqbot v2.14 上线: the approval.
+        // 运维 / orderbot v2.14 上线: the approval.
         let t = T_RELEASE;
         let mut approval = message(
             OPS,
@@ -690,14 +690,14 @@ impl V2Samples {
             2,
             WATCH,
             at_s(10, 20, 45),
-            "把 qqbot v2.14 发布到生产吗？",
+            "把 orderbot v2.14 发布到生产吗？",
         );
         approval.id = format!("{t}-ask");
         cards.insert(
             approval.id.clone(),
             card(serde_json::json!({
                 "v": 1,
-                "title": "把 qqbot v2.14 发布到生产吗？",
+                "title": "把 orderbot v2.14 发布到生产吗？",
                 "tone": "warning",
                 "blocks": [
                     { "type": "fields", "fields": [
@@ -721,7 +721,7 @@ impl V2Samples {
                     1,
                     JOJO,
                     at(9, 20),
-                    "@Watch 准备 qqbot v2.14：#412 群相册分享、#415 撤回同步、#418 告警降噪。",
+                    "@Watch 准备 orderbot v2.14：#412 群相册分享、#415 撤回同步、#418 告警降噪。",
                 ),
                 approval,
             ],
@@ -738,7 +738,7 @@ impl V2Samples {
                 "staging 每日巡检做完了，24 项都通过。",
             )],
         );
-        // 夹夹增长 / 夹夹 3.0 宣传: the draft.
+        // 拾光增长 / 拾光 3.0 宣传: the draft.
         let t = T_PROMO;
         let mut draft = message(
             GROWTH,
@@ -746,17 +746,17 @@ impl V2Samples {
             2,
             TARO,
             at(10, 20),
-            "这条小红书确认后，周四 20:00 发出。",
+            "这条微博确认后，周四 20:00 发出。",
         );
         draft.id = format!("{t}-ask");
         cards.insert(
             draft.id.clone(),
             card(serde_json::json!({
                 "v": 1,
-                "title": "这条小红书确认后，周四 20:00 发出",
+                "title": "这条微博确认后，周四 20:00 发出",
                 "blocks": [
                     { "type": "fields", "fields": [
-                        { "label": "标题", "value": "夹夹 3.0｜群里的照片，一键分享回群" }
+                        { "label": "标题", "value": "拾光 3.0｜群里的照片，一键分享回群" }
                     ]},
                     { "type": "text", "text": "以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。" }
                 ],
@@ -776,7 +776,7 @@ impl V2Samples {
                     1,
                     TATA,
                     at(9, 15),
-                    "@Taro 写一条 3.0 的小红书，主打群相册。",
+                    "@Taro 写一条 3.0 的微博，主打群相册。",
                 ),
                 draft,
             ],
@@ -832,7 +832,7 @@ impl V2Samples {
                     1,
                     ME,
                     at(9, 25),
-                    "@Tata 整理夹夹 4.0 的需求，参考上周的群反馈。",
+                    "@Tata 整理拾光 4.0 的需求，参考上周的群反馈。",
                 ),
                 message(
                     GROWTH,
@@ -963,7 +963,7 @@ impl V2Samples {
                     ART_V4,
                     T_V4,
                     ArtifactKind::Page,
-                    "夹夹 4.0 需求（第二版）",
+                    "拾光 4.0 需求（第二版）",
                     1,
                     TATA,
                     at(10, 10),
@@ -1413,7 +1413,7 @@ impl ChatProvider for V2Samples {
                 Some(format!("{T_RELEASE}-ask")),
                 WATCH,
                 AskKind::Approval,
-                "把 qqbot v2.14 发布到生产吗？",
+                "把 orderbot v2.14 发布到生产吗？",
                 at_s(10, 20, 45),
             ),
             ask(
@@ -1431,7 +1431,7 @@ impl ChatProvider for V2Samples {
                 Some(format!("{T_PROMO}-ask")),
                 TARO,
                 AskKind::Draft,
-                "这条小红书确认后，周四 20:00 发出",
+                "这条微博确认后，周四 20:00 发出",
                 at(10, 20),
             ),
             ask(
@@ -1591,7 +1591,7 @@ impl ChatProvider for V2Samples {
                 d(
                     "d-scout",
                     TATA,
-                    "qqbot 发布前必须 Scout 在 staging 验收",
+                    "orderbot 发布前必须 Scout 在 staging 验收",
                     days_ago_at(6, 10, 0),
                 ),
             ],
@@ -1601,9 +1601,9 @@ impl ChatProvider for V2Samples {
     }
     fn group_purpose(&self, group_id: &str) -> Option<String> {
         match group_id {
-            DEV => Some("qqbot、夹夹和 TeamChat 的开发".into()),
-            OPS => Some("qqbot 和夹夹的上线、巡检和告警".into()),
-            GROWTH => Some("夹夹的增长、数据和社媒".into()),
+            DEV => Some("orderbot、拾光和 TeamChat 的开发".into()),
+            OPS => Some("orderbot 和拾光的上线、巡检和告警".into()),
+            GROWTH => Some("拾光的增长、数据和社媒".into()),
             ALL => Some("全员的周报和通知".into()),
             _ => None,
         }
@@ -1826,7 +1826,7 @@ impl ChatProvider for V2Samples {
                 ],
                 cited_by: vec![
                     (ALL.into(), T_WEEKLY.into(), "本周周报".into()),
-                    (GROWTH.into(), T_V4.into(), "夹夹 4.0 需求".into()),
+                    (GROWTH.into(), T_V4.into(), "拾光 4.0 需求".into()),
                 ],
             }),
             ART_RECONNECT => Some(ArtifactStory {

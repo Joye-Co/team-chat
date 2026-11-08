@@ -8,7 +8,7 @@
     "rev": 2,
     "intent": "info",
     "title": "10 月新增群从哪来",
-    "fallback": "Ledger：10 月新增群 38 个，小红书最多（14 个）。",
+    "fallback": "Ledger：10 月新增群 38 个，微博最多（14 个）。",
     "blocks": [
       {
         "id": "bars",
@@ -16,7 +16,7 @@
         "kind": "bar",
         "label": "新增群 · 按渠道",
         "x": [
-          "小红书",
+          "微博",
           "群内邀请",
           "B 站",
           "抖音"
@@ -33,7 +33,7 @@
             ]
           }
         ],
-        "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
+        "summary": "微博 14、群内邀请 10、B 站 9、抖音 5。",
         "events": [
           "chart.select",
           "chart.zoom"
@@ -43,7 +43,7 @@
       {
         "id": "detail",
         "type": "group",
-        "title": "小红书 · 14 个新增群",
+        "title": "微博 · 14 个新增群",
         "children": [
           "detail_row",
           "d_posts"
@@ -64,7 +64,7 @@
       {
         "id": "d_metric",
         "type": "metric",
-        "label": "小红书新增群",
+        "label": "微博新增群",
         "value": 14,
         "delta": 6,
         "better": "up"

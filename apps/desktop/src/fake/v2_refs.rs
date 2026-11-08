@@ -34,7 +34,7 @@ pub fn channel_table() -> (Vec<String>, Vec<Vec<String>>) {
     (
         s(&["渠道", "新增群", "占比", "比 9 月"]),
         vec![
-            s(&["小红书", "14", "37%", "+6"]),
+            s(&["微博", "14", "37%", "+6"]),
             s(&["群内邀请", "10", "26%", "+1"]),
             s(&["B 站", "9", "24%", "-1"]),
             s(&["抖音", "5", "13%", "-2"]),
@@ -123,7 +123,7 @@ impl V2Samples {
                     "tone": "success",
                     "status": { "label": "按渠道拆开" },
                     "blocks": [
-                        { "type": "text", "text": "10 月新增 38 个群，小红书带来的最多。" },
+                        { "type": "text", "text": "10 月新增 38 个群，微博带来的最多。" },
                         { "type": "table", "columns": columns, "rows": rows }
                     ]
                 })),

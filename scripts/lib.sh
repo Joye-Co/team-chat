@@ -104,21 +104,37 @@ designated_requirement() {
   codesign -d -r- "$1" 2>/dev/null | sed -n 's/^\(# \)\{0,1\}designated => //p' | head -n 1
 }
 
-# env_base <env>: the API base URL of a deployed env. CHAT_API_BASE overrides it.
+# ops_dir: the private ops checkout of the operator (deploy config, server URLs, character
+# pack). TC_OPS_DIR, else ~/.config/team-chat/ops. Empty when neither exists.
+ops_dir() {
+  local d="${TC_OPS_DIR:-${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/ops}"
+  if [ -d "$d" ]; then printf '%s' "$d"; fi
+}
+
+# env_base <env>: the API base URL of a deployed env, from <ops>/deploy/servers.json.
+# CHAT_API_BASE overrides it.
 env_base() {
-  local base="${CHAT_API_BASE:-}"
+  local base="${CHAT_API_BASE:-}" ops
   if [ -z "$base" ]; then
-    base="$(jq -r --arg e "$1" '.servers[$e] // empty' "$ROOT/product.json")"
+    ops="$(ops_dir)"
+    if [ -n "$ops" ] && [ -f "$ops/deploy/servers.json" ]; then
+      base="$(jq -r --arg e "$1" '.[$e] // empty' "$ops/deploy/servers.json")"
+    fi
   fi
-  if [ -z "$base" ]; then
-    case "$1" in
-      e2e) base="https://chat-api-e2e.huangdeshiou.workers.dev" ;;
-      staging) base="https://chat-api-staging.huangdeshiou.workers.dev" ;;
-      production) base="https://chat-api-prod.huangdeshiou.workers.dev" ;;
-      *) die "no API base URL for env '$1'" ;;
-    esac
-  fi
+  [ -n "$base" ] || die "no API base URL for env '$1': set CHAT_API_BASE, or TC_OPS_DIR with deploy/servers.json"
   printf '%s' "${base%/}"
+}
+
+# deploy_wrangler_config <server|monitor>: copies <ops>/deploy/<name>.wrangler.jsonc next to the
+# Worker as wrangler.deploy.jsonc (git ignores it) and prints that file name. The committed
+# wrangler.jsonc has no deployed env.
+deploy_wrangler_config() {
+  local ops dir
+  ops="$(ops_dir)"
+  [ -n "$ops" ] && [ -f "$ops/deploy/$1.wrangler.jsonc" ] || die "no $1 deploy config: set TC_OPS_DIR (needs deploy/$1.wrangler.jsonc)"
+  case "$1" in server) dir="$ROOT/server" ;; monitor) dir="$ROOT/ops/monitor" ;; *) die "unknown worker '$1'" ;; esac
+  cp "$ops/deploy/$1.wrangler.jsonc" "$dir/wrangler.deploy.jsonc"
+  printf 'wrangler.deploy.jsonc'
 }
 
 # health_version <base>: the version that GET <base>/v1/health reports (empty when unreachable).

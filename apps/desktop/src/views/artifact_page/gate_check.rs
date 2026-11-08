@@ -229,7 +229,7 @@ h2{margin:0 0 8px;font-size:18px;line-height:28px}p{margin:0 0 16px;color:var(--
 button{height:32px;padding:0 12px;border:1px solid var(--tc-border,#e5e5e5);border-radius:8px;background:var(--tc-bg,#fff);font:inherit;color:inherit}
 </style></head><body>
 <h2>渠道预算</h2><p>这个页面在打开时、定时和用脚本点按钮时都试着发回应。</p>
-<button type="button" id="go">选小红书</button>
+<button type="button" id="go">选微博</button>
 <script>
 (function(){
   function send(why){if(window.artifact&&window.artifact.emitEvent){window.artifact.emitEvent('choose',{option:'a',why:why}).catch(function(){});}}

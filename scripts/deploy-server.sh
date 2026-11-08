@@ -6,7 +6,8 @@
 #   3. otherwise the short commit, with "-dirty" when server/, packages/ or protocol/ have
 #      uncommitted changes (what is deployed then is not exactly that commit).
 #
-# A version that starts with 0.0.0 (the static values in server/wrangler.jsonc) is refused.
+# The env config comes from the private ops checkout (TC_OPS_DIR, deploy/server.wrangler.jsonc).
+# A version that starts with 0.0.0 (the static VERSION values in the wrangler config) is refused.
 # After the deploy it reads GET /v1/health until it reports that version (up to
 # HEALTH_WAIT_SECONDS, default 60) and fails when it does not, or when it reports 0.0.0*.
 #
@@ -92,13 +93,14 @@ if [ "$PRINT" = 1 ]; then
   exit 0
 fi
 
+CONFIG="$(deploy_wrangler_config server)"
 cd "$ROOT/server"
 if [ "$DRY_RUN" = 1 ]; then
   log "dry run: $ENV_NAME version $VERSION (no D1 migrations, nothing uploaded)"
-  exec bunx wrangler deploy --env "$ENV_NAME" --var "VERSION:$VERSION" --dry-run
+  exec bunx wrangler deploy -c "$CONFIG" --env "$ENV_NAME" --var "VERSION:$VERSION" --dry-run
 fi
 log "applying D1 migrations ($ENV_NAME)"
-bunx wrangler d1 migrations apply DB --env "$ENV_NAME" --remote
+bunx wrangler d1 migrations apply DB -c "$CONFIG" --env "$ENV_NAME" --remote
 log "deploying chat API ($ENV_NAME) version $VERSION"
-bunx wrangler deploy --env "$ENV_NAME" --var "VERSION:$VERSION"
+bunx wrangler deploy -c "$CONFIG" --env "$ENV_NAME" --var "VERSION:$VERSION"
 check_health "$VERSION"

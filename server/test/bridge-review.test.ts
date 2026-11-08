@@ -75,7 +75,7 @@ describe("TcSchema pattern (SEC-4)", () => {
     expect(tcSchemaViolation(month, "2026-10")).toBeUndefined();
     expect(tcSchemaViolation(month, "oct")).toBe("payload does not match the pattern");
     expect(tcSchemaViolation({ pattern: "x|y\\d{2,3}" }, "ay123")).toBeUndefined();
-    expect(tcSchemaViolation({ pattern: "^(?:抖音|小红书)$" }, "抖音")).toBeUndefined();
+    expect(tcSchemaViolation({ pattern: "^(?:抖音|微博)$" }, "抖音")).toBeUndefined();
     expect(tcSchemaViolation({ pattern: "^[^\\s]+$" }, "a b")).toBe("payload does not match the pattern");
     expect(tcSchemaViolation({ pattern: "^\\w+\\.json$" }, "data.json")).toBeUndefined();
     expect(tcSchemaViolation({ pattern: "^.{2}$" }, "抖音")).toBeUndefined();

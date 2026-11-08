@@ -62,7 +62,7 @@ pub struct Member {
     pub deactivated: bool,
     /// Presence, from transient `presence` events.
     pub online: bool,
-    /// The jojo-friends character the avatar draws, when set (`characters`).
+    /// The character the avatar draws, when set and its art is in this build (`characters`).
     pub character: Option<crate::characters::CharacterId>,
 }
 
@@ -1734,7 +1734,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Owner: adds a bot member. With `runner`, it is runner-backed (the server
     /// runs it on a machine) and no credential is returned.
-    /// `character` is its jojo-friends look (avatar and status art).
+    /// `character` is its look (avatar and status art).
     fn create_bot_member(
         &self,
         _name: String,

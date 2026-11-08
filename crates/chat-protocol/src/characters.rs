@@ -1,11 +1,12 @@
-//! Member characters: the look of a member's avatar, from the jojo-friends family
-//! (docs/protocol.md, `Member.character`). Unknown ids fail to parse.
+//! Member characters: the look of a member's avatar, one of a fixed set of 26 ids
+//! (docs/protocol.md, `Member.character`). Unknown ids fail to parse. A client
+//! without art for an id draws the member's initial.
 
 use serde::{Deserialize, Serialize};
 
 macro_rules! characters {
     ($($variant:ident = $id:literal),* $(,)?) => {
-        /// One of the 26 known jojo-friends character ids.
+        /// One of the 26 known character ids.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub enum CharacterId {
             $(#[serde(rename = $id)] $variant,)*

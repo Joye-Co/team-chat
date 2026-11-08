@@ -110,7 +110,7 @@ pub const SCENES: &[Scene] = &[
     ),
     Scene {
         name: "cards-v2-topic",
-        about: "The approval card of qqbot v2.14 上线 as a v2 card in its 话题",
+        about: "The approval card of orderbot v2.14 上线 as a v2 card in its 话题",
         start: Start::V2,
         setup: |s, cx| v2_open_topic(s, d::OPS, d::T_RELEASE, cx),
         open: open_main,

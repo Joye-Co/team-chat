@@ -1,12 +1,26 @@
 //! Exports product.json fields as compile-time constants so the product name lives in one place:
-//! PRODUCT_NAME, PRODUCT_SLUG, PRODUCT_BUNDLE_ID, PRODUCT_URL_SCHEME, and the server URLs
-//! PRODUCT_STAGING_URL and PRODUCT_PRODUCTION_URL (empty when not set yet).
-//! It also writes `character_assets.rs`: the bundled character SVGs (assets/characters/) as an
-//! embedded table that `src/characters/assets.rs` serves through the app's asset source.
-//! And it writes `release_notes.rs`: every `docs/releases/<version>.md`, newest first, which
+//! PRODUCT_NAME, PRODUCT_SLUG, PRODUCT_BUNDLE_ID and PRODUCT_URL_SCHEME.
+//!
+//! Private deployment data comes from an optional ops checkout: `$TC_OPS_DIR`, else
+//! `$HOME/.config/team-chat/ops` when that directory exists. Open-source builds have neither and
+//! build fine without it:
+//! - `deploy/servers.json` (`{"e2e": "…", "staging": "…", "production": "…"}`) gives the server
+//!   URLs PRODUCT_STAGING_URL and PRODUCT_PRODUCTION_URL. Without it they come from a `servers`
+//!   key in product.json when there is one, else they are empty (the app then hides them).
+//! - `characters/<id>/<status>-<px>.svg` and `characters/boxes.json`, the optional character
+//!   pack, become `character_assets.rs` (an embedded table that `src/characters/assets.rs`
+//!   serves through the app's asset source) and `character_boxes.rs`. Without the pack both
+//!   are empty and members with a character draw their initial instead.
+//! - `roster/roster.json` becomes `bot_roster.rs`, the default character of a new bot by name.
+//!   Without it the table is empty.
+//!
+//! It also writes `release_notes.rs`: every `docs/releases/<version>.md`, newest first, which
 //! the 更新记录 and the 更新后 sheet of `src/updater/notes.rs` read without a network.
 
-use std::{env, fs, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -25,19 +39,58 @@ fn main() {
             .unwrap_or_else(|| panic!("product.json is missing {key}"));
         println!("cargo:rustc-env={var}={value}");
     }
+    let ops = ops_dir();
+    let servers = ops
+        .as_deref()
+        .and_then(|ops| read_json(&ops.join("deploy/servers.json")))
+        .unwrap_or_else(|| json["servers"].clone());
     for (key, var) in [
         ("staging", "PRODUCT_STAGING_URL"),
         ("production", "PRODUCT_PRODUCTION_URL"),
     ] {
-        let value = json["servers"][key].as_str().unwrap_or("");
+        let value = servers[key].as_str().unwrap_or("");
         println!("cargo:rustc-env={var}={value}");
     }
-    embed_characters(&manifest);
+    embed_characters(ops.as_deref());
+    embed_roster(ops.as_deref());
     embed_release_notes(&manifest);
 }
 
+/// The private ops checkout: `$TC_OPS_DIR`, else `$HOME/.config/team-chat/ops` when it is a
+/// directory (or a symlink to one).
+fn ops_dir() -> Option<PathBuf> {
+    println!("cargo:rerun-if-env-changed=TC_OPS_DIR");
+    println!("cargo:rerun-if-env-changed=HOME");
+    if let Some(dir) = env::var_os("TC_OPS_DIR").filter(|d| !d.is_empty()) {
+        let dir = PathBuf::from(dir);
+        assert!(
+            dir.is_dir(),
+            "TC_OPS_DIR={} is not a directory",
+            dir.display()
+        );
+        return Some(dir);
+    }
+    let fallback = PathBuf::from(env::var_os("HOME")?).join(".config/team-chat/ops");
+    fallback.is_dir().then_some(fallback)
+}
+
+/// The JSON at `path` when the file exists (watched for changes); a broken file fails the build.
+fn read_json(path: &Path) -> Option<serde_json::Value> {
+    if !path.is_file() {
+        return None;
+    }
+    println!("cargo:rerun-if-changed={}", path.display());
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    Some(serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display())))
+}
+
+fn write_out(name: &str, text: String) {
+    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join(name);
+    fs::write(&dest, text).unwrap_or_else(|e| panic!("write {}: {e}", dest.display()));
+}
+
 /// `(version, text)` for every `docs/releases/<MAJOR.MINOR.PATCH>.md`, newest first.
-fn embed_release_notes(manifest: &std::path::Path) {
+fn embed_release_notes(manifest: &Path) {
     let root = manifest.join("../../docs/releases");
     println!("cargo:rerun-if-changed={}", root.display());
     let mut notes = Vec::new();
@@ -54,7 +107,7 @@ fn embed_release_notes(manifest: &std::path::Path) {
             }
         }
     }
-    notes.sort_by(|a, b| b.0.cmp(&a.0));
+    notes.sort_by_key(|n| std::cmp::Reverse(n.0));
     let mut out = String::from("pub static RELEASES: &[(&str, &str)] = &[\n");
     for (_, version, path) in &notes {
         out.push_str(&format!(
@@ -63,27 +116,35 @@ fn embed_release_notes(manifest: &std::path::Path) {
         ));
     }
     out.push_str("];\n");
-    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("release_notes.rs");
-    fs::write(dest, out).expect("write release_notes.rs");
+    write_out("release_notes.rs", out);
 }
 
-/// `(asset path, bytes)` for every `assets/characters/<id>/<status>-<px>.svg`, sorted by path.
-fn embed_characters(manifest: &std::path::Path) {
-    let root = manifest.join("assets/characters");
-    println!("cargo:rerun-if-changed={}", root.display());
+/// `(asset path, bytes)` for every `characters/<id>/<status>-<px>.svg` of the optional
+/// character pack, sorted by path, and the pack's `boxes.json`. Both are empty without it.
+fn embed_characters(ops: Option<&Path>) {
     let mut files = Vec::new();
-    for dir in fs::read_dir(&root).expect("read assets/characters") {
-        let dir = dir.unwrap().path();
-        if !dir.is_dir() {
-            continue;
-        }
-        println!("cargo:rerun-if-changed={}", dir.display());
-        for file in fs::read_dir(&dir).unwrap() {
-            let file = file.unwrap().path();
-            if file.extension().is_some_and(|e| e == "svg") {
-                let rel = file.strip_prefix(manifest.join("assets")).unwrap();
-                files.push((rel.to_string_lossy().replace('\\', "/"), file));
+    let mut boxes = None;
+    if let Some(root) = ops.map(|o| o.join("characters")).filter(|r| r.is_dir()) {
+        println!("cargo:rerun-if-changed={}", root.display());
+        for dir in fs::read_dir(&root).expect("read the character pack") {
+            let dir = dir.unwrap().path();
+            if !dir.is_dir() {
+                continue;
             }
+            println!("cargo:rerun-if-changed={}", dir.display());
+            for file in fs::read_dir(&dir).unwrap() {
+                let file = file.unwrap().path();
+                if file.extension().is_some_and(|e| e == "svg") {
+                    let rel = file.strip_prefix(&root).unwrap();
+                    let rel = format!("characters/{}", rel.to_string_lossy().replace('\\', "/"));
+                    files.push((rel, file));
+                }
+            }
+        }
+        let path = root.join("boxes.json");
+        if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+            boxes = Some(path);
         }
     }
     files.sort();
@@ -95,6 +156,28 @@ fn embed_characters(manifest: &std::path::Path) {
         ));
     }
     out.push_str("];\n");
-    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("character_assets.rs");
-    fs::write(dest, out).expect("write character_assets.rs");
+    write_out("character_assets.rs", out);
+    let boxes = match boxes {
+        Some(path) => format!(
+            "pub static BOXES_JSON: &str = include_str!({:?});\n",
+            path.display().to_string()
+        ),
+        None => "pub static BOXES_JSON: &str = \"{}\";\n".to_string(),
+    };
+    write_out("character_boxes.rs", boxes);
+}
+
+/// `(lowercase name, character id)` for every bot of `roster/roster.json`; empty without it.
+fn embed_roster(ops: Option<&Path>) {
+    let mut out = String::from("pub static ROSTER: &[(&str, &str)] = &[\n");
+    if let Some(roster) = ops.and_then(|o| read_json(&o.join("roster/roster.json"))) {
+        for bot in roster["bots"].as_array().into_iter().flatten() {
+            if let (Some(name), Some(c)) = (bot["name"].as_str(), bot["character"].as_str()) {
+                let name = name.trim().to_lowercase();
+                out.push_str(&format!("    ({name:?}, {c:?}),\n"));
+            }
+        }
+    }
+    out.push_str("];\n");
+    write_out("bot_roster.rs", out);
 }

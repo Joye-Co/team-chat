@@ -1013,7 +1013,7 @@ pub fn member_tint_index(key: &str) -> usize {
     if let Some(i) = MEMBER_TINTS.iter().position(|n| *n == lower) {
         return i;
     }
-    // Roster characters (assets/bots/roster.json): the tint of the name.
+    // Sample bot characters (`fake.rs`): the tint of the name.
     const CHARACTERS: [(&str, usize); 7] = [
         ("o11", 1),
         ("h03", 2),

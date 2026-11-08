@@ -143,7 +143,7 @@ ok("entities/member-full.json", "Member", ownerFull, "every field set, Chinese r
 ok("entities/member-minimal.json", "Member", aliceMinimal, "optional fields omitted");
 ok("entities/member-bot-nulls.json", "Member", botNulls, "bot with explicit nulls and emoji name");
 ok("entities/member-name-max.json", "Member", { ...aliceMinimal, name: "名".repeat(MAX_NAME_CHARS) }, "name at 64 characters");
-ok("entities/member-bot-character.json", "Member", { ...botNulls, role: "主助手", level: "owner", character: "jojo" }, "bot with a jojo-friends character");
+ok("entities/member-bot-character.json", "Member", { ...botNulls, role: "主助手", level: "owner", character: "jojo" }, "bot with a character id");
 ok("entities/member-character-null.json", "Member", { ...aliceMinimal, character: null }, "character null = no character");
 bad("entities/member-bad-character.json", "Member", { ...aliceMinimal, character: "o21" }, "character is not one of the 26 known ids");
 bad("entities/member-character-uppercase.json", "Member", { ...aliceMinimal, character: "JOJO" }, "character ids are lower case");

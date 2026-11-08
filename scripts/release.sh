@@ -56,18 +56,7 @@ TAG="v$VERSION"
 DMG="$DIST/$NAME-$VERSION.dmg"
 SECRET_FILE="${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/$ENV_NAME/admin-secret"
 
-server_base() {
-  local base="${CHAT_API_BASE:-}"
-  if [ -z "$base" ]; then base="$(jq -r --arg e "$ENV_NAME" '.servers[$e] // empty' "$ROOT/product.json")"; fi
-  if [ -z "$base" ]; then
-    case "$ENV_NAME" in
-      staging) base="https://chat-api-staging.huangdeshiou.workers.dev" ;;
-      production) base="https://chat-api-prod.huangdeshiou.workers.dev" ;;
-    esac
-  fi
-  printf '%s' "${base%/}"
-}
-BASE="$(server_base)"
+BASE="$(env_base "$ENV_NAME")"
 
 # release_notes_b64: notes for the server header, base64 on one line, at most ~6 KB of text.
 release_notes_b64() {
@@ -170,6 +159,12 @@ PLAN
 fi
 
 need cargo
+# The operator's build: the character pack and the server URLs come from the ops checkout
+# (apps/desktop/build.rs). A release without them would ship monograms and no server menu.
+OPS="$(ops_dir)"
+[ -n "$OPS" ] && [ -f "$OPS/characters/boxes.json" ] && [ -f "$OPS/deploy/servers.json" ] \
+  || die "release needs the ops checkout (TC_OPS_DIR) with characters/ and deploy/servers.json"
+export TC_OPS_DIR="$OPS"
 log "setting version $VERSION"
 restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
 trap 'restore' ERR

@@ -15,7 +15,7 @@
     "kind": "card",
     "card": {
       "v": 1,
-      "title": "发布 qqbot 1.4 到正式环境？",
+      "title": "发布 orderbot 1.4 到正式环境？",
       "tone": "warning",
       "blocks": [
         {
@@ -74,7 +74,7 @@
     "kind": "card",
     "card": {
       "v": 1,
-      "title": "发布 qqbot 1.4 到正式环境？",
+      "title": "发布 orderbot 1.4 到正式环境？",
       "tone": "warning",
       "blocks": [
         {

@@ -1,7 +1,7 @@
 {
   "kind": "Member",
   "valid": true,
-  "description": "bot with a jojo-friends character",
+  "description": "bot with a character id",
   "value": {
     "id": "01JBX0BOT000000000000000AC",
     "kind": "bot",

@@ -33,13 +33,13 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
     v: 2,
     rev: 1,
     intent: "ask",
-    title: "发布 qqbot 1.4 到正式环境？",
+    title: "发布 orderbot 1.4 到正式环境？",
     fallback: "Scout 在 staging 验收通过。请选择发布时间。",
     ask: {
       from: ["requester", "owners", ID.alice],
       expiresAt: T0 + 86_400_000,
       record: true,
-      irreversible: { verb: "发布", target: "qqbot 1.4 到正式环境", consequence: "所有群立刻用上新版本", typeToConfirm: "发布" },
+      irreversible: { verb: "发布", target: "orderbot 1.4 到正式环境", consequence: "所有群立刻用上新版本", typeToConfirm: "发布" },
     },
     blocks: [
       { type: "text", id: "why", text: "**验收通过**，没有新的报错。" },
@@ -49,7 +49,7 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
       { type: "input", id: "tags", kind: "chips", label: "通知", options: [{ id: "all", label: "全员" }, { id: "ops", label: "值班" }] },
       { type: "input", id: "notify", kind: "switch", label: "发通知", default: true },
       { type: "draft", id: "notes", label: "发布说明", text: "- 修好了重复消息\n- 更快的启动", editable: true },
-      { type: "evidence", id: "e2e", label: "E2E 42/42", state: "pass", url: "https://github.com/Joye-Co/qqbot/actions/runs/1" },
+      { type: "evidence", id: "e2e", label: "E2E 42/42", state: "pass", url: "https://github.com/example/orderbot/actions/runs/1" },
     ],
     actions: [
       { id: "ship", label: "发布", style: "primary", confirm: { title: "确定发布？", body: "所有群立刻用上新版本。" } },
@@ -268,7 +268,7 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
     messageId: ID.msg,
     topicId: ID.topic,
     rev: 1,
-    title: "发布 qqbot 1.4 到正式环境？",
+    title: "发布 orderbot 1.4 到正式环境？",
     actionId: "ship",
     actionLabel: "发布",
     choices: ["今晚 22:00"],

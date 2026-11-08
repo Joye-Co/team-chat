@@ -10,7 +10,7 @@ Evidence folders (not in git):
 - `S` = `~/.cache/team-chat/screens/final/` (screenshot self-test captures, contact sheets, boards)
 - e2e run ids: `kthm42` and `sz8xgx` (all scenarios, before and after the last deploy), `p24gpf`
   (30-minute soak), all against
-  `https://chat-api-e2e.huangdeshiou.workers.dev`
+  the e2e env (`https://chat-api-e2e.<your-subdomain>.workers.dev`)
 
 ## 1. Chat
 

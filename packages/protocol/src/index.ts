@@ -168,7 +168,7 @@ export const Member = z.object({
   level: MemberLevel,
   avatarUrl: z.string().nullable().optional(),
   deactivated: z.boolean().optional(),
-  /** jojo-friends character id; absent or null = no character (initial avatar). */
+  /** Character id; absent or null = no character (initial avatar). */
   character: CharacterId.nullable().optional(),
   /** 1.1: who the member reports to (汇报给), set by an owner; absent = nobody. */
   reportsTo: Id.optional(),

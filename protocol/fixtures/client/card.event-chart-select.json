@@ -13,7 +13,7 @@
     "event": "chart.select",
     "value": {
       "series": "groups",
-      "x": "小红书",
+      "x": "微博",
       "y": 14,
       "index": 0
     },
@@ -21,7 +21,7 @@
       "kind": "bar",
       "keys": {
         "series": "groups",
-        "x": "小红书"
+        "x": "微博"
       }
     }
   }

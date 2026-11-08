@@ -610,7 +610,7 @@ describe("run plans", () => {
     const other = await createMember({ kind: "bot", name: "other" });
     const gid = await createGroup(owner, [human.id, bot.id, other.id]);
     const { c } = await Client.connect(human.token);
-    const sent = await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "@taro 写一条小红书", mentions: [bot.id] });
+    const sent = await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "@taro 写一条微博", mentions: [bot.id] });
     return { owner, human, bot, other, gid, c, topicId: sent.message.topicId as string };
   }
 

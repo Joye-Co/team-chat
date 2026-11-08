@@ -15,7 +15,7 @@
     "kind": "card",
     "card": {
       "v": 1,
-      "title": "发布 qqbot 1.4 到正式环境？",
+      "title": "发布 orderbot 1.4 到正式环境？",
       "tone": "warning",
       "blocks": [
         {
@@ -56,7 +56,7 @@
       "v": 2,
       "rev": 1,
       "intent": "ask",
-      "title": "发布 qqbot 1.4 到正式环境？",
+      "title": "发布 orderbot 1.4 到正式环境？",
       "fallback": "Scout 在 staging 验收通过。请选择发布时间。",
       "ask": {
         "from": [
@@ -68,7 +68,7 @@
         "record": true,
         "irreversible": {
           "verb": "发布",
-          "target": "qqbot 1.4 到正式环境",
+          "target": "orderbot 1.4 到正式环境",
           "consequence": "所有群立刻用上新版本",
           "typeToConfirm": "发布"
         }
@@ -149,7 +149,7 @@
           "id": "e2e",
           "label": "E2E 42/42",
           "state": "pass",
-          "url": "https://github.com/Joye-Co/qqbot/actions/runs/1"
+          "url": "https://github.com/example/orderbot/actions/runs/1"
         }
       ],
       "actions": [
