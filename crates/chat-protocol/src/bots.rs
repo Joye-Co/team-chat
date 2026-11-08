@@ -476,6 +476,78 @@ pub struct RunEventsResponse {
     pub last_seq: Seq,
 }
 
+/// What a run's prompt carried from its topic (docs/protocol.md, "Run context").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContextManifest {
+    pub resumed: bool,
+    pub chars: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_seq: Option<Seq>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seq: Option<Seq>,
+    pub messages: u64,
+    pub omitted: u64,
+    pub files: u64,
+    pub cards: u64,
+    pub refs: u64,
+}
+
+/// `GET /v1/runs/:id/context` (owner).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContext {
+    pub prompt: String,
+    pub manifest: RunContextManifest,
+}
+
+/// One message as a run reads it (machine-protocol.md, "Topic context").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMessage {
+    pub id: String,
+    pub seq: Seq,
+    pub author_id: String,
+    pub author_name: String,
+    pub at: Millis,
+    pub text: String,
+}
+
+/// `GET /v1/machine/runs/:id/topic/messages`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicHistoryResponse {
+    pub messages: Vec<ContextMessage>,
+    pub has_more: bool,
+}
+
+/// `GET /v1/machine/runs/:id/topic/messages/:messageId`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicMessageResponse {
+    pub message: ContextMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextHit {
+    pub message_id: String,
+    pub topic_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic_title: Option<String>,
+    pub seq: Seq,
+    pub author_name: String,
+    pub at: Millis,
+    pub snippet: String,
+}
+
+/// `GET /v1/machine/runs/:id/search`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextSearchResponse {
+    pub hits: Vec<ContextHit>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunnerRepo {

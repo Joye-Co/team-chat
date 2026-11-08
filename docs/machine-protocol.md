@@ -245,6 +245,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
+| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`), see "Topic context". |
 
 How the 1.1 daemon does each one:
 
@@ -257,8 +258,10 @@ How the 1.1 daemon does each one:
   `$CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl` is copied into the project folder of the new
   working directory and the CLI starts with `--resume <id>` instead of `--session-id`; with no
   such file the run starts a new session. Codex: `thread/resume { threadId, ...the thread/start
-  params }`; an error answer falls back to `thread/start`. The prompt is the same as without
-  resume, and `run.done.sessionId` names the session the run used.
+  params }`; an error answer falls back to `thread/start`. With `resumeSessionId` the prompt
+  carries only what the session has not seen (protocol.md, "Run context"), and `run.done.sessionId`
+  names the session the run used. In the 群聊 a run continues the last session only when its request
+  quotes a message of that bot or follows up its run; other requests start a new session.
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
   every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. CLIs start tool
@@ -494,6 +497,47 @@ the group. A version is added only to a 产出 of the run's group, and its `runI
 run. The member's file limits and quota apply. The audit log has `file.create`, `file.upload`,
 `artifact.create` and `artifact.version.add` with the member as the actor and
 `machine:{machineId}` as the credential.
+
+### Topic context (`chat-run`, daemon over HTTP; feature `context`)
+
+The prompt carries a budget of the topic (see protocol.md, "Run context"), not all of it. A run
+reads the rest with these `chat-run` ops. Like files, the daemon answers them itself over HTTP
+with the machine token (results can be larger than a frame); they only read.
+
+| `op` | `body` | `chat-run` command |
+| --- | --- | --- |
+| `topic.history` | `{ before?, after?, limit? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N]` → `{ messages: ContextMessage[], hasMore }` |
+| `topic.message` | `{ messageId }` | `chat-run topic message --id M` → `{ message: ContextMessage }` |
+| `context.search` | `{ query, scope?, limit? }` | `chat-run search --query Q [--group] [--limit N]` → `{ hits: ContextHit[] }` |
+| `file.get` | `{ fileId, out? }` | `chat-run file get --id F [--out PATH]` → `{ path, name, mime, size }` |
+
+```ts
+GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=   -> { messages: ContextMessage[], hasMore: boolean }
+GET /v1/machine/runs/:id/topic/messages/:messageId              -> { message: ContextMessage }
+GET /v1/machine/runs/:id/search?q=&scope=topic|group&limit=     -> { hits: ContextHit[] }
+GET /v1/machine/runs/:id/files/:fileId                          -> the file's bytes
+    headers: Content-Type, Content-Length, X-File-Name (URI-encoded UTF-8)
+ContextMessage = { id, seq, authorId, authorName, at /* ms */, text }
+ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
+```
+
+- The run must be on the calling machine, active and not a side chat, as for files.
+- `topic.history` reads the run's topic, oldest first. `before` and `after` are message seqs
+  (`ContextMessage.seq`, also printed in the prompt) and exclusive. Without either it returns the
+  newest messages. `limit` is 1-100, default 30. `hasMore` says that more messages lie past the page
+  in the direction of the read (older without `after`, newer with it). Deleted messages are left out.
+- `text` is the message as one compact line (protocol.md, "Run context"): the body, then a line for
+  each attachment, 产出 reference, quote and card. In `topic.history` the body is cut to 4000
+  characters; `topic.message` gives the whole body. A message of another topic is `not_found`.
+- `context.search` searches the run's topic, or with `scope: "group"` (`--group`) every topic of the
+  run's group the bot member can read. `limit` 1-50, default 20, newest first.
+- `file.get` gives a file of the run's group (ready, not deleted). The daemon writes it to `out`,
+  which must be inside the run's working folder after symbolic links are resolved (`forbidden`,
+  `file.outside_workspace` otherwise); without `out`, to `<working folder>/.chat-files/<fileId>/<name>`
+  (the folder gets a `.gitignore` of `*`). It refuses files over 100 MiB with `too_large`.
+  `chat-run` waits up to 5 minutes for it.
+- A daemon with this feature reports `context`; the server's prompt then names these commands for
+  messages it left out. The `chat-run` note lists them.
 
 ## Raw session upload
 

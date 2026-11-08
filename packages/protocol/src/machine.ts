@@ -19,7 +19,7 @@ export const Labels = z.array(Label).max(MAX_LABELS);
 export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
-export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume"] as const;
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context"] as const;
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */

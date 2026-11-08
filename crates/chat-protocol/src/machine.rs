@@ -27,6 +27,8 @@ pub mod feature {
     pub const OUTPUT: &str = "output";
     /// `run.assign.resumeSessionId`: continue the CLI session of the topic's last run.
     pub const RESUME: &str = "resume";
+    /// chat-run topic context ops: `topic.history`, `topic.message`, `context.search`, `file.get`.
+    pub const CONTEXT: &str = "context";
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

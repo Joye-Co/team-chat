@@ -73,6 +73,68 @@ export type RunEventsResponse = z.infer<typeof RunEventsResponse>;
 /** `GET /v1/runs/:id` */
 export const RunResponse = BotRun;
 
+// ---------------------------------------------------------------------------
+// Run context (docs/protocol.md, "Run context"; machine-protocol.md, "Topic context")
+// ---------------------------------------------------------------------------
+
+const Count = z.int().nonnegative();
+
+/** What a run's prompt carried from its topic. */
+export const RunContextManifest = z.object({
+  /** The prompt continued the CLI session of the topic's last run: only what was new. */
+  resumed: z.boolean(),
+  /** Characters of topic lines. */
+  chars: Count,
+  firstSeq: Seq.optional(),
+  lastSeq: Seq.optional(),
+  /** Messages carried. */
+  messages: Count,
+  /** Messages left out (readable with chat-run). */
+  omitted: Count,
+  files: Count,
+  cards: Count,
+  refs: Count,
+});
+export type RunContextManifest = z.infer<typeof RunContextManifest>;
+
+/** `GET /v1/runs/:id/context` (owner). */
+export const RunContext = z.object({ prompt: z.string(), manifest: RunContextManifest });
+export type RunContext = z.infer<typeof RunContext>;
+
+/** One message as a run reads it: `text` is its compact line (Run context). */
+export const ContextMessage = z.object({
+  id: Id,
+  seq: Seq,
+  authorId: Id,
+  authorName: z.string(),
+  at: Millis,
+  text: z.string(),
+});
+export type ContextMessage = z.infer<typeof ContextMessage>;
+
+/** `GET /v1/machine/runs/:id/topic/messages` */
+export const TopicHistoryResponse = z.object({ messages: z.array(ContextMessage).max(100), hasMore: z.boolean() });
+export type TopicHistoryResponse = z.infer<typeof TopicHistoryResponse>;
+
+/** `GET /v1/machine/runs/:id/topic/messages/:messageId` */
+export const TopicMessageResponse = z.object({ message: ContextMessage });
+export type TopicMessageResponse = z.infer<typeof TopicMessageResponse>;
+
+export const ContextHit = z.object({
+  messageId: Id,
+  topicId: Id,
+  topicTitle: z.string().optional(),
+  seq: Seq,
+  authorName: z.string(),
+  at: Millis,
+  snippet: z.string(),
+});
+export type ContextHit = z.infer<typeof ContextHit>;
+
+/** `GET /v1/machine/runs/:id/search` */
+export const ContextSearchResponse = z.object({ hits: z.array(ContextHit).max(50) });
+export type ContextSearchResponse = z.infer<typeof ContextSearchResponse>;
+
 /**
  * `POST /v1/runs` (a bot that is not runner-backed, member of the group): starts a run of the
  * calling bot in the topic, or returns its active run there. `plan`, when given, replaces the plan.

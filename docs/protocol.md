@@ -790,12 +790,14 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
 | `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
 | `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
+| `GET /v1/runs/:id/context` | owner | | `RunContext` ("Run context"); 404 for a run made before it |
 | `POST /v1/runs` | a bot that is not runner-backed, member of the group | `StartRunRequest` | `BotRun`: a new `running` run, or the bot's active run in the topic |
 | `PUT /v1/runs/:id/plan` | the run's bot | `SetRunPlanRequest` | `BotRun`; `conflict` when the run ended |
 | `POST /v1/runs/:id/cancel` | a person in the run's group | | `BotRun` with `status: "cancelled"`; `conflict` when the run ended; audited |
 | `POST /v1/runs/:id/end` | the run's bot, runs from `POST /v1/runs` only | `EndRunRequest` | `BotRun`; `conflict` when the run ended |
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
+| `GET /v1/machine/runs/:id/topic/messages`, `…/topic/messages/:messageId`, `…/search`, `…/files/:fileId` | machine token | | the run's topic context (machine-protocol.md, "Topic context") |
 
 Rules:
 
@@ -850,6 +852,43 @@ Rules:
   `GET /v1/runs/:id/events`, paged by `seq` (gaps are normal: the daemon may drop deltas).
 - The raw session (the CLI's own file, gzip) is stored in R2 at `sessions/<runId>.jsonl.gz`.
   Only owners can download it.
+
+### Run context
+
+What a run's prompt carries from its topic. The server builds the prompt; it is not a client
+contract, but its shape is fixed here so the developer view and the daemon notes agree.
+
+- **Lines, not rows.** Each message becomes one compact line, and nothing is dropped because it
+  is not text:
+
+  ```
+  [#42 m 01J… · 张三 · 11-08 14:02] the body (cut at 600 characters; the rest by id)
+    ↪ quotes m 01J… (王五: the excerpt)
+    [file f 01J… · 设计稿.png · image/png · 1280×720]
+    [产出 a 01J… v3]
+    [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
+  ```
+
+  `#42` is the message's seq. A system message (`kind: "system"`) is one line in brackets.
+- **Budget, not a count.** The topic's first message is always there. Then the newest messages,
+  newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
+  between them, one line says how many and, for a machine with feature `context`, how to read them
+  (`chat-run topic history --before <seq>`).
+- **Resume sends only what is new.** Each run keeps the highest seq its prompt covered. A run that
+  continues the session of the topic's last run (`resumeSessionId`) gets only messages after that
+  seq that are not the bot's own, then the request; at most the same budget.
+- **群聊.** A run continues the bot's last session in the 群聊 only when its request quotes a
+  message of that bot or is a follow-up of its run (input left over). A new request starts a new
+  session with the 群聊's lines as above.
+- **What it carried.** Every run keeps its prompt and a manifest; owners read them with
+  `GET /v1/runs/:id/context`:
+
+  ```ts
+  RunContext = { prompt: string, manifest: RunContextManifest }
+  RunContextManifest = { resumed: boolean, chars: number, firstSeq?: number, lastSeq?: number,
+                         messages: number /* lines carried */, omitted: number /* messages left out */,
+                         files: number, cards: number, refs: number }
+  ```
 
 ### Run plans
 

@@ -37034,6 +37034,225 @@
         }
       }
     },
+    "RunContext": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "manifest": {
+          "type": "object",
+          "properties": {
+            "resumed": {
+              "type": "boolean"
+            },
+            "chars": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "firstSeq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lastSeq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "messages": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "omitted": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cards": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "refs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "resumed",
+            "chars",
+            "messages",
+            "omitted",
+            "files",
+            "cards",
+            "refs"
+          ]
+        }
+      },
+      "required": [
+        "prompt",
+        "manifest"
+      ]
+    },
+    "TopicHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "authorId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorName": {
+                "type": "string"
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "seq",
+              "authorId",
+              "authorName",
+              "at",
+              "text"
+            ]
+          }
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "messages",
+        "hasMore"
+      ]
+    },
+    "TopicMessageResponse": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "authorId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authorName": {
+              "type": "string"
+            },
+            "at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "seq",
+            "authorId",
+            "authorName",
+            "at",
+            "text"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "ContextSearchResponse": {
+      "type": "object",
+      "properties": {
+        "hits": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicTitle": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "authorName": {
+                "type": "string"
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "snippet": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "messageId",
+              "topicId",
+              "seq",
+              "authorName",
+              "at",
+              "snippet"
+            ]
+          }
+        }
+      },
+      "required": [
+        "hits"
+      ]
+    },
     "SetBotRunnerRequest": {
       "type": "object",
       "properties": {

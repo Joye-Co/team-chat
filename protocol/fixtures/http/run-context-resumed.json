@@ -1,0 +1,17 @@
+{
+  "kind": "RunContext",
+  "valid": true,
+  "description": "nothing new since the last run",
+  "value": {
+    "prompt": "Request from 张三:\n继续",
+    "manifest": {
+      "resumed": true,
+      "chars": 0,
+      "messages": 0,
+      "omitted": 0,
+      "files": 0,
+      "cards": 0,
+      "refs": 0
+    }
+  }
+}

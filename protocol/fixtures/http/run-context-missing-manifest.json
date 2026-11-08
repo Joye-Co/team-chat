@@ -1,0 +1,8 @@
+{
+  "kind": "RunContext",
+  "valid": false,
+  "description": "manifest is required",
+  "value": {
+    "prompt": "x"
+  }
+}
