@@ -34,7 +34,7 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
                 if let Some(mtm) = objc2::MainThreadMarker::new()
                     && !macos::app_is_active(mtm)
                 {
-                    macos::post(&notice, mtm);
+                    macos::post(&notice, crate::views::settings::prefs::get().sound, mtm);
                 }
             }
         })

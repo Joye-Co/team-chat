@@ -175,6 +175,14 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     let _ = status_item;
 }
 
+/// 设置 › 通用 › 菜单栏里显示: hides or shows the menu bar item.
+pub fn show_status_item(shown: bool, cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    status_item::set_visible(shown, cx);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (shown, cx);
+}
+
 /// For the self-test: the menu bar item is installed and up to date.
 pub fn status_item_ok(services: &Services, cx: &App) -> bool {
     #[cfg(target_os = "macos")]

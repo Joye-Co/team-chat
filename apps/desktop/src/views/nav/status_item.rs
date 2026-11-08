@@ -1,4 +1,6 @@
-//! The menu bar item (NSStatusItem through objc2; GPUI has no API for it).
+//! The menu bar item (NSStatusItem through objc2; GPUI has no API for it)
+//! and the Dock icon's badge, both from the same unread totals.
+//! 设置 › 通用 › 菜单栏里显示 hides or shows the item.
 //! A 16 pt template of the icon's brackets and circle; a dot at the top right
 //! when something waits on you (DESIGN.md §13.16). A click opens the main window.
 //! AppKit calls the click target on the main thread inside GPUI's run loop;
@@ -13,7 +15,9 @@ use objc2::{
     AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained, runtime::AnyObject, sel,
 };
-use objc2_app_kit::{NSImage, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
+use objc2_app_kit::{
+    NSApplication, NSImage, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+};
 use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSSize, NSString};
 
 /// The brand's template images (assets/brand/menubar), drawn at 2x and shown at 16 pt.
@@ -106,6 +110,7 @@ pub fn install(services: Services, cx: &mut App) {
         button.setTarget(Some(&target));
         button.setAction(Some(sel!(statusItemClicked:)));
     }
+    item.setVisible(crate::views::settings::prefs::get().menu_bar);
     cx.set_global(StatusItem {
         item,
         _target: target,
@@ -129,16 +134,43 @@ pub fn install(services: Services, cx: &mut App) {
     .detach();
 }
 
+/// 菜单栏里显示: hides or shows the item (it stays installed, so the Dock
+/// badge and its totals keep updating).
+pub fn set_visible(shown: bool, cx: &mut App) {
+    if let Some(state) = cx.try_global::<StatusItem>() {
+        state.item.setVisible(shown);
+    }
+}
+
+/// The Dock badge: the unread count, empty when nothing is unread.
+pub fn badge_label(unread: u32) -> Option<String> {
+    (unread > 0).then(|| unread.to_string())
+}
+
 fn update(services: &Services, cx: &mut App) {
-    let (unread, mentions) = totals(services.provider.as_ref());
+    let provider = services.provider.as_ref();
+    let (unread, mentions) = totals(provider);
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
+    // A group read here (or on another device) takes its notifications
+    // out of Notification Center.
+    let groups = provider.groups();
+    let read: Vec<&str> = groups
+        .iter()
+        .filter(|g| g.unread == 0 && g.mentions == 0)
+        .map(|g| g.id.as_str())
+        .collect();
+    crate::provider::macos::withdraw_read(&read);
     let state = cx.global_mut::<StatusItem>();
     if state.shown == Some((unread, mentions)) {
         return;
     }
     state.shown = Some((unread, mentions));
+    let badge = badge_label(unread).map(|label| NSString::from_str(&label));
+    NSApplication::sharedApplication(mtm)
+        .dockTile()
+        .setBadgeLabel(badge.as_deref());
     let Some(button) = state.item.button(mtm) else {
         return;
     };
@@ -170,5 +202,21 @@ pub fn check(services: &Services, cx: &App) -> bool {
     let Some(state) = cx.try_global::<StatusItem>() else {
         return false;
     };
-    state.shown == Some(totals(services.provider.as_ref())) && state.item.button(mtm).is_some()
+    let (unread, mentions) = totals(services.provider.as_ref());
+    let badge = NSApplication::sharedApplication(mtm)
+        .dockTile()
+        .badgeLabel()
+        .map(|l| l.to_string());
+    state.shown == Some((unread, mentions))
+        && state.item.button(mtm).is_some()
+        && badge == badge_label(unread)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn badge_shows_the_unread_count_or_nothing() {
+        assert_eq!(super::badge_label(0), None);
+        assert_eq!(super::badge_label(7).as_deref(), Some("7"));
+    }
 }

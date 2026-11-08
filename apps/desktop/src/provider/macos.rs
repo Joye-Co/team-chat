@@ -149,7 +149,9 @@ pub fn install_notifications(mtm: MainThreadMarker) -> NotifyMode {
             tracing::info!(granted = granted.as_bool(), "notification permission");
         });
         center.requestAuthorizationWithOptions_completionHandler(
-            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+            UNAuthorizationOptions::Alert
+                | UNAuthorizationOptions::Sound
+                | UNAuthorizationOptions::Badge,
             &done,
         );
         NotifyMode::UserNotifications
@@ -161,15 +163,46 @@ pub fn app_is_active(mtm: MainThreadMarker) -> bool {
     NSApplication::sharedApplication(mtm).isActive()
 }
 
-/// Shows a notification. Call on the main thread.
-pub fn post(notice: &Notice, mtm: MainThreadMarker) {
+/// The ids of the notifications posted by this run, per group, so they can
+/// be taken back out of Notification Center once the group is read.
+static POSTED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// Takes the notifications of `read_groups` (groups with nothing unread) out
+/// of Notification Center. Call on the main thread.
+pub fn withdraw_read(read_groups: &[&str]) {
+    if MODE.get() != Some(&NotifyMode::UserNotifications) {
+        return;
+    }
+    let ids: Vec<String> = {
+        let mut posted = POSTED.lock().unwrap_or_else(|e| e.into_inner());
+        let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut *posted)
+            .into_iter()
+            .partition(|(group, _)| read_groups.contains(&group.as_str()));
+        *posted = kept;
+        gone.into_iter().map(|(_, id)| id).collect()
+    };
+    if ids.is_empty() {
+        return;
+    }
+    let ids: Vec<Retained<NSString>> = ids.iter().map(|id| NSString::from_str(id)).collect();
+    let refs: Vec<&NSString> = ids.iter().map(|id| &**id).collect();
+    let array = objc2_foundation::NSArray::from_slice(&refs);
+    UNUserNotificationCenter::currentNotificationCenter()
+        .removeDeliveredNotificationsWithIdentifiers(&array);
+}
+
+/// Shows a notification, with the default sound when `sound` (设置 › 通用 ›
+/// 声音). Call on the main thread.
+pub fn post(notice: &Notice, sound: bool, mtm: MainThreadMarker) {
     match MODE.get().copied().unwrap_or(NotifyMode::Fallback) {
         NotifyMode::UserNotifications => {
             let content = UNMutableNotificationContent::new();
             content.setTitle(&NSString::from_str(&notice.title));
             content.setBody(&NSString::from_str(&notice.body));
             content.setThreadIdentifier(&NSString::from_str(&notice.group_id));
-            content.setSound(Some(&UNNotificationSound::defaultSound()));
+            if sound {
+                content.setSound(Some(&UNNotificationSound::defaultSound()));
+            }
             let id = format!(
                 "{}{SEP}{}{SEP}{}",
                 notice.group_id,
@@ -183,6 +216,10 @@ pub fn post(notice: &Notice, mtm: MainThreadMarker) {
             );
             UNUserNotificationCenter::currentNotificationCenter()
                 .addNotificationRequest_withCompletionHandler(&request, None);
+            POSTED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((notice.group_id.clone(), id));
         }
         NotifyMode::Fallback => {
             let (title, body) = (notice.title.clone(), notice.body.clone());
