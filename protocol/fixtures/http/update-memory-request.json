@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemoryRequest",
+  "valid": true,
+  "value": {
+    "text": "PR 标题用英文",
+    "when": null
+  }
+}

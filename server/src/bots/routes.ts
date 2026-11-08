@@ -65,7 +65,7 @@ export async function machineRun(request: Request, env: Parameters<typeof deskSt
     throw new ApiError("forbidden", "the run's member is not in the group");
   }
   const writer: WriterContext = { memberId: run.bot_id, tokenId: `machine:${machine.id}`, member: { level: bot.level, kind: bot.kind } };
-  return { run, writer };
+  return { run, writer, info };
 }
 
 export function registerBotRoutes(): void {

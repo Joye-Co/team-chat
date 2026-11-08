@@ -12,6 +12,7 @@ import { type Brief, briefText } from "../../agent/frontdesk";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
+import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
 
@@ -291,6 +292,8 @@ export abstract class DeskRuns extends DeskCore {
       rules: policyPrompt(await effectivePolicy(this.env.DB)),
       acceptance,
       ...(brief ? { brief: briefText(brief) } : {}),
+      // 沉淀: what the team, the group, this member and the requester keep (reference material).
+      memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: EXECUTOR_MEMORY_BYTES }),
     });
     const out: Prompts = { prompt, manifest: manifestOf(sel, false) };
     if (since) {

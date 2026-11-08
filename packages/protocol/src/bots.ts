@@ -164,6 +164,35 @@ export type FrontDeskDecision = z.infer<typeof FrontDeskDecision>;
 export const FrontDeskDecisionsResponse = z.object({ decisions: z.array(FrontDeskDecision).max(100) });
 export type FrontDeskDecisionsResponse = z.infer<typeof FrontDeskDecisionsResponse>;
 
+/** `GET /v1/bots/:id/metrics?days=` (owner): what the front desk and the runs did lately. */
+export const BotMetrics = z.object({
+  since: Millis,
+  frontDesk: z.object({
+    decisions: Count,
+    byAction: z.object({ reply: Count, dispatch: Count, ask: Count, skip: Count }),
+    fallbacks: Count,
+    p50Ms: Count,
+    p95Ms: Count,
+    inputTokens: Count,
+    outputTokens: Count,
+  }),
+  runs: z.object({
+    total: Count,
+    done: Count,
+    failed: Count,
+    blocked: Count,
+    cancelled: Count,
+    /** Restarted by supervision (盯活). */
+    restarted: Count,
+    /** Continued by supervision after a promise without work. */
+    continued: Count,
+    interventions: Count,
+    p50Ms: Count,
+    p95Ms: Count,
+  }),
+});
+export type BotMetrics = z.infer<typeof BotMetrics>;
+
 /** `GET /v1/machine/runs/:id/search` */
 export const ContextSearchResponse = z.object({ hits: z.array(ContextHit).max(50) });
 export type ContextSearchResponse = z.infer<typeof ContextSearchResponse>;

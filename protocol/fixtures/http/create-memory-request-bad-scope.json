@@ -1,0 +1,10 @@
+{
+  "kind": "CreateMemoryRequest",
+  "valid": false,
+  "description": "a group scope needs the group id",
+  "value": {
+    "scope": "group:",
+    "kind": "fact",
+    "text": "x"
+  }
+}
