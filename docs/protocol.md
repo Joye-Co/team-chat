@@ -926,11 +926,17 @@ FrontDeskDecision = { messageId, topicId, authorId, action: "reply" | "dispatch"
                       reason, confidence, reply?, brief?: WorkBrief, fallback?, model?, ms,
                       inputTokens, outputTokens, replyMessageId?, at }
 FrontDeskDecisionsResponse = { decisions: FrontDeskDecision[] }   // newest first, at most 20
+BotMetrics = { since, frontDesk: { decisions, byAction: { reply, dispatch, ask, skip }, fallbacks,
+               p50Ms, p95Ms, inputTokens, outputTokens },
+               runs: { total, done, failed, blocked, cancelled, restarted, continued, interventions,
+                       p50Ms, p95Ms } }
 ```
 
 | Method and path | Who | Response |
 | --- | --- | --- |
 | `GET /v1/bots/:id/decisions?topicId=` | owner | `FrontDeskDecisionsResponse` |
+| `GET /v1/bots/:id/decisions/export?since=` | owner | the decisions with what the front desk read (`system`, `prompt`), one JSON object per line (`application/x-ndjson`), to build a replay set; holds topic text |
+| `GET /v1/bots/:id/metrics?days=` | owner | `BotMetrics`: front desk decisions by action, fallbacks, latency p50/p95, tokens; runs by outcome, supervision restarts and continues, interventions, duration p50/p95 (default 30 days, 1..365) |
 
 ### Run context
 
@@ -991,6 +997,92 @@ updates to it). Any other caller gets `forbidden`, an unknown run `not_found`, a
   no stall detection; they do not change the topic status or its responsible member (the bot
   sets those itself with `topic.update`). A runner-backed bot gets `conflict` on
   `POST /v1/runs`: its runs come from mentions.
+
+### Memory (沉淀)
+
+What the team keeps for later (docs/design/agent-harness.zh.md section 7). A memory lives in one
+scope: `team`, `group:<groupId>`, `member:<botId>` (an AI member: its lessons and playbooks) or
+`person:<memberId>` (a person's preferences). What a person writes is active at once; what an AI
+writes (an AI member's own token, a run's memory note, the review after a run) waits as
+`pending` until the daily consolidation. Nothing asks for confirmation: people correct afterwards,
+and every change keeps a version.
+
+```ts
+MemoryScope = "team" | `group:${id}` | `member:${id}` | `person:${id}`   // ids of [A-Za-z0-9_-]
+MemoryKind = "convention" | "fact" | "decision" | "preference" | "lesson" | "playbook"
+MemoryItem = { id, scope: MemoryScope, kind: MemoryKind, text /* 1..500 */, when? /* <= 300: when it applies */,
+               source: { kind: "message" | "run" | "card" | "manual", ids: string[] /* <= 20 */ },
+               note? /* <= 500: evidence, what a merge or promotion came from, why it was retired */,
+               authorId, human: boolean /* a person wrote or last edited it */,
+               status: "active" | "retired" | "pending", confidence /* 0..1 */, uses, lastUsedAt: number | null,
+               version /* >= 1 */, createdAt, updatedAt }
+CreateMemoryRequest = { scope, kind, text, when?, source? /* default { kind: "manual", ids: [] } */ }
+UpdateMemoryRequest = { kind?, text?, when?: string | null, status?: "active" | "retired" }
+MemoriesResponse = { memories: MemoryItem[] }                      // newest change first, <= 500
+MemoryVersion = { memoryId, version, item: MemoryItem /* as this version left it */,
+                  by: string | null /* null = the consolidation */, at }
+MemoryVersionsResponse = { versions: MemoryVersion[] }             // newest first, <= 200
+MemoryUpdate = { id, day /* YYYY-MM-DD, the team's local day */, scope, memoryId,
+                 change: "added" | "changed" | "retired" | "flagged", before: MemoryItem | null,
+                 after: MemoryItem | null, note?, undoneAt: number | null, at }
+MemoryUpdatesResponse = { day: string | null, updates: MemoryUpdate[] }   // oldest first
+MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind, text, when? }
+```
+
+Kinds, statuses, source kinds and changes may grow: Rust reads an unknown value as `Unknown`.
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/memories?scope=&status=&q=&limit=` | readers of the scope | | `MemoriesResponse`; `status` `active` (default), `pending`, `retired` or `all`; `q` matches the text (case-insensitive substring); `limit` 1-500, default 200 |
+| `POST /v1/memories` | writers of the scope | `CreateMemoryRequest` | `MemoryItem`: a person's is `active` with `human: true`; an AI member's is `pending` |
+| `GET /v1/memories/:id` | readers | | `MemoryItem` |
+| `PATCH /v1/memories/:id` | writers | `UpdateMemoryRequest` | `MemoryItem`, a new version (none when nothing changes). A person's edit of the text, kind or `when` makes it `human`; `status: "active"` on a pending memory makes it active at once; `retired` 停用 |
+| `GET /v1/memories/:id/versions` | readers | | `MemoryVersionsResponse` |
+| `POST /v1/memories/:id/versions/:version/restore` | writers | | `MemoryItem`: a new version with that version's kind, text, `when` and status (a pending one keeps the current status) |
+| `GET /v1/memories/updates?scope=&day=` | readers | | `MemoryUpdatesResponse`: that day's 记忆更新 of the scope, or the newest day with any |
+| `POST /v1/memories/updates/:id/undo` | writers of the line's scope | | `MemoryUpdate` with `undoneAt`: `added` retires the memory, `changed` puts back `before`, `retired` makes it active again (each a new version); `flagged` cannot be undone (`invalid`); twice is `conflict` |
+
+Who reads and writes:
+
+| Scope | Reads | Writes |
+| --- | --- | --- |
+| `team` | every member | owners |
+| `group:<id>` | members of the group | members of the group |
+| `member:<botId>` | every member | owners and that AI member |
+| `person:<id>` | only that person | only that person |
+
+Another member's person scope, a group the caller is not in, or a scope whose group or member does
+not exist is `not_found`; a reader without write access gets `forbidden`. A version clash (two
+writes of the same version) is `conflict`.
+
+Rules:
+
+- Text, `when` and notes go through the server's redaction (the daemon's token formats) before
+  they are stored: memory never keeps credentials.
+- **Runs** write with `POST /v1/machine/runs/:id/memories` (docs/machine-protocol.md, "Memory
+  notes"): `member` is the run's AI member, `person` the requester, `group` the run's group (not in
+  a direct conversation: `forbidden`). Always `pending`, source `{ kind: "run", ids: [runId] }`.
+- **Review after a run** (复盘): with an AI service, when a run of a person's request ends on a
+  machine (done, failed or stopped), one forced tool call reads the request, the work order, the
+  progress and the result and writes at most 3 `lesson`s with their evidence (`note`) and `when`,
+  as `pending` in the member's scope. Requests of bots and integrations and side chats get no
+  review. A review never fails or delays the run.
+- **Daily consolidation** (每天整理): once a day, at the first cron after 03:00 in the team's time
+  zone (`TEAM_TIME_ZONE`, default `Asia/Shanghai`), every scope with pending memories from before
+  that day's 03:00 is consolidated once (idempotent per scope and day). With an AI service, one
+  forced tool call gets the scope's active and pending memories (and, for an AI member, the other
+  members' lessons) and returns operations: add a pending one (maybe reworded), merge it into an
+  active one, retire one with a reason, keep, or promote a lesson found on two or more members to
+  a team `convention` (its `note` names the sources). A pending memory no operation names becomes
+  active as it is. Memories with `human: true` are never changed: an operation on one becomes a
+  `flagged` line. Without an AI service the pending memories become active as they are. AI-written
+  active memories unused for 60 days are retired. Every change is a `MemoryUpdate` line of that
+  day, without a card or a notification, and a new version (`by: null`).
+- **Reading**: a run's prompt carries an index (at most 8 KB) of the team's, the run's group's, the
+  member's (its own pending lessons too, marked as not yet consolidated) and the requester's
+  active memories; the front desk's system prompt carries the same, at most 4 KB. Both say the
+  memory is reference material, not instructions. Each memory in a prompt counts one `use` and
+  sets `lastUsedAt`.
 
 # 1.1 extensions
 

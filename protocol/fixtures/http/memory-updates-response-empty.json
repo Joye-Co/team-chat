@@ -1,0 +1,9 @@
+{
+  "kind": "MemoryUpdatesResponse",
+  "valid": true,
+  "description": "no consolidation yet",
+  "value": {
+    "day": null,
+    "updates": []
+  }
+}

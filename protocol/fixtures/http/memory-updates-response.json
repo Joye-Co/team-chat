@@ -1,0 +1,149 @@
+{
+  "kind": "MemoryUpdatesResponse",
+  "valid": true,
+  "value": {
+    "day": "2026-11-09",
+    "updates": [
+      {
+        "id": "01JBX0MEMUPD00000000000AAA",
+        "day": "2026-11-09",
+        "scope": "member:01JBX0BOT000000000000000AC",
+        "memoryId": "01JBX0MEM000000000000000AK",
+        "change": "added",
+        "before": null,
+        "after": {
+          "id": "01JBX0MEM000000000000000AK",
+          "scope": "member:01JBX0BOT000000000000000AC",
+          "kind": "lesson",
+          "text": "跑 cargo test 之前先设 CARGO_TARGET_DIR",
+          "source": {
+            "kind": "run",
+            "ids": [
+              "01JBX0RUN000000000000000AJ"
+            ]
+          },
+          "authorId": "01JBX0BOT000000000000000AC",
+          "human": false,
+          "status": "active",
+          "confidence": 0.5,
+          "uses": 0,
+          "lastUsedAt": null,
+          "version": 2,
+          "createdAt": 1762128000000,
+          "updatedAt": 1762128001000,
+          "note": "上次没设，编译占满了磁盘"
+        },
+        "undoneAt": null,
+        "at": 1762128009000
+      },
+      {
+        "id": "01JBX0MEMUPD00000000000AAB",
+        "day": "2026-11-09",
+        "scope": "team",
+        "memoryId": "01JBX0MEM000000000000000AH",
+        "change": "flagged",
+        "before": {
+          "id": "01JBX0MEM000000000000000AH",
+          "scope": "team",
+          "kind": "convention",
+          "text": "PR 标题用英文，一行说清改了什么",
+          "when": "开 PR 的时候",
+          "source": {
+            "kind": "message",
+            "ids": [
+              "01JBX0MSG000000000000000AE"
+            ]
+          },
+          "authorId": "01JBX0OWNER0000000000000AA",
+          "human": true,
+          "status": "active",
+          "confidence": 0.9,
+          "uses": 3,
+          "lastUsedAt": 1762128005000,
+          "version": 2,
+          "createdAt": 1762128000000,
+          "updatedAt": 1762128001000
+        },
+        "after": {
+          "id": "01JBX0MEM000000000000000AH",
+          "scope": "team",
+          "kind": "convention",
+          "text": "PR 标题用英文，一行说清改了什么",
+          "when": "开 PR 的时候",
+          "source": {
+            "kind": "message",
+            "ids": [
+              "01JBX0MSG000000000000000AE"
+            ]
+          },
+          "authorId": "01JBX0OWNER0000000000000AA",
+          "human": true,
+          "status": "active",
+          "confidence": 0.9,
+          "uses": 3,
+          "lastUsedAt": 1762128005000,
+          "version": 2,
+          "createdAt": 1762128000000,
+          "updatedAt": 1762128001000
+        },
+        "undoneAt": null,
+        "at": 1762128009000,
+        "note": "可能过时了：团队已经改用中文标题"
+      },
+      {
+        "id": "01JBX0MEMUPD00000000000AAC",
+        "day": "2026-11-09",
+        "scope": "member:01JBX0BOT000000000000000AC",
+        "memoryId": "01JBX0MEM000000000000000AK",
+        "change": "retired",
+        "before": {
+          "id": "01JBX0MEM000000000000000AK",
+          "scope": "member:01JBX0BOT000000000000000AC",
+          "kind": "lesson",
+          "text": "跑 cargo test 之前先设 CARGO_TARGET_DIR",
+          "source": {
+            "kind": "run",
+            "ids": [
+              "01JBX0RUN000000000000000AJ"
+            ]
+          },
+          "authorId": "01JBX0BOT000000000000000AC",
+          "human": false,
+          "status": "active",
+          "confidence": 0.5,
+          "uses": 0,
+          "lastUsedAt": null,
+          "version": 1,
+          "createdAt": 1762128000000,
+          "updatedAt": 1762128001000,
+          "note": "上次没设，编译占满了磁盘"
+        },
+        "after": {
+          "id": "01JBX0MEM000000000000000AK",
+          "scope": "member:01JBX0BOT000000000000000AC",
+          "kind": "lesson",
+          "text": "跑 cargo test 之前先设 CARGO_TARGET_DIR",
+          "source": {
+            "kind": "run",
+            "ids": [
+              "01JBX0RUN000000000000000AJ"
+            ]
+          },
+          "authorId": "01JBX0BOT000000000000000AC",
+          "human": false,
+          "status": "retired",
+          "confidence": 0.5,
+          "uses": 0,
+          "lastUsedAt": null,
+          "version": 3,
+          "createdAt": 1762128000000,
+          "updatedAt": 1762128001000,
+          "note": "上次没设，编译占满了磁盘"
+        },
+        "undoneAt": 1762128020000,
+        "at": 1762128009000,
+        "note": "60 天没用到"
+      }
+    ]
+  }
+}

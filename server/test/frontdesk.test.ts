@@ -27,6 +27,8 @@ function fakeDesk(decisions: (unknown | Error)[]): Seen[] {
     const body = (await req.json()) as any;
     // Other model calls (topic titles) get a plain answer.
     if (!body.tools) return Response.json({ choices: [{ message: { role: "assistant", content: "标题" } }] });
+    // The review after a run (memory/retro.ts) finds nothing to keep.
+    if (body.tool_choice?.function?.name !== "decide") return Response.json({ choices: [{ message: { role: "assistant", content: '{"lessons":[]}' } }] });
     seen.push({ body });
     const d = decisions.shift();
     if (d instanceof Error) return new Response(JSON.stringify({ error: { message: d.message } }), { status: 500 });

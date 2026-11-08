@@ -69,9 +69,11 @@ export interface DecideInput {
   request: string;
   /** The topic is a DM with this member. */
   dm: boolean;
+  /** 沉淀: the memory index (memory/inject.ts), reference material in the fixed prefix. */
+  memory?: string;
 }
 
-export function systemPrompt(i: Pick<DecideInput, "botName" | "role">): string {
+export function systemPrompt(i: Pick<DecideInput, "botName" | "role" | "memory">): string {
   return [
     `You are the front desk of ${i.botName}${i.role ? ` (${i.role})` : ""}, an AI member of a team chat. ${i.botName} works on the team's computers through a coding agent (the executor) that can read and change the code repository, run commands, use the web and deliver files.`,
     "A new request just came in. Decide how to handle it with the `decide` tool:",
@@ -80,6 +82,7 @@ export function systemPrompt(i: Pick<DecideInput, "botName" | "role">): string {
     "- ask: the request cannot be started as it is (what or where is unclear) and the topic does not answer it. Ask one short question.",
     "- skip: nothing for this member to do (the message is for someone else, or needs no answer).",
     "When unsure between reply and dispatch, dispatch. Write replies short, in the language of the request, as the member (not as a front desk).",
+    ...(i.memory ? ["", i.memory] : []),
   ].join("\n");
 }
 
@@ -110,6 +113,9 @@ export function settle(raw: unknown): { decision: Decision; fallback?: string } 
 
 export interface DecideResult {
   decision: Decision;
+  /** What the model read, kept for replay (M6). */
+  system: string;
+  prompt: string;
   /** Why the desk did not take the model's answer as it was. */
   fallback?: string;
   ms: number;
@@ -118,11 +124,13 @@ export interface DecideResult {
 
 export async function decide(cfg: ModelConfig, input: DecideInput, opts: CallOptions = {}): Promise<DecideResult> {
   const t0 = Date.now();
-  const res = await callTool(cfg, { system: systemPrompt(input), prompt: userPrompt(input), tool: DECIDE_TOOL, maxTokens: 1500 }, opts);
+  const system = systemPrompt(input);
+  const prompt = userPrompt(input);
+  const res = await callTool(cfg, { system, prompt, tool: DECIDE_TOOL, maxTokens: 1500 }, opts);
   const ms = Date.now() - t0;
-  if (!res.ok) return { decision: { action: "dispatch", reason: "", confidence: 0 }, fallback: `model error: ${res.error}`, ms };
+  if (!res.ok) return { decision: { action: "dispatch", reason: "", confidence: 0 }, fallback: `model error: ${res.error}`, ms, system, prompt };
   const s = settle(res.input);
-  return { ...s, ms, ...(res.usage ? { usage: res.usage } : {}) };
+  return { ...s, ms, system, prompt, ...(res.usage ? { usage: res.usage } : {}) };
 }
 
 /** The work order as the executor's prompt shows it. */

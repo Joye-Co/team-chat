@@ -604,6 +604,51 @@ pub struct FrontDeskDecisionsResponse {
     pub decisions: Vec<FrontDeskDecision>,
 }
 
+/// `GET /v1/bots/:id/metrics?days=` (owner).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotMetrics {
+    pub since: Millis,
+    pub front_desk: FrontDeskMetrics,
+    pub runs: RunMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontDeskMetrics {
+    pub decisions: u64,
+    pub by_action: FrontDeskActionCounts,
+    pub fallbacks: u64,
+    pub p50_ms: u64,
+    pub p95_ms: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontDeskActionCounts {
+    pub reply: u64,
+    pub dispatch: u64,
+    pub ask: u64,
+    pub skip: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunMetrics {
+    pub total: u64,
+    pub done: u64,
+    pub failed: u64,
+    pub blocked: u64,
+    pub cancelled: u64,
+    pub restarted: u64,
+    pub continued: u64,
+    pub interventions: u64,
+    pub p50_ms: u64,
+    pub p95_ms: u64,
+}
+
 /// `GET /v1/machine/runs/:id/search`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
