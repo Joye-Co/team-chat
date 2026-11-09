@@ -84,6 +84,68 @@ export const Health = z.object({
 });
 export type Health = z.infer<typeof Health>;
 
+// ---------------------------------------------------------------------------
+// Machine metrics (heartbeat.metrics, docs/machine-protocol.md "Metrics")
+// ---------------------------------------------------------------------------
+
+export const MAX_METRIC_RUNS = 64;
+/** `VmRunMetrics.phase` values; read as any short string so a newer daemon's phase never fails a heartbeat. */
+export const VM_PHASES = ["booting", "running", "paused"] as const;
+/** One run's VM (or local process tree) as the daemon measured it. */
+export const VmRunMetrics = z.object({
+  runId: RunId,
+  /** "booting" | "running" | "paused" */
+  phase: z.string().min(1).max(32),
+  startedAt: Millis,
+  /** Start of the VM to a connected guest agent, once it booted. */
+  bootMs: z.int().nonnegative().optional(),
+  /** CPU since the previous sample, in cores (1.0 = one thread busy). */
+  cpuCores: z.number().nonnegative().optional(),
+  /** Resident memory of the VM (the guest pages it touched). */
+  memBytes: z.int().nonnegative().optional(),
+  /** Blocks the run's scratch disk uses. */
+  scratchBytes: z.int().nonnegative().optional(),
+});
+export type VmRunMetrics = z.infer<typeof VmRunMetrics>;
+/** `CliLogin.state` values. */
+export const CLI_LOGIN_STATES = ["logged_in", "logged_out", "unknown"] as const;
+/** Whether a runtime's CLI has a credential on the machine; never the credential itself. */
+export const CliLogin = z.object({
+  runtime: z.string().min(1).max(64),
+  /** "logged_in" | "logged_out" | "unknown" */
+  state: z.string().min(1).max(32),
+  /** "subscription" | "api_key" when known. */
+  method: z.string().min(1).max(32).optional(),
+});
+export type CliLogin = z.infer<typeof CliLogin>;
+/** VM boot times of the last (at most 50) runs. */
+export const BootStats = z.object({
+  avgMs: z.int().nonnegative(),
+  maxMs: z.int().nonnegative(),
+  samples: z.int().nonnegative(),
+});
+export type BootStats = z.infer<typeof BootStats>;
+/** Host and VM numbers the daemon sends with each heartbeat; every number is optional (a platform may not have it). */
+export const MachineMetrics = z.object({
+  /** When the daemon took the sample (machine clock). */
+  at: Millis,
+  uptimeSecs: z.int().nonnegative().optional(),
+  /** Whole-host CPU busy since the previous sample, 0-100. */
+  cpuPct: z.number().min(0).max(100).optional(),
+  cpuThreads: z.int().nonnegative().optional(),
+  memTotalBytes: z.int().nonnegative().optional(),
+  memAvailableBytes: z.int().nonnegative().optional(),
+  /** Bytes per second over the non-loopback, non-VM interfaces since the previous sample. */
+  netRxBps: z.number().nonnegative().optional(),
+  netTxBps: z.number().nonnegative().optional(),
+  /** VM slots of the machine (`[vm]`), absent without VMs. */
+  vmSlots: z.int().nonnegative().optional(),
+  boot: BootStats.optional(),
+  runs: z.array(VmRunMetrics).max(MAX_METRIC_RUNS),
+  logins: z.array(CliLogin).max(64).optional(),
+});
+export type MachineMetrics = z.infer<typeof MachineMetrics>;
+
 export const RunCursor = z.object({ runId: RunId, lastSeq: Seq, done: z.boolean() });
 export type RunCursor = z.infer<typeof RunCursor>;
 export const KnownRun = z.object({ runId: RunId, ackedSeq: Seq });
@@ -247,7 +309,14 @@ export const MachineUpFrame = z.discriminatedUnion("t", [
     health: Health,
     runs: z.array(RunCursor),
   }),
-  z.object({ t: z.literal("heartbeat"), at: Millis, health: Health, runs: z.array(RunCursor) }),
+  z.object({
+    t: z.literal("heartbeat"),
+    at: Millis,
+    health: Health,
+    runs: z.array(RunCursor),
+    /** Host and VM metrics (daemons since 1.2.7); old servers ignore it. */
+    metrics: MachineMetrics.optional(),
+  }),
   z.object({ t: z.literal("run.accept"), runId: RunId }),
   z.object({
     t: z.literal("run.reject"),
