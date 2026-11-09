@@ -169,7 +169,18 @@ pub struct MembersPage {
     rules_status: Status,
     spend: Entity<InputState>,
     filter: Entity<InputState>,
+    /// What the pane draws: both parts in Settings (self-tests), one in 团队管理.
+    part: MembersPart,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The parts of the 成员 pane: the roster, and 默认规则.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MembersPart {
+    #[default]
+    Both,
+    Roster,
+    Rules,
 }
 
 impl MembersPage {
@@ -217,6 +228,7 @@ impl MembersPage {
             rules_status: Status::Idle,
             spend,
             filter,
+            part: MembersPart::Both,
             _subscriptions: subscriptions,
         }
     }
@@ -268,6 +280,12 @@ impl MembersPage {
     }
 
     /// Loads 默认规则.
+    /// 团队管理 shows the roster and 默认规则 as two pages.
+    pub fn set_part(&mut self, part: MembersPart, cx: &mut Context<Self>) {
+        self.part = part;
+        cx.notify();
+    }
+
     pub fn refresh_rules(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.rules_status.busy() {
             return;
@@ -774,10 +792,15 @@ impl Render for MembersPage {
                 GroupedForm::new().row(widgets::item_rows(off_rows, tokens::avatar::MD, cx)),
             )
         });
+        if self.part == MembersPart::Rules {
+            return widgets::pane().child(self.rules_section(owner, window, cx));
+        }
         widgets::pane()
             .child(members_section)
             .children(off_section)
-            .child(self.rules_section(owner, window, cx))
+            .when(self.part == MembersPart::Both, |p| {
+                p.child(self.rules_section(owner, window, cx))
+            })
     }
 }
 

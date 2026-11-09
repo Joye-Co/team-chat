@@ -7,6 +7,8 @@
 //! card on top of 设置 › 通用; both show only to owners. The window asks the server every 5
 //! seconds while it is open.
 
+mod accounts;
+mod fleet;
 mod model;
 mod overview;
 mod spark;
@@ -43,6 +45,7 @@ use crate::{
     views::settings::{i_am_owner, widgets::answer},
 };
 
+pub use accounts::Page as AdminPage;
 pub use model::Range;
 
 gpui::actions!(
@@ -68,21 +71,43 @@ pub fn install(services: Services, cx: &mut App) {
 
 /// The open monitor window, so the command never opens a second one.
 #[derive(Default)]
-struct AdminWindow(Option<AnyWindowHandle>);
+struct AdminWindow(Option<(AnyWindowHandle, gpui::WeakEntity<AdminView>)>);
 
 impl Global for AdminWindow {}
 
 /// Opens the monitor window, or brings the open one to the front.
 pub fn open(services: Services, cx: &mut App) {
-    if let Some(handle) = cx.try_global::<AdminWindow>().and_then(|w| w.0)
+    open_with(services, None, cx);
+}
+
+/// Opens 团队管理 at `page` (Settings sends 成员, 团队约定 and 机器 here).
+pub fn open_at(services: Services, page: AdminPage, cx: &mut App) {
+    open_with(services, Some(page), cx);
+}
+
+fn open_with(services: Services, page: Option<AdminPage>, cx: &mut App) {
+    if !i_am_owner(&services) {
+        return;
+    }
+    if let Some((handle, view)) = cx.try_global::<AdminWindow>().and_then(|w| w.0.clone())
         && handle
-            .update(cx, |_, window, _| window.activate_window())
+            .update(cx, |_, window, cx| {
+                window.activate_window();
+                if let Some(p) = page {
+                    let _ = view.update(cx, |v, cx| v.open_page(p, window, cx));
+                }
+            })
             .is_ok()
     {
         return;
     }
-    if let Ok((handle, _)) = open_window(services, true, cx) {
-        cx.set_global(AdminWindow(Some(handle)));
+    if let Ok((handle, view)) = open_window(services, true, cx) {
+        if let Some(p) = page {
+            let _ = handle.update(cx, |_, window, cx| {
+                view.update(cx, |v, cx| v.open_page(p, window, cx))
+            });
+        }
+        cx.set_global(AdminWindow(Some((handle, view.downgrade()))));
     }
 }
 
@@ -136,6 +161,17 @@ pub struct AdminView {
     scroll: ScrollHandle,
     _poll: Task<()>,
     _subs: Vec<Subscription>,
+    /// The live page: 概览, 订阅账号 or API 密钥.
+    page: accounts::Page,
+    acct: accounts::State,
+    fleet: fleet::Fleet,
+    /// The panes that moved here from Settings.
+    members: Entity<crate::views::settings::members::MembersPage>,
+    rules: Entity<crate::views::settings::members::MembersPage>,
+    memory: Entity<crate::views::memory::MemoryBoard>,
+    ai: Entity<crate::views::settings::ai_service::AiServicePanel>,
+    /// 模型, under AI 服务 on the same page.
+    models: Entity<crate::views::settings::worker_models::WorkerModelsPanel>,
 }
 
 impl AdminView {
@@ -166,6 +202,37 @@ impl AdminView {
             ),
             cx.observe_window_activation(window, |_, _, cx| cx.notify()),
         ];
+        let acct = accounts::State::new(window, cx);
+        use crate::views::settings::members::{MembersPage, MembersPart};
+        let members = cx.new(|cx| {
+            let mut p = MembersPage::new(services.clone(), window, cx);
+            p.set_part(MembersPart::Roster, cx);
+            p
+        });
+        let rules = cx.new(|cx| {
+            let mut p = MembersPage::new(services.clone(), window, cx);
+            p.set_part(MembersPart::Rules, cx);
+            p
+        });
+        let memory = cx.new(|cx| {
+            crate::views::memory::MemoryBoard::new(
+                services.clone(),
+                crate::data::memory::MemoryScope::Team,
+                crate::views::memory::Host::Settings,
+                String::new(),
+                cx,
+            )
+        });
+        let ai = cx.new(|cx| {
+            crate::views::settings::ai_service::AiServicePanel::new(services.clone(), window, cx)
+        });
+        let models = cx.new(|cx| {
+            crate::views::settings::worker_models::WorkerModelsPanel::new(
+                services.clone(),
+                window,
+                cx,
+            )
+        });
         let mut this = Self {
             services,
             owner,
@@ -177,6 +244,14 @@ impl AdminView {
             data_for: None,
             load: Load::Idle,
             scroll: ScrollHandle::new(),
+            page: accounts::Page::default(),
+            acct,
+            fleet: fleet::Fleet::default(),
+            members,
+            rules,
+            memory,
+            ai,
+            models,
             _poll: poll,
             _subs: subs,
         };
@@ -189,6 +264,9 @@ impl AdminView {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         if !self.owner || self.load == Load::Busy {
             return;
+        }
+        if self.page == accounts::Page::Keys {
+            self.fetch_secrets(cx);
         }
         self.load = Load::Busy;
         let list = self.services.provider.machines();
@@ -208,6 +286,9 @@ impl AdminView {
                             .map(|x| x.id.clone())
                     });
                     this.machines = Some(list);
+                    if this.page == accounts::Page::Machines {
+                        this.fetch_fleet(cx);
+                    }
                     this.fetch(cx);
                 }
                 Err(e) => {
@@ -333,6 +414,16 @@ fn clock(ms: u64) -> String {
 }
 
 /// "10:31" in local time.
+/// "11 月 8 日 19:20" in local time.
+fn clock_day(ms: u64) -> String {
+    use chrono::TimeZone as _;
+    chrono::Local
+        .timestamp_millis_opt(ms as i64)
+        .single()
+        .map(|t| t.format("%-m 月 %-d 日 %H:%M").to_string())
+        .unwrap_or_default()
+}
+
 fn clock_short(ms: u64) -> String {
     use chrono::TimeZone as _;
     chrono::Local
@@ -429,26 +520,50 @@ impl AdminView {
                 };
                 soon(id.into(), row)
             };
-        // A machine's own pages sit under it, indented past its symbol.
-        let sub = |id: String,
-                   label: &'static str,
-                   selected: bool,
-                   trailing: Option<gpui::AnyElement>| {
-            let row = SidebarRow::new(SharedString::from(id.clone()), label)
-                .leading(div().w(SymSize::SIDEBAR.slot_px()))
-                .selected(selected);
-            let row = match trailing {
+        // The pages that work: selected when open.
+        let current_page = self.page;
+        let live_page = |id: &'static str,
+                         label: &'static str,
+                         s: Sym,
+                         target: accounts::Page,
+                         trailing: Option<gpui::AnyElement>| {
+            let on = current_page == target;
+            let view = cx.entity();
+            let row = SidebarRow::new(id, label)
+                .leading(icon(s, on))
+                .selected(on)
+                .on_click(move |_, window, cx| {
+                    view.update(cx, |v, cx| v.open_page(target, window, cx))
+                });
+            match trailing {
                 Some(el) => row.trailing_element(el),
                 None => row,
-            };
-            if selected {
-                div()
-                    .id(SharedString::from(format!("{id}-wrap")))
-                    .child(row)
-            } else {
-                soon(id.into(), row)
             }
         };
+        // A machine's own pages sit under it, indented past its symbol.
+        let view_for_sub = cx.entity();
+        let on_overview = self.page == accounts::Page::Overview;
+        let sub =
+            |id: String, label: &'static str, live: bool, trailing: Option<gpui::AnyElement>| {
+                let selected = live && on_overview;
+                let row = SidebarRow::new(SharedString::from(id.clone()), label)
+                    .leading(div().w(SymSize::SIDEBAR.slot_px()))
+                    .selected(selected);
+                let row = match trailing {
+                    Some(el) => row.trailing_element(el),
+                    None => row,
+                };
+                if live {
+                    let view = view_for_sub.clone();
+                    div()
+                        .id(SharedString::from(format!("{id}-wrap")))
+                        .child(row.on_click(move |_, _, cx| {
+                            view.update(cx, |v, cx| v.show_page(accounts::Page::Overview, cx))
+                        }))
+                } else {
+                    soon(id.into(), row)
+                }
+            };
         let view = cx.entity();
         let machines: Vec<gpui::AnyElement> = self
             .machines
@@ -466,7 +581,10 @@ impl AdminView {
                 .trailing_element(dot(if x.connected { k.green } else { k.secondary }))
                 .on_click(move |_, _, cx| {
                     let id = id.clone();
-                    view.update(cx, |v, cx| v.select_machine(id, cx))
+                    view.update(cx, |v, cx| {
+                        v.select_machine(id, cx);
+                        v.show_page(accounts::Page::Overview, cx)
+                    })
                 });
                 if open {
                     row = row.disclosure(true);
@@ -532,28 +650,66 @@ impl AdminView {
                     .flex_col()
                     .child(group_label(m::NAV_TEAM, cx).mt(space::S12))
                     .child(page("nav-home", m::NAV_HOME, Sym::Grid, None))
-                    .child(page(
+                    .child(live_page(
                         "nav-members",
                         m::NAV_MEMBERS,
                         Sym::Members,
+                        accounts::Page::Members,
                         (members > 0).then(|| count(members, false)),
                     ))
                     .child(page("nav-usage", m::NAV_USAGE, Sym::BarChart, None))
                     .child(page("nav-activity", m::NAV_ACTIVITY, Sym::List, None))
                     .child(group_label(m::NAV_MACHINES, cx).mt(space::S12))
+                    .child(live_page(
+                        "nav-machines",
+                        m::NAV_ALL_MACHINES,
+                        Sym::Computer,
+                        accounts::Page::Machines,
+                        self.machines.as_ref().map(|l| count(l.len() as u32, false)),
+                    ))
                     .children(machines)
                     .child(group_label(m::NAV_ACCOUNTS, cx).mt(space::S12))
-                    .child(page(
+                    .child(live_page(
                         "nav-subs",
                         m::NAV_SUBSCRIPTIONS,
                         Sym::Account,
+                        accounts::Page::Accounts,
                         (logged_out > 0).then(|| count(logged_out, true)),
                     ))
-                    .child(page("nav-keys", m::NAV_KEYS, Sym::Key, None))
+                    .child(live_page(
+                        "nav-keys",
+                        m::NAV_KEYS,
+                        Sym::Key,
+                        accounts::Page::Keys,
+                        self.acct
+                            .secrets
+                            .as_ref()
+                            .map(|s| s.secrets.len() as u32)
+                            .filter(|n| *n > 0)
+                            .map(|n| count(n, false)),
+                    ))
                     .child(group_label(m::NAV_SETTINGS, cx).mt(space::S12))
-                    .child(page("nav-ai", m::NAV_AI, Sym::AiMember, None))
-                    .child(page("nav-rules", m::NAV_RULES, Sym::Checklist, None))
-                    .child(page("nav-memory", m::NAV_MEMORY, Sym::Book, None)),
+                    .child(live_page(
+                        "nav-ai",
+                        m::NAV_AI,
+                        Sym::AiMember,
+                        accounts::Page::Ai,
+                        None,
+                    ))
+                    .child(live_page(
+                        "nav-rules",
+                        m::NAV_RULES,
+                        Sym::Checklist,
+                        accounts::Page::Rules,
+                        None,
+                    ))
+                    .child(live_page(
+                        "nav-memory",
+                        m::NAV_MEMORY,
+                        Sym::Book,
+                        accounts::Page::Memory,
+                        None,
+                    )),
             )
             .children(me.map(|me| {
                 SidebarFooter::new(
@@ -607,17 +763,43 @@ impl AdminView {
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         let active = window.is_window_active();
-        let subtitle = match self.current() {
-            Some(d) => match d.sampled_at {
-                Some(at) => fill(m::SAMPLED_AT, &[("time", &clock(at))]),
-                None => m::WAITING_FIRST.to_string(),
-            },
-            None => String::new(),
-        };
         let machine_name = self
             .machine()
             .map(|x| x.name.clone())
             .or_else(|| self.current().map(|d| d.machine.name.clone()));
+        let overview = self.page == accounts::Page::Overview;
+        let subtitle = match self.page {
+            accounts::Page::Overview => match self.current() {
+                Some(d) => match d.sampled_at {
+                    Some(at) => fill(m::SAMPLED_AT, &[("time", &clock(at))]),
+                    None => m::WAITING_FIRST.to_string(),
+                },
+                None => String::new(),
+            },
+            accounts::Page::Accounts => fill(
+                m::ACCOUNTS_SUB,
+                &[("machine", machine_name.as_deref().unwrap_or_default())],
+            ),
+            accounts::Page::Keys => fill(
+                m::KEYS_SUB,
+                &[("machine", machine_name.as_deref().unwrap_or_default())],
+            ),
+            accounts::Page::Members => m::MEMBERS_SUB.to_string(),
+            accounts::Page::Machines => m::FLEET_SUB.to_string(),
+            accounts::Page::Ai => m::AI_SUB.to_string(),
+            accounts::Page::Rules => m::RULES_SUB.to_string(),
+            accounts::Page::Memory => m::MEMORY_SUB.to_string(),
+        };
+        let page_title = match self.page {
+            accounts::Page::Overview => m::TITLE,
+            accounts::Page::Accounts => m::ACCOUNTS_TITLE,
+            accounts::Page::Keys => m::KEYS_TITLE,
+            accounts::Page::Members => m::MEMBERS_TITLE,
+            accounts::Page::Machines => m::FLEET_TITLE,
+            accounts::Page::Ai => m::AI_TITLE,
+            accounts::Page::Rules => m::RULES_TITLE,
+            accounts::Page::Memory => m::MEMORY_TITLE,
+        };
         let view = cx.entity();
         let range = Segmented::new(
             "admin-range",
@@ -671,13 +853,15 @@ impl AdminView {
                             .gap(space::S4)
                             .n_title3()
                             .text_color(if active { k.label } else { k.secondary })
-                            .child(div().text_color(k.secondary).child(m::PATH_MACHINES))
-                            .child(sym_icon(
-                                Sym::ChevronRight,
-                                SymSize::INLINE_SMALL,
-                                k.tertiary,
-                            ))
-                            .children(machine_name.map(|n| {
+                            .when(overview, |d| {
+                                d.child(div().text_color(k.secondary).child(m::PATH_MACHINES))
+                                    .child(sym_icon(
+                                        Sym::ChevronRight,
+                                        SymSize::INLINE_SMALL,
+                                        k.tertiary,
+                                    ))
+                            })
+                            .children(machine_name.filter(|_| overview).map(|n| {
                                 div()
                                     .flex()
                                     .items_center()
@@ -689,7 +873,7 @@ impl AdminView {
                                         k.tertiary,
                                     ))
                             }))
-                            .child(m::TITLE),
+                            .child(page_title),
                     )
                     .when(!subtitle.is_empty(), |d| {
                         d.child(
@@ -700,7 +884,7 @@ impl AdminView {
                         )
                     }),
             )
-            .child(range)
+            .when(overview, |d| d.child(range))
             .child(refresh)
     }
 
@@ -764,6 +948,43 @@ impl AdminView {
                 )
                 .into_any_element();
         }
+        // Pages that do not need the machine's numbers.
+        match self.page {
+            // Settings panes bring their own 24 inset: 8 more lines them up with the toolbar.
+            accounts::Page::Members => {
+                return div()
+                    .w_full()
+                    .px(space::S8)
+                    .child(self.members.clone())
+                    .into_any_element();
+            }
+            accounts::Page::Rules => {
+                return div()
+                    .w_full()
+                    .px(space::S8)
+                    .child(self.rules.clone())
+                    .into_any_element();
+            }
+            accounts::Page::Memory => {
+                return div()
+                    .w_full()
+                    .px(space::S8)
+                    .child(self.memory.clone())
+                    .into_any_element();
+            }
+            accounts::Page::Ai => {
+                return pad
+                    .child(self.ai.clone())
+                    .child(self.models.clone())
+                    .into_any_element();
+            }
+            accounts::Page::Machines => {
+                return pad
+                    .child(self.machines_page(now_ms(), window, cx))
+                    .into_any_element();
+            }
+            _ => {}
+        }
         let Some(d) = self.current().cloned() else {
             // Nothing to show yet: the error in place of the page, or the page's skeleton.
             return match failed {
@@ -808,6 +1029,21 @@ impl AdminView {
                     .description(m::NO_METRICS_DESC)
                     .into_any_element(),
             );
+        }
+        match self.page {
+            accounts::Page::Accounts => {
+                return pad
+                    .children(top)
+                    .child(self.accounts_page(now, window, cx))
+                    .into_any_element();
+            }
+            accounts::Page::Keys => {
+                return pad
+                    .children(top)
+                    .child(self.keys_page(now, window, cx))
+                    .into_any_element();
+            }
+            _ => {}
         }
         let names = |id: &str| self.member_name(id);
         let provider = self.services.provider.clone();

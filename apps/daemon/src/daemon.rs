@@ -84,6 +84,16 @@ pub struct Daemon {
     exec: Arc<dyn crate::executor::Executor>,
     /// Host and VM numbers for the heartbeat.
     sampler: crate::metrics::Sampler,
+    /// Feature "accounts": the machine key (None turns the feature off), the API keys, the
+    /// sign-ins in progress and their status channel, usage and who each CLI is signed in as.
+    machine_key: Option<Arc<crate::accounts::MachineKey>>,
+    keys: crate::accounts::SecretStore,
+    logins: HashMap<String, mpsc::UnboundedSender<crate::accounts::LoginCtl>>,
+    login_tx: mpsc::UnboundedSender<crate::proto::LoginStatus>,
+    usage: Arc<std::sync::Mutex<Vec<crate::proto::CliUsage>>>,
+    accounts: Arc<std::sync::Mutex<HashMap<String, crate::proto::LoginAccount>>>,
+    /// Values masked besides the config's: every key this process has held.
+    key_values: Vec<String>,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -91,7 +101,15 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let _ = std::fs::create_dir_all(crate::workspace::runs_dir(&cfg));
     let (link_tx, mut link_rx) = mpsc::unbounded_channel();
     let (run_tx, mut run_rx) = mpsc::unbounded_channel();
-    let redactor = Arc::new(crate::redact::Redactor::for_daemon(&cfg, &token));
+    let keys = crate::accounts::SecretStore::load(&cfg);
+    let key_values = keys.values();
+    let redactor = Arc::new(crate::redact::Redactor::for_daemon_with(
+        &cfg,
+        &token,
+        &key_values,
+    ));
+    let machine_key = crate::accounts::MachineKey::load_or_create(&cfg).map(Arc::new);
+    let (login_tx, mut login_rx) = mpsc::unbounded_channel();
     let exec = crate::executor::for_config(&cfg);
     let mut d = Daemon {
         cfg: Arc::new(cfg),
@@ -112,7 +130,15 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         run_tx,
         exec,
         sampler: crate::metrics::Sampler::new(),
+        machine_key,
+        keys,
+        logins: HashMap::new(),
+        login_tx,
+        usage: Arc::new(std::sync::Mutex::new(vec![])),
+        accounts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        key_values,
     };
+    d.read_accounts();
     d.recover();
     {
         let cfg = d.cfg.clone();
@@ -136,6 +162,10 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let mut exe = crate::selfupdate::Watch::current();
     let mut update_check =
         tokio::time::interval_at(tokio::time::Instant::now() + UPDATE_CHECK, UPDATE_CHECK);
+    let mut usage_tick = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(5),
+        crate::usage::EVERY,
+    );
     tokio::pin!(shutdown);
     log!("daemon started: {} runtimes", d.cfg.runtimes.len());
     loop {
@@ -146,6 +176,8 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             Some(ev) = link_rx.recv() => d.on_link(ev),
             Some((id, msg)) = run_rx.recv() => d.on_run(id, msg),
             _ = heartbeat.tick() => d.heartbeat(hb),
+            Some(st) = login_rx.recv() => d.on_login_status(st),
+            _ = usage_tick.tick(), if d.machine_key.is_some() => d.read_accounts(),
             _ = update_check.tick() => {
                 // While runs are active the change stays ready; the next idle check restarts.
                 if exe.as_mut().is_some_and(|w| w.check()) && d.active_count() == 0 {
@@ -457,8 +489,16 @@ impl Daemon {
                         os: std::env::consts::OS.into(),
                         arch: std::env::consts::ARCH.into(),
                         max_parallel_runs: self.cfg.max_parallel_runs,
-                        features: Some(FEATURES.iter().map(|f| f.to_string()).collect()),
+                        features: Some(
+                            FEATURES
+                                .iter()
+                                .copied()
+                                .chain(self.machine_key.as_ref().map(|_| feature::ACCOUNTS))
+                                .map(str::to_string)
+                                .collect(),
+                        ),
                         takeover_url: self.takeover_url(),
+                        public_key: self.machine_key.as_ref().map(|k| k.public_b64()),
                     },
                     clis: self.clis.clone(),
                     health: health::health(&self.cfg, self.active_count()),
@@ -601,6 +641,24 @@ impl Daemon {
                     let _ = r.control.send(Control::Input { input_id, text }.into());
                 }
             }
+            Down::AccountLogin {
+                login_id,
+                runtime,
+                op,
+                code,
+            } => self.on_account_login(login_id, runtime, op, code),
+            Down::SecretSet {
+                name,
+                sealed,
+                members,
+            } => self.on_secret_set(&name, &sealed, members),
+            Down::SecretDelete { name } => {
+                if let Err(e) = self.keys.delete(&name) {
+                    log!("key {}: {e}", crate::chat_run::safe_word(&name));
+                } else {
+                    log!("key {} removed", crate::chat_run::safe_word(&name));
+                }
+            }
             Down::RunOutputResult(res) => {
                 let run_id = res.run_id.clone();
                 let output_id = res.output_id.clone();
@@ -724,6 +782,11 @@ impl Daemon {
         );
         log!("run {id} accepted ({})", a.runtime);
         self.send_now(&Up::RunAccept { run_id: id });
+        let keys = if a.kind.is_some() {
+            vec![]
+        } else {
+            self.keys.env_for(&a.bot_member_id)
+        };
         tokio::spawn(crate::run::supervise(RunCtx {
             cfg: self.cfg.clone(),
             token: self.token.clone(),
@@ -734,6 +797,7 @@ impl Daemon {
             redactor: self.redactor.clone(),
             outputs,
             exec: self.exec.clone(),
+            keys,
         }));
     }
 
@@ -837,6 +901,138 @@ impl Daemon {
         });
     }
 
+    /// Feature "accounts": start, finish or cancel a sign-in.
+    fn on_account_login(
+        &mut self,
+        login_id: String,
+        runtime: String,
+        op: String,
+        code: Option<String>,
+    ) {
+        use crate::accounts::LoginCtl;
+        if self.machine_key.is_none() || !crate::proto::valid_run_id(&login_id) {
+            return;
+        }
+        match op.as_str() {
+            "start" => {
+                let Some(rt) = self.cfg.runtimes.get(&runtime).cloned() else {
+                    let _ = self.login_tx.send(crate::proto::LoginStatus {
+                        login_id,
+                        runtime: runtime.clone(),
+                        state: crate::proto::login_phase::FAILED.into(),
+                        url: None,
+                        user_code: None,
+                        account: None,
+                        error: Some(format!(
+                            "no runtime {}",
+                            crate::chat_run::safe_word(&runtime)
+                        )),
+                    });
+                    return;
+                };
+                // One sign-in per runtime at a time: a new one replaces the old.
+                let (tx, rx) = mpsc::unbounded_channel();
+                if let Some(old) = self.logins.insert(login_id.clone(), tx) {
+                    let _ = old.send(LoginCtl::Cancel);
+                }
+                log!(
+                    "sign-in {} started ({})",
+                    login_id,
+                    crate::chat_run::safe_word(&runtime)
+                );
+                tokio::spawn(crate::accounts::run_login(
+                    login_id,
+                    runtime,
+                    rt,
+                    rx,
+                    self.login_tx.clone(),
+                ));
+            }
+            "code" => {
+                if let (Some(tx), Some(code)) = (self.logins.get(&login_id), code) {
+                    let _ = tx.send(LoginCtl::Code(code));
+                }
+            }
+            "cancel" => {
+                if let Some(tx) = self.logins.remove(&login_id) {
+                    let _ = tx.send(LoginCtl::Cancel);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A sign-in moved on: tell the server; after it ends, read who is signed in and the usage.
+    fn on_login_status(&mut self, st: crate::proto::LoginStatus) {
+        use crate::proto::login_phase as p;
+        let ended = matches!(st.state.as_str(), p::DONE | p::FAILED | p::CANCELLED);
+        if ended {
+            self.logins.remove(&st.login_id);
+            log!("sign-in {} {}", st.login_id, st.state);
+        }
+        if st.state == p::DONE {
+            self.read_accounts();
+        }
+        // Errors come from the CLI's output: mask them like run frames.
+        let st = crate::proto::LoginStatus {
+            error: st.error.map(|e| self.redactor.text(&e)),
+            ..st
+        };
+        if self.welcomed {
+            self.send_now(&Up::AccountLoginStatus(st));
+        }
+    }
+
+    /// Feature "accounts": open and keep an API key, then mask its value from now on.
+    fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>) {
+        let Some(key) = self.machine_key.clone() else {
+            return;
+        };
+        let safe = crate::chat_run::safe_word(name);
+        let value = match key.unseal(sealed) {
+            Ok(v) => v,
+            Err(e) => return log!("key {safe}: {e}"),
+        };
+        match self.keys.set(name, value.clone(), members) {
+            Ok(()) => {
+                log!("key {safe} saved");
+                self.key_values.push(value);
+                self.redactor = Arc::new(crate::redact::Redactor::for_daemon_with(
+                    &self.cfg,
+                    &self.token,
+                    &self.key_values,
+                ));
+            }
+            Err(e) => log!("key {safe}: {e}"),
+        }
+    }
+
+    /// Reads who each CLI is signed in as and the subscription usage, in the background.
+    fn read_accounts(&self) {
+        if self.machine_key.is_none() {
+            return;
+        }
+        let runtimes: Vec<(String, crate::config::RuntimeConfig)> = self
+            .cfg
+            .runtimes
+            .iter()
+            .filter(|(_, rt)| rt.kind == "claude" || rt.kind == "codex")
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let (usage, accounts) = (self.usage.clone(), self.accounts.clone());
+        tokio::spawn(async move {
+            let mut found = HashMap::new();
+            for (name, rt) in &runtimes {
+                if let Some(a) = crate::accounts::account_of(rt).await {
+                    found.insert(name.clone(), a);
+                }
+            }
+            *accounts.lock().unwrap_or_else(|e| e.into_inner()) = found;
+            let u = crate::usage::read_all(runtimes).await;
+            *usage.lock().unwrap_or_else(|e| e.into_inner()) = u;
+        });
+    }
+
     /// The heartbeat's metrics: VMs from the executor, else the runs this daemon holds.
     fn metrics(&mut self) -> crate::proto::MachineMetrics {
         let vm_slots = self.cfg.vm.as_ref().map(|_| self.cfg.max_parallel_runs);
@@ -856,6 +1052,26 @@ impl Daemon {
                 })
                 .collect()
         };
-        self.sampler.sample(&self.cfg, vm_slots, &local)
+        let mut m = self.sampler.sample(&self.cfg, vm_slots, &local);
+        if self.machine_key.is_some() {
+            m.secrets = Some(self.keys.infos());
+            m.usage = Some(self.usage.lock().unwrap_or_else(|e| e.into_inner()).clone());
+            let accounts = self.accounts.lock().unwrap_or_else(|e| e.into_inner());
+            for l in m.logins.iter_mut().flatten() {
+                if let Some(a) = accounts.get(&l.runtime) {
+                    l.email = a.email.clone();
+                    l.plan = a.plan.clone();
+                    if a.plan.as_deref() == Some("api_key") {
+                        l.state = crate::proto::login_state::LOGGED_IN.into();
+                        l.method = Some("api_key".into());
+                    } else if l.state != crate::proto::login_state::LOGGED_IN {
+                        // The CLI itself says it is signed in (macOS keeps Claude's in the Keychain).
+                        l.state = crate::proto::login_state::LOGGED_IN.into();
+                        l.method = Some("subscription".into());
+                    }
+                }
+            }
+        }
+        m
     }
 }

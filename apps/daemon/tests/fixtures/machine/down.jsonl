@@ -15,3 +15,8 @@
 {"t":"run.resume","runId":"01JA0000000000000000000R04","note":"A person used this computer for 5 minutes. Look at the current state before you go on."}
 {"t":"run.pause","runId":"01JA0000000000000000000R04"}
 {"t":"run.resume","runId":"01JA0000000000000000000R04"}
+{"t":"account.login","loginId":"L01","runtime":"claude","op":"start"}
+{"t":"account.login","loginId":"L01","runtime":"claude","op":"code","code":"abc123#state456"}
+{"t":"account.login","loginId":"L01","runtime":"claude","op":"cancel"}
+{"t":"secret.set","name":"OPENAI_API_KEY","sealed":"c2VhbGVkLWJveC1ieXRlcw==","members":[]}
+{"t":"secret.delete","name":"OPENAI_API_KEY"}

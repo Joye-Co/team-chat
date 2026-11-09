@@ -12,8 +12,8 @@ pub mod ai_service;
 pub mod appearance;
 pub(crate) mod general;
 pub mod login_item;
-mod machines;
-mod members;
+pub(crate) mod machines;
+pub(crate) mod members;
 pub mod worker_models;
 // pages track: the 成员 page reuses the invite and add-member forms.
 pub(crate) use members::{open_add_bot, open_invite};
@@ -121,6 +121,21 @@ impl Page {
             Page::Appearance => "appearance",
             Page::Shortcuts => "shortcuts",
         }
+    }
+
+    /// The tabs of the settings window: my own preferences. 成员 (with 默认规则), 团队约定 and
+    /// 机器 live in 团队管理 (`views::admin`); their panes stay here for the self-tests.
+    pub const TABS: [Page; 5] = [
+        Page::General,
+        Page::Account,
+        Page::Notifications,
+        Page::Appearance,
+        Page::Shortcuts,
+    ];
+
+    /// The pane belongs to 团队管理, not to the settings window.
+    pub fn in_admin(self) -> bool {
+        !Self::TABS.contains(&self)
     }
 
     pub fn from_slug(slug: &str) -> Option<Page> {
@@ -349,7 +364,7 @@ impl Render for SettingsView {
             window.set_window_title(self.page.title());
             self.titled = Some(self.page);
         }
-        let tabs: Vec<Button> = Page::ALL
+        let tabs: Vec<Button> = Page::TABS
             .into_iter()
             .map(|p| self.tab(p, window, cx))
             .collect();
@@ -474,6 +489,7 @@ fn last_page() -> Page {
         .last_pane
         .as_deref()
         .and_then(Page::from_slug)
+        .filter(|p| !p.in_admin())
         .unwrap_or(Page::General)
 }
 
@@ -514,6 +530,21 @@ pub fn toggle(services: Services, cx: &mut App) {
 /// v12/fx-overlays: opens the settings window at `page` (the app menu's
 /// 检查更新… opens 通用), or brings the open one to the front.
 pub fn open_page(services: Services, page: Page, cx: &mut App) {
+    // 成员, 团队约定 and 机器 moved to 团队管理.
+    // Members other than owners have the read-only 成员 page in the main window.
+    let page = if page.in_admin() && !i_am_owner(&services) {
+        Page::General
+    } else {
+        page
+    };
+    if page.in_admin() {
+        let target = match page {
+            Page::Memory => crate::views::admin::AdminPage::Memory,
+            Page::Machines => crate::views::admin::AdminPage::Machines,
+            _ => crate::views::admin::AdminPage::Members,
+        };
+        return crate::views::admin::open_at(services, target, cx);
+    }
     if let Some(handle) = cx.try_global::<SettingsWindow>().and_then(|w| w.0)
         && handle
             .update(cx, |_, window, _| window.activate_window())

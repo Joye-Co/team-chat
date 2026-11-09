@@ -61,8 +61,10 @@ pub struct GeneralPage {
     versions: usize,
     /// AI 服务, shown to owners only.
     ai: Entity<super::ai_service::AiServicePanel>,
-    /// 模型 (front desk and executors), shown to owners only.
+    /// 模型, under AI 服务: it lives in 团队管理 too, the self-tests show it here.
     models: Entity<super::worker_models::WorkerModelsPanel>,
+    /// Self-tests only: AI 服务 under 通用 (it lives in 团队管理).
+    ai_here: bool,
     updater: Option<Entity<updater::Updater>>,
     description: Entity<TextareaState>,
     status: Status,
@@ -106,6 +108,7 @@ impl GeneralPage {
             services,
             ai,
             models,
+            ai_here: false,
             updater,
             description,
             status: Status::Idle,
@@ -123,6 +126,12 @@ impl GeneralPage {
 
     pub fn worker_models(&self) -> &Entity<super::worker_models::WorkerModelsPanel> {
         &self.models
+    }
+
+    /// Self-tests: draw 通用 › AI 服务 as before it moved to 团队管理.
+    pub fn show_ai_here(&mut self, cx: &mut Context<Self>) {
+        self.ai_here = true;
+        cx.notify();
     }
 
     pub fn set_description(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -708,7 +717,8 @@ impl Render for GeneralPage {
             .when(owner, |p| p.child(admin_card(cx)))
             .child(startup)
             .child(alerts)
-            .when(owner, |p| {
+            // AI 服务 and 模型 live in 团队管理; the self-tests still show them here.
+            .when(owner && self.ai_here, |p| {
                 p.child(self.ai.clone()).child(self.models.clone())
             })
             .child(version)

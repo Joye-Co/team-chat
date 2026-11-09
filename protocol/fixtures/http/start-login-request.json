@@ -1,0 +1,7 @@
+{
+  "kind": "StartLoginRequest",
+  "valid": true,
+  "value": {
+    "runtime": "claude"
+  }
+}

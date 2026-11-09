@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::machine::BootStats;
+use crate::machine::{BootStats, LoginAccount, SecretInfo, UsageWindow};
 
 /// `MonitorRange` values.
 pub mod range {
@@ -115,6 +115,16 @@ pub struct MonitorCli {
     /// [`crate::machine::login_state`]
     pub login: String,
     pub failed_today: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Vec<UsageWindow>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -185,4 +195,56 @@ pub struct MachineMonitor {
     pub members: Vec<MonitorMember>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_failure: Option<MonitorFailure>,
+}
+
+/// `POST /v1/machines/:id/logins`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartLoginRequest {
+    pub runtime: String,
+}
+
+/// `POST /v1/machines/:id/logins/:loginId/code`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginCodeRequest {
+    pub code: String,
+}
+
+/// A sign-in in progress on a machine (`GET /v1/machines/:id/logins/:loginId`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineLogin {
+    pub login_id: String,
+    pub runtime: String,
+    /// [`crate::machine::login_phase`]
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<LoginAccount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub updated_at: u64,
+}
+
+/// `GET /v1/machines/:id/secrets`
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineSecretsResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
+    #[serde(default)]
+    pub secrets: Vec<SecretInfo>,
+}
+
+/// `PUT /v1/machines/:id/secrets/:name`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSecretRequest {
+    pub sealed: String,
+    #[serde(default)]
+    pub members: Vec<String>,
 }

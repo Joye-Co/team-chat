@@ -289,7 +289,7 @@ crate::copy! {
     TEAM_COMPUTERS_FOOTER = "AI 成员被 @ 后，在这些电脑上干活。",
     NO_COMPUTERS = "还没有连接的电脑",
     COMPUTER_ADD = "添加电脑",
-    COMPUTER_ADD_HINT = "最简单的做法：在那台电脑上安装并打开应用，到「设置 › 机器」里点「用这台电脑」。也可以在这里添加，再到那台电脑的终端里运行安装命令。",
+    COMPUTER_ADD_HINT = "最简单的做法：在那台电脑上安装并打开应用，到「团队管理 › 机器」里点「用这台电脑」。也可以在这里添加，再到那台电脑的终端里运行安装命令。",
     CLOUD = "云端",
     CLOUD_NOT_YET = "还没有开放",
     CLOUD_COMING_SOON = "即将推出",

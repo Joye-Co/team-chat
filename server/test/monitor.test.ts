@@ -191,3 +191,76 @@ describe("monitor math", () => {
     expect(MachineMonitor.safeParse(m).success).toBe(true);
   });
 });
+
+describe("sign in and API keys from the app (feature accounts)", () => {
+  const KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+
+  it("relays a sign-in: start, the CLI's link, the pasted code, done; owners only", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["accounts"], publicKey: KEY });
+    expect((await api(`/v1/machines/${w.machineId}/logins`, { token: w.human.token, body: { runtime: "codex" } })).status).toBe(403);
+    const start = await api(`/v1/machines/${w.machineId}/logins`, { token: w.owner.token, body: { runtime: "codex" } });
+    expect(start.status, JSON.stringify(start.body)).toBe(200);
+    const loginId = start.body.loginId as string;
+    const f = await d.next((x) => x.t === "account.login");
+    expect(f).toEqual({ t: "account.login", loginId, runtime: "codex", op: "start" });
+    expect((await api(`/v1/machines/${w.machineId}/logins/${loginId}`, { token: w.owner.token })).body).toMatchObject({ state: "starting" });
+    d.send({ t: "account.login.status", loginId, runtime: "codex", state: "device_code", url: "https://auth.openai.com/codex/device", userCode: "ABCD-12345" });
+    let got: any;
+    for (let i = 0; i < 30; i++) {
+      got = (await api(`/v1/machines/${w.machineId}/logins/${loginId}`, { token: w.owner.token })).body;
+      if (got.state === "device_code") break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(got).toMatchObject({ loginId, runtime: "codex", state: "device_code", userCode: "ABCD-12345" });
+    expect(got.updatedAt).toBeGreaterThan(0);
+    const code = await api(`/v1/machines/${w.machineId}/logins/${loginId}/code`, { token: w.owner.token, body: { code: "abc#def" } });
+    expect(code.status).toBe(200);
+    expect(await d.next((x) => x.t === "account.login" && x.op === "code")).toMatchObject({ code: "abc#def", runtime: "codex" });
+    expect((await api(`/v1/machines/${w.machineId}/logins/${loginId}`, { method: "DELETE", token: w.owner.token })).status).toBe(200);
+    expect(await d.next((x) => x.t === "account.login" && x.op === "cancel")).toMatchObject({ loginId });
+    expect((await api(`/v1/machines/${w.machineId}/logins/nope`, { token: w.owner.token })).status).toBe(404);
+    d.close();
+  });
+
+  it("relays a sealed key and its removal, and lists only names and last 4 from the heartbeat", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["accounts"], publicKey: KEY });
+    const put = await api(`/v1/machines/${w.machineId}/secrets/OPENAI_API_KEY`, {
+      method: "PUT",
+      token: w.owner.token,
+      body: { sealed: "c2VhbGVk", members: [w.bot.id] },
+    });
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    expect(await d.next((x) => x.t === "secret.set")).toEqual({ t: "secret.set", name: "OPENAI_API_KEY", sealed: "c2VhbGVk", members: [w.bot.id] });
+    expect((await api(`/v1/machines/${w.machineId}/secrets/lower`, { method: "PUT", token: w.owner.token, body: { sealed: "x" } })).status).toBe(400);
+    d.send({
+      t: "heartbeat",
+      at: Date.now(),
+      health: HEALTH,
+      runs: [],
+      metrics: metrics([], { secrets: [{ name: "OPENAI_API_KEY", last4: "x9Qz", members: [w.bot.id], updatedAt: Date.now() }] }),
+    });
+    await d.next((x) => x.t === "heartbeat.ack");
+    const list = await api(`/v1/machines/${w.machineId}/secrets`, { token: w.owner.token });
+    expect(list.body.publicKey).toBe(KEY);
+    expect(list.body.secrets).toEqual([expect.objectContaining({ name: "OPENAI_API_KEY", last4: "x9Qz" })]);
+    expect(JSON.stringify(list.body)).not.toContain("c2VhbGVk");
+    expect((await api(`/v1/machines/${w.machineId}/secrets/OPENAI_API_KEY`, { method: "DELETE", token: w.owner.token })).status).toBe(200);
+    expect(await d.next((x) => x.t === "secret.delete")).toEqual({ t: "secret.delete", name: "OPENAI_API_KEY" });
+    d.close();
+  });
+
+  it("says when the machine is offline or its daemon too old, and never sends those frames to it", async () => {
+    const w = await world();
+    const off = await api(`/v1/machines/${w.machineId}/logins`, { token: w.owner.token, body: { runtime: "claude" } });
+    expect(off.status).toBe(409);
+    const { d } = await Daemon.connect(w.machineToken);
+    const old = await api(`/v1/machines/${w.machineId}/logins`, { token: w.owner.token, body: { runtime: "claude" } });
+    expect(old.status).toBe(409);
+    expect(JSON.stringify(old.body)).toContain("too old");
+    expect((await api(`/v1/machines/${w.machineId}/secrets`, { token: w.owner.token })).body).toEqual({ secrets: [] });
+    expect(d.frames.some((x) => x.t === "account.login" || x.t === "secret.set")).toBe(false);
+    d.close();
+  });
+});

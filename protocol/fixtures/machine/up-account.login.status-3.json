@@ -1,0 +1,15 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "account.login.status",
+    "loginId": "L01",
+    "runtime": "claude",
+    "state": "done",
+    "account": {
+      "email": "owner@example.com",
+      "plan": "max"
+    }
+  }
+}

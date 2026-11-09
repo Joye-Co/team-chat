@@ -731,7 +731,8 @@ pub(crate) fn open_end(
     Ok(handle)
 }
 
-/// 通用 scrolled to 模型: the front desk's model and the team's model per runtime.
+/// 通用 scrolled to 模型 (drawn here as before it moved to 团队管理): the front desk's model and
+/// the team's model per runtime.
 pub fn open_models(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
@@ -739,7 +740,9 @@ pub fn open_models(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     handle
-        .update(cx, |_, window, _| {
+        .update(cx, |_, window, cx| {
+            let general = view.read(cx).general().clone();
+            general.update(cx, |g, cx| g.show_ai_here(cx));
             window.on_next_frame(move |_, cx| view.read(cx).scroll_to_y(gpui::px(560.)));
         })
         .map_err(|e| e.to_string())?;
@@ -788,7 +791,9 @@ pub fn open_ai_service(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |_, cx| {
-        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        let general = view.read(cx).general().clone();
+        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| p.test(cx));
     });
     Ok(handle)
@@ -803,7 +808,9 @@ pub fn open_ai_service_failed(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |window, cx| {
-        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        let general = view.read(cx).general().clone();
+        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| {
             p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
             p.fill_for_test(

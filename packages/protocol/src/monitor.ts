@@ -2,7 +2,7 @@
 // `GET /v1/machines/:id/monitor` answers one MachineMonitor.
 import { z } from "zod";
 import { Id, Millis } from "./common.ts";
-import { BootStats, RunId } from "./machine.ts";
+import { BootStats, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
 
 export const MonitorRange = z.enum(["15m", "1h", "24h"]);
 export type MonitorRange = z.infer<typeof MonitorRange>;
@@ -97,6 +97,13 @@ export const MonitorCli = z.object({
   login: CliLoginState,
   /** Runs of this runtime on the machine that failed today. */
   failedToday: z.int().nonnegative(),
+  /** "subscription" | "api_key" when the daemon knows how it is signed in. */
+  method: z.string().max(32).optional(),
+  email: z.string().max(320).optional(),
+  plan: z.string().max(64).optional(),
+  /** Subscription usage windows and when they were read (server clock). */
+  usage: z.array(UsageWindow).max(8).optional(),
+  usageAt: Millis.optional(),
 });
 export type MonitorCli = z.infer<typeof MonitorCli>;
 
@@ -142,3 +149,42 @@ export const MachineMonitor = z.object({
   lastFailure: MonitorFailure.optional(),
 });
 export type MachineMonitor = z.infer<typeof MachineMonitor>;
+
+// ---------------------------------------------------------------------------
+// Sign in and API keys from the app (feature "accounts"; docs/protocol.md "Machine accounts")
+// ---------------------------------------------------------------------------
+
+/** `POST /v1/machines/:id/logins` */
+export const StartLoginRequest = z.object({ runtime: z.string().min(1).max(64) });
+export type StartLoginRequest = z.infer<typeof StartLoginRequest>;
+/** `POST /v1/machines/:id/logins/:loginId/code` */
+export const LoginCodeRequest = z.object({ code: z.string().trim().min(1).max(2048) });
+export type LoginCodeRequest = z.infer<typeof LoginCodeRequest>;
+/** A sign-in in progress on the machine, as it last reported it. */
+export const MachineLogin = z.object({
+  loginId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  runtime: z.string().min(1).max(64),
+  /** "starting" | "open_url" | "device_code" | "checking" | "done" | "failed" | "cancelled" */
+  state: z.string().min(1).max(32),
+  url: z.string().max(4096).optional(),
+  userCode: z.string().max(64).optional(),
+  account: z.object({ email: z.string().max(320).optional(), plan: z.string().max(64).optional() }).optional(),
+  error: z.string().max(1000).optional(),
+  updatedAt: Millis,
+});
+export type MachineLogin = z.infer<typeof MachineLogin>;
+/** `GET /v1/machines/:id/secrets` */
+export const MachineSecretsResponse = z.object({
+  /** The machine's X25519 public key (base64); absent when its daemon cannot take keys. */
+  publicKey: z.string().optional(),
+  secrets: z.array(SecretInfo).max(100),
+});
+export type MachineSecretsResponse = z.infer<typeof MachineSecretsResponse>;
+/** `PUT /v1/machines/:id/secrets/:name`: the value sealed to the machine's key on the owner's Mac. */
+export const SetSecretRequest = z.object({
+  sealed: z.string().min(1).max(16384),
+  /** AI members whose runs get it; empty = every run. */
+  members: z.array(Id).max(100).default([]),
+});
+export type SetSecretRequest = z.infer<typeof SetSecretRequest>;
+export { SecretName };

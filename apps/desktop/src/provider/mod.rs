@@ -2044,6 +2044,105 @@ impl ChatProvider for CoreProvider {
         self.machines_inner()
     }
 
+    fn start_machine_login(&self, machine_id: &str, runtime: &str) -> AdminReply<String> {
+        let (id, rt) = (machine_id.to_string(), runtime.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .start_machine_login(&id, &rt)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_login(
+        &self,
+        machine_id: &str,
+        login_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineLogin> {
+        let (id, login) = (machine_id.to_string(), login_id.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_login(&id, &login)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_login_code(&self, machine_id: &str, login_id: &str, code: &str) -> AdminReply<()> {
+        let (id, login, code) = (
+            machine_id.to_string(),
+            login_id.to_string(),
+            code.to_string(),
+        );
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_login_code(&id, &login, &code)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn cancel_machine_login(&self, machine_id: &str, login_id: &str) -> AdminReply<()> {
+        let (id, login) = (machine_id.to_string(), login_id.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .cancel_machine_login(&id, &login)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_secrets(
+        &self,
+        machine_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineSecretsResponse> {
+        let id = machine_id.to_string();
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_secrets(&id)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn set_machine_secret(
+        &self,
+        machine_id: &str,
+        public_key: &str,
+        name: &str,
+        value: crate::data::SecretText,
+        members: Vec<String>,
+    ) -> AdminReply<()> {
+        let (id, key, name) = (
+            machine_id.to_string(),
+            public_key.to_string(),
+            name.to_string(),
+        );
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .set_machine_secret(&id, &key, &name, value.expose(), members)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn delete_machine_secret(&self, machine_id: &str, name: &str) -> AdminReply<()> {
+        let (id, name) = (machine_id.to_string(), name.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .delete_machine_secret(&id, &name)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
     fn machine_monitor(
         &self,
         machine_id: &str,
