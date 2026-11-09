@@ -1835,6 +1835,16 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Owner: the monitor of one machine (`GET /v1/machines/:id/monitor`); `range` is "15m",
+    /// "1h" or "24h", `day_start` local midnight in ms.
+    fn machine_monitor(
+        &self,
+        _machine_id: &str,
+        _range: &'static str,
+        _day_start: u64,
+    ) -> AdminReply<chat_core::proto::MachineMonitor> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Owner: registers a machine.
     fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
         reply_now(Err(AdminError::Unsupported))

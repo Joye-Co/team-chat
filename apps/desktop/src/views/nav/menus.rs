@@ -52,6 +52,11 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action(settings::MENU_SETTINGS, OpenSettings),
             server_menu(),
+        ]
+        .into_iter()
+        // Owners only: the machine monitor (开发者视图). One item, easy to move.
+        .chain(crate::views::monitor::menu_item(IS_OWNER.with(|o| o.get())))
+        .chain([
             MenuItem::separator(),
             MenuItem::os_submenu(nav::MENU_SERVICES, SystemMenuType::Services),
             MenuItem::separator(),
@@ -60,7 +65,8 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
             MenuItem::action(nav::MENU_SHOW_ALL, ShowAll),
             MenuItem::separator(),
             MenuItem::action(settings::MENU_QUIT, Quit),
-        ]),
+        ])
+        .collect::<Vec<_>>()),
         Menu::new(nav::MENU_FILE).items([
             MenuItem::action(nav::MENU_NEW_TOPIC, NewTopic),
             MenuItem::action(nav::MENU_NEW_GROUP, NewGroup),
@@ -368,6 +374,23 @@ fn server_menu() -> MenuItem {
         crate::views::login::UseOtherServer,
     ));
     MenuItem::submenu(Menu::new(l::MENU_SERVER).items(items))
+}
+
+thread_local! {
+    /// I am an owner of the server in use: the app menu shows 机器监控….
+    static IS_OWNER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Sets the menus again when my level changed (sign in, sign out, a level change), so only
+/// owners see the owner commands.
+pub fn refresh_owner_menu(cx: &mut App) {
+    let Some(nav) = cx.try_global::<super::NavGlobal>() else {
+        return;
+    };
+    let owner = crate::views::settings::i_am_owner(&nav.services);
+    if IS_OWNER.with(|o| o.replace(owner)) != owner {
+        set_menus(app_menus_with(LAST_STATE.with(|s| s.get())), cx);
+    }
 }
 
 /// Switches to `url` and keeps the 服务器 check marks in step.

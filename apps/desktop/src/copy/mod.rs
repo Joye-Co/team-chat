@@ -52,6 +52,7 @@ pub mod group_page;
 pub mod live;
 pub mod members_page;
 pub mod memory;
+pub mod monitor;
 pub mod rail;
 pub mod side_chat;
 pub mod topic_rail;
@@ -184,6 +185,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "dev",
         entries: dev::ENTRIES,
+        developer: true,
+    },
+    Section {
+        name: "monitor",
+        entries: monitor::ENTRIES,
         developer: true,
     },
     Section {

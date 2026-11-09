@@ -1497,6 +1497,7 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
             crate::views::settings::toggle(services.clone(), cx)
         });
     }
+    crate::views::monitor::install(services.clone(), cx);
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
     bind_view_keys(cx);
