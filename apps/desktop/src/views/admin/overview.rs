@@ -10,12 +10,12 @@ use gpui::{
 use chat_core::proto::MachineMonitor;
 
 use super::{
-    MonitorView, dot,
+    AdminView, dot,
     model::{self, AttentionKind, Range, Sort, SortKey, Tone},
     spark::{rate_max, spark},
 };
 use crate::{
-    copy::{fill, monitor as m},
+    copy::{admin as m, fill},
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
@@ -50,9 +50,9 @@ pub fn page(
     name: &dyn Fn(&str) -> String,
     member: &dyn Fn(&str) -> Option<crate::data::Member>,
     time: &dyn Fn(u64) -> String,
-    view: Entity<MonitorView>,
+    view: Entity<AdminView>,
     window: &mut Window,
-    cx: &mut Context<MonitorView>,
+    cx: &mut Context<AdminView>,
 ) -> impl IntoElement {
     let _ = window;
     div()
@@ -67,7 +67,13 @@ pub fn page(
                 .w_full()
                 .flex()
                 .gap(space::S16)
-                .child(div().flex_1().min_w(gpui::Pixels::ZERO).flex().child(capacity(d, now, cx)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(gpui::Pixels::ZERO)
+                        .flex()
+                        .child(capacity(d, now, cx)),
+                )
                 .child(
                     div()
                         .w(relative(t::ATTENTION_SHARE))
@@ -86,41 +92,44 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
     let k = native_colors(cx);
     let cells = model::strip(d, now);
     let n = cells.len();
-    panel(cx).flex_row().overflow_hidden().children(cells.into_iter().enumerate().map(|(i, c)| {
-        div()
-            .flex_1()
-            .min_w(gpui::Pixels::ZERO)
-            .px(space::S16)
-            .py(space::S12)
-            .flex()
-            .flex_col()
-            .gap(space::S4)
-            .when(i > 0, |d| d.border_l_1().border_color(k.separator))
-            .when(i + 1 == n, |d| d)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .n_footnote()
-                    .text_color(k.secondary)
-                    .child(sym_icon(
-                        if c.cli { Sym::Terminal } else { Sym::Activity },
-                        SymSize::INLINE_SMALL,
-                        k.secondary,
-                    ))
-                    .child(TruncText::new(c.label)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .n_headline()
-                    .child(dot(tone_color(c.tone, &k)))
-                    .child(TruncText::new(c.value)),
-            )
-    }))
+    panel(cx)
+        .flex_row()
+        .overflow_hidden()
+        .children(cells.into_iter().enumerate().map(|(i, c)| {
+            div()
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
+                .px(space::S16)
+                .py(space::S12)
+                .flex()
+                .flex_col()
+                .gap(space::S4)
+                .when(i > 0, |d| d.border_l_1().border_color(k.separator))
+                .when(i + 1 == n, |d| d)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .child(sym_icon(
+                            if c.cli { Sym::Terminal } else { Sym::Activity },
+                            SymSize::INLINE_SMALL,
+                            k.secondary,
+                        ))
+                        .child(TruncText::new(c.label)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S8)
+                        .n_headline()
+                        .child(dot(tone_color(c.tone, &k)))
+                        .child(TruncText::new(c.value)),
+                )
+        }))
 }
 
 // ---------------------------------------------------------------------------
@@ -135,9 +144,9 @@ fn kpis(d: &MachineMonitor, range: Range, cx: &App) -> impl IntoElement {
         let avail = h.mem_available_bytes?;
         Some(model::share(total.saturating_sub(avail), total) as f64 * 100.)
     });
-    let disk_pct = h
-        .filter(|h| h.disk_total_bytes > 0)
-        .map(|h| model::share(h.disk_total_bytes - h.disk_free_bytes, h.disk_total_bytes) as f64 * 100.);
+    let disk_pct = h.filter(|h| h.disk_total_bytes > 0).map(|h| {
+        model::share(h.disk_total_bytes - h.disk_free_bytes, h.disk_total_bytes) as f64 * 100.
+    });
     let (net_v, net_u) = match h.and_then(|h| h.net_rx_bps) {
         Some(r) => {
             let (v, u) = model::rate_parts(r);
@@ -192,7 +201,9 @@ fn kpis(d: &MachineMonitor, range: Range, cx: &App) -> impl IntoElement {
                 .map(|r| fill(m::UPLOAD, &[("rate", &model::rate(r))])),
             value: net_v,
             unit: net_u,
-            foot: h.and_then(|h| h.net_rx_bps).map(|_| m::DOWNLOAD.to_string()),
+            foot: h
+                .and_then(|h| h.net_rx_bps)
+                .map(|_| m::DOWNLOAD.to_string()),
             max: rate_max(&d.series.net_rx_bps),
             series: d.series.net_rx_bps.clone(),
         },
@@ -244,7 +255,10 @@ fn kpi(c: Kpi, range: &str, cx: &App) -> impl IntoElement {
                 )
                 .child(div().flex_1())
                 .children(c.side.map(|s| {
-                    TruncText::new(s).n_footnote().n_figures().text_color(k.secondary)
+                    TruncText::new(s)
+                        .n_footnote()
+                        .n_figures()
+                        .text_color(k.secondary)
                 })),
         )
         .child(
@@ -268,7 +282,11 @@ fn kpi(c: Kpi, range: &str, cx: &App) -> impl IntoElement {
                 .child(div().flex_1())
                 .child(
                     TruncText::new(c.foot.unwrap_or_else(|| {
-                        if has_value { String::new() } else { m::KPI_NO_DATA.into() }
+                        if has_value {
+                            String::new()
+                        } else {
+                            m::KPI_NO_DATA.into()
+                        }
                     }))
                     .n_footnote()
                     .n_figures()
@@ -326,7 +344,12 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
             m::TILE_QUEUE,
             d.queue
                 .oldest_at
-                .map(|at| fill(m::TILE_QUEUE_OLDEST, &[("wait", &model::duration(now.saturating_sub(at)))]))
+                .map(|at| {
+                    fill(
+                        m::TILE_QUEUE_OLDEST,
+                        &[("wait", &model::duration(now.saturating_sub(at)))],
+                    )
+                })
                 .unwrap_or_else(|| m::TILE_QUEUE_NONE.into()),
         ),
         (
@@ -344,9 +367,15 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
             t.finished.to_string(),
             m::TILE_DONE,
             if t.finished > t.finished_yesterday {
-                fill(m::TILE_DONE_MORE, &[("n", &(t.finished - t.finished_yesterday).to_string())])
+                fill(
+                    m::TILE_DONE_MORE,
+                    &[("n", &(t.finished - t.finished_yesterday).to_string())],
+                )
             } else if t.finished < t.finished_yesterday {
-                fill(m::TILE_DONE_LESS, &[("n", &(t.finished_yesterday - t.finished).to_string())])
+                fill(
+                    m::TILE_DONE_LESS,
+                    &[("n", &(t.finished_yesterday - t.finished).to_string())],
+                )
             } else {
                 m::TILE_DONE_SAME.into()
             },
@@ -357,7 +386,10 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                 if judged == 0 {
                     "—".into()
                 } else {
-                    format!("{}%", (t.succeeded as f64 * 100. / judged as f64).round() as u32)
+                    format!(
+                        "{}%",
+                        (t.succeeded as f64 * 100. / judged as f64).round() as u32
+                    )
                 },
                 m::TILE_OK,
                 if judged == 0 {
@@ -378,7 +410,13 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
             div()
                 .flex()
                 .items_center()
-                .child(div().flex_1().n_title3().font_weight(gpui::FontWeight::SEMIBOLD).child(m::CAPACITY))
+                .child(
+                    div()
+                        .flex_1()
+                        .n_title3()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(m::CAPACITY),
+                )
                 .child(
                     div()
                         .id("capacity-all")
@@ -392,7 +430,11 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                             gpui_component::tooltip::Tooltip::new(m::NAV_SOON).build(window, cx)
                         })
                         .child(m::SEE_ALL_VMS)
-                        .child(sym_icon(Sym::ChevronRight, SymSize::INLINE_SMALL, k.secondary)),
+                        .child(sym_icon(
+                            Sym::ChevronRight,
+                            SymSize::INLINE_SMALL,
+                            k.secondary,
+                        )),
                 ),
         )
         .child(
@@ -407,7 +449,12 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .n_figures()
                         .child(cap.running.to_string()),
                 )
-                .child(div().n_body().text_color(k.secondary).child(m::RUNNING_SUFFIX))
+                .child(
+                    div()
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(m::RUNNING_SUFFIX),
+                )
                 .child(div().flex_1())
                 .child(
                     div()
@@ -442,9 +489,20 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .border_color(k.separator)
                         .flex()
                         .flex_col()
-                        .child(div().n_title3().font_weight(gpui::FontWeight::SEMIBOLD).n_figures().child(v))
+                        .child(
+                            div()
+                                .n_title3()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .n_figures()
+                                .child(v),
+                        )
                         .child(TruncText::new(l).n_section())
-                        .child(TruncText::new(s).n_footnote().n_figures().text_color(k.secondary))
+                        .child(
+                            TruncText::new(s)
+                                .n_footnote()
+                                .n_figures()
+                                .text_color(k.secondary),
+                        )
                 })),
         )
 }
@@ -477,7 +535,13 @@ fn swatch(label: &'static str, value: &str, color: Hsla, cx: &App) -> impl IntoE
                 .border_color(k.separator),
         )
         .child(label)
-        .child(div().n_figures().font_weight(gpui::FontWeight::MEDIUM).text_color(k.label).child(value.to_string()))
+        .child(
+            div()
+                .n_figures()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.label)
+                .child(value.to_string()),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -502,15 +566,18 @@ fn attention(
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .child(div().n_title3().font_weight(gpui::FontWeight::SEMIBOLD).child(m::ATTENTION))
+                .child(
+                    div()
+                        .n_title3()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(m::ATTENTION),
+                )
                 .when(n > 0, |d| {
                     d.child(crate::ui::native::CountPill::new(n as u32).tone(k.amber))
                 }),
         )
         .when(n == 0, |d| {
-            d.child(
-                crate::ui::native::EmptyLine::new(m::ATT_NONE).icon(Sym::Done),
-            )
+            d.child(crate::ui::native::EmptyLine::new(m::ATT_NONE).icon(Sym::Done))
         })
         .children(items.into_iter().enumerate().map(|(i, a)| {
             let icon = match a.kind {
@@ -547,7 +614,12 @@ fn attention(
                         .flex_col()
                         .child(TruncText::new(a.title).n_headline())
                         .when(!a.meta.is_empty(), |d| {
-                            d.child(TruncText::new(a.meta).n_footnote().n_figures().text_color(k.secondary))
+                            d.child(
+                                TruncText::new(a.meta)
+                                    .n_footnote()
+                                    .n_figures()
+                                    .text_color(k.secondary),
+                            )
                         }),
                 )
         }))
@@ -561,8 +633,8 @@ fn members(
     sort: Sort,
     name: &dyn Fn(&str) -> String,
     member_of: &dyn Fn(&str) -> Option<crate::data::Member>,
-    view: Entity<MonitorView>,
-    cx: &mut Context<MonitorView>,
+    view: Entity<AdminView>,
+    cx: &mut Context<AdminView>,
 ) -> impl IntoElement {
     let k = native_colors(cx);
     let rows = model::member_rows(d, sort, name);
@@ -598,7 +670,11 @@ fn members(
             let key = *key;
             let view = view.clone();
             let arrow = if on {
-                if sort.descending { Sym::ArrowDown } else { Sym::ArrowUp }
+                if sort.descending {
+                    Sym::ArrowDown
+                } else {
+                    Sym::ArrowUp
+                }
             } else {
                 Sym::Sort
             };
@@ -614,12 +690,19 @@ fn members(
                     .n_section()
                     .text_color(if on { k.label } else { k.secondary })
                     .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(fill(m::SORT_BY, &[("col", key.label())]))
-                            .build(window, cx)
+                        gpui_component::tooltip::Tooltip::new(fill(
+                            m::SORT_BY,
+                            &[("col", key.label())],
+                        ))
+                        .build(window, cx)
                     })
                     .on_click(move |_, _, cx| view.update(cx, |v, cx| v.sort_by(key, cx)))
                     .child(key.label())
-                    .child(sym_icon(arrow, SymSize::INLINE_SMALL, if on { k.label } else { k.tertiary })),
+                    .child(sym_icon(
+                        arrow,
+                        SymSize::INLINE_SMALL,
+                        if on { k.label } else { k.tertiary },
+                    )),
             )
         }));
     let n = rows.len();
@@ -649,9 +732,10 @@ fn members(
                     .n_figures()
                     .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
                     .child(
-                        cell(None, false).gap(space::S12).child(MemberAvatar::new(member.as_ref(), avatar::XS)).child(
-                            TruncText::new(r.name.clone()).n_headline(),
-                        ),
+                        cell(None, false)
+                            .gap(space::S12)
+                            .child(MemberAvatar::new(member.as_ref(), avatar::XS))
+                            .child(TruncText::new(r.name.clone()).n_headline()),
                     )
                     .child(cell(Some(t::COL_COUNT), true).child(r.doing.to_string()))
                     .child(
@@ -660,7 +744,11 @@ fn members(
                             .when(r.waiting > 0, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .child(r.waiting.to_string()),
                     )
-                    .child(cell(Some(t::COL_CPU), true).text_color(k.secondary).child(model::cores(r.cpu_cores)))
+                    .child(
+                        cell(Some(t::COL_CPU), true)
+                            .text_color(k.secondary)
+                            .child(model::cores(r.cpu_cores)),
+                    )
                     .child(
                         cell(Some(t::COL_MEM), false)
                             .gap(space::S8)
@@ -680,10 +768,20 @@ fn members(
                                             .w(relative(model::share(r.mem_bytes, max_mem))),
                                     ),
                             )
-                            .child(div().flex_1().flex().justify_end().child(model::bytes(r.mem_bytes))),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .justify_end()
+                                    .child(model::bytes(r.mem_bytes)),
+                            ),
                     )
                     .child(cell(Some(t::COL_TOKENS), true).child(model::count_short(r.tokens)))
-                    .child(cell(Some(t::COL_DONE), true).text_color(k.secondary).child(r.done.to_string()))
+                    .child(
+                        cell(Some(t::COL_DONE), true)
+                            .text_color(k.secondary)
+                            .child(r.done.to_string()),
+                    )
                     .into_any_element()
             })
             .collect()
@@ -699,13 +797,16 @@ fn members(
                 .flex()
                 .items_baseline()
                 .gap(space::S8)
-                .child(div().n_title3().font_weight(gpui::FontWeight::SEMIBOLD).child(m::MEMBERS))
                 .child(
                     div()
-                        .n_body()
-                        .text_color(k.secondary)
-                        .child(fill(m::MEMBERS_COUNT, &[("n", &d.members.len().to_string())])),
-                ),
+                        .n_title3()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(m::MEMBERS),
+                )
+                .child(div().n_body().text_color(k.secondary).child(fill(
+                    m::MEMBERS_COUNT,
+                    &[("n", &d.members.len().to_string())],
+                ))),
         )
         .child(
             div()
@@ -728,7 +829,13 @@ fn members(
 /// The page's shapes while the first answer is on its way (§2.14).
 pub fn page_skeleton(cx: &App) -> impl IntoElement {
     let bone = |h: gpui::Pixels| skeleton(relative(1.), h);
-    let card = |h: gpui::Pixels| panel(cx).flex_1().p(space::S16).gap(space::S8).child(bone(h));
+    let card = |h: gpui::Pixels| {
+        panel(cx)
+            .flex_1()
+            .p(space::S16)
+            .gap(space::S8)
+            .child(bone(h))
+    };
     div()
         .w_full()
         .flex()

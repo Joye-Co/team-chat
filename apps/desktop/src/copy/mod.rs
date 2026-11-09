@@ -52,7 +52,7 @@ pub mod group_page;
 pub mod live;
 pub mod members_page;
 pub mod memory;
-pub mod monitor;
+pub mod admin;
 pub mod rail;
 pub mod side_chat;
 pub mod topic_rail;
@@ -188,8 +188,8 @@ pub const SECTIONS: &[Section] = &[
         developer: true,
     },
     Section {
-        name: "monitor",
-        entries: monitor::ENTRIES,
+        name: "admin",
+        entries: admin::ENTRIES,
         developer: true,
     },
     Section {

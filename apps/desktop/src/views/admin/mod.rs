@@ -1,10 +1,11 @@
-//! The machine monitor (开发者视图, owners only): its own window with a sidebar of pages and
-//! the 概览 page of one machine (docs/protocol.md, "Machine monitor"). Only 概览 is live; the
-//! other pages of the approved design are listed and disabled until they land.
+//! 团队管理 (owners only): its own window with the team admin sidebar (团队, 机器, 账号与密钥,
+//! 团队设置). In this change only 机器 › <machine> › 概览 is live (docs/protocol.md, "Machine
+//! monitor"); the other pages are listed and disabled until they land. It is a 开发者视图-level
+//! screen, so VM, CLI and token are allowed words.
 //!
-//! The entry point is one command, [`OpenMonitor`], offered to owners by the app menu
-//! ([`menu_item`]); the admin area may move it, nothing else depends on where it sits.
-//! The window asks the server every 5 seconds while it is open.
+//! The way in is one action, [`OpenTeamAdmin`] (⌥⌘,), from the sidebar's account menu and the
+//! card on top of 设置 › 通用; both show only to owners. The window asks the server every 5
+//! seconds while it is open.
 
 mod model;
 mod overview;
@@ -13,29 +14,27 @@ mod spark;
 use std::time::Duration;
 
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, Global, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, div, point, prelude::FluentBuilder as _, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, Global,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, div, point, prelude::FluentBuilder as _, size,
 };
 use gpui_component::Disableable as _;
-use gpui_component::button::ButtonVariants as _;
-use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 
 use chat_core::proto::MachineMonitor;
 
 use crate::{
-    app::Services,
-    copy::{fill, monitor as m},
     app::Changes,
+    app::Services,
+    copy::{admin as m, fill},
     data::{AdminError, Change, MachineInfo},
     theme,
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            Alert, AlertTone, Empty, NativeType as _, PushSize, PushStyle, SidebarFooter,
-            SidebarRow, Segment, Segmented, TruncText, group_label, native_colors, push_button,
+            Alert, AlertTone, Empty, NativeType as _, PushSize, PushStyle, Segment, Segmented,
+            SidebarFooter, SidebarRow, TruncText, group_label, native_colors, push_button,
             sidebar_panel,
             tokens::{height, metrics, monitor as t, radius, space},
         },
@@ -47,35 +46,35 @@ use crate::{
 pub use model::Range;
 
 gpui::actions!(
-    monitor,
+    admin,
     [
-        /// App menu › 机器监控… (owners): opens the monitor window, or brings it to the front.
-        OpenMonitor
+        /// 团队管理… (owners, ⌥⌘,): opens the 团队管理 window, or brings it to the front.
+        OpenTeamAdmin
     ]
 );
 
 /// How often the open window asks for fresh numbers.
 const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
-/// The app menu's item, for owners only; `None` for everyone else.
-pub fn menu_item(owner: bool) -> Option<gpui::MenuItem> {
-    owner.then(|| gpui::MenuItem::action(m::MENU_OPEN, OpenMonitor))
-}
-
-/// Binds [`OpenMonitor`]. The window itself checks again that I am an owner.
+/// Binds [`OpenTeamAdmin`] and ⌥⌘,. The window itself checks again that I am an owner.
 pub fn install(services: Services, cx: &mut App) {
-    cx.on_action(move |_: &OpenMonitor, cx| open(services.clone(), cx));
+    cx.bind_keys([gpui::KeyBinding::new("cmd-alt-,", OpenTeamAdmin, None)]);
+    cx.on_action(move |_: &OpenTeamAdmin, cx| {
+        if i_am_owner(&services) {
+            open(services.clone(), cx)
+        }
+    });
 }
 
 /// The open monitor window, so the command never opens a second one.
 #[derive(Default)]
-struct MonitorWindow(Option<AnyWindowHandle>);
+struct AdminWindow(Option<AnyWindowHandle>);
 
-impl Global for MonitorWindow {}
+impl Global for AdminWindow {}
 
 /// Opens the monitor window, or brings the open one to the front.
 pub fn open(services: Services, cx: &mut App) {
-    if let Some(handle) = cx.try_global::<MonitorWindow>().and_then(|w| w.0)
+    if let Some(handle) = cx.try_global::<AdminWindow>().and_then(|w| w.0)
         && handle
             .update(cx, |_, window, _| window.activate_window())
             .is_ok()
@@ -83,7 +82,7 @@ pub fn open(services: Services, cx: &mut App) {
         return;
     }
     if let Ok((handle, _)) = open_window(services, true, cx) {
-        cx.set_global(MonitorWindow(Some(handle)));
+        cx.set_global(AdminWindow(Some(handle)));
     }
 }
 
@@ -91,7 +90,7 @@ pub fn open_window(
     services: Services,
     focus: bool,
     cx: &mut App,
-) -> Result<(AnyWindowHandle, Entity<MonitorView>), String> {
+) -> Result<(AnyWindowHandle, Entity<AdminView>), String> {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
@@ -110,7 +109,7 @@ pub fn open_window(
         ..Default::default()
     };
     gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| MonitorView::new(services, window, cx))
+        cx.new(|cx| AdminView::new(services, window, cx))
     })
     .map_err(|e| e.to_string())
 }
@@ -123,7 +122,7 @@ enum Load {
     Failed(String),
 }
 
-pub struct MonitorView {
+pub struct AdminView {
     services: Services,
     owner: bool,
     machines: Option<Vec<MachineInfo>>,
@@ -139,7 +138,7 @@ pub struct MonitorView {
     _subs: Vec<Subscription>,
 }
 
-impl MonitorView {
+impl AdminView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let owner = i_am_owner(&services);
         let poll = cx.spawn(async move |this, cx| {
@@ -152,16 +151,19 @@ impl MonitorView {
         });
         let subs = vec![
             theme::follow_system(window, cx),
-            cx.subscribe(&services.hub, |this: &mut Self, _, changes: &Changes, cx| {
-                if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
-                    let owner = i_am_owner(&this.services);
-                    if owner != this.owner {
-                        this.owner = owner;
-                        this.refresh(cx);
+            cx.subscribe(
+                &services.hub,
+                |this: &mut Self, _, changes: &Changes, cx| {
+                    if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                        let owner = i_am_owner(&this.services);
+                        if owner != this.owner {
+                            this.owner = owner;
+                            this.refresh(cx);
+                        }
+                        cx.notify();
                     }
-                    cx.notify();
-                }
-            }),
+                },
+            ),
             cx.observe_window_activation(window, |_, _, cx| cx.notify()),
         ];
         let mut this = Self {
@@ -192,27 +194,25 @@ impl MonitorView {
         let list = self.services.provider.machines();
         cx.spawn(async move |this, cx| {
             let result = answer(list).await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(list) => {
-                        let keep = this
-                            .selected
-                            .as_ref()
-                            .filter(|id| list.iter().any(|x| &x.id == *id))
-                            .cloned();
-                        this.selected = keep.or_else(|| {
-                            list.iter()
-                                .find(|x| x.connected)
-                                .or(list.first())
-                                .map(|x| x.id.clone())
-                        });
-                        this.machines = Some(list);
-                        this.fetch(cx);
-                    }
-                    Err(e) => {
-                        this.load = Load::Failed(error_text(e));
-                        cx.notify();
-                    }
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(list) => {
+                    let keep = this
+                        .selected
+                        .as_ref()
+                        .filter(|id| list.iter().any(|x| &x.id == *id))
+                        .cloned();
+                    this.selected = keep.or_else(|| {
+                        list.iter()
+                            .find(|x| x.connected)
+                            .or(list.first())
+                            .map(|x| x.id.clone())
+                    });
+                    this.machines = Some(list);
+                    this.fetch(cx);
+                }
+                Err(e) => {
+                    this.load = Load::Failed(error_text(e));
+                    cx.notify();
                 }
             });
         })
@@ -317,7 +317,9 @@ fn day_start() -> u64 {
 }
 
 fn now_ms() -> u64 {
-    crate::selftest::clock::local_now().timestamp_millis().max(0) as u64
+    crate::selftest::clock::local_now()
+        .timestamp_millis()
+        .max(0) as u64
 }
 
 /// "10:42:30" in local time.
@@ -344,11 +346,11 @@ fn error_text(e: AdminError) -> String {
     crate::views::settings::widgets::error_text(e).to_string()
 }
 
-impl Render for MonitorView {
+impl Render for AdminView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         div()
-            .id("monitor-root")
+            .id("admin-root")
             .size_full()
             .flex()
             .bg(k.content)
@@ -365,7 +367,7 @@ impl Render for MonitorView {
                     .child(self.toolbar(window, cx))
                     .child(
                         div()
-                            .id("monitor-scroll")
+                            .id("admin-scroll")
                             .flex_1()
                             .min_h(gpui::Pixels::ZERO)
                             .overflow_y_scroll()
@@ -376,8 +378,9 @@ impl Render for MonitorView {
     }
 }
 
-impl MonitorView {
+impl AdminView {
     fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let _ = window;
         let k = native_colors(cx);
         let data = self.current();
         let logged_out = data
@@ -389,22 +392,26 @@ impl MonitorView {
             })
             .unwrap_or(0);
         let vm_count = data.map(model::running_now);
-        let row = |id: &'static str, label: &'static str, s: Sym, selected: bool| {
-            SidebarRow::new(id, label)
-                .leading(sym_icon(
-                    s,
-                    SymSize::SIDEBAR,
-                    if selected { k.label } else { k.secondary },
-                ))
-                .selected(selected)
+        let members = self
+            .services
+            .provider
+            .members()
+            .iter()
+            .filter(|x| !x.deactivated)
+            .count() as u32;
+        let icon = |s: Sym, on: bool| {
+            sym_icon(s, SymSize::SIDEBAR, if on { k.label } else { k.secondary })
         };
-        // The other pages land in later changes: listed, not clickable.
-        let soon = |id: &'static str, label: &'static str, s: Sym, trailing: Option<gpui::AnyElement>| {
-            let row = row(id, label, s, false);
-            let row = match trailing {
-                Some(el) => row.trailing_element(el),
-                None => row,
-            };
+        let count = |n: u32, warn: bool| -> gpui::AnyElement {
+            let pill = crate::ui::native::CountPill::new(n);
+            if warn {
+                pill.tone(k.amber).into_any_element()
+            } else {
+                pill.into_any_element()
+            }
+        };
+        // Pages that land in later changes: listed, not clickable yet.
+        let soon = |id: SharedString, row: SidebarRow| {
             div()
                 .id(id)
                 .opacity(0.5)
@@ -413,10 +420,87 @@ impl MonitorView {
                 })
                 .child(row)
         };
-        let count = |n: u32, warn: bool| -> gpui::AnyElement {
-            let pill = crate::ui::native::CountPill::new(n);
-            if warn { pill.tone(k.amber).into_any_element() } else { pill.into_any_element() }
+        let page =
+            |id: &'static str, label: &'static str, s: Sym, trailing: Option<gpui::AnyElement>| {
+                let row = SidebarRow::new(id, label).leading(icon(s, false));
+                let row = match trailing {
+                    Some(el) => row.trailing_element(el),
+                    None => row,
+                };
+                soon(id.into(), row)
+            };
+        // A machine's own pages sit under it, indented past its symbol.
+        let sub = |id: String,
+                   label: &'static str,
+                   selected: bool,
+                   trailing: Option<gpui::AnyElement>| {
+            let row = SidebarRow::new(SharedString::from(id.clone()), label)
+                .leading(div().w(SymSize::SIDEBAR.slot_px()))
+                .selected(selected);
+            let row = match trailing {
+                Some(el) => row.trailing_element(el),
+                None => row,
+            };
+            if selected {
+                div()
+                    .id(SharedString::from(format!("{id}-wrap")))
+                    .child(row)
+            } else {
+                soon(id.into(), row)
+            }
         };
+        let view = cx.entity();
+        let machines: Vec<gpui::AnyElement> = self
+            .machines
+            .iter()
+            .flatten()
+            .flat_map(|x| {
+                let open = self.selected.as_deref() == Some(x.id.as_str());
+                let id = x.id.clone();
+                let view = view.clone();
+                let mut row = SidebarRow::new(
+                    SharedString::from(format!("machine-{}", x.id)),
+                    x.name.clone(),
+                )
+                .leading(icon(Sym::Server, open))
+                .trailing_element(dot(if x.connected { k.green } else { k.secondary }))
+                .on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    view.update(cx, |v, cx| v.select_machine(id, cx))
+                });
+                if open {
+                    row = row.disclosure(true);
+                }
+                let mut out = vec![row.into_any_element()];
+                if open {
+                    let base = format!("machine-{}", x.id);
+                    out.push(
+                        sub(format!("{base}-overview"), m::NAV_OVERVIEW, true, None)
+                            .into_any_element(),
+                    );
+                    out.push(
+                        sub(
+                            format!("{base}-vms"),
+                            m::NAV_VMS,
+                            false,
+                            vm_count.map(|n| count(n, false)),
+                        )
+                        .into_any_element(),
+                    );
+                    out.push(
+                        sub(format!("{base}-image"), m::NAV_IMAGE, false, None).into_any_element(),
+                    );
+                    out.push(
+                        sub(format!("{base}-network"), m::NAV_NETWORK, false, None)
+                            .into_any_element(),
+                    );
+                    out.push(
+                        sub(format!("{base}-logs"), m::NAV_LOGS, false, None).into_any_element(),
+                    );
+                }
+                out
+            })
+            .collect();
         let me = match self.services.provider.session() {
             crate::data::SessionState::SignedIn { me, .. } => Some(me),
             _ => None,
@@ -425,7 +509,7 @@ impl MonitorView {
             .child(
                 // The traffic lights' row; dragging it moves the window.
                 div()
-                    .id("monitor-lights")
+                    .id("admin-lights")
                     .flex_none()
                     .h(height::TOOLBAR)
                     .w_full()
@@ -437,52 +521,54 @@ impl MonitorView {
                         }
                     }),
             )
-            .child(self.switcher(window, cx))
-            .children(self.capacity_row(cx))
-            .child(group_label(m::NAV_WATCH, cx).mt(space::S12))
-            .child(row("nav-overview", m::NAV_OVERVIEW, Sym::Grid, true))
-            .child(soon("nav-vms", m::NAV_VMS, Sym::Server, vm_count.map(|n| count(n, false))))
-            .child(soon("nav-history", m::NAV_HISTORY, Sym::History, None))
-            .child(group_label(m::NAV_ACCOUNTS, cx).mt(space::S12))
-            .child(soon("nav-subs", m::NAV_SUBSCRIPTIONS, Sym::Account, (logged_out > 0).then(|| count(logged_out, true))))
-            .child(soon("nav-keys", m::NAV_KEYS, Sym::Key, None))
-            .child(group_label(m::NAV_MACHINE, cx).mt(space::S12))
-            .child(soon("nav-image", m::NAV_IMAGE, Sym::Layers, None))
-            .child(soon("nav-network", m::NAV_NETWORK, Sym::Shield, None))
-            .child(soon("nav-logs", m::NAV_LOGS, Sym::Logs, None))
-            .child(div().flex_1())
+            .child(self.header(cx))
+            .child(
+                div()
+                    .id("admin-nav")
+                    .flex_1()
+                    .min_h(gpui::Pixels::ZERO)
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .child(group_label(m::NAV_TEAM, cx).mt(space::S12))
+                    .child(page("nav-home", m::NAV_HOME, Sym::Grid, None))
+                    .child(page(
+                        "nav-members",
+                        m::NAV_MEMBERS,
+                        Sym::Members,
+                        (members > 0).then(|| count(members, false)),
+                    ))
+                    .child(page("nav-usage", m::NAV_USAGE, Sym::BarChart, None))
+                    .child(page("nav-activity", m::NAV_ACTIVITY, Sym::List, None))
+                    .child(group_label(m::NAV_MACHINES, cx).mt(space::S12))
+                    .children(machines)
+                    .child(group_label(m::NAV_ACCOUNTS, cx).mt(space::S12))
+                    .child(page(
+                        "nav-subs",
+                        m::NAV_SUBSCRIPTIONS,
+                        Sym::Account,
+                        (logged_out > 0).then(|| count(logged_out, true)),
+                    ))
+                    .child(page("nav-keys", m::NAV_KEYS, Sym::Key, None))
+                    .child(group_label(m::NAV_SETTINGS, cx).mt(space::S12))
+                    .child(page("nav-ai", m::NAV_AI, Sym::AiMember, None))
+                    .child(page("nav-rules", m::NAV_RULES, Sym::Checklist, None))
+                    .child(page("nav-memory", m::NAV_MEMORY, Sym::Book, None)),
+            )
             .children(me.map(|me| {
                 SidebarFooter::new(
-                    "monitor-me",
+                    "admin-me",
                     MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::SM),
                     me.name.clone(),
                 )
-                .detail(m::ONLY_YOU, cx)
+                .detail(m::ROLE_OWNER, cx)
             }))
     }
 
-    /// The machine card at the top of the sidebar: name and state; a menu when there are more.
-    fn switcher(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The window's name card at the top of the sidebar.
+    fn header(&self, cx: &App) -> impl IntoElement {
         let k = native_colors(cx);
-        let machine = self.machine();
-        let data = self.current();
-        let connected = data
-            .map(|d| d.machine.connected)
-            .or(machine.map(|x| x.connected))
-            .unwrap_or(false);
-        let name: SharedString = machine
-            .map(|x| x.name.clone())
-            .or(data.map(|d| d.machine.name.clone()))
-            .unwrap_or_default()
-            .into();
-        let detail = match data.and_then(|d| d.machine.os.clone()) {
-            Some(os) if connected => format!("{} · {os}", m::MACHINE_ONLINE),
-            _ if connected => m::MACHINE_ONLINE.to_string(),
-            _ => m::MACHINE_OFFLINE.to_string(),
-        };
-        let many = self.machines.as_ref().is_some_and(|l| l.len() > 1);
-        let card = div()
-            .id("monitor-machine")
+        div()
             .flex_none()
             .flex()
             .items_center()
@@ -501,7 +587,7 @@ impl MonitorView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(sym_icon(Sym::Server, SymSize::INLINE, k.on_primary)),
+                    .child(sym_icon(Sym::Shield, SymSize::INLINE, k.on_primary)),
             )
             .child(
                 div()
@@ -509,85 +595,13 @@ impl MonitorView {
                     .min_w(gpui::Pixels::ZERO)
                     .flex()
                     .flex_col()
-                    .child(TruncText::new(name).n_headline())
+                    .child(TruncText::new(m::HEADER_TITLE).n_headline())
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S6)
+                        TruncText::new(m::HEADER_DESC)
                             .n_footnote()
-                            .text_color(k.secondary)
-                            .child(dot(if connected { k.green } else { k.secondary }))
-                            .child(TruncText::new(detail)),
+                            .text_color(k.secondary),
                     ),
             )
-            .when(many, |d| {
-                d.child(sym_icon(Sym::PopUp, SymSize::INLINE_SMALL, k.secondary))
-            });
-        if !many {
-            return card.into_any_element();
-        }
-        let list: Vec<(String, String, bool)> = self
-            .machines
-            .iter()
-            .flatten()
-            .map(|x| (x.id.clone(), x.name.clone(), x.connected))
-            .collect();
-        let selected = self.selected.clone();
-        let view = cx.entity();
-        let _ = window;
-        gpui_component::button::Button::new("monitor-switch")
-            .ghost()
-            .p_0()
-            .w_full()
-            .h_auto()
-            .tooltip(m::SWITCH_MACHINE)
-            .child(card)
-            .dropdown_menu(move |menu, _, _| {
-                let mut menu = menu;
-                for (id, name, _) in &list {
-                    let (id, view) = (id.clone(), view.clone());
-                    menu = menu.item(
-                        PopupMenuItem::new(name.clone())
-                            .checked(selected.as_deref() == Some(id.as_str()))
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |v, cx| v.select_machine(id.clone(), cx))
-                            }),
-                    );
-                }
-                menu
-            })
-            .into_any_element()
-    }
-
-    /// VM 容量 23 / 34 under the machine card.
-    fn capacity_row(&self, cx: &App) -> Option<impl IntoElement> {
-        let k = native_colors(cx);
-        let d = self.current()?;
-        let running = d.capacity.running;
-        let total = running + d.capacity.can_take;
-        Some(
-            div()
-                .px(space::S8)
-                .pt(space::S12)
-                .flex()
-                .flex_col()
-                .gap(space::S6)
-                .child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .n_footnote()
-                        .text_color(k.secondary)
-                        .child(m::VM_CAPACITY)
-                        .child(
-                            div()
-                                .n_figures()
-                                .child(format!("{running} / {total}")),
-                        ),
-                )
-                .child(crate::ui::native::progress(model::share(running as u64, total as u64), cx)),
-        )
     }
 
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -600,9 +614,13 @@ impl MonitorView {
             },
             None => String::new(),
         };
+        let machine_name = self
+            .machine()
+            .map(|x| x.name.clone())
+            .or_else(|| self.current().map(|d| d.machine.name.clone()));
         let view = cx.entity();
         let range = Segmented::new(
-            "monitor-range",
+            "admin-range",
             Range::ALL.map(|r| Segment::Label(r.label().into())),
         )
         .selected(self.range.index())
@@ -614,7 +632,7 @@ impl MonitorView {
         let view = cx.entity();
         let busy = self.load == Load::Busy;
         let refresh = crate::ui::native::buttons::icon_button_outline(
-            "monitor-refresh",
+            "admin-refresh",
             Sym::Refresh,
             m::REFRESH,
             crate::ui::native::IconSize::Regular,
@@ -624,7 +642,7 @@ impl MonitorView {
         .disabled(!self.owner || self.selected.is_none())
         .on_click(move |_, _, cx| view.update(cx, |v, cx| v.retry(cx)));
         div()
-            .id("monitor-toolbar")
+            .id("admin-toolbar")
             .flex_none()
             .h(height::TOOLBAR)
             .px(space::S32)
@@ -648,8 +666,29 @@ impl MonitorView {
                     .flex_col()
                     .child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap(space::S4)
                             .n_title3()
                             .text_color(if active { k.label } else { k.secondary })
+                            .child(div().text_color(k.secondary).child(m::PATH_MACHINES))
+                            .child(sym_icon(
+                                Sym::ChevronRight,
+                                SymSize::INLINE_SMALL,
+                                k.tertiary,
+                            ))
+                            .children(machine_name.map(|n| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S4)
+                                    .child(div().text_color(k.secondary).child(n))
+                                    .child(sym_icon(
+                                        Sym::ChevronRight,
+                                        SymSize::INLINE_SMALL,
+                                        k.tertiary,
+                                    ))
+                            }))
                             .child(m::TITLE),
                     )
                     .when(!subtitle.is_empty(), |d| {
@@ -688,8 +727,14 @@ impl MonitorView {
         };
         let retry = |cx: &mut Context<Self>| {
             let view = cx.entity();
-            push_button("monitor-retry", m::RETRY, PushStyle::Outline, PushSize::Small, cx)
-                .on_click(move |_, _, cx| view.update(cx, |v, cx| v.retry(cx)))
+            push_button(
+                "admin-retry",
+                m::RETRY,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, _, cx| view.update(cx, |v, cx| v.retry(cx)))
         };
         if let Some(list) = &self.machines
             && list.is_empty()
@@ -701,7 +746,7 @@ impl MonitorView {
                         .description(m::NO_MACHINES_DESC)
                         .action(
                             push_button(
-                                "monitor-open-settings",
+                                "admin-open-settings",
                                 m::OPEN_SETTINGS,
                                 PushStyle::Default,
                                 PushSize::Small,
@@ -786,9 +831,5 @@ impl MonitorView {
 
 /// An 8 pt state dot that sits next to its words (never alone, §2.12).
 fn dot(color: gpui::Hsla) -> gpui::Div {
-    div()
-        .flex_none()
-        .size(t::SWATCH)
-        .rounded_full()
-        .bg(color)
+    div().flex_none().size(t::SWATCH).rounded_full().bg(color)
 }

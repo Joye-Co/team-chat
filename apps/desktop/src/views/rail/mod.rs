@@ -817,6 +817,13 @@ fn account_menu(
                 window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
             }),
         )
+        // Owners only: 团队管理… (⌥⌘,).
+        .when(crate::views::settings::i_am_owner(services), |menu| {
+            menu.menu(
+                crate::copy::admin::MENU_OPEN,
+                Box::new(crate::views::admin::OpenTeamAdmin),
+            )
+        })
         .separator()
         .item(
             PopupMenuItem::new(c::ACCOUNT_SIGN_OUT).on_click(move |_, window, cx| {

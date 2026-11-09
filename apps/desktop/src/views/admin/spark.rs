@@ -2,7 +2,9 @@
 //! and white, COMPLETENESS.md §1.2). A bucket with no sample breaks the line; the y axis runs
 //! from 0 to `max` so cards of percentages compare at a glance.
 
-use gpui::{App, Bounds, Hsla, IntoElement, PathBuilder, Pixels, Styled as _, Window, canvas, point};
+use gpui::{
+    App, Bounds, Hsla, IntoElement, PathBuilder, Pixels, Styled as _, Window, canvas, point,
+};
 
 use crate::ui::native::{native_colors, tokens::monitor as t};
 
@@ -18,7 +20,14 @@ pub fn spark(values: Vec<Option<f64>>, max: f64, cx: &App) -> impl IntoElement {
     .h(t::SPARK_HEIGHT)
 }
 
-fn paint(values: &[Option<f64>], max: f64, b: Bounds<Pixels>, line: Hsla, fill: Hsla, window: &mut Window) {
+fn paint(
+    values: &[Option<f64>],
+    max: f64,
+    b: Bounds<Pixels>,
+    line: Hsla,
+    fill: Hsla,
+    window: &mut Window,
+) {
     let n = values.len();
     if n < 2 {
         return;

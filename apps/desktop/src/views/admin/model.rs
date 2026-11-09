@@ -5,7 +5,7 @@
 use chat_core::proto::machine::login_state;
 use chat_core::proto::monitor::{MachineMonitor, MonitorMember, run_state};
 
-use crate::copy::{fill, monitor as m};
+use crate::copy::{admin as m, fill};
 
 /// The ranges of the segmented control, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -177,7 +177,10 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
         let since = d.machine.connected_at.unwrap_or(now);
         StripCell {
             label: m::STRIP_HOST.into(),
-            value: fill(m::HOST_UP, &[("duration", &duration(now.saturating_sub(since)))]),
+            value: fill(
+                m::HOST_UP,
+                &[("duration", &duration(now.saturating_sub(since)))],
+            ),
             tone: Tone::Ok,
             cli: false,
         }
@@ -294,7 +297,12 @@ pub fn attention(
             meta: d
                 .queue
                 .oldest_at
-                .map(|t| fill(m::ATT_QUEUE_OLDEST, &[("wait", &duration(now.saturating_sub(t)))]))
+                .map(|t| {
+                    fill(
+                        m::ATT_QUEUE_OLDEST,
+                        &[("wait", &duration(now.saturating_sub(t)))],
+                    )
+                })
                 .unwrap_or_default(),
             tone: Tone::Warn,
         });
@@ -459,7 +467,10 @@ pub fn member_rows(
 
 /// Runs on the machine now (everything but the queue).
 pub fn running_now(d: &MachineMonitor) -> u32 {
-    d.runs.iter().filter(|r| r.state != run_state::QUEUED).count() as u32
+    d.runs
+        .iter()
+        .filter(|r| r.state != run_state::QUEUED)
+        .count() as u32
 }
 
 /// The 容量 bar: VM, the host's own use and free memory, as shares of the total.
