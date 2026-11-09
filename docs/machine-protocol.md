@@ -53,7 +53,8 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
   // machine.id is the configured id (optional); the token is authoritative.
   // runs = every run the daemon still holds (running, or finished with frames not yet acked)
 
-{ t: "heartbeat", at, health: Health, runs: RunCursor[] }      // every 30 s; renews leases
+{ t: "heartbeat", at, health: Health, runs: RunCursor[],
+  metrics?: MachineMetrics }                                     // every 30 s; renews leases; metrics: see "Metrics"
 { t: "run.accept", runId }
 { t: "run.reject", runId, reason: "busy" | "runtime_unavailable" | "disk_low" | "invalid" | "draining",
   message: string }
@@ -199,6 +200,40 @@ RunEvent =
   runtime, health, free disk, load) and stores the run log by `(runId, seq)` idempotently.
   `run.reject` makes it try the next qualifying machine; with none left the run fails with a
   note in the topic.
+
+## Metrics
+
+Since 1.2.7 every heartbeat carries `metrics`, the numbers of the owner's monitor (protocol.md,
+"Machine monitor"). Old servers ignore the field; the server reads it apart from the heartbeat, so
+metrics it cannot parse are dropped and the heartbeat still renews the leases. Every number is
+optional: a platform may not have it.
+
+```ts
+MachineMetrics = { at /* sample time, machine clock */, uptimeSecs?, cpuPct? /* 0-100 */, cpuThreads?,
+                   memTotalBytes?, memAvailableBytes?, netRxBps?, netTxBps?, vmSlots?,
+                   boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[] }
+VmRunMetrics   = { runId, phase: "booting" | "running" | "paused", startedAt, bootMs?, cpuCores?, memBytes?, scratchBytes? }
+CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", method?: "subscription" | "api_key" }
+```
+
+- **Host**: CPU busy since the previous sample over all threads (Linux `/proc/stat`, macOS
+  `host_statistics`), `MemTotal` and `MemAvailable` (`/proc/meminfo`; macOS free + inactive +
+  speculative pages), uptime, and bytes per second received and sent on the host's own interfaces
+  (`/proc/net/dev` without `lo`, `tap*`, `fc*`, `veth*`, `docker*`, `virbr*`, `br-*`; Linux only).
+- **VMs** (`[vm]`): the executor records each run's VM as it boots (`booting`), answers
+  (`running`, with `bootMs`: Firecracker start to a connected guest agent), is paused by 接管
+  (`paused`) and goes. `cpuCores` is the Firecracker process's CPU time since the previous sample
+  divided by the wall time (1.0 = one thread); `memBytes` its `VmRSS` (the guest pages it
+  touched); `scratchBytes` the blocks the sparse scratch disk uses. `vmSlots` is
+  `max_parallel_runs`; `boot` covers the last 50 boots. Without `[vm]`, `runs` lists the daemon's
+  unfinished runs with `phase: "running"` and their start, nothing else.
+- **Logins**: for `claude` and `codex` runtimes only, checked for presence, never read out:
+  Claude Code is `logged_in` (`subscription`) with `claudeAiOauth` tokens in
+  `$CLAUDE_CONFIG_DIR/.credentials.json` (on macOS, where the credential is in the Keychain, an
+  `oauthAccount` in `.claude.json`), else (`api_key`) when the CLI gets `ANTHROPIC_API_KEY` (the
+  runtime's `env`, or `env_passthrough` with the daemon's own value); Codex is `logged_in` with
+  `tokens` (`subscription`) or `OPENAI_API_KEY` (`api_key`) in `$CODEX_HOME/auth.json`, or the
+  same variable as above. Otherwise `logged_out`.
 
 ## Leases
 

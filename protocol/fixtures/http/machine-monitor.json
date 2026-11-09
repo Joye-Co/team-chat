@@ -1,0 +1,140 @@
+{
+  "kind": "MachineMonitor",
+  "valid": true,
+  "value": {
+    "machine": {
+      "id": "01JBX0MACHINE00000000000AV",
+      "name": "runner-1",
+      "connected": true,
+      "lastHeartbeatAt": 1762128000000,
+      "connectedAt": 1762117200000,
+      "daemonVersion": "1.2.7",
+      "os": "linux",
+      "arch": "x86_64"
+    },
+    "sampledAt": 1762127999600,
+    "host": {
+      "cpuPct": 62.4,
+      "cpuThreads": 12,
+      "load1": 7.4,
+      "memTotalBytes": 67216998400,
+      "memAvailableBytes": 28883582976,
+      "memVmBytes": 31567822438,
+      "diskTotalBytes": 996000000000,
+      "diskFreeBytes": 896000000000,
+      "netRxBps": 3565158.5,
+      "netTxBps": 1153433.5,
+      "uptimeSecs": 10800
+    },
+    "series": {
+      "range": "1h",
+      "from": 1762124400000,
+      "stepMs": 60000,
+      "cpuPct": [
+        22.5,
+        null,
+        61.5
+      ],
+      "memPct": [
+        40.5,
+        null,
+        57.1
+      ],
+      "diskPct": [
+        9.5,
+        null,
+        10.1
+      ],
+      "netRxBps": [
+        4000.5,
+        null,
+        3565158.5
+      ],
+      "netTxBps": [
+        1000.5,
+        null,
+        1153433.5
+      ]
+    },
+    "capacity": {
+      "slots": 34,
+      "running": 23,
+      "canTake": 11,
+      "avgVmBytes": 1395864371,
+      "reserveBytes": 12884901888
+    },
+    "boot": {
+      "avgMs": 1300,
+      "maxMs": 2100,
+      "samples": 50
+    },
+    "queue": {
+      "count": 4,
+      "oldestAt": 1762127870000
+    },
+    "today": {
+      "finished": 186,
+      "succeeded": 175,
+      "failed": 11,
+      "finishedYesterday": 163,
+      "tokens": 14100000
+    },
+    "clis": [
+      {
+        "runtime": "claude",
+        "kind": "claude",
+        "available": true,
+        "version": "2.1.0",
+        "login": "logged_in",
+        "failedToday": 0
+      },
+      {
+        "runtime": "codex",
+        "kind": "codex",
+        "available": true,
+        "login": "logged_out",
+        "failedToday": 2
+      }
+    ],
+    "runs": [
+      {
+        "runId": "01JA0000000000000000000R01",
+        "memberId": "01JBX0BOT000000000000000AC",
+        "state": "running",
+        "startedAt": 1762127400000,
+        "bootMs": 1250,
+        "cpuCores": 1.25,
+        "memBytes": 1395864371,
+        "scratchBytes": 734003200
+      },
+      {
+        "runId": "01JA0000000000000000000R02",
+        "memberId": "01JBX0BOT000000000000000AC",
+        "state": "waiting",
+        "startedAt": 1762127940000
+      },
+      {
+        "runId": "01JA0000000000000000000R03",
+        "state": "queued"
+      }
+    ],
+    "members": [
+      {
+        "memberId": "01JBX0BOT000000000000000AC",
+        "running": 6,
+        "waiting": 2,
+        "queued": 1,
+        "cpuCores": 2.65,
+        "memBytes": 10307921510,
+        "tokensToday": 6800000,
+        "finishedToday": 48
+      }
+    ],
+    "lastFailure": {
+      "runId": "01JA0000000000000000000R09",
+      "memberId": "01JBX0BOT000000000000000AC",
+      "at": 1762127100000,
+      "title": "对一下十月的账单"
+    }
+  }
+}

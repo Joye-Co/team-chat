@@ -787,6 +787,7 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `POST /v1/machines` | owner | `CreateMachineRequest` | `CreateMachineResponse` |
 | `GET /v1/machines` | member | | `Machine[]`; members other than owners get only `id`, `name`, `createdBy`, `createdAt`, `revoked`, `connected` and `healthy` (`labels` and `runningRuns` empty) |
 | `DELETE /v1/machines/:id` | owner | | `{ ok: true }`; revokes the token, closes the link |
+| `GET /v1/machines/:id/monitor?range=15m\|1h\|24h&dayStart=<ms>` | owner | | `MachineMonitor`, see "Machine monitor" |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
 | `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
 | `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
@@ -1105,6 +1106,53 @@ that the server makes (an answer, a retract, an expiry of a card ask; a ref whos
 deleted). 1.0.1 shows the mark for every `message.updated`, and such an update carries
 `editedAt` (see "Edit marks" under Cards v2). The message content does not change. A 1.1 client
 does not show the mark. The server sends these updates to 1.0.x connections unchanged.
+
+## Machine monitor
+
+Owners watch a machine in the monitor window (开发者视图 level: VM, CLI and token are allowed
+words there). `GET /v1/machines/:id/monitor` (owner only, `not_found` for an unknown machine,
+`invalid` for another `range`) joins the machine's MachineLink with every runner bot's BotDesk.
+`dayStart` is the viewer's local midnight (今天); without it 今天 is the last 24 hours. The
+schema is `MachineMonitor` in `packages/protocol/src/monitor.ts` and
+`crates/chat-protocol/src/monitor.rs`.
+
+```ts
+MachineMonitor = {
+  machine: { id, name, connected, revoked?, lastHeartbeatAt?, connectedAt? /* this link */, daemonVersion?, os?, arch? },
+  sampledAt?,                       // when the latest heartbeat metrics arrived (server clock)
+  host?: { cpuPct?, cpuThreads?, load1, memTotalBytes?, memAvailableBytes?, memVmBytes,
+           diskTotalBytes, diskFreeBytes, netRxBps?, netTxBps?, uptimeSecs? },
+  series: { range, from, stepMs, cpuPct, memPct, diskPct, netRxBps, netTxBps },   // (number | null)[]
+  capacity: { slots, running, canTake, avgVmBytes?, reserveBytes? },
+  boot?: { avgMs, maxMs, samples },
+  queue: { count, oldestAt? },      // runs of every runner bot waiting for a machine (排队)
+  today: { finished, succeeded, failed, finishedYesterday, tokens },
+  clis: { runtime, kind, available, version?, login: "logged_in" | "logged_out" | "unknown", failedToday }[],
+  runs: { runId, memberId?, state, startedAt?, bootMs?, cpuCores?, memBytes?, scratchBytes? }[],
+  members: { memberId, running, waiting, queued, cpuCores, memBytes, tokensToday, finishedToday }[],
+  lastFailure?: { runId, memberId, at, title? },
+}
+```
+
+- **Series**: MachineLink keeps one row per heartbeat for 25 hours (named migration
+  `machine-2-metrics`). `15m` is 30 buckets of 30 s, `1h` 60 of 1 min, `24h` 48 of 30 min, the
+  last one holding now; each value is the bucket's average, `null` when it has no sample. Memory
+  and disk are percent used; network is bytes per second.
+- **Runs**: the VMs of the latest heartbeat (machine-protocol.md, "Metrics"), each joined to the
+  member of its run. `state` is `booting` (起机中), `paused` (接管), `waiting` (等你: the run's
+  BotDesk status is `waiting`), else `running` (在跑); queued runs (排队) of every runner bot follow
+  with `state: "queued"`. A daemon without metrics gives the server's open runs on the machine
+  instead. Clients read an unknown `state` as `running`.
+- **Capacity**: `slots` is the daemon's `vmSlots`, else `maxParallelRuns`. `canTake` is the free
+  slots, and no more than fit in the available memory above `reserveBytes` (a fifth of the host,
+  at least 2 GiB) at the average memory of the running VMs.
+- **Today**: runs that ended on the machine since `dayStart`: `succeeded` are `done`, `failed`
+  are `failed` or `blocked` (cancelled runs are neither); `tokens` add input and output tokens of
+  `run.done.usage`. `finishedYesterday` counts the 24 hours before `dayStart`.
+- **Members**: one row per runner bot that has runs on the machine, queued runs, or runs that
+  ended there today. `cpuCores` and `memBytes` add up its VMs.
+- **CLIs**: the machine's `CliInfo` with the login the daemon reported (`unknown` when it did not)
+  and the runs of that runtime that failed today. No credential ever leaves the machine.
 
 ## Cards v2
 

@@ -293,6 +293,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Keyboard, privacy | `keyboard`, `hand.raised`; shield `checkmark.shield` |
 | Mic, book, square, asterisk | `mic`, `book`, `square`, `asterisk` |
 | Busy spinner | `progress.indicator` (turned by the spinner) |
+| Machine monitor (开发者视图) | CPU `cpu`, memory `memorychip`, disk `internaldrive`, network `network`, API key `key`, image and environment `square.stack.3d.up`, logs `doc.text.magnifyingglass`, run history `clock.arrow.circlepath`; 概览 `square.grid.2x2`, VM `server.rack` |
 | Find and replace, bottom panel (gpui-component) | `arrow.left.arrow.right`, `rectangle.bottomthird.inset.filled` |
 
 ## 7. Overlays

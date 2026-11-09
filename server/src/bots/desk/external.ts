@@ -11,6 +11,7 @@ import { TokenBucket } from "../../core/ratelimit";
 import { cut } from "../dispatch";
 import { DEFAULT_PAGE, MAX_PAGE, PLAN_RATE, type RunRow, result } from "./core";
 import { DeskInteract } from "./interact";
+import { type DeskRollup, deskRollup } from "../../monitor/rollup";
 
 export class BotDesk extends DeskInteract {
   // -------------------------------------------------------------------------
@@ -107,6 +108,16 @@ export class BotDesk extends DeskInteract {
   // -------------------------------------------------------------------------
   // Reads (API Worker)
   // -------------------------------------------------------------------------
+
+  /** This bot's share of a machine for the owner's monitor (monitor/rollup.ts), with the title of its last failure today. */
+  async monitorRollup(botId: string, machineId: string, dayStart: number): Promise<DeskRollup & { lastFailureTitle?: string }> {
+    this.bind(botId);
+    const r = deskRollup(this.sql, machineId, dayStart);
+    if (!r.lastFailure) return r;
+    const row = this.run(r.lastFailure.runId);
+    const title = row ? await this.topicTitle(row) : "";
+    return title ? { ...r, lastFailureTitle: title } : r;
+  }
 
   async getRun(botId: string, runId: string): Promise<BotRun | null> {
     this.bind(botId);

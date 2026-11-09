@@ -1,0 +1,73 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "heartbeat",
+    "at": 1793627430000,
+    "health": {
+      "diskFreeBytes": 896000000000,
+      "diskTotalBytes": 996000000000,
+      "load1": 7.4,
+      "load5": 6.9,
+      "load15": 5.2,
+      "cpuCount": 12,
+      "activeRuns": 2
+    },
+    "runs": [
+      {
+        "runId": "01JA0000000000000000000R01",
+        "lastSeq": 14,
+        "done": false
+      },
+      {
+        "runId": "01JA0000000000000000000R02",
+        "lastSeq": 0,
+        "done": false
+      }
+    ],
+    "metrics": {
+      "at": 1793627429900,
+      "uptimeSecs": 10800,
+      "cpuPct": 62.4,
+      "cpuThreads": 12,
+      "memTotalBytes": 67216998400,
+      "memAvailableBytes": 28883582976,
+      "netRxBps": 3565158.5,
+      "netTxBps": 1153433.5,
+      "vmSlots": 12,
+      "boot": {
+        "avgMs": 1300,
+        "maxMs": 2100,
+        "samples": 50
+      },
+      "runs": [
+        {
+          "runId": "01JA0000000000000000000R01",
+          "phase": "running",
+          "startedAt": 1793627000000,
+          "bootMs": 1250,
+          "cpuCores": 1.25,
+          "memBytes": 1395864371,
+          "scratchBytes": 734003200
+        },
+        {
+          "runId": "01JA0000000000000000000R02",
+          "phase": "booting",
+          "startedAt": 1793627429000
+        }
+      ],
+      "logins": [
+        {
+          "runtime": "claude",
+          "state": "logged_in",
+          "method": "subscription"
+        },
+        {
+          "runtime": "codex",
+          "state": "logged_out"
+        }
+      ]
+    }
+  }
+}

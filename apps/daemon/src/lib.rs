@@ -12,6 +12,7 @@ pub mod executor;
 pub mod gates;
 pub mod health;
 pub mod input;
+pub mod metrics;
 pub mod models;
 pub mod proctree;
 pub mod product;

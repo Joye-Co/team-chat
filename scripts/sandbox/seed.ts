@@ -30,6 +30,60 @@ export interface SeedOptions {
   adminSecret: string;
   out: string;
   log?: (line: string) => void;
+  /**
+   * Starts the sample machine (machine.ts) with `<out>/machine-token` and resolves once it is
+   * connected; then a few runs go to it. Without it (CI) the machine is made but runs nothing.
+   */
+  startMachine?: () => Promise<void>;
+}
+
+/** AI members that run on the sample machine, and their runtime. */
+const RUNNERS = [
+  ["forge", "claude"],
+  ["scout", "claude"],
+  ["ledger", "claude"],
+  ["taro", "codex"],
+] as const;
+
+/**
+ * The sample machine for the owner's monitor (机器监控): a machine named runner-1 whose token
+ * goes to `<out>/machine-token` (mode 600), and Forge, Scout, Ledger and Taro pinned to it. With
+ * `startMachine`, people then hand each of them work, so the machine has runs to show. Returns
+ * the machine id.
+ */
+export async function seedMachine(o: SeedOptions, owner: string, ids: Record<string, string>, groups: { dev: string; growth: string }): Promise<string> {
+  const log = o.log ?? ((l: string) => console.log(l));
+  const url = o.url.replace(/\/+$/, "");
+  const m = await call<{ machine: { id: string }; token: string }>(url, "POST", "/v1/machines", {
+    token: owner,
+    body: { name: "runner-1", labels: ["sandbox"] },
+  });
+  writeSecret(join(o.out, "machine-token"), m.token);
+  for (const [k, runtime] of RUNNERS) {
+    await call(url, "PUT", `/v1/bots/${ids[k]}/runner`, { token: owner, body: { runtime, labels: [], machineId: m.machine.id } });
+  }
+  log("machine: runner-1");
+  if (!o.startMachine) return m.machine.id;
+  await o.startMachine();
+  const me = new Bot({ url, token: owner, client: { name: "sandbox-seed", version: "1" }, logLevel: "warn", markRead: false });
+  await me.start();
+  try {
+    const work: [string, string, string][] = [
+      [groups.dev, "forge", "@Forge 把登录页的端到端测试补齐"],
+      [groups.dev, "forge", "@Forge 看看为什么夜间构建变慢了"],
+      [groups.dev, "scout", "@Scout 验收一下 v2.15 的搜索高亮"],
+      [groups.dev, "scout", "@Scout 回归一遍断线重连"],
+      [groups.growth, "ledger", "@Ledger 对一下十月的账单"],
+      [groups.growth, "taro", "@Taro 把这周的微博排期发出来"],
+    ];
+    for (const [groupId, k, body] of work) {
+      await me.startTopic(groupId, { title: body.replace(/^@\S+ /, ""), body, mentions: [ids[k]] });
+    }
+  } finally {
+    await me.stop();
+  }
+  log("runs: 6 on runner-1");
+  return m.machine.id;
 }
 
 const HUMANS = [
@@ -349,7 +403,8 @@ export async function seed(o: SeedOptions): Promise<Json> {
     await topic("xiaowang", xwDm.id, "搜索高亮", "Joye，高亮那块我下午看。");
     log("topics: 14");
 
-    const out = { url, members: ids, groups: { all, dev, ops, growth }, seededAt: Date.now() };
+    const machineId = await seedMachine(o, owner, ids, { dev, growth });
+    const out = { url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };
     writeFileSync(join(o.out, "seed.json"), `${JSON.stringify(out, null, 2)}\n`);
     return out;
   } finally {
