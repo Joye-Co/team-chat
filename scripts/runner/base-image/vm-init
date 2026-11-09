@@ -1,0 +1,27 @@
+#!/bin/sh
+# PID 1 of a run's microVM (kernel argument init=/sbin/vm-init). Mounts the basics and, until
+# vm-agent exists, prints a ready line with the boot time and powers off.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /dev/shm
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+hostname vm
+ip link set lo up
+
+echo "vm-init: ready after $(cut -d' ' -f1 /proc/uptime)s"
+if [ -x /usr/local/bin/vm-agent ]; then
+  exec /usr/local/bin/vm-agent
+fi
+for c in git node claude codex pi bun uv gh python3; do
+  printf '%s: %s\n' "$c" "$(command -v $c >/dev/null && $c --version 2>&1 | head -1 || echo missing)"
+done
+echo "vm-init: tools listed after $(cut -d' ' -f1 /proc/uptime)s"
+sync
+# The image has no init system: a sysrq reboot makes Firecracker exit (kernel argument reboot=k).
+echo 1 > /proc/sys/kernel/sysrq
+echo b > /proc/sysrq-trigger
