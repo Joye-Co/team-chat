@@ -119,6 +119,7 @@ import {
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
 import { ActivityResponse } from "./activity.ts";
+import { TeamUsage } from "./usage.ts";
 import { LoginCodeRequest, MachineLogin, MachineMonitor, MachineSecretsResponse, SetSecretRequest, StartLoginRequest } from "./monitor.ts";
 import {
   AiServiceConfig,
@@ -173,6 +174,7 @@ export * from "./audit.ts";
 export * from "./machine.ts";
 export * from "./monitor.ts";
 export * from "./activity.ts";
+export * from "./usage.ts";
 export * from "./bots.ts";
 export * from "./plan.ts";
 export * from "./settings.ts";
@@ -801,6 +803,7 @@ export const schemas = {
   MachinesResponse,
   MachineMonitor,
   ActivityResponse,
+  TeamUsage,
   StartLoginRequest,
   LoginCodeRequest,
   MachineLogin,

@@ -146,7 +146,7 @@ function finish(v: Vm, ok: boolean, error?: string) {
     at: Date.now(),
     status: ok ? "succeeded" : "failed",
     ...(ok
-      ? { resultText: "（样例机器）做完了：这是沙盒里的演示结果。", summary: "（样例机器）做完了", usage: { inputTokens: Math.round(tokens * 0.85), outputTokens: Math.round(tokens * 0.15) } }
+      ? { resultText: "（样例机器）做完了：这是沙盒里的演示结果。", summary: "（样例机器）做完了", usage: { inputTokens: Math.round(tokens * 0.85), outputTokens: Math.round(tokens * 0.15), ...(v.runtime === "claude" ? { costUsd: Math.round(tokens * 0.0009) / 100 } : {}) } }
       : { error: error ?? "failed" }),
     durationMs: Date.now() - v.startedAt,
   });
@@ -168,7 +168,7 @@ function take(runId: string, runtime: string, seq = 0) {
     mem: (1.1 + Math.random() * 0.6) * GIB,
     cpu: 0.3 + Math.random(),
     scratch: (0.2 + Math.random() * 0.5) * GIB,
-    endsAt: now + (4 + Math.random() * 8) * 60_000,
+    endsAt: now + (1 + Math.random() * 3) * 60_000,
     ask: runtime !== "codex" && taken++ % 3 === 1,
   };
   vms.set(runId, v);

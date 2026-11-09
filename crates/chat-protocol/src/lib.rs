@@ -42,6 +42,7 @@ mod serde_util;
 pub mod settings;
 pub mod topic;
 pub mod updates;
+pub mod usage;
 
 pub use audit::*;
 pub use bots::*;
@@ -62,6 +63,7 @@ pub use limits::*;
 pub use links::*;
 pub use monitor::MachineMonitor;
 pub use activity::ActivityResponse;
+pub use usage::TeamUsage;
 pub use media::*;
 pub use members::*;
 pub use memory::*;

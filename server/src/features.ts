@@ -20,3 +20,4 @@ import "./summary";
 import "./memory";
 import "./monitor";
 import "./activity";
+import "./usage";
