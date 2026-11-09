@@ -1,0 +1,17 @@
+{
+  "kind": "UpdateApprovalPolicyRequest",
+  "valid": true,
+  "description": "replace the deploy patterns, clear the merge ones, set approvers",
+  "value": {
+    "patterns": {
+      "deployProd": [
+        "\\bdeploy-prod\\.sh\\b"
+      ],
+      "mergeMain": []
+    },
+    "approvers": {
+      "deployProd": "owners",
+      "mergeMain": "requester"
+    }
+  }
+}

@@ -110,12 +110,91 @@ export type Approver = z.infer<typeof Approver>;
 /** Max single spend before asking, in whole yuan (单次花费超过); null = 不限. */
 export const SpendLimit = z.int().min(1).max(1_000_000).nullable();
 
+/**
+ * The action kinds the machine stops at the moment a command would run (要批准的动作): the
+ * `ApprovalActions` keys. docs/protocol.md, "Approval rules for AI members".
+ */
+export const GATE_KINDS = ["mergeMain", "deployProd", "prodConfig", "deleteData", "externalPublish"] as const;
+export const GateKind = z.enum(GATE_KINDS);
+export type GateKind = z.infer<typeof GateKind>;
+
+/**
+ * One matching rule: a regular expression matched against each shell command a tool would run
+ * (case-insensitive). Use the subset JavaScript and Rust's `regex` share: no lookaround, no
+ * backreferences. The server rejects a pattern JavaScript cannot compile.
+ */
+export const GatePattern = z.string().min(1).max(200);
+export const MAX_GATE_PATTERNS = 20;
+export const GatePatterns = z.array(GatePattern).max(MAX_GATE_PATTERNS);
+
+/** The team's own patterns per kind (团队自己的匹配规则), added to the defaults. */
+export const ApprovalPatterns = z.object({
+  mergeMain: GatePatterns.optional(),
+  deployProd: GatePatterns.optional(),
+  prodConfig: GatePatterns.optional(),
+  deleteData: GatePatterns.optional(),
+  externalPublish: GatePatterns.optional(),
+});
+export type ApprovalPatterns = z.infer<typeof ApprovalPatterns>;
+
+/** Who approves each kind (每类的批准人); a kind without one uses `approver`. */
+export const ApprovalApprovers = z.object({
+  mergeMain: Approver.optional(),
+  deployProd: Approver.optional(),
+  prodConfig: Approver.optional(),
+  deleteData: Approver.optional(),
+  externalPublish: Approver.optional(),
+});
+export type ApprovalApprovers = z.infer<typeof ApprovalApprovers>;
+
+/**
+ * The built-in patterns of each kind. Conservative on purpose: a wrong match is a useless card,
+ * so only commands that clearly do the action are listed (docs/protocol.md lists them too).
+ */
+export const DEFAULT_GATE_PATTERNS: Record<GateKind, readonly string[]> = {
+  mergeMain: [
+    "\\bgh pr merge\\b",
+    // `git push origin main`, `git push origin HEAD:main`, `git push origin x:refs/heads/master`
+    "\\bgit push\\b.*[\\s:](refs/heads/)?(main|master)(\\s|$)",
+  ],
+  deployProd: [
+    "\\bwrangler (deploy|publish)\\b.*(--env|-e)[ =](prod|production)\\b",
+    "\\bvercel\\b.*--prod\\b",
+    "\\bnetlify deploy\\b.*--prod\\b",
+    "\\bfly(ctl)? deploy\\b",
+    "\\b(npm|bun|pnpm|yarn) run deploy[:_-](prod|production)\\b",
+  ],
+  prodConfig: [
+    "\\bwrangler secret (put|delete|bulk)\\b.*(--env|-e)[ =](prod|production)\\b",
+    "\\bvercel env (add|rm|remove)\\b.*\\bproduction\\b",
+    "\\bfly(ctl)? secrets (set|unset|import)\\b",
+  ],
+  deleteData: [
+    // rm with flags of the root or the home folder itself
+    "\\brm\\s+(-\\S+\\s+)+(/|/\\*|~/?|~/\\*|\\$HOME/?|\\$HOME/\\*)(\\s|$)",
+    "\\b(wrangler d1 execute|psql|mysql|sqlite3)\\b.*\\b(drop\\s+(table|database|schema)|truncate\\s+table)\\b",
+    "\\bwrangler d1 execute\\b.*(--remote\\b.*\\bdelete\\s+from\\b|\\bdelete\\s+from\\b.*--remote\\b)",
+    "\\bwrangler (d1|kv (namespace|key|bulk)|r2 (bucket|object)) delete\\b",
+    "\\bgh repo delete\\b",
+  ],
+  externalPublish: [
+    "\\b(npm|bun|pnpm|yarn) publish\\b",
+    "\\bcargo publish\\b",
+    "\\bgh release create\\b",
+    "\\btwine upload\\b",
+  ],
+};
+
 export const ApprovalPolicy = z.object({
   askBefore: ApprovalActions,
   maxSpendCny: SpendLimit,
   approver: Approver,
   /** 0 = never changed. */
   updatedAt: Millis,
+  /** The team's own patterns per kind, added to `DEFAULT_GATE_PATTERNS`; absent = none. */
+  patterns: ApprovalPatterns.optional(),
+  /** Who approves each kind; absent or a kind left out = `approver`. */
+  approvers: ApprovalApprovers.optional(),
 });
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicy>;
 
@@ -132,6 +211,10 @@ export const UpdateApprovalPolicyRequest = z.object({
   askBefore: ApprovalActions.partial().optional(),
   maxSpendCny: SpendLimit.optional(),
   approver: Approver.optional(),
+  /** Replaces the team patterns of each kind given (`[]` clears that kind). */
+  patterns: ApprovalPatterns.optional(),
+  /** Sets the approver of each kind given. */
+  approvers: ApprovalApprovers.optional(),
 });
 export type UpdateApprovalPolicyRequest = z.infer<typeof UpdateApprovalPolicyRequest>;
 

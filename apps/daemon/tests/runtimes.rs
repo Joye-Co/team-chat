@@ -42,6 +42,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         aside: false,
         note: None,
         resume_session_id: None,
+        gate_hook: None,
         exec: daemon::executor::local(),
     }
 }

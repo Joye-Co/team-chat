@@ -118,6 +118,8 @@ pub(super) fn defaults_request(d: &ApprovalDefaults) -> UpdateApprovalPolicyRequ
             ApproverRole::Owners => proto::Approver::Owners,
             ApproverRole::Requester => proto::Approver::Requester,
         }),
+        // The team's own patterns and per-kind approvers are kept as they are.
+        ..Default::default()
     }
 }
 

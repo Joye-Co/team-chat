@@ -283,6 +283,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 item_id: tc["toolCallId"].as_str().map(str::to_string),
                                 title: tc["title"].as_str().unwrap_or("permission").to_string(),
                                 detail: tc.get("rawInput").map(|r| truncate(&r.to_string(), 2000)),
+                                kind: None,
+                                command: None,
                             });
                         } else {
                             let _ = p.write_json(&json!({ "jsonrpc": "2.0", "id": id, "error": {

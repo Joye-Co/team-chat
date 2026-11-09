@@ -4,8 +4,9 @@
 import { type ApprovalPolicy, UpdateApprovalPolicyRequest } from "@chat/protocol";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
+import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
-import { applyPolicyUpdate, teamPolicy } from "./rules";
+import { applyPolicyUpdate, patternProblem, teamPolicy } from "./rules";
 
 /** The scope of the team row. Other scopes are reserved (for example per AI member later). */
 const TEAM = "*";
@@ -49,6 +50,13 @@ registerRoute({
   async handler({ env, auth, body }) {
     const a = auth as AuthContext;
     const update = await body(UpdateApprovalPolicyRequest);
+    // The daemon compiles the patterns with Rust's regex: only the shared subset goes in.
+    for (const [kind, list] of Object.entries(update.patterns ?? {})) {
+      for (const p of list ?? []) {
+        const why = patternProblem(p);
+        if (why) throw new ApiError("invalid", `patterns.${kind}: ${why}`);
+      }
+    }
     const before = await loadTeamPolicy(env.DB);
     const now = Date.now();
     const after = applyPolicyUpdate(before, update, now);

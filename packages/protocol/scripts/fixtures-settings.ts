@@ -58,7 +58,11 @@ export function addSettingsFixtures({ ok, bad, T0, ID, base }: SettingsCtx) {
   ok("http/update-approval-policy-empty.json", "UpdateApprovalPolicyRequest", {}, "no change");
   ok("http/update-approval-policy.json", "UpdateApprovalPolicyRequest", { maxSpendCny: 100, approver: "requester" });
   bad("http/update-approval-policy-fraction.json", "UpdateApprovalPolicyRequest", { maxSpendCny: 20.5 }, "whole yuan only");
-
+  // M4: the team's own patterns and the approver of each kind
+  const gates = { patterns: { deployProd: ["\\bdeploy-prod\\.sh\\b"], mergeMain: [] }, approvers: { deployProd: "owners", mergeMain: "requester" } };
+  ok("http/approval-policy-gates.json", "ApprovalPolicy", { ...policy, ...gates }, "team patterns and an approver per kind");
+  ok("http/update-approval-policy-gates.json", "UpdateApprovalPolicyRequest", gates, "replace the deploy patterns, clear the merge ones, set approvers");
+  bad("http/update-approval-policy-long-pattern.json", "UpdateApprovalPolicyRequest", { patterns: { deleteData: ["x".repeat(201)] } }, "a pattern is at most 200 characters");
   const ai = { provider: "deepseek", model: "deepseek-chat", baseUrl: null, keySet: true, keyHint: "a1b2", updatedAt: T0 };
   ok("http/ai-service.json", "AiServiceConfig", ai);
   ok("http/ai-service-unset.json", "AiServiceConfig", { provider: null, model: "", baseUrl: null, keySet: false, keyHint: null, updatedAt: 0 }, "not set up");

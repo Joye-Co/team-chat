@@ -4,7 +4,7 @@ import type { Approver, BotRun } from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
-import { TEXT, approvalDecision } from "../dispatch";
+import { TEXT, approvalDecision, approvesWholeWork } from "../dispatch";
 import { linkStub } from "../env";
 import { answerText } from "../answers";
 import { refsText } from "../refs";
@@ -95,10 +95,13 @@ export abstract class DeskInput extends DeskDelegate {
       return;
     }
     const link = r.machine_id ? linkStub(this.env, r.machine_id) : null;
-    const decision = r.approval_id ? approvalDecision(m.body) : null;
+    const kind = this.approvalKind(r);
+    // 这件事里都同意 answers only a gated approval (one with a kind).
+    const whole = kind !== null && approvesWholeWork(m.body);
+    const decision = r.approval_id ? (whole ? "approve" : approvalDecision(m.body)) : null;
     // The room hook sends only human messages; other members' 同意 stays plain input.
-    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approver())) {
-      await this.auditApproval(r, m.authorId, decision, "text");
+    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approver(kind))) {
+      await this.auditApproval(r, m.authorId, whole ? "approve_run" : decision, "text");
       // Recorded as an input so a retried call does not answer twice.
       this.sql.exec(
         "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
@@ -109,7 +112,8 @@ export abstract class DeskInput extends DeskDelegate {
         m.body,
         Date.now(),
       );
-      await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision } as never);
+      if (whole && kind) this.approveGateForWork(r.id, kind);
+      await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
       return;
     }
     // 盯活: "进展怎么样了" is answered from the run's own state; the CLI is not interrupted.
@@ -170,14 +174,18 @@ export abstract class DeskInput extends DeskDelegate {
       .toArray()
       .find((x) => (x as RunRow).approval_id && a.actionId.endsWith(`:${(x as RunRow).approval_id}`)) as RunRow | undefined;
     if (!r?.machine_id || !r.approval_id) return;
-    const decision = a.actionId.startsWith("approve:") ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
+    const kind = this.approvalKind(r);
+    // 这件事里都同意 (approveall:) counts only for a gated approval.
+    const whole = kind !== null && a.actionId.startsWith("approveall:");
+    const decision = a.actionId.startsWith("approve:") || whole ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
     if (!decision) return;
-    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approver())) {
+    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approver(kind))) {
       this.log.info("approval press ignored", { runId: r.id, actorId: a.actorId, kind: a.actorKind });
       return;
     }
-    await this.auditApproval(r, a.actorId, decision, "card");
-    await linkStub(this.env, r.machine_id).toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision } as never);
+    await this.auditApproval(r, a.actorId, whole ? "approve_run" : decision, "card");
+    if (whole && kind) this.approveGateForWork(r.id, kind);
+    await linkStub(this.env, r.machine_id).toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
   }
 
   // -------------------------------------------------------------------------

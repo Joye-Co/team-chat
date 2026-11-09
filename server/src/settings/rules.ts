@@ -1,8 +1,15 @@
 // Pure rules of the settings feature: local time in the member's zone, quiet hours, the next
 // digest time, notify filtering and approval policy updates. No I/O, so they are unit-tested.
 import {
+  type ApprovalApprovers,
+  type ApprovalPatterns,
   type ApprovalPolicy,
+  type Approver,
   DEFAULT_APPROVAL_POLICY,
+  DEFAULT_GATE_PATTERNS,
+  GATE_KINDS,
+  type GateKind,
+  type RunGate,
   DEFAULT_NOTIFY_SETTINGS,
   type NotifyEvent,
   type NotifySettings,
@@ -145,17 +152,69 @@ export function teamPolicy(stored: Partial<ApprovalPolicy> | null | undefined): 
     maxSpendCny: stored.maxSpendCny === undefined ? d.maxSpendCny : stored.maxSpendCny,
     approver: stored.approver ?? d.approver,
     updatedAt: stored.updatedAt ?? 0,
+    ...perKind(stored.patterns, stored.approvers),
   };
 }
 
-/** Applies a PATCH to the team policy. */
+/** `patterns` and `approvers` with only the known kinds that have a value; empty ones left out. */
+function perKind(patterns: ApprovalPatterns | undefined, approvers: ApprovalApprovers | undefined): Pick<ApprovalPolicy, "patterns" | "approvers"> {
+  const out: Pick<ApprovalPolicy, "patterns" | "approvers"> = {};
+  const p: ApprovalPatterns = {};
+  const a: ApprovalApprovers = {};
+  for (const k of GATE_KINDS) {
+    const list = patterns?.[k];
+    if (Array.isArray(list) && list.length > 0) p[k] = list.filter((x) => typeof x === "string" && x !== "");
+    const who = approvers?.[k];
+    if (who === "owners" || who === "requester") a[k] = who;
+  }
+  if (Object.keys(p).length > 0) out.patterns = p;
+  if (Object.keys(a).length > 0) out.approvers = a;
+  return out;
+}
+
+/** Applies a PATCH to the team policy. Patterns of a kind given replace that kind's (`[]` clears). */
 export function applyPolicyUpdate(p: ApprovalPolicy, u: UpdateApprovalPolicyRequest, now: number): ApprovalPolicy {
+  const { patterns: _p, approvers: _a, ...rest } = p;
   return {
+    ...rest,
     askBefore: { ...p.askBefore, ...(u.askBefore ?? {}) },
     maxSpendCny: u.maxSpendCny === undefined ? p.maxSpendCny : u.maxSpendCny,
     approver: u.approver ?? p.approver,
     updatedAt: now,
+    ...perKind({ ...p.patterns, ...u.patterns }, { ...p.approvers, ...u.approvers }),
   };
+}
+
+/**
+ * A team pattern the server takes: it compiles in JavaScript and stays in the subset Rust's
+ * `regex` shares (no lookaround, no backreferences, no possessive or atomic groups). Returns
+ * the reason when it does not.
+ */
+export function patternProblem(p: string): string | null {
+  if (/\(\?<?[=!]|\(\?>|\\[1-9]|\\k<|[*+?}]\+/.test(p)) return "lookaround, backreferences and possessive forms are not supported";
+  try {
+    new RegExp(p, "i");
+  } catch {
+    return "not a valid regular expression";
+  }
+  return null;
+}
+
+/** Who approves `kind`: its own approver, else the team approver. */
+export function approverOf(p: ApprovalPolicy, kind: string | null | undefined): Approver {
+  return (kind && p.approvers?.[kind as GateKind]) || p.approver;
+}
+
+/**
+ * The run's gates (machine protocol `run.assign.gates`): each checked kind with the default
+ * patterns and the team's own, except kinds a person already approved for the whole piece of
+ * work (这件事里都同意).
+ */
+export function runGates(p: ApprovalPolicy, approved: readonly string[] = []): RunGate[] {
+  return GATE_KINDS.filter((k) => p.askBefore[k] && !approved.includes(k)).map((k) => ({
+    kind: k,
+    patterns: [...new Set([...DEFAULT_GATE_PATTERNS[k], ...(p.patterns?.[k] ?? [])])].slice(0, 64),
+  }));
 }
 
 const ACTION_TEXT: Record<keyof ApprovalPolicy["askBefore"], string> = {
@@ -166,14 +225,32 @@ const ACTION_TEXT: Record<keyof ApprovalPolicy["askBefore"], string> = {
   externalPublish: "publish anything outside the team (social media, email, public posts)",
 };
 
-/** The policy lines for a run prompt, or undefined when nothing needs approval. */
-export function policyPrompt(p: ApprovalPolicy): string | undefined {
-  const items = (Object.keys(ACTION_TEXT) as (keyof typeof ACTION_TEXT)[]).filter((k) => p.askBefore[k]).map((k) => ACTION_TEXT[k]);
-  if (p.maxSpendCny !== null) items.push(`spend more than ¥${p.maxSpendCny} at once (paid APIs, cloud resources, purchases)`);
-  if (items.length === 0) return undefined;
-  const who = p.approver === "owners" ? "a team owner" : "the person who asked you";
-  return [
-    `Team rule: before you do any of these, stop, ask ${who} for approval in the topic and wait for the answer:`,
-    ...items.map((x) => `- ${x}`),
-  ].join("\n");
+/**
+ * The policy lines for a run prompt, or undefined when nothing needs approval. With `gated` the
+ * machine stops the matching commands itself and asks the approver (feature "gates"): the CLI
+ * then asks in the topic only when it does such an action another way (an API call, a web
+ * page) or spends money.
+ */
+export function policyPrompt(p: ApprovalPolicy, gated = false): string | undefined {
+  const kinds = GATE_KINDS.filter((k) => p.askBefore[k]);
+  const items = kinds.map((k) => ACTION_TEXT[k]);
+  const spend = p.maxSpendCny !== null ? `spend more than ¥${p.maxSpendCny} at once (paid APIs, cloud resources, purchases)` : null;
+  if (items.length === 0 && !spend) return undefined;
+  const who = (k?: GateKind) => (approverOf(p, k) === "owners" ? "a team owner" : "the person who asked you");
+  if (!gated) {
+    return [
+      `Team rule: before you do any of these, stop, ask ${who()} for approval in the topic and wait for the answer:`,
+      ...[...kinds.map((k) => `${ACTION_TEXT[k]}${approverOf(p, k) !== p.approver ? ` (ask ${who(k)})` : ""}`), ...(spend ? [spend] : [])].map((x) => `- ${x}`),
+    ].join("\n");
+  }
+  const lines: string[] = [];
+  if (items.length > 0) {
+    lines.push(
+      "Team rule: these need a person's approval. When you run a command for one of them (for example `gh pr merge`, a production deploy), the machine asks the approver and the command waits for the answer; do not ask for it in the topic yourself. If a person declines, do not try again, do the rest another way:",
+      ...items.map((x) => `- ${x}`),
+      `When you do one of these another way (an API call, a web page), first ask ${who()} in the topic and wait for the answer.`,
+    );
+  }
+  if (spend) lines.push(`${lines.length > 0 ? "Also" : "Team rule"}: before you ${spend}, ask ${who()} in the topic and wait for the answer.`);
+  return lines.join("\n");
 }

@@ -1176,6 +1176,8 @@ async fn bot_runs_from_events_and_the_process_view_from_the_run_log() {
         item_id: None,
         title: "push?".into(),
         detail: None,
+        kind: None,
+        command: None,
     });
     push(RunEvent::ApprovalResolved {
         approval_id: "ap1".into(),

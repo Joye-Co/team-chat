@@ -92,10 +92,12 @@ KnownRun = { runId, ackedSeq: number }
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
   sessionUpload?: { url: string, headers?: Record<string, string> },
   kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
-  resumeSessionId?: string }       // 1.1, feature "resume": continue this CLI session (<= 128)
+  resumeSessionId?: string,        // 1.1, feature "resume": continue this CLI session (<= 128)
+  gates?: RunGate[] }              // feature "gates": kinds the run stops at, see "Gated actions"
 { t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
-{ t: "run.approval", runId, approvalId, decision: "approve" | "deny" }
+{ t: "run.approval", runId, approvalId, decision: "approve" | "deny",
+  scope?: "run" }                                                // feature "gates": 这件事里都同意
 { t: "run.cancel",   runId, reason? }
 { t: "run.pause",    runId, by? }                                // 1.1, feature "pause"
 { t: "run.resume",   runId, note? /* <= 2000 */ }                // 1.1, feature "pause"
@@ -126,7 +128,8 @@ RunEvent =
   | { type: "tool.call",        itemId, turnId?, tool, title, input?: unknown }
   | { type: "tool.result",      itemId, turnId?, ok: boolean, output? /* <= 16 KiB */, exitCode? }
   | { type: "file.change",      itemId, turnId?, changes: { path, kind: "add" | "modify" | "delete", diff? }[] }
-  | { type: "approval.request", approvalId, itemId?, title, detail? }   // answer with run.approval
+  | { type: "approval.request", approvalId, itemId?, title, detail?,    // answer with run.approval
+      kind?, command? }                                                 // feature "gates": a stopped command
   | { type: "approval.resolved", approvalId, decision: "approve" | "deny" }
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
   | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md); the daemon sets startedAt / endedAt when a step becomes current / done
@@ -220,9 +223,10 @@ RunEvent =
 - Input that reaches the daemon after the run's last turn has ended and the CLI exits is not
   taken: no `input.accepted` comes, `run.done` follows. BotDesk must then start a new run for
   that input (with the topic context in its prompt).
-- `approval.request` comes from CLIs that ask (ACP `session/request_permission`) and from
-  `chat-run secret` (see **Environment**). The server answers `run.approval`; the daemon
-  answers the CLI (or keeps the secret's answer) and emits `approval.resolved`. Since 1.2.1
+- `approval.request` comes from CLIs that ask (ACP `session/request_permission`), from
+  `chat-run secret` (see **Environment**) and from gated commands (see "Gated actions"). The
+  server answers `run.approval`; the daemon answers the CLI (or keeps the secret's answer, or
+  lets the waiting command run or not) and emits `approval.resolved`. Since 1.2.1
   an AI member always has every permission and nothing in `daemon.toml` narrows it: Claude Code
   runs with `--permission-mode bypassPermissions` and `--allowedTools` for the shell, edit, web,
   todo and task tools and `Bash(chat-run:*)` (`-p` has nobody to ask); Codex runs with sandbox
@@ -248,6 +252,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
 | `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`), see "Topic context". |
+| `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
 
 How the 1.1 daemon does each one:
 
@@ -529,6 +534,55 @@ reports no `models`, and settings then let the owner type a model id.
 `turn/start.effort` on every turn. An effort the CLI did not report is not passed (the run goes on
 with the CLI's default and the daemon logs it). Ids and efforts are passed as one argument, never
 through a shell. The `session` run event's `model` reports the model the CLI really used.
+
+### Gated actions (feature `gates`)
+
+```ts
+CliInfo += { gates?: boolean }       // runs of this CLI stop at gated commands
+run.assign += { gates?: RunGate[] }  // <= 16; only to a daemon with "gates" whose CLI says gates: true
+RunGate = { kind: string /* [A-Za-z][A-Za-z0-9_-]{0,31} */, patterns: string[] /* 1..64, each <= 200 */ }
+approval.request += { kind?: string /* <= 32 */, command?: string /* <= 4000, redacted */ }
+run.approval += { scope?: "run" }
+```
+
+An AI member runs with every permission; only the few kinds the team checked need a person
+(protocol.md, "Gated actions"), and only at the moment a command would run.
+
+- **Matching**: each pattern is a regular expression, matched case-insensitively against each
+  simple command of the tool's shell line (split at newlines, `;`, `&`, `|`; whitespace runs as
+  one space), so a pattern cannot span two commands. An MCP tool call is matched as
+  `<tool name> <input JSON>`. The first kind (assignment order) with a matching pattern wins. A
+  pattern the daemon cannot compile is left out and logged; a kind left with none is dropped.
+- **Claude Code** (`CliInfo.gates = true`): the run gets `--settings <run folder>/.gate-settings.json`
+  with a PreToolUse hook (matcher `^(Bash|mcp__.*)$`, anchored: Claude Code reads a matcher with
+  other characters than letters, digits and `|` as an unanchored regex) that runs
+  `<run folder>/bin/chat-run gate` (timeout 24 h instead of the 600 s default; the run's own
+  deadline ends it sooner). Claude Code merges hooks of all settings files, so the user's own
+  stay; a `disableAllHooks` in the user's settings would turn the hook off. The hook reads the hook input on standard input and sends `gate.check
+  { tool, command }` over the run's `chat-run` socket. No match: it exits 0 at once with no
+  output. A match: the daemon emits `approval.request { approvalId: "daemon-gate-<n>", title: <the
+  kind's 设置 name>, detail: command, kind, command }` and the hook waits. `run.approval approve`
+  lets the command run; `deny` (or the run ending) prints the PreToolUse `deny` decision with a
+  reason the CLI reads ("a person declined it … do the rest another way"). The daemon emits
+  `approval.resolved`. Hooks run before the permission flow, so the deny holds although the run
+  uses `bypassPermissions` (Claude Code hooks reference, "PreToolUse decision control"; checked
+  with the fake CLI in `tests/integration.rs`, not yet with the real one).
+- **One question at a time**: the server keeps one open approval per run, so a second gated
+  command waits until the first is answered, then asks (or passes, see scope).
+- **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
+  without asking. The server leaves the kind out of `gates` of the run's follow-ups and retries.
+- **While a command waits** the daemon sends no `stalled` status and the run keeps its deadline;
+  `run.cancel` stops the CLI as usual (the hook ends with it).
+- **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
+  fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
+  run, socket gone), the command runs and the reason goes to the hook's standard error: the
+  daemon is the run's parent, so this happens only when the run is ending anyway.
+- **Codex** (`gates` absent): not gated yet. Its app-server asks
+  (`item/commandExecution/requestApproval`) only under an approval policy (`untrusted`,
+  `on-request`, `granular`) that asks for nearly every command and changes how the model works
+  with its sandbox, so the daemon would have to answer every command itself; that was not
+  checked against the real CLI. Codex runs keep approval `never`, and the server keeps the
+  rules in the prompt for them. Side chat runs and ACP / PTY runtimes are never gated.
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 
