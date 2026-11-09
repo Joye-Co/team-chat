@@ -794,6 +794,7 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `DELETE /v1/machines/:id/logins/:loginId` | owner | | `{ ok: true }`; cancels the sign-in |
 | `GET /v1/machines/:id/secrets` | owner | | `MachineSecretsResponse` |
 | `GET /v1/activity?before=&limit=&actor=&kind=&machine=` | owner | | `ActivityResponse`, see "Activity" |
+| `GET /v1/usage?from=&to=` | owner | | `TeamUsage`, see "Team usage" |
 | `PUT /v1/machines/:id/secrets/:name` | owner | `SetSecretRequest` | `{ ok: true }` |
 | `DELETE /v1/machines/:id/secrets/:name` | owner | | `{ ok: true }` |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
@@ -1219,6 +1220,28 @@ default 100), `actor` (a member id), `kind` (comma-separated kinds) and `machine
 kept 90 days: the route leaves older ones out and the daily cron deletes them. The migration copies
 the last 90 days of the audit log once. `details` are the audit details (names, levels, budgets,
 member lists), never a secret value.
+
+## Team usage
+
+团队管理 › 用量: what AI members' runs cost. `GET /v1/usage?from=<ms>&to=<ms>` (owner; at most 62
+days) reads every runner bot's BotDesk for runs that ended in `[from, to)` and in the same span
+before it, and stores nothing.
+
+```ts
+Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */ }
+TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
+              teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
+              bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
+              machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
+              daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
+```
+
+- Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
+  subscription); runs without it (Codex today) count tokens and 0 cost.
+- `initiators` is the person who asked for each run (`requestedBy`). `runtimes` is split by machine,
+  so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
+- Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
+- A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
 
 ## Cards v2
 

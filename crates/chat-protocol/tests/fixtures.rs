@@ -202,6 +202,7 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("MachinesResponse", plain::<MachinesResponse>),
     ("MachineMonitor", plain::<MachineMonitor>),
     ("ActivityResponse", plain::<ActivityResponse>),
+    ("TeamUsage", plain::<TeamUsage>),
     ("StartLoginRequest", plain::<chat_protocol::monitor::StartLoginRequest>),
     ("LoginCodeRequest", plain::<chat_protocol::monitor::LoginCodeRequest>),
     ("MachineLogin", plain::<chat_protocol::monitor::MachineLogin>),
