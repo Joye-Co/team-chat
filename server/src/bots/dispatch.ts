@@ -51,6 +51,13 @@ export const TEXT = {
     `需要你确认：${kind}${command ? `\n\n${command}` : ""}\n\n回复「同意」「拒绝」或「这件事里都同意」。`,
   approveRun: "这件事里都同意",
   approveRunConfirm: "这件事里之后同类的操作都不再问你。",
+  /** The approval card after the answer (DESIGN.md §7.10 answered): title and one record line. */
+  approvalClosed: {
+    approve: { title: (what: string) => `已同意：${what}`, line: (who: string, at: string) => `${who} 同意了 · ${at}` },
+    approve_run: { title: (what: string) => `已同意：${what}`, line: (who: string, at: string) => `${who} 同意了，这件事里同类的操作不再问 · ${at}` },
+    deny: { title: (what: string) => `已拒绝：${what}`, line: (who: string, at: string) => `${who} 拒绝了 · ${at}` },
+    expired: { title: (what: string) => `没用上：${what}`, line: (_who: string, at: string) => `这件事结束了，没等到回答 · ${at}` },
+  },
   /** 设置 › 默认规则 names of the gated kinds. */
   gateKinds: {
     mergeMain: "合并到 main",
