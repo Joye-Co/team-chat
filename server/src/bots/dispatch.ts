@@ -176,6 +176,27 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
   return out;
 }
 
+/**
+ * A CLI error as people read it: the message inside a JSON error body (the raw body stays in the
+ * run log), and a plain Chinese line for errors people can fix themselves.
+ */
+export function readableError(raw: string): string {
+  const t = raw.trim();
+  if (!t.startsWith("{")) return t;
+  try {
+    const j = JSON.parse(t) as { message?: unknown; error?: unknown };
+    const e = (typeof j.error === "object" && j.error !== null ? j.error : j) as { message?: unknown; code?: unknown };
+    const msg = typeof e.message === "string" ? e.message : typeof j.error === "string" ? j.error : "";
+    if (e.code === "model_not_found") {
+      const model = /'([^']+)'/.exec(msg)?.[1];
+      return `这台电脑上的账号用不了模型 ${model ?? ""}，换个模型再试`.replace("模型 ，", "这个模型，");
+    }
+    return msg || t;
+  } catch {
+    return t;
+  }
+}
+
 /** "同意" / "拒绝" (and a few common forms) answer a pending approval; anything else is input. */
 export function approvalDecision(body: string): "approve" | "deny" | null {
   const t = body

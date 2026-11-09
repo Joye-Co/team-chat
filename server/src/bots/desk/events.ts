@@ -2,7 +2,7 @@
 // cards), and the end of a run (result, status, follow-up runs).
 import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
-import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, stripAcceptance } from "../dispatch";
+import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, readableError, stripAcceptance } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
@@ -391,7 +391,7 @@ export abstract class DeskEvents extends DeskRuns {
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
     } else {
-      const why = firstLine(f.error ?? f.summary ?? "", 300);
+      const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));
     }
     // Follow-ups the CLI never took start a new run with the topic context.
