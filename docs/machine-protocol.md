@@ -235,6 +235,53 @@ CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", metho
   `tokens` (`subscription`) or `OPENAI_API_KEY` (`api_key`) in `$CODEX_HOME/auth.json`, or the
   same variable as above. Otherwise `logged_out`.
 
+## Accounts and keys (feature `accounts`)
+
+The owner signs the machine's CLIs in and gives it API keys from the app (团队管理 › 订阅账号 and
+API 密钥), never through a shell on the machine. A daemon that can do this reports feature
+`accounts` and its public key; the server sends these frames only to such a daemon.
+
+```ts
+hello.machine += { publicKey?: string }   // X25519, base64 of 32 bytes
+// server -> daemon
+{ t: "account.login", loginId, runtime, op: "start" | "code" | "cancel", code? /* <= 2048 */ }
+{ t: "secret.set", name /* [A-Z_][A-Z0-9_]{0,63} */, sealed /* base64 sealed box */, members: string[] }
+{ t: "secret.delete", name }
+// daemon -> server
+{ t: "account.login.status", loginId, runtime, state, url?, userCode?, account?: { email?, plan? }, error? }
+MachineMetrics += { secrets?: SecretInfo[], usage?: CliUsage[] }   // CliLogin += { email?, plan? }
+SecretInfo = { name, last4, members: string[] /* empty = every run */, updatedAt }
+CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
+```
+
+- **Machine key**: made once next to the token file (`machine.key`, mode 600; a group- or
+  world-readable file turns the feature off). The app seals a key's value to it with a libsodium
+  sealed box (X25519 + XSalsa20-Poly1305, `crypto_box_seal`), so the server only relays
+  ciphertext.
+- **Keys**: `secrets.json` next to it (mode 600) keeps each value, its members and when it
+  changed. A name that a run variable or the base environment uses (`CHAT_*`, `PATH`, `HOME`, …)
+  is refused. Runs of a listed member (every run when the list is empty) get the keys as
+  environment variables, under the runtime's own fixed `env`; side chat runs get none. Every
+  value the daemon has held is masked like the machine token in all it sends. The heartbeat
+  reports names and the last 4 characters only (none for values shorter than 12).
+- **Sign-in** (`op: "start"`): the daemon runs the CLI's own login with the runtime's
+  environment and `BROWSER=true`, reads its output and reports each step. Claude Code:
+  `claude auth login --claudeai` prints a link (`state: "open_url"`, `url`); the person signs in
+  in their own browser and pastes the code it shows; `op: "code"` writes it to the CLI's standard
+  input (`state: "checking"`). Codex: `codex login --device-auth` prints a link and a one-time code
+  (`state: "device_code"`, `url`, `userCode`); the person enters the code there. When the CLI exits
+  0 the state is `done` with the account (`claude auth status --json`, `codex login status`), else
+  `failed` with the CLI's last line (masked). `op: "cancel"` stops it (`cancelled`); after 15 minutes
+  it fails. A new `start` for the same `loginId` replaces the old one. Credentials stay in the CLI's
+  own files on the machine (`$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`), which the VMs share.
+- **Usage** (every 10 minutes and after a sign-in): Claude Code's windows from `claude -p /usage
+  --output-format json --tools "" --strict-mcp-config --setting-sources "" --no-session-persistence`
+  (a local command: no model request, no new window), parsed from its `Current session: N% used ·
+  resets …` and `Current week (…): N% used` lines (`kind` `session`, `week`, `week_model`; the reset
+  stays in `label`). Codex's from `GET https://chatgpt.com/backend-api/wham/usage` with the
+  machine's own Codex sign-in (`rate_limit.primary_window` / `secondary_window`: `used_percent`,
+  `reset_at`). Only percentages and reset times leave the machine.
+
 ## Leases
 
 - `run.assign.leaseMs` is the time the server waits without hearing about a run before it

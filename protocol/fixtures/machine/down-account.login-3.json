@@ -1,0 +1,11 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "account.login",
+    "loginId": "L01",
+    "runtime": "claude",
+    "op": "cancel"
+  }
+}

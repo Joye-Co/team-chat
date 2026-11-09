@@ -176,6 +176,15 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   }, "never sent metrics");
   bad("http/machine-monitor-negative.json", "MachineMonitor", { ...monitor, queue: { count: -1 } }, "counts are not negative");
 
+  // Sign in and API keys from the app (feature "accounts")
+  ok("http/start-login-request.json", "StartLoginRequest", { runtime: "claude" });
+  ok("http/login-code-request.json", "LoginCodeRequest", { code: "abc123#state456" });
+  ok("http/machine-login.json", "MachineLogin", { loginId: "L01", runtime: "codex", state: "device_code", url: "https://auth.openai.com/codex/device", userCode: "ABCD-12345", updatedAt: T0 });
+  ok("http/machine-login-done.json", "MachineLogin", { loginId: "L01", runtime: "claude", state: "done", account: { email: "owner@example.com", plan: "max" }, updatedAt: T0 });
+  ok("http/machine-secrets.json", "MachineSecretsResponse", { publicKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", secrets: [{ name: "OPENAI_API_KEY", last4: "x9Qz", members: [], updatedAt: T0 }] });
+  ok("http/machine-secrets-old-daemon.json", "MachineSecretsResponse", { secrets: [] }, "the daemon cannot take keys");
+  ok("http/set-secret-request.json", "SetSecretRequest", { sealed: "c2VhbGVkLWJveC1ieXRlcw==", members: [ID.bot] });
+
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
   ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);

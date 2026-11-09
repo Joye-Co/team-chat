@@ -34,6 +34,9 @@ pub mod feature {
     /// `run.assign.gates`, `CliInfo.gates`, `approval.request.kind`/`command` and
     /// `run.approval.scope`: the run stops at gated commands for a person's approval.
     pub const GATES: &str = "gates";
+    /// `machine.publicKey`, `account.login`, `secret.set` / `secret.delete` and the
+    /// `secrets` / `usage` metrics: sign in and API keys from the app.
+    pub const ACCOUNTS: &str = "accounts";
 }
 
 /// `run.approval.scope = "run"` (这件事里都同意): later matches of the same kind in the run pass.
@@ -81,6 +84,9 @@ pub struct MachineInfo {
     /// 1.1: screen sharing address (e.g. `vnc://mac-mini.tailnet`) for 接管.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub takeover_url: Option<String>,
+    /// Feature "accounts": the machine's X25519 public key (base64, 32 bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -166,6 +172,85 @@ pub struct CliLogin {
     /// "subscription" | "api_key" when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
+    /// Feature "accounts": the signed-in account and plan, when the CLI says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+/// An API key the machine holds: never the value, only its last 4 characters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretInfo {
+    pub name: String,
+    pub last4: String,
+    /// AI members whose runs get it; empty = every run.
+    #[serde(default)]
+    pub members: Vec<String>,
+    pub updated_at: u64,
+}
+
+/// One usage window of a subscription.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageWindow {
+    /// "session" | "week" | "week_model" | "primary" | "secondary" | another short word.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub used_pct: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<u64>,
+}
+
+/// A runtime's subscription usage as the daemon last read it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliUsage {
+    pub runtime: String,
+    pub at: u64,
+    #[serde(default)]
+    pub windows: Vec<UsageWindow>,
+}
+
+/// `account.login.status.state` values.
+pub mod login_phase {
+    pub const STARTING: &str = "starting";
+    pub const OPEN_URL: &str = "open_url";
+    pub const DEVICE_CODE: &str = "device_code";
+    pub const CHECKING: &str = "checking";
+    pub const DONE: &str = "done";
+    pub const FAILED: &str = "failed";
+    pub const CANCELLED: &str = "cancelled";
+}
+
+/// The account a sign-in reached.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginAccount {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+/// Daemon to server (feature "accounts"): where a sign-in stands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginStatus {
+    pub login_id: String,
+    pub runtime: String,
+    /// [`login_phase`]
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<LoginAccount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// VM boot times of the last (at most 50) runs.
@@ -209,6 +294,12 @@ pub struct MachineMetrics {
     pub runs: Vec<VmRunMetrics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logins: Option<Vec<CliLogin>>,
+    /// Feature "accounts": the API keys the machine holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<Vec<SecretInfo>>,
+    /// Feature "accounts": subscription usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Vec<CliUsage>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -713,6 +804,9 @@ pub enum Up {
     RunDone(RunDone),
     #[serde(rename = "run.session")]
     RunSession(RunSession),
+    /// Feature "accounts": where a sign-in stands.
+    #[serde(rename = "account.login.status")]
+    AccountLoginStatus(LoginStatus),
 }
 
 /// Server to daemon.
@@ -788,6 +882,27 @@ pub enum Down {
     /// 1.1 (feature "output").
     #[serde(rename = "run.output.result")]
     RunOutputResult(RunOutputResult),
+    /// Feature "accounts": start, finish (`code`) or cancel a CLI sign-in.
+    #[serde(rename = "account.login", rename_all = "camelCase")]
+    AccountLogin {
+        login_id: String,
+        runtime: String,
+        /// "start" | "code" | "cancel"
+        op: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
+    /// Feature "accounts": keep an API key, sealed to the machine's public key.
+    #[serde(rename = "secret.set", rename_all = "camelCase")]
+    SecretSet {
+        name: String,
+        sealed: String,
+        #[serde(default)]
+        members: Vec<String>,
+    },
+    /// Feature "accounts": forget an API key.
+    #[serde(rename = "secret.delete", rename_all = "camelCase")]
+    SecretDelete { name: String },
 }
 
 impl Up {

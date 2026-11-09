@@ -788,6 +788,13 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/machines` | member | | `Machine[]`; members other than owners get only `id`, `name`, `createdBy`, `createdAt`, `revoked`, `connected` and `healthy` (`labels` and `runningRuns` empty) |
 | `DELETE /v1/machines/:id` | owner | | `{ ok: true }`; revokes the token, closes the link |
 | `GET /v1/machines/:id/monitor?range=15m\|1h\|24h&dayStart=<ms>` | owner | | `MachineMonitor`, see "Machine monitor" |
+| `POST /v1/machines/:id/logins` | owner | `StartLoginRequest` | `{ loginId }`; see "Machine accounts" |
+| `GET /v1/machines/:id/logins/:loginId` | owner | | `MachineLogin` |
+| `POST /v1/machines/:id/logins/:loginId/code` | owner | `LoginCodeRequest` | `{ ok: true }` |
+| `DELETE /v1/machines/:id/logins/:loginId` | owner | | `{ ok: true }`; cancels the sign-in |
+| `GET /v1/machines/:id/secrets` | owner | | `MachineSecretsResponse` |
+| `PUT /v1/machines/:id/secrets/:name` | owner | `SetSecretRequest` | `{ ok: true }` |
+| `DELETE /v1/machines/:id/secrets/:name` | owner | | `{ ok: true }` |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
 | `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
 | `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
@@ -1152,7 +1159,37 @@ MachineMonitor = {
 - **Members**: one row per runner bot that has runs on the machine, queued runs, or runs that
   ended there today. `cpuCores` and `memBytes` add up its VMs.
 - **CLIs**: the machine's `CliInfo` with the login the daemon reported (`unknown` when it did not)
-  and the runs of that runtime that failed today. No credential ever leaves the machine.
+  and the runs of that runtime that failed today; with feature `accounts` also `method`, `email`,
+  `plan`, and the subscription `usage` windows with `usageAt` (server clock). No credential ever
+  leaves the machine.
+
+## Machine accounts
+
+Owners sign a machine's CLIs in and give it API keys from 团队管理, relayed by MachineLink to a
+daemon with feature `accounts` (docs/machine-protocol.md, "Accounts and keys"). Every route is
+owner only, answers `not_found` for an unknown machine, and `conflict` with reason
+`machine.offline` when the daemon is not connected or `machine.too_old` when it lacks the feature.
+Nothing is queued: these act on the machine now.
+
+```ts
+StartLoginRequest = { runtime }
+LoginCodeRequest  = { code }                  // what the CLI's page showed (Claude's code#state)
+MachineLogin      = { loginId, runtime, state, url?, userCode?, account?: { email?, plan? }, error?, updatedAt }
+MachineSecretsResponse = { publicKey?, secrets: { name, last4, members, updatedAt }[] }
+SetSecretRequest  = { sealed, members: string[] /* AI members; empty = every run */ }
+```
+
+- A sign-in: `POST …/logins` starts it and answers its `loginId`; the app reads `GET …/logins/:id`
+  until `state` is `open_url` (show `url`, ask for the code, `POST …/code`), `device_code` (show
+  `url` and `userCode`), then `done`, `failed` (with `error`) or `cancelled`. MachineLink keeps each
+  sign-in's last status for a day (named migration `machine-3-logins`). The code is relayed, never
+  stored or logged.
+- A key: the app seals the value to `publicKey` on the owner's Mac and `PUT`s only the sealed box
+  (at most 16 KiB of base64). `:name` is an environment variable name. The server stores nothing of
+  it; the list comes back from the machine's next heartbeat (within 30 s). Writes are audited as
+  `machine.login.start`, `machine.secret.set` and `machine.secret.delete` with the name and members,
+  never a value.
+
 
 ## Cards v2
 

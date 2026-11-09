@@ -1,0 +1,12 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "account.login.status",
+    "loginId": "L01",
+    "runtime": "claude",
+    "state": "open_url",
+    "url": "https://claude.ai/oauth/authorize?code=true&client_id=example"
+  }
+}
