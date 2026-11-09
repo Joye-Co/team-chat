@@ -161,6 +161,7 @@ impl AdminView {
                 Page::Machines => self.fetch_fleet(cx),
                 Page::Activity if !self.activity.loaded => self.fetch_activity(false, cx),
                 Page::Usage => self.fetch_usage(cx),
+                Page::Members => self.fetch_team(cx),
                 Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
                 _ => {}
             }
@@ -174,8 +175,7 @@ impl AdminView {
         if page == Page::Ai {
             self.ai.update(cx, |a, cx| a.refresh(window, cx));
         }
-        if page == Page::Rules || page == Page::Members {
-            self.members.update(cx, |m, cx| m.refresh_rules(window, cx));
+        if page == Page::Rules {
             self.rules.update(cx, |m, cx| m.refresh_rules(window, cx));
         }
     }

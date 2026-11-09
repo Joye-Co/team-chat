@@ -13,6 +13,7 @@ mod fleet;
 mod model;
 mod overview;
 mod spark;
+mod team;
 mod usage;
 
 use std::time::Duration;
@@ -169,8 +170,8 @@ pub struct AdminView {
     fleet: fleet::Fleet,
     activity: activity::Activity,
     usage: usage::Usage,
+    team: team::Team,
     /// The panes that moved here from Settings.
-    members: Entity<crate::views::settings::members::MembersPage>,
     rules: Entity<crate::views::settings::members::MembersPage>,
     memory: Entity<crate::views::memory::MemoryBoard>,
     ai: Entity<crate::views::settings::ai_service::AiServicePanel>,
@@ -206,12 +207,8 @@ impl AdminView {
         ];
         let acct = accounts::State::new(window, cx);
         let usage = usage::Usage::new(window, cx);
+        let team = team::Team::new(window, cx);
         use crate::views::settings::members::{MembersPage, MembersPart};
-        let members = cx.new(|cx| {
-            let mut p = MembersPage::new(services.clone(), window, cx);
-            p.set_part(MembersPart::Roster, cx);
-            p
-        });
         let rules = cx.new(|cx| {
             let mut p = MembersPage::new(services.clone(), window, cx);
             p.set_part(MembersPart::Rules, cx);
@@ -245,7 +242,7 @@ impl AdminView {
             fleet: fleet::Fleet::default(),
             activity: activity::Activity::default(),
             usage,
-            members,
+            team,
             rules,
             memory,
             ai,
@@ -793,7 +790,7 @@ impl AdminView {
                 m::KEYS_SUB,
                 &[("machine", machine_name.as_deref().unwrap_or_default())],
             ),
-            accounts::Page::Members => m::MEMBERS_SUB.to_string(),
+            accounts::Page::Members => self.team_subtitle(),
             accounts::Page::Machines => m::FLEET_SUB.to_string(),
             accounts::Page::Ai => m::AI_SUB.to_string(),
             accounts::Page::Rules => m::RULES_SUB.to_string(),
@@ -901,6 +898,9 @@ impl AdminView {
             .when(self.page == accounts::Page::Usage, |d| {
                 d.child(self.usage_range_control(cx))
             })
+            .when(self.page == accounts::Page::Members, |d| {
+                d.child(self.team_actions(cx))
+            })
             .child(refresh)
     }
 
@@ -968,11 +968,7 @@ impl AdminView {
         match self.page {
             // Settings panes bring their own 24 inset: 8 more lines them up with the toolbar.
             accounts::Page::Members => {
-                return div()
-                    .w_full()
-                    .px(space::S8)
-                    .child(self.members.clone())
-                    .into_any_element();
+                return pad.child(self.team_page(window, cx)).into_any_element();
             }
             accounts::Page::Rules => {
                 return div()

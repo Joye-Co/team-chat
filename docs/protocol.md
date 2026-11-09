@@ -795,6 +795,7 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/machines/:id/secrets` | owner | | `MachineSecretsResponse` |
 | `GET /v1/activity?before=&limit=&actor=&kind=&machine=` | owner | | `ActivityResponse`, see "Activity" |
 | `GET /v1/usage?from=&to=` | owner | | `TeamUsage`, see "Team usage" |
+| `GET /v1/team/roster` | owner | | `TeamRoster`, see "Team roster" |
 | `PUT /v1/machines/:id/secrets/:name` | owner | `SetSecretRequest` | `{ ok: true }` |
 | `DELETE /v1/machines/:id/secrets/:name` | owner | | `{ ok: true }` |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
@@ -1242,6 +1243,20 @@ TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
   so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
 - Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
 - A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
+
+## Team roster
+
+团队管理 › 成员 shows what the member directory does not carry. `GET /v1/team/roster` (owner):
+
+```ts
+TeamRoster = { members: { memberId, joinedAt, addedBy?, lastSeenAt?, devices: { label, createdAt, lastUsedAt? }[] }[],
+               invites: { id, name, kind, level, role?, createdBy, createdAt, expiresAt }[] }
+```
+
+`joinedAt` and `addedBy` are the member row's `created_at` and `created_by`; `devices` are the
+member's tokens that are not revoked (their sign-in labels), newest use first, and `lastSeenAt` the
+newest `last_used_at` of them. `invites` are invite codes not used and not expired (at most 200),
+newest first. No hash or code is returned.
 
 ## Cards v2
 

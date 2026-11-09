@@ -2139,6 +2139,12 @@ impl ChatProvider for CoreProvider {
         self.set_member_budget_inner(member_id, cents)
     }
 
+    fn team_roster(&self) -> AdminReply<chat_core::proto::TeamRoster> {
+        self.request(move |client, _| async move {
+            client.http().team_roster().await.map_err(|e| settings::api_error(&e))
+        })
+    }
+
     fn team_usage(&self, from: u64, to: u64) -> AdminReply<chat_core::proto::TeamUsage> {
         self.request(move |client, _| async move {
             client
