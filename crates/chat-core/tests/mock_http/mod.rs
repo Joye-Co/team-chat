@@ -36,6 +36,12 @@ pub struct HttpState {
     pub not_owner: bool,
     pub devices: Vec<Device>,
     // --- end settings-backend track ---
+    // --- memory ---
+    pub memories: Vec<MemoryItem>,
+    pub memory_updates: Vec<MemoryUpdate>,
+    /// The query string of every memory request.
+    pub memory_queries: Vec<String>,
+    // --- end memory ---
     // Knobs.
     /// Serve file contents with the last byte flipped.
     pub corrupt_downloads: bool,
@@ -612,8 +618,146 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             ok(json!({"revoked": 1}))
         }
         // --- end settings-backend track ---
+        // --- memory: just enough of docs/protocol.md "Memory" for the client ---
+        (&Method::GET, ["v1", "memories"]) => {
+            s.memory_queries.push(query.clone());
+            let scope = query_value(&query, "scope").unwrap_or_default();
+            let status = query_value(&query, "status").unwrap_or_else(|| "active".into());
+            let memories = s
+                .memories
+                .iter()
+                .filter(|m| m.scope == scope)
+                .filter(|m| {
+                    status == "all"
+                        || serde_json::to_value(m.status).unwrap() == Value::String(status.clone())
+                })
+                .cloned()
+                .collect();
+            ok(MemoriesResponse { memories })
+        }
+        (&Method::POST, ["v1", "memories"]) => {
+            let r: CreateMemoryRequest = serde_json::from_value(json_body()).unwrap();
+            let id = s.id("M");
+            let item = MemoryItem {
+                id,
+                scope: r.scope,
+                kind: r.kind,
+                text: r.text.trim().to_string(),
+                when: r.when,
+                source: r.source.unwrap_or(MemorySource {
+                    kind: MemorySourceKind::Manual,
+                    ids: Vec::new(),
+                }),
+                note: None,
+                author_id: "m1".into(),
+                human: true,
+                status: MemoryStatus::Active,
+                confidence: 1.0,
+                uses: 0,
+                last_used_at: None,
+                version: 1,
+                created_at: 1,
+                updated_at: 1,
+            };
+            s.memories.push(item.clone());
+            ok(item)
+        }
+        (&Method::GET, ["v1", "memories", "updates"]) => {
+            s.memory_queries.push(query.clone());
+            let scope = query_value(&query, "scope").unwrap_or_default();
+            let updates: Vec<MemoryUpdate> = s
+                .memory_updates
+                .iter()
+                .filter(|u| u.scope == scope)
+                .cloned()
+                .collect();
+            ok(MemoryUpdatesResponse {
+                day: updates.first().map(|u| u.day.clone()),
+                updates,
+            })
+        }
+        (&Method::POST, ["v1", "memories", "updates", id, "undo"]) => {
+            let id = unescape(id);
+            let Some(u) = s.memory_updates.iter_mut().find(|u| u.id == id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if u.change == MemoryChange::Flagged {
+                return err(StatusCode::BAD_REQUEST, "invalid");
+            }
+            if u.undone_at.is_some() {
+                return err(StatusCode::CONFLICT, "conflict");
+            }
+            u.undone_at = Some(5);
+            ok(u.clone())
+        }
+        (&Method::GET, ["v1", "memories", id]) => {
+            let id = unescape(id);
+            match s.memories.iter().find(|m| m.id == id) {
+                Some(m) => ok(m.clone()),
+                None => err(StatusCode::NOT_FOUND, "not_found"),
+            }
+        }
+        (&Method::PATCH, ["v1", "memories", id]) => {
+            let id = unescape(id);
+            let r: UpdateMemoryRequest = serde_json::from_value(json_body()).unwrap();
+            let Some(m) = s.memories.iter_mut().find(|m| m.id == id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if let Some(t) = r.text {
+                m.text = t;
+                m.human = true;
+            }
+            if let Some(k) = r.kind {
+                m.kind = k;
+            }
+            if let Some(w) = r.when {
+                m.when = w;
+            }
+            if let Some(st) = r.status {
+                m.status = st;
+            }
+            m.version += 1;
+            ok(m.clone())
+        }
+        (&Method::GET, ["v1", "memories", id, "versions"]) => {
+            let id = unescape(id);
+            let versions = s
+                .memories
+                .iter()
+                .filter(|m| m.id == id)
+                .map(|m| MemoryVersion {
+                    memory_id: m.id.clone(),
+                    version: m.version,
+                    item: m.clone(),
+                    by: None,
+                    at: 1,
+                })
+                .collect();
+            ok(MemoryVersionsResponse { versions })
+        }
+        (&Method::POST, ["v1", "memories", id, "versions", v, "restore"]) => {
+            let id = unescape(id);
+            let v: u32 = v.parse().unwrap_or(0);
+            let Some(m) = s.memories.iter_mut().find(|m| m.id == id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if v == 0 || v > m.version {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            }
+            m.version += 1;
+            ok(m.clone())
+        }
+        // --- end memory ---
         _ => err(StatusCode::NOT_FOUND, "not_found"),
     }
+}
+
+/// The decoded value of `key` in a query string.
+fn query_value(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then(|| unescape(v))
+    })
 }
 
 fn version_files(s: &HttpState, input: &[VersionFileInput]) -> Option<Vec<ArtifactFile>> {

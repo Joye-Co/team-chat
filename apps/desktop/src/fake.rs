@@ -14,6 +14,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use crate::{data::*, drafts::DraftStore};
 
+pub mod memory;
 mod settings;
 /// The v2 sample team of the 1.1.0 artboards.
 pub mod v2;
@@ -44,6 +45,8 @@ pub struct FakeProvider {
     settings_backend: Mutex<settings_backend::FakeSettingsBackend>,
     /// 用这台电脑 was clicked in the demo.
     this_mac_used: std::sync::atomic::AtomicBool,
+    /// 记得的事 and 团队约定.
+    memory: memory::FakeMemory,
 }
 
 struct State {
@@ -128,6 +131,7 @@ impl FakeProvider {
             // settings-backend track
             settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
             this_mac_used: std::sync::atomic::AtomicBool::new(false),
+            memory: memory::FakeMemory::default(),
         });
         provider.seed_followed();
         provider
@@ -151,6 +155,7 @@ impl FakeProvider {
             // settings-backend track
             settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
             this_mac_used: std::sync::atomic::AtomicBool::new(false),
+            memory: memory::FakeMemory::default(),
         });
         provider.seed_followed();
         provider
@@ -1930,6 +1935,34 @@ impl ChatProvider for FakeProvider {
     }
     fn approval_defaults(&self) -> AdminReply<ApprovalDefaults> {
         self.approval_defaults_fake()
+    }
+    fn memories(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> AdminReply<Vec<crate::data::memory::Memory>> {
+        self.memories_fake(scope)
+    }
+    fn memory_updates(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> AdminReply<crate::data::memory::MemoryDay> {
+        self.memory_updates_fake(scope)
+    }
+    fn create_memory(
+        &self,
+        new: crate::data::memory::NewMemory,
+    ) -> AdminReply<crate::data::memory::Memory> {
+        self.create_memory_fake(new)
+    }
+    fn update_memory(
+        &self,
+        memory_id: &str,
+        edit: crate::data::memory::MemoryEdit,
+    ) -> AdminReply<crate::data::memory::Memory> {
+        self.update_memory_fake(memory_id, edit)
+    }
+    fn undo_memory_update(&self, update_id: &str) -> AdminReply<crate::data::memory::MemoryUpdate> {
+        self.undo_memory_update_fake(update_id)
     }
     fn set_approval_defaults(&self, defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
         self.set_approval_defaults_fake(defaults)

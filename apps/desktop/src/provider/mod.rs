@@ -38,6 +38,7 @@ mod pages;
 // --- inc-host track ---
 mod page_host;
 // --- end inc-host track ---
+mod memory;
 mod process;
 mod realtime;
 #[cfg(test)]
@@ -2099,6 +2100,34 @@ impl ChatProvider for CoreProvider {
     }
     fn approval_defaults(&self) -> AdminReply<crate::data::ApprovalDefaults> {
         self.approval_defaults_inner()
+    }
+    fn memories(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> AdminReply<Vec<crate::data::memory::Memory>> {
+        self.memories_inner(scope)
+    }
+    fn memory_updates(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> AdminReply<crate::data::memory::MemoryDay> {
+        self.memory_updates_inner(scope)
+    }
+    fn create_memory(
+        &self,
+        new: crate::data::memory::NewMemory,
+    ) -> AdminReply<crate::data::memory::Memory> {
+        self.create_memory_inner(new)
+    }
+    fn update_memory(
+        &self,
+        memory_id: &str,
+        edit: crate::data::memory::MemoryEdit,
+    ) -> AdminReply<crate::data::memory::Memory> {
+        self.update_memory_inner(memory_id, edit)
+    }
+    fn undo_memory_update(&self, update_id: &str) -> AdminReply<crate::data::memory::MemoryUpdate> {
+        self.undo_memory_update_inner(update_id)
     }
     fn set_approval_defaults(
         &self,

@@ -168,6 +168,14 @@ pub fn worst_case() -> bool {
 }
 // --- end v11/inc-diagrams ---
 
+/// The memory shape of a scene: the samples at their longest with `--worst-case`.
+fn worst_memory(shape: fake::memory::MemoryShape, worst_case: bool) -> fake::memory::MemoryShape {
+    match shape {
+        fake::memory::MemoryShape::Normal if worst_case => fake::memory::MemoryShape::Long,
+        other => other,
+    }
+}
+
 fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
     let base: Arc<dyn ChatProvider> = match start {
         Start::SignedOut => fake::FakeProvider::signed_out(),
@@ -199,6 +207,13 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         // --- inc-refs
         Start::Shaped(shape) => shaped::Shaped::new(fake::FakeProvider::new(), shape),
         Start::V2Refs => fake::v2::V2Samples::with_refs(),
+        // Worst data: the longest memories.
+        Start::V2Memory(shape) => fake::v2::V2Samples::with_memory(worst_memory(shape, worst_case)),
+        Start::Memory(shape) => {
+            let fake = fake::FakeProvider::new();
+            fake.set_memory_shape(worst_memory(shape, worst_case));
+            fake
+        }
         Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),
         // --- provider track ---
         Start::Core => {

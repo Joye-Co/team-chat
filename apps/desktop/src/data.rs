@@ -22,6 +22,8 @@ pub mod cards_v2;
 // --- inc-host track: 产出 page host types ---
 pub mod page_host;
 // --- end inc-host track ---
+/// 沉淀: 记得的事, 团队约定 and the daily 记忆更新.
+pub mod memory;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -1081,6 +1083,8 @@ pub enum AdminError {
     TooLarge,
     /// Too many requests; try again later.
     RateLimited,
+    /// Someone changed it first (a memory line undone twice, a version clash).
+    Conflict,
     Other,
 }
 
@@ -1793,6 +1797,35 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
+    // --- memory (docs/protocol.md "Memory"; all have defaults) ---
+
+    /// The memories of `scope` people see: active, pending (today's, made active by the
+    /// daily consolidation) and retired, newest change first.
+    fn memories(&self, _scope: &memory::MemoryScope) -> AdminReply<Vec<memory::Memory>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The newest day's 记忆更新 of `scope`.
+    fn memory_updates(&self, _scope: &memory::MemoryScope) -> AdminReply<memory::MemoryDay> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 记一条 (writers of the scope): active at once.
+    fn create_memory(&self, _new: memory::NewMemory) -> AdminReply<memory::Memory> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Edits, 停用 or 恢复 a memory (writers): a new version.
+    fn update_memory(
+        &self,
+        _memory_id: &str,
+        _edit: memory::MemoryEdit,
+    ) -> AdminReply<memory::Memory> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 撤回 one line of a day's 记忆更新 (writers). A flagged line cannot be undone
+    /// (`Invalid`); a second undo is `Conflict`.
+    fn undo_memory_update(&self, _update_id: &str) -> AdminReply<memory::MemoryUpdate> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+
     /// Owners: 汇报给 and 限额 of a member (`PATCH /v1/members/:id` with `reportsTo` and
     /// `weeklyBudgetCents`; `None` clears). Answers with the stored member.
     fn set_member_plan(&self, _member_id: &str, _plan: pages::MemberPlan) -> AdminReply<Member> {
