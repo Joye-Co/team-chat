@@ -40,10 +40,20 @@ const LOGIN_POLL: Duration = Duration::from_millis(1500);
 /// The pages of 团队管理 that are live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Page {
+    /// 机器 › <machine> › 概览.
     #[default]
     Overview,
+    /// 账号与密钥.
     Accounts,
     Keys,
+    /// 团队 › 成员 (the roster pane that was in Settings).
+    Members,
+    /// 机器: every computer as a card.
+    Machines,
+    /// 团队设置.
+    Ai,
+    Rules,
+    Memory,
 }
 
 /// A sign-in the owner started from 订阅账号.
@@ -140,10 +150,27 @@ impl AdminView {
     pub(super) fn show_page(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.page != page {
             self.page = page;
-            if page == Page::Keys {
-                self.fetch_secrets(cx);
+            self.scroll
+                .set_offset(gpui::point(gpui::Pixels::ZERO, gpui::Pixels::ZERO));
+            match page {
+                Page::Keys => self.fetch_secrets(cx),
+                Page::Machines => self.fetch_fleet(cx),
+                Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
+                _ => {}
             }
             cx.notify();
+        }
+    }
+
+    /// [`Self::show_page`] from a click: panes that need the window load here.
+    pub(super) fn open_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_page(page, cx);
+        if page == Page::Ai {
+            self.ai.update(cx, |a, cx| a.refresh(window, cx));
+        }
+        if page == Page::Rules || page == Page::Members {
+            self.members.update(cx, |m, cx| m.refresh_rules(window, cx));
+            self.rules.update(cx, |m, cx| m.refresh_rules(window, cx));
         }
     }
 
