@@ -837,7 +837,10 @@ fn dev_value_with_copy(
 /// Owners: the way from 设置 to 团队管理 (its own window), on top of 通用.
 fn admin_card(cx: &App) -> impl IntoElement {
     use crate::copy::admin as a;
-    use crate::ui::native::{PushSize, PushStyle, push_button, tokens::{monitor as t, radius}};
+    use crate::ui::native::{
+        PushSize, PushStyle, push_button,
+        tokens::{monitor as t, radius},
+    };
     let k = native_colors(cx);
     GroupedForm::new().row(
         FormRow::new(a::HEADER_TITLE)
@@ -858,10 +861,16 @@ fn admin_card(cx: &App) -> impl IntoElement {
                     )),
             )
             .control(
-                push_button("open-admin", a::SETTINGS_CARD_OPEN, PushStyle::Default, PushSize::Small, cx)
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(crate::views::admin::OpenTeamAdmin), cx)
-                    }),
+                push_button(
+                    "open-admin",
+                    a::SETTINGS_CARD_OPEN,
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(crate::views::admin::OpenTeamAdmin), cx)
+                }),
             ),
     )
 }
