@@ -285,7 +285,7 @@ impl AdminView {
         self.fetch_activity(false, cx);
     }
 
-    fn machine_name(&self, id: &str) -> String {
+    pub(super) fn machine_name(&self, id: &str) -> String {
         self.machines
             .iter()
             .flatten()

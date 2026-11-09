@@ -52,6 +52,8 @@ pub enum Page {
     Machines,
     /// 团队 › 活动记录.
     Activity,
+    /// 团队 › 用量.
+    Usage,
     /// 团队设置.
     Ai,
     Rules,
@@ -158,6 +160,7 @@ impl AdminView {
                 Page::Keys => self.fetch_secrets(cx),
                 Page::Machines => self.fetch_fleet(cx),
                 Page::Activity if !self.activity.loaded => self.fetch_activity(false, cx),
+                Page::Usage => self.fetch_usage(cx),
                 Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
                 _ => {}
             }
