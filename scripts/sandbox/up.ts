@@ -81,19 +81,29 @@ async function port(): Promise<number> {
   return p;
 }
 
-/** The admin secret: the one of server/.dev.vars when it exists (wrangler loads it), else ours. */
-function adminSecret(): { secret: string; envFile?: string } {
-  const devVars = read(join(ROOT, "server", ".dev.vars"));
-  const fromDevVars = devVars?.match(/^ADMIN_SECRET=(.+)$/m)?.[1]?.trim();
-  if (fromDevVars) return { secret: fromDevVars };
-  const path = join(DIR, "admin-secret");
+/** A random secret kept in .tmp/sandbox/<name> (mode 600), the same on every start. */
+function kept(name: string): string {
+  const path = join(DIR, name);
   let secret = read(path);
   if (!secret) {
     secret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
     write(path, secret, true);
   }
+  return secret;
+}
+
+/**
+ * The server's secrets, in an env file of mode 600 (wrangler then skips server/.dev.vars, so its
+ * values are copied): the admin secret, and the key that encrypts stored secrets such as the
+ * AI 服务 key (without it, saving one fails with 500).
+ */
+function serverSecrets(): { secret: string; envFile: string } {
+  const devVars = read(join(ROOT, "server", ".dev.vars")) ?? "";
+  const fromDevVars = (name: string) => devVars.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
+  const secret = fromDevVars("ADMIN_SECRET") ?? kept("admin-secret");
+  const hookKey = fromDevVars("HOOK_SECRET_KEY") ?? kept("hook-secret-key");
   const envFile = join(DIR, "server.env");
-  write(envFile, `ADMIN_SECRET=${secret}`, true);
+  write(envFile, `ADMIN_SECRET=${secret}\nHOOK_SECRET_KEY=${hookKey}`, true);
   return { secret, envFile };
 }
 
@@ -116,7 +126,7 @@ async function start(): Promise<string> {
   stop();
   const listen = await port();
   const url = `http://127.0.0.1:${listen}`;
-  const { envFile } = adminSecret();
+  const { envFile } = serverSecrets();
   migrate();
   const out = openSync(LOG, "a");
   const child = spawn(
@@ -127,7 +137,7 @@ async function start(): Promise<string> {
       "--port", String(listen),
       "--inspector-port", String(listen + 1000),
       "--persist-to", STATE,
-      ...(envFile ? ["--env-file", envFile] : []),
+      "--env-file", envFile,
     ],
     { cwd: join(ROOT, "server"), detached: true, stdio: ["ignore", out, out], env: { ...process.env, CI: "1" } },
   );
@@ -160,7 +170,7 @@ async function main() {
   write(join(DIR, "server-url"), url);
   if (!existsSync(join(DIR, "seed.json"))) {
     log("seeding the sample team…");
-    await seed({ url, adminSecret: adminSecret().secret, out: DIR, log: (l) => log(l) });
+    await seed({ url, adminSecret: serverSecrets().secret, out: DIR, log: (l) => log(l) });
   }
   log(`server ${url} (log ${LOG})`);
 }
