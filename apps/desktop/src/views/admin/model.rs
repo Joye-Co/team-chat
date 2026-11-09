@@ -527,6 +527,11 @@ mod tests {
                     version: None,
                     login: "logged_in".into(),
                     failed_today: 0,
+                    method: None,
+                    email: None,
+                    plan: None,
+                    usage: None,
+                    usage_at: None,
                 },
                 MonitorCli {
                     runtime: "codex".into(),
@@ -535,6 +540,11 @@ mod tests {
                     version: None,
                     login: "logged_out".into(),
                     failed_today: 2,
+                    method: None,
+                    email: None,
+                    plan: None,
+                    usage: None,
+                    usage_at: None,
                 },
             ],
             members: vec![

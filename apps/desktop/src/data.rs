@@ -1845,6 +1845,48 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> AdminReply<chat_core::proto::MachineMonitor> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Owner (feature "accounts"): starts a CLI sign-in on a machine; answers its id.
+    fn start_machine_login(&self, _machine_id: &str, _runtime: &str) -> AdminReply<String> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: where a sign-in on a machine stands.
+    fn machine_login(
+        &self,
+        _machine_id: &str,
+        _login_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineLogin> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: the code the sign-in page showed.
+    fn machine_login_code(&self, _machine_id: &str, _login_id: &str, _code: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: stops a sign-in.
+    fn cancel_machine_login(&self, _machine_id: &str, _login_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: a machine's public key and the API keys it holds (names and last 4).
+    fn machine_secrets(
+        &self,
+        _machine_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineSecretsResponse> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: gives a machine an API key, sealed to its public key on this Mac.
+    fn set_machine_secret(
+        &self,
+        _machine_id: &str,
+        _public_key: &str,
+        _name: &str,
+        _value: SecretText,
+        _members: Vec<String>,
+    ) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: removes an API key from a machine.
+    fn delete_machine_secret(&self, _machine_id: &str, _name: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Owner: registers a machine.
     fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
         reply_now(Err(AdminError::Unsupported))

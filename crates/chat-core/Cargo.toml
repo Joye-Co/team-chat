@@ -21,6 +21,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ulid = "1"
 fastrand = "2"
 sha2 = "0.10"
+# API keys for a machine are sealed to its X25519 key before they leave this Mac.
+crypto_box = { version = "0.9.1", features = ["seal", "std"] }
+base64 = "0.22"
 flate2 = "1"
 imagesize = "0.14"
 regex = "1"
