@@ -89,14 +89,15 @@ fn make_tools_disk(exe: &[u8], disk: &Path) -> std::io::Result<()> {
     )?;
     let tmp = disk.with_extension("tmp");
     let size_mb = exe.len() / (1 << 20) * 2 + 16;
-    let out = std::process::Command::new("mkfs.ext4")
+    let out = std::process::Command::new(mkfs_ext4())
         .args(["-q", "-F", "-L", "runner-tools", "-d"])
         .arg(&stage)
         .arg(&tmp)
         .arg(format!("{size_mb}M"))
         .output();
     let _ = std::fs::remove_dir_all(&stage);
-    let out = out?;
+    let out =
+        out.map_err(|e| std::io::Error::other(format!("mkfs.ext4 for the tools disk: {e}")))?;
     if !out.status.success() {
         return Err(std::io::Error::other(format!(
             "mkfs.ext4 for the tools disk: {}",
@@ -104,6 +105,18 @@ fn make_tools_disk(exe: &[u8], disk: &Path) -> std::io::Result<()> {
         )));
     }
     std::fs::rename(&tmp, disk)
+}
+
+/// `mkfs.ext4`: on PATH, else in the system folders a service PATH often lacks.
+pub fn mkfs_ext4() -> PathBuf {
+    crate::health::which("mkfs.ext4")
+        .or_else(|| {
+            ["/usr/sbin/mkfs.ext4", "/sbin/mkfs.ext4"]
+                .iter()
+                .map(PathBuf::from)
+                .find(|p| p.is_file())
+        })
+        .unwrap_or_else(|| PathBuf::from("mkfs.ext4"))
 }
 
 /// The host and guest addresses of a slot: a /30 per VM in 10.200.0.0/16.
@@ -203,7 +216,9 @@ fn vm_state(sock: &Path, state: &str) -> Result<(), String> {
 
 impl Executor for Firecracker {
     fn spawn(&self, spec: &RunSpec, program: &str, args: &[String]) -> std::io::Result<Spawned> {
-        let tools = self.tools_disk()?;
+        let tools = self
+            .tools_disk()
+            .map_err(|e| std::io::Error::other(format!("VM tools disk: {e}")))?;
         let slot = self
             .take_slot()
             .ok_or_else(|| std::io::Error::other("no free VM slot"))?;
@@ -404,7 +419,7 @@ impl Job {
         std::fs::File::create(&scratch)
             .and_then(|f| f.set_len(u64::from(self.cfg.scratch_gb) << 30))
             .map_err(|e| format!("scratch disk: {e}"))?;
-        let out = tokio::process::Command::new("mkfs.ext4")
+        let out = tokio::process::Command::new(mkfs_ext4())
             .args([
                 "-q",
                 "-F",
