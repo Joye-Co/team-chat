@@ -174,6 +174,8 @@ impl Sampler {
             boot: vm_slots.and_then(|_| boot_stats()),
             runs,
             logins: Some(logins(cfg)),
+            secrets: None,
+            usage: None,
         }
     }
 
@@ -574,6 +576,8 @@ pub fn claude_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
         runtime: String::new(),
         state: state.to_string(),
         method: method.map(str::to_string),
+        email: None,
+        plan: None,
     }
 }
 
@@ -599,6 +603,8 @@ pub fn codex_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
         runtime: String::new(),
         state: state.to_string(),
         method: method.map(str::to_string),
+        email: None,
+        plan: None,
     }
 }
 

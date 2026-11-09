@@ -825,11 +825,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "resume",
                         "context",
                         "effort",
-                        "gates"
+                        "gates",
+                        "accounts"
                     ]
                     .map(String::from)[..]
                 )
             );
+            // Feature "accounts": the machine key made next to the token file.
+            assert_eq!(machine.public_key.as_deref().map(str::len), Some(44));
             assert_eq!(
                 machine.takeover_url.as_deref(),
                 Some("vnc://mac-mini.tailnet")

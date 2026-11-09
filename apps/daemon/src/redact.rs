@@ -124,6 +124,14 @@ impl Redactor {
 
     /// The machine token and the values of every `env_passthrough` and `gated_env` variable in
     /// this process.
+    /// [`Self::for_daemon`] plus the API keys the app gave the machine (feature "accounts").
+    pub fn for_daemon_with(cfg: &Config, token: &str, keys: &[String]) -> Redactor {
+        let mut r = Self::for_daemon(cfg, token);
+        let mut all = std::mem::take(&mut r.exact);
+        all.extend(keys.iter().cloned());
+        Redactor::new(all)
+    }
+
     pub fn for_daemon(cfg: &Config, token: &str) -> Redactor {
         let mut values: Vec<String> = cfg
             .env_passthrough

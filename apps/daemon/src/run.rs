@@ -130,6 +130,8 @@ pub struct RunCtx {
     pub outputs: Arc<crate::chat_run::Outputs>,
     /// Where the run's CLI executes.
     pub exec: Arc<dyn Executor>,
+    /// Feature "accounts": the API keys this run's member gets (none for side chats).
+    pub keys: Vec<(String, String)>,
 }
 
 /// The `chat-run` transport of one run. Dropping it removes the socket or the folder.
@@ -224,6 +226,7 @@ pub async fn supervise(ctx: RunCtx) {
         redactor,
         outputs,
         exec,
+        keys,
     } = ctx;
     let run_id = assign.run_id.clone();
     let started = Instant::now();
@@ -260,6 +263,15 @@ pub async fn supervise(ctx: RunCtx) {
                 workspace::set_read_only(&cwd, true);
             }
             let mut env = build_env(&cfg, &rt, &assign);
+            // API keys from the app: under the runtime's fixed env, and never in a side chat.
+            if !aside {
+                for (k, v) in &keys {
+                    if !rt.env.contains_key(k) {
+                        env.retain(|(n, _)| n != k);
+                        env.push((k.clone(), v.clone()));
+                    }
+                }
+            }
             // Marks the run's processes, also tools that leave the CLI's tree (proctree).
             env.push((proctree::ENV_FOLDER.into(), dir.display().to_string()));
             let gate = Arc::new(crate::secrets::Gate::for_run(
