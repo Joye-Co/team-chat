@@ -9,7 +9,19 @@ import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { TokenBucket } from "../../core/ratelimit";
 import { cut } from "../dispatch";
-import { DEFAULT_PAGE, MAX_PAGE, PLAN_RATE, type RunRow, result } from "./core";
+import { DEFAULT_PAGE, MAX_PAGE, PLAN_RATE, type RunRow, result, sanitizeUsage } from "./core";
+
+/** One ended run for 用量. */
+export interface UsageRun {
+  endedAt: number;
+  requestedBy: string;
+  machineId: string | null;
+  runtime: string | null;
+  topicId: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
 import { DeskInteract } from "./interact";
 import { type DeskRollup, deskRollup } from "../../monitor/rollup";
 
@@ -117,6 +129,39 @@ export class BotDesk extends DeskInteract {
     const row = this.run(r.lastFailure.runId);
     const title = row ? await this.topicTitle(row) : "";
     return title ? { ...r, lastFailureTitle: title } : r;
+  }
+
+  /**
+   * 用量 (usage/index.ts): this bot's runs that ended in [from, to), with what each cost.
+   * Side chats count too: they run on the same subscriptions and keys.
+   */
+  async usageRuns(botId: string, from: number, to: number): Promise<UsageRun[]> {
+    this.bind(botId);
+    return this.sql
+      .exec<{ ended_at: number; requested_by: string; machine_id: string | null; runtime: string | null; topic_id: string; usage: string | null }>(
+        "SELECT ended_at, requested_by, machine_id, runtime, topic_id, usage FROM runs WHERE ended_at >= ? AND ended_at < ? AND external = 0",
+        from,
+        to,
+      )
+      .toArray()
+      .map((r) => {
+        let u: ReturnType<typeof sanitizeUsage> = null;
+        try {
+          u = r.usage ? sanitizeUsage(JSON.parse(r.usage)) : null;
+        } catch {
+          u = null;
+        }
+        return {
+          endedAt: r.ended_at,
+          requestedBy: r.requested_by,
+          machineId: r.machine_id,
+          runtime: r.runtime,
+          topicId: r.topic_id,
+          costUsd: u?.costUsd ?? 0,
+          inputTokens: u?.inputTokens ?? 0,
+          outputTokens: u?.outputTokens ?? 0,
+        };
+      });
   }
 
   async getRun(botId: string, runId: string): Promise<BotRun | null> {
