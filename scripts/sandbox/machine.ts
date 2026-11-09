@@ -44,6 +44,15 @@ interface Vm {
 }
 
 const vms = new Map<string, Vm>();
+// Feature "accounts" (machine-protocol.md "Accounts and keys"), played for the sandbox: Claude Code
+// is signed in, Codex is not until the owner signs it in from 团队管理 › 订阅账号. A key the owner
+// adds is sealed to this public key; the sample cannot open it, so it lists the name only.
+const PUBLIC_KEY = "m1sCWjYp5PNXYviFXVLjvFI4pMAsv4xQ5MpYCD2+yeo=";
+const logins: Record<string, { state: string; method?: string; email?: string; plan?: string }> = {
+  claude: { state: "logged_in", method: "subscription", email: "owner@example.com", plan: "max" },
+  codex: { state: "logged_out" },
+};
+const secrets = new Map<string, { last4: string; members: string[]; updatedAt: number }>();
 const boots: number[] = [];
 /** Every third run stops at a gated step and waits for a person (等你). */
 let taken = 0;
@@ -103,9 +112,21 @@ function metrics() {
       ? { boot: { avgMs: Math.round(recent.reduce((a, b) => a + b, 0) / recent.length), maxMs: Math.max(...recent), samples: recent.length } }
       : {}),
     runs,
-    logins: [
-      { runtime: "claude", state: "logged_in", method: "subscription" },
-      { runtime: "codex", state: "logged_out" },
+    logins: Object.entries(logins).map(([runtime, l]) => ({ runtime, ...l })),
+    secrets: [...secrets.entries()].map(([name, x]) => ({ name, ...x })),
+    usage: [
+      {
+        runtime: "claude",
+        at: Date.now() - 60_000,
+        windows: [
+          { kind: "session", label: "Current session · resets in 2 hr 13 min", usedPct: 42 },
+          { kind: "week", label: "Current week (all models) · resets Thu 09:00", usedPct: 31 },
+          { kind: "week_model", label: "Current week (Opus) · resets Thu 09:00", usedPct: 58 },
+        ],
+      },
+      ...(logins.codex.state === "logged_in"
+        ? [{ runtime: "codex", at: Date.now() - 30_000, windows: [{ kind: "primary", label: "5 hours", usedPct: 12, resetsAt: Date.now() + 3 * 3600_000 }, { kind: "secondary", label: "7 days", usedPct: 23, resetsAt: Date.now() + 4 * 86_400_000 }] }]
+        : []),
     ],
   };
 }
@@ -191,7 +212,7 @@ function connect() {
     send({
       t: "hello",
       protocol: 1,
-      machine: { name: "runner-1", labels: ["sandbox"], daemonVersion: "1.2.7-sample", os: "linux", arch: "x86_64", maxParallelRuns: SLOTS },
+      machine: { name: "runner-1", labels: ["sandbox"], daemonVersion: "1.2.7-sample", os: "linux", arch: "x86_64", maxParallelRuns: SLOTS, features: ["accounts"], publicKey: PUBLIC_KEY },
       clis: [
         { runtime: "claude", kind: "claude", command: "claude", version: "2.1.0 (Claude Code)", available: true },
         { runtime: "codex", kind: "codex", command: "codex", version: "codex-cli 0.159.0", available: true },
@@ -236,6 +257,41 @@ function connect() {
         }
         break;
       }
+      case "account.login": {
+        const status = (state: string, extra: Record<string, unknown> = {}) =>
+          send({ t: "account.login.status", loginId: f.loginId, runtime: f.runtime, state, ...extra });
+        if (f.op === "start") {
+          status("starting");
+          setTimeout(() => {
+            if (f.runtime === "codex") {
+              status("device_code", { url: "https://auth.openai.com/codex/device", userCode: "SAMP-12345" });
+              // The sample signs in by itself after a while, as if the code was entered.
+              setTimeout(() => {
+                logins.codex = { state: "logged_in", method: "subscription", plan: "chatgpt" };
+                status("done", { account: { plan: "chatgpt" } });
+                tick();
+              }, 12_000);
+            } else {
+              status("open_url", { url: "https://claude.com/cai/oauth/authorize?code=true&sample=1" });
+            }
+          }, 1500);
+        } else if (f.op === "code") {
+          status("checking");
+          setTimeout(() => status("done", { account: { email: "owner@example.com", plan: "max" } }), 2000);
+        } else if (f.op === "cancel") {
+          status("cancelled");
+        }
+        break;
+      }
+      case "secret.set":
+        secrets.set(f.name, { last4: "", members: f.members ?? [], updatedAt: Date.now() });
+        log(`key ${f.name} kept (sealed; the sample cannot open it)`);
+        tick();
+        break;
+      case "secret.delete":
+        secrets.delete(f.name);
+        tick();
+        break;
       case "error":
         log(`error: ${f.error?.code} ${f.error?.message}`);
         break;
