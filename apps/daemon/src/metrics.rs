@@ -112,11 +112,12 @@ pub struct Sampler {
 
 impl Sampler {
     pub fn new() -> Sampler {
-        let mut s = Sampler::default();
         // A first reading, so the first heartbeat already has rates.
-        s.cpu = host::cpu_times();
-        s.net = host::net_bytes().map(|n| (n, Instant::now()));
-        s
+        Sampler {
+            cpu: host::cpu_times(),
+            net: host::net_bytes().map(|n| (n, Instant::now())),
+            ..Default::default()
+        }
     }
 
     /// One sample. `vm_slots` is `Some` when runs go to VMs; `local` lists the runs of the
@@ -177,10 +178,8 @@ impl Sampler {
     }
 
     fn vm_runs(&mut self, now: Instant) -> Vec<VmRunMetrics> {
-        let entries: Vec<(String, VmEntry)> = vms()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let entries: Vec<(String, VmEntry)> =
+            vms().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let tick = host::clock_ticks();
         let mut seen = HashMap::new();
         let mut out = Vec::new();
@@ -281,7 +280,11 @@ pub fn parse_proc_stat(text: &str) -> Option<CpuTimes> {
 pub fn parse_meminfo(text: &str) -> Option<(u64, u64)> {
     let kb = |key: &str| -> Option<u64> {
         let l = text.lines().find(|l| l.starts_with(key))?;
-        l[key.len()..].split_whitespace().next()?.parse::<u64>().ok()
+        l[key.len()..]
+            .split_whitespace()
+            .next()?
+            .parse::<u64>()
+            .ok()
     };
     Some((kb("MemTotal:")? * 1024, kb("MemAvailable:")? * 1024))
 }
@@ -339,7 +342,14 @@ pub fn parse_pid_stat(text: &str) -> Option<u64> {
 /// `VmRSS` of `/proc/<pid>/status`, in bytes.
 pub fn parse_vm_rss(text: &str) -> Option<u64> {
     let l = text.lines().find(|l| l.starts_with("VmRSS:"))?;
-    Some(l["VmRSS:".len()..].split_whitespace().next()?.parse::<u64>().ok()? * 1024)
+    Some(
+        l["VmRSS:".len()..]
+            .split_whitespace()
+            .next()?
+            .parse::<u64>()
+            .ok()?
+            * 1024,
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -542,12 +552,16 @@ pub fn claude_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
         .unwrap_or_else(|| crate::config::home().join(".claude"));
     let creds = read_json(&dir.join(".credentials.json"));
     let oauth = creds.as_ref().and_then(|c| c.get("claudeAiOauth"));
-    let token = oauth.is_some_and(|o| present(o.get("refreshToken")) || present(o.get("accessToken")));
+    let token =
+        oauth.is_some_and(|o| present(o.get("refreshToken")) || present(o.get("accessToken")));
     // `.claude.json` lives in the config dir when CLAUDE_CONFIG_DIR is set, else in the home.
-    let account = [dir.join(".claude.json"), crate::config::home().join(".claude.json")]
-        .iter()
-        .filter_map(|p| read_json(p))
-        .any(|j| present(j.get("oauthAccount")));
+    let account = [
+        dir.join(".claude.json"),
+        crate::config::home().join(".claude.json"),
+    ]
+    .iter()
+    .filter_map(|p| read_json(p))
+    .any(|j| present(j.get("oauthAccount")));
     let (state, method) = if token || (account && cfg!(target_os = "macos")) {
         (login_state::LOGGED_IN, Some("subscription"))
     } else if has_key(cfg, rt, "ANTHROPIC_API_KEY") {
@@ -570,7 +584,9 @@ pub fn codex_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
         .unwrap_or_else(|| crate::config::home().join(".codex"));
     let auth = read_json(&home.join("auth.json"));
     let tokens = auth.as_ref().is_some_and(|a| present(a.get("tokens")));
-    let key = auth.as_ref().is_some_and(|a| present(a.get("OPENAI_API_KEY")))
+    let key = auth
+        .as_ref()
+        .is_some_and(|a| present(a.get("OPENAI_API_KEY")))
         || has_key(cfg, rt, "OPENAI_API_KEY");
     let (state, method) = if tokens {
         (login_state::LOGGED_IN, Some("subscription"))
@@ -646,7 +662,10 @@ mod tests {
     fn pid_stat_reads_cpu_after_a_name_with_spaces_and_parens() {
         let t = "4242 (fire cracker) (x) S 1 4242 4242 0 -1 4194560 100 0 0 0 1500 250 0 0 20 0 3 0 99 0 0";
         assert_eq!(parse_pid_stat(t), Some(1750));
-        assert_eq!(parse_vm_rss("Name: fc\nVmRSS:\t  1024 kB\n"), Some(1024 * 1024));
+        assert_eq!(
+            parse_vm_rss("Name: fc\nVmRSS:\t  1024 kB\n"),
+            Some(1024 * 1024)
+        );
     }
 
     #[test]
@@ -655,7 +674,9 @@ mod tests {
         vm_booting(id, PathBuf::from("/nonexistent/scratch.ext4"));
         vm_process(id, 0);
         let mut s = Sampler::default();
-        let cfg = Config::parse("server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n").unwrap();
+        let cfg =
+            Config::parse("server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n")
+                .unwrap();
         let m = s.sample(&cfg, Some(4), &[]);
         let r = m.runs.iter().find(|r| r.run_id == id).unwrap();
         assert_eq!(r.phase, vm_phase::BOOTING);
@@ -663,7 +684,10 @@ mod tests {
         vm_paused(id, true);
         let m = s.sample(&cfg, Some(4), &[]);
         let r = m.runs.iter().find(|r| r.run_id == id).unwrap();
-        assert_eq!((r.phase.as_str(), r.boot_ms), (vm_phase::PAUSED, Some(1300)));
+        assert_eq!(
+            (r.phase.as_str(), r.boot_ms),
+            (vm_phase::PAUSED, Some(1300))
+        );
         assert!(m.boot.is_some_and(|b| b.samples >= 1));
         vm_gone(id);
         let m = s.sample(&cfg, Some(4), &[]);
@@ -683,24 +707,29 @@ mod tests {
             codex.display()
         );
         let cfg = Config::parse(&toml).unwrap();
-        let by = |cfg: &Config, name: &str| {
-            logins(cfg)
-                .into_iter()
-                .find(|l| l.runtime == name)
-                .unwrap()
-        };
+        let by =
+            |cfg: &Config, name: &str| logins(cfg).into_iter().find(|l| l.runtime == name).unwrap();
         assert_eq!(by(&cfg, "codex").state, login_state::LOGGED_OUT);
         std::fs::write(
             claude.join(".credentials.json"),
             r#"{"claudeAiOauth":{"accessToken":"x","refreshToken":"y"}}"#,
         )
         .unwrap();
-        std::fs::write(codex.join("auth.json"), r#"{"OPENAI_API_KEY":null,"tokens":{"id_token":"z"}}"#)
-            .unwrap();
+        std::fs::write(
+            codex.join("auth.json"),
+            r#"{"OPENAI_API_KEY":null,"tokens":{"id_token":"z"}}"#,
+        )
+        .unwrap();
         let c = by(&cfg, "claude");
-        assert_eq!((c.state.as_str(), c.method.as_deref()), (login_state::LOGGED_IN, Some("subscription")));
+        assert_eq!(
+            (c.state.as_str(), c.method.as_deref()),
+            (login_state::LOGGED_IN, Some("subscription"))
+        );
         let x = by(&cfg, "codex");
-        assert_eq!((x.state.as_str(), x.method.as_deref()), (login_state::LOGGED_IN, Some("subscription")));
+        assert_eq!(
+            (x.state.as_str(), x.method.as_deref()),
+            (login_state::LOGGED_IN, Some("subscription"))
+        );
         std::fs::write(codex.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-test"}"#).unwrap();
         assert_eq!(by(&cfg, "codex").method.as_deref(), Some("api_key"));
         // The value never leaves this module: only state and method are reported.
