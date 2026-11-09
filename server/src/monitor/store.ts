@@ -24,6 +24,12 @@ export const METRICS_MIGRATION: MigrationStep = {
   `,
 };
 
+/** Named migration of MachineLink: sign-ins the owner started from the app (feature "accounts"). */
+export const LOGINS_MIGRATION: MigrationStep = {
+  name: "machine-3-logins",
+  up: `CREATE TABLE logins (login_id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at INTEGER NOT NULL);`,
+};
+
 /** Buckets of each range: count and width. */
 export const RANGES: Record<MonitorRange, { buckets: number; stepMs: number }> = {
   "15m": { buckets: 30, stepMs: 30_000 },
