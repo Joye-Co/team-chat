@@ -417,6 +417,17 @@ impl HttpClient {
         Ok(())
     }
 
+    /// Owner: 用量 of AI members' runs that ended in [from, to) (docs/protocol.md "Team usage").
+    pub async fn team_usage(&self, from: u64, to: u64) -> ApiResult<crate::proto::TeamUsage> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/usage?from={from}&to={to}"),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Owner: 活动记录, newest first (docs/protocol.md "Activity"). `kinds` empty = every kind.
     pub async fn activity(
         &self,

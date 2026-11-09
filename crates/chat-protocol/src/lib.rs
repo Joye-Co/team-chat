@@ -42,6 +42,7 @@ mod serde_util;
 pub mod settings;
 pub mod topic;
 pub mod updates;
+pub mod usage;
 
 pub use activity::ActivityResponse;
 pub use audit::*;
@@ -73,6 +74,7 @@ pub use serde_util::{ProtocolV1, True};
 pub use settings::*;
 pub use topic::*;
 pub use updates::*;
+pub use usage::TeamUsage;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 /// `hello.features` of a 1.1 client: the interaction loop and refs to parts.

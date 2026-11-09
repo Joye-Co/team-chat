@@ -13,6 +13,7 @@ mod fleet;
 mod model;
 mod overview;
 mod spark;
+mod usage;
 
 use std::time::Duration;
 
@@ -167,6 +168,7 @@ pub struct AdminView {
     acct: accounts::State,
     fleet: fleet::Fleet,
     activity: activity::Activity,
+    usage: usage::Usage,
     /// The panes that moved here from Settings.
     members: Entity<crate::views::settings::members::MembersPage>,
     rules: Entity<crate::views::settings::members::MembersPage>,
@@ -205,6 +207,7 @@ impl AdminView {
             cx.observe_window_activation(window, |_, _, cx| cx.notify()),
         ];
         let acct = accounts::State::new(window, cx);
+        let usage = usage::Usage::new(window, cx);
         use crate::views::settings::members::{MembersPage, MembersPart};
         let members = cx.new(|cx| {
             let mut p = MembersPage::new(services.clone(), window, cx);
@@ -250,6 +253,7 @@ impl AdminView {
             acct,
             fleet: fleet::Fleet::default(),
             activity: activity::Activity::default(),
+            usage,
             members,
             rules,
             memory,
@@ -660,7 +664,13 @@ impl AdminView {
                         accounts::Page::Members,
                         (members > 0).then(|| count(members, false)),
                     ))
-                    .child(page("nav-usage", m::NAV_USAGE, Sym::BarChart, None))
+                    .child(live_page(
+                        "nav-usage",
+                        m::NAV_USAGE,
+                        Sym::BarChart,
+                        accounts::Page::Usage,
+                        None,
+                    ))
                     .child(live_page(
                         "nav-activity",
                         m::NAV_ACTIVITY,
@@ -799,6 +809,7 @@ impl AdminView {
             accounts::Page::Rules => m::RULES_SUB.to_string(),
             accounts::Page::Memory => m::MEMORY_SUB.to_string(),
             accounts::Page::Activity => m::ACTIVITY_SUB.to_string(),
+            accounts::Page::Usage => m::USAGE_PAGE_SUB.to_string(),
         };
         let page_title = match self.page {
             accounts::Page::Overview => m::TITLE,
@@ -810,6 +821,7 @@ impl AdminView {
             accounts::Page::Rules => m::RULES_TITLE,
             accounts::Page::Memory => m::MEMORY_TITLE,
             accounts::Page::Activity => m::ACTIVITY_TITLE,
+            accounts::Page::Usage => m::USAGE_PAGE_TITLE,
         };
         let view = cx.entity();
         let range = Segmented::new(
@@ -896,6 +908,9 @@ impl AdminView {
                     }),
             )
             .when(overview, |d| d.child(range))
+            .when(self.page == accounts::Page::Usage, |d| {
+                d.child(self.usage_range_control(cx))
+            })
             .child(refresh)
     }
 
@@ -991,6 +1006,9 @@ impl AdminView {
             }
             accounts::Page::Activity => {
                 return pad.child(self.activity_page(window, cx)).into_any_element();
+            }
+            accounts::Page::Usage => {
+                return pad.child(self.usage_page(window, cx)).into_any_element();
             }
             accounts::Page::Machines => {
                 return pad

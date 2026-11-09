@@ -377,6 +377,22 @@ impl CoreProvider {
         self.patch_member(id.to_string(), req)
     }
 
+    /// 限额 alone (owners, 用量 › 改预算): `None` clears; 汇报给 stays.
+    pub(super) fn set_member_budget_inner(
+        &self,
+        id: &str,
+        cents: Option<u64>,
+    ) -> AdminReply<Member> {
+        let req = UpdateMemberRequest {
+            weekly_budget_cents: Some(cents),
+            ..Default::default()
+        };
+        if req.validate().is_err() {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        self.patch_member(id.to_string(), req)
+    }
+
     /// 汇报给 and 限额 (owners): both fields at once, `None` clears.
     pub(super) fn set_member_plan_inner(
         &self,

@@ -1892,6 +1892,14 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn delete_machine_secret(&self, _machine_id: &str, _name: &str) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Owner: an AI member's weekly budget alone (用量 › 改预算); `None` clears it.
+    fn set_member_budget(&self, _member_id: &str, _cents: Option<u64>) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: 用量 of AI members' runs that ended in [from, to).
+    fn team_usage(&self, _from: u64, _to: u64) -> AdminReply<chat_core::proto::TeamUsage> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Owner: 活动记录, newest first; `before` pages back, the filters narrow it.
     fn team_activity(
         &self,

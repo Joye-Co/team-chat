@@ -196,6 +196,21 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   });
   ok("http/activity-response-empty.json", "ActivityResponse", { entries: [], hasMore: false });
 
+  // 用量 (team admin)
+  const spend = (c: number, runs: number) => ({ costUsd: c, inputTokens: runs * 90000, outputTokens: runs * 9000, runs, topics: runs - 1 });
+  ok("http/team-usage.json", "TeamUsage", {
+    from: T0 - 7 * 86_400_000,
+    to: T0,
+    total: spend(212.5, 12),
+    previous: { costUsd: 180.25, topics: 9 },
+    teamBudgetCents: 40000,
+    bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000 }],
+    initiators: [{ memberId: ID.owner, ...spend(74.5, 4) }],
+    machines: [{ machineId: R.machine, ...spend(212.5, 12) }],
+    runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2) }],
+    daily: [{ start: T0 - 7 * 86_400_000, costUsd: 32.5, bots: [{ memberId: ID.bot, costUsd: 32.5 }] }],
+  });
+
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
   ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);
