@@ -554,11 +554,16 @@ fn attention(
     time: &dyn Fn(u64) -> String,
     cx: &App,
 ) -> impl IntoElement {
+    attention_panel(model::attention(d, now, name, time), cx)
+}
+
+/// The 要注意 card: a list of items, or 没有要注意的事.
+pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
-    let items = model::attention(d, now, name, time);
     let n = items.len();
     panel(cx)
         .flex_1()
+        .min_w(gpui::Pixels::ZERO)
         .p(space::S24)
         .gap(space::S8)
         .child(
@@ -587,6 +592,8 @@ fn attention(
                 AttentionKind::Failed => Sym::Failed,
                 AttentionKind::Disk => Sym::Disk,
                 AttentionKind::Offline => Sym::Offline,
+                AttentionKind::Budget => Sym::BarChart,
+                AttentionKind::Invite => Sym::Invite,
             };
             let c = tone_color(a.tone, &k);
             div()

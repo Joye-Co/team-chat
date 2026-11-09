@@ -121,6 +121,53 @@ fn usd(x: f64) -> String {
     }
 }
 
+/// A KPI card of 用量 and 总览: label with icon, the figure, a foot line and an optional bar.
+pub(super) fn kpi_card(
+    label: &'static str,
+    icon: Sym,
+    value: String,
+    foot: String,
+    bar: Option<f32>,
+    cx: &gpui::App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    card_surface(cx)
+        .flex_1()
+        .min_w(gpui::Pixels::ZERO)
+        .p(space::S16)
+        .flex()
+        .flex_col()
+        .gap(space::S4)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .n_headline()
+                .text_color(k.secondary)
+                .child(crate::ui::icons::sym(
+                    icon,
+                    crate::ui::sf_symbols::SymSize::INLINE,
+                    k.secondary,
+                ))
+                .child(label),
+        )
+        .child(
+            div()
+                .n_style(text::KPI)
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .n_figures()
+                .child(value),
+        )
+        .child(
+            TruncText::new(foot)
+                .n_footnote()
+                .n_figures()
+                .text_color(k.secondary),
+        )
+        .children(bar.map(|b| div().mt(space::S8).child(progress(b, cx))))
+}
+
 fn cents(c: u64) -> String {
     format!("${}", (c as f64 / 100.).round() as u64)
 }
@@ -250,7 +297,6 @@ impl AdminView {
     }
 
     pub(super) fn usage_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let k = native_colors(cx);
         let Some(u) = self.usage.data.clone() else {
             return match &self.usage.error {
                 Some(e) => Alert::new(Sym::Failed, m::USAGE_FAILED)
@@ -284,53 +330,10 @@ impl AdminView {
             0.
         };
         let now_per = per_topic(&u.total);
-        let kpi = |_id: &'static str,
-                   label: &'static str,
-                   icon: Sym,
-                   value: String,
-                   foot: String,
-                   bar: Option<f32>| {
-            card_surface(cx)
-                .flex_1()
-                .min_w(gpui::Pixels::ZERO)
-                .p(space::S16)
-                .flex()
-                .flex_col()
-                .gap(space::S4)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .n_headline()
-                        .text_color(k.secondary)
-                        .child(crate::ui::icons::sym(
-                            icon,
-                            crate::ui::sf_symbols::SymSize::INLINE,
-                            k.secondary,
-                        ))
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .n_style(text::KPI)
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .n_figures()
-                        .child(value),
-                )
-                .child(
-                    TruncText::new(foot)
-                        .n_footnote()
-                        .n_figures()
-                        .text_color(k.secondary),
-                )
-                .children(bar.map(|b| div().mt(space::S8).child(progress(b, cx))))
-        };
         let kpis = div()
             .flex()
             .gap(space::S16)
-            .child(kpi(
-                "usage-total",
+            .child(kpi_card(
                 if week {
                     m::USAGE_SPENT_WEEK
                 } else {
@@ -354,9 +357,9 @@ impl AdminView {
                 budget_cents
                     .filter(|b| *b > 0)
                     .map(|b| (total / (b as f64 / 100.)) as f32),
+                cx,
             ))
-            .child(kpi(
-                "usage-included",
+            .child(kpi_card(
                 m::USAGE_INCLUDED,
                 Sym::Account,
                 usd(inc),
@@ -373,17 +376,17 @@ impl AdminView {
                     )],
                 ),
                 None,
+                cx,
             ))
-            .child(kpi(
-                "usage-extra",
+            .child(kpi_card(
                 m::USAGE_EXTRA,
                 Sym::Key,
                 usd((total - inc).max(0.)),
                 m::USAGE_EXTRA_FOOT.into(),
                 None,
+                cx,
             ))
-            .child(kpi(
-                "usage-per-topic",
+            .child(kpi_card(
                 m::USAGE_PER_TOPIC,
                 Sym::Topic,
                 usd(now_per),
@@ -395,6 +398,7 @@ impl AdminView {
                     fill(m::USAGE_PER_TOPIC_MORE, &[("d", &usd(now_per - prev_per))])
                 },
                 None,
+                cx,
             ));
         div()
             .w_full()
