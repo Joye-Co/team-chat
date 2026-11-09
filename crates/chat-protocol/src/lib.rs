@@ -11,6 +11,7 @@
 //! Parse a server frame with [`parse_server_frame`]; encode a client frame with
 //! [`encode_client_frame`], which runs [`ClientFrame::validate`] first.
 
+pub mod activity;
 pub mod audit;
 pub mod bots;
 pub mod card;
@@ -42,6 +43,7 @@ pub mod settings;
 pub mod topic;
 pub mod updates;
 
+pub use activity::ActivityResponse;
 pub use audit::*;
 pub use bots::*;
 pub use card::*;

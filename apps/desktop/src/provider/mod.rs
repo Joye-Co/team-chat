@@ -2143,6 +2143,22 @@ impl ChatProvider for CoreProvider {
         })
     }
 
+    fn team_activity(
+        &self,
+        before: Option<u64>,
+        actor: Option<String>,
+        kinds: Vec<String>,
+        machine: Option<String>,
+    ) -> AdminReply<chat_core::proto::ActivityResponse> {
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .activity(before, actor.as_deref(), &kinds, machine.as_deref())
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
     fn machine_monitor(
         &self,
         machine_id: &str,

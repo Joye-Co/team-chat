@@ -417,6 +417,36 @@ impl HttpClient {
         Ok(())
     }
 
+    /// Owner: 活动记录, newest first (docs/protocol.md "Activity"). `kinds` empty = every kind.
+    pub async fn activity(
+        &self,
+        before: Option<u64>,
+        actor: Option<&str>,
+        kinds: &[String],
+        machine: Option<&str>,
+    ) -> ApiResult<crate::proto::ActivityResponse> {
+        let mut q = vec!["limit=100".to_string()];
+        if let Some(b) = before {
+            q.push(format!("before={b}"));
+        }
+        if let Some(a) = actor {
+            q.push(format!("actor={}", enc(a)));
+        }
+        if !kinds.is_empty() {
+            q.push(format!("kind={}", enc(&kinds.join(","))));
+        }
+        if let Some(m) = machine {
+            q.push(format!("machine={}", enc(m)));
+        }
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/activity?{}", q.join("&")),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Owner. Revokes the machine token and closes its link.
     pub async fn delete_machine(&self, machine_id: &str) -> ApiResult<()> {
         let _: serde_json::Value = self

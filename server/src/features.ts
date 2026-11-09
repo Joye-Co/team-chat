@@ -19,3 +19,4 @@ import "./autotitle";
 import "./summary";
 import "./memory";
 import "./monitor";
+import "./activity";

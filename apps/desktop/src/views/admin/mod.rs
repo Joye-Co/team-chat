@@ -8,6 +8,7 @@
 //! seconds while it is open.
 
 mod accounts;
+mod activity;
 mod fleet;
 mod model;
 mod overview;
@@ -165,6 +166,7 @@ pub struct AdminView {
     page: accounts::Page,
     acct: accounts::State,
     fleet: fleet::Fleet,
+    activity: activity::Activity,
     /// The panes that moved here from Settings.
     members: Entity<crate::views::settings::members::MembersPage>,
     rules: Entity<crate::views::settings::members::MembersPage>,
@@ -247,6 +249,7 @@ impl AdminView {
             page: accounts::Page::default(),
             acct,
             fleet: fleet::Fleet::default(),
+            activity: activity::Activity::default(),
             members,
             rules,
             memory,
@@ -658,7 +661,13 @@ impl AdminView {
                         (members > 0).then(|| count(members, false)),
                     ))
                     .child(page("nav-usage", m::NAV_USAGE, Sym::BarChart, None))
-                    .child(page("nav-activity", m::NAV_ACTIVITY, Sym::List, None))
+                    .child(live_page(
+                        "nav-activity",
+                        m::NAV_ACTIVITY,
+                        Sym::List,
+                        accounts::Page::Activity,
+                        None,
+                    ))
                     .child(group_label(m::NAV_MACHINES, cx).mt(space::S12))
                     .child(live_page(
                         "nav-machines",
@@ -789,6 +798,7 @@ impl AdminView {
             accounts::Page::Ai => m::AI_SUB.to_string(),
             accounts::Page::Rules => m::RULES_SUB.to_string(),
             accounts::Page::Memory => m::MEMORY_SUB.to_string(),
+            accounts::Page::Activity => m::ACTIVITY_SUB.to_string(),
         };
         let page_title = match self.page {
             accounts::Page::Overview => m::TITLE,
@@ -799,6 +809,7 @@ impl AdminView {
             accounts::Page::Ai => m::AI_TITLE,
             accounts::Page::Rules => m::RULES_TITLE,
             accounts::Page::Memory => m::MEMORY_TITLE,
+            accounts::Page::Activity => m::ACTIVITY_TITLE,
         };
         let view = cx.entity();
         let range = Segmented::new(
@@ -977,6 +988,9 @@ impl AdminView {
                     .child(self.ai.clone())
                     .child(self.models.clone())
                     .into_any_element();
+            }
+            accounts::Page::Activity => {
+                return pad.child(self.activity_page(window, cx)).into_any_element();
             }
             accounts::Page::Machines => {
                 return pad

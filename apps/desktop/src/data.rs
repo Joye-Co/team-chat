@@ -1892,6 +1892,16 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn delete_machine_secret(&self, _machine_id: &str, _name: &str) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Owner: 活动记录, newest first; `before` pages back, the filters narrow it.
+    fn team_activity(
+        &self,
+        _before: Option<u64>,
+        _actor: Option<String>,
+        _kinds: Vec<String>,
+        _machine: Option<String>,
+    ) -> AdminReply<chat_core::proto::ActivityResponse> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Owner: registers a machine.
     fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
         reply_now(Err(AdminError::Unsupported))

@@ -50,6 +50,8 @@ pub enum Page {
     Members,
     /// 机器: every computer as a card.
     Machines,
+    /// 团队 › 活动记录.
+    Activity,
     /// 团队设置.
     Ai,
     Rules,
@@ -155,6 +157,7 @@ impl AdminView {
             match page {
                 Page::Keys => self.fetch_secrets(cx),
                 Page::Machines => self.fetch_fleet(cx),
+                Page::Activity if !self.activity.loaded => self.fetch_activity(false, cx),
                 Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
                 _ => {}
             }

@@ -793,6 +793,7 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `POST /v1/machines/:id/logins/:loginId/code` | owner | `LoginCodeRequest` | `{ ok: true }` |
 | `DELETE /v1/machines/:id/logins/:loginId` | owner | | `{ ok: true }`; cancels the sign-in |
 | `GET /v1/machines/:id/secrets` | owner | | `MachineSecretsResponse` |
+| `GET /v1/activity?before=&limit=&actor=&kind=&machine=` | owner | | `ActivityResponse`, see "Activity" |
 | `PUT /v1/machines/:id/secrets/:name` | owner | `SetSecretRequest` | `{ ok: true }` |
 | `DELETE /v1/machines/:id/secrets/:name` | owner | | `{ ok: true }` |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
@@ -1190,6 +1191,34 @@ SetSecretRequest  = { sealed, members: string[] /* AI members; empty = every run
   `machine.login.start`, `machine.secret.set` and `machine.secret.delete` with the name and members,
   never a value.
 
+
+## Activity
+
+团队管理 › 活动记录 shows who changed what in the team. D1 migration `0013_activity` adds an
+`activity` table and a trigger on `audit`: every audit row of these actions is copied in the same
+transaction as the write, with a `kind` the page filters by:
+
+| `kind` | Audit actions |
+| --- | --- |
+| `level` | `member.update` that changes `level` |
+| `budget` | `member.update` that changes `weeklyBudgetCents` |
+| `member` | other `member.update`, `member.deactivate`, `bot.create`, `bot.runner.set`, `bot.runner.delete`, `token.revoke` |
+| `invite` | `invite.create`, `invite.redeem` |
+| `key` | `machine.secret.set`, `machine.secret.delete` |
+| `approval` | `run.approval`, `settings.approvals` |
+| `login` | `email.sign_in`, `machine.login.start` |
+| `machine` | `machine.create`, `machine.revoke` |
+
+```ts
+ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
+ActivityResponse = { entries: ActivityEntry[] /* newest first */, hasMore }
+```
+
+`GET /v1/activity` (owner) takes `before` (an entry id, for the next page), `limit` (1-200,
+default 100), `actor` (a member id), `kind` (comma-separated kinds) and `machine`. Entries are
+kept 90 days: the route leaves older ones out and the daily cron deletes them. The migration copies
+the last 90 days of the audit log once. `details` are the audit details (names, levels, budgets,
+member lists), never a secret value.
 
 ## Cards v2
 
