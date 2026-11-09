@@ -202,6 +202,7 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("CreateMachineRequest", validated::<CreateMachineRequest>),
     ("CreateMachineResponse", plain::<CreateMachineResponse>),
     ("MachinesResponse", plain::<MachinesResponse>),
+    ("MachineMonitor", plain::<MachineMonitor>),
     ("MachineUpFrame", plain::<Up>),
     ("MachineDownFrame", plain::<Down>),
     // 1.1

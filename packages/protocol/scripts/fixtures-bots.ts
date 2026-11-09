@@ -140,6 +140,42 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   const offline = { id: R.machine, name: "laptop", labels: [], createdBy: ID.owner, createdAt: T0, connected: false, healthy: false, runningRuns: [] };
   ok("entities/machine.json", "Machine", machine);
   ok("entities/machine-never-connected.json", "Machine", offline, "made, daemon never connected");
+  // Machine monitor (owners)
+  const series = (vals: (number | null)[]) => vals;
+  const monitor = {
+    machine: { id: R.machine, name: "runner-1", connected: true, lastHeartbeatAt: T0, connectedAt: T0 - 10_800_000, daemonVersion: "1.2.7", os: "linux", arch: "x86_64" },
+    sampledAt: T0 - 400,
+    host: { cpuPct: 62.4, cpuThreads: 12, load1: 7.4, memTotalBytes: 67216998400, memAvailableBytes: 28883582976, memVmBytes: 31567822438, diskTotalBytes: 996000000000, diskFreeBytes: 896000000000, netRxBps: 3565158.5, netTxBps: 1153433.5, uptimeSecs: 10800 },
+    series: { range: "1h", from: T0 - 3_600_000, stepMs: 60_000, cpuPct: series([22.5, null, 61.5]), memPct: series([40.5, null, 57.1]), diskPct: series([9.5, null, 10.1]), netRxBps: series([4000.5, null, 3565158.5]), netTxBps: series([1000.5, null, 1153433.5]) },
+    capacity: { slots: 34, running: 23, canTake: 11, avgVmBytes: 1395864371, reserveBytes: 12884901888 },
+    boot: { avgMs: 1300, maxMs: 2100, samples: 50 },
+    queue: { count: 4, oldestAt: T0 - 130_000 },
+    today: { finished: 186, succeeded: 175, failed: 11, finishedYesterday: 163, tokens: 14100000 },
+    clis: [
+      { runtime: "claude", kind: "claude", available: true, version: "2.1.0", login: "logged_in", failedToday: 0 },
+      { runtime: "codex", kind: "codex", available: true, login: "logged_out", failedToday: 2 },
+    ],
+    runs: [
+      { runId: "01JA0000000000000000000R01", memberId: ID.bot, state: "running", startedAt: T0 - 600_000, bootMs: 1250, cpuCores: 1.25, memBytes: 1395864371, scratchBytes: 734003200 },
+      { runId: "01JA0000000000000000000R02", memberId: ID.bot, state: "waiting", startedAt: T0 - 60_000 },
+      { runId: "01JA0000000000000000000R03", state: "queued" },
+    ],
+    members: [{ memberId: ID.bot, running: 6, waiting: 2, queued: 1, cpuCores: 2.65, memBytes: 10307921510, tokensToday: 6800000, finishedToday: 48 }],
+    lastFailure: { runId: "01JA0000000000000000000R09", memberId: ID.bot, at: T0 - 900_000, title: "对一下十月的账单" },
+  };
+  ok("http/machine-monitor.json", "MachineMonitor", monitor);
+  ok("http/machine-monitor-offline.json", "MachineMonitor", {
+    machine: { id: R.machine, name: "laptop", connected: false },
+    series: { range: "15m", from: T0 - 900_000, stepMs: 30_000, cpuPct: [], memPct: [], diskPct: [], netRxBps: [], netTxBps: [] },
+    capacity: { slots: 0, running: 0, canTake: 0 },
+    queue: { count: 0 },
+    today: { finished: 0, succeeded: 0, failed: 0, finishedYesterday: 0, tokens: 0 },
+    clis: [],
+    runs: [],
+    members: [],
+  }, "never sent metrics");
+  bad("http/machine-monitor-negative.json", "MachineMonitor", { ...monitor, queue: { count: -1 } }, "counts are not negative");
+
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
   ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);

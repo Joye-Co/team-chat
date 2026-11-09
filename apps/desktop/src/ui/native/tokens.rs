@@ -1181,6 +1181,40 @@ pub mod desk_screen {
     pub const SCROLL_PER_LINE: Duration = Duration::from_millis(900);
 }
 
+/// The machine monitor window (开发者视图): its frame and the few sizes its parts need beyond
+/// the scale.
+pub mod monitor {
+    use super::space;
+    use gpui::{Pixels, px};
+
+    pub const WINDOW_WIDTH: Pixels = px(1216.);
+    pub const WINDOW_HEIGHT: Pixels = px(900.);
+    pub const MIN_WIDTH: Pixels = px(960.);
+    pub const MIN_HEIGHT: Pixels = px(640.);
+    /// The sidebar's row column (the panel adds its insets).
+    pub const SIDEBAR_WIDTH: Pixels = px(216.);
+    /// The machine tile of the switcher.
+    pub const MACHINE_TILE: Pixels = px(32.);
+    /// A KPI card's sparkline.
+    pub const SPARK_HEIGHT: Pixels = space::S48;
+    pub const SPARK_STROKE: Pixels = px(1.5);
+    /// The capacity bar and its gaps.
+    pub const CAPACITY_BAR: Pixels = space::S8;
+    /// The legend swatches and the state dots.
+    pub const SWATCH: Pixels = space::S8;
+    /// The memory bar of a member row.
+    pub const MEMBER_BAR: Pixels = space::S6;
+    pub const MEMBER_BAR_WIDTH: Pixels = px(96.);
+    /// Table columns of 按成员.
+    pub const COL_COUNT: Pixels = px(80.);
+    pub const COL_CPU: Pixels = px(96.);
+    pub const COL_MEM: Pixels = px(200.);
+    pub const COL_TOKENS: Pixels = px(120.);
+    pub const COL_DONE: Pixels = px(104.);
+    /// The 要注意 card's share of the row next to 容量.
+    pub const ATTENTION_SHARE: f32 = 0.41;
+}
+
 // ---------------------------------------------------------------------------
 // Text styles
 

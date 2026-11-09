@@ -117,6 +117,100 @@ pub struct Health {
     pub active_runs: u32,
 }
 
+/// `VmRunMetrics.phase` values (any short string is read).
+pub mod vm_phase {
+    pub const BOOTING: &str = "booting";
+    pub const RUNNING: &str = "running";
+    pub const PAUSED: &str = "paused";
+}
+
+/// `CliLogin.state` values (any short string is read).
+pub mod login_state {
+    pub const LOGGED_IN: &str = "logged_in";
+    pub const LOGGED_OUT: &str = "logged_out";
+    pub const UNKNOWN: &str = "unknown";
+}
+
+/// At most this many runs in `MachineMetrics.runs`.
+pub const MAX_METRIC_RUNS: usize = 64;
+
+/// One run's VM (or local process tree) as the daemon measured it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VmRunMetrics {
+    pub run_id: String,
+    /// [`vm_phase`]
+    pub phase: String,
+    pub started_at: u64,
+    /// Start of the VM to a connected guest agent, once it booted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_ms: Option<u64>,
+    /// CPU since the previous sample, in cores (1.0 = one thread busy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_cores: Option<f64>,
+    /// Resident memory of the VM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_bytes: Option<u64>,
+    /// Blocks the run's scratch disk uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scratch_bytes: Option<u64>,
+}
+
+/// Whether a runtime's CLI has a credential on the machine; never the credential itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliLogin {
+    pub runtime: String,
+    /// [`login_state`]
+    pub state: String,
+    /// "subscription" | "api_key" when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+/// VM boot times of the last (at most 50) runs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootStats {
+    pub avg_ms: u64,
+    pub max_ms: u64,
+    pub samples: u32,
+}
+
+/// Host and VM numbers sent with each heartbeat (docs/machine-protocol.md, "Metrics"). Every
+/// number is optional: a platform may not have it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineMetrics {
+    /// When the sample was taken (machine clock).
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_secs: Option<u64>,
+    /// Whole-host CPU busy since the previous sample, 0-100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_threads: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_available_bytes: Option<u64>,
+    /// Bytes per second over the non-loopback, non-VM interfaces since the previous sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_rx_bps: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_tx_bps: Option<f64>,
+    /// VM slots of the machine (`[vm]`), absent without VMs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm_slots: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot: Option<BootStats>,
+    #[serde(default)]
+    pub runs: Vec<VmRunMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logins: Option<Vec<CliLogin>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunCursor {
@@ -595,6 +689,9 @@ pub enum Up {
         at: u64,
         health: Health,
         runs: Vec<RunCursor>,
+        /// Host and VM metrics (daemons since 1.2.7); old servers ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metrics: Option<MachineMetrics>,
     },
     #[serde(rename = "run.accept", rename_all = "camelCase")]
     RunAccept { run_id: String },

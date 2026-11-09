@@ -5,6 +5,9 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CliInfo,
   Health,
+  type MachineMetrics,
+  type MonitorRange,
+  type MonitorSeries,
   MACHINE_PROTOCOL_VERSION,
   MachineInfo,
   type RunAssignFrame,
@@ -16,6 +19,7 @@ import {
 import { z } from "zod";
 import { logger as baseLogger, type Logger } from "../core/logger";
 import { runMigrations } from "../core/migrations";
+import { METRICS_MIGRATION, latestMetrics, readSeries, recordMetrics } from "../monitor/store";
 import { ASSIGN_RETRY_MS, LINK_IDLE_MS } from "./dispatch";
 import { type BotsEnv, deskStub } from "./env";
 
@@ -50,7 +54,8 @@ const UpFrame = z.discriminatedUnion("t", [
     health: Health,
     runs: z.array(RunCursor).max(1000),
   }),
-  z.object({ t: z.literal("heartbeat"), at: z.number(), health: Health, runs: z.array(RunCursor).max(1000) }),
+  // `metrics` is checked apart (monitor/store.ts): metrics a server cannot read never fail the heartbeat.
+  z.object({ t: z.literal("heartbeat"), at: z.number(), health: Health, runs: z.array(RunCursor).max(1000), metrics: z.unknown().optional() }),
   z.object({ t: z.literal("run.accept"), runId: RunId }),
   z.object({ t: z.literal("run.reject"), runId: RunId, reason: z.string().max(64), message: z.string().max(4096) }),
   z.object({ t: z.literal("run.event"), runId: RunId, seq: z.int().positive(), at: z.number(), event: LooseEvent }),
@@ -127,6 +132,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
             CREATE TABLE outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, frame TEXT NOT NULL);
           `,
         },
+        METRICS_MIGRATION,
       ]);
       this.machineId = this.meta("machine_id");
       if (this.machineId) this.log = baseLogger.child({ obj: "MachineLink", machineId: this.machineId });
@@ -288,6 +294,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
         this.setMeta("clock_offset", String(now - f.at));
         this.setMeta("health", JSON.stringify(f.health));
         this.setMeta("last_heartbeat_at", String(now));
+        recordMetrics(this.sql, (k, v) => this.setMeta(k, v), f.metrics, f.health, now);
         this.renew(
           f.runs.map((r) => r.runId),
           now,
@@ -335,6 +342,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
       return;
     }
     this.setMeta("info", JSON.stringify(f.machine));
+    this.setMeta("connected_at", String(now));
     this.setMeta("clis", JSON.stringify(f.clis));
     this.setMeta("health", JSON.stringify(f.health));
     this.setMeta("last_heartbeat_at", String(now));
@@ -582,6 +590,30 @@ export class MachineLink extends DurableObject<BotsEnv> {
         .exec<{ run_id: string }>("SELECT run_id FROM runs WHERE state IN ('assigned','accepted') ORDER BY run_id")
         .toArray()
         .map((r) => r.run_id),
+    };
+  }
+
+  /**
+   * The owner's monitor (docs/protocol.md, "Machine monitor"): the link's status, the latest
+   * metrics, the history of `range` and the bot of every open run.
+   */
+  async monitor(range: MonitorRange, now = Date.now()): Promise<{
+    status: LinkStatus;
+    connectedAt?: number;
+    metrics: MachineMetrics | null;
+    metricsAt: number | null;
+    series: MonitorSeries;
+    runBots: { runId: string; botId: string }[];
+  }> {
+    const { metrics, at } = latestMetrics((k) => this.meta(k));
+    const connectedAt = Number(this.meta("connected_at")) || undefined;
+    return {
+      status: await this.status(),
+      ...(connectedAt ? { connectedAt } : {}),
+      metrics,
+      metricsAt: at,
+      series: readSeries(this.sql, range, now),
+      runBots: this.openRuns().map((r) => ({ runId: r.run_id, botId: r.bot_id })),
     };
   }
 

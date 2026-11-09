@@ -18,3 +18,4 @@ import "./aiservice";
 import "./autotitle";
 import "./summary";
 import "./memory";
+import "./monitor";

@@ -118,6 +118,7 @@ import {
 } from "./bots.ts";
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
+import { MachineMonitor } from "./monitor.ts";
 import {
   AiServiceConfig,
   WorkerModel,
@@ -172,6 +173,7 @@ export * from "./diagnostics.ts";
 export * from "./hooks.ts";
 export * from "./audit.ts";
 export * from "./machine.ts";
+export * from "./monitor.ts";
 export * from "./bots.ts";
 export * from "./plan.ts";
 export * from "./settings.ts";
@@ -798,6 +800,7 @@ export const schemas = {
   CreateMachineRequest,
   CreateMachineResponse,
   MachinesResponse,
+  MachineMonitor,
   MachineUpFrame,
   MachineDownFrame,
   // 1.1

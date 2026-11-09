@@ -16,6 +16,11 @@
 // body redacted, and the socket must be gone after the run.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
+// With --vm on a Linux runner host (scripts/runner/host-setup.sh), every run's CLI runs in a
+// Firecracker microVM: run as the runner user from a checkout under /srv/runner with
+// TMPDIR=/srv/runner/<folder> (only those paths are shared with VMs). Codex then uses the socket
+// through the VM's relay instead of the request folder. --vm-kernel and --vm-rootfs default to
+// /srv/runner/kernels/vmlinux and /srv/runner/images/base.ext4.
 // Against a deployed env (no wrangler; the owner token comes from a file, and the run makes its
 // own group, member, bot runner and machine, then removes the runner and the machine):
 //   bun apps/daemon/e2e/local-e2e.ts --base-url https://chat-api-e2e.<account>.workers.dev \
@@ -32,6 +37,10 @@ const args = process.argv.slice(2);
 const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const PORT = Number(flag("--port") || 0) || 8793;
 const KEEP = args.includes("--keep");
+const VM = args.includes("--vm");
+const VM_KERNEL = flag("--vm-kernel") ?? "/srv/runner/kernels/vmlinux";
+const VM_ROOTFS = flag("--vm-rootfs") ?? "/srv/runner/images/base.ext4";
+const VM_DIR = join(process.env.TMPDIR ?? tmpdir(), `vms-${process.pid}`);
 const REMOTE = flag("--base-url")?.replace(/\/$/, "");
 const OWNER_TOKEN_FILE = flag("--owner-token-file")?.replace(/^~/, process.env.HOME ?? "~");
 const BASE = REMOTE ?? `http://127.0.0.1:${PORT}`;
@@ -209,6 +218,17 @@ async function runDaemonCheck(
       'sandbox = "workspace-write"',
       'approval_policy = "never"',
       "",
+      ...(VM
+        ? [
+            "[vm]",
+            `kernel = "${VM_KERNEL}"`,
+            `rootfs = "${VM_ROOTFS}"`,
+            `dir = "${VM_DIR}"`,
+            // The fake CLIs and the fake Claude config are not in the base image: share them.
+            `shares = ["${claudeHome}", "${dirname(fake)}"]`,
+            "",
+          ]
+        : []),
     ].join("\n"),
   );
   start("daemon", daemonBin, ["run", "--config", config], { cwd: TMP });
@@ -352,15 +372,20 @@ async function codexCheck(owner: string, groupId: string, work: string, events: 
   if (run.status !== "done") throw new Error(`codex run ${run.status}`);
   const runWork = join(work, "runs", run.id, "work");
   const r = JSON.parse(readFileSync(join(runWork, "chatcard.json"), "utf8"));
-  if (r.socket || !r.dir?.endsWith(`.chat-run-${run.id}`)) throw new Error(`codex chat-run used no request folder: ${JSON.stringify({ dir: r.dir, socket: r.socket })}`);
-  if (existsSync(r.dir)) throw new Error("the request folder is left after the run");
+  if (VM) {
+    // In a VM chat-run always uses the socket the agent relays.
+    if (r.dir || r.socket !== "/run/chat-run.sock") throw new Error(`codex chat-run in a VM used no relayed socket: ${JSON.stringify({ dir: r.dir, socket: r.socket })}`);
+  } else {
+    if (r.socket || !r.dir?.endsWith(`.chat-run-${run.id}`)) throw new Error(`codex chat-run used no request folder: ${JSON.stringify({ dir: r.dir, socket: r.socket })}`);
+    if (existsSync(r.dir)) throw new Error("the request folder is left after the run");
+  }
   const posted = r.post.out;
   if (r.post.code !== 0 || !posted?.messageId) throw new Error(`codex chat-run card post failed: ${JSON.stringify(r.post)}`);
   if (r.again.out?.messageId !== posted.messageId) throw new Error("the codex retry posted another card");
   if (r.patch.code !== 0 || r.patch.out?.rev !== posted.message.cardV2.rev + 1) throw new Error(`codex chat-run card patch failed: ${JSON.stringify(r.patch)}`);
   const cards = events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.cardV2?.title === "chat-run codex card");
   if (cards.length !== 1) throw new Error(`the topic holds the codex card ${cards.length} times`);
-  step(`codex: chat-run through the request folder posted once (retry deduped) and patched to rev ${r.patch.out.rev}; folder removed`);
+  step(`codex: chat-run through ${VM ? "the VM's relayed socket" : "the request folder"} posted once (retry deduped) and patched to rev ${r.patch.out.rev}${VM ? "" : "; folder removed"}`);
   return { runId: run.id, topicId, patchedRev: r.patch.out.rev };
 }
 
@@ -428,16 +453,26 @@ async function cancelCheck(
   const topicId = ack.frame.result.message.topicId as string;
   const runsOf = () => events.filter((e) => e.type === "run.updated" && e.data.run.topicId === topicId).map((e) => e.data.run);
   const running = await until("run running", () => runsOf().find((r: any) => r.status === "running"), 60_000);
-  const pidFile = await until("fake CLI hangs", () => findFile(work, "fake.pid"), 60_000);
+  // The file can show up before its content (a VM writes it over NFS): wait for the pid.
+  const pidFile = await until(
+    "fake CLI hangs",
+    () => {
+      const f = findFile(work, "fake.pid");
+      return f && readFileSync(f, "utf8").trim() ? f : undefined;
+    },
+    60_000,
+  );
   const pid = Number(readFileSync(pidFile, "utf8").trim());
-  if (!alive(pid)) throw new Error("the fake CLI is not running");
+  // In a VM the pid is the guest's: the CLI lives as long as the run's VM.
+  const cliAlive = () => (VM ? existsSync(join(VM_DIR, running.id)) : alive(pid));
+  if (!cliAlive()) throw new Error("the fake CLI is not running");
   step(`run ${running.id} works (fake CLI pid ${pid} hangs)`);
 
   const first = cancel(running.id);
   if (first.outcome !== "cancelled" || first.status !== "cancelled") throw new Error(`stop answered ${JSON.stringify(first)}`);
   step("a member stopped the run through the client API");
   const ended = await until("run.updated cancelled", () => runsOf().find((r: any) => r.id === running.id && r.status === "cancelled"));
-  await until("daemon got run.cancel and stopped the fake CLI", () => !alive(pid), 30_000);
+  await until("daemon got run.cancel and stopped the fake CLI", () => !cliAlive(), 30_000);
   const statuses = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).map((e) => e.data.status);
   await until("topic back to open", () => statuses().at(-1) === "open");
   const notes = () =>
@@ -457,7 +492,7 @@ async function cancelCheck(
     again,
     runStatuses: runsOf().map((r: any) => r.status),
     endedAt: ended.endedAt ?? null,
-    cliStopped: !alive(pid),
+    cliStopped: !cliAlive(),
     note: note.body,
     topicStatuses: statuses(),
   };

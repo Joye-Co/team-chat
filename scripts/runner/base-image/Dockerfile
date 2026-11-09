@@ -37,5 +37,9 @@ RUN userdel -r ubuntu 2>/dev/null || true; \
     && echo 'agent ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent && chmod 440 /etc/sudoers.d/agent \
     && git config --system init.defaultBranch main
 
+# Mount points vm-init uses: the scratch disk, the overlay root, the old root after the
+# pivot, and the tools disk.
+RUN mkdir -p /mnt/scratch /mnt/newroot /mnt/oldroot /opt/runner
+
 COPY vm-init /sbin/vm-init
 RUN chmod 755 /sbin/vm-init

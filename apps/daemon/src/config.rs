@@ -49,6 +49,63 @@ pub struct Config {
     /// Runtimes by name. When empty, `codex` and `claude` are added if found on PATH.
     #[serde(default)]
     pub runtimes: BTreeMap<String, RuntimeConfig>,
+    /// Run each CLI in its own Firecracker microVM (Linux hosts, see
+    /// `scripts/runner/host-setup.sh`). Absent: CLIs run as processes of this machine.
+    #[serde(default)]
+    pub vm: Option<VmConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmConfig {
+    /// Guest kernel (uncompressed vmlinux).
+    pub kernel: PathBuf,
+    /// Read-only base image (`scripts/runner/build-base-image.sh`).
+    pub rootfs: PathBuf,
+    /// VM folders (sockets, scratch disks, console logs) and the tools disk.
+    #[serde(default = "default_vm_dir")]
+    pub dir: PathBuf,
+    #[serde(default = "default_vm_vcpus")]
+    pub vcpus: u32,
+    /// The VM's memory cap; the host gives only the pages the VM touches.
+    #[serde(default = "default_vm_mem_mib")]
+    pub mem_mib: u32,
+    /// Size of each run's writable layer (a sparse file).
+    #[serde(default = "default_vm_scratch_gb")]
+    pub scratch_gb: u32,
+    #[serde(default = "default_vm_firecracker")]
+    pub firecracker: String,
+    /// Root helper for the tap device and NFS exports, run with `sudo -n`.
+    #[serde(default = "default_vm_helper")]
+    pub helper: String,
+    /// Folders shared with every VM at their host paths (the CLIs' sessions and logins).
+    #[serde(default = "default_vm_shares")]
+    pub shares: Vec<PathBuf>,
+}
+
+fn default_vm_dir() -> PathBuf {
+    PathBuf::from("/srv/runner/vms")
+}
+fn default_vm_vcpus() -> u32 {
+    2
+}
+fn default_vm_mem_mib() -> u32 {
+    4096
+}
+fn default_vm_scratch_gb() -> u32 {
+    32
+}
+fn default_vm_firecracker() -> String {
+    "firecracker".into()
+}
+fn default_vm_helper() -> String {
+    "/usr/local/sbin/runner-vm".into()
+}
+fn default_vm_shares() -> Vec<PathBuf> {
+    ["~/.claude", "~/.codex", "~/.pi"]
+        .iter()
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// Why a `takeover_url` cannot be reported, or None when it is fine: it must be a
@@ -197,6 +254,12 @@ impl Config {
         c.token_file = expand(&c.token_file);
         c.work_root = expand(&c.work_root);
         c.repo_roots = c.repo_roots.iter().map(|p| expand(p)).collect();
+        if let Some(vm) = c.vm.as_mut() {
+            vm.kernel = expand(&vm.kernel);
+            vm.rootfs = expand(&vm.rootfs);
+            vm.dir = expand(&vm.dir);
+            vm.shares = vm.shares.iter().map(|p| expand(p)).collect();
+        }
         if c.runtimes.is_empty() {
             for kind in ["codex", "claude"] {
                 if crate::health::which(kind).is_some() {
@@ -273,6 +336,27 @@ impl Config {
         if self.runtimes.is_empty() {
             out.push("no runtimes: install codex or claude, or add [runtimes.*]".into());
         }
+        if let Some(vm) = &self.vm {
+            if !cfg!(target_os = "linux") {
+                out.push("[vm] runs only on Linux".into());
+            }
+            for (what, p) in [("kernel", &vm.kernel), ("rootfs", &vm.rootfs)] {
+                if !p.exists() {
+                    out.push(format!("[vm] {what} {} does not exist", p.display()));
+                }
+            }
+            if !Path::new(&vm.helper).is_file() {
+                out.push(format!("[vm] helper {} does not exist", vm.helper));
+            }
+            if crate::health::which(&vm.firecracker).is_none()
+                && !Path::new(&vm.firecracker).is_file()
+            {
+                out.push(format!("[vm] {} not found", vm.firecracker));
+            }
+            if self.max_parallel_runs > 1000 {
+                out.push("[vm] max_parallel_runs must be at most 1000".into());
+            }
+        }
         out
     }
 
@@ -332,6 +416,14 @@ kind = "claude"
 # kind = "pty"
 # command = "/bin/sh"
 # args = ["-c", "{prompt}"]
+
+# Linux runner hosts: each run in its own Firecracker microVM (scripts/runner/host-setup.sh).
+# [vm]
+# kernel = "/srv/runner/kernels/vmlinux"
+# rootfs = "/srv/runner/images/base.ext4"
+# vcpus = 2
+# mem_mib = 4096                     # a cap; the host gives only what the VM touches
+# shares = ["~/.claude", "~/.codex", "~/.pi"]
 "#;
 
 #[cfg(test)]

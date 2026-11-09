@@ -219,6 +219,19 @@ concepts! {
     Book = "book";
     Square = "square";
     Asterisk = "asterisk";
+    /// Machine monitor (开发者视图): host CPU, memory, disk and network.
+    Cpu = "cpu";
+    Memory = "memorychip";
+    Disk = "internaldrive";
+    Network = "network";
+    /// An API key.
+    Key = "key";
+    /// A machine's base image and environment.
+    Layers = "square.stack.3d.up";
+    /// A machine's logs.
+    Logs = "doc.text.magnifyingglass";
+    /// Past runs (任务记录).
+    History = "clock.arrow.circlepath";
     /// The busy spinner (gpui-component's `Spinner` turns it).
     Spinner = "progress.indicator";
     /// Find and replace (gpui-component's input search).

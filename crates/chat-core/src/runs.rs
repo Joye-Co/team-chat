@@ -277,6 +277,27 @@ impl HttpClient {
             .await
     }
 
+    /// Owner. The monitor of one machine (docs/protocol.md, "Machine monitor"): `range` is
+    /// "15m", "1h" or "24h", `day_start` the viewer's local midnight in ms.
+    pub async fn machine_monitor(
+        &self,
+        machine_id: &str,
+        range: &str,
+        day_start: u64,
+    ) -> ApiResult<crate::proto::MachineMonitor> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!(
+                "/v1/machines/{}/monitor?range={}&dayStart={day_start}",
+                enc(machine_id),
+                enc(range)
+            ),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Owner. Revokes the machine token and closes its link.
     pub async fn delete_machine(&self, machine_id: &str) -> ApiResult<()> {
         let _: serde_json::Value = self

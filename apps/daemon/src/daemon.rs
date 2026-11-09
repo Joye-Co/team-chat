@@ -82,6 +82,8 @@ pub struct Daemon {
     run_tx: mpsc::UnboundedSender<(String, RunMsg)>,
     /// Where runs execute.
     exec: Arc<dyn crate::executor::Executor>,
+    /// Host and VM numbers for the heartbeat.
+    sampler: crate::metrics::Sampler,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -90,6 +92,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let (link_tx, mut link_rx) = mpsc::unbounded_channel();
     let (run_tx, mut run_rx) = mpsc::unbounded_channel();
     let redactor = Arc::new(crate::redact::Redactor::for_daemon(&cfg, &token));
+    let exec = crate::executor::for_config(&cfg);
     let mut d = Daemon {
         cfg: Arc::new(cfg),
         token: Arc::new(token),
@@ -107,7 +110,8 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         last_rx: Instant::now(),
         link_tx,
         run_tx,
-        exec: crate::executor::local(),
+        exec,
+        sampler: crate::metrics::Sampler::new(),
     };
     d.recover();
     {
@@ -824,10 +828,34 @@ impl Daemon {
         if !self.welcomed {
             return;
         }
+        let metrics = self.metrics();
         self.send_now(&Up::Heartbeat {
             at: now_ms(),
             health: health::health(&self.cfg, self.active_count()),
             runs: self.cursors(),
+            metrics: Some(metrics),
         });
+    }
+
+    /// The heartbeat's metrics: VMs from the executor, else the runs this daemon holds.
+    fn metrics(&mut self) -> crate::proto::MachineMetrics {
+        let vm_slots = self.cfg.vm.as_ref().map(|_| self.cfg.max_parallel_runs);
+        let local: Vec<crate::metrics::LocalRun> = if vm_slots.is_some() {
+            vec![]
+        } else {
+            self.runs
+                .iter()
+                .filter(|(_, r)| !r.done)
+                .map(|(id, _)| crate::metrics::LocalRun {
+                    run_id: id.clone(),
+                    started_at: crate::workspace::read_meta(&crate::workspace::run_dir(
+                        &self.cfg, id,
+                    ))
+                    .map(|m| m.started_at)
+                    .unwrap_or(0),
+                })
+                .collect()
+        };
+        self.sampler.sample(&self.cfg, vm_slots, &local)
     }
 }

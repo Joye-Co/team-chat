@@ -2044,6 +2044,22 @@ impl ChatProvider for CoreProvider {
         self.machines_inner()
     }
 
+    fn machine_monitor(
+        &self,
+        machine_id: &str,
+        range: &'static str,
+        day_start: u64,
+    ) -> AdminReply<chat_core::proto::MachineMonitor> {
+        let id = machine_id.to_string();
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_monitor(&id, range, day_start)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_inner(name, labels)
     }
