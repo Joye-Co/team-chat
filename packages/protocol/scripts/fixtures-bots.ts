@@ -185,6 +185,17 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/machine-secrets-old-daemon.json", "MachineSecretsResponse", { secrets: [] }, "the daemon cannot take keys");
   ok("http/set-secret-request.json", "SetSecretRequest", { sealed: "c2VhbGVkLWJveC1ieXRlcw==", members: [ID.bot] });
 
+  // 活动记录 (team admin)
+  ok("http/activity-response.json", "ActivityResponse", {
+    entries: [
+      { id: 42, at: T0, kind: "level", action: "member.update", actorId: ID.owner, target: ID.bot, details: { level: ["member", "owner"] } },
+      { id: 41, at: T0 - 60_000, kind: "key", action: "machine.secret.set", actorId: ID.owner, target: R.machine, machineId: R.machine, details: { name: "OPENAI_API_KEY", members: [] } },
+      { id: 40, at: T0 - 120_000, kind: "login", action: "email.sign_in", actorId: ID.alice, target: ID.alice },
+    ],
+    hasMore: true,
+  });
+  ok("http/activity-response-empty.json", "ActivityResponse", { entries: [], hasMore: false });
+
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
   ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);
