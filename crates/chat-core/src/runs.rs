@@ -417,6 +417,11 @@ impl HttpClient {
         Ok(())
     }
 
+    /// Owner: when members joined, who added them, devices and open invites.
+    pub async fn team_roster(&self) -> ApiResult<crate::proto::TeamRoster> {
+        self.call::<(), _>(Method::GET, "/v1/team/roster", None, true).await
+    }
+
     /// Owner: 用量 of AI members' runs that ended in [from, to) (docs/protocol.md "Team usage").
     pub async fn team_usage(&self, from: u64, to: u64) -> ApiResult<crate::proto::TeamUsage> {
         self.call::<(), _>(

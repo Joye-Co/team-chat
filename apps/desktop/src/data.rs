@@ -1896,6 +1896,10 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn set_member_budget(&self, _member_id: &str, _cents: Option<u64>) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Owner: when members joined, who added them, their devices and open invites.
+    fn team_roster(&self) -> AdminReply<chat_core::proto::TeamRoster> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Owner: 用量 of AI members' runs that ended in [from, to).
     fn team_usage(&self, _from: u64, _to: u64) -> AdminReply<chat_core::proto::TeamUsage> {
         reply_now(Err(AdminError::Unsupported))

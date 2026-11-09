@@ -211,6 +211,15 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     daily: [{ start: T0 - 7 * 86_400_000, costUsd: 32.5, bots: [{ memberId: ID.bot, costUsd: 32.5 }] }],
   });
 
+  // 成员 (team admin)
+  ok("http/team-roster.json", "TeamRoster", {
+    members: [
+      { memberId: ID.owner, joinedAt: T0 - 30 * 86_400_000, lastSeenAt: T0, devices: [{ label: "Joye 的 MacBook Pro", createdAt: T0 - 30 * 86_400_000, lastUsedAt: T0 }] },
+      { memberId: ID.alice, joinedAt: T0 - 20 * 86_400_000, addedBy: ID.owner, devices: [] },
+    ],
+    invites: [{ id: ID.msg, name: "Lina", kind: "human", level: "member", createdBy: ID.owner, createdAt: T0 - 3 * 86_400_000, expiresAt: T0 + 4 * 86_400_000 }],
+  });
+
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
   ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);
