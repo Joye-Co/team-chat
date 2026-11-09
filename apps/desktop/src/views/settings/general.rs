@@ -61,6 +61,8 @@ pub struct GeneralPage {
     versions: usize,
     /// AI 服务, shown to owners only.
     ai: Entity<super::ai_service::AiServicePanel>,
+    /// Self-tests only: AI 服务 under 通用 (it lives in 团队管理).
+    ai_here: bool,
     updater: Option<Entity<updater::Updater>>,
     description: Entity<TextareaState>,
     status: Status,
@@ -101,6 +103,7 @@ impl GeneralPage {
             versions: updater::notes::history_len(),
             services,
             ai,
+            ai_here: false,
             updater,
             description,
             status: Status::Idle,
@@ -114,6 +117,12 @@ impl GeneralPage {
 
     pub fn ai_service(&self) -> &Entity<super::ai_service::AiServicePanel> {
         &self.ai
+    }
+
+    /// Self-tests: draw 通用 › AI 服务 as before it moved to 团队管理.
+    pub fn show_ai_here(&mut self, cx: &mut Context<Self>) {
+        self.ai_here = true;
+        cx.notify();
     }
 
     pub fn set_description(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -699,7 +708,8 @@ impl Render for GeneralPage {
             .when(owner, |p| p.child(admin_card(cx)))
             .child(startup)
             .child(alerts)
-            .when(owner, |p| p.child(self.ai.clone()))
+            // AI 服务 lives in 团队管理; the self-tests still show it here.
+            .when(owner && self.ai_here, |p| p.child(self.ai.clone()))
             .child(version)
             .child(developer_section)
     }

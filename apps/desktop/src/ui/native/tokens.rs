@@ -1207,6 +1207,9 @@ pub mod monitor {
     pub const COL_MEM: Pixels = px(200.);
     pub const COL_TOKENS: Pixels = px(120.);
     pub const COL_DONE: Pixels = px(104.);
+    /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
+    pub const FLEET_CARD_MIN: Pixels = px(320.);
+    pub const FLEET_ADD_TEXT: Pixels = px(320.);
     /// The 要注意 card's share of the row next to 容量.
     pub const ATTENTION_SHARE: f32 = 0.41;
 }

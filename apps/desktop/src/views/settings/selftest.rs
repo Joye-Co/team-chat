@@ -773,7 +773,9 @@ pub fn open_ai_service(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |_, cx| {
-        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        let general = view.read(cx).general().clone();
+        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| p.test(cx));
     });
     Ok(handle)
@@ -788,7 +790,9 @@ pub fn open_ai_service_failed(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |window, cx| {
-        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        let general = view.read(cx).general().clone();
+        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| {
             p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
             p.fill_for_test(
