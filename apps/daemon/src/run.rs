@@ -265,7 +265,8 @@ pub async fn supervise(ctx: RunCtx) {
             let chat_run = if aside {
                 None
             } else {
-                let files = rt.kind == "codex";
+                // In a VM `chat-run` always goes through the relayed socket.
+                let files = rt.kind == "codex" && !exec.isolated();
                 // Files and 产出 go up over HTTP as the run's member, from its working folder.
                 outputs.set_local(crate::chat_run_files::Local {
                     server_url: cfg.server_url.clone(),

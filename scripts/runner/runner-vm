@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Root helper of the daemon's Firecracker executor, run by the runner user with `sudo -n`
+# (installed to /usr/local/sbin/runner-vm by host-setup.sh, allowed in /etc/sudoers.d/runner-vm).
+#
+#   runner-vm up <slot>                     tap rvm<slot> for the runner user, host side of the slot's /30
+#   runner-vm export <slot> <path> rw|ro    NFS export of <path> to the slot's guest address only
+#   runner-vm down <slot>                   removes the slot's exports and its tap
+#
+# Slot n uses 10.200.0.0/16 at offset 4n: host .1, guest .2. Paths must be under /srv/runner or
+# the runner user's home. The static firewall (/etc/runner-vm.nft) does the rest.
+set -euo pipefail
+
+RUNNER_USER="${RUNNER_USER:-runner}"
+STATE=/run/runner-vm
+runner_home="$(getent passwd "$RUNNER_USER" | cut -d: -f6)"
+ROOTS=(/srv/runner "$runner_home")
+
+die() { echo "runner-vm: $*" >&2; exit 2; }
+
+slot="${2:-}"
+[[ "$slot" =~ ^[0-9]{1,5}$ ]] && (( slot < 16384 )) || die "bad slot"
+base=$(( slot * 4 ))
+host="10.200.$(( base >> 8 )).$(( (base & 255) + 1 ))"
+guest="10.200.$(( base >> 8 )).$(( (base & 255) + 2 ))"
+tap="rvm$slot"
+mkdir -p "$STATE"
+
+case "${1:-}" in
+  up)
+    ip link del "$tap" 2>/dev/null || true
+    ip tuntap add dev "$tap" mode tap user "$RUNNER_USER" group "$RUNNER_USER"
+    ip addr add "$host/30" dev "$tap"
+    ip link set "$tap" up
+    # Strict reverse path: a VM cannot send with another slot's address.
+    sysctl -qw "net.ipv4.conf.$tap.rp_filter=1"
+    ;;
+  export)
+    mode="${4:-}"
+    [[ "$mode" == rw || "$mode" == ro ]] || die "mode must be rw or ro"
+    path="$(realpath -e -- "${3:-}")" || die "no such path"
+    ok=0
+    for r in "${ROOTS[@]}"; do
+      [[ -n "$r" && ( "$path" == "$r" || "$path" == "$r"/* ) ]] && ok=1
+    done
+    (( ok )) || die "$path is outside ${ROOTS[*]}"
+    uid="$(id -u "$RUNNER_USER")"; gid="$(id -g "$RUNNER_USER")"
+    exportfs -o "$mode,sync,no_subtree_check,all_squash,anonuid=$uid,anongid=$gid" "$guest:$path"
+    echo "$path" >> "$STATE/$slot"
+    ;;
+  down)
+    if [[ -f "$STATE/$slot" ]]; then
+      while IFS= read -r p; do
+        exportfs -u "$guest:$p" 2>/dev/null || true
+      done < "$STATE/$slot"
+      rm -f "$STATE/$slot"
+    fi
+    ip link del "$tap" 2>/dev/null || true
+    ;;
+  *) die "usage: runner-vm up|export|down <slot> ..." ;;
+esac

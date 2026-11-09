@@ -6,13 +6,16 @@
 #
 # What it does: system packages, Docker (builds the base image), Firecracker and jailer from the
 # official release (checked against its SHA256SUMS), the `runner` user that runs the daemon (kvm
-# and docker groups, systemd linger), IP forwarding for the VMs' NAT, and /srv/runner for images,
-# caches and run disks. It does not touch SSH settings.
+# and docker groups, systemd linger), /srv/runner for images, the daemon's runs and the VMs, and
+# the VM network: IP forwarding, the NFS server, the static firewall (runner-vm.nft, loaded at
+# boot by runner-vm-net.service) and the root helper runner-vm that the daemon runs with sudo.
+# It does not touch SSH settings. Run it from its folder in a checkout (it installs siblings).
 set -euo pipefail
 
 FC_VERSION="${FC_VERSION:-latest}"
 RUNNER_USER="${RUNNER_USER:-runner}"
 RUNNER_HOME_DATA="/srv/runner"
+here="$(cd "$(dirname "$0")" && pwd)"
 
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 [[ -e /dev/kvm ]] || { echo "/dev/kvm is missing: this host cannot run Firecracker" >&2; exit 1; }
@@ -25,7 +28,7 @@ apt-get install -yq --no-install-recommends \
   ca-certificates curl git jq unzip zstd xz-utils tar \
   nftables iproute2 iptables e2fsprogs acl \
   build-essential pkg-config \
-  docker.io docker-buildx \
+  docker.io docker-buildx nfs-kernel-server \
   unattended-upgrades htop
 systemctl enable --now docker
 # The stock nftables.service flushes the whole ruleset on start, which drops Docker's NAT rules.
@@ -58,19 +61,44 @@ usermod -aG kvm,docker "$RUNNER_USER"
 loginctl enable-linger "$RUNNER_USER"
 install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 750 \
   "$RUNNER_HOME_DATA" "$RUNNER_HOME_DATA/images" "$RUNNER_HOME_DATA/kernels" \
-  "$RUNNER_HOME_DATA/cache" "$RUNNER_HOME_DATA/runs"
+  "$RUNNER_HOME_DATA/cache" "$RUNNER_HOME_DATA/daemon" "$RUNNER_HOME_DATA/vms"
 # The daemon user gets its own copy of root's keys so an operator can log in as it.
 if [[ -s /root/.ssh/authorized_keys ]]; then
   install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 700 "/home/$RUNNER_USER/.ssh"
   install -o "$RUNNER_USER" -g "$RUNNER_USER" -m 600 /root/.ssh/authorized_keys "/home/$RUNNER_USER/.ssh/authorized_keys"
 fi
 
-echo "== networking"
+echo "== VM network"
 cat > /etc/sysctl.d/90-runner.conf <<'EOF'
 # The microVMs reach the internet through NAT on this host.
 net.ipv4.ip_forward = 1
 EOF
 sysctl -q --system
+install -m 755 "$here/runner-vm" /usr/local/sbin/runner-vm
+install -m 644 "$here/runner-vm.nft" /etc/runner-vm.nft
+echo "$RUNNER_USER ALL=(root) NOPASSWD: /usr/local/sbin/runner-vm" > /etc/sudoers.d/runner-vm
+chmod 440 /etc/sudoers.d/runner-vm
+visudo -cq
+cat > /etc/systemd/system/runner-vm-net.service <<'EOF'
+[Unit]
+Description=Firewall and NAT for the runner's microVMs
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/runner-vm.nft
+# Docker may set the FORWARD policy to drop: let the VMs' traffic through its chain.
+ExecStart=/bin/sh -c 'iptables -L DOCKER-USER >/dev/null 2>&1 || exit 0; for d in -i -o; do iptables -C DOCKER-USER $d rvm+ -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER $d rvm+ -j ACCEPT; done'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now nfs-server
+systemctl enable runner-vm-net.service
+systemctl restart runner-vm-net.service
 
 echo "== done"
 echo "firecracker: $(command -v firecracker)  jailer: $(command -v jailer)"

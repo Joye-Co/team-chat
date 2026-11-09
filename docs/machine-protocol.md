@@ -636,6 +636,28 @@ later audits have the complete record:
   commits is kept, and the daemon log names it. Below half of `min_free_gb` new runs are
   rejected with `disk_low`.
 
+## MicroVM runs (`[vm]`, Linux)
+
+With `[vm]` in the config each run's CLI runs in its own Firecracker microVM instead of as a
+process of the daemon's machine. Nothing in this protocol changes. The VM boots the read-only
+base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
+Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
+that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
+folder, the run's git dir and `[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS
+shares of the host, mounted at their host paths, so the worktree, session files, `stderr.log`
+and 产出 stay where the daemon reads them. Stdin and stdout go over vsock (port 1024) as
+frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
+the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
+folder. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
+before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
+
+The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
+their traffic to the host (except NFS), to private, link-local and metadata ranges and to each
+other; strict reverse-path filtering stops address spoofing. The daemon runs as an unprivileged
+user; the tap device and the NFS exports go through the root helper `runner-vm` with `sudo -n`.
+`scripts/runner/host-setup.sh` installs all of it; `scripts/runner/net-check.py` boots a VM and
+checks its network.
+
 ## Environment
 
 The CLI process starts with an empty environment plus: `PATH HOME USER LOGNAME SHELL TMPDIR
@@ -676,8 +698,10 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
-`command`, `args`, `env`, `model`. `approval_policy`, `sandbox`, `permission_mode` and
+`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
+`command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
+(a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
+`shares`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 
@@ -699,4 +723,4 @@ found on PATH.
   the real daemon and the fake Claude Code CLI. A member mentions the bot; the run must show
   the acknowledgement reaction, no progress message, the done card with `resultMessageId`, the
   topic status `done`, the run log and the uploaded session. It writes `report.json` in a temp folder and stops both processes by
-  the PIDs it started.
+  the PIDs it started. With `--vm` on a runner host every run's CLI runs in a microVM.
