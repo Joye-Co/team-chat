@@ -323,6 +323,110 @@ async fn codex_models(program: &Path, rt: &RuntimeConfig) -> Option<Vec<CliModel
     out
 }
 
+// ---- Codex: a default model the account cannot use ----
+
+/// The top-level `model` of Codex's `config.toml` (`$CODEX_HOME`, else `~/.codex`), when set.
+pub fn codex_config_model(rt: &RuntimeConfig) -> Option<String> {
+    let home = rt
+        .env
+        .get("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
+        .unwrap_or_else(|| crate::config::home().join(".codex"));
+    let text = std::fs::read_to_string(home.join("config.toml")).ok()?;
+    top_level_model(&text)
+}
+
+fn top_level_model(toml: &str) -> Option<String> {
+    for line in toml.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            return None;
+        }
+        let Some(rest) = l.strip_prefix("model") else {
+            continue;
+        };
+        let Some(v) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let v = v
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'');
+        return (!v.is_empty()).then(|| v.to_string());
+    }
+    None
+}
+
+/// A run with no model of its own uses Codex's configured default. When the account's model
+/// list does not have that model (Codex then fails with model_not_found), the run gets the
+/// list's default model instead. None: keep Codex's own choice.
+pub fn codex_fallback_model(cli: Option<&CliInfo>, configured: Option<&str>) -> Option<String> {
+    let configured = configured?;
+    let models = cli?.models.as_ref().filter(|m| !m.is_empty())?;
+    if models.iter().any(|m| m.id == configured) {
+        return None;
+    }
+    models
+        .iter()
+        .find(|m| m.is_default == Some(true))
+        .or_else(|| models.first())
+        .map(|m| m.id.clone())
+}
+
+#[cfg(test)]
+mod codex_default_tests {
+    use super::*;
+
+    fn cli(ids: &[(&str, bool)]) -> CliInfo {
+        CliInfo {
+            runtime: "codex".into(),
+            kind: "codex".into(),
+            command: "codex".into(),
+            version: None,
+            available: true,
+            models: Some(
+                ids.iter()
+                    .map(|(id, d)| CliModel {
+                        id: (*id).into(),
+                        is_default: d.then_some(true),
+                        ..Default::default()
+                    })
+                    .collect(),
+            ),
+            efforts: None,
+            gates: None,
+        }
+    }
+
+    #[test]
+    fn reads_only_the_top_level_model() {
+        assert_eq!(
+            top_level_model("# c\nmodel = \"gpt-x\" # note\n[profiles.a]\nmodel = \"y\""),
+            Some("gpt-x".into())
+        );
+        assert_eq!(top_level_model("[profiles.a]\nmodel = \"y\""), None);
+        assert_eq!(top_level_model("model_provider = \"z\""), None);
+    }
+
+    #[test]
+    fn falls_back_only_when_the_account_lacks_the_configured_model() {
+        let c = cli(&[("gpt-6-luna", true), ("gpt-5.6-terra", false)]);
+        assert_eq!(
+            codex_fallback_model(Some(&c), Some("gpt-6.1-sol")),
+            Some("gpt-6-luna".into())
+        );
+        assert_eq!(codex_fallback_model(Some(&c), Some("gpt-5.6-terra")), None);
+        assert_eq!(codex_fallback_model(Some(&c), None), None);
+        assert_eq!(
+            codex_fallback_model(Some(&cli(&[])), Some("gpt-6.1-sol")),
+            None
+        );
+    }
+}
+
 // ---- Claude Code: aliases, the settings model, `claude --help` ----
 
 /// The CLI's config folder for a runtime: its `CLAUDE_CONFIG_DIR`, else the daemon's, else
