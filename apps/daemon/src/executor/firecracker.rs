@@ -255,8 +255,12 @@ impl Executor for Firecracker {
         if !sock.exists() {
             return None;
         }
+        let run_id = run_dir.file_name()?.to_string_lossy().to_string();
         match vm_state(&sock, "Paused") {
-            Ok(()) => Some(Box::new(VmStopped { sock })),
+            Ok(()) => {
+                crate::metrics::vm_paused(&run_id, true);
+                Some(Box::new(VmStopped { sock, run_id }))
+            }
             Err(e) => {
                 eprintln!("{} pause: {e}", crate::proto::now_ms());
                 None
@@ -283,12 +287,14 @@ impl Executor for Firecracker {
 
 struct VmStopped {
     sock: PathBuf,
+    run_id: String,
 }
 
 impl Stopped for VmStopped {
     fn resume(&self) {
-        if let Err(e) = vm_state(&self.sock, "Resumed") {
-            eprintln!("{} resume: {e}", crate::proto::now_ms());
+        match vm_state(&self.sock, "Resumed") {
+            Ok(()) => crate::metrics::vm_paused(&self.run_id, false),
+            Err(e) => eprintln!("{} resume: {e}", crate::proto::now_ms()),
         }
     }
 }
@@ -373,6 +379,15 @@ impl Job {
         }
     }
 
+    /// The run's id: the name of its run folder.
+    fn run_id(&self) -> String {
+        self.run_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn console_tail(&self) -> String {
         let s = std::fs::read(self.vm_dir.join("console.log")).unwrap_or_default();
         let start = s.len().saturating_sub(1500);
@@ -416,6 +431,7 @@ impl Job {
         std::fs::create_dir_all(&self.vm_dir).map_err(|e| format!("vm folder: {e}"))?;
         std::fs::write(self.vm_dir.join("slot"), &slot).map_err(|e| e.to_string())?;
         let scratch = self.vm_dir.join("scratch.ext4");
+        crate::metrics::vm_booting(&self.run_id(), scratch.clone());
         std::fs::File::create(&scratch)
             .and_then(|f| f.set_len(u64::from(self.cfg.scratch_gb) << 30))
             .map_err(|e| format!("scratch disk: {e}"))?;
@@ -487,6 +503,7 @@ impl Job {
             .map_err(|e| format!("{}: {e}", self.cfg.firecracker))?;
         let pid = child.id().map(|p| p as i32).unwrap_or(0);
         workspace::record_process(&self.run_dir, pid, &self.cfg.firecracker);
+        crate::metrics::vm_process(&self.run_id(), pid);
 
         let started = tokio::time::Instant::now();
         loop {
@@ -572,6 +589,7 @@ impl Job {
             self.teardown(Some(child)).await;
             return;
         }
+        crate::metrics::vm_booted(&self.run_id(), booted.elapsed().as_millis() as u64);
         eprintln!(
             "{} run {}: VM {} up in {} ms",
             crate::proto::now_ms(),
@@ -662,6 +680,7 @@ impl Job {
             let _ = c.start_kill();
             let _ = c.wait().await;
         }
+        crate::metrics::vm_gone(&self.run_id());
         if let Err(e) = helper(&self.cfg, &["down", &self.slot.to_string()]).await {
             eprintln!("{} vm slot {}: {e}", crate::proto::now_ms(), self.slot);
         }
