@@ -5,15 +5,27 @@ and their `.sha256` files. Release notes for the team are in Chinese in `docs/re
 
 ## 1.2.6 (unreleased)
 
-Notes: [docs/releases/1.2.6.md](docs/releases/1.2.6.md). D1 migration `0011_runner_effort`.
-Protocol: additive (`CliInfo.models` / `efforts`, `run.assign.effort`, `BotRunner.effort`,
-`SetBotRunnerRequest.effort`, `RunContext` and the context routes). The server is redeployed
+Notes: [docs/releases/1.2.6.md](docs/releases/1.2.6.md). D1 migrations `0011_runner_effort` and
+`0012_memory`. Protocol: additive (`CliInfo.models` / `efforts` / `gates`, `run.assign.effort` /
+`gates`, `BotRunner.effort`, `SetBotRunnerRequest.effort`, `RunContext` and the context routes,
+memory, gated actions, delegation, `BotMetrics`). The server is redeployed
 before the release. 1.2.5 clients and daemons keep working.
 
 - Members pick a model and a 思考强度 from what their computer's CLIs report; the model is saved.
 - Run context: compact topic lines within a 24,000-character budget with the first message,
   resumed sessions get only newer messages, a new 群聊 request starts a new session, and the
   daemon adds `chat-run topic history|message`, `chat-run search` and `chat-run file get`.
+- Memory: 记得的事 on an AI member's page and 设置 › 团队约定, run reviews and `chat-run memory
+  note` write pending memories, a daily consolidation writes 记忆更新 lines that can be undone,
+  and runs and the front desk read a memory index.
+- Gated actions: the kinds checked in 设置 › 默认规则 stop a Claude Code command through a
+  PreToolUse hook until the kind's approver answers; 这件事里都同意 passes that kind for the work.
+- 转交 and 分出去: `chat-run handoff` and `chat-run assign` hand work or a part of it to another AI
+  member.
+- Rolling topic summaries for topics of 60 or more messages in run and front desk prompts.
+- Front desk replay, the prompt patch register and `GET /v1/bots/:id/metrics`; the developer view
+  saves a run's context and the front desk decisions.
+- Daemon: on Linux, `[vm]` runs each CLI in its own Firecracker microVM (`scripts/runner`).
 
 - A group chat message opens its 话题 in one click.
 - Group info beside the group chat; the whole 群 in the 话题 details.
