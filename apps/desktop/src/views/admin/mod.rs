@@ -10,6 +10,7 @@
 mod accounts;
 mod activity;
 mod fleet;
+mod home;
 mod model;
 mod overview;
 mod spark;
@@ -280,8 +281,10 @@ impl AdminView {
                             .map(|x| x.id.clone())
                     });
                     this.machines = Some(list);
-                    if this.page == accounts::Page::Machines {
-                        this.fetch_fleet(cx);
+                    match this.page {
+                        accounts::Page::Machines => this.fetch_fleet(cx),
+                        accounts::Page::Home => this.fetch_home(cx),
+                        _ => {}
                     }
                     this.fetch(cx);
                 }
@@ -505,15 +508,6 @@ impl AdminView {
                 })
                 .child(row)
         };
-        let page =
-            |id: &'static str, label: &'static str, s: Sym, trailing: Option<gpui::AnyElement>| {
-                let row = SidebarRow::new(id, label).leading(icon(s, false));
-                let row = match trailing {
-                    Some(el) => row.trailing_element(el),
-                    None => row,
-                };
-                soon(id.into(), row)
-            };
         // The pages that work: selected when open.
         let current_page = self.page;
         let live_page = |id: &'static str,
@@ -643,7 +637,13 @@ impl AdminView {
                     .flex()
                     .flex_col()
                     .child(group_label(m::NAV_TEAM, cx).mt(space::S12))
-                    .child(page("nav-home", m::NAV_HOME, Sym::Grid, None))
+                    .child(live_page(
+                        "nav-home",
+                        m::NAV_HOME,
+                        Sym::Grid,
+                        accounts::Page::Home,
+                        None,
+                    ))
                     .child(live_page(
                         "nav-members",
                         m::NAV_MEMBERS,
@@ -791,6 +791,7 @@ impl AdminView {
                 &[("machine", machine_name.as_deref().unwrap_or_default())],
             ),
             accounts::Page::Members => self.team_subtitle(),
+            accounts::Page::Home => self.home_subtitle(),
             accounts::Page::Machines => m::FLEET_SUB.to_string(),
             accounts::Page::Ai => m::AI_SUB.to_string(),
             accounts::Page::Rules => m::RULES_SUB.to_string(),
@@ -803,6 +804,7 @@ impl AdminView {
             accounts::Page::Accounts => m::ACCOUNTS_TITLE,
             accounts::Page::Keys => m::KEYS_TITLE,
             accounts::Page::Members => m::MEMBERS_TITLE,
+            accounts::Page::Home => m::NAV_HOME,
             accounts::Page::Machines => m::FLEET_TITLE,
             accounts::Page::Ai => m::AI_TITLE,
             accounts::Page::Rules => m::RULES_TITLE,
@@ -895,9 +897,10 @@ impl AdminView {
                     }),
             )
             .when(overview, |d| d.child(range))
-            .when(self.page == accounts::Page::Usage, |d| {
-                d.child(self.usage_range_control(cx))
-            })
+            .when(
+                matches!(self.page, accounts::Page::Usage | accounts::Page::Home),
+                |d| d.child(self.usage_range_control(cx)),
+            )
             .when(self.page == accounts::Page::Members, |d| {
                 d.child(self.team_actions(cx))
             })
@@ -969,6 +972,9 @@ impl AdminView {
             // Settings panes bring their own 24 inset: 8 more lines them up with the toolbar.
             accounts::Page::Members => {
                 return pad.child(self.team_page(window, cx)).into_any_element();
+            }
+            accounts::Page::Home => {
+                return pad.child(self.home_page(window, cx)).into_any_element();
             }
             accounts::Page::Rules => {
                 return div()
