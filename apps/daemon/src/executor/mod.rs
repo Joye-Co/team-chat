@@ -5,7 +5,9 @@
 //! this machine. A backend that runs each CLI in its own VM plugs in here, without changes to
 //! the runtimes, the run supervisor or the machine protocol.
 
+pub mod firecracker;
 pub mod local;
+pub mod vmwire;
 
 use crate::runtime::RunSpec;
 use crate::workspace::RunMeta;
@@ -31,6 +33,12 @@ pub trait Executor: Send + Sync + std::fmt::Debug {
 
     /// Ends what a daemon that crashed left running for an unfinished run.
     fn kill_leftover(&self, meta: &RunMeta);
+
+    /// The CLI runs apart from this machine's processes (in a VM): it reaches `chat-run`
+    /// only through the relayed socket, never through files the daemon watches.
+    fn isolated(&self) -> bool {
+        false
+    }
 }
 
 /// A started CLI: its pipes and the handle that ends it.
@@ -61,4 +69,15 @@ pub trait Stopped: Send {
 /// The executor for this machine.
 pub fn local() -> Arc<dyn Executor> {
     Arc::new(local::Local)
+}
+
+/// A microVM per run when `[vm]` is configured, else the local executor.
+pub fn for_config(cfg: &crate::config::Config) -> Arc<dyn Executor> {
+    match &cfg.vm {
+        Some(vm) => Arc::new(firecracker::Firecracker::new(
+            vm.clone(),
+            cfg.max_parallel_runs,
+        )),
+        None => local(),
+    }
 }

@@ -23,4 +23,5 @@ pub mod secrets;
 pub mod selfupdate;
 pub mod service;
 pub mod upload;
+pub mod vm_agent;
 pub mod workspace;

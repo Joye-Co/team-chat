@@ -90,6 +90,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let (link_tx, mut link_rx) = mpsc::unbounded_channel();
     let (run_tx, mut run_rx) = mpsc::unbounded_channel();
     let redactor = Arc::new(crate::redact::Redactor::for_daemon(&cfg, &token));
+    let exec = crate::executor::for_config(&cfg);
     let mut d = Daemon {
         cfg: Arc::new(cfg),
         token: Arc::new(token),
@@ -107,7 +108,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         last_rx: Instant::now(),
         link_tx,
         run_tx,
-        exec: crate::executor::local(),
+        exec,
     };
     d.recover();
     {

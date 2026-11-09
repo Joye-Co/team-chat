@@ -11,6 +11,12 @@ fn main() {
     {
         std::process::exit(daemon::chat_run::main(std::env::args().skip(1).collect()));
     }
+    // PID 1 of a run's microVM (the tools disk names it vm-agent).
+    if std::path::Path::new(&argv0).file_name()
+        == Some(std::ffi::OsStr::new(daemon::vm_agent::NAME))
+    {
+        std::process::exit(daemon::vm_agent::main());
+    }
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_default();
     let mut config_path = config::default_config_path();
