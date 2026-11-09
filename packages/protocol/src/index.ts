@@ -120,6 +120,9 @@ import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
 import {
   AiServiceConfig,
+  WorkerModel,
+  WorkerModelsResponse,
+  SetWorkerModelRequest,
   AiServiceTestResult,
   ApprovalPolicy,
   Device,
@@ -826,6 +829,9 @@ export const schemas = {
   ApprovalPolicy,
   UpdateApprovalPolicyRequest,
   AiServiceConfig,
+  WorkerModel,
+  WorkerModelsResponse,
+  SetWorkerModelRequest,
   UpdateAiServiceRequest,
   TestAiServiceRequest,
   AiServiceTestResult,

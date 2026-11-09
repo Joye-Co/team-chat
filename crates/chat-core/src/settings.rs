@@ -8,8 +8,9 @@ use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::{
     AiServiceConfig, AiServiceTestResult, ApprovalPolicy, DevicesResponse, EmailCodeRequest,
     EmailCodeResponse, EmailSignInRequest, MyEmailResponse, NotifySettings, RedeemResponse,
-    RevokeTokensResponse, UpdateAiServiceRequest, UpdateApprovalPolicyRequest,
-    UpdateNotifySettingsRequest, VerifyEmailRequest,
+    RevokeTokensResponse, SetWorkerModelRequest, UpdateAiServiceRequest,
+    UpdateApprovalPolicyRequest, UpdateNotifySettingsRequest, VerifyEmailRequest, WorkerModel,
+    WorkerModelsResponse,
 };
 
 type Handle<T> = tokio::task::JoinHandle<Result<T, ClientError>>;
@@ -73,6 +74,29 @@ impl HttpClient {
         req.validate().map_err(invalid)?;
         self.call(Method::POST, "/v1/settings/ai/test", Some(req), true)
             .await
+    }
+
+    /// 设置 › 模型: the team's model and effort per CLI runtime (members read).
+    pub async fn worker_models(&self) -> ApiResult<WorkerModelsResponse> {
+        self.call::<(), _>(Method::GET, "/v1/settings/models", None, true)
+            .await
+    }
+
+    /// Sets the team's model and effort for one runtime (owner only). Absent keeps, `Some(None)` clears.
+    pub async fn set_worker_model(
+        &self,
+        runtime: &str,
+        req: &SetWorkerModelRequest,
+    ) -> ApiResult<WorkerModel> {
+        req.validate().map_err(invalid)?;
+        // A runtime name is lower-case letters, digits, `_` and `-`: nothing to escape.
+        let probe = WorkerModel {
+            runtime: runtime.to_string(),
+            ..Default::default()
+        };
+        probe.validate().map_err(invalid)?;
+        let path = format!("/v1/settings/models/{runtime}");
+        self.call(Method::PUT, &path, Some(req), true).await
     }
 
     pub async fn devices(&self) -> ApiResult<DevicesResponse> {

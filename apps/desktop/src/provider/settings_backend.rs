@@ -16,7 +16,7 @@ use super::{CoreProvider, settings::api_error};
 use crate::data::{
     AdminError, AdminReply, AiProviderKind, AiServiceDraft, AiServiceSettings, AiTestOutcome,
     ApprovalDefaults, ApproverRole, ClockTime, DeviceInfo, DeviceKind, NotifyPreferences,
-    reply_now,
+    WorkerModelSetting, reply_now,
 };
 
 /// This Mac's IANA time zone, from `TZ` or the `/etc/localtime` link
@@ -42,6 +42,14 @@ pub(super) fn local_time_zone() -> Option<String> {
 }
 
 /// A read on a server without the settings routes (404) means the server is too old.
+fn worker_from(w: &proto::WorkerModel) -> WorkerModelSetting {
+    WorkerModelSetting {
+        runtime: w.runtime.clone(),
+        model: w.model.clone(),
+        effort: w.effort.clone(),
+    }
+}
+
 fn read_error(e: &ApiError) -> AdminError {
     match api_error(e) {
         AdminError::NotFound => AdminError::Unsupported,
@@ -262,6 +270,35 @@ impl CoreProvider {
                 .await
                 .map_err(|e| read_error(&e))?;
             Ok(ai_from(&c))
+        })
+    }
+
+    pub(super) fn worker_models_inner(&self) -> AdminReply<Vec<WorkerModelSetting>> {
+        self.sb_request(|client| async move {
+            let r = client
+                .http()
+                .worker_models()
+                .await
+                .map_err(|e| read_error(&e))?;
+            Ok(r.workers.iter().map(worker_from).collect())
+        })
+    }
+
+    pub(super) fn set_worker_model_inner(
+        &self,
+        setting: WorkerModelSetting,
+    ) -> AdminReply<WorkerModelSetting> {
+        let req = proto::SetWorkerModelRequest {
+            model: Some(setting.model.clone()),
+            effort: Some(setting.effort.clone()),
+        };
+        self.sb_request(move |client| async move {
+            let w = client
+                .http()
+                .set_worker_model(&setting.runtime, &req)
+                .await
+                .map_err(|e| read_error(&e))?;
+            Ok(worker_from(&w))
         })
     }
 

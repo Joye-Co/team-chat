@@ -61,6 +61,8 @@ pub struct GeneralPage {
     versions: usize,
     /// AI 服务, shown to owners only.
     ai: Entity<super::ai_service::AiServicePanel>,
+    /// 模型 (front desk and executors), shown to owners only.
+    models: Entity<super::worker_models::WorkerModelsPanel>,
     updater: Option<Entity<updater::Updater>>,
     description: Entity<TextareaState>,
     status: Status,
@@ -96,11 +98,14 @@ impl GeneralPage {
             subscriptions.push(cx.observe(u, |_, _, cx| cx.notify()));
         }
         let ai = cx.new(|cx| super::ai_service::AiServicePanel::new(services.clone(), window, cx));
+        let models =
+            cx.new(|cx| super::worker_models::WorkerModelsPanel::new(services.clone(), window, cx));
         Self {
             me: Me::read(&services),
             versions: updater::notes::history_len(),
             services,
             ai,
+            models,
             updater,
             description,
             status: Status::Idle,
@@ -114,6 +119,10 @@ impl GeneralPage {
 
     pub fn ai_service(&self) -> &Entity<super::ai_service::AiServicePanel> {
         &self.ai
+    }
+
+    pub fn worker_models(&self) -> &Entity<super::worker_models::WorkerModelsPanel> {
+        &self.models
     }
 
     pub fn set_description(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -698,7 +707,9 @@ impl Render for GeneralPage {
         widgets::pane()
             .child(startup)
             .child(alerts)
-            .when(owner, |p| p.child(self.ai.clone()))
+            .when(owner, |p| {
+                p.child(self.ai.clone()).child(self.models.clone())
+            })
             .child(version)
             .child(developer_section)
     }

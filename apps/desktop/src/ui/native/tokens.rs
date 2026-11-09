@@ -730,6 +730,10 @@ pub mod size {
     pub const SELECT: Pixels = height::DEFAULT;
     /// One width for every select in a column (§2.8).
     pub const SELECT_WIDTH: Pixels = px(160.);
+    /// A model select with 思考强度 beside it (设置 › 模型): room for 默认（GPT-6-Astra）.
+    pub const MODEL_SELECT_WIDTH: Pixels = px(220.);
+    /// A 思考强度 select beside a model select (设置 › 模型): short words only.
+    pub const EFFORT_SELECT_WIDTH: Pixels = px(112.);
     /// A pop-up button whose choices are names (a computer, with 这台电脑 after it).
     pub const SELECT_WIDE: Pixels = px(280.);
     /// The search field of the find bar of a 话题 (⌘F).

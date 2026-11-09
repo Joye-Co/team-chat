@@ -731,6 +731,21 @@ pub(crate) fn open_end(
     Ok(handle)
 }
 
+/// 通用 scrolled to 模型: the front desk's model and the team's model per runtime.
+pub fn open_models(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::General, cx)?;
+    handle
+        .update(cx, |_, window, _| {
+            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_y(gpui::px(560.)));
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 /// 成员 scrolled to its end: 默认规则.
 pub fn open_members_end(
     services: Services,

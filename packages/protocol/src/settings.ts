@@ -2,6 +2,7 @@
 // approval rules for AI members, the team's AI 服务 and my signed-in devices. See docs/protocol.md, "Settings".
 import { z } from "zod";
 import { Count, Id, Millis } from "./common.ts";
+import { Effort } from "./machine.ts";
 
 /** A wall-clock time "HH:MM" (24 h) in the member's `timeZone`. */
 export const ClockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM");
@@ -352,3 +353,36 @@ export type MyEmailResponse = z.infer<typeof MyEmailResponse>;
 
 /** `hello.features` value of a client that handles `digest` and `notifyEvent`. */
 export const SETTINGS_FEATURE = "settings/1";
+
+// ---------------------------------------------------------------------------
+// Worker models (设置 › 模型): the team's model and effort per CLI runtime
+// ---------------------------------------------------------------------------
+
+/** A runtime name as machines configure it (`claude`, `codex`). */
+export const WorkerRuntime = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
+/** A CLI model id as the CLI names it. */
+export const WorkerModelId = z.string().min(1).max(200).regex(/^[\x21-\x7e]+$/);
+
+/**
+ * The team's choice for runs on one CLI runtime. A member's own runner model or effort wins; null
+ * = the CLI's own default.
+ */
+export const WorkerModel = z.object({
+  runtime: WorkerRuntime,
+  model: WorkerModelId.nullable(),
+  effort: Effort.nullable(),
+  /** 0 = never changed. */
+  updatedAt: Millis,
+});
+export type WorkerModel = z.infer<typeof WorkerModel>;
+
+/** `GET /v1/settings/models` (member): the runtimes with a team choice, by runtime name. */
+export const WorkerModelsResponse = z.object({ workers: z.array(WorkerModel).max(32) });
+export type WorkerModelsResponse = z.infer<typeof WorkerModelsResponse>;
+
+/** `PUT /v1/settings/models/:runtime` (owner). Absent keeps the stored value, null clears it. Response: `WorkerModel`. */
+export const SetWorkerModelRequest = z.object({
+  model: WorkerModelId.nullable().optional(),
+  effort: Effort.nullable().optional(),
+});
+export type SetWorkerModelRequest = z.infer<typeof SetWorkerModelRequest>;

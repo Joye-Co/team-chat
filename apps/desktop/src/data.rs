@@ -2712,6 +2712,14 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn test_ai_service(&self, _draft: AiServiceDraft) -> AdminReply<AiTestOutcome> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// 通用 › 模型: the team's model and 思考强度 per CLI runtime (`GET /v1/settings/models`).
+    fn worker_models(&self) -> AdminReply<Vec<WorkerModelSetting>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 通用 › 模型, owners only: stores both fields for one runtime (`None` clears one).
+    fn set_worker_model(&self, _setting: WorkerModelSetting) -> AdminReply<WorkerModelSetting> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// 账号 › 登录的设备: my signed-in devices (`GET /v1/me/devices`), newest use first.
     fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
         reply_now(Err(AdminError::Unsupported))
@@ -2924,6 +2932,14 @@ impl AiProviderKind {
     pub fn needs_base_url(self) -> bool {
         self == AiProviderKind::OpenaiCompatible
     }
+}
+
+/// 设置 › 模型: the team's model and 思考强度 for one CLI runtime. `None` = the CLI's own default.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkerModelSetting {
+    pub runtime: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// The team's AI 服务 as the server keeps it. The key itself never reaches the client.

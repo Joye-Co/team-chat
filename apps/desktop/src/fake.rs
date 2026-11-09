@@ -1970,6 +1970,12 @@ impl ChatProvider for FakeProvider {
     fn ai_service(&self) -> AdminReply<AiServiceSettings> {
         self.ai_service_fake()
     }
+    fn worker_models(&self) -> AdminReply<Vec<WorkerModelSetting>> {
+        self.worker_models_fake()
+    }
+    fn set_worker_model(&self, setting: WorkerModelSetting) -> AdminReply<WorkerModelSetting> {
+        self.set_worker_model_fake(setting)
+    }
     fn set_ai_service(&self, draft: AiServiceDraft) -> AdminReply<AiServiceSettings> {
         self.set_ai_service_fake(draft)
     }

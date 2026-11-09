@@ -14,6 +14,7 @@ pub(crate) mod general;
 pub mod login_item;
 mod machines;
 mod members;
+pub mod worker_models;
 // pages track: the 成员 page reuses the invite and add-member forms.
 pub(crate) use members::{open_add_bot, open_invite};
 mod notifications;
@@ -274,6 +275,11 @@ impl SettingsView {
     pub fn select(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
         cx.notify();
+    }
+
+    /// Scrolls the pane so that `y` from its top is at the top (self-tests).
+    pub fn scroll_to_y(&self, y: gpui::Pixels) {
+        self.scroll.set_offset(gpui::point(px(0.), -y));
     }
 
     /// Scrolls the pane to its end.

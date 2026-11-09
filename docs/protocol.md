@@ -1890,6 +1890,34 @@ Rules:
 - Suggested models: `deepseek-chat` for DeepSeek, `claude-haiku-5-5` for Anthropic.
 - Not set up: a topic keeps its first line as its title.
 
+## Worker models (设置 › 模型)
+
+The team's model and 思考强度 for the executors, one choice per CLI runtime (the runtime names
+machines configure, such as `claude` and `codex`). The front desk, topic summaries and memory use
+the AI 服务 above; this section is only for runs on machines.
+
+```ts
+WorkerModel = { runtime: string /* ^[a-z][a-z0-9_-]{0,31}$ */,
+                model: string | null   /* the CLI's model id, 1..200 printable; null = the CLI's default */,
+                effort: Effort | null  /* null = the CLI's default */,
+                updatedAt: number }    // 0 = never changed
+WorkerModelsResponse = { workers: WorkerModel[] }   // only runtimes with a team choice
+SetWorkerModelRequest = { model?: string | null, effort?: Effort | null }   // absent keeps, null clears
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/settings/models` | member | | `WorkerModelsResponse` |
+| `PUT /v1/settings/models/:runtime` | owner | `SetWorkerModelRequest` | `WorkerModel`; audited as `settings.models` |
+
+Rules:
+
+- D1 `worker_models` (migration 0013), one row per runtime.
+- A run's `run.assign.model` is the runner's own model, else the team's for the runner's runtime,
+  else absent (the CLI's default). `effort` is chosen the same way, field by field, and still goes
+  only to a machine with feature `effort`.
+- The choices the settings offer are the models and efforts the machines report (`CliInfo`).
+
 ## Devices
 
 ```ts

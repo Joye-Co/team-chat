@@ -10,6 +10,7 @@ pub struct FakeSettingsBackend {
     notify: NotifyPreferences,
     approvals: ApprovalDefaults,
     ai: AiServiceSettings,
+    workers: Vec<WorkerModelSetting>,
     devices: Vec<DeviceInfo>,
 }
 
@@ -36,6 +37,11 @@ impl FakeSettingsBackend {
                 base_url: None,
                 key_hint: Some("7Qx2".into()),
             },
+            workers: vec![WorkerModelSetting {
+                runtime: "claude".into(),
+                model: Some("opus".into()),
+                effort: Some("high".into()),
+            }],
             devices: vec![
                 dev("tk-mbp", "Joye 的 MacBook Pro", Some(now), true),
                 dev(
@@ -108,6 +114,24 @@ impl FakeProvider {
                 .iter()
                 .any(|m| m.id == ME && m.level == MemberLevel::Owner)
         })
+    }
+
+    pub(super) fn worker_models_fake(&self) -> AdminReply<Vec<WorkerModelSetting>> {
+        reply_now(Ok(self.sb(|s| s.workers.clone())))
+    }
+
+    pub(super) fn set_worker_model_fake(
+        &self,
+        setting: WorkerModelSetting,
+    ) -> AdminReply<WorkerModelSetting> {
+        if !self.i_am_owner_fake() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        self.sb(|s| {
+            s.workers.retain(|w| w.runtime != setting.runtime);
+            s.workers.push(setting.clone());
+        });
+        reply_now(Ok(setting))
     }
 
     pub(super) fn ai_service_fake(&self) -> AdminReply<AiServiceSettings> {
