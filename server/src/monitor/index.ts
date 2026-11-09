@@ -14,6 +14,7 @@ import { linkStub, deskStub } from "../bots/env";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
 import type { DeskRollup } from "./rollup";
+import "./accounts";
 
 const GIB = 1024 ** 3;
 const DAY_MS = 86_400_000;
@@ -113,16 +114,24 @@ export function buildMonitor(input: {
     }
   }
 
-  const logins = new Map((metrics?.logins ?? []).map((l) => [l.runtime, l.state]));
+  const logins = new Map((metrics?.logins ?? []).map((l) => [l.runtime, l]));
+  const usage = new Map((metrics?.usage ?? []).map((u) => [u.runtime, u]));
+  // Usage was read on the machine clock; the latest sample's offset puts it on the server's.
+  const offset = link?.metricsAt && metrics ? link.metricsAt - metrics.at : 0;
   const clis: MonitorCli[] = (status?.clis ?? []).map((c) => {
     const l = logins.get(c.runtime);
+    const u = usage.get(c.runtime);
     return {
       runtime: c.runtime,
       kind: c.kind,
       available: c.available,
       ...(c.version ? { version: c.version } : {}),
-      login: l === "logged_in" || l === "logged_out" ? l : "unknown",
+      login: l?.state === "logged_in" || l?.state === "logged_out" ? l.state : "unknown",
       failedToday: failedByRuntime[c.runtime] ?? 0,
+      ...(l?.method ? { method: l.method.slice(0, 32) } : {}),
+      ...(l?.email ? { email: l.email } : {}),
+      ...(l?.plan ? { plan: l.plan } : {}),
+      ...(u ? { usage: u.windows, usageAt: Math.max(0, u.at + offset) } : {}),
     };
   });
 

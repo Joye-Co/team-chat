@@ -26,6 +26,9 @@ sha2 = "0.10"
 toml = "0.9"
 libc = "0.2"
 regex = "1"
+# Feature "accounts": API keys sealed to the machine's X25519 key (libsodium sealed boxes).
+crypto_box = { version = "0.9.1", features = ["seal", "std"] }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,0 +1,12 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "account.login.status",
+    "loginId": "L03",
+    "runtime": "codex",
+    "state": "failed",
+    "error": "the sign-in timed out"
+  }
+}

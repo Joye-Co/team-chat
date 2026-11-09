@@ -19,7 +19,8 @@ import {
 import { z } from "zod";
 import { logger as baseLogger, type Logger } from "../core/logger";
 import { runMigrations } from "../core/migrations";
-import { METRICS_MIGRATION, latestMetrics, readSeries, recordMetrics } from "../monitor/store";
+import { LOGINS_MIGRATION, METRICS_MIGRATION, latestMetrics, readSeries, recordMetrics } from "../monitor/store";
+import { type MachineLogin, LoginStatusFrame } from "@chat/protocol";
 import { ASSIGN_RETRY_MS, LINK_IDLE_MS } from "./dispatch";
 import { type BotsEnv, deskStub } from "./env";
 
@@ -61,6 +62,8 @@ const UpFrame = z.discriminatedUnion("t", [
   z.object({ t: z.literal("run.event"), runId: RunId, seq: z.int().positive(), at: z.number(), event: LooseEvent }),
   RunDoneFrame.extend({ status: z.string().max(32) }),
   RunSessionFrame.extend({ source: z.string().max(32).optional() }),
+  // Feature "accounts": where a sign-in the owner started stands.
+  LoginStatusFrame,
 ]);
 type UpFrame = z.infer<typeof UpFrame>;
 /**
@@ -133,6 +136,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
           `,
         },
         METRICS_MIGRATION,
+        LOGINS_MIGRATION,
       ]);
       this.machineId = this.meta("machine_id");
       if (this.machineId) this.log = baseLogger.child({ obj: "MachineLink", machineId: this.machineId });
@@ -302,6 +306,16 @@ export class MachineLink extends DurableObject<BotsEnv> {
         this.send(ws, { t: "heartbeat.ack", at: now });
         this.touchD1(now);
         return;
+      case "account.login.status": {
+        this.sql.exec(
+          "INSERT OR REPLACE INTO logins (login_id, status, updated_at) VALUES (?, ?, ?)",
+          f.loginId,
+          JSON.stringify(f),
+          now,
+        );
+        this.sql.exec("DELETE FROM logins WHERE updated_at < ?", now - 86_400_000);
+        return;
+      }
       case "run.accept": {
         const r = this.run(f.runId);
         if (!r) return;
@@ -615,6 +629,52 @@ export class MachineLink extends DurableObject<BotsEnv> {
       series: readSeries(this.sql, range, now),
       runBots: this.openRuns().map((r) => ({ runId: r.run_id, botId: r.bot_id })),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature "accounts": sign in and API keys from the app (docs/protocol.md "Machine accounts")
+  // -------------------------------------------------------------------------
+
+  /** The open link of a daemon that takes "accounts" frames, or the reason it cannot. */
+  private accountsLink(): WebSocket | "offline" | "unsupported" {
+    const ws = this.socket();
+    if (!ws) return "offline";
+    return this.hasFeature("accounts") ? ws : "unsupported";
+  }
+
+  /** Sends one "accounts" frame now: these act on the machine at once, so nothing is queued. */
+  async accountsFrame(frame: Record<string, unknown>): Promise<"sent" | "offline" | "unsupported"> {
+    const ws = this.accountsLink();
+    if (typeof ws === "string") return ws;
+    if (frame.t === "account.login" && frame.op === "start") {
+      this.sql.exec(
+        "INSERT OR REPLACE INTO logins (login_id, status, updated_at) VALUES (?, ?, ?)",
+        frame.loginId as string,
+        JSON.stringify({ loginId: frame.loginId, runtime: frame.runtime, state: "starting" }),
+        Date.now(),
+      );
+    }
+    this.send(ws, frame);
+    return "sent";
+  }
+
+  /** A sign-in as the daemon last reported it. */
+  async login(loginId: string): Promise<MachineLogin | null> {
+    const row = this.sql
+      .exec<{ status: string; updated_at: number }>("SELECT status, updated_at FROM logins WHERE login_id = ?", loginId)
+      .toArray()[0];
+    if (!row) return null;
+    const f = JSON.parse(row.status) as Omit<MachineLogin, "updatedAt"> & { t?: string };
+    const { t: _t, ...rest } = f;
+    return { ...rest, updatedAt: row.updated_at };
+  }
+
+  /** The machine key and the keys it holds (names and last 4), from the latest heartbeat. */
+  async secrets(): Promise<{ publicKey?: string; secrets: NonNullable<MachineMetrics["secrets"]> }> {
+    const info = this.meta("info");
+    const publicKey = info ? (JSON.parse(info) as { publicKey?: string }).publicKey : undefined;
+    const { metrics } = latestMetrics((k) => this.meta(k));
+    return { ...(publicKey && this.hasFeature("accounts") ? { publicKey } : {}), secrets: metrics?.secrets ?? [] };
   }
 
   /** The token was revoked: close the link and refuse frames from now on. */

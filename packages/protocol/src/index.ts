@@ -118,7 +118,7 @@ import {
 } from "./bots.ts";
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
-import { MachineMonitor } from "./monitor.ts";
+import { LoginCodeRequest, MachineLogin, MachineMonitor, MachineSecretsResponse, SetSecretRequest, StartLoginRequest } from "./monitor.ts";
 import {
   AiServiceConfig,
   AiServiceTestResult,
@@ -798,6 +798,11 @@ export const schemas = {
   CreateMachineResponse,
   MachinesResponse,
   MachineMonitor,
+  StartLoginRequest,
+  LoginCodeRequest,
+  MachineLogin,
+  MachineSecretsResponse,
+  SetSecretRequest,
   MachineUpFrame,
   MachineDownFrame,
   // 1.1

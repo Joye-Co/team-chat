@@ -19,7 +19,7 @@ export const Labels = z.array(Label).max(MAX_LABELS);
 export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
-export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort", "gates"] as const;
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort", "gates", "accounts"] as const;
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -34,6 +34,8 @@ export const MachineInfo = z.object({
   features: z.array(MachineFeature).max(MAX_MACHINE_FEATURES).optional(),
   /** 1.1: a screen sharing address (e.g. `vnc://mac-mini.tailnet`) people use for 接管. */
   takeoverUrl: z.string().min(1).max(2048).optional(),
+  /** Feature "accounts": the machine's X25519 public key (base64, 32 bytes); API keys are sealed to it. */
+  publicKey: z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional(),
 });
 export type MachineInfo = z.infer<typeof MachineInfo>;
 
@@ -116,6 +118,9 @@ export const CliLogin = z.object({
   state: z.string().min(1).max(32),
   /** "subscription" | "api_key" when known. */
   method: z.string().min(1).max(32).optional(),
+  /** Feature "accounts": the signed-in account and plan, when the CLI says. */
+  email: z.string().max(320).optional(),
+  plan: z.string().max(64).optional(),
 });
 export type CliLogin = z.infer<typeof CliLogin>;
 /** VM boot times of the last (at most 50) runs. */
@@ -126,6 +131,53 @@ export const BootStats = z.object({
 });
 export type BootStats = z.infer<typeof BootStats>;
 /** Host and VM numbers the daemon sends with each heartbeat; every number is optional (a platform may not have it). */
+// ---------------------------------------------------------------------------
+// Accounts and API keys (feature "accounts", docs/machine-protocol.md "Accounts and keys")
+// ---------------------------------------------------------------------------
+
+/** An API key's name: an environment variable name. */
+export const SecretName = z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/);
+/** A key the machine holds, as it reports it: never the value, only its last 4 characters. */
+export const SecretInfo = z.object({
+  name: SecretName,
+  last4: z.string().max(4),
+  /** AI members whose runs get it; empty = every run. */
+  members: z.array(Id).max(100),
+  updatedAt: Millis,
+});
+export type SecretInfo = z.infer<typeof SecretInfo>;
+/** One usage window of a subscription (Claude 5 h / week, Codex primary / secondary). */
+export const UsageWindow = z.object({
+  /** "session" | "week" | "week_model" | "primary" | "secondary" | another short word. */
+  kind: z.string().min(1).max(32),
+  /** What the CLI calls it, e.g. "Current week (Opus)". */
+  label: z.string().max(80).optional(),
+  usedPct: z.number().min(0).max(100),
+  resetsAt: Millis.optional(),
+});
+export type UsageWindow = z.infer<typeof UsageWindow>;
+export const CliUsage = z.object({
+  runtime: z.string().min(1).max(64),
+  /** When the daemon read it (machine clock). */
+  at: Millis,
+  windows: z.array(UsageWindow).max(8),
+});
+export type CliUsage = z.infer<typeof CliUsage>;
+/** `account.login.status.state` values. */
+export const LOGIN_STATES = ["starting", "open_url", "device_code", "checking", "done", "failed", "cancelled"] as const;
+export const LoginStatusFrame = z.object({
+  t: z.literal("account.login.status"),
+  loginId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  runtime: z.string().min(1).max(64),
+  /** "starting" | "open_url" (open url, paste the code) | "device_code" (open url, enter userCode) | "checking" | "done" | "failed" | "cancelled" */
+  state: z.string().min(1).max(32),
+  url: z.string().max(4096).optional(),
+  userCode: z.string().max(64).optional(),
+  account: z.object({ email: z.string().max(320).optional(), plan: z.string().max(64).optional() }).optional(),
+  error: z.string().max(1000).optional(),
+});
+export type LoginStatusFrame = z.infer<typeof LoginStatusFrame>;
+
 export const MachineMetrics = z.object({
   /** When the daemon took the sample (machine clock). */
   at: Millis,
@@ -143,6 +195,10 @@ export const MachineMetrics = z.object({
   boot: BootStats.optional(),
   runs: z.array(VmRunMetrics).max(MAX_METRIC_RUNS),
   logins: z.array(CliLogin).max(64).optional(),
+  /** Feature "accounts": the API keys the machine holds (names and last 4 only). */
+  secrets: z.array(SecretInfo).max(100).optional(),
+  /** Feature "accounts": subscription usage windows, read every 10 minutes. */
+  usage: z.array(CliUsage).max(16).optional(),
 });
 export type MachineMetrics = z.infer<typeof MachineMetrics>;
 
@@ -327,6 +383,7 @@ export const MachineUpFrame = z.discriminatedUnion("t", [
   RunEventFrame,
   RunDoneFrame,
   RunSessionFrame,
+  LoginStatusFrame,
 ]);
 export type MachineUpFrame = z.infer<typeof MachineUpFrame>;
 
@@ -493,6 +550,23 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
   RunAnswerFrame,
   RunInteractionFrame,
   RunOutputResultFrame,
+  // feature "accounts"
+  z.object({
+    t: z.literal("account.login"),
+    loginId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+    runtime: z.string().min(1).max(64),
+    op: z.enum(["start", "code", "cancel"]),
+    /** op "code": what the person pasted (Claude's code#state). */
+    code: z.string().min(1).max(2048).optional(),
+  }),
+  z.object({
+    t: z.literal("secret.set"),
+    name: SecretName,
+    /** base64 of a libsodium sealed box (X25519 + XSalsa20-Poly1305) to `machine.publicKey`. */
+    sealed: z.string().min(1).max(16384),
+    members: z.array(Id).max(100),
+  }),
+  z.object({ t: z.literal("secret.delete"), name: SecretName }),
 ]);
 export type MachineDownFrame = z.infer<typeof MachineDownFrame>;
 

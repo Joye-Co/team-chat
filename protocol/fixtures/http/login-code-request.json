@@ -1,0 +1,7 @@
+{
+  "kind": "LoginCodeRequest",
+  "valid": true,
+  "value": {
+    "code": "abc123#state456"
+  }
+}
