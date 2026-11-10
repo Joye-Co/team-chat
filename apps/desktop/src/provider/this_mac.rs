@@ -533,15 +533,32 @@ mod tests {
     #[test]
     fn the_state_says_where_launchd_runs_the_daemon() {
         let bundled = Path::new("/Applications/X.app/Contents/MacOS/x-daemon");
-        assert_eq!(state_of(None, None), ThisMac::Unavailable);
-        assert_eq!(
-            state_of(None, Some("<string>/x</string>")),
-            ThisMac::Unavailable
-        );
-        assert_eq!(state_of(Some(bundled), None), ThisMac::NotSetUp);
         let mine = "<array>\n<string>/Applications/X.app/Contents/MacOS/x-daemon</string>\n<string>run</string>";
-        assert_eq!(state_of(Some(bundled), Some(mine)), ThisMac::Working);
         let other = "<array>\n<string>/Users/a/bin/x-daemon</string>";
+        assert!(runs(mine, bundled, false));
+        assert!(!runs(other, bundled, false));
+    }
+
+    #[test]
+    fn the_state_says_whether_the_service_runs_this_apps_daemon() {
+        // The definition of this system's service manager: a plist, on Windows a task.
+        let (bundled, mine, other) = if cfg!(windows) {
+            (
+                Path::new(r"C:\Programs\X\x-daemon.exe"),
+                "<Arguments>--headless &quot;C:\\Programs\\X\\x-daemon.exe&quot; run --config</Arguments>",
+                "<Arguments>--headless &quot;C:\\tools\\x-daemon.exe&quot; run --config</Arguments>",
+            )
+        } else {
+            (
+                Path::new("/Applications/X.app/Contents/MacOS/x-daemon"),
+                "<string>/Applications/X.app/Contents/MacOS/x-daemon</string>",
+                "<string>/Users/a/bin/x-daemon</string>",
+            )
+        };
+        assert_eq!(state_of(None, None), ThisMac::Unavailable);
+        assert_eq!(state_of(None, Some(mine)), ThisMac::Unavailable);
+        assert_eq!(state_of(Some(bundled), None), ThisMac::NotSetUp);
+        assert_eq!(state_of(Some(bundled), Some(mine)), ThisMac::Working);
         assert_eq!(state_of(Some(bundled), Some(other)), ThisMac::Elsewhere);
     }
 
@@ -621,6 +638,8 @@ mod tests {
         assert!(t.contains("labels = [\"mac\"]\n"));
     }
 
+    // launchd's PATH: a scheduled task gets the user's environment, nothing is merged there.
+    #[cfg(not(windows))]
     #[test]
     fn the_service_path_keeps_the_shell_path_first_and_adds_usual_folders() {
         let home = Path::new("/Users/a");

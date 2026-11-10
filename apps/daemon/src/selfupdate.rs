@@ -13,7 +13,7 @@
 //! 3. rename `<name>.exe.new` to `<name>.exe`. If that fails, rename the old file back.
 //!
 //! The updater never stops the daemon or its scheduled task (that would cancel the runs). The
-//! daemon does the rest: it sees a file with another stamp (size, write time, creation time)
+//! daemon does the rest: it sees another file (file index, size, write time)
 //! at its own path, waits until the stamp is the same at two checks and no run is active, and
 //! exits; the scheduled task starts the new file within a minute ([`crate::service`]). When a
 //! daemon starts it deletes the `<name>.exe.old-*` files next to it ([`clean_stale`]); one
@@ -45,15 +45,31 @@ impl Stamp {
         })
     }
 
-    /// Windows keeps no inode number in the standard metadata: the creation time stands in
-    /// for it (a new file moved into place has a new one).
+    /// Windows: the volume serial number and the file index are what the device and inode
+    /// are on Unix. The times alone would not do: a file renamed into a name that was just
+    /// freed gets the creation time of the file that had the name (NTFS tunneling), and a
+    /// copied file keeps its write time.
     #[cfg(windows)]
     pub fn of(path: &Path) -> Option<Stamp> {
         use std::os::windows::fs::MetadataExt as _;
-        let m = std::fs::metadata(path).ok()?;
-        m.is_file().then(|| Stamp {
-            dev: 0,
-            ino: m.creation_time(),
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+        };
+        let file = std::fs::File::open(path).ok()?;
+        let m = file.metadata().ok()?;
+        if !m.is_file() {
+            return None;
+        }
+        // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value to be filled in.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: the handle is an open file and `info` is a valid place to write.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+            return None;
+        }
+        Some(Stamp {
+            dev: u64::from(info.dwVolumeSerialNumber),
+            ino: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
             size: m.file_size(),
             mtime: m.last_write_time() as i64,
             mtime_nsec: 0,

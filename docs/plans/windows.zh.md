@@ -188,7 +188,7 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
   mode 函数在 Windows 上不做事）；磁盘空间用 `GetDiskFreeSpaceExW`，负载报 0；git 加
   `core.longpaths=true`；删除运行目录遇到文件被占用会重试几秒，还删不掉就留给下一次清理；Claude Code
   会话目录名按去掉 `\\?\` 前缀的路径算（`C:\Users\me\work` 是 `C--Users-me-work`）；自己更新的文件指纹
-  用大小、写入时间和创建时间。
+  用卷序列号、文件索引、大小和写入时间（M3 改的：只看时间会被 NTFS 的文件名隧道骗过）。
 - **先不支持、会明确报错的**：`pty` 运行时、`install-service` / `uninstall-service`、`[vm]`。
 - `tools/e2e` 能为 Windows 编译。
 
@@ -265,7 +265,7 @@ M1 里发现、留给后面的：
   3. 把 `<名字>.exe.new` 改名成 `<名字>.exe`；这一步失败就把旧文件改回去。
 
   更新方不要停 daemon，也不要结束计划任务（那会取消正在跑的 run）。剩下的 daemon 自己做：每分钟看一次
-  自己路径上的文件，指纹（大小、写入时间、创建时间）变了、连续两次一样、手上没有 run 时退出，计划任务
+  自己路径上的文件，指纹（卷序列号、文件索引、大小、写入时间）变了、连续两次一样、手上没有 run 时退出，计划任务
   一分钟内启动新文件；daemon 每次启动时删掉旁边的 `<名字>.exe.old-*`，删不掉的（旧进程还没退出）留到
   下一次。`bin\chat-run.exe` 是指向旧文件的硬链接，改名不影响它，daemon 启动时会重新建。
 - **「用这台电脑」**（`apps/desktop/src/provider/this_mac.rs`，对外的函数没变，设置页不用改）：
