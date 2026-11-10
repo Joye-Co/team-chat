@@ -14,6 +14,10 @@ pub mod rename;
 pub mod selftest;
 #[cfg(target_os = "macos")]
 mod status_item;
+#[cfg(target_os = "windows")]
+#[path = "status_item_win.rs"]
+mod status_item;
+mod tray_icon;
 pub mod switcher;
 // --- v12/overlays ---
 pub mod new_topic;
@@ -167,28 +171,31 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     })
     .detach();
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     if status_item {
         status_item::install(services, cx);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = status_item;
 }
 
 /// 设置 › 通用 › 菜单栏里显示: hides or shows the menu bar item.
 pub fn show_status_item(shown: bool, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     status_item::set_visible(shown, cx);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (shown, cx);
 }
 
 /// For the self-test: the menu bar item is installed and up to date.
 pub fn status_item_ok(services: &Services, cx: &App) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     return status_item::check(services, cx);
-    #[cfg(not(target_os = "macos"))]
-    return true;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (services, cx);
+        true
+    }
 }
 
 /// Registers the main window, where the navigation dialogs open.
