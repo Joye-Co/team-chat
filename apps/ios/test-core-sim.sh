@@ -33,5 +33,7 @@ BINS="$(cargo test --locked -p chat-core --target "$TRIPLE" --no-run --message-f
 cd "$ROOT/crates/chat-core"
 while IFS= read -r bin; do
   echo "== $(basename "$bin")"
-  xcrun simctl spawn "$DEVICE" "$bin"
+  # The perf_ tests assert host timings (a 10 ms query); a simulator on a shared CI runner
+  # misses them by chance. They run on the host in the Rust jobs.
+  xcrun simctl spawn "$DEVICE" "$bin" --skip perf_
 done <<<"$BINS"
