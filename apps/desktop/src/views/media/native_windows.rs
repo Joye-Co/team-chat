@@ -19,7 +19,11 @@ use std::{
     ffi::c_void,
     mem::ManuallyDrop,
     path::Path,
-    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak, mpsc},
+    sync::{
+        Arc, Mutex, MutexGuard, OnceLock, Weak,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
@@ -78,19 +82,32 @@ fn com() -> bool {
     *MTA.get_or_init(|| unsafe { CoIncrementMTAUsage() }.is_ok())
 }
 
-/// Runs `f` on a thread of its own and waits at most `limit` for the answer.
+/// Set when the caller stopped waiting: the worker checks it between samples and pages
+/// and gives up, so a decode nobody waits for does not go on using CPU and memory.
+type Stop = AtomicBool;
+
+fn stopped(stop: &Stop) -> bool {
+    stop.load(Ordering::Relaxed)
+}
+
+/// Runs `f` on a thread of its own and waits at most `limit` for the answer. After
+/// that the thread is told to stop.
 fn run<T: Send + 'static>(
     limit: Duration,
-    f: impl FnOnce() -> Option<T> + Send + 'static,
+    f: impl FnOnce(&Stop) -> Option<T> + Send + 'static,
 ) -> Option<T> {
     let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(Stop::new(false));
+    let theirs = stop.clone();
     std::thread::Builder::new()
         .name("media-native".into())
         .spawn(move || {
-            let _ = tx.send(f());
+            let _ = tx.send(f(&theirs));
         })
         .ok()?;
-    rx.recv_timeout(limit).ok().flatten()
+    let answer = rx.recv_timeout(limit).ok().flatten();
+    stop.store(true, Ordering::Relaxed);
+    answer
 }
 
 /// The absolute path with backslashes and without the `\\?\` prefix: the form the
@@ -311,7 +328,7 @@ impl Video {
     }
 
     /// The frame shown at `t` seconds.
-    unsafe fn frame(&mut self, t: f64) -> Option<Bitmap> {
+    unsafe fn frame(&mut self, t: f64, stop: &Stop) -> Option<Bitmap> {
         unsafe {
             let target = (t.max(0.) * 1e7) as i64;
             self.reader
@@ -319,6 +336,9 @@ impl Video {
                 .ok()?;
             let mut last: Option<IMFSample> = None;
             for _ in 0..MAX_SAMPLES_PER_FRAME {
+                if stopped(stop) {
+                    return None;
+                }
                 let (mut flags, mut time, mut sample) = (0u32, 0i64, None);
                 if self
                     .reader
@@ -341,7 +361,8 @@ impl Video {
                 if let Some(sample) = sample {
                     let length = sample.GetSampleDuration().unwrap_or(0).max(1);
                     last = Some(sample);
-                    if time + length > target {
+                    // Both come from the file.
+                    if time.saturating_add(length) > target {
                         break;
                     }
                 }
@@ -375,7 +396,13 @@ impl Video {
             if let Ok(two_d) = buffer.cast::<IMF2DBuffer>() {
                 let (mut scan0, mut pitch) = (std::ptr::null_mut(), 0i32);
                 two_d.Lock2D(&mut scan0, &mut pitch).ok()?;
-                let fits = !scan0.is_null() && pitch.unsigned_abs() as usize >= min_pitch;
+                // A sample decoded before a change of size is smaller than the size
+                // the reader reports now: the buffer must hold every row that is read.
+                let fits = !scan0.is_null()
+                    && pitch.unsigned_abs() as usize >= min_pitch
+                    && two_d
+                        .GetContiguousLength()
+                        .is_ok_and(|n| n as usize >= min_pitch * self.height as usize);
                 if fits {
                     copy(scan0, pitch as isize, &mut rgba);
                 }
@@ -437,7 +464,7 @@ fn fit(b: Bitmap, max: f64) -> Option<Bitmap> {
 
 pub fn video_info(path: &Path) -> Option<VideoInfo> {
     let path = path.to_path_buf();
-    run(Duration::from_secs(20), move || {
+    run(Duration::from_secs(20), move |_| {
         let video = unsafe { Video::open(&path) }?;
         let (width, height) = video.shown_size();
         (video.duration.is_finite() && width > 0 && height > 0).then_some(VideoInfo {
@@ -452,12 +479,12 @@ pub fn video_frames(path: &Path, times: &[f64], max_width: f64) -> Vec<Option<Bi
     let path = path.to_path_buf();
     let asked: Vec<f64> = times.to_vec();
     let limit = Duration::from_secs(20 + 10 * times.len() as u64);
-    run(limit, move || {
+    run(limit, move |stop| {
         let mut video = unsafe { Video::open(&path) }?;
         Some(
             asked
                 .iter()
-                .map(|&t| unsafe { video.frame(t) }.and_then(|b| fit(b, max_width)))
+                .map(|&t| unsafe { video.frame(t, stop) }.and_then(|b| fit(b, max_width)))
                 .collect::<Vec<_>>(),
         )
     })
@@ -516,7 +543,7 @@ unsafe fn format(reader: &IMFSourceReader) -> Option<(Pcm, usize, f64)> {
 /// The most peak groups kept while decoding (64 MB; days of audio in groups of 64).
 const MAX_GROUPS: usize = 16 << 20;
 
-unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
+unsafe fn peaks(path: &Path, buckets: usize, stop: &Stop) -> Option<(f64, Vec<f32>)> {
     unsafe {
         let mf = mf()?;
         let reader = mf.reader(path, false)?;
@@ -546,6 +573,9 @@ unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
         let mut groups: Vec<f32> = Vec::new();
         let (mut loudest, mut in_group, mut frames, mut seconds) = (0f32, 0usize, 0u64, 0f64);
         loop {
+            if stopped(stop) {
+                return None;
+            }
             let (mut flags, mut sample) = (0u32, None);
             if reader
                 .ReadSample(AUDIO, 0, None, Some(&mut flags), None, Some(&mut sample))
@@ -612,8 +642,8 @@ unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
 
 pub fn audio_peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
     let path = path.to_path_buf();
-    run(Duration::from_secs(180), move || unsafe {
-        peaks(&path, buckets)
+    run(Duration::from_secs(180), move |stop| unsafe {
+        peaks(&path, buckets, stop)
     })
 }
 
@@ -725,7 +755,7 @@ pub fn pdf_pages(path: &Path, width: u32, max_pages: usize) -> Option<(usize, Ve
     }
     let path = path.to_path_buf();
     let limit = Duration::from_secs(30 + 5 * max_pages.min(600) as u64);
-    run(limit, move || {
+    run(limit, move |stop| {
         let file = open_file(&path)?;
         let _ = keep_pdf_engine();
         // Fails for a file that is not a PDF and for one that needs a password.
@@ -733,6 +763,9 @@ pub fn pdf_pages(path: &Path, width: u32, max_pages: usize) -> Option<(usize, Ve
         let count = doc.PageCount().ok()? as usize;
         let mut out = Vec::new();
         for i in 0..count.min(max_pages) {
+            if stopped(stop) {
+                return None;
+            }
             let Ok(page) = doc.GetPage(i as u32) else {
                 break;
             };
@@ -973,7 +1006,7 @@ impl Drop for AudioPlayer {
 #[cfg(test)]
 pub fn describe(path: &Path) -> String {
     let path = path.to_path_buf();
-    run(Duration::from_secs(30), move || unsafe {
+    run(Duration::from_secs(30), move |_| unsafe {
         let mut out = String::new();
         let Some(mf) = mf() else {
             return Some("no Media Foundation".to_string());
