@@ -1,9 +1,9 @@
 # Windows 端计划
 
-状态：W0 已完成（客户端能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。M1 已完成（daemon 能为
-Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过真的 CLI）。
-R1 已完成（安装包、更新程序、发版流程；Windows CI 上真的装、更新、回滚、卸载了一遍；还缺证书、第一次真实
-发版和真机确认）。其余未开始。
+状态：W0 已完成（客户端能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。C1 的系统集成部分已写完
+（见 C1 一节）。M1 已完成（daemon 能为 Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；
+还没在真的 Windows 电脑上跑过真的 CLI）。R1 已完成（安装包、更新程序、发版流程；Windows CI 上真的装、更新、
+回滚、卸载了一遍；还缺证书、第一次真实发版和真机确认）。其余未开始。
 
 ## 目标
 
@@ -129,6 +129,58 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - 客户端测试在 Windows 上全过，去掉 CI 里的 `continue-on-error`。
 
 完成标准：在 Windows 上登录，收发消息、看话题、收通知、断线重连都正常。
+
+**C1 系统集成部分（已写完，Windows CI 跑过单元测试，没有在真机上看过）**
+
+做了什么：
+
+| 功能 | Windows 上的做法 | 代码 |
+| --- | --- | --- |
+| Token | Credential Manager 的普通凭据，目标名是 `<app id>:<服务器地址>`（和 Keychain 的 service、account 同一对），只存本机 | `crates/chat-core/src/token.rs` 的 `CredentialTokenStore` |
+| 通知 | GPUI 自带的 WinRT Toast（`App::show_system_notification`）。没有包身份，GPUI 给进程设 AppUserModelID 并在 `HKCU\Software\Classes\AppUserModelId\<id>` 登记显示名，不需要开始菜单快捷方式，开发构建也走这条路。Toast 的 tag 带群和话题，点击后打开对应话题。同时闪任务栏按钮；声音由客户端自己播系统通知音（GPUI 的 Toast 是静音的） | `apps/desktop/src/provider/windows.rs` |
+| 睡眠唤醒 | GPUI 的 `on_system_wake`（`WM_POWERBROADCAST`），再加时钟跳变兜底 | 同上 |
+| 网络变化 | 每 3 秒用 `GetAdaptersAddresses` 比较一次网卡地址，和 Mac 的做法一样 | 同上 |
+| 开机启动 | `HKCU\...\Run` 下以 app id 命名的值；同时读写 `Explorer\StartupApproved\Run`，所以在任务管理器里关掉后开关会显示关 | `views/settings/login_item.rs` |
+| 托盘图标 | `Shell_NotifyIconW`，挂在一个隐藏的顶层窗口上。图标用菜单栏的模板图按任务栏深浅色染成白或黑，有未读时带点；左键打开主窗口，右键菜单是 Mac 上 Dock 菜单的几项加「设置…」和「退出」 | `views/nav/status_item_win.rs`、`tray_icon.rs`、`src/win32.rs` |
+| 应用菜单 | GPUI 在 Windows 上的 `set_menus` 只把菜单存起来，不画。菜单列表去掉了只有 macOS 才有的项（服务、隐藏、前置全部窗口、表情与符号、空的帮助）；`menus::window_menu_bar` 返回 gpui-component 的 `AppMenuBar`，由窗口标题栏放进去 | `views/nav/menus.rs` |
+| 减弱动画、高对比度 | `SPI_GETCLIENTAREAANIMATION`、`SPI_GETHIGHCONTRAST`，设置变化靠隐藏窗口收到的 `WM_SETTINGCHANGE` | `ui/motion.rs` |
+| 文件操作 | 打开和定位本来就走 GPUI（Windows 上可用）。Quick Look 改为用默认程序打开，和「打开」走同一道检查：Windows 会运行、安装、挂载的类型（`exe`、`bat`、`scr`、`msi`、`hta`、`js`、带宏的 Office 文件等）和网页只在资源管理器里选中，文件名按 Windows 的读法判断（忽略末尾的点和空格）；分享改为在资源管理器里选中文件 | `views/files/native.rs` |
+| 设置窗口高度 | `SetWindowPos`，顶边不动、不超出显示器工作区；首次定高前用 DWM cloak 隐藏；去掉最小化和最大化按钮 | `views/settings/window_fit.rs` |
+
+过程中发现的：
+
+- GPUI 的 Windows 平台已经有 Toast、唤醒通知、打开和定位文件、系统深浅色，这些不用自己写 Win32。
+- GPUI 在 macOS 以外默认关掉最后一个窗口就退出（`QuitMode::Default`）。托盘图标在通知区域里时改成
+  `QuitMode::Explicit`，关窗后程序留在托盘（和 Mac 一样），用托盘菜单的「退出」退出；图标被隐藏或没加上时
+  保持默认，关掉最后一个窗口就退出，不会留下一个找不到的进程。
+- GPUI 的 `hide_other_apps` 在 Windows 上是 `unimplemented!()`，调到就崩；对应的动作现在只在 macOS 注册。
+- 系统强调色没有接：Windows 总有一个强调色（默认蓝），接了就不再是黑白规范，所以保持石墨色。
+- 外观跟随系统不用改：`window.appearance()` 和它的变化通知在 Windows 上由 GPUI 提供。
+
+这部分还没做的：
+
+- `window_menu_bar` 还没有放进主窗口标题栏（标题栏在窗口那部分工作里），放进去之前菜单在窗口里没有入口。
+- 快捷键没有动，`menus.rs` 里仍是 `cmd-…`，随整套键位一起映射。
+- 任务栏按钮上的未读角标（`ITaskbarList3::SetOverlayIcon`，对应 Dock 角标）。
+- 「关于」在 Windows 上打开设置窗口，没有单独的关于面板。
+- 系统分享面板（`DataTransferManager`）留到 C3。
+- 程序退出后，留在通知中心里的 Toast 点了没有反应（没有注册 COM 激活器）；安装包阶段（R1）可以一起做。
+- Toast 没有群头像和按群分组。
+
+要在真机上看的（CI 没法验证）：
+
+1. Toast 能弹出，标题是产品名；点击后窗口到前台并打开对应话题；读完后通知中心里那条消失。
+2. 专注助手打开时不弹 Toast，任务栏按钮仍然闪；设置里关掉声音后不响。
+3. 睡眠再唤醒、切换 Wi-Fi 或拔网线后几秒内重连（日志里有 `system change`）。
+4. 托盘图标在深色和浅色任务栏上都看得清，100% 和 150% 缩放下不糊；有未读时带点，悬停提示是未读数；
+   右键菜单每一项都能用，「退出」后图标立刻消失；重启资源管理器后图标回来；设置里关掉后图标消失。
+   关掉主窗口后程序还在托盘里，点图标能再打开；设置里隐藏图标后，关掉最后一个窗口程序退出。
+5. 开机启动：打开开关后重新登录，程序自己启动；在任务管理器里禁用后，开关显示为关。
+6. 登录后重启程序不用再登录（Token 在「凭据管理器 › Windows 凭据」里能看到一条，以 app id 开头）；退出登录后那条消失。
+7. 设置窗口：切换分页时高度变化顺滑、顶边不动，打开时不闪一下再跳到位，没有最小化和最大化按钮；
+   如果设置窗口打不开或看不见，先查 DWM cloak 那段。
+8. 关闭系统的动画效果后，客户端的装饰动画停掉；打开对比度主题后颜色切到高对比。
+9. 文件卡片上的预览用默认程序打开，分享会打开资源管理器并选中文件（路径里有空格和逗号也行）。
 
 **C2 产出和图（约 3 周，客户端里风险最大）**
 

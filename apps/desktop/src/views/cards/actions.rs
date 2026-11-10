@@ -137,6 +137,7 @@ fn press_of(action: &CardAction, message: &Message, provider: &Arc<dyn ChatProvi
         group_id: message.group_id.clone(),
         topic_id: message.topic_id.clone(),
         message_id: message.id.clone(),
+        author_id: message.author_id.to_string(),
         action_id: action.id.clone(),
         label: action.label.clone(),
         confirm: action.confirm.clone(),
@@ -233,6 +234,8 @@ struct Press {
     group_id: String,
     topic_id: String,
     message_id: String,
+    /// Who posted the card: on a budget card, the AI member at its budget.
+    author_id: String,
     action_id: String,
     label: String,
     confirm: Option<String>,
@@ -251,6 +254,14 @@ impl Press {
 
     /// Sends at once, or after the user agrees to the action's question.
     fn run(&self, window: &mut Window, cx: &mut App) {
+        // 改每周预算… on a budget card (docs/protocol.md "Budget pause") is the app's own: it opens
+        // 团队管理 › 用量 with that AI member's budget editor; nothing goes to the server.
+        if self.action_id.starts_with("budget-edit:") {
+            if let Some(services) = crate::views::refs::services(cx) {
+                crate::views::admin::open_budget(services, self.author_id.clone(), cx);
+            }
+            return;
+        }
         let Some(question) = self.confirm.clone() else {
             self.send();
             return;

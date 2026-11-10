@@ -62,6 +62,8 @@ mod ui;
 mod updater;
 #[allow(dead_code)]
 mod views;
+#[cfg(target_os = "windows")]
+mod win32;
 
 use std::{
     path::PathBuf,

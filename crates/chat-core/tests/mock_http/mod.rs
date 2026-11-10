@@ -544,7 +544,11 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
         (&Method::GET, ["v1", "updates", "latest"]) => {
             let windows = !s.ignores_platform
                 && query_value(&query, "platform").as_deref() == Some("windows");
-            match if windows { &s.windows_release } else { &s.release } {
+            match if windows {
+                &s.windows_release
+            } else {
+                &s.release
+            } {
                 Some((u, _)) => ok(u),
                 None => err(StatusCode::NOT_FOUND, "not_found"),
             }
@@ -552,7 +556,11 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
         (&Method::GET, ["v1", "updates", v, "download"]) => {
             let windows = !s.ignores_platform
                 && query_value(&query, "platform").as_deref() == Some("windows");
-            match if windows { &s.windows_release } else { &s.release } {
+            match if windows {
+                &s.windows_release
+            } else {
+                &s.release
+            } {
                 Some((u, b)) if u.version == *v => {
                     bytes(b.clone(), "application/x-apple-diskimage")
                 }
