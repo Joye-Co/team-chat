@@ -1211,6 +1211,15 @@ transaction as the write, with a `kind` the page filters by:
 | `login` | `email.sign_in`, `machine.login.start` |
 | `machine` | `machine.create`, `machine.revoke` |
 
+The server also writes events it notices itself (`audit_id` 0, no actor but the AI member):
+
+| `kind` | Action | When |
+| --- | --- | --- |
+| `run` | `run.failed` | a run of an AI member ended failed; `actorId` the AI member, `target` the 话题, `details { runId, groupId, requestedBy, title? }` |
+| `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
+| `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
+| `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
+
 ```ts
 ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
 ActivityResponse = { entries: ActivityEntry[] /* newest first */, hasMore }
