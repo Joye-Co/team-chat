@@ -10,6 +10,8 @@
 //! - [`prewarm`] draws every concept at the §6 sizes on a background thread at
 //!   launch; the asset loader serves from that cache and draws a missing one
 //!   on the spot (synchronously, so never a blank frame).
+//! - On a system without SF Symbols the same path serves the concept's icon
+//!   from the SVG set ([`svgset`]) as plain vector SVG.
 //! - A name the system does not have draws a crossed box in debug builds
 //!   (and is logged), and nothing in release builds.
 
@@ -25,7 +27,7 @@ use gpui::Styled as _;
 use gpui_component::Icon;
 
 use super::{
-    Weight, raster,
+    Weight, raster, svgset,
     sym::{LUCIDE, Sym, SymSize},
 };
 
@@ -188,6 +190,12 @@ fn lucide_path(sym: Sym) -> String {
 fn draw(p: &Parsed<'_>) -> Option<Arc<[u8]>> {
     if p.name.is_empty() {
         return None;
+    }
+    // No SF Symbols on this system (or `TC_SVG_ICONS`): the SVG set, at the
+    // symbol's size, weight and place.
+    if svgset::active() {
+        let svg = svgset::svg(p.name, p.point, p.weight, p.slot, p.ink)?;
+        return Some(Arc::from(svg.into_bytes()));
     }
     let mask = raster::draw_ink(
         p.name,
