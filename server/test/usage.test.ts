@@ -1,7 +1,8 @@
 // 用量: AI members' run costs by member, initiator, machine, runtime and day (owners only).
 import { TeamUsage } from "@chat/protocol";
 import { describe, expect, it } from "vitest";
-import { buildUsage } from "../src/usage";
+import { buildUsage, priceRun } from "../src/usage";
+import { PRICES, priceOf } from "../src/usage/prices";
 import { Daemon, mention, world } from "./daemon";
 import { Client, api } from "./helpers";
 
@@ -31,6 +32,7 @@ describe("team usage", () => {
     expect(u.bots).toEqual([expect.objectContaining({ memberId: w.bot.id, costUsd: 1.25, budgetCents: 10_000 })]);
     expect(u.initiators).toEqual([expect.objectContaining({ memberId: w.human.id, runs: 1 })]);
     expect(u.machines).toEqual([expect.objectContaining({ machineId: w.machineId, costUsd: 1.25 })]);
+    expect(u.pairs).toEqual([expect.objectContaining({ initiatorId: w.human.id, memberId: w.bot.id, costUsd: 1.25, runs: 1 })]);
     expect(u.runtimes).toEqual([expect.objectContaining({ runtime: "codex", machineId: w.machineId })]);
     expect(u.daily).toHaveLength(2);
     expect(u.daily[0].bots).toEqual([{ memberId: w.bot.id, costUsd: 1.25 }]);
@@ -56,6 +58,31 @@ describe("team usage", () => {
     expect(u.previous).toEqual({ costUsd: 4, topics: 1 });
     expect(u.daily.map((d) => d.costUsd)).toEqual([0, 3, 0, 0, 0, 0, 3]);
     expect(u.runtimes).toEqual([{ runtime: "claude", costUsd: 6, inputTokens: 3, outputTokens: 3, runs: 3, topics: 2 }]);
+    expect(TeamUsage.safeParse(u).success).toBe(true);
+  });
+
+  it("prices runs that report no cost from their tokens and marks the estimate", () => {
+    expect(priceOf("codex", null)).toEqual(PRICES["gpt-5-codex"]);
+    expect(priceOf("codex", "gpt-5-mini-2025")).toEqual(PRICES["gpt-5-mini"]);
+    expect(priceOf("claude", "claude-sonnet-4-5")).toEqual(PRICES["claude-sonnet-4"]);
+    expect(priceOf("other", null)).toBeNull();
+    const base = { endedAt: 8 * DAY, requestedBy: "p1", machineId: null, topicId: "t1" };
+    const codex = { ...base, runtime: "codex", costUsd: 0, inputTokens: 1_000_000, outputTokens: 100_000 };
+    expect(priceRun(codex, { runtime: "codex", model: null })).toMatchObject({ costUsd: 2.25, estimated: 2.25 });
+    expect(priceRun({ ...codex, costUsd: 0.5 }, { runtime: "codex", model: null })).toMatchObject({ costUsd: 0.5, estimated: 0 });
+    const u = buildUsage({
+      from: 7 * DAY,
+      to: 14 * DAY,
+      runs: [
+        { botId: "b1", run: codex },
+        { botId: "b2", run: { ...base, runtime: "claude", costUsd: 1, inputTokens: 10, outputTokens: 10 } },
+      ],
+      budgets: new Map(),
+      runners: new Map([["b1", { runtime: "codex", model: "gpt-5-mini" }]]),
+    });
+    expect(u.total).toMatchObject({ costUsd: 1.45, estimatedUsd: 0.45 });
+    expect(u.bots.find((b) => b.memberId === "b1")).toMatchObject({ costUsd: 0.45, estimatedUsd: 0.45 });
+    expect(u.bots.find((b) => b.memberId === "b2")?.estimatedUsd).toBeUndefined();
     expect(TeamUsage.safeParse(u).success).toBe(true);
   });
 });

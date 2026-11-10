@@ -47,6 +47,17 @@
         "topics": 11
       }
     ],
+    "pairs": [
+      {
+        "initiatorId": "01JBX0OWNER0000000000000AA",
+        "memberId": "01JBX0BOT000000000000000AC",
+        "costUsd": 52.5,
+        "inputTokens": 270000,
+        "outputTokens": 27000,
+        "runs": 3,
+        "topics": 2
+      }
+    ],
     "runtimes": [
       {
         "runtime": "claude",
@@ -63,7 +74,8 @@
         "inputTokens": 180000,
         "outputTokens": 18000,
         "runs": 2,
-        "topics": 1
+        "topics": 1,
+        "estimatedUsd": 12.5
       }
     ],
     "daily": [
