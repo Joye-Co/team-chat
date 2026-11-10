@@ -74,7 +74,8 @@
         "inputTokens": 180000,
         "outputTokens": 18000,
         "runs": 2,
-        "topics": 1
+        "topics": 1,
+        "estimatedUsd": 12.5
       }
     ],
     "daily": [

@@ -208,7 +208,7 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     initiators: [{ memberId: ID.owner, ...spend(74.5, 4) }],
     machines: [{ machineId: R.machine, ...spend(212.5, 12) }],
     pairs: [{ initiatorId: ID.owner, memberId: ID.bot, ...spend(52.5, 3) }],
-    runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2) }],
+    runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2), estimatedUsd: 12.5 }],
     daily: [{ start: T0 - 7 * 86_400_000, costUsd: 32.5, bots: [{ memberId: ID.bot, costUsd: 32.5 }] }],
   });
 
