@@ -27,12 +27,14 @@
 //!    background executor first, `gpui::elements::img` `use_data`).
 //!
 //! License: SF Symbols are drawn by the system at run time and never exported
-//! or bundled.
+//! or bundled. Systems without them (Windows) draw each concept from the SVG
+//! set in [`svgset`], behind the same asset paths.
 
 pub mod asset;
 pub mod gates;
 mod raster;
 pub mod scene;
+pub mod svgset;
 pub mod sym;
 
 pub use sym::{Sym, SymSize};

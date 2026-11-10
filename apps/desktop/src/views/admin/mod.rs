@@ -90,6 +90,23 @@ pub fn open_at(services: Services, page: AdminPage, cx: &mut App) {
     open_with(services, Some(page), cx);
 }
 
+/// 改每周预算… on a budget card: 团队管理 › 用量 with that AI member's budget editor open.
+pub fn open_budget(services: Services, member_id: String, cx: &mut App) {
+    if !i_am_owner(&services) {
+        return;
+    }
+    open_with(services, Some(AdminPage::Usage), cx);
+    if let Some((handle, view)) = cx.try_global::<AdminWindow>().and_then(|w| w.0.clone()) {
+        let _ = handle.update(cx, |_, _, cx| {
+            let _ = view.update(cx, |v, cx| {
+                v.usage.budget_for = Some(member_id);
+                v.usage.budget_error = None;
+                cx.notify();
+            });
+        });
+    }
+}
+
 fn open_with(services: Services, page: Option<AdminPage>, cx: &mut App) {
     if !i_am_owner(&services) {
         return;

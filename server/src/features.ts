@@ -22,3 +22,4 @@ import "./monitor";
 import "./activity";
 import "./usage";
 import "./team";
+import "./budget";

@@ -219,10 +219,27 @@ export const SessionUpload = z.object({
   headers: z.record(z.string(), z.string()).optional(),
 });
 
+/**
+ * What one model of a run used. `inputTokens` leaves out cached input: cache reads and writes are
+ * their own counts, priced apart. `costUsd` is the CLI's own figure for this model (Claude Code
+ * reports one); absent, the server prices the tokens from its price list.
+ */
+export const ModelUsage = z.object({
+  model: z.string().min(1).max(200),
+  inputTokens: z.int().nonnegative(),
+  outputTokens: z.int().nonnegative(),
+  cacheReadTokens: z.int().nonnegative().optional(),
+  cacheWriteTokens: z.int().nonnegative().optional(),
+  costUsd: z.number().nonnegative().optional(),
+});
+export type ModelUsage = z.infer<typeof ModelUsage>;
+
 export const Usage = z.object({
   inputTokens: z.int().nonnegative(),
   outputTokens: z.int().nonnegative(),
   costUsd: z.number().nonnegative().optional(),
+  /** Per model the run used (daemons from 1.3 on); older daemons send the totals only. */
+  models: z.array(ModelUsage).max(32).optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 

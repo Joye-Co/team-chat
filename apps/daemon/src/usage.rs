@@ -84,7 +84,7 @@ fn env_or(rt: &RuntimeConfig, name: &str, default: PathBuf) -> PathBuf {
 
 async fn claude(rt: &RuntimeConfig) -> Option<Vec<UsageWindow>> {
     let program = crate::health::which(&rt.command())?;
-    let mut cmd = tokio::process::Command::new(program);
+    let mut cmd = crate::health::command(&program);
     cmd.args([
         "-p",
         "/usage",

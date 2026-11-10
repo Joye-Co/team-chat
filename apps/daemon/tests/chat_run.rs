@@ -3,8 +3,14 @@
 use std::process::Command;
 
 fn linked(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let p = dir.join(name);
+    let p = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    #[cfg(unix)]
     std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_daemon"), &p).unwrap();
+    // Windows: a hard link, like the run's `bin\\chat-run.exe` (a copy across volumes).
+    #[cfg(not(unix))]
+    if std::fs::hard_link(env!("CARGO_BIN_EXE_daemon"), &p).is_err() {
+        std::fs::copy(env!("CARGO_BIN_EXE_daemon"), &p).unwrap();
+    }
     p
 }
 
@@ -20,6 +26,7 @@ fn the_daemon_binary_named_chat_run_is_the_client() {
     let out = Command::new(&chat_run)
         .args(["resolve", "--event", "E", "--result", "ignored"])
         .env_remove("CHAT_RUN_SOCKET")
+        .env_remove("CHAT_RUN_DIR")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));

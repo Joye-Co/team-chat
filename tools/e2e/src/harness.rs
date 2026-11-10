@@ -55,12 +55,15 @@ fn read_secret(path: &Path) -> Result<Option<String>> {
 
 fn write_secret(path: &Path, value: &str) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    // Windows has no file modes: the user's profile folder is private already.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts
         .open(path)
         .with_context(|| format!("write {}", path.display()))?;
     writeln!(f, "{value}")?;
