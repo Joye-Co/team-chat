@@ -374,7 +374,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "${user}:(OI)(CI)RX" | Out-Null
           Copy-Item target\debug\daemon.exe "$dir\daemon.exe"
-          [IO.File]::WriteAllText("$dir\daemon.toml", "server_url = `"http://127.0.0.1:9`"`ntoken_file = `"C:\\tc-standard\\token`"`n")
+          [IO.File]::WriteAllText("$dir\daemon.toml", "server_url = `"http://127.0.0.1:9`"`ntoken_file = `"C:\\tc-standard\\token`"`n[runtimes.ci]`nkind = `"claude`"`ncommand = 'C:\Windows\System32\whoami.exe'`n")
+          [IO.File]::WriteAllText("$dir\token", 'tm_test_not_a_real_token')
           foreach ($verb in 'install-service', 'uninstall-service') {
             $p = Start-Process -FilePath "$dir\daemon.exe" -ArgumentList $verb, '--config', "$dir\daemon.toml" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
             Write-Host "$verb as a standard user: exit code $($p.ExitCode)"

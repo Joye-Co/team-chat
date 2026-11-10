@@ -108,7 +108,22 @@ fn main() {
             std::process::exit(if ok { 0 } else { 1 });
         }
         "install-service" => {
-            let _ = load_cfg();
+            let cfg = load_cfg();
+            // Windows: a daemon that would stop at start-up (a token or config that other
+            // users can read, no token) is not registered: the task would start it every
+            // minute and only its log would say why. launchd and systemd installs are as before.
+            if cfg!(windows) {
+                let mut problems = cfg.problems();
+                if let Some(why) = daemon::sys::acl_problem(&config_path) {
+                    problems.push(format!(
+                        "config {} must be private to this user: {why}",
+                        config_path.display()
+                    ));
+                }
+                if !problems.is_empty() {
+                    exit_with(&problems.join("\n"));
+                }
+            }
             let res = if cfg!(windows) {
                 std::env::current_exe()
                     .map_err(|e| e.to_string())

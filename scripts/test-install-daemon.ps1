@@ -88,8 +88,8 @@ try {
     Assert $refused 'a download without -Sha256 is refused'
     Assert (-not (Test-Path -LiteralPath $exe)) 'and nothing was installed'
 
-    # The install.
-    & $install @common -Sha256 $hash
+    # The install, files only: this computer has no coding CLI yet, see below.
+    & $install @common -Sha256 $hash -NoService
     Assert (Test-Path -LiteralPath $exe) 'the daemon is installed'
     $config = Get-Content -Raw -LiteralPath (Join-Path $configDir 'daemon.toml')
     Assert ($config.Contains('machine_id = "01TESTMACHINE"')) 'the config names the machine'
@@ -109,16 +109,24 @@ try {
     }
     Assert ((Get-Acl -LiteralPath $configDir).AreAccessRulesProtected) 'the config folder inherits no access from its parent'
 
-    # The scheduled task runs the daemon, hidden, and the daemon writes its log.
-    & $schtasks /Query /TN $taskName | Out-Null
-    Assert ($LASTEXITCODE -eq 0) "the task $taskName is registered"
-    # This computer has no coding CLI, and a daemon without a runtime does not run: give it
-    # one (never started here) and restart the service, which is what an operator does after
-    # changing the config.
+    # A daemon that would stop at start-up is not registered: this computer has no coding CLI,
+    # so there is no runtime.
+    $ErrorActionPreference = 'Continue'
+    & $exe install-service --config (Join-Path $configDir 'daemon.toml') 2>&1 | Out-Host
+    $code = $LASTEXITCODE
+    & $schtasks /Query /TN $taskName 2>&1 | Out-Null
+    $registered = $LASTEXITCODE -eq 0
+    $ErrorActionPreference = 'Stop'
+    Assert ($code -ne 0 -and -not $registered) 'without a runtime install-service refuses and registers nothing'
+
+    # With a runtime (a program that is never started here) the scheduled task runs the
+    # daemon, hidden, and the daemon writes its log.
     $whoami = Join-Path $env:SystemRoot 'System32\whoami.exe'
     Add-Content -LiteralPath (Join-Path $configDir 'daemon.toml') -Encoding Ascii -Value "`n[runtimes.ci]`nkind = `"claude`"`ncommand = '$whoami'"
-    & $exe restart-service
-    Assert ($LASTEXITCODE -eq 0) 'restart-service worked'
+    & $exe install-service --config (Join-Path $configDir 'daemon.toml')
+    Assert ($LASTEXITCODE -eq 0) 'install-service worked'
+    & $schtasks /Query /TN $taskName | Out-Null
+    Assert ($LASTEXITCODE -eq 0) "the task $taskName is registered"
     Wait-For 60 'the daemon started and writes its log' {
         (Test-Path -LiteralPath $script:log) -and ((Get-Content -Raw -LiteralPath $script:log) -match 'daemon started')
     }

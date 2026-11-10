@@ -485,6 +485,9 @@ M2 里发现的事：
   `D:\Apps\X`，默认所有登录用户可改），`install-service` 就拒绝并说明原因。检查的是所有者和访问列表；
   「在盘符根目录下能新建文件夹」不算。它和 M2 的 `winacl::check` 问的不是一个问题：那边问「谁能打开」（私有
   文件，别人连读都不行），这边问「谁能改」（Program Files 里的程序别人可以读），所以是单独一个模块。
+- **装之前先查**：Windows 上 `install-service` 先做 daemon 启动时会做的检查（token 在不在、配置和 token 是否
+  只有当前用户、SYSTEM、Administrators 能打开），不过就不注册。否则任务每分钟启动一次、每次都马上退出，
+  原因只写在日志里。
 - **任务属于谁**：XML 里用当前用户的 SID，不用用户名（`whoami` 按控制台代码页输出，中文用户名会被读错）。
 - **为什么用 XML 加 `schtasks`，不用任务计划程序的 COM 接口**：XML 是纯文本，在每个系统上都能单元测试；
   `schtasks` 每台 Windows 都有；daemon 不用为此写 COM 代码。不解析 `schtasks` 的输出（它跟着系统语言和
