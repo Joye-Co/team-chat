@@ -949,6 +949,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "ulid",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -1495,6 +1496,7 @@ dependencies = [
  "tracing",
  "unicode-segmentation",
  "windows 0.62.2",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
