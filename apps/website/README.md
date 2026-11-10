@@ -14,7 +14,7 @@ dependencies.
 | --- | --- |
 | `src/index.html` | The page. Write `{{PRODUCT_NAME}}` wherever the product name appears; the build fills it from `product.json`. |
 | `src/styles.css` | Tokens for light and dark mode, layout, and the scroll motion (only under `.motion`, which `main.js` adds unless the viewer asked for reduced motion) |
-| `src/main.js` | Scroll reveals, the card gallery, and the clickable app demos |
+| `src/main.js` | Scroll reveals, the card gallery, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view and the clickable app demos |
 | `src/img/` | WebP screenshots in light and dark pairs (`*-light.webp`, `*-dark.webp`) and the app icon |
 | `src/img/ui/` | The screens of the clickable demos |
 
@@ -27,8 +27,16 @@ Every screenshot comes from the app's own screenshot self-test, with the sample 
 desktop --screenshot <dir> --theme both --size 1440x900 --scenes desk,topic-v2,…
 ```
 
-Then convert with `cwebp -q 88 -m 6`. Card images (`img/card-*`) are crops of the card gallery
+Then convert with `cwebp -q 88 -m 6`. `settings-machines` is the settings window without its
+toolbar (`-crop 0 190 1280 900`). Card images (`img/card-*`) are crops of the card gallery
 scenes (`compose-*`, `cards-v2-*`) taken at `--size 1440x1700`.
+
+## Pins and legends
+
+A screenshot can carry numbered pins and a legend under it: `<div class="pins">` inside the `.shot`
+holds one `<i class="pin" data-n="1" style="left:..%;top:..%">` per point (percent of the image), and
+the `<ol class="legend">` after the shot explains each number. Pointing at a legend item lights its
+pin. On a clickable demo the pins show only on the start screen.
 
 ## Clickable demos
 
