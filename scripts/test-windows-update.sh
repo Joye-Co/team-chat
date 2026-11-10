@@ -33,6 +33,8 @@ A_SETUP="${1:?usage: test-windows-update.sh <a-setup.exe> <b-setup.exe> [port]}"
 B_SETUP="${2:?usage: test-windows-update.sh <a-setup.exe> <b-setup.exe> [port]}"
 PORT="${3:-8826}"
 [ -f "$A_SETUP" ] && [ -f "$B_SETUP" ] || die "an installer is missing"
+A_SETUP="$(cd "$(dirname "$A_SETUP")" && pwd)/$(basename "$A_SETUP")"
+B_SETUP="$(cd "$(dirname "$B_SETUP")" && pwd)/$(basename "$B_SETUP")"
 NAME="$(product name)"
 SLUG="$(product slug)"
 version_of() { basename "$1" | sed -E "s/^$NAME-(.*)-setup\.exe$/\1/"; }

@@ -138,6 +138,8 @@ else
 fi
 
 mkdir -p "$DIST"
+# Absolute: makensis reads a relative output path from the script's folder.
+DIST="$(cd "$DIST" && pwd)"
 OUT="$DIST/$NAME-$VERSION-setup.exe"
 rm -f "$OUT" "$OUT.sha256"
 log "packing $(basename "$OUT")"
