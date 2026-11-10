@@ -12,7 +12,7 @@ export const OFFLINE_GRACE_MS = 5 * 60_000;
 export interface ActivityEvent {
   at: number;
   kind: "run" | "machine" | "budget";
-  action: "run.failed" | "machine.offline" | "machine.online" | "budget.reached";
+  action: "run.failed" | "machine.offline" | "machine.online" | "budget.reached" | "budget.paused" | "budget.raised" | "budget.stopped";
   actorId?: string | null;
   target?: string | null;
   machineId?: string | null;

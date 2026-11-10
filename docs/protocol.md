@@ -1219,6 +1219,9 @@ The server also writes events it notices itself (`audit_id` 0, no actor but the 
 | `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
 | `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
 | `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
+| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
+| `budget` | `budget.raised` | an owner chose 这周再加: `actorId` the owner, `target` the AI member, `details { extraCents, runId }` |
+| `budget` | `budget.stopped` | an owner chose 先停: the held run is cancelled; `details { runId, topicId, title? }` |
 
 ```ts
 ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
@@ -1243,7 +1246,8 @@ Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话�
               unpricedTokens? /* tokens of models with no known price, not in costUsd */ }
 TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
-              bots: (Spend & { memberId, budgetCents?, models?: string[] /* by cost */ })[],
+              bots: (Spend & { memberId, budgetCents?, models?: string[] /* by cost */,
+                               heldRuns? /* runs waiting at the budget for an owner */ })[],
               initiators: (Spend & { memberId })[],
               models?: (Spend & { model, name, runtimes: string[] })[] /* by model the runs used */,
               machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
@@ -1267,6 +1271,28 @@ TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
   machine's CLI login (`MonitorCli.method`).
 - Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
 - A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
+
+## Budget pause
+
+到了预算先停下来问: before a run of an AI member starts (or leaves the queue), the server compares
+the member's spend this week with its `weeklyBudgetCents` plus what owners added for this week.
+The week starts Monday 00:00 in the team's time zone; spend is priced per model as in Team usage,
+estimates included. At or over the line the run does not start: it stays `waiting` with no
+machine, the topic waits on the team's owners in the group (`waiting_answer`, so 首页 and
+notifications show it), and the AI member posts a Card v1 to them:
+
+- title 「Forge 这周花了 $100，到了预算。继续吗？」
+- `budget-raise:<runId>` 「这周再加 $X」: X is half the weekly budget, rounded up to whole
+  dollars (at least $1), for this week only (D1 `budget_grants`, migration 0015). The held runs
+  go back in the queue and start.
+- `budget-edit:<runId>` 「改每周预算…」, `value { memberId }`: the app opens 团队管理 › 用量 with
+  that member's budget editor; the server ignores the press. A new `weeklyBudgetCents` that covers
+  the spend lets held runs go.
+- `budget-stop:<runId>` 「先停」: the held run is cancelled and the topic says so in plain words.
+
+Only an owner's press counts. A run already on a machine finishes. No `weeklyBudgetCents`, no
+limit. 活动记录 records `budget.paused`, `budget.raised` and `budget.stopped`; `GET /v1/usage` gives
+each budgeted member's `heldRuns`.
 
 ## Team roster
 

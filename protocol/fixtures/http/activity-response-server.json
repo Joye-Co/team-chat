@@ -4,6 +4,33 @@
   "value": {
     "entries": [
       {
+        "id": 47,
+        "at": 1762128120000,
+        "kind": "budget",
+        "action": "budget.raised",
+        "actorId": "01JBX0OWNER0000000000000AA",
+        "target": "01JBX0BOT000000000000000AC",
+        "details": {
+          "extraCents": 5000,
+          "runId": "01JA0000000000000000000R10"
+        }
+      },
+      {
+        "id": 46,
+        "at": 1762128060000,
+        "kind": "budget",
+        "action": "budget.paused",
+        "actorId": "01JBX0BOT000000000000000AC",
+        "target": "01JBX0BOT000000000000000AC",
+        "details": {
+          "runId": "01JA0000000000000000000R10",
+          "topicId": "01JBX0TOPIC0000000000000AD",
+          "budgetCents": 10000,
+          "spentCents": 10040,
+          "title": "对一下十一月的账单"
+        }
+      },
+      {
         "id": 45,
         "at": 1762128000000,
         "kind": "budget",

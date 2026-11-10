@@ -34,6 +34,8 @@ export const TeamUsage = z.object({
         memberId: Id,
         ...Spend,
         budgetCents: z.int().nonnegative().optional(),
+        /** Runs held at its weekly budget, waiting for an owner (到了预算先停下来问). */
+        heldRuns: z.int().nonnegative().optional(),
         /** The models this AI member used, by cost (ids as in `models`). */
         models: z.array(z.string().min(1).max(200)).max(10).optional(),
       }),

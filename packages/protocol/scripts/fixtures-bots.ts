@@ -197,6 +197,8 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/activity-response-empty.json", "ActivityResponse", { entries: [], hasMore: false });
   ok("http/activity-response-server.json", "ActivityResponse", {
     entries: [
+      { id: 47, at: T0 + 120_000, kind: "budget", action: "budget.raised", actorId: ID.owner, target: ID.bot, details: { extraCents: 5000, runId: "01JA0000000000000000000R10" } },
+      { id: 46, at: T0 + 60_000, kind: "budget", action: "budget.paused", actorId: ID.bot, target: ID.bot, details: { runId: "01JA0000000000000000000R10", topicId: ID.topic, budgetCents: 10000, spentCents: 10040, title: "对一下十一月的账单" } },
       { id: 45, at: T0, kind: "budget", action: "budget.reached", actorId: ID.bot, target: ID.bot, details: { budgetCents: 10000, spentCents: 10040 } },
       { id: 44, at: T0 - 60_000, kind: "run", action: "run.failed", actorId: ID.bot, target: ID.topic, machineId: R.machine, details: { runId: "01JA0000000000000000000R09", groupId: ID.general, requestedBy: ID.owner, title: "对一下十月的账单" } },
       { id: 43, at: T0 - 120_000, kind: "machine", action: "machine.online", target: R.machine, machineId: R.machine, details: { offlineMs: 2_400_000 } },
@@ -212,7 +214,7 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     total: { ...spend(212.5, 12), unpricedTokens: 198000 },
     previous: { costUsd: 180.25, topics: 9 },
     teamBudgetCents: 40000,
-    bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000, models: ["claude-opus-5-5", "claude-haiku-4-5"] }],
+    bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000, heldRuns: 1, models: ["claude-opus-5-5", "claude-haiku-4-5"] }],
     initiators: [{ memberId: ID.owner, ...spend(74.5, 4) }],
     machines: [{ machineId: R.machine, ...spend(212.5, 12) }],
     pairs: [{ initiatorId: ID.owner, memberId: ID.bot, ...spend(52.5, 3) }],

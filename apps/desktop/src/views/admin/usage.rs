@@ -92,7 +92,7 @@ pub struct Usage {
     /// 改预算 for this AI member.
     pub budget_for: Option<String>,
     budget: Entity<InputState>,
-    budget_error: Option<String>,
+    pub budget_error: Option<String>,
     saving: bool,
 }
 
@@ -1198,6 +1198,7 @@ mod tests {
                 member_id: "forge".into(),
                 spend: Spend::default(),
                 budget_cents: None,
+                held_runs: None,
                 models: vec!["claude-opus-5-5".into(), "mystery-1".into()],
             }],
             models: vec![ModelSpend {

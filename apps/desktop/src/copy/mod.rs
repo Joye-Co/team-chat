@@ -47,12 +47,12 @@ pub mod cards_v2;
 // --- inc-cards21 ---
 pub mod cards21;
 // --- end inc-cards21 ---
+pub mod admin;
 pub mod desk;
 pub mod group_page;
 pub mod live;
 pub mod members_page;
 pub mod memory;
-pub mod admin;
 pub mod rail;
 pub mod side_chat;
 pub mod topic_rail;

@@ -26,6 +26,7 @@
         "runs": 5,
         "topics": 4,
         "budgetCents": 10000,
+        "heldRuns": 1,
         "models": [
           "claude-opus-5-5",
           "claude-haiku-4-5"

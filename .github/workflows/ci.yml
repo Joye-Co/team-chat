@@ -280,13 +280,11 @@ jobs:
         run: cargo check --locked -p e2e --all-targets
 
   rust-lint:
-    name: Rust fmt and clippy (report only)
+    name: Rust fmt and clippy
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Report only until main is clean: fmt and clippy fail on main today. Remove this line then.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml

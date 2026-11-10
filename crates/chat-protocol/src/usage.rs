@@ -47,6 +47,9 @@ pub struct BotSpend {
     pub spend: Spend,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_cents: Option<u64>,
+    /// Runs held at its weekly budget, waiting for an owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_runs: Option<u32>,
     /// The models this AI member used, by cost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<String>,
