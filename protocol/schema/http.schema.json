@@ -24513,6 +24513,13 @@
         "downloadUrl": {
           "type": "string",
           "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "macos",
+            "windows"
+          ]
         }
       },
       "required": [

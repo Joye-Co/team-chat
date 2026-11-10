@@ -14,6 +14,8 @@
 //! - `roster/roster.json` becomes `bot_roster.rs`, the default character of a new bot by name.
 //!   Without it the table is empty.
 //!
+//! On Windows it also compiles the exe's icon and version resources (`embed_windows_resources`).
+//!
 //! It also writes `release_notes.rs`: every `docs/releases/<version>.md`, newest first, which
 //! the 更新记录 and the 更新后 sheet of `src/updater/notes.rs` read without a network.
 
@@ -54,6 +56,35 @@ fn main() {
     embed_characters(ops.as_deref());
     embed_roster(ops.as_deref());
     embed_release_notes(&manifest);
+    embed_windows_resources(&manifest, json["name"].as_str().unwrap_or_default());
+}
+
+/// Windows: gives the exe its icon and its version block (file and product version from the
+/// Cargo version, the product name from product.json), which Explorer, the taskbar and
+/// 应用和功能 show. Needs the resource compiler of the Windows SDK, so it runs only when the
+/// build host is Windows too; a cross-build from another system (a compile check) skips it.
+fn embed_windows_resources(manifest: &Path, name: &str) {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    // A plain path without `..`: the resource compiler reads it from a script.
+    let Some(root) = manifest.parent().and_then(Path::parent) else {
+        return;
+    };
+    let icon = root.join("assets").join("brand").join("AppIcon.ico");
+    println!("cargo:rerun-if-changed={}", icon.display());
+    #[cfg(windows)]
+    {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon(&icon.display().to_string());
+        res.set("ProductName", name);
+        res.set("FileDescription", name);
+        res.set("InternalName", name);
+        res.set("OriginalFilename", &format!("{name}.exe"));
+        res.compile().expect("compile the Windows resources");
+    }
+    #[cfg(not(windows))]
+    let _ = name;
 }
 
 /// The private ops checkout: `$TC_OPS_DIR`, else `$HOME/.config/team-chat/ops` when it is a

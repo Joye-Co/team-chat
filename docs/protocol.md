@@ -647,24 +647,46 @@ Module: `updates.ts` / `updates.rs`.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
-| `GET /v1/updates/latest` | member | | `UpdateInfo`; 404 when no release exists |
-| `GET /v1/updates/:version/download` | member | | the DMG (`Range` supported) |
+| `GET /v1/updates/latest?platform=` | member | | `UpdateInfo` of the newest release for that platform; 404 when there is none |
+| `GET /v1/updates/:version/download?platform=` | member | | the file of that platform (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
-| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }`; a withdrawn release is not `latest` and not downloadable |
+| `PUT /v1/admin/releases/:version/assets/:platform` | header `X-Admin-Secret` | the raw file of that platform; same headers | `UpdateInfo` |
+| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }` (`latest` is the newest DMG); a withdrawn release is not `latest` and not downloadable, on every platform |
 | `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
-| `POST /download` | anyone with a valid invite code | form `code=<invite code>` | the latest DMG |
+| `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
 | `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG (links made before the fragment form) |
 
 ```ts
-UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl }
+ReleasePlatform = "macos" | "windows"   // macos = the DMG; windows = the installer (-setup.exe, x64)
+UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl, platform?: ReleasePlatform }
   // version "MAJOR.MINOR.PATCH" without leading zeros; notes Markdown <= 20,000; downloadUrl absolute
+  // platform: sent by every server that knows platforms; missing = "macos"
 ```
 
-Rules: latest = the highest version by numeric comparison. A `PUT` of an existing version is
-`conflict`. The server checks the body's SHA-256 against `X-Sha256` (`invalid` otherwise) and
-the body is at most 100 MB. `GET /download` accepts an invite code that is not expired (used or
-not), is rate limited per IP, answers 404 with a plain-text body for a bad code, and sends
-`Content-Disposition: attachment; filename="<slug>-<version>.dmg"`. Invite links put the code in
+Rules: latest = the highest version by numeric comparison, per platform: each platform's file
+of a version is uploaded on its own, so the newest Windows release may be older than the
+newest DMG. A `PUT` of an existing version and platform is `conflict`. The server checks the
+body's SHA-256 against `X-Sha256` (`invalid` otherwise) and the body is at most 100 MB.
+
+Platforms (added for the Windows client; old clients and scripts are not affected):
+
+- A request without `platform` means `macos`, and the DMG's `downloadUrl` has no query. So a
+  Mac client from before platforms sends and receives what it always did, plus the
+  `platform: "macos"` field it ignores. An unknown `platform` is `invalid`.
+- `PUT /v1/admin/releases/:version/assets/macos` is the same upload as
+  `PUT /v1/admin/releases/:version`.
+- A client asks for its own platform and must drop an `UpdateInfo` whose `platform` (missing =
+  `macos`) is another one. A Windows client therefore never takes the DMG: a server without a
+  Windows release answers 404, and a server from before platforms ignores the parameter and
+  answers with an `UpdateInfo` that has no `platform`.
+- `/download`: the page posts `platform=windows` when the browser runs on Windows; any other
+  value, or none, serves the DMG.
+
+`GET /download` accepts an invite code that is not expired (used or
+not), is rate limited per IP, answers 404 with a plain-text body for a bad code or when the
+platform has no release, and sends
+`Content-Disposition: attachment; filename="<slug>-<version>.dmg"` (`<slug>-<version>-setup.exe`
+for Windows). Invite links put the code in
 the URL fragment, which browsers never send, so no request log (the app's or the Workers
 invocation log) records it. Logs must redact the `code` query parameter of old links. Every
 publish is audited.
