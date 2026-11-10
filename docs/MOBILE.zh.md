@@ -12,7 +12,7 @@
 | `chat-core` 的 87 个测试在 iOS 27.2 模拟器里运行 | 全部通过 |
 | 最小应用：SwiftUI + UniFFI + `chat-core`，登录本地沙盒 | 能看群、话题、消息，能发消息 |
 
-还没验证：真机；应用进后台被挂起后再回来的重连和补拉；钥匙串；推送。
+还没验证：真机；应用进后台被挂起后再回来的重连和补拉；真机上的钥匙串和应用组（模拟器里已通过）；推送。
 
 ## 2. 架构
 
@@ -39,7 +39,10 @@ chat-protocol（协议类型）
 | `apps/ios/Sources` | 应用的 Swift 代码 |
 | `apps/ios/Extensions` | 通知扩展、实时活动扩展 |
 | `apps/ios/project.yml` | 工程定义，用 XcodeGen 生成 Xcode 工程（工程文件不进仓库） |
-| `apps/ios/build-sim.sh` | 不用 Xcode 工程的模拟器构建，本地和 CI 做快速检查 |
+| `apps/ios/Shared` | 应用和扩展共用的类型 |
+| `apps/ios/build-sim.sh` | 模拟器构建：编核心、生成接口、生成工程、编应用和扩展；`--run` 装到模拟器并登录本地沙盒 |
+| `apps/ios/test-core-sim.sh` | 在模拟器里跑 `chat-core` 的测试 |
+| `apps/ios/check-copy.ts` | 界面文字检查 |
 | `server/src/push` | 推送模块 |
 
 ## 3. 关键决定
@@ -92,6 +95,7 @@ chat-protocol（协议类型）
 - CI 增加一个 macOS 任务：构建桥接和应用，在模拟器里跑 `chat-core` 的测试。
 - 界面文字目录和用语检查。
 - 完成标准：CI 通过；应用重启后不用重新登录。
+- 状态：代码已完成。模拟器里钥匙串、应用组容器、重启后保持登录、退出登录都验证过。真机上的应用组要等有开发者账号签名后再验证。
 
 ### M1 能聊（大）
 
