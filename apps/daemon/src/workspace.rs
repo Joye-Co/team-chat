@@ -491,6 +491,8 @@ mod tests {
             assert!(std::fs::write(work.join("src").join("a.txt"), "new").is_err());
             assert!(std::fs::write(work.join("new.txt"), "x").is_err());
             assert!(std::fs::write(work.join("src").join("new.txt"), "x").is_err());
+            // Windows: a process with the restore privilege (the CI runner) may still delete.
+            #[cfg(unix)]
             assert!(std::fs::remove_file(work.join("src").join("a.txt")).is_err());
         }
         assert_eq!(

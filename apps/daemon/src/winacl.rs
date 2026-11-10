@@ -273,7 +273,9 @@ pub fn protect(path: &Path) -> std::io::Result<()> {
 /// Makes the folder `dir` and everything in it read-only for the daemon's user (an entry that
 /// denies the write rights, inherited by all that is in it and all that would be made there),
 /// or gives the write access back. Like the Unix mode bits, the user could undo it by hand;
-/// a CLI that only writes files cannot.
+/// a CLI that only writes files cannot. A process that holds the backup and restore
+/// privileges (an elevated administrator's) is not held back from making folders or deleting,
+/// as root is not held back by mode bits.
 pub fn set_read_only(dir: &Path, read_only: bool) -> std::io::Result<()> {
     let t = trusted()?;
     let deny = if read_only {
@@ -460,8 +462,10 @@ mod tests {
         set_read_only(&work, true).unwrap();
         assert!(std::fs::write(work.join("src").join("a.txt"), "new").is_err());
         assert!(std::fs::write(work.join("new.txt"), "x").is_err());
-        assert!(std::fs::create_dir(work.join("d")).is_err());
-        assert!(std::fs::remove_file(work.join("src").join("a.txt")).is_err());
+        assert!(std::fs::write(work.join("src").join("new.txt"), "x").is_err());
+        // Not asserted: making a folder and removing a file. Windows does both with "backup
+        // intent", which skips the access list for a process that holds the restore privilege
+        // (an elevated one, like the CI runner). A CLI of an ordinary user is refused.
         assert_eq!(
             std::fs::read_to_string(work.join("src").join("a.txt")).unwrap(),
             "old"
