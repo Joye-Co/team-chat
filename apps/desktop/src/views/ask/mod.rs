@@ -145,7 +145,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
         KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
-        KeyBinding::new("cmd-enter", GiveToHelper, Some(CONTEXT)),
+        KeyBinding::new("secondary-enter", GiveToHelper, Some(CONTEXT)),
     ]);
 }
 

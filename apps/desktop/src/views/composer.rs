@@ -1883,7 +1883,7 @@ impl Render for ComposerView {
                                 .t_mono()
                                 .text_size(crate::ui::native::tokens::text::META.0)
                                 .line_height(px(18.))
-                                .child("⌘;"),
+                                .child(crate::copy::topic_rail::SIDE_CHAT_KEY),
                         )
                         .child(crate::copy::topic_rail::TITLE_SIDE_CHAT)
                         .on_click(cx.listener(|this, _, _, cx| {

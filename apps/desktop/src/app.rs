@@ -1478,17 +1478,26 @@ pub fn bind_view_keys(cx: &mut App) {
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
+        KeyBinding::new("secondary-q", Quit, None),
+        KeyBinding::new("secondary-,", OpenSettings, None),
+        KeyBinding::new("secondary-alt-i", ToggleSidePanel, None),
         // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
-        KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
-        KeyBinding::new("cmd-n", NewTopic, None),
-        KeyBinding::new("cmd-;", ToggleSideChat, None),
-        KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
-        KeyBinding::new("cmd-shift-h", OpenDesk, None),
-        KeyBinding::new("cmd-shift-m", OpenMembers, None),
-        KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
+        // Windows has no second command key: Ctrl+Alt+S.
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "ctrl-cmd-s"
+            } else {
+                "ctrl-alt-s"
+            },
+            ToggleSidebar,
+            None,
+        ),
+        KeyBinding::new("secondary-n", NewTopic, None),
+        KeyBinding::new("secondary-;", ToggleSideChat, None),
+        KeyBinding::new("secondary-alt-r", ToggleTopicRail, None),
+        KeyBinding::new("secondary-shift-h", OpenDesk, None),
+        KeyBinding::new("secondary-shift-m", OpenMembers, None),
+        KeyBinding::new("secondary-shift-o", OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     {

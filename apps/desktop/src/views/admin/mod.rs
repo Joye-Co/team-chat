@@ -66,7 +66,7 @@ const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
 /// Binds [`OpenTeamAdmin`] and ⌥⌘,. The window itself checks again that I am an owner.
 pub fn install(services: Services, cx: &mut App) {
-    cx.bind_keys([gpui::KeyBinding::new("cmd-alt-,", OpenTeamAdmin, None)]);
+    cx.bind_keys([gpui::KeyBinding::new("secondary-alt-,", OpenTeamAdmin, None)]);
     cx.on_action(move |_: &OpenTeamAdmin, cx| {
         if i_am_owner(&services) {
             open(services.clone(), cx)
