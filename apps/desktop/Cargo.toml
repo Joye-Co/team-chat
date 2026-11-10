@@ -63,3 +63,7 @@ objc2-avf-audio = "0.3"
 objc2-core-graphics = "0.3"
 objc2-core-foundation = "0.3"
 # --- end v11/media
+
+# Embedded 产出 pages are child windows of GPUI's HWND (src/ui/web_embed.rs).
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"

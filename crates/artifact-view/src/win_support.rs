@@ -135,6 +135,15 @@ pub fn client_rect_on_screen(hwnd: isize) -> (i32, i32, i32, i32) {
     (origin.x, origin.y, rect.right, rect.bottom)
 }
 
+/// The size of the primary screen in pixels.
+pub fn screen_size() -> (i32, i32) {
+    // SAFETY: plain system queries.
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+    }
+}
+
 /// A PNG of a rectangle of the screen (what the user sees, with every window composed).
 pub fn capture_screen_png(x: i32, y: i32, width: i32, height: i32) -> Option<Vec<u8>> {
     if width <= 0 || height <= 0 {

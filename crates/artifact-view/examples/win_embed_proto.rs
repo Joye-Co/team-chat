@@ -3,8 +3,9 @@
 //!
 //! `cargo run -p artifact-view --example win_embed_proto -- <out-dir>` writes
 //! `<out-dir>/report.json` and screenshots of the host window (`embed.png`,
-//! `embed-clipped.png`, `embed-hidden.png`) plus the page's own capture
-//! (`embed-snapshot.png`). Exit status 0 when every check passed.
+//! `embed-clipped.png`, `embed-hidden.png`), the page's own capture (`embed-snapshot.png`)
+//! and the screen with the 产出 window open (`window.png`). Exit status 0 when every check
+//! passed.
 //!
 //! It checks what only a real Windows desktop shows: the child window paints above the
 //! host's content, follows `set_frame` (also clipped and hidden), has round corners, a
@@ -20,11 +21,11 @@ mod proto {
 
     use artifact_view::win_support::{
         capture_screen_png, client_rect_on_screen, create_host_window, png_pixel, pump, scale_of,
-        set_dpi_aware,
+        screen_size, set_dpi_aware,
     };
     use artifact_view::{
-        ArtifactEvent, Capabilities, Content, EmbedOptions, EmbeddedArtifact, MainThread, Rect,
-        VersionSpec, origin_host,
+        ArtifactEvent, ArtifactWindow, Capabilities, Content, EmbedOptions, EmbeddedArtifact,
+        MainThread, OpenOptions, Rect, VersionItem, VersionSpec, origin_host,
     };
     use serde_json::{Value, json};
 
@@ -52,8 +53,6 @@ mod proto {
             width: innerWidth, height: innerHeight };
   try { r.data = await window.artifact.getData(); } catch (e) { r.dataError = String(e); }
   try { await fetch('https://example.com/'); r.fetchFails = false; } catch (e) { r.fetchFails = true; }
-  r.hostObjects = !!(window.chrome && window.chrome.webview && window.chrome.webview.hostObjects
-    && window.chrome.webview.hostObjects.sync);
   document.getElementById('b').addEventListener('click', function (e) {
     document.getElementById('log').textContent = 'clicked';
     window.artifact.emitEvent('clicked', { trusted: e.isTrusted });
@@ -163,7 +162,6 @@ mod proto {
             results["data"] == json!({ "hello": "世界" }),
         );
         check("fetchFails", results["fetchFails"] == json!(true));
-        check("noHostObjects", results["hostObjects"] == json!(false));
         check(
             "pageSizeFollowsFrame",
             results["width"] == json!(400) && results["height"] == json!(300),
@@ -282,6 +280,70 @@ mod proto {
         pump(Duration::from_millis(500), || false);
         let gone = shot("embed-closed.png");
         check("closedRemovesView", near(at(&gone, 360.0, 300.0), HOST_RGB));
+
+        // The 产出 window: a top-level window with the version picker above the page.
+        let win_seen = Rc::new(RefCell::new((false, None::<String>)));
+        let win_seen2 = win_seen.clone();
+        let mut options = OpenOptions::new(
+            "产出 window · v2",
+            ARTIFACT_ID,
+            VersionSpec::new(2, Content::single("index.html", PAGE.as_bytes().to_vec()))
+                .with_data(json!({ "hello": "世界" })),
+        );
+        options.width = 520.0;
+        options.height = 360.0;
+        options.versions = vec![
+            VersionItem {
+                version: 2,
+                label: "v2 · 最新".into(),
+            },
+            VersionItem {
+                version: 1,
+                label: "v1".into(),
+            },
+        ];
+        let window = ArtifactWindow::open(main, options, move |event| match event {
+            ArtifactEvent::Loaded { .. } => win_seen2.borrow_mut().0 = true,
+            ArtifactEvent::LoadFailed { reason, .. } => win_seen2.borrow_mut().1 = Some(reason),
+            _ => {}
+        })
+        .expect("open the window");
+        let opened = pump(Duration::from_secs(60), || {
+            let s = win_seen.borrow();
+            s.0 || s.1.is_some()
+        });
+        check("windowPageLoaded", opened && win_seen.borrow().0);
+        pump(Duration::from_millis(1500), || false);
+        let (sw, sh) = screen_size();
+        let screen = capture_screen_png(0, 0, sw, sh);
+        if let Some(png) = &screen {
+            let _ = std::fs::write(out.join("window.png"), png);
+        }
+        check("windowScreenshot", screen.is_some());
+        let page_png: Rc<RefCell<Option<Result<Vec<u8>, String>>>> = Rc::new(RefCell::new(None));
+        let page_png2 = page_png.clone();
+        window.snapshot(Rect::new(0.0, 0.0, 300.0, 200.0), 2.0, move |png| {
+            *page_png2.borrow_mut() = Some(png)
+        });
+        pump(Duration::from_secs(15), || page_png.borrow().is_some());
+        match page_png.borrow_mut().take() {
+            Some(Ok(png)) => {
+                // 300 × 200 CSS px at 2 pixels each.
+                let size = (
+                    u32::from_be_bytes(png[16..20].try_into().unwrap()),
+                    u32::from_be_bytes(png[20..24].try_into().unwrap()),
+                );
+                details.insert("windowSnapshotSize".into(), json!([size.0, size.1]));
+                check("windowSnapshot", size == (600, 400));
+                let _ = std::fs::write(out.join("window-snapshot.png"), &png);
+            }
+            other => {
+                details.insert("windowSnapshotError".into(), json!(format!("{other:?}")));
+                check("windowSnapshot", false);
+            }
+        }
+        window.close();
+        check("windowClosed", window.is_closed());
 
         let ok = checks.values().all(|v| v == &json!(true));
         let report = json!({

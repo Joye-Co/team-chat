@@ -52,7 +52,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, IStream};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow};
-use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetActiveWindow, SetFocus};
 use windows::Win32::UI::Shell::{SHCreateMemStream, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR, w};
@@ -330,6 +330,9 @@ pub(crate) struct PageConfig {
     pub(crate) report_focus: bool,
 }
 
+/// The virtual-key code of Esc.
+const VK_ESCAPE_CODE: u32 = 0x1b;
+
 /// Sent by the wheel script of a page whose scrolling goes to the host.
 const WHEEL_PREFIX: &[u8] = b"{\"__wheel\":";
 
@@ -374,7 +377,7 @@ pub(crate) struct Page {
     /// The window that gets the page's wheel scrolling (0: the page keeps it).
     scroll_target: Cell<isize>,
     /// Called when Tab leaves the page: the host takes the keyboard focus back.
-    on_focus_out: RefCell<Option<Box<dyn Fn()>>>,
+    on_focus_out: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 macro_rules! text_of {
@@ -435,6 +438,16 @@ impl Page {
 
     pub(crate) fn is_closed(&self) -> bool {
         self.state.borrow().closed
+    }
+
+    // The COM pointers are cloned out of their cells before any call: a call into WebView2
+    // can run this page's event handlers before it returns, and they use the same cells.
+    fn controller(&self) -> Option<ICoreWebView2Controller> {
+        self.controller.borrow().clone()
+    }
+
+    fn webview(&self) -> Option<ICoreWebView2> {
+        self.webview.borrow().clone()
     }
 
     /// Delivers an event on a later turn of the message loop.
@@ -737,7 +750,7 @@ impl Page {
             let weak = Rc::downgrade(self);
             let tab_out = MoveFocusRequestedEventHandler::create(Box::new(move |_, args| {
                 if let (Some(page), Some(args)) = (weak.upgrade(), args)
-                    && let Some(take) = page.on_focus_out.borrow().as_ref()
+                    && let Some(take) = page.focus_taker()
                 {
                     take();
                     args.SetHandled(true)?;
@@ -757,6 +770,15 @@ impl Page {
                         || kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
                     {
                         page.note_input();
+                        // Esc: the page still gets the key, and the host gets the keyboard
+                        // back (an embedded page; the window has no host to give it to).
+                        let mut key = 0u32;
+                        args.VirtualKey(&mut key)?;
+                        if key == VK_ESCAPE_CODE
+                            && let Some(take) = page.focus_taker()
+                        {
+                            take();
+                        }
                     }
                 }
                 Ok(())
@@ -955,7 +977,7 @@ impl Page {
     /// Loads the version in the state: replaces the document-start script (the bridge of
     /// this version), then navigates to its entry.
     pub(crate) fn load_current(self: &Rc<Self>) {
-        let Some(webview) = self.webview.borrow().clone() else {
+        let Some(webview) = self.webview() else {
             // Not created yet: `wire` loads the version the state holds then.
             return;
         };
@@ -1030,7 +1052,7 @@ impl Page {
 
     /// Runs JavaScript in the page; dropped while the web view does not exist.
     pub(crate) fn evaluate(&self, script: &str) {
-        if let Some(webview) = self.webview.borrow().as_ref() {
+        if let Some(webview) = self.webview() {
             // SAFETY: a COM call on this thread's web view; no completion handler.
             unsafe {
                 let _ = webview.ExecuteScript(
@@ -1043,7 +1065,7 @@ impl Page {
 
     /// Runs JavaScript and gives its value when it is a string.
     pub(crate) fn evaluate_text(&self, script: &str, done: impl FnOnce(Option<String>) + 'static) {
-        let Some(webview) = self.webview.borrow().clone() else {
+        let Some(webview) = self.webview() else {
             post(move || done(None));
             return;
         };
@@ -1098,7 +1120,7 @@ impl Page {
         if self.bounds.replace(bounds) == bounds {
             return;
         }
-        if let Some(controller) = self.controller.borrow().as_ref() {
+        if let Some(controller) = self.controller() {
             // SAFETY: a COM call on this thread's controller.
             unsafe {
                 let _ = controller.SetBounds(bounds);
@@ -1110,7 +1132,7 @@ impl Page {
         if self.visible.replace(visible) == visible {
             return;
         }
-        if let Some(controller) = self.controller.borrow().as_ref() {
+        if let Some(controller) = self.controller() {
             // SAFETY: a COM call on this thread's controller.
             unsafe {
                 let _ = controller.SetIsVisible(visible);
@@ -1121,7 +1143,7 @@ impl Page {
     /// Tells the web view that its top-level window moved (it places its popups and the
     /// input method window from it).
     pub(crate) fn parent_moved(&self) {
-        if let Some(controller) = self.controller.borrow().as_ref() {
+        if let Some(controller) = self.controller() {
             // SAFETY: a COM call on this thread's controller.
             unsafe {
                 let _ = controller.NotifyParentWindowPositionChanged();
@@ -1132,7 +1154,7 @@ impl Page {
     /// `prefers-color-scheme` of the page. WebView2 keeps it per profile: every 产出 page
     /// follows the last call, as the app has one theme.
     pub(crate) fn set_dark(&self, dark: bool) {
-        let Some(webview) = self.webview.borrow().clone() else {
+        let Some(webview) = self.webview() else {
             self.dark.set(Some(dark));
             return;
         };
@@ -1160,8 +1182,12 @@ impl Page {
         }
     }
 
+    fn focus_taker(&self) -> Option<Rc<dyn Fn()>> {
+        self.on_focus_out.borrow().clone()
+    }
+
     pub(crate) fn set_on_focus_out(&self, take: impl Fn() + 'static) {
-        *self.on_focus_out.borrow_mut() = Some(Box::new(take));
+        *self.on_focus_out.borrow_mut() = Some(Rc::new(take));
     }
 
     pub(crate) fn is_focused(&self) -> bool {
@@ -1170,7 +1196,7 @@ impl Page {
 
     /// Moves keyboard focus into the page.
     pub(crate) fn focus(&self) {
-        if let Some(controller) = self.controller.borrow().as_ref() {
+        if let Some(controller) = self.controller() {
             // SAFETY: a COM call on this thread's controller.
             unsafe {
                 let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
@@ -1184,7 +1210,7 @@ impl Page {
         params: &Value,
         done: Option<Box<dyn FnOnce(Result<Value, String>)>>,
     ) {
-        let Some(webview) = self.webview.borrow().clone() else {
+        let Some(webview) = self.webview() else {
             if let Some(done) = done {
                 post(move || done(Err("no web view".into())));
             }
@@ -1225,9 +1251,7 @@ impl Page {
 
     /// The pixels the web view draws per CSS px.
     fn raster_scale(&self) -> f64 {
-        self.controller
-            .borrow()
-            .as_ref()
+        self.controller()
             .and_then(|c| c.cast::<ICoreWebView2Controller3>().ok())
             .and_then(|c| {
                 let mut scale = 1.0f64;
@@ -1974,4 +1998,23 @@ pub fn open_external_url(url: &str) -> bool {
             .chars()
             .any(|c| c.is_control() || c.is_whitespace() || c == '"')
         && shell_open(url)
+}
+
+/// Asks the user to confirm with a system message box (确定 / 取消), on a later turn of the
+/// message loop so it never runs inside the caller's own work. `done` gets true only for
+/// 确定.
+pub fn confirm_later(title: &str, detail: &str, done: impl FnOnce(bool) + 'static) {
+    let (title, detail) = (HSTRING::from(title), HSTRING::from(detail));
+    post(move || {
+        // SAFETY: a modal message box owned by this thread's active window.
+        let answer = unsafe {
+            MessageBoxW(
+                Some(GetActiveWindow()),
+                &detail,
+                &title,
+                MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2,
+            )
+        };
+        done(answer == IDOK);
+    });
 }

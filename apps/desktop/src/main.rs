@@ -154,6 +154,8 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() {
     let started = Instant::now();
+    // Before GPUI starts: on Windows, embedded 产出 pages need this (see the function).
+    ui::web_embed::prepare_process();
     // `--screenshot` and other self-tests in `selftest/` parse their own arguments.
     if let Some(code) = selftest::main_if_requested() {
         std::process::exit(code);
