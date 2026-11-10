@@ -188,7 +188,19 @@ registerRoute({
       )
     ).flat();
     const prices = await loadPrices(env, (p) => ctx.waitUntil(p));
-    return buildUsage({ from, to, runs, budgets, runners, prices });
+    const out = buildUsage({ from, to, runs, budgets, runners, prices });
+    // 到了预算: how many runs of each AI member with a budget wait for an owner.
+    await Promise.all(
+      out.bots
+        .filter((b) => b.budgetCents !== undefined)
+        .map(async (b) => {
+          const n = await deskStub(env, b.memberId)
+            .budgetHeld(b.memberId)
+            .catch(() => 0);
+          if (n > 0) b.heldRuns = n;
+        }),
+    );
+    return out;
   },
 });
 
