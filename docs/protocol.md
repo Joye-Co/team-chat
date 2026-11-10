@@ -212,7 +212,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `POST /v1/auth/redeem` | anyone with an invite code | `{ inviteCode, deviceName }` | `{ token, member }` |
 | `GET /v1/me` | member | | `Member` |
 | `GET /v1/members` | member | | `Member[]` |
-| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member |
+| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId?, expiresInHours? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member; `expiresInHours` 1-168, default 168 (a week) |
 | `POST /v1/bots` | owner | `{ name, role?, character? }` | `{ member, token }` |
 | `POST /v1/tokens/revoke` | owner, or the token's member | `{ memberId?, all? }` | `{ revoked }` |
 | `GET /v1/groups` | member | | `GroupSummary[]` |
