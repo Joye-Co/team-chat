@@ -36,16 +36,14 @@ fn system_accessibility() -> (bool, bool) {
 /// (`SPI_GETHIGHCONTRAST`).
 #[cfg(target_os = "windows")]
 fn system_accessibility() -> (bool, bool) {
-    use windows::core::BOOL;
-    use windows::Win32::{
-        UI::{
-            Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
-            WindowsAndMessaging::{
-                SPI_GETCLIENTAREAANIMATION, SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-                SystemParametersInfoW,
-            },
+    use windows::Win32::UI::{
+        Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
+        WindowsAndMessaging::{
+            SPI_GETCLIENTAREAANIMATION, SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            SystemParametersInfoW,
         },
     };
+    use windows::core::BOOL;
     let mut animations = BOOL(1);
     let mut contrast = HIGHCONTRASTW {
         cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32,

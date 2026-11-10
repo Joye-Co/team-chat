@@ -17,8 +17,8 @@ mod status_item;
 #[cfg(target_os = "windows")]
 #[path = "status_item_win.rs"]
 mod status_item;
-mod tray_icon;
 pub mod switcher;
+mod tray_icon;
 // --- v12/overlays ---
 pub mod new_topic;
 // --- end v12/overlays ---

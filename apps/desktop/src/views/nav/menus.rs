@@ -638,11 +638,13 @@ mod tests {
         use gpui::Action as _;
         let mac = mac_menus(MenuState::default());
         let win = without_mac_only(mac_menus(MenuState::default()));
-        let names = |menus: &[Menu]| -> Vec<String> {
-            menus.iter().map(|m| m.name.to_string()).collect()
-        };
+        let names =
+            |menus: &[Menu]| -> Vec<String> { menus.iter().map(|m| m.name.to_string()).collect() };
         assert!(names(&mac).iter().any(|n| n == nav::MENU_HELP));
-        assert!(!names(&win).iter().any(|n| n == nav::MENU_HELP), "帮助 is empty");
+        assert!(
+            !names(&win).iter().any(|n| n == nav::MENU_HELP),
+            "帮助 is empty"
+        );
         assert_eq!(names(&win).len(), names(&mac).len() - 1);
         let actions = |menus: &[Menu]| -> Vec<String> {
             menus
@@ -672,12 +674,17 @@ mod tests {
         for menu in &win {
             assert!(!matches!(menu.items.first(), Some(MenuItem::Separator)));
             assert!(!matches!(menu.items.last(), Some(MenuItem::Separator)));
-            assert!(!menu.items.iter().any(|i| matches!(i, MenuItem::SystemMenu(_))));
             assert!(
-                !menu.items.windows(2).any(|w| matches!(
-                    w,
-                    [MenuItem::Separator, MenuItem::Separator]
-                )),
+                !menu
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MenuItem::SystemMenu(_)))
+            );
+            assert!(
+                !menu
+                    .items
+                    .windows(2)
+                    .any(|w| matches!(w, [MenuItem::Separator, MenuItem::Separator])),
                 "{}",
                 menu.name
             );
@@ -685,7 +692,12 @@ mod tests {
         // The app menu keeps 设置… and 退出, and the 服务器 submenu.
         assert!(win_actions.contains(&OpenSettings.name().to_string()));
         assert!(win_actions.contains(&Quit.name().to_string()));
-        assert!(win[0].items.iter().any(|i| matches!(i, MenuItem::Submenu(_))));
+        assert!(
+            win[0]
+                .items
+                .iter()
+                .any(|i| matches!(i, MenuItem::Submenu(_)))
+        );
     }
 
     // --- v12/behavior ---

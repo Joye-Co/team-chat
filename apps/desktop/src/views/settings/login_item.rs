@@ -167,7 +167,8 @@ mod imp {
                 .map_err(|e| e.to_string())?;
             // Turned off in 任务管理器 before: the switch turns it back on.
             if let Ok(approved) = CURRENT_USER.create(APPROVED) {
-                let _ = approved.set_bytes(name, Type::Bytes, &[2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+                let _ =
+                    approved.set_bytes(name, Type::Bytes, &[2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
             }
         } else {
             match key.remove_value(name) {
@@ -265,7 +266,10 @@ mod tests {
         let command = super::run_command(exe);
         assert_eq!(command, r#""C:\Program Files\App\app.exe""#);
         assert!(super::runs_exe(&command, exe));
-        assert!(super::runs_exe(r#""c:\program files\app\APP.EXE" --hidden"#, exe));
+        assert!(super::runs_exe(
+            r#""c:\program files\app\APP.EXE" --hidden"#,
+            exe
+        ));
         assert!(!super::runs_exe(r#""C:\Other\app.exe""#, exe));
         assert!(!super::runs_exe("", exe));
         let plain = Path::new(r"C:\App\app.exe");

@@ -52,10 +52,10 @@ pub use store::{
     Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
     TopicRow,
 };
-#[cfg(target_os = "macos")]
-pub use token::KeychainTokenStore;
 #[cfg(target_os = "windows")]
 pub use token::CredentialTokenStore;
+#[cfg(target_os = "macos")]
+pub use token::KeychainTokenStore;
 pub use token::{FileTokenStore, TokenStore, TokenStoreError, credential_target};
 
 /// Milliseconds since the Unix epoch.

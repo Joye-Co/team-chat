@@ -190,12 +190,12 @@ fn fit_span(frame: Span, work: Span, delta: i32, first: bool) -> Span {
 fn set_height(hwnd: NsWindow, now: Pixels, height: Pixels, _animate: bool, first: bool) {
     use windows::Win32::{
         Foundation::{HWND, RECT},
-        Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow},
+        Graphics::Gdi::{
+            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+        },
         UI::{
             HiDpi::GetDpiForWindow,
-            WindowsAndMessaging::{
-                GetWindowRect, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
-            },
+            WindowsAndMessaging::{GetWindowRect, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos},
         },
     };
 
@@ -376,9 +376,8 @@ pub fn dim_window_buttons(window: &Window) {
     use windows::Win32::{
         Foundation::HWND,
         UI::WindowsAndMessaging::{
-            GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-            SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_MAXIMIZEBOX,
-            WS_MINIMIZEBOX,
+            GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
         },
     };
     let Some(hwnd) = ns_window(window) else {

@@ -29,10 +29,10 @@ pub mod files;
 mod files_live;
 #[cfg(target_os = "macos")]
 pub mod macos;
-#[cfg(target_os = "windows")]
-pub mod windows;
 mod panes;
 pub mod persist;
+#[cfg(target_os = "windows")]
+pub mod windows;
 // Proof chips from done cards (1.1.0).
 mod proof;
 // pages track: the 群, 成员 and 产出 pages.
@@ -52,8 +52,8 @@ pub mod sandbox;
 pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
-mod system_events;
 mod settings;
+mod system_events;
 mod this_mac;
 #[cfg(test)]
 mod wire_live;
