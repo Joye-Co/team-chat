@@ -37,7 +37,7 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 | `src/views/settings/login_item.rs`（开机启动） | `SMAppService` | `HKCU\...\Run` |
 | `src/views/nav/menus.rs`、`status_item.rs` | 菜单栏、状态栏图标、关于面板 | 窗口内菜单加系统托盘图标 |
 | `src/views/files/native.rs` | Quick Look、分享面板 | 用默认程序打开、资源管理器里定位、`DataTransferManager` 分享 |
-| `src/ui/sf_symbols` | SF Symbols 栅格化 | 自带一套 SVG 图标 |
+| `src/ui/sf_symbols` | SF Symbols 栅格化 | Lucide 加几个自绘 SVG（已完成，见 C4） |
 | `src/theme.rs`、`src/ui/motion.rs` | 系统外观、减弱动画 | `UISettings`、`SPI_GETCLIENTAREAANIMATION` |
 | `src/views/settings/window_fit.rs` | NSWindow 尺寸和位置 | `GetMonitorInfo` 和工作区 |
 | `src/provider/this_mac.rs`（用这台电脑） | 应用包里的 daemon 加 launchd | 安装目录里的 daemon 加计划任务，见 M3 |
@@ -107,8 +107,18 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 
 **C4 设计验收（约 2 周，可以和 C2、C3 同时做）**
 
-- 写 `docs/design/WINDOWS.md`（NATIVE.md 的 Windows 版）；COMPLETENESS.md 的黑白 token 和尺寸规范照用。
-- 一套 SVG 图标替换 SF Symbols。
+- 已完成：`docs/design/WINDOWS.md`，只写和 NATIVE.md 不同的地方（标题栏和窗口按钮、窗口内菜单和托盘、
+  Ctrl 快捷键写法、字体、图标、滚动条、对话框、设置窗口）；COMPLETENESS.md 两端通用。
+- 已完成：图标。macOS 仍画 SF Symbols；其他系统用 Lucide（ISC，`third_party/lucide/`）加 7 个自己画的
+  SVG（`assets/icons/drawn/`），调用处不用改。每个图标按对应 SF Symbol 的墨迹尺寸、线宽和位置来画
+  （`ui/sf_symbols/svgset.rs`），新增概念没配 SVG 就编译不过，另有测试。在 Mac 上用 `TC_SVG_ICONS=1`
+  看过主窗口、首页、设置的浅色和深色截图；没在 Windows 上看过。
+- 已完成：字体。界面 Segoe UI Variable → Segoe UI，中文 Microsoft YaHei UI，等宽 Cascadia Mono → Consolas，
+  字号不变（`theme.rs`）。只编译过。
+- 待做：线条没有对齐到整像素，100 % 缩放下 1 px 的线可能发虚，要在真机或 Windows CI 截图上确认。
+- 待做：`views/settings` 里两处直接用 `theme::MONO_FONT_FAMILY`（Windows 上是 Consolas），改成
+  `theme::mono_font_family()`；内嵌网页的 CSS 字体栈（`ui/web_embed.rs`、`diagrams`、`views/artifacts`、
+  `views/media`）加上 Windows 字体。
 - 截图自测移植到 Windows，浅色深色都截；每个页面过 COMPLETENESS.md §4 清单。
 
 ### 机器
