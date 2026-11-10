@@ -168,6 +168,15 @@ pub(super) fn kpi_card(
         .children(bar.map(|b| div().mt(space::S8).child(progress(b, cx))))
 }
 
+/// A cost, with ≈ when part of it is estimated from tokens (`Spend::estimated_usd`).
+fn usd_of(s: &Spend) -> String {
+    if s.estimated_usd.is_some_and(|e| e > 0.) {
+        fill(m::USAGE_ESTIMATED, &[("cost", &usd(s.cost_usd))])
+    } else {
+        usd(s.cost_usd)
+    }
+}
+
 fn cents(c: u64) -> String {
     format!("${}", (c as f64 / 100.).round() as u64)
 }
@@ -179,7 +188,8 @@ pub fn included(u: &TeamUsage, method: &dyn Fn(&str, Option<&str>) -> Option<Str
         .iter()
         .filter(|r| method(&r.runtime, r.machine_id.as_deref()).as_deref() == Some("subscription"))
         .map(|r| r.spend.cost_usd)
-        .sum()
+        // A float sum of nothing is -0.0, which prints as "$-0.00".
+        .fold(0., |a, b| a + b)
 }
 
 impl AdminView {
@@ -334,10 +344,10 @@ impl AdminView {
             .flex()
             .gap(space::S16)
             .child(kpi_card(
-                if week {
-                    m::USAGE_SPENT_WEEK
-                } else {
-                    m::USAGE_SPENT_MONTH
+                match self.usage.range {
+                    UsageRange::Week => m::USAGE_SPENT_WEEK,
+                    UsageRange::Month => m::USAGE_SPENT_MONTH,
+                    UsageRange::LastMonth => m::USAGE_SPENT_LAST_MONTH,
                 },
                 Sym::BarChart,
                 usd(total),
@@ -497,7 +507,10 @@ impl AdminView {
                     })
                     .unwrap_or_default()
                 } else {
-                    t.map(|t| t.day().to_string()).unwrap_or_default()
+                    // A month's bars are too narrow for every date: the 1st and every 5th.
+                    t.filter(|t| t.day() == 1 || t.day() % 5 == 0)
+                        .map(|t| t.day().to_string())
+                        .unwrap_or_default()
                 }
             };
             div()
@@ -543,7 +556,14 @@ impl AdminView {
                                 )),
                         ),
                 )
-                .child(div().n_footnote().text_color(k.secondary).child(label))
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .n_footnote()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(label),
+                )
         });
         // The budget per day, as a line across the bars.
         let line = budget_cents.filter(|b| *b > 0).map(|b| {
@@ -608,7 +628,8 @@ impl AdminView {
     fn where_spent(&self, u: &TeamUsage, cx: &Context<Self>) -> AnyElement {
         let k = native_colors(cx);
         // One row per CLI and way of paying.
-        let mut rows: Vec<(String, String, f64, u64)> = vec![];
+        // (CLI, how it is paid, cost, tokens, estimated cost)
+        let mut rows: Vec<(String, String, f64, u64, f64)> = vec![];
         for r in &u.runtimes {
             let kind = self
                 .fleet
@@ -632,16 +653,19 @@ impl AdminView {
             }
             .to_string();
             let tokens = r.spend.input_tokens + r.spend.output_tokens;
+            let est = r.spend.estimated_usd.unwrap_or(0.);
             match rows.iter_mut().find(|x| x.0 == name && x.1 == via) {
                 Some(x) => {
                     x.2 += r.spend.cost_usd;
                     x.3 += tokens;
+                    x.4 += est;
                 }
-                None => rows.push((name, via, r.spend.cost_usd, tokens)),
+                None => rows.push((name, via, r.spend.cost_usd, tokens, est)),
             }
         }
         rows.sort_by(|a, b| b.2.total_cmp(&a.2));
         let max = rows.iter().map(|r| r.2).fold(0., f64::max).max(0.01);
+        let any_estimate = rows.iter().any(|r| r.4 > 0.);
         card_surface(cx)
             .flex_1()
             .p(space::S24)
@@ -657,7 +681,7 @@ impl AdminView {
             .when(rows.is_empty(), |d| {
                 d.child(div().n_body().text_color(k.secondary).child(m::USAGE_EMPTY))
             })
-            .children(rows.into_iter().map(|(name, via, cost, tokens)| {
+            .children(rows.into_iter().map(|(name, via, cost, tokens, est)| {
                 div()
                     .flex()
                     .flex_col()
@@ -670,7 +694,9 @@ impl AdminView {
                             .child(div().n_headline().child(name))
                             .child(div().n_footnote().text_color(k.secondary).child(via))
                             .child(div().flex_1())
-                            .child(div().n_headline().n_figures().child(if cost > 0. {
+                            .child(div().n_headline().n_figures().child(if est > 0. {
+                                fill(m::USAGE_ESTIMATED, &[("cost", &usd(cost))])
+                            } else if cost > 0. {
                                 usd(cost)
                             } else {
                                 fill(
@@ -681,6 +707,15 @@ impl AdminView {
                     )
                     .child(progress((cost / max) as f32, cx))
             }))
+            .when(any_estimate, |d| {
+                d.child(
+                    div()
+                        .mt(space::S4)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .child(m::USAGE_ESTIMATE_NOTE),
+                )
+            })
             .into_any_element()
     }
 
@@ -854,7 +889,7 @@ impl AdminView {
                             .px(space::S12)
                             .text_right()
                             .n_headline()
-                            .child(usd(s.cost_usd)),
+                            .child(usd_of(&s)),
                     )
                     .when(tab == UsageTab::Bots, |d| {
                         d.child(

@@ -11,9 +11,9 @@ mod accounts;
 mod activity;
 mod fleet;
 mod home;
-pub mod scenes;
 mod model;
 mod overview;
+pub mod scenes;
 mod spark;
 mod team;
 mod usage;
@@ -283,7 +283,11 @@ impl AdminView {
                     });
                     this.machines = Some(list);
                     match this.page {
-                        accounts::Page::Machines => this.fetch_fleet(cx),
+                        // These read the machines' monitors (logins, who is at work), which
+                        // need the machine list that just came in.
+                        accounts::Page::Machines
+                        | accounts::Page::Usage
+                        | accounts::Page::Members => this.fetch_fleet(cx),
                         accounts::Page::Home => this.fetch_home(cx),
                         _ => {}
                     }

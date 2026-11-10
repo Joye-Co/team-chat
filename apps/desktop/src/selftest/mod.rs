@@ -268,6 +268,9 @@ fn run(options: Options) -> i32 {
             // this Mac keeps the focus. The windows draw as inactive
             // windows (grey traffic lights).
             cx.set_activation_policy(ActivationPolicy::Accessory);
+            // Off the Mac GPUI quits when the last window closes, which
+            // every scene's window does before the next one opens.
+            cx.set_quit_mode(gpui::QuitMode::Explicit);
             capture::keep_frames();
             // The key scenes press the app's real keys: Tab through the tab
             // stops and the arrows of the lists and sheets (the member

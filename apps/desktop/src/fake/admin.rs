@@ -119,6 +119,12 @@ fn with(id_key: &str, id: &str, cost: f64, topics: u32, extra: Value) -> Value {
     v
 }
 
+fn pair(initiator: &str, member: &str, cost: f64, topics: u32) -> Value {
+    let mut v = with("memberId", member, cost, topics, json!({}));
+    v["initiatorId"] = json!(initiator);
+    v
+}
+
 pub fn team_usage(from: u64, to: u64) -> TeamUsage {
     let bots = [
         ("m-coder", 86.4, 31_u32, Some(10_000_u64)),
@@ -146,8 +152,14 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         "total": spend(total, 71),
         "previous": { "costUsd": 151.0, "topics": 63 },
         "teamBudgetCents": 21_000,
-        "bots": bots.iter().map(|b| with("memberId", b.0, b.1, b.2,
-            b.3.map(|c| json!({ "budgetCents": c })).unwrap_or(json!({})))).collect::<Vec<_>>(),
+        "bots": bots.iter().map(|b| {
+            let mut extra = b.3.map(|c| json!({ "budgetCents": c })).unwrap_or(json!({}));
+            // Taro runs on Codex: its cost is estimated from tokens.
+            if b.0 == "m-taro" {
+                extra["estimatedUsd"] = json!(b.1);
+            }
+            with("memberId", b.0, b.1, b.2, extra)
+        }).collect::<Vec<_>>(),
         "initiators": [
             with("memberId", ME, 74.1, 26, json!({})),
             with("memberId", "m-xiaowang", 41.8, 17, json!({})),
@@ -155,9 +167,15 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
             with("memberId", "m-alex", 21.7, 14, json!({})),
         ],
         "machines": [ with("machineId", "mc-mini", total, 71, json!({})) ],
+        "pairs": [
+            pair(ME, "m-coder", 38.2, 11), pair(ME, "m-reviewer", 16.0, 7), pair(ME, "m-docs", 12.4, 5),
+            pair("m-xiaowang", "m-coder", 30.1, 9), pair("m-xiaowang", "m-reviewer", 11.7, 6),
+            pair("m-lixue", "m-tata", 12.1, 6), pair("m-lixue", "m-docs", 12.4, 5), pair("m-lixue", "m-reviewer", 8.7, 3),
+            pair("m-alex", "m-coder", 18.1, 11), pair("m-alex", "m-taro", 3.6, 3),
+        ],
         "runtimes": [
             with("runtime", "claude", 152.6, 58, json!({ "machineId": "mc-mini" })),
-            with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini" })),
+            with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini", "estimatedUsd": 18.2 })),
         ],
         "daily": daily
     }))
