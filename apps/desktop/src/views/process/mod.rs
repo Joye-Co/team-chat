@@ -52,6 +52,18 @@ pub fn status_text(status: RunStatus) -> &'static str {
     }
 }
 
+/// `text` with a break opportunity after every character: raw JSON has none of its own.
+fn break_anywhere(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2);
+    for c in text.chars() {
+        out.push(c);
+        if !c.is_whitespace() {
+            out.push('\u{200B}');
+        }
+    }
+    out
+}
+
 /// "42 秒", "3 分钟", "1 小时 2 分钟": the one duration format of the
 /// run log, the live pane and the inspector.
 pub fn duration_text(ms: u64) -> String {
@@ -182,6 +194,8 @@ pub struct ProcessView {
     /// The run the poll loop follows.
     polling: Option<String>,
     download: Download,
+    /// Raw events opened in the developer view (by seq): shown whole instead of one line.
+    raw_open: std::collections::HashSet<u64>,
     /// Shows its own 工作记录 header (off when a pane's toolbar row names it).
     titled: bool,
     _subscriptions: Vec<Subscription>,
@@ -217,6 +231,7 @@ impl ProcessView {
             visible: false,
             polling: None,
             download: Download::Idle,
+            raw_open: Default::default(),
             titled: true,
             _subscriptions: subscriptions,
         };
@@ -314,6 +329,7 @@ impl ProcessView {
         }
         self.selected = id.clone();
         self.download = Download::Idle;
+        self.raw_open.clear();
         self.process = match &id {
             Some(id) => {
                 self.services.provider.follow_run(id);
@@ -415,10 +431,27 @@ impl ProcessView {
         let id = run.id.clone();
         // The one date format of the pane (`10:21`, `11-01`), as the facts.
         let when = clock(run.started_at.unwrap_or(run.created_at));
+        // What tells this run from the others: how long it took and what came of it (the
+        // result's first line), or the step it is on while it works.
+        let took = crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), run)
+            .map(|ms| duration_text(ms.max(0) as u64));
+        let about = run
+            .summary
+            .as_deref()
+            .and_then(|s| s.lines().map(str::trim).find(|l| !l.is_empty()))
+            .map(|l| crate::markdown::clip(l, 120))
+            .or_else(|| {
+                run.plan
+                    .iter()
+                    .find(|p| p.state == crate::data::PlanState::Current)
+                    .map(|p| crate::markdown::clip(&p.text, 120))
+            });
+        let second = [took, about].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         div()
             .id(gpui::ElementId::Name(format!("run-{}", run.id).into()))
             .focus_row(selected, cx)
-            .h(space::S48)
+            .min_h(space::S48)
+            .py(space::S8)
             .px(space::S12)
             .rounded(tokens::radius::CONTAINER)
             .border_1()
@@ -437,11 +470,27 @@ impl ProcessView {
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .n_body()
-                    .text_color(n.label)
-                    .when(selected, |el| el.font_weight(gpui::FontWeight::MEDIUM))
-                    .one_line()
-                    .child(bot.map(|b| b.name).unwrap_or_default()),
+                    .flex()
+                    .flex_col()
+                    .gap(space::S2)
+                    .child(
+                        div()
+                            .n_body()
+                            .text_color(n.label)
+                            .when(selected, |el| el.font_weight(gpui::FontWeight::MEDIUM))
+                            .one_line()
+                            .child(bot.map(|b| b.name).unwrap_or_default()),
+                    )
+                    .when(!second.is_empty(), |el| {
+                        el.child(
+                            div()
+                                .n_footnote()
+                                .n_figures()
+                                .text_color(n.secondary)
+                                .one_line()
+                                .child(second),
+                        )
+                    }),
             )
             .child(run_badge(
                 run,
@@ -691,19 +740,40 @@ impl ProcessView {
             .take(100)
             .rev()
             .map(|e| {
-                let mut text: String = e.json.chars().take(600).collect();
+                // One line per event, cut with `…` at the frame: raw JSON has no break
+                // points and would run past the pane. A click opens the event whole (it
+                // wraps anywhere) and puts it on the clipboard.
+                let open = self.raw_open.contains(&e.seq);
+                let limit = if open { 20_000 } else { 600 };
+                let mut text: String = e.json.chars().take(limit).collect();
                 if text.len() < e.json.len() {
                     text.push('…');
                 }
-                // One line per event, cut with `…` at the frame: raw JSON
-                // has no break points and would run past the pane.
+                let (seq, json) = (e.seq, e.json.clone());
                 div()
+                    .id(gpui::ElementId::NamedInteger("raw-event".into(), e.seq))
                     .py(space::S2)
                     .min_w_0()
-                    .one_line()
+                    .cursor_pointer()
                     .border_b(theme::HAIRLINE)
                     .border_color(colors.sep)
-                    .child(format!("#{} {}", e.seq, text))
+                    .map(|el| {
+                        if open {
+                            el.text_color(colors.text_1)
+                                .whitespace_normal()
+                                .overflow_hidden()
+                                .child(break_anywhere(&format!("#{} {}", e.seq, text)))
+                        } else {
+                            el.one_line().child(format!("#{} {}", e.seq, text))
+                        }
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.raw_open.remove(&seq) {
+                            this.raw_open.insert(seq);
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(json.clone()));
+                        }
+                        cx.notify();
+                    }))
             })
             .collect();
         div()
