@@ -441,6 +441,14 @@ fn error_text(e: AdminError) -> String {
 
 impl Render for AdminView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed(m::WINDOW_TITLE, body, window, cx)
+    }
+}
+
+impl AdminView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         div()
             .id("admin-root")

@@ -1092,6 +1092,14 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed(env!("PRODUCT_NAME"), body, window, cx)
+    }
+}
+
+impl RootView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
@@ -1188,7 +1196,9 @@ impl Render for RootView {
         // flush with the window edge (traffic lights inside it), the page
         // column with its toolbar row, and the inspector edge to edge.
         use crate::views::columns::Column;
-        let fullscreen = window.is_fullscreen();
+        // Off the Mac there are no traffic lights either: the sidebar's top
+        // row takes the full-screen layout (the toggle at the leading edge).
+        let fullscreen = window.is_fullscreen() || crate::ui::native::window_chrome::drawn();
         self.services
             .nav
             .update(cx, |nav, cx| nav.set_fullscreen(fullscreen, cx));
