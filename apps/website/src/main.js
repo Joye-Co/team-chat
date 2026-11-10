@@ -12,7 +12,7 @@
   window.addEventListener("load",function(){tabs.forEach(function(t){["light","dark"].forEach(function(m){var im=new Image();im.src="img/card-"+t.dataset.k+"-"+m+".webp";});});});
   /* sliding pill behind the selected tab of a tab row */
   function slider(box){var ind=document.createElement("span");ind.className="ind still";box.insertBefore(ind,box.firstChild);box.classList.add("has-ind");
-    function place(){var t=box.querySelector('[aria-selected="true"]');if(!t)return;ind.style.width=t.offsetWidth+"px";ind.style.height=t.offsetHeight+"px";ind.style.transform="translate("+t.offsetLeft+"px,"+t.offsetTop+"px)";}
+    function place(){var t=box.querySelector('[aria-selected="true"]');if(!t)return;ind.style.width=t.offsetWidth+"px";ind.style.height=t.offsetHeight+"px";ind.style.transform="translate("+t.offsetLeft+"px,"+t.offsetTop+"px)";if(box.scrollWidth>box.clientWidth+1)box.scrollTo({left:t.offsetLeft-(box.clientWidth-t.offsetWidth)/2,behavior:ind.classList.contains("still")?"auto":"smooth"});}
     place();requestAnimationFrame(function(){requestAnimationFrame(function(){ind.classList.remove("still");});});
     addEventListener("resize",place);addEventListener("load",place);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);return place;}
   var galPlace=slider(document.querySelector(".gal .tabs"));
@@ -74,7 +74,7 @@
   document.querySelectorAll(".demo").forEach(function(el){
     var start=el.dataset.start,cur=start,prev=start,stack=el.querySelector(".stack"),bar=el.nextElementSibling,reset=bar&&bar.querySelector(".reset"),base=stack.innerHTML;
     stack.innerHTML="";var first=document.createElement("div");first.innerHTML=base;first.style.position="relative";stack.appendChild(first);
-    var hsWrap=document.createElement("div");hsWrap.style.cssText="position:absolute;inset:0";el.appendChild(hsWrap);
+    var hsWrap=document.createElement("div");hsWrap.className="hsw";hsWrap.style.cssText="position:absolute;inset:0";el.appendChild(hsWrap);
     function draw(){hsWrap.innerHTML="";var st=G[cur]||{h:[]};var list=(st.sb?SB:[]).concat(st.h);
       list.forEach(function(h){var b=document.createElement("button");b.type="button";b.className="hs"+(h[7]?" full":"")+(h[1]<8?" below":"");
         b.style.cssText="left:"+h[0]+"%;top:"+h[1]+"%;width:"+h[2]+"%;height:"+h[3]+"%";
@@ -129,4 +129,9 @@
   pres.forEach(function(b){b.addEventListener("click",function(){cur=P[b.dataset.p];pres.forEach(function(x){x.setAttribute("aria-selected",x===b?"true":"false");});set("m",[cur[2]]);set("h",[cur[3]]);set("t",cur[4]);render();});});
   ["m","h"].forEach(function(g){opts(g).forEach(function(b){b.addEventListener("click",function(){set(g,[b.dataset.v]);render();});});});
   opts("t").forEach(function(b){b.addEventListener("click",function(){b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")==="true"?"false":"true");render();});});
+})();
+/* phones: a panned screenshot starts where its subject is (data-pan: 0 = left edge, 1 = right edge) */
+(function(){
+  function place(){[].forEach.call(document.querySelectorAll(".pan[data-pan]"),function(el){if(el.dataset.panned)return;var room=el.scrollWidth-el.clientWidth;if(room>1){el.scrollLeft=room*parseFloat(el.dataset.pan);el.dataset.panned="1";}});}
+  addEventListener("load",place);place();
 })();

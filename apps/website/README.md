@@ -31,6 +31,12 @@ Then convert with `cwebp -q 88 -m 6`. `settings-machines` is the settings window
 toolbar (`-crop 0 190 1280 900`). Card images (`img/card-*`) are crops of the card gallery
 scenes (`compose-*`, `cards-v2-*`) taken at `--size 1440x1700`.
 
+## Phones
+
+Up to 640 px a `.shot` with the class `pan` keeps a readable width and scrolls sideways instead of
+shrinking; `data-pan` (0 to 1) says where it starts, so the subject is in view. Tab rows scroll in one
+line, and the comparison stacks each row (theirs, then ours).
+
 ## Waitlist
 
 The page has no download link yet. The buttons lead to the form at the end (`#waitlist`), which talks

@@ -30,8 +30,9 @@
     <p class="sub">聊工作的地方，就是 AI 成员干活的地方。背景不用再从群里搬进一个个会话；团队沉淀下来的做法，每个 AI 成员接活前就已经读过。</p>
     <div class="ctas"><a class="btn pri" href="#waitlist">上线时通知我</a><a class="btn" href="#look">先看一眼 ↓</a></div>
     <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>先支持 macOS，Windows 版和手机版正在开发</div>
-    <div class="shot demo" id="look" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="shot demo pan" id="look" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
     <div class="demo-bar" data-for="desk"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+    <div class="pan-hint">← 左右滑动看全 →</div>
   </div>
 
   <section class="wrap">
@@ -72,8 +73,9 @@
         </ul>
       </div>
     </div>
-    <div class="shot demo" data-start="topic-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：话题"><div class="pins" aria-hidden="true"><i class="pin" data-n="1" style="left:33.6%;top:24.2%;--i:0">1</i><i class="pin" data-n="2" style="left:44.2%;top:39.6%;--i:1">2</i><i class="pin" data-n="3" style="left:65.6%;top:47.4%;--i:2">3</i><i class="pin" data-n="4" style="left:75.6%;top:80.4%;--i:3">4</i><i class="pin" data-n="5" style="left:78.6%;top:39.8%;--i:4">5</i></div><div class="stack"><img class="l" src="img/ui/topic-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/topic-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="shot demo pan" data-pan=".3" data-start="topic-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：话题"><div class="pins" aria-hidden="true"><i class="pin" data-n="1" style="left:33.6%;top:24.2%;--i:0">1</i><i class="pin" data-n="2" style="left:44.2%;top:39.6%;--i:1">2</i><i class="pin" data-n="3" style="left:65.6%;top:47.4%;--i:2">3</i><i class="pin" data-n="4" style="left:75.6%;top:80.4%;--i:3">4</i><i class="pin" data-n="5" style="left:78.6%;top:39.8%;--i:4">5</i></div><div class="stack"><img class="l" src="img/ui/topic-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/topic-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
     <div class="demo-bar" data-for="topic-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+    <div class="pan-hint">← 左右滑动看全 →</div>
     <ol class="legend"><li data-n="1"><i>1</i><div><b>转交</b><span>Jojo 把这件事转给了 Forge</span></div></li><li data-n="2"><i>2</i><div><b>一问一答</b><span>它问方案，你选完留一行记录</span></div></li><li data-n="3"><i>3</i><div><b>交付</b><span>改动、测试结果和录屏一起回来</span></div></li><li data-n="4"><i>4</i><div><b>等你拍板</b><span>要你决定的事固定在输入框上方</span></div></li><li data-n="5"><i>5</i><div><b>同一份名单</b><span>人和 AI 成员都在这个话题的成员里</span></div></li></ol>
   </section>
 
@@ -101,7 +103,7 @@
         <button type="button" class="tab" role="tab" aria-selected="false" data-k="image" data-d="选项是图片，下面写着名字和推荐理由。" data-w="1294" data-h="806">图片选择</button>
       </div>
       <figure class="view" role="tabpanel" aria-live="polite">
-        <div class="card"><img class="l" id="v-l" src="img/card-compare-light.webp" alt="方案对比卡片" width="1294" height="992"><img class="d" id="v-d" src="img/card-compare-dark.webp" alt="方案对比卡片" width="1294" height="992"></div>
+        <div class="card pan"><img class="l" id="v-l" src="img/card-compare-light.webp" alt="方案对比卡片" width="1294" height="992"><img class="d" id="v-d" src="img/card-compare-dark.webp" alt="方案对比卡片" width="1294" height="992"></div>
         <figcaption id="v-c"><b>方案对比</b>：两个可以点开的原型并排，各写清好处和代价，选一个就行。</figcaption>
       </figure>
     </div>
@@ -114,7 +116,8 @@
         <p>话题旁边能看到它的终端、计划和验收标准。需要时可以接管，你改完交还，它从当前这一步继续。</p>
       </div>
     </div>
-    <div class="shot pinned"><div class="pins" aria-hidden="true"><i class="pin" data-n="1" style="left:72.4%;top:10.3%;--i:0">1</i><i class="pin" data-n="2" style="left:72.4%;top:35.1%;--i:1">2</i><i class="pin" data-n="3" style="left:72.4%;top:45.4%;--i:2">3</i><i class="pin" data-n="4" style="left:72.4%;top:65.0%;--i:3">4</i><i class="pin" data-n="5" style="left:98.3%;top:94.7%;--i:4">5</i></div><img class="l" src="img/live-light.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"><img class="d" src="img/live-dark.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"></div>
+    <div class="shot pinned pan" data-pan="1"><div class="pins" aria-hidden="true"><i class="pin" data-n="1" style="left:72.4%;top:10.3%;--i:0">1</i><i class="pin" data-n="2" style="left:72.4%;top:35.1%;--i:1">2</i><i class="pin" data-n="3" style="left:72.4%;top:45.4%;--i:2">3</i><i class="pin" data-n="4" style="left:72.4%;top:65.0%;--i:3">4</i><i class="pin" data-n="5" style="left:98.3%;top:94.7%;--i:4">5</i></div><img class="l" src="img/live-light.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"><img class="d" src="img/live-dark.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"></div>
+    <div class="pan-hint">← 左右滑动看全 →</div>
     <ol class="legend"><li data-n="1"><i>1</i><div><b>终端</b><span>它正在敲什么，实时看得到</span></div></li><li data-n="2"><i>2</i><div><b>回放</b><span>每一步都留着，可以拖回去看</span></div></li><li data-n="3"><i>3</i><div><b>验收标准</b><span>逐条显示达标没有</span></div></li><li data-n="4"><i>4</i><div><b>计划</b><span>做到第几步，每步用了多久</span></div></li><li data-n="5"><i>5</i><div><b>接管</b><span>它先停下，你改完交还</span></div></li></ol>
   </section>
 
@@ -125,8 +128,9 @@
         <p>AI 成员做的网页、文档、视频都放在产出里。每个版本都留着，也能看到它来自哪个话题、是谁要的。网页里的按钮点了，会发给做它的那个成员。</p>
       </div>
     </div>
-    <div class="shot demo" data-start="artifact-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：产出"><div class="stack"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="shot demo pan" data-start="artifact-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：产出"><div class="stack"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
     <div class="demo-bar" data-for="artifact-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+    <div class="pan-hint">← 左右滑动看全 →</div>
   </section>
 
   <section class="wrap chap" id="memory">
@@ -160,7 +164,7 @@
 
   <section class="wrap" id="machines">
     <div class="split">
-      <div class="shot"><img class="l" src="img/settings-machines-light.webp" alt="设置里的机器：团队的电脑、VPS 和在线状态" width="1280" height="900" loading="lazy"><img class="d" src="img/settings-machines-dark.webp" alt="设置里的机器：团队的电脑、VPS 和在线状态" width="1280" height="900" loading="lazy"></div>
+      <div class="shot pan sm"><img class="l" src="img/settings-machines-light.webp" alt="设置里的机器：团队的电脑、VPS 和在线状态" width="1280" height="900" loading="lazy"><img class="d" src="img/settings-machines-dark.webp" alt="设置里的机器：团队的电脑、VPS 和在线状态" width="1280" height="900" loading="lazy"></div>
       <div class="txt">
         <div class="eyebrow">Machines</div>
         <h2>给每个 AI 成员，<br>分配一台电脑。</h2>
@@ -234,7 +238,7 @@
   <section class="wrap" id="compare">
     <div class="center">
       <div class="eyebrow">Compare</div>
-      <h2>为什么不直接在<br>Slack、飞书里加个 bot？</h2>
+      <h2>为什么不直接在<br>Slack、飞书里<span class="nb">加个 bot？</span></h2>
       <p class="lead">在现有的聊天软件里加 bot，或者另装一个 bot 应用，各有卡住的地方。{{PRODUCT_NAME}} 是照着这些地方做的。</p>
     </div>
     <div class="cmp">
