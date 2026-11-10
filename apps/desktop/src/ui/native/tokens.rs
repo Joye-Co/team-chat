@@ -357,6 +357,21 @@ impl NativeColors {
         self.dark
     }
 
+    /// The 团队管理 window and its flat sidebar: `sidebar` in light, `background` in dark, so the
+    /// content panel on it reads lighter in dark mode as it does in the design.
+    pub fn admin_window(&self) -> Hsla {
+        if self.dark {
+            self.content
+        } else {
+            self.sidebar
+        }
+    }
+
+    /// The 团队管理 content panel and the tables on it: `background` in light, `card` in dark.
+    pub fn admin_panel(&self) -> Hsla {
+        if self.dark { self.sheet } else { self.content }
+    }
+
     /// The float level (§1.7): shadow md and the 1 px border line.
     pub fn float(&self) -> Vec<BoxShadow> {
         let mut s = shadow::md();
@@ -1189,6 +1204,17 @@ pub mod monitor {
     pub const MIN_HEIGHT: Pixels = px(640.);
     /// The sidebar's row column (the panel adds its insets).
     pub const SIDEBAR_WIDTH: Pixels = px(216.);
+    /// The content panel floats on the window this far from its top, right and bottom edges.
+    pub const PANEL_INSET: Pixels = space::S8;
+    pub const PANEL_RADIUS: Pixels = px(12.);
+    /// The panel's 1 px outline: `label` at this opacity.
+    pub const PANEL_OUTLINE_LIGHT: f32 = 0.06;
+    pub const PANEL_OUTLINE_DARK: f32 = 0.08;
+    /// The page header inside the panel: 24 above the title, 20 under the subtitle.
+    pub const HEADER_PAD_TOP: Pixels = space::S24;
+    pub const HEADER_PAD_BOTTOM: Pixels = px(20.);
+    /// Room under the last section of a page.
+    pub const BODY_PAD_BOTTOM: Pixels = px(28.);
     /// The machine tile of the switcher.
     pub const MACHINE_TILE: Pixels = px(32.);
     /// A KPI card's sparkline.

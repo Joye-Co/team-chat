@@ -42,7 +42,7 @@ use crate::{
             Alert, AlertTone, Empty, NativeType as _, PushSize, PushStyle, Segment, Segmented,
             SidebarFooter, SidebarRow, TruncText, group_label, native_colors, push_button,
             sidebar_panel,
-            tokens::{height, metrics, monitor as t, radius, space},
+            tokens::{height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
     },
@@ -441,29 +441,75 @@ impl Render for AdminView {
             .id("admin-root")
             .size_full()
             .flex()
-            .bg(k.content)
+            .bg(k.admin_window())
             .text_color(k.label)
             .n_body()
             .child(self.sidebar(window, cx))
             .child(
+                // The content floats on the window: inset from the top, right and bottom edges.
                 div()
                     .flex_1()
                     .min_w(gpui::Pixels::ZERO)
                     .h_full()
+                    .pr(t::PANEL_INSET)
+                    .pb(t::PANEL_INSET)
                     .flex()
                     .flex_col()
-                    .child(self.toolbar(window, cx))
                     .child(
                         div()
-                            .id("admin-scroll")
-                            .flex_1()
-                            .min_h(gpui::Pixels::ZERO)
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll)
-                            .child(self.body(window, cx)),
+                            .id("admin-drag")
+                            .flex_none()
+                            .h(t::PANEL_INSET)
+                            .w_full()
+                            .on_mouse_down(MouseButton::Left, |e, window, _| {
+                                if e.click_count >= 2 {
+                                    window.titlebar_double_click();
+                                } else {
+                                    window.start_window_move();
+                                }
+                            }),
+                    )
+                    .child(
+                        content_panel(cx).child(self.toolbar(window, cx)).child(
+                            div()
+                                .id("admin-scroll")
+                                .flex_1()
+                                .min_h(gpui::Pixels::ZERO)
+                                .overflow_y_scroll()
+                                .track_scroll(&self.scroll)
+                                .child(self.body(window, cx)),
+                        ),
                     ),
             )
     }
+}
+
+/// The floating content panel: content fill, radius 12, a 1 px outline and, in light mode, a
+/// faint shadow.
+fn content_panel(cx: &gpui::App) -> gpui::Div {
+    let k = native_colors(cx);
+    let mut s = if k.is_dark() {
+        vec![]
+    } else {
+        crate::ui::native::tokens::shadow::xs()
+    };
+    s.push(crate::ui::native::tokens::shadow::line(k.label.opacity(
+        if k.is_dark() {
+            t::PANEL_OUTLINE_DARK
+        } else {
+            t::PANEL_OUTLINE_LIGHT
+        },
+    )));
+    div()
+        .flex_1()
+        .min_h(gpui::Pixels::ZERO)
+        .w_full()
+        .flex()
+        .flex_col()
+        .rounded(t::PANEL_RADIUS)
+        .bg(k.admin_panel())
+        .shadow(s)
+        .overflow_hidden()
 }
 
 impl AdminView {
@@ -612,6 +658,9 @@ impl AdminView {
             _ => None,
         };
         sidebar_panel(t::SIDEBAR_WIDTH, cx)
+            // Flat on the window: the content panel carries the edge.
+            .border_r(gpui::Pixels::ZERO)
+            .bg(k.admin_window())
             .child(
                 // The traffic lights' row; dragging it moves the window.
                 div()
@@ -838,13 +887,12 @@ impl AdminView {
         div()
             .id("admin-toolbar")
             .flex_none()
-            .h(height::TOOLBAR)
             .px(space::S32)
+            .pt(t::HEADER_PAD_TOP)
+            .pb(t::HEADER_PAD_BOTTOM)
             .flex()
-            .items_center()
+            .items_end()
             .gap(space::S12)
-            .border_b(metrics::HAIRLINE)
-            .border_color(k.separator)
             .on_mouse_down(MouseButton::Left, |e, window, _| {
                 if e.click_count >= 2 {
                     window.titlebar_double_click();
@@ -858,39 +906,42 @@ impl AdminView {
                     .min_w(gpui::Pixels::ZERO)
                     .flex()
                     .flex_col()
+                    .when(overview, |d| {
+                        d.child(
+                            div()
+                                .mb(space::S6)
+                                .flex()
+                                .items_center()
+                                .gap(space::S6)
+                                .n_footnote()
+                                .text_color(k.secondary)
+                                .child(m::PATH_MACHINES)
+                                .children(machine_name.map(|n| {
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S6)
+                                        .child(sym_icon(
+                                            Sym::ChevronRight,
+                                            SymSize::INLINE_SMALL,
+                                            k.tertiary,
+                                        ))
+                                        .child(n)
+                                })),
+                        )
+                    })
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S4)
-                            .n_title3()
+                            .n_style(crate::ui::native::tokens::text::HERO)
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(if active { k.label } else { k.secondary })
-                            .when(overview, |d| {
-                                d.child(div().text_color(k.secondary).child(m::PATH_MACHINES))
-                                    .child(sym_icon(
-                                        Sym::ChevronRight,
-                                        SymSize::INLINE_SMALL,
-                                        k.tertiary,
-                                    ))
-                            })
-                            .children(machine_name.filter(|_| overview).map(|n| {
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::S4)
-                                    .child(div().text_color(k.secondary).child(n))
-                                    .child(sym_icon(
-                                        Sym::ChevronRight,
-                                        SymSize::INLINE_SMALL,
-                                        k.tertiary,
-                                    ))
-                            }))
                             .child(page_title),
                     )
                     .when(!subtitle.is_empty(), |d| {
                         d.child(
                             TruncText::new(subtitle)
-                                .n_subheadline()
+                                .mt(space::S4)
+                                .n_body()
                                 .n_figures()
                                 .text_color(k.secondary),
                         )
@@ -911,7 +962,7 @@ impl AdminView {
         let pad = div()
             .w_full()
             .px(space::S32)
-            .py(space::S24)
+            .pb(t::BODY_PAD_BOTTOM)
             .flex()
             .flex_col()
             .gap(space::S16);

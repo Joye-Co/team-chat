@@ -1005,7 +1005,7 @@ impl AdminView {
                     .rounded(radius::CONTAINER)
                     .border_1()
                     .border_color(k.separator)
-                    .bg(k.content)
+                    .bg(k.admin_panel())
                     .overflow_hidden()
                     .flex()
                     .flex_col()
