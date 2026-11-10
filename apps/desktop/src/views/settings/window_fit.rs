@@ -244,7 +244,10 @@ pub fn dim_window_buttons(window: &Window) {
 #[cfg(not(target_os = "macos"))]
 pub fn dim_window_buttons(_window: &Window) {}
 
+#[cfg(target_os = "macos")]
 type NsWindow = *mut objc2::runtime::AnyObject;
+#[cfg(not(target_os = "macos"))]
+type NsWindow = *mut std::ffi::c_void;
 
 #[cfg(not(target_os = "macos"))]
 fn ns_window(_: &Window) -> Option<NsWindow> {

@@ -205,6 +205,31 @@ jobs:
       - name: cargo test
         run: cargo test --locked -p desktop
 
+  desktop-windows:
+    name: Desktop build and tests (Windows)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-test
+      - name: cargo build
+        run: cargo build --locked -p desktop
+      - name: cargo test (protocol and core)
+        run: cargo test --locked -p chat-protocol -p chat-core
+      # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
+      - name: cargo test (desktop, report only)
+        continue-on-error: true
+        run: cargo test --locked -p desktop
+
   rust-lint:
     name: Rust fmt and clippy (report only)
     needs: changes

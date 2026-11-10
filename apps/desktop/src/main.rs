@@ -48,6 +48,7 @@ mod drafts;
 mod fake;
 mod fake_extra;
 mod markdown;
+mod paths;
 mod provider;
 mod selftest;
 #[allow(dead_code)]

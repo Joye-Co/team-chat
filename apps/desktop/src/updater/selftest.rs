@@ -21,7 +21,6 @@
 
 use std::{
     ffi::OsString,
-    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -340,6 +339,11 @@ fn fake_old_bundle(bundle: &Path) -> Result<(), String> {
     std::fs::write(bundle.join("Contents/Info.plist"), plist).map_err(|e| e.to_string())?;
     let exe = macos.join(env!("PRODUCT_NAME"));
     std::fs::write(&exe, "#!/bin/sh\nexit 0\n").map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
