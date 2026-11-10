@@ -26,4 +26,9 @@ set +e
 code="${PIPESTATUS[0]}"
 set -e
 echo "screenshot self-test exit code: $code"
+if [ "$code" != 0 ]; then
+  # A crash leaves no line in the log; Windows records the faulting module.
+  powershell -NoProfile -Command "Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error','Windows Error Reporting'} -MaxEvents 4 -ErrorAction SilentlyContinue | Format-List TimeCreated, ProviderName, Message" \
+    2>&1 | tee -a "$dir/selftest.log" || true
+fi
 exit "$code"
