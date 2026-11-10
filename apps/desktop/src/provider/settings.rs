@@ -378,7 +378,11 @@ impl CoreProvider {
     }
 
     /// 限额 alone (owners, 用量 › 改预算): `None` clears; 汇报给 stays.
-    pub(super) fn set_member_budget_inner(&self, id: &str, cents: Option<u64>) -> AdminReply<Member> {
+    pub(super) fn set_member_budget_inner(
+        &self,
+        id: &str,
+        cents: Option<u64>,
+    ) -> AdminReply<Member> {
         let req = UpdateMemberRequest {
             weekly_budget_cents: Some(cents),
             ..Default::default()

@@ -30,6 +30,27 @@ pub fn framed(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    frame(title.into(), true, content, window, cx)
+}
+
+/// [`framed`] for a window that cannot be resized (login, 设置): its maximize
+/// button is drawn dimmed and does nothing, as the Mac dims the zoom button.
+pub fn framed_fixed(
+    title: impl Into<SharedString>,
+    content: impl IntoElement,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    frame(title.into(), false, content, window, cx)
+}
+
+fn frame(
+    title: SharedString,
+    resizable: bool,
+    content: impl IntoElement,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     if !drawn() || window.is_fullscreen() {
         return content.into_any_element();
     }
@@ -39,14 +60,19 @@ pub fn framed(
         .flex()
         .flex_col()
         .bg(k.content)
-        .child(caption(title.into(), window, cx))
+        .child(caption(title, resizable, window, cx))
         .child(div().flex_1().min_h_0().w_full().relative().child(content))
         .into_any_element()
 }
 
 /// The caption strip: the window's title at the leading edge, the window
 /// buttons at the trailing edge.
-fn caption(title: SharedString, window: &mut Window, cx: &mut App) -> impl IntoElement {
+fn caption(
+    title: SharedString,
+    resizable: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement {
     let k = native_colors(cx);
     // Like every title in the app, the title dims in an inactive window.
     let ink = if emphasized(window) {
@@ -55,6 +81,7 @@ fn caption(title: SharedString, window: &mut Window, cx: &mut App) -> impl IntoE
         k.tertiary
     };
     TitleBar::new()
+        .maximizable(resizable)
         .h(metrics::CAPTION)
         .pl(space::S12)
         .bg(k.sidebar)

@@ -987,7 +987,7 @@ impl LoginWindow {
 impl Render for LoginWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = div().size_full().child(self.login.clone());
-        crate::ui::native::window_chrome::framed(env!("PRODUCT_NAME"), body, window, cx)
+        crate::ui::native::window_chrome::framed_fixed(env!("PRODUCT_NAME"), body, window, cx)
     }
 }
 

@@ -1114,6 +1114,11 @@ impl RootView {
             .size_full()
             .bg(k.bg)
             .text_color(k.ink);
+        // Off the Mac the app ends with its last window and has no tray to
+        // come back from, so Ctrl+W does not close the main window: the
+        // action stops here. Other windows (设置, 团队管理) still close.
+        #[cfg(not(target_os = "macos"))]
+        let root = root.on_action(|_: &crate::views::nav::menus::CloseWindow, _, _| {});
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root =
             crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
@@ -1491,8 +1496,11 @@ pub fn bind_view_keys(cx: &mut App) {
 
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
+    // Windows quits with Alt+F4 and the close button; Ctrl+Q would end the
+    // app without a warning.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.bind_keys([
-        KeyBinding::new(crate::secondary!("q"), Quit, None),
         KeyBinding::new(crate::secondary!(","), OpenSettings, None),
         KeyBinding::new(crate::secondary!("alt-i"), ToggleSidePanel, None),
         // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).

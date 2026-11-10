@@ -66,7 +66,11 @@ const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
 /// Binds [`OpenTeamAdmin`] and ⌥⌘,. The window itself checks again that I am an owner.
 pub fn install(services: Services, cx: &mut App) {
-    cx.bind_keys([gpui::KeyBinding::new(crate::secondary!("alt-,"), OpenTeamAdmin, None)]);
+    cx.bind_keys([gpui::KeyBinding::new(
+        crate::secondary!("alt-,"),
+        OpenTeamAdmin,
+        None,
+    )]);
     cx.on_action(move |_: &OpenTeamAdmin, cx| {
         if i_am_owner(&services) {
             open(services.clone(), cx)
@@ -88,6 +92,23 @@ pub fn open(services: Services, cx: &mut App) {
 /// Opens 团队管理 at `page` (Settings sends 成员, 团队约定 and 机器 here).
 pub fn open_at(services: Services, page: AdminPage, cx: &mut App) {
     open_with(services, Some(page), cx);
+}
+
+/// 改每周预算… on a budget card: 团队管理 › 用量 with that AI member's budget editor open.
+pub fn open_budget(services: Services, member_id: String, cx: &mut App) {
+    if !i_am_owner(&services) {
+        return;
+    }
+    open_with(services, Some(AdminPage::Usage), cx);
+    if let Some((handle, view)) = cx.try_global::<AdminWindow>().and_then(|w| w.0.clone()) {
+        let _ = handle.update(cx, |_, _, cx| {
+            let _ = view.update(cx, |v, cx| {
+                v.usage.budget_for = Some(member_id);
+                v.usage.budget_error = None;
+                cx.notify();
+            });
+        });
+    }
 }
 
 fn open_with(services: Services, page: Option<AdminPage>, cx: &mut App) {

@@ -214,7 +214,14 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Minimize, cx| with_key_window(cx, |window| window.minimize_window()));
     // Like the red traffic light: the app keeps running, and a click on the
     // Dock icon opens the main window again.
-    cx.on_action(|_: &CloseWindow, cx| with_key_window(cx, |window| window.remove_window()));
+    cx.on_action(|_: &CloseWindow, cx| {
+        // Off the Mac the app ends with its last window: Ctrl+W never closes
+        // that one (the close button and Alt+F4 do).
+        if cfg!(not(target_os = "macos")) && cx.windows().len() <= 1 {
+            return;
+        }
+        with_key_window(cx, |window| window.remove_window())
+    });
     cx.on_action(|_: &Zoom, cx| with_key_window(cx, |window| window.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| {
         with_key_window(cx, |window| window.toggle_fullscreen())
