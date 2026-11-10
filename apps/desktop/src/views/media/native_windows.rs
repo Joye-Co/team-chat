@@ -40,7 +40,7 @@ use windows::{
     },
     Win32::{
         Media::MediaFoundation::{
-            IMF2DBuffer, IMFAttributes, IMFMediaType, IMFSample, IMFSourceReader,
+            IMF2DBuffer, IMF2DBuffer2, IMFAttributes, IMFMediaType, IMFSample, IMFSourceReader,
             MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
             MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
             MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_SUBTYPE, MF_MT_VIDEO_ROTATION, MF_PD_DURATION,
@@ -48,8 +48,8 @@ use windows::{
             MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
             MF_SOURCE_READER_MEDIASOURCE, MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED,
             MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READERF_ERROR, MF_VERSION,
-            MFAudioFormat_Float, MFAudioFormat_PCM, MFMediaType_Audio, MFMediaType_Video,
-            MFSTARTUP_FULL, MFVideoFormat_RGB32,
+            MF2DBuffer_LockFlags_Read, MFAudioFormat_Float, MFAudioFormat_PCM, MFMediaType_Audio,
+            MFMediaType_Video, MFSTARTUP_FULL, MFVideoFormat_RGB32,
         },
         System::{
             Com::{
@@ -307,8 +307,8 @@ impl Video {
                     && y >= 0
                     && cw > 0
                     && ch > 0
-                    && x as u32 + cw as u32 <= w
-                    && y as u32 + ch as u32 <= h
+                    && (x as u32).checked_add(cw as u32).is_some_and(|r| r <= w)
+                    && (y as u32).checked_add(ch as u32).is_some_and(|b| b <= h)
                 {
                     self.crop = (x as u32, y as u32, cw as u32, ch as u32);
                 }
@@ -393,40 +393,83 @@ impl Video {
                     }
                 }
             };
-            if let Ok(two_d) = buffer.cast::<IMF2DBuffer>() {
+            // A sample decoded before a change of size can be smaller than the size the
+            // reader reports now, so every row that is read must lie inside the memory
+            // the buffer really has: `start` and `len`.
+            let fits = |start: *const u8, len: usize, scan0: *const u8, pitch: isize| {
+                !scan0.is_null()
+                    && pitch.unsigned_abs() >= min_pitch
+                    && rows_inside(
+                        start as usize,
+                        len,
+                        scan0 as usize,
+                        pitch,
+                        y,
+                        h,
+                        x * 4,
+                        w * 4,
+                    )
+            };
+            let rows = self.height as usize;
+            let ok = if let Ok(two_d) = buffer.cast::<IMF2DBuffer2>() {
                 let (mut scan0, mut pitch) = (std::ptr::null_mut(), 0i32);
-                two_d.Lock2D(&mut scan0, &mut pitch).ok()?;
-                // A sample decoded before a change of size is smaller than the size
-                // the reader reports now: the buffer must hold every row that is read.
-                let fits = !scan0.is_null()
-                    && pitch.unsigned_abs() as usize >= min_pitch
-                    && two_d
-                        .GetContiguousLength()
-                        .is_ok_and(|n| n as usize >= min_pitch * self.height as usize);
-                if fits {
+                let (mut start, mut len) = (std::ptr::null_mut(), 0u32);
+                two_d
+                    .Lock2DSize(
+                        MF2DBuffer_LockFlags_Read,
+                        &mut scan0,
+                        &mut pitch,
+                        &mut start,
+                        &mut len,
+                    )
+                    .ok()?;
+                let ok = fits(start, len as usize, scan0, pitch as isize);
+                if ok {
                     copy(scan0, pitch as isize, &mut rgba);
                 }
                 let _ = two_d.Unlock2D();
-                if !fits {
-                    return None;
+                ok
+            } else if let Ok(two_d) = buffer.cast::<IMF2DBuffer>() {
+                let (mut scan0, mut pitch) = (std::ptr::null_mut(), 0i32);
+                two_d.Lock2D(&mut scan0, &mut pitch).ok()?;
+                // No length from this interface: the picture's own bytes, which start
+                // at the first row in memory.
+                let len = two_d.GetContiguousLength().unwrap_or(0) as usize;
+                let start = if pitch < 0 {
+                    (scan0 as usize).checked_sub(
+                        (pitch.unsigned_abs() as usize).saturating_mul(rows.saturating_sub(1)),
+                    )
+                } else {
+                    Some(scan0 as usize)
+                };
+                let ok =
+                    start.is_some_and(|start| fits(start as *const u8, len, scan0, pitch as isize));
+                if ok {
+                    copy(scan0, pitch as isize, &mut rgba);
                 }
+                let _ = two_d.Unlock2D();
+                ok
             } else {
                 let (mut data, mut len) = (std::ptr::null_mut(), 0u32);
                 buffer.Lock(&mut data, None, Some(&mut len)).ok()?;
                 let pitch = self.stride.unsigned_abs() as usize;
-                let rows = self.height as usize;
-                let fits = !data.is_null() && pitch >= min_pitch && len as usize >= pitch * rows;
-                if fits {
-                    if self.stride < 0 {
-                        copy(data.add(pitch * (rows - 1)), -(pitch as isize), &mut rgba);
-                    } else {
-                        copy(data, pitch as isize, &mut rgba);
-                    }
+                let (scan0, signed) = if self.stride < 0 {
+                    (
+                        data.wrapping_add(pitch.saturating_mul(rows.saturating_sub(1))),
+                        -(pitch as isize),
+                    )
+                } else {
+                    (data, pitch as isize)
+                };
+                let ok = !data.is_null() && fits(data, len as usize, scan0, signed);
+                if ok {
+                    copy(scan0, signed, &mut rgba);
                 }
                 let _ = buffer.Unlock();
-                if !fits {
-                    return None;
-                }
+                ok
+            };
+            if !ok {
+                return None;
             }
             let picture = image::RgbaImage::from_raw(w as u32, h as u32, rgba)?;
             let picture = match self.turn {
@@ -442,6 +485,32 @@ impl Video {
             })
         }
     }
+}
+
+/// Whether `rows` rows from row `first`, each `row_bytes` long and `x_bytes` into its
+/// line, lie inside the `len` bytes at `start`, for lines `pitch` apart from `scan0`
+/// (negative for a bottom-up picture). All of these come from the decoder.
+fn rows_inside(
+    start: usize,
+    len: usize,
+    scan0: usize,
+    pitch: isize,
+    first: usize,
+    rows: usize,
+    x_bytes: usize,
+    row_bytes: usize,
+) -> bool {
+    if rows == 0 {
+        return true;
+    }
+    let (lo, hi) = (start as i128, start as i128 + len as i128);
+    // The lines are evenly spaced: the first and the last one bound the others.
+    [first as i128, first as i128 + rows as i128 - 1]
+        .iter()
+        .all(|row| {
+            let line = scan0 as i128 + row * pitch as i128 + x_bytes as i128;
+            line >= lo && line + row_bytes as i128 <= hi
+        })
 }
 
 /// Scales `b` down so that its long side is at most `max` pixels.
@@ -695,6 +764,17 @@ fn blank_pdf() -> Vec<u8> {
 /// release needs threads that are already gone, and the process ends as a crash
 /// (0xC000000D in `d3d10warp!Task::ScheduleTask`, seen on Windows Server 2025). A
 /// document that is never closed keeps the device out of that destructor.
+///
+/// The stack, for whoever wants to remove this: the main thread calls `ExitProcess`;
+/// `Windows_Data_Pdf!dllmain_crt_process_detach` runs the destructor of the static
+/// `s_pdfStaticsInstance` (`CPdfStatics`), which drops the last reference to its D3D11
+/// device; `d3d11!NOutermost::CDevice::FlushDeletionPool` then has WARP schedule work
+/// on a thread pool that process shutdown already tore down, and
+/// `ntdll!TppRaiseInvalidParameter` raises. It needs no file of ours to be open and
+/// happens on no thread of ours.
+///
+/// The kept document is the blank PDF built in memory above, never a file of the
+/// user: a kept document made from a file would hold that file open.
 pub(super) fn keep_pdf_engine() -> bool {
     static KEPT: OnceLock<Option<(PdfDocument, PdfPage)>> = OnceLock::new();
     KEPT.get_or_init(|| {
@@ -1066,4 +1146,53 @@ pub fn describe(path: &Path) -> String {
         Some(out)
     })
     .unwrap_or_else(|| "no answer in 30 s".to_string())
+}
+
+#[cfg(test)]
+pub mod tests_support {
+    use super::*;
+
+    /// A worker that would decode for ever sees the stop flag once its caller's time
+    /// is up, and ends.
+    pub fn a_timed_out_worker_is_told_to_stop() -> bool {
+        let (ended_tx, ended_rx) = mpsc::channel();
+        let answer: Option<()> = run(Duration::from_millis(100), move |stop| {
+            while !stopped(stop) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let _ = ended_tx.send(());
+            None
+        });
+        answer.is_none() && ended_rx.recv_timeout(Duration::from_secs(5)).is_ok()
+    }
+
+    pub fn rows_stay_inside_the_buffer() {
+        // A 4x3 picture, 16 bytes a line, in a 48-byte buffer at 1000.
+        let (start, len) = (1000usize, 48usize);
+        // Top-down, whole picture and a crop.
+        assert!(rows_inside(start, len, 1000, 16, 0, 3, 0, 16));
+        assert!(rows_inside(start, len, 1000, 16, 1, 2, 4, 8));
+        // Bottom-up: the first line is the last in memory.
+        assert!(rows_inside(start, len, 1032, -16, 0, 3, 0, 16));
+        // The reader now says 4x4 (or 8 wide) but the sample is still 4x3.
+        assert!(!rows_inside(start, len, 1000, 16, 0, 4, 0, 16));
+        assert!(!rows_inside(start, len, 1000, 32, 0, 3, 0, 32));
+        assert!(!rows_inside(start, len, 1032, -16, 0, 4, 0, 16));
+        // A crop that runs past the line or starts before the buffer.
+        assert!(!rows_inside(start, len, 1000, 16, 2, 1, 8, 16));
+        assert!(!rows_inside(start, len, 992, 16, 0, 3, 0, 16));
+        // No length known, and numbers at the edge of the address space.
+        assert!(!rows_inside(start, 0, 1000, 16, 0, 1, 0, 16));
+        assert!(!rows_inside(
+            usize::MAX - 8,
+            64,
+            usize::MAX - 8,
+            isize::MAX,
+            0,
+            3,
+            0,
+            16
+        ));
+        assert!(rows_inside(start, len, 1000, 16, 0, 0, 0, 16));
+    }
 }

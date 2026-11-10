@@ -610,6 +610,18 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_decode_nobody_waits_for_stops() {
+        assert!(win::tests_support::a_timed_out_worker_is_told_to_stop());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_frame_is_only_read_from_inside_its_buffer() {
+        win::tests_support::rows_stay_inside_the_buffer();
+    }
+
     /// Without it the process can crash while it exits (see `keep_pdf_engine`).
     #[cfg(target_os = "windows")]
     #[test]
