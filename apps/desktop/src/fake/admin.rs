@@ -158,6 +158,12 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
             if b.0 == "m-taro" {
                 extra["estimatedUsd"] = json!(b.1);
             }
+            extra["models"] = json!(match b.0 {
+                "m-coder" => vec!["claude-opus-5-5", "claude-haiku-4-5"],
+                "m-reviewer" => vec!["claude-sonnet-5-5", "claude-haiku-4-5"],
+                "m-taro" => vec!["gpt-5.1-codex", "glm-5-air"],
+                _ => vec!["claude-sonnet-5-5"],
+            });
             with("memberId", b.0, b.1, b.2, extra)
         }).collect::<Vec<_>>(),
         "initiators": [
@@ -176,6 +182,13 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         "runtimes": [
             with("runtime", "claude", 152.6, 58, json!({ "machineId": "mc-mini" })),
             with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini", "estimatedUsd": 18.2 })),
+        ],
+        "models": [
+            with("model", "claude-opus-5-5", 118.4, 41, json!({ "name": "Claude Opus 5.5", "runtimes": ["claude"] })),
+            with("model", "claude-sonnet-5-5", 31.9, 22, json!({ "name": "Claude Sonnet 5.5", "runtimes": ["claude"] })),
+            with("model", "gpt-5.1-codex", 18.2, 13, json!({ "name": "GPT-5.1 Codex", "runtimes": ["codex"], "estimatedUsd": 18.2 })),
+            with("model", "claude-haiku-4-5", 2.3, 9, json!({ "name": "Claude Haiku 4.5", "runtimes": ["claude"] })),
+            with("model", "glm-5-air", 0.0, 2, json!({ "name": "glm-5-air", "runtimes": ["codex"], "unpricedTokens": 41000 })),
         ],
         "daily": daily
     }))

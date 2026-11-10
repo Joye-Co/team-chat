@@ -168,6 +168,35 @@ pub(super) fn kpi_card(
         .children(bar.map(|b| div().mt(space::S8).child(progress(b, cx))))
 }
 
+/// A CLI as people know it, from a runtime name.
+fn cli_word(runtime: &str) -> String {
+    match runtime {
+        "claude" => "Claude Code".into(),
+        "codex" => "Codex".into(),
+        r => r.to_string(),
+    }
+}
+
+/// The names of the models an AI member used (`BotSpend::models`), from the usage's model list.
+pub fn model_names(u: &TeamUsage, member_id: &str) -> Vec<String> {
+    u.bots
+        .iter()
+        .find(|b| b.member_id == member_id)
+        .map(|b| {
+            b.models
+                .iter()
+                .map(|id| {
+                    u.models
+                        .iter()
+                        .find(|x| &x.model == id)
+                        .map(|x| x.name.clone())
+                        .unwrap_or_else(|| id.clone())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A cost, with ≈ when part of it is estimated from tokens (`Spend::estimated_usd`).
 fn usd_of(s: &Spend) -> String {
     if s.estimated_usd.is_some_and(|e| e > 0.) {
@@ -627,45 +656,73 @@ impl AdminView {
 
     fn where_spent(&self, u: &TeamUsage, cx: &Context<Self>) -> AnyElement {
         let k = native_colors(cx);
-        // One row per CLI and way of paying.
-        // (CLI, how it is paid, cost, tokens, estimated cost)
-        let mut rows: Vec<(String, String, f64, u64, f64)> = vec![];
-        for r in &u.runtimes {
-            let kind = self
-                .fleet
-                .monitors
-                .get(r.machine_id.as_deref().unwrap_or_default())
-                .and_then(|d| {
-                    d.clis
-                        .iter()
-                        .find(|c| c.runtime == r.runtime)
-                        .map(|c| c.kind.clone())
-                })
-                .unwrap_or_else(|| r.runtime.clone());
-            let name = model::cli_name(&kind, &r.runtime);
-            let via = match self
-                .cli_method(&r.runtime, r.machine_id.as_deref())
-                .as_deref()
-            {
-                Some("subscription") => m::USAGE_VIA_SUBSCRIPTION,
-                Some("api_key") => m::USAGE_VIA_KEY,
-                _ => "",
+        // (name, secondary label, cost, tokens, estimated cost, tokens with no price)
+        let mut rows: Vec<(String, String, f64, u64, f64, u64)> = vec![];
+        if !u.models.is_empty() {
+            // One row per model; the CLIs it ran in as the second label.
+            for x in &u.models {
+                let via = x
+                    .runtimes
+                    .iter()
+                    .map(|r| cli_word(r))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                rows.push((
+                    x.name.clone(),
+                    via,
+                    x.spend.cost_usd,
+                    x.spend.input_tokens + x.spend.output_tokens,
+                    x.spend.estimated_usd.unwrap_or(0.),
+                    x.spend.unpriced_tokens.unwrap_or(0),
+                ));
             }
-            .to_string();
-            let tokens = r.spend.input_tokens + r.spend.output_tokens;
-            let est = r.spend.estimated_usd.unwrap_or(0.);
-            match rows.iter_mut().find(|x| x.0 == name && x.1 == via) {
-                Some(x) => {
-                    x.2 += r.spend.cost_usd;
-                    x.3 += tokens;
-                    x.4 += est;
+        } else {
+            // An older server: one row per CLI and way of paying.
+            for r in &u.runtimes {
+                let kind = self
+                    .fleet
+                    .monitors
+                    .get(r.machine_id.as_deref().unwrap_or_default())
+                    .and_then(|d| {
+                        d.clis
+                            .iter()
+                            .find(|c| c.runtime == r.runtime)
+                            .map(|c| c.kind.clone())
+                    })
+                    .unwrap_or_else(|| r.runtime.clone());
+                let name = model::cli_name(&kind, &r.runtime);
+                let via = match self
+                    .cli_method(&r.runtime, r.machine_id.as_deref())
+                    .as_deref()
+                {
+                    Some("subscription") => m::USAGE_VIA_SUBSCRIPTION,
+                    Some("api_key") => m::USAGE_VIA_KEY,
+                    _ => "",
                 }
-                None => rows.push((name, via, r.spend.cost_usd, tokens, est)),
+                .to_string();
+                let tokens = r.spend.input_tokens + r.spend.output_tokens;
+                let est = r.spend.estimated_usd.unwrap_or(0.);
+                match rows.iter_mut().find(|x| x.0 == name && x.1 == via) {
+                    Some(x) => {
+                        x.2 += r.spend.cost_usd;
+                        x.3 += tokens;
+                        x.4 += est;
+                    }
+                    None => rows.push((
+                        name,
+                        via,
+                        r.spend.cost_usd,
+                        tokens,
+                        est,
+                        r.spend.unpriced_tokens.unwrap_or(0),
+                    )),
+                }
             }
         }
         rows.sort_by(|a, b| b.2.total_cmp(&a.2));
         let max = rows.iter().map(|r| r.2).fold(0., f64::max).max(0.01);
         let any_estimate = rows.iter().any(|r| r.4 > 0.);
+        let unpriced: u64 = rows.iter().map(|r| r.5).sum();
         card_surface(cx)
             .flex_1()
             .p(space::S24)
@@ -681,32 +738,40 @@ impl AdminView {
             .when(rows.is_empty(), |d| {
                 d.child(div().n_body().text_color(k.secondary).child(m::USAGE_EMPTY))
             })
-            .children(rows.into_iter().map(|(name, via, cost, tokens, est)| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S6)
-                    .child(
+            .children(
+                rows.into_iter()
+                    .map(|(name, via, cost, tokens, est, unknown)| {
                         div()
                             .flex()
-                            .items_baseline()
-                            .gap(space::S8)
-                            .child(div().n_headline().child(name))
-                            .child(div().n_footnote().text_color(k.secondary).child(via))
-                            .child(div().flex_1())
-                            .child(div().n_headline().n_figures().child(if est > 0. {
-                                fill(m::USAGE_ESTIMATED, &[("cost", &usd(cost))])
-                            } else if cost > 0. {
-                                usd(cost)
-                            } else {
-                                fill(
-                                    m::USAGE_TOKENS_ONLY,
-                                    &[("tokens", &model::count_short(tokens))],
-                                )
-                            })),
-                    )
-                    .child(progress((cost / max) as f32, cx))
-            }))
+                            .flex_col()
+                            .gap(space::S6)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap(space::S8)
+                                    .child(div().n_headline().child(name))
+                                    .child(div().n_footnote().text_color(k.secondary).child(via))
+                                    .child(div().flex_1())
+                                    .child(div().n_headline().n_figures().child(if est > 0. {
+                                        fill(m::USAGE_ESTIMATED, &[("cost", &usd(cost))])
+                                    } else if cost > 0. {
+                                        usd(cost)
+                                    } else if unknown > 0 {
+                                        fill(
+                                            m::USAGE_PRICE_UNKNOWN,
+                                            &[("tokens", &model::count_short(unknown))],
+                                        )
+                                    } else {
+                                        fill(
+                                            m::USAGE_TOKENS_ONLY,
+                                            &[("tokens", &model::count_short(tokens))],
+                                        )
+                                    })),
+                            )
+                            .child(progress((cost / max) as f32, cx))
+                    }),
+            )
             .when(any_estimate, |d| {
                 d.child(
                     div()
@@ -715,6 +780,12 @@ impl AdminView {
                         .text_color(k.secondary)
                         .child(m::USAGE_ESTIMATE_NOTE),
                 )
+            })
+            .when(unpriced > 0, |d| {
+                d.child(div().n_footnote().text_color(k.secondary).child(fill(
+                    m::USAGE_UNPRICED_NOTE,
+                    &[("tokens", &model::count_short(unpriced))],
+                )))
             })
             .into_any_element()
     }
@@ -880,7 +951,26 @@ impl AdminView {
                                     .as_ref()
                                     .map(|mm| MemberAvatar::new(Some(mm), avatar::SM)),
                             )
-                            .child(TruncText::new(name).n_headline()),
+                            .child({
+                                let models = if tab == UsageTab::Bots {
+                                    model_names(u, &id)
+                                } else {
+                                    vec![]
+                                };
+                                div()
+                                    .flex_1()
+                                    .min_w(gpui::Pixels::ZERO)
+                                    .flex()
+                                    .flex_col()
+                                    .child(TruncText::new(name).n_headline())
+                                    .when(!models.is_empty(), |d| {
+                                        d.child(
+                                            TruncText::new(models.join(" · "))
+                                                .n_footnote()
+                                                .text_color(k.secondary),
+                                        )
+                                    })
+                            }),
                     )
                     .child(
                         div()
@@ -1098,5 +1188,27 @@ mod tests {
         let method =
             |_: &str, m: Option<&str>| (m == Some("m1")).then(|| "subscription".to_string());
         assert_eq!(included(&u, &method), 10.);
+    }
+
+    #[test]
+    fn an_ai_members_models_read_by_name() {
+        use chat_core::proto::usage::{BotSpend, ModelSpend};
+        let u = TeamUsage {
+            bots: vec![BotSpend {
+                member_id: "forge".into(),
+                spend: Spend::default(),
+                budget_cents: None,
+                models: vec!["claude-opus-5-5".into(), "mystery-1".into()],
+            }],
+            models: vec![ModelSpend {
+                model: "claude-opus-5-5".into(),
+                name: "Claude Opus 5.5".into(),
+                runtimes: vec!["claude".into()],
+                spend: Spend::default(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(model_names(&u, "forge"), ["Claude Opus 5.5", "mystery-1"]);
+        assert!(model_names(&u, "scout").is_empty());
     }
 }

@@ -209,13 +209,17 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/team-usage.json", "TeamUsage", {
     from: T0 - 7 * 86_400_000,
     to: T0,
-    total: spend(212.5, 12),
+    total: { ...spend(212.5, 12), unpricedTokens: 198000 },
     previous: { costUsd: 180.25, topics: 9 },
     teamBudgetCents: 40000,
-    bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000 }],
+    bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000, models: ["claude-opus-5-5", "claude-haiku-4-5"] }],
     initiators: [{ memberId: ID.owner, ...spend(74.5, 4) }],
     machines: [{ machineId: R.machine, ...spend(212.5, 12) }],
     pairs: [{ initiatorId: ID.owner, memberId: ID.bot, ...spend(52.5, 3) }],
+    models: [
+      { model: "claude-opus-5-5", name: "Claude Opus 5.5", runtimes: ["claude"], ...spend(190.5, 9) },
+      { model: "gpt-5.1-codex", name: "GPT-5.1 Codex", runtimes: ["codex"], ...spend(12.5, 2), estimatedUsd: 12.5 },
+    ],
     runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2), estimatedUsd: 12.5 }],
     daily: [{ start: T0 - 7 * 86_400_000, costUsd: 32.5, bots: [{ memberId: ID.bot, costUsd: 32.5 }] }],
   });

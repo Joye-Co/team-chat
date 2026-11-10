@@ -3,7 +3,7 @@
 // messages and topic status, and later topic messages into run input. The normalized run log
 // lives in its SQLite. This class adds runs of external bots, plans over HTTP and reads to the
 // feature modules it extends (core, runs, events, stall, input, takeover, interact).
-import type { BotRun, RunPlan, RunStatus, TopicStatus } from "@chat/protocol";
+import type { BotRun, ModelUsage, RunPlan, RunStatus, TopicStatus } from "@chat/protocol";
 import { activityAfterRun } from "../../activity/events";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
@@ -22,6 +22,8 @@ export interface UsageRun {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** Per model the run used (daemons from 1.3). */
+  models?: ModelUsage[];
 }
 import { DeskInteract } from "./interact";
 import { type DeskRollup, deskRollup } from "../../monitor/rollup";
@@ -181,6 +183,7 @@ export class BotDesk extends DeskInteract {
           costUsd: u?.costUsd ?? 0,
           inputTokens: u?.inputTokens ?? 0,
           outputTokens: u?.outputTokens ?? 0,
+          ...(u?.models?.length ? { models: u.models } : {}),
         };
       });
   }

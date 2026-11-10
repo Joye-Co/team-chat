@@ -4,7 +4,7 @@
 import type { UsageRun } from "../bots/desk/external";
 import type { Env } from "../core/env";
 import { teamZone } from "../memory/consolidate";
-import { priceRun } from "../usage/prices";
+import { loadPrices, priceRun } from "../usage/prices";
 
 /** A machine counts as offline in 活动记录 only after this long without a connection. */
 export const OFFLINE_GRACE_MS = 5 * 60_000;
@@ -83,7 +83,8 @@ export async function activityAfterRun(
   const from = weekStart(now, teamZone(env));
   const runs = await input.runsSince(from);
   const runner = { runtime: row?.runtime ?? null, model: row?.model ?? null };
-  const priced = runs.map((r) => priceRun(r, runner));
+  const prices = await loadPrices(env);
+  const priced = runs.map((r) => priceRun(r, prices, runner));
   const spent = priced.reduce((s, r) => s + r.costUsd, 0) * 100;
   if (spent < budget) return;
   const seen = await env.DB.prepare("SELECT 1 AS x FROM activity WHERE action = 'budget.reached' AND target = ? AND at >= ? LIMIT 1")
