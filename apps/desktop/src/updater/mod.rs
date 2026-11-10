@@ -243,11 +243,16 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
             let bundle = running_bundle();
             let done = install::finish_on_launch(&marker, bundle.as_deref(), version::CURRENT);
             tracing::info!(?done, "update finish on launch");
-            if cfg!(windows)
-                && done != install::Finish::NotForMe
-                && let Some(dir) = &bundle
-            {
-                install::windows::remove_stale_backups(dir);
+            if cfg!(windows) {
+                // An update that was cut short is undone (or found finished) by the helper.
+                if let Some(updates) = marker.parent() {
+                    install::windows::recover_interrupted(updates);
+                }
+                if done != install::Finish::NotForMe
+                    && let Some(dir) = &bundle
+                {
+                    install::windows::remove_stale_backups(dir);
+                }
             }
         })
         .detach();
@@ -683,7 +688,10 @@ impl Updater {
         let mut open = if cfg!(windows) {
             let mut select = std::ffi::OsString::from("/select,");
             select.push(dmg);
-            let mut cmd = std::process::Command::new("explorer.exe");
+            // By its full path: a bare name is looked up in the app's folder first.
+            let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+            let mut cmd =
+                std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe"));
             cmd.arg(select);
             cmd
         } else {

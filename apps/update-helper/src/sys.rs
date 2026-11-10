@@ -27,9 +27,30 @@ impl Running for Started {
     }
 }
 
-/// A command that opens no console window (the helper has none itself).
-fn quiet(program: &str) -> Command {
-    let mut cmd = Command::new(program);
+/// The Windows system folder (`C:\Windows\System32`). The helper starts system tools from
+/// there by full path: a bare name would be looked up in the helper's own folder first,
+/// which the user (and so any program of the user) can write to.
+#[cfg(windows)]
+fn system_dir() -> std::path::PathBuf {
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buf = [0u16; 512];
+    // SAFETY: the buffer is ours and its length is passed.
+    let len = unsafe { GetSystemDirectoryW(Some(&mut buf)) } as usize;
+    if len == 0 || len > buf.len() {
+        return std::path::PathBuf::from(r"C:\Windows\System32");
+    }
+    std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]))
+}
+
+#[cfg(not(windows))]
+fn system_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from("/usr/bin")
+}
+
+/// A system tool by its full path, started without a console window (the helper has none
+/// itself).
+fn system_tool(relative: &str) -> Command {
+    let mut cmd = Command::new(system_dir().join(relative));
     cmd.stdin(Stdio::null());
     #[cfg(windows)]
     {
@@ -39,6 +60,11 @@ fn quiet(program: &str) -> Command {
     }
     cmd
 }
+
+const POWERSHELL: &str = r"WindowsPowerShell\v1.0\powershell.exe";
+const REG: &str = "reg.exe";
+/// Where Windows keeps the commands it runs once at the user's next sign-in.
+const RUN_ONCE: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce";
 
 /// The `DisplayVersion` line of `reg query <key> /v DisplayVersion`.
 pub(crate) fn parse_reg_value(output: &str, name: &str) -> Option<String> {
@@ -52,13 +78,21 @@ pub(crate) fn parse_reg_value(output: &str, name: &str) -> Option<String> {
     })
 }
 
-/// Reads the two lines the signature query prints: the status, then the subject.
+/// Reads the lines the signature query prints: the status, then the certificate's subject
+/// and thumbprint when there is one. No output at all is a failed query, not "unsigned".
 pub(crate) fn parse_signer(output: &str) -> Signer {
     let mut lines = output.lines().map(str::trim).filter(|l| !l.is_empty());
+    let Some(status) = lines.next() else {
+        return Signer::Unknown("the signature query printed nothing".into());
+    };
     match (lines.next(), lines.next()) {
-        (Some("Valid"), Some(subject)) => Signer::Valid(subject.to_string()),
-        (Some("NotSigned"), _) | (None, _) => Signer::Unsigned,
-        (Some(status), _) => Signer::Invalid(status.to_string()),
+        (Some(subject), Some(thumbprint)) => Signer::Signed {
+            status: status.to_string(),
+            subject: subject.to_string(),
+            thumbprint: thumbprint.to_string(),
+        },
+        (None, _) if status == "NotSigned" => Signer::Unsigned,
+        _ => Signer::Unknown(format!("status {status} without a certificate")),
     }
 }
 
@@ -146,18 +180,22 @@ impl Sys for Os {
             return Signer::Unsigned;
         }
         // The path travels in the environment, so no quoting rule applies to it.
-        let out = quiet("powershell.exe")
+        let out = system_tool(POWERSHELL)
             .args(["-NoProfile", "-NonInteractive", "-Command"])
             .arg(
-                "$s = Get-AuthenticodeSignature -LiteralPath $env:UPDATE_SIGNED_FILE; \
+                "$ErrorActionPreference = 'Stop'; \
+                 $s = Get-AuthenticodeSignature -LiteralPath $env:UPDATE_SIGNED_FILE; \
                  [Console]::Out.WriteLine($s.Status); \
-                 if ($s.SignerCertificate) { [Console]::Out.WriteLine($s.SignerCertificate.Subject) }",
+                 if ($s.SignerCertificate) { \
+                 [Console]::Out.WriteLine($s.SignerCertificate.Subject); \
+                 [Console]::Out.WriteLine($s.SignerCertificate.Thumbprint) }",
             )
             .env("UPDATE_SIGNED_FILE", file)
             .output();
         match out {
             Ok(out) if out.status.success() => parse_signer(&String::from_utf8_lossy(&out.stdout)),
-            _ => Signer::Unsigned,
+            Ok(out) => Signer::Unknown(format!("the signature query failed ({})", out.status)),
+            Err(e) => Signer::Unknown(format!("cannot run the signature query: {e}")),
         }
     }
 
@@ -165,7 +203,7 @@ impl Sys for Os {
         if !cfg!(windows) {
             return None;
         }
-        let out = quiet("reg.exe")
+        let out = system_tool(REG)
             .args([
                 "query",
                 &format!("HKCU\\{uninstall_key}"),
@@ -181,7 +219,7 @@ impl Sys for Os {
         if !cfg!(windows) {
             return;
         }
-        let _ = quiet("reg.exe")
+        let _ = system_tool(REG)
             .args([
                 "add",
                 &format!("HKCU\\{uninstall_key}"),
@@ -192,6 +230,51 @@ impl Sys for Os {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    }
+
+    fn register_recovery(&self, name: &str, journal: &Path) -> Result<(), String> {
+        if !cfg!(windows) {
+            return Ok(());
+        }
+        let helper = std::env::current_exe().map_err(|e| e.to_string())?;
+        // Windows runs this line at the next sign-in and removes the entry first.
+        let command = format!(
+            "\"{}\" --recover \"{}\"",
+            helper.display(),
+            journal.display()
+        );
+        let status = system_tool(REG)
+            .args(["add", RUN_ONCE, "/v", name, "/t", "REG_SZ", "/d"])
+            .arg(command)
+            .arg("/f")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|e| format!("cannot register the recovery: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("cannot register the recovery ({status})"))
+        }
+    }
+
+    fn clear_recovery(&self, name: &str) {
+        if !cfg!(windows) {
+            return;
+        }
+        let _ = system_tool(REG)
+            .args(["delete", RUN_ONCE, "/v", name, "/f"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    /// A test on a real machine can hold the helper at a step (to kill it there):
+    /// `UPDATE_HELPER_TEST_PAUSE_AT=<step>`. Nothing sets it outside that test.
+    fn checkpoint(&self, step: &str) {
+        if std::env::var("UPDATE_HELPER_TEST_PAUSE_AT").is_ok_and(|at| at == step) {
+            std::thread::sleep(Duration::from_secs(600));
+        }
     }
 }
 

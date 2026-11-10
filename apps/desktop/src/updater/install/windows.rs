@@ -24,6 +24,13 @@ use crate::updater::version;
 pub const HELPER: &str = concat!(env!("PRODUCT_SLUG"), "-update.exe");
 /// File name of the uninstaller the installer writes.
 pub const UNINSTALLER: &str = "uninstall.exe";
+/// File name of the machine daemon in the install folder, when the installer shipped it.
+/// It may be running a bot, so an update never moves or stops it: the installer replaces
+/// it by the daemon's rename protocol (docs/machine-protocol.md) and the helper leaves it
+/// in place.
+pub const DAEMON_EXE: &str = concat!(env!("PRODUCT_SLUG"), "-daemon.exe");
+/// File name of the copy of the helper that runs an update, in the updates folder.
+const HELPER_COPY: &str = concat!(env!("PRODUCT_SLUG"), "-update-run.exe");
 /// File name of the app's program in the install folder.
 pub const APP_EXE: &str = concat!(env!("PRODUCT_NAME"), ".exe");
 /// The app's entry in 应用和功能, under `HKEY_CURRENT_USER`.
@@ -72,7 +79,7 @@ pub fn prepare(plan: &Plan, launch_args: Vec<OsString>) -> Result<(Marker, Stage
         .ok_or_else(|| InstallError::Io("the marker has no folder".into()))?;
     std::fs::create_dir_all(updates)?;
     // Its own name: the downloads are cleared by their "-setup.exe" ending.
-    let helper = updates.join(concat!(env!("PRODUCT_SLUG"), "-update-run.exe"));
+    let helper = updates.join(HELPER_COPY);
     std::fs::copy(&source, &helper)?;
     let marker = Marker {
         bundle: plan.bundle.clone(),
@@ -92,6 +99,7 @@ pub fn prepare(plan: &Plan, launch_args: Vec<OsString>) -> Result<(Marker, Stage
         log: Some(updates.join("update.log")),
         launch_args,
         uninstall_key: Some(UNINSTALL_KEY.into()),
+        keep: vec![DAEMON_EXE.into()],
         wait_secs: 0,
         confirm_secs: 0,
     };
@@ -116,6 +124,35 @@ pub fn start(staged: &Staged, pid: u32) -> std::io::Result<()> {
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
     cmd.spawn().map(|_| ())
+}
+
+/// Ends an update that was cut short (the helper was killed, the user signed out, the power
+/// went) when its journal is still in the updates folder: starts the helper's recovery,
+/// which puts the old version back or finds that the new one had finished. Windows also
+/// runs the same recovery at the next sign-in; this covers an app that is started first.
+/// While the helper of a running update lives, the recovery leaves it alone.
+pub fn recover_interrupted(updates: &Path) {
+    let journal = updates.join(update_helper::JOURNAL);
+    let helper = updates.join(HELPER_COPY);
+    if !journal.is_file() || !helper.is_file() {
+        return;
+    }
+    let mut cmd = std::process::Command::new(&helper);
+    cmd.arg("--recover")
+        .arg(&journal)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    match cmd.spawn() {
+        Ok(_) => tracing::info!("an update was interrupted; recovery started"),
+        Err(e) => tracing::warn!(error = %e, "cannot start the update recovery"),
+    }
 }
 
 /// Removes backup folders of earlier updates next to the install folder. The new version
@@ -195,6 +232,11 @@ mod tests {
         assert_eq!(job.installer, plan.dmg);
         assert_eq!(job.marker, plan.marker);
         assert_eq!(job.app_exe, APP_EXE);
+        assert_eq!(job.keep, vec![DAEMON_EXE.to_string()]);
+        assert_eq!(
+            job.journal(),
+            plan.marker.with_file_name(update_helper::JOURNAL)
+        );
         assert_eq!(job.version, "9.0.0");
         assert!(
             job.uninstall_key

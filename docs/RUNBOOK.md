@@ -201,10 +201,18 @@ Release again. A prerelease has no Windows installer.
 
   A certificate whose key lives in a cloud key store or on a hardware token has no PFX: set
   `WINDOWS_SIGN_CMD` for the build step instead (`scripts/windows/sign.sh`).
-- Once a release is signed, the app's update helper only installs an update signed by the same
-  publisher (the certificate's subject). So keep signing every later release, with a certificate
-  of the same subject; an unsigned or differently signed installer is refused and the installed
-  version stays. Users of an unsigned version take a signed update without any step.
+- Once a release is signed, the app's update helper only installs an update with a valid
+  signature of the same publisher (the certificate's subject). So keep signing every later
+  release, with a certificate of the same subject; an unsigned or differently signed installer
+  is refused and the installed version stays. Users of an unsigned version take a signed update
+  without any step. Use a certificate Windows trusts: an app signed with a certificate the
+  user's computer does not trust (self-signed) only takes updates signed with that very
+  certificate, so it cannot be renewed. If the helper cannot read a signature at all (PowerShell
+  is blocked on the computer), it installs nothing.
+- An update that is cut short (sign-out, power cut, the helper killed) is undone at the user's
+  next sign-in, at the next start of the app or before the next update, from the journal
+  `%APPDATA%\<bundle id>\updates\update-journal.json`; `update.log` next to it says what
+  happened. To run it by hand: `"<updates folder>\<slug>-update-run.exe" --recover "<journal>"`.
 - Withdrawing a version (`withdraw-release`) withdraws its Windows installer too.
 
 ## Bad app release

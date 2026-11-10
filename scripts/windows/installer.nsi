@@ -129,18 +129,33 @@ Section "Install"
 
   SetOutPath "$INSTDIR"
   !ifdef HAS_DAEMON
-    ; A daemon that runs keeps its file open: a rename works, an overwrite does not. The
-    ; daemon is not stopped: it sees the new file, exits when idle, its task starts the new
-    ; one, and a starting daemon removes the <daemon>.exe.old-* files next to it.
+    File /r /x "${DAEMON_EXE}" "${STAGE}\*.*"
+    ; The machine daemon may be running a bot, so it is replaced by its own protocol
+    ; (docs/machine-protocol.md) and never stopped: the whole new program is written beside
+    ; it, the running file is renamed (a rename works where an overwrite does not), and the
+    ; new file takes the name. The daemon sees the new file, exits when idle, its task
+    ; starts the new one, and a starting daemon removes the .old-* files next to it.
+    File "/oname=$INSTDIR\${DAEMON_EXE}.new" "${STAGE}\${DAEMON_EXE}"
+    StrCpy $1 ""
     ${If} ${FileExists} "$INSTDIR\${DAEMON_EXE}"
       System::Call 'kernel32::GetTickCount()i.r1'
       Rename "$INSTDIR\${DAEMON_EXE}" "$INSTDIR\${DAEMON_EXE}.old-$1"
     ${EndIf}
-  !endif
-  File /r "${STAGE}\*.*"
-  !ifdef HAS_DAEMON
-    ; Gone at once when no daemon runs from it.
-    Delete "$INSTDIR\${DAEMON_EXE}.old-$1"
+    ClearErrors
+    Rename "$INSTDIR\${DAEMON_EXE}.new" "$INSTDIR\${DAEMON_EXE}"
+    ${If} ${Errors}
+      ; Put the old program back and stop: the update helper rolls the rest back.
+      ${If} $1 != ""
+        Rename "$INSTDIR\${DAEMON_EXE}.old-$1" "$INSTDIR\${DAEMON_EXE}"
+      ${EndIf}
+      Abort
+    ${EndIf}
+    ${If} $1 != ""
+      ; Gone at once when no daemon runs from it.
+      Delete "$INSTDIR\${DAEMON_EXE}.old-$1"
+    ${EndIf}
+  !else
+    File /r "${STAGE}\*.*"
   !endif
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
 
@@ -222,9 +237,10 @@ Section "Uninstall"
       nsExec::Exec '"$INSTDIR\${DAEMON_EXE}" uninstall-service'
       Pop $1
     ${EndIf}
-    nsExec::Exec 'taskkill /F /IM "${DAEMON_EXE}"'
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /F /IM "${DAEMON_EXE}"'
     Pop $1
     Delete "$INSTDIR\${DAEMON_EXE}"
+    Delete "$INSTDIR\${DAEMON_EXE}.new"
     FindFirst $2 $3 "$INSTDIR\${DAEMON_EXE}.old-*"
     ${DoWhile} $3 != ""
       Delete "$INSTDIR\$3"
@@ -254,6 +270,8 @@ Section "Uninstall"
   DeleteRegKey HKCU "${APP_ID_KEY}"
   ; 登录时打开, when the user turned it on in the app.
   DeleteRegValue HKCU "${RUN_KEY}" "${APP_ID}"
+  ; The recovery of an update that was cut short (the update helper registers it).
+  DeleteRegValue HKCU "${RUN_KEY}Once" "${NAME}.update-recovery"
   ; Messages, settings and the sign-in stay (%APPDATA%\<APP_ID>): docs/INSTALL.md says how
   ; to remove them.
 SectionEnd

@@ -13,6 +13,9 @@
 #      reports its version; check the files, the registry and that no backup is left;
 #   5. rollback: run the helper with an installer whose app does not finish the update;
 #      the folder must hold B again, byte for byte;
+#      interruption: kill the helper while the install folder is empty (the old files are
+#      in the backup, the installer has not run), check that the recovery is registered
+#      for the next sign-in, run it, and find B again, byte for byte;
 #   6. with EXPECT_SIGNED=1 (installers signed by one certificate): the helper must refuse a
 #      changed installer and a program of another publisher;
 #   7. uninstall and check that nothing is left.
@@ -157,7 +160,13 @@ if [ "${DAEMON:-1}" = 1 ]; then
   [ -f "$DIR/$SLUG-daemon.exe" ] || fail "the daemon is missing after the update"
   # The daemon is replaced with the app: its file is the one of the B build.
   [ "$(grep "$SLUG-daemon.exe" <<<"$A_FILES")" != "$(grep "$SLUG-daemon.exe" <<<"$BEFORE")" ] || fail "the daemon was not replaced"
+  # By its rename protocol; with no daemon running, the renamed old file is gone again.
+  if compgen -G "$DIR/$SLUG-daemon.exe.*" >/dev/null; then ls "$DIR" >&2; fail "files of the daemon's replacement are left"; fi
 fi
+[ ! -e "$UPDATES/update-journal.json" ] || fail "the journal is left after the update"
+RUN_ONCE='Software\Microsoft\Windows\CurrentVersion\RunOnce'
+RECOVERY="$NAME.update-recovery"
+[ -z "$(reg_value "$RUN_ONCE" "$RECOVERY")" ] || fail "the recovery is still registered after the update"
 log "ok: $A -> $B, version $B runs"
 
 # The helper outside the install folder, as the app copies it.
@@ -169,6 +178,7 @@ helper() {
   local name="$1" installer="$2" args=() a
   shift 2
   for a in "$@"; do args+=(--launch-arg "$a"); done
+  if [ "${DAEMON:-1}" = 1 ]; then args+=(--keep "$SLUG-daemon.exe"); fi
   "$HELPER" --installer "$(m "$installer")" --sha256 "$(sha "$installer")" \
     --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
     --app-exe "$NAME.exe" --version "$A" --marker "$(m "$WORK/$name-pending.json")" \
@@ -191,6 +201,51 @@ if compgen -G "$BACKUPS*" >/dev/null; then fail "a backup folder is left after t
 "$EXE" --selftest-installed --report "$(m "$WORK/after-rollback.json")" || fail "the app does not start after the rollback"
 [ "$(jq -r .version "$WORK/after-rollback.json")" = "$B" ] || fail "the app after the rollback is not $B"
 log "ok: a version that does not start is rolled back to $B"
+
+# Interruption: the helper is killed while the install folder holds no app (the old files
+# are in the backup and the installer has not run), as a sign-out or a power cut would
+# leave it. The helper is held at that step for the kill (UPDATE_HELPER_TEST_PAUSE_AT).
+log "interrupted update"
+mkdir -p "$WORK/kill"
+JOURNAL="$WORK/kill/update-journal.json"
+KEEP=()
+if [ "${DAEMON:-1}" = 1 ]; then KEEP=(--keep "$SLUG-daemon.exe"); fi
+UPDATE_HELPER_TEST_PAUSE_AT=moved "$HELPER" --installer "$(m "$A_SETUP")" --sha256 "$(sha "$A_SETUP")" \
+  --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
+  --app-exe "$NAME.exe" --version "$A" --marker "$(m "$WORK/kill/pending.json")" \
+  --result "$(m "$WORK/kill/result.json")" --log "$(m "$WORK/kill/update.log")" \
+  --uninstall-key "$KEY" ${KEEP[@]+"${KEEP[@]}"} --launch-arg --selftest-installed &
+HELPER_PID=$!
+for _ in $(seq 1 240); do
+  [ "$(jq -r .stage "$JOURNAL" 2>/dev/null)" = installing ] && break
+  sleep 0.5
+done
+[ "$(jq -r .stage "$JOURNAL" 2>/dev/null)" = installing ] || { show_log "$WORK/kill/update.log"; fail "the helper did not reach the installer step"; }
+run_native taskkill /F /PID "$(cat "/proc/$HELPER_PID/winpid")" >/dev/null
+wait "$HELPER_PID" 2>/dev/null || true
+# What the user would find: no app, the old files hidden next to the install folder.
+[ ! -e "$EXE" ] || fail "the app is still in the install folder at the kill"
+[ -f "${BACKUPS}test/$NAME.exe" ] || fail "the old app is not in the backup"
+[ -f "$JOURNAL" ] || fail "the kill left no journal"
+# Windows runs this at the next sign-in.
+REGISTERED="$(reg_value "$RUN_ONCE" "$RECOVERY")"
+case "$REGISTERED" in
+  *"$(cygpath -w "$HELPER")"*"--recover"*"update-journal.json"*) ;;
+  *) fail "the recovery is not registered for the next sign-in: '$REGISTERED'" ;;
+esac
+"$HELPER" --recover "$(cygpath -w "$JOURNAL")" || fail "the recovery failed"
+show_log "$WORK/kill/update.log"
+[ "$(snapshot)" = "$BEFORE" ] || { ls -la "$DIR" >&2; fail "the install folder is not what it was before the interrupted update"; }
+[ "$(reg_value "$KEY" DisplayVersion)" = "$B" ] || fail "Windows shows $(reg_value "$KEY" DisplayVersion) after the recovery"
+[ ! -e "$JOURNAL" ] || fail "the journal is left after the recovery"
+[ -z "$(reg_value "$RUN_ONCE" "$RECOVERY")" ] || fail "the recovery is still registered"
+if compgen -G "$BACKUPS*" >/dev/null; then fail "a backup folder is left after the recovery"; fi
+"$EXE" --selftest-installed --report "$(m "$WORK/after-recovery.json")" || fail "the app does not start after the recovery"
+[ "$(jq -r .version "$WORK/after-recovery.json")" = "$B" ] || fail "the app after the recovery is not $B"
+# A second run finds nothing to do.
+"$HELPER" --recover "$(cygpath -w "$JOURNAL")" || fail "a second recovery failed"
+[ "$(snapshot)" = "$BEFORE" ] || fail "a second recovery changed the install folder"
+log "ok: an update killed with an empty install folder is undone by the recovery"
 
 # A changed installer is refused before anything moves.
 RC="$("$HELPER" --installer "$(m "$A_SETUP")" --sha256 "$(printf '0%.0s' $(seq 1 64))" \
@@ -231,4 +286,4 @@ assert_uninstalled "$DIR" || fail "the uninstall left something"
 jq -n --arg a "$A" --arg b "$B" --arg signed "${EXPECT_SIGNED:-0}" \
   --slurpfile update "$WORK/update.json" --slurpfile finish "$WORK/finish.json" --slurpfile rollback "$WORK/rollback-result.json" \
   '{ok: true, from: $a, to: $b, signed: ($signed == "1"), update: $update[0], finish: $finish[0], rollback: $rollback[0]}' >"$WORK/report.json"
-log "ok: update $A -> $B, rollback, uninstall. Report: $WORK/report.json"
+log "ok: update $A -> $B, rollback, interruption and recovery, uninstall. Report: $WORK/report.json"

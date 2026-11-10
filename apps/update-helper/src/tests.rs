@@ -9,9 +9,10 @@ use super::*;
 /// What the made-up new version does after the helper starts it.
 #[derive(Clone, Copy, PartialEq)]
 enum NewVersion {
-    /// Removes the marker and keeps running.
+    /// Finishes the update as the app does (removes the backup and the marker) and keeps
+    /// running.
     Starts,
-    /// Removes the marker and exits at once.
+    /// Finishes the update and exits at once.
     StartsAndExits,
     /// Exits without touching the marker.
     Crashes,
@@ -19,15 +20,38 @@ enum NewVersion {
     Hangs,
 }
 
+/// A valid signature of `subject`.
+fn valid(subject: &str) -> Signer {
+    signed("Valid", subject, subject)
+}
+
+fn signed(status: &str, subject: &str, thumbprint: &str) -> Signer {
+    Signer::Signed {
+        status: status.into(),
+        subject: subject.into(),
+        thumbprint: thumbprint.into(),
+    }
+}
+
+/// The helper's process id in the tests.
+const HELPER: u32 = 4242;
+
 struct Fake {
     app_exits: bool,
+    /// The helper of the journal is still running, and this is another helper looking.
+    helper_alive: bool,
+    /// The step at which this helper is killed (a panic the test catches).
+    dies_at: Option<&'static str>,
+    /// The helper is killed while the installer is half way through.
+    dies_in_installer: bool,
     installer_ok: bool,
-    /// The installer writes a file the rollback cannot remove (a program that runs).
     writes_app: bool,
     new_version: NewVersion,
     installed: Signer,
     installer: Signer,
     marker: PathBuf,
+    /// The sign-in entry: its name and the journal it names.
+    recovery: RefCell<Option<(String, PathBuf)>>,
     shown: RefCell<BTreeMap<String, String>>,
     launches: RefCell<Vec<(PathBuf, Vec<OsString>, String)>>,
     killed: Rc<Cell<bool>>,
@@ -47,23 +71,81 @@ impl Running for FakeChild {
     }
 }
 
+impl Fake {
+    /// What the app does at its first start after an update.
+    fn finish_like_the_app(&self) {
+        let marker: Marker = serde_json::from_slice(&std::fs::read(&self.marker).unwrap()).unwrap();
+        std::fs::remove_dir_all(&marker.old).unwrap();
+        std::fs::remove_file(&self.marker).unwrap();
+    }
+}
+
 impl Sys for Fake {
-    fn wait_exit(&self, _pid: u32, _timeout: Duration) -> bool {
-        self.app_exits
+    fn wait_exit(&self, pid: u32, _timeout: Duration) -> bool {
+        if pid == HELPER {
+            !self.helper_alive
+        } else {
+            self.app_exits
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        if self.helper_alive {
+            HELPER + 1
+        } else {
+            HELPER
+        }
+    }
+
+    fn register_recovery(&self, name: &str, journal: &Path) -> Result<(), String> {
+        *self.recovery.borrow_mut() = Some((name.into(), journal.to_path_buf()));
+        Ok(())
+    }
+
+    fn clear_recovery(&self, name: &str) {
+        let mut recovery = self.recovery.borrow_mut();
+        if recovery.as_ref().is_some_and(|(n, _)| n == name) {
+            *recovery = None;
+        }
+    }
+
+    fn checkpoint(&self, step: &str) {
+        if self.dies_at == Some(step) {
+            panic!("killed at {step}");
+        }
     }
 
     fn run_installer(&self, installer: &Path, install_dir: &Path) -> Result<(), String> {
         assert!(installer.is_file());
-        // The installer starts from an empty folder: the old files are in the backup.
-        assert_eq!(std::fs::read_dir(install_dir).unwrap().count(), 0);
+        // The old files are in the backup; only the daemon stayed (it may be running).
+        let left: Vec<_> = std::fs::read_dir(install_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, vec![OsString::from("daemon.exe")]);
         if !self.installer_ok {
             std::fs::write(install_dir.join("half.tmp"), "x").unwrap();
             return Err("the installer failed (exit code: 2)".into());
         }
+        // The daemon by its protocol: the new program beside it, the old one renamed.
+        std::fs::write(install_dir.join("daemon.exe.new"), "new daemon").unwrap();
+        std::fs::rename(
+            install_dir.join("daemon.exe"),
+            install_dir.join("daemon.exe.old-1"),
+        )
+        .unwrap();
+        if self.dies_in_installer {
+            // Between the two renames: no daemon.exe at all.
+            panic!("killed in the installer");
+        }
+        std::fs::rename(
+            install_dir.join("daemon.exe.new"),
+            install_dir.join("daemon.exe"),
+        )
+        .unwrap();
         if self.writes_app {
             std::fs::write(install_dir.join("App.exe"), "new app").unwrap();
         }
-        std::fs::write(install_dir.join("daemon.exe"), "new daemon").unwrap();
         std::fs::write(install_dir.join("only-new.dll"), "new").unwrap();
         self.shown
             .borrow_mut()
@@ -79,9 +161,9 @@ impl Sys for Fake {
         let mut exited = false;
         if content == "new app" {
             match self.new_version {
-                NewVersion::Starts => std::fs::remove_file(&self.marker).unwrap(),
+                NewVersion::Starts => self.finish_like_the_app(),
                 NewVersion::StartsAndExits => {
-                    std::fs::remove_file(&self.marker).unwrap();
+                    self.finish_like_the_app();
                     exited = true;
                 }
                 NewVersion::Crashes => exited = true,
@@ -144,17 +226,22 @@ fn world() -> World {
         log: Some(root.join("data/updates/update.log")),
         launch_args: vec!["--flag".into()],
         uninstall_key: Some("Uninstall\\app".into()),
+        keep: vec!["daemon.exe".into()],
         wait_secs: 0,
         confirm_secs: 0,
     };
     let sys = Fake {
         app_exits: true,
+        helper_alive: false,
+        dies_at: None,
+        dies_in_installer: false,
         installer_ok: true,
         writes_app: true,
         new_version: NewVersion::Starts,
         installed: Signer::Unsigned,
         installer: Signer::Unsigned,
         marker,
+        recovery: RefCell::default(),
         shown: RefCell::new(BTreeMap::from([("Uninstall\\app".into(), "1.0.0".into())])),
         launches: RefCell::default(),
         killed: Rc::default(),
@@ -174,7 +261,12 @@ fn result(job: &Job) -> serde_json::Value {
     serde_json::from_str(&read(job.result.as_ref().unwrap())).unwrap()
 }
 
-/// The install folder holds exactly the old version again.
+fn shown(w: &World) -> Option<String> {
+    w.sys.shown_version("Uninstall\\app")
+}
+
+/// The install folder holds exactly the old version again, and nothing waits for a
+/// recovery.
 fn assert_old_version(w: &World) {
     let dir = &w.job.install_dir;
     assert_eq!(read(&dir.join("App.exe")), "old app");
@@ -183,32 +275,28 @@ fn assert_old_version(w: &World) {
     assert_eq!(std::fs::read_dir(dir).unwrap().count(), 3);
     assert!(!w.job.backup_dir.exists());
     assert!(!w.job.marker.exists());
-    assert_eq!(
-        w.sys.shown_version("Uninstall\\app").as_deref(),
-        Some("1.0.0")
-    );
+    assert_eq!(shown(w).as_deref(), Some("1.0.0"));
+    assert!(!w.job.journal().exists());
+    assert_eq!(*w.sys.recovery.borrow(), None);
 }
 
 #[test]
-fn updates_and_leaves_the_backup_for_the_new_version_to_remove() {
+fn updates_and_replaces_the_daemon_by_its_protocol() {
     let w = world();
     assert_eq!(run(&w.job, &w.sys), Outcome::Updated);
     let dir = &w.job.install_dir;
     assert_eq!(read(&dir.join("App.exe")), "new app");
     assert_eq!(read(&dir.join("daemon.exe")), "new daemon");
     assert!(!dir.join("resources").exists(), "old files do not stay");
-    // The old files wait in the backup: the new version removes them (it knows the folder
-    // from the marker, which the fake new version removed like the app does).
-    assert_eq!(read(&w.job.backup_dir.join("App.exe")), "old app");
-    assert_eq!(
-        read(&w.job.backup_dir.join("resources/a.txt")),
-        "old resource"
-    );
+    // The new version removed the backup (it knows the folder from the marker). The old
+    // daemon is beside the new one under the name its protocol gives it, for the daemon
+    // to remove when it restarts.
+    assert!(!w.job.backup_dir.exists());
+    assert_eq!(read(&dir.join("daemon.exe.old-1")), "old daemon");
     assert!(!w.job.installer.exists(), "the installer is used up");
-    assert_eq!(
-        w.sys.shown_version("Uninstall\\app").as_deref(),
-        Some("2.0.0")
-    );
+    assert_eq!(shown(&w).as_deref(), Some("2.0.0"));
+    assert!(!w.job.journal().exists());
+    assert_eq!(*w.sys.recovery.borrow(), None);
     let launches = w.sys.launches.borrow();
     assert_eq!(launches.len(), 1);
     assert_eq!(launches[0].0, dir.join("App.exe"));
@@ -219,51 +307,43 @@ fn updates_and_leaves_the_backup_for_the_new_version_to_remove() {
 }
 
 #[test]
+fn the_backup_holds_the_old_files_and_a_copy_of_the_daemon_while_the_installer_runs() {
+    let mut w = world();
+    w.sys.dies_at = Some("moved");
+    killed(&w);
+    let backup = &w.job.backup_dir;
+    assert_eq!(read(&backup.join("App.exe")), "old app");
+    assert_eq!(read(&backup.join("resources/a.txt")), "old resource");
+    assert_eq!(read(&backup.join("daemon.exe")), "old daemon");
+    // The daemon itself never left its place.
+    assert_eq!(read(&w.job.install_dir.join("daemon.exe")), "old daemon");
+    let journal: Journal =
+        serde_json::from_slice(&std::fs::read(w.job.journal()).unwrap()).unwrap();
+    assert_eq!(journal.stage, Stage::Installing);
+    assert_eq!(journal.helper_pid, HELPER);
+    assert_eq!(journal.shown_version.as_deref(), Some("1.0.0"));
+    assert_eq!(journal.keep, vec!["daemon.exe".to_string()]);
+}
+
+#[test]
 fn the_marker_names_the_install_folder_the_backup_and_the_version() {
     let mut w = world();
-    // A new version that never removes the marker lets the test read it before rollback.
-    w.sys.new_version = NewVersion::Hangs;
-    let marker = Rc::new(RefCell::new(None));
-    struct Peek<'a>(&'a Fake, Rc<RefCell<Option<Marker>>>, PathBuf);
-    impl Sys for Peek<'_> {
-        fn wait_exit(&self, pid: u32, t: Duration) -> bool {
-            self.0.wait_exit(pid, t)
-        }
-        fn run_installer(&self, i: &Path, d: &Path) -> Result<(), String> {
-            self.0.run_installer(i, d)
-        }
-        fn launch(&self, exe: &Path, args: &[OsString]) -> Result<Box<dyn Running>, String> {
-            if let Ok(bytes) = std::fs::read(&self.2) {
-                *self.1.borrow_mut() = serde_json::from_slice(&bytes).ok();
-            }
-            self.0.launch(exe, args)
-        }
-        fn signer(&self, f: &Path) -> Signer {
-            self.0.signer(f)
-        }
-        fn shown_version(&self, k: &str) -> Option<String> {
-            self.0.shown_version(k)
-        }
-        fn set_shown_version(&self, k: &str, v: &str) {
-            self.0.set_shown_version(k, v)
-        }
-        fn sleep(&self, _d: Duration) {}
-    }
-    w.job.confirm_secs = 1;
-    let peek = Peek(&w.sys, marker.clone(), w.job.marker.clone());
-    assert!(matches!(run(&w.job, &peek), Outcome::RolledBack(_)));
+    // Killed right after the marker is written: it is still there to read.
+    w.sys.dies_at = Some("marker");
+    killed(&w);
+    let marker: Marker = serde_json::from_slice(&std::fs::read(&w.job.marker).unwrap()).unwrap();
     assert_eq!(
-        marker.borrow().clone(),
-        Some(Marker {
+        marker,
+        Marker {
             bundle: w.job.install_dir.clone(),
             old: w.job.backup_dir.clone(),
             version: "2.0.0".into(),
-        })
+        }
     );
 }
 
 #[test]
-fn a_new_version_that_removes_the_marker_and_exits_counts_as_started() {
+fn a_new_version_that_finishes_the_update_and_exits_counts_as_started() {
     let mut w = world();
     w.sys.new_version = NewVersion::StartsAndExits;
     assert_eq!(run(&w.job, &w.sys), Outcome::Updated);
@@ -288,6 +368,19 @@ fn rolls_back_when_the_new_version_exits_early() {
     assert!(w.job.installer.exists(), "a failed installer is kept");
     assert_eq!(result(&w.job)["outcome"], "rolled_back");
     assert_eq!(outcome.exit_code(), 3);
+}
+
+#[test]
+fn a_rollback_puts_the_old_daemon_back_by_the_rename_protocol() {
+    let mut w = world();
+    w.sys.new_version = NewVersion::Crashes;
+    assert!(matches!(run(&w.job, &w.sys), Outcome::RolledBack(_)));
+    let dir = &w.job.install_dir;
+    assert_eq!(read(&dir.join("daemon.exe")), "old daemon");
+    // Nothing runs here, so the renamed files are gone too.
+    assert!(!dir.join("daemon.exe.new").exists());
+    assert!(!dir.join("daemon.exe.old-1").exists());
+    assert_old_version(&w);
 }
 
 #[test]
@@ -351,41 +444,209 @@ fn refuses_without_touching_anything() {
     assert_eq!(w.sys.launches.borrow()[0].2, "old app");
     assert_eq!(outcome.exit_code(), 2);
 
-    // A signed app and an installer from someone else, or from nobody.
+    // A signed app and an installer from someone else, from nobody, changed, or unreadable.
     for installer in [
         Signer::Unsigned,
-        Signer::Valid("CN=Somebody Else".into()),
-        Signer::Invalid("HashMismatch".into()),
+        valid("CN=Somebody Else"),
+        signed("HashMismatch", "CN=Publisher", "CN=Publisher"),
+        Signer::Unknown("the query failed".into()),
     ] {
         let mut w = world();
-        w.sys.installed = Signer::Valid("CN=Publisher".into());
+        w.sys.installed = valid("CN=Publisher");
         w.sys.installer = installer;
         assert!(matches!(run(&w.job, &w.sys), Outcome::Refused(_)));
         assert_old_version(&w);
     }
+
+    // The system cannot say whether the installed app is signed: that is not "unsigned".
+    let mut w = world();
+    w.sys.installed = Signer::Unknown("the query failed".into());
+    let outcome = run(&w.job, &w.sys);
+    assert!(
+        matches!(&outcome, Outcome::Refused(why) if why.contains("cannot read the signature")),
+        "{outcome:?}"
+    );
+    assert_old_version(&w);
 }
 
 #[test]
 fn signer_rule() {
-    let valid = |s: &str| Signer::Valid(s.into());
+    let unknown = || Signer::Unknown("x".into());
+    // An unsigned app: unsigned or validly signed installers, never a broken signature.
     assert!(signer_allows(&Signer::Unsigned, &Signer::Unsigned).is_ok());
     assert!(signer_allows(&Signer::Unsigned, &valid("CN=A")).is_ok());
+    assert!(signer_allows(&Signer::Unsigned, &signed("HashMismatch", "CN=A", "1")).is_err());
+    // A validly signed app: only the same publisher, validly signed.
     assert!(signer_allows(&valid("CN=A"), &valid("CN=A")).is_ok());
+    assert!(signer_allows(&valid("CN=A"), &signed("Valid", "CN=A", "renewed")).is_ok());
     assert!(signer_allows(&valid("CN=A"), &valid("CN=B")).is_err());
     assert!(signer_allows(&valid("CN=A"), &Signer::Unsigned).is_err());
-    assert!(signer_allows(&valid("CN=A"), &Signer::Invalid("x".into())).is_err());
-    // A tampered installer is refused whoever asks.
-    assert!(signer_allows(&Signer::Unsigned, &Signer::Invalid("HashMismatch".into())).is_err());
-    // A broken signature on the installed app does not block updates for ever.
-    assert!(signer_allows(&Signer::Invalid("x".into()), &valid("CN=A")).is_ok());
+    assert!(signer_allows(&valid("CN=A"), &signed("HashMismatch", "CN=A", "CN=A")).is_err());
+    assert!(signer_allows(&valid("CN=A"), &signed("NotTrusted", "CN=A", "CN=A")).is_err());
+    // An app signed with a certificate this computer does not trust: only the very same
+    // certificate, never unsigned, never a changed file, never the subject alone.
+    let untrusted = signed("UnknownError", "CN=A", "1");
+    assert!(signer_allows(&untrusted, &signed("UnknownError", "CN=A", "1")).is_ok());
+    assert!(signer_allows(&untrusted, &signed("Valid", "CN=A", "1")).is_ok());
+    assert!(signer_allows(&untrusted, &signed("UnknownError", "CN=A", "2")).is_err());
+    assert!(signer_allows(&untrusted, &signed("Valid", "CN=A", "2")).is_err());
+    assert!(signer_allows(&untrusted, &signed("HashMismatch", "CN=A", "1")).is_err());
+    assert!(signer_allows(&untrusted, &Signer::Unsigned).is_err());
+    // A failed query is an error on either side, whatever the other says.
+    for other in [
+        Signer::Unsigned,
+        valid("CN=A"),
+        untrusted.clone(),
+        unknown(),
+    ] {
+        assert!(signer_allows(&unknown(), &other).is_err());
+        assert!(signer_allows(&other, &unknown()).is_err());
+    }
 }
 
 #[test]
 fn a_signed_update_from_the_same_publisher_installs() {
     let mut w = world();
-    w.sys.installed = Signer::Valid("CN=Publisher".into());
-    w.sys.installer = Signer::Valid("CN=Publisher".into());
+    w.sys.installed = valid("CN=Publisher");
+    w.sys.installer = valid("CN=Publisher");
     assert_eq!(run(&w.job, &w.sys), Outcome::Updated);
+}
+
+/// Runs the update until the helper is killed (at `dies_at`, or inside the installer),
+/// then disarms the kill: what follows is another process.
+fn killed(w: &World) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&w.job, &w.sys)));
+    assert!(result.is_err(), "the helper was not killed");
+    // What a kill leaves: the journal, and the entry that runs the recovery at sign-in.
+    assert!(w.job.journal().exists());
+    assert_eq!(
+        *w.sys.recovery.borrow(),
+        Some(("App.update-recovery".into(), w.job.journal()))
+    );
+}
+
+/// The recovery, as the sign-in entry, the app or the next update runs it.
+fn recover_later(w: &World) -> Recovery {
+    recover(&w.job.journal(), &w.sys, &Log::new(w.job.log.clone()))
+}
+
+#[test]
+fn an_update_killed_at_any_step_is_undone_by_the_recovery() {
+    for step in ["journaled", "moved-one", "moved", "installed", "marker"] {
+        let mut w = world();
+        w.sys.dies_at = Some(step);
+        killed(&w);
+        w.sys.dies_at = None;
+        assert_eq!(recover_later(&w), Recovery::Restored, "{step}");
+        assert_old_version(&w);
+        // Running it again finds nothing to do.
+        assert_eq!(recover_later(&w), Recovery::Nothing, "{step}");
+        assert_old_version(&w);
+        // The recovery starts nothing: at a sign-in the user did not ask for the app.
+        assert!(w.sys.launches.borrow().is_empty(), "{step}");
+    }
+}
+
+#[test]
+fn an_update_killed_while_the_old_files_move_keeps_the_ones_not_moved_yet() {
+    let mut w = world();
+    w.sys.dies_at = Some("moved-one");
+    killed(&w);
+    // One entry is in the backup, the others are still in the install folder.
+    let dir = &w.job.install_dir;
+    assert!(!dir.join("App.exe").exists());
+    assert_eq!(read(&dir.join("resources/a.txt")), "old resource");
+    w.sys.dies_at = None;
+    assert_eq!(recover_later(&w), Recovery::Restored);
+    assert_old_version(&w);
+}
+
+#[test]
+fn an_update_killed_inside_the_installer_gets_its_daemon_back() {
+    let mut w = world();
+    w.sys.dies_in_installer = true;
+    killed(&w);
+    // The worst moment of the daemon's protocol: its program is renamed away and the new
+    // one is not in place.
+    let dir = &w.job.install_dir;
+    assert!(!dir.join("daemon.exe").exists());
+    assert!(dir.join("daemon.exe.old-1").exists());
+    assert!(!dir.join("App.exe").exists());
+    w.sys.dies_in_installer = false;
+    assert_eq!(recover_later(&w), Recovery::Restored);
+    assert_old_version(&w);
+}
+
+#[test]
+fn a_helper_killed_after_the_new_version_started_leaves_the_new_version() {
+    // The new version finished the update (marker and backup gone) before the kill.
+    let mut w = world();
+    w.sys.dies_at = Some("started");
+    killed(&w);
+    w.sys.dies_at = None;
+    assert_eq!(recover_later(&w), Recovery::Finished);
+    let dir = &w.job.install_dir;
+    assert_eq!(read(&dir.join("App.exe")), "new app");
+    assert_eq!(read(&dir.join("daemon.exe")), "new daemon");
+    assert_eq!(shown(&w).as_deref(), Some("2.0.0"));
+    assert!(!w.job.journal().exists());
+    assert_eq!(*w.sys.recovery.borrow(), None);
+
+    // The new version never finished it: the old version comes back.
+    let mut w = world();
+    w.sys.new_version = NewVersion::Hangs;
+    w.sys.dies_at = Some("started");
+    killed(&w);
+    assert!(w.job.marker.exists());
+    w.sys.dies_at = None;
+    assert_eq!(recover_later(&w), Recovery::Restored);
+    assert_old_version(&w);
+}
+
+#[test]
+fn the_recovery_leaves_a_running_update_alone() {
+    let mut w = world();
+    w.sys.dies_at = Some("moved");
+    killed(&w);
+    // Another helper looks while the first one still runs.
+    w.sys.dies_at = None;
+    w.sys.helper_alive = true;
+    assert_eq!(recover_later(&w), Recovery::Busy);
+    assert!(!w.job.install_dir.join("App.exe").exists());
+    assert!(w.job.journal().exists());
+    // And a new update is refused until it is over.
+    assert_eq!(
+        run(&w.job, &w.sys),
+        Outcome::Refused("another update is running".into())
+    );
+    w.sys.helper_alive = false;
+    assert_eq!(recover_later(&w), Recovery::Restored);
+    assert_old_version(&w);
+}
+
+#[test]
+fn a_new_update_first_undoes_an_interrupted_one() {
+    let mut w = world();
+    w.sys.dies_in_installer = true;
+    killed(&w);
+    w.sys.dies_in_installer = false;
+    // The next update starts from the old version again and goes through.
+    assert_eq!(run(&w.job, &w.sys), Outcome::Updated);
+    assert_eq!(read(&w.job.install_dir.join("App.exe")), "new app");
+    assert_eq!(read(&w.job.install_dir.join("daemon.exe")), "new daemon");
+    assert!(!w.job.journal().exists());
+    assert_eq!(*w.sys.recovery.borrow(), None);
+}
+
+#[test]
+fn recovery_without_a_journal_does_nothing() {
+    let w = world();
+    assert_eq!(recover_later(&w), Recovery::Nothing);
+    assert_old_version(&w);
+    std::fs::create_dir_all(w.job.journal().parent().unwrap()).unwrap();
+    std::fs::write(w.job.journal(), "not json").unwrap();
+    assert_eq!(recover_later(&w), Recovery::Nothing);
+    assert_eq!(read(&w.job.install_dir.join("App.exe")), "old app");
 }
 
 #[test]
@@ -399,6 +660,7 @@ fn command_line_round_trip() {
     plain.log = None;
     plain.launch_args.clear();
     plain.uninstall_key = None;
+    plain.keep.clear();
     plain.confirm_secs = 5;
     assert_eq!(parse_job(&job_args(&plain)).unwrap(), plain);
 }
@@ -427,6 +689,13 @@ fn command_line_errors() {
     let mut bad = w.job.clone();
     bad.backup_dir = bad.install_dir.clone();
     assert!(parse_job(&job_args(&bad)).is_err());
+    // A kept program is a file name, and never the app.
+    let mut bad = w.job.clone();
+    bad.keep = vec!["sub/daemon.exe".into()];
+    assert!(parse_job(&job_args(&bad)).is_err());
+    let mut bad = w.job.clone();
+    bad.keep = vec!["App.exe".into()];
+    assert!(parse_job(&job_args(&bad)).is_err());
 }
 
 #[test]
@@ -439,19 +708,26 @@ fn registry_and_signature_output() {
     assert_eq!(sys::parse_reg_value(out, "Other"), None);
     assert_eq!(sys::parse_reg_value("", "DisplayVersion"), None);
     assert_eq!(
-        sys::parse_signer("Valid\r\nCN=Example Co, O=Example Co, C=US\r\n"),
-        Signer::Valid("CN=Example Co, O=Example Co, C=US".into())
+        sys::parse_signer("Valid\r\nCN=Example Co, O=Example Co, C=US\r\nABCDEF0123\r\n"),
+        signed("Valid", "CN=Example Co, O=Example Co, C=US", "ABCDEF0123")
     );
     assert_eq!(sys::parse_signer("NotSigned\r\n"), Signer::Unsigned);
-    assert_eq!(sys::parse_signer(""), Signer::Unsigned);
     assert_eq!(
-        sys::parse_signer("HashMismatch\r\nCN=Example Co\r\n"),
-        Signer::Invalid("HashMismatch".into())
+        sys::parse_signer("HashMismatch\r\nCN=Example Co\r\nAB12\r\n"),
+        signed("HashMismatch", "CN=Example Co", "AB12")
     );
     assert_eq!(
-        sys::parse_signer("UnknownError\r\nCN=Self Signed\r\n"),
-        Signer::Invalid("UnknownError".into())
+        sys::parse_signer("UnknownError\r\nCN=Self Signed\r\nCD34\r\n"),
+        signed("UnknownError", "CN=Self Signed", "CD34")
     );
+    // A query that printed nothing, or a status without its certificate, is not "unsigned".
+    assert!(matches!(sys::parse_signer(""), Signer::Unknown(_)));
+    assert!(matches!(sys::parse_signer("\r\n"), Signer::Unknown(_)));
+    assert!(matches!(sys::parse_signer("Valid\r\n"), Signer::Unknown(_)));
+    assert!(matches!(
+        sys::parse_signer("Valid\r\nCN=Example Co\r\n"),
+        Signer::Unknown(_)
+    ));
 }
 
 /// The real system on Unix, with shell scripts as the installer and the app: the whole
@@ -466,6 +742,7 @@ fn real_processes() {
     };
     let w = world();
     let mut job = w.job.clone();
+    job.keep.clear();
     // The installer writes an app that removes the marker ($1) and leaves a note.
     script(
         &job.installer,
@@ -495,10 +772,12 @@ fn real_processes() {
     assert_eq!(run(&job, &Os), Outcome::Updated);
     assert_eq!(read(&note).trim(), "new");
     assert!(job.backup_dir.join("daemon.exe").exists());
+    assert!(!job.journal().exists());
 
     // An installer that fails: the old files come back.
     let w = world();
     let mut job = w.job.clone();
+    job.keep.clear();
     script(&job.installer, "#!/bin/sh\nexit 7\n");
     job.sha256 = sha256_file(&job.installer).unwrap();
     script(&job.install_dir.join("App.exe"), "#!/bin/sh\nexit 0\n");
@@ -507,4 +786,5 @@ fn real_processes() {
     assert!(matches!(run(&job, &Os), Outcome::RolledBack(_)));
     assert_eq!(read(&job.install_dir.join("daemon.exe")), "old daemon");
     assert!(!job.backup_dir.exists());
+    assert!(!job.journal().exists());
 }
