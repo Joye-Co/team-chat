@@ -32,6 +32,8 @@ const BUDGET_WARN: f64 = 0.8;
 const INVITE_SOON_MS: u64 = 2 * 86_400_000;
 /// 谁在用 lists this many people at most.
 const WHO_ROWS: usize = 6;
+/// 谁在用 shows this many of the AI members each person asks most.
+const WHO_AVATARS: usize = 3;
 
 fn usd(x: f64) -> String {
     if x >= 100. {
@@ -353,6 +355,24 @@ impl AdminView {
                     .map(|mm| mm.name.clone())
                     .unwrap_or_else(|| m::UNKNOWN_MEMBER.to_string());
                 let role = member.as_ref().and_then(|mm| mm.role.clone());
+                // 常找: the AI members this person asked most, from the split by person.
+                let mut most: Vec<_> = u
+                    .pairs
+                    .iter()
+                    .filter(|p| p.initiator_id == x.member_id && p.spend.topics > 0)
+                    .collect();
+                most.sort_by(|a, b| {
+                    b.spend
+                        .topics
+                        .cmp(&a.spend.topics)
+                        .then(b.spend.cost_usd.total_cmp(&a.spend.cost_usd))
+                });
+                let most: Vec<AnyElement> = most
+                    .iter()
+                    .take(WHO_AVATARS)
+                    .filter_map(|p| self.services.provider.member(&p.member_id))
+                    .map(|mm| MemberAvatar::new(Some(&mm), avatar::XS).into_any_element())
+                    .collect();
                 div()
                     .flex()
                     .items_center()
@@ -372,6 +392,14 @@ impl AdminView {
                                     TruncText::new(r).n_footnote().text_color(k.secondary)
                                 }),
                             ),
+                    )
+                    .child(
+                        div()
+                            .w(t::COL_CPU)
+                            .flex_none()
+                            .flex()
+                            .gap(space::S2)
+                            .children(most),
                     )
                     .child(
                         div()

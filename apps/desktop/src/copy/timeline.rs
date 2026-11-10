@@ -55,7 +55,7 @@ crate::copy! {
     REACTED_BY = "{names} 回应了 {emoji}",
     REPLY = "回复",
     // A sender's avatar: a click @s them and quotes the message in the composer.
-    AVATAR_MENTION_TIP = "@{name} 并引用这条消息",
+    AVATAR_MENTION_TIP = "@{name}",
     MORE = "更多",
     FOLLOW = "关注话题",
     UNFOLLOW = "取消关注",

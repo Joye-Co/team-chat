@@ -775,6 +775,30 @@ impl AdminView {
         }
         recent.sort_by(|a, b| b.4.cmp(&a.4));
         uses.sort_by(|a, b| b.1.cmp(&a.1));
+        // With the server's split of 用量 by person and AI member, count this week's 话题 there:
+        // whom a person asks most, or who asks an AI member most.
+        let pairs = self
+            .team
+            .week
+            .as_ref()
+            .map(|w| w.pairs.as_slice())
+            .filter(|p| !p.is_empty());
+        let by_topics = pairs.is_some();
+        if let Some(pairs) = pairs {
+            uses = pairs
+                .iter()
+                .filter_map(|x| {
+                    let other = if bot {
+                        (x.member_id == id).then(|| x.initiator_id.clone())
+                    } else {
+                        (x.initiator_id == id).then(|| x.member_id.clone())
+                    };
+                    other.map(|o| (o, x.spend.topics))
+                })
+                .filter(|u| u.1 > 0)
+                .collect();
+            uses.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        }
         let max_use = uses.first().map(|u| u.1).unwrap_or(1).max(1);
         let roster = self
             .team
@@ -946,18 +970,17 @@ impl AdminView {
                             }),
                     ),
             )
-            .when(!bot && !uses.is_empty(), |d| {
+            .when(!uses.is_empty(), |d| {
                 d.child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(space::S8)
-                        .child(
-                            div()
-                                .n_section()
-                                .text_color(k.secondary)
-                                .child(m::TEAM_USES_MOST),
-                        )
+                        .child(div().n_section().text_color(k.secondary).child(if bot {
+                            m::TEAM_ASKED_BY
+                        } else {
+                            m::TEAM_USES_MOST
+                        }))
                         .children(uses.iter().take(3).map(|(bid, n)| {
                             let member = self.services.provider.member(bid);
                             div()
@@ -971,12 +994,14 @@ impl AdminView {
                                         .flex_1()
                                         .child(progress(*n as f32 / max_use as f32, cx)),
                                 )
-                                .child(
-                                    div()
-                                        .n_footnote()
-                                        .text_color(k.secondary)
-                                        .child(fill(m::TEAM_TIMES, &[("n", &n.to_string())])),
-                                )
+                                .child(div().n_footnote().text_color(k.secondary).child(fill(
+                                    if by_topics {
+                                        m::HOME_WHO_TOPICS
+                                    } else {
+                                        m::TEAM_TIMES
+                                    },
+                                    &[("n", &n.to_string())],
+                                )))
                         })),
                 )
             })
