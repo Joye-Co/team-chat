@@ -20,8 +20,9 @@ mod proto {
     use std::time::{Duration, Instant};
 
     use artifact_view::win_support::{
-        capture_screen_png, client_rect_on_screen, create_host_window, png_pixel, pump, scale_of,
-        screen_size, set_dpi_aware,
+        capture_screen_png, click_at_screen, client_rect_on_screen, create_host_window,
+        find_window, host_wheel, png_pixel, press_key, pump, scale_of, screen_size, set_dpi_aware,
+        wheel_at_screen,
     };
     use artifact_view::{
         ArtifactEvent, ArtifactWindow, Capabilities, Content, EmbedOptions, EmbeddedArtifact,
@@ -231,6 +232,37 @@ mod proto {
             text.borrow().clone().flatten().as_deref() == Some("clicked"),
         );
 
+        // Wheel scrolling that goes to the host: from the system's input only.
+        let (ox0, oy0, _, _) = client_rect_on_screen(host);
+        let over_page = (
+            ox0 + ((60.0 + 300.0) * scale) as i32,
+            oy0 + ((60.0 + 250.0) * scale) as i32,
+        );
+        let wheel_before = host_wheel();
+        wheel_at_screen(over_page.0, over_page.1, -120);
+        pump(Duration::from_millis(600), || false);
+        check("pageKeepsItsWheelByDefault", host_wheel() == wheel_before);
+        embed.set_pass_scroll(true);
+        wheel_at_screen(over_page.0, over_page.1, -120);
+        pump(Duration::from_secs(3), || host_wheel().0 > wheel_before.0);
+        let passed = host_wheel();
+        check(
+            "wheelOverPageScrollsHost",
+            passed == (wheel_before.0 + 1, wheel_before.1 - 120),
+        );
+        // A page cannot scroll the host by saying so.
+        embed.evaluate_script(
+            "for (var i = 0; i < 50; i++) window.chrome.webview.postMessage({ __wheel: [0, 99999, 0] });\
+             window.dispatchEvent(new WheelEvent('wheel', { deltaY: 99999, bubbles: true }));",
+        );
+        pump(Duration::from_millis(800), || false);
+        check("pageCannotForgeWheel", host_wheel() == passed);
+        embed.set_pass_scroll(false);
+        wheel_at_screen(over_page.0, over_page.1, -120);
+        pump(Duration::from_millis(600), || false);
+        check("wheelBackToPage", host_wheel() == passed);
+        details.insert("hostWheel".into(), json!([passed.0, passed.1]));
+
         // The page's own capture (what the host draws under an overlay).
         let snap: Rc<RefCell<Option<Option<Vec<u8>>>>> = Rc::new(RefCell::new(None));
         let snap2 = snap.clone();
@@ -284,6 +316,9 @@ mod proto {
         // The 产出 window: a top-level window with the version picker above the page.
         let win_seen = Rc::new(RefCell::new((false, None::<String>)));
         let win_seen2 = win_seen.clone();
+        // `probe` events of the window's page: name → sent as the viewer's action.
+        let probes: Rc<RefCell<Vec<(String, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+        let probes2 = probes.clone();
         let mut options = OpenOptions::new(
             "产出 window · v2",
             ARTIFACT_ID,
@@ -305,6 +340,15 @@ mod proto {
         let window = ArtifactWindow::open(main, options, move |event| match event {
             ArtifactEvent::Loaded { .. } => win_seen2.borrow_mut().0 = true,
             ArtifactEvent::LoadFailed { reason, .. } => win_seen2.borrow_mut().1 = Some(reason),
+            ArtifactEvent::Emit {
+                payload,
+                user_action,
+                ..
+            } => {
+                if let Some(probe) = payload["probe"].as_str() {
+                    probes2.borrow_mut().push((probe.to_string(), user_action));
+                }
+            }
             _ => {}
         })
         .expect("open the window");
@@ -320,6 +364,49 @@ mod proto {
             let _ = std::fs::write(out.join("window.png"), png);
         }
         check("windowScreenshot", screen.is_some());
+        // The user-action gate: a click on the version picker (the host's own control) is
+        // not input to the page; a click in the page is.
+        let probe = |name: &str| {
+            window.evaluate_script(&format!(
+                "window.artifact.emitEvent('probe', {{ probe: '{name}' }});"
+            ));
+            let name = name.to_string();
+            pump(Duration::from_secs(5), || {
+                probes.borrow().iter().any(|(n, _)| *n == name)
+            });
+            probes
+                .borrow()
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, user_action)| *user_action)
+        };
+        let frame = find_window("产出 window · v2");
+        let (wx, wy, ww, _) = client_rect_on_screen(frame);
+        let wscale = scale_of(frame);
+        check("windowFound", frame != 0 && ww > 0);
+        check("noInputNoAction", probe("idle") == Some(false));
+        // The picker: 180 pt wide, 12 pt from the right edge, in the 40 pt strip.
+        click_at_screen(
+            wx + ww - ((12.0 + 90.0) * wscale) as i32,
+            wy + (20.0 * wscale) as i32,
+        );
+        pump(Duration::from_millis(500), || false);
+        check("pickerClickIsNotPageInput", probe("picker") == Some(false));
+        // Esc closes the picker's list.
+        press_key(0x1b);
+        pump(Duration::from_millis(400), || false);
+        click_at_screen(
+            wx + (300.0 * wscale) as i32,
+            wy + ((40.0 + 250.0) * wscale) as i32,
+        );
+        pump(Duration::from_millis(500), || false);
+        check("pageClickIsPageInput", probe("page") == Some(true));
+        details.insert("probes".into(), json!(probes.borrow().clone()));
+        let screen2 = capture_screen_png(0, 0, sw, sh);
+        if let Some(png) = &screen2 {
+            let _ = std::fs::write(out.join("window-after-clicks.png"), png);
+        }
+
         let page_png: Rc<RefCell<Option<Result<Vec<u8>, String>>>> = Rc::new(RefCell::new(None));
         let page_png2 = page_png.clone();
         window.snapshot(Rect::new(0.0, 0.0, 300.0, 200.0), 2.0, move |png| {

@@ -12,10 +12,7 @@ use std::rc::Rc;
 use serde_json::Value;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{ClientToScreen, CreateRoundRectRgn, SetWindowRgn};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput, SetFocus,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
@@ -46,7 +43,7 @@ unsafe extern "system" fn container_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPA
             if win::is_child_click(w)
                 && let Some(page) = shared.and_then(Shared::page)
             {
-                page.note_input();
+                page.note_click(l);
             }
             LRESULT(0)
         }
@@ -183,7 +180,8 @@ impl EmbeddedArtifact {
         page.set_visible(false);
         page.set_dark(dark);
         if pass_scroll {
-            page.set_scroll_target(host.0 as isize);
+            page.set_pass_wheel(true);
+            win::set_wheel_route(container, Some(host));
         }
         // Tab out of the page: the host window gets the keyboard back.
         page.set_on_focus_out(move || {
@@ -297,8 +295,8 @@ impl EmbeddedArtifact {
 
     /// Gives wheel scrolling to the host window (true) or to the page (false).
     pub fn set_pass_scroll(&self, pass: bool) {
-        self.page
-            .set_scroll_target(if pass { self.host.0 as isize } else { 0 });
+        self.page.set_pass_wheel(pass);
+        win::set_wheel_route(self.container, pass.then_some(self.host));
     }
 
     /// Moves keyboard focus into the page.
@@ -422,6 +420,7 @@ impl EmbeddedArtifact {
             return;
         }
         self.resign_focus();
+        win::set_wheel_route(self.container, None);
         self.page.teardown();
         self.shown.set(false);
         // SAFETY: undoes what `attach` set up, then destroys the container. `shared` stays
@@ -456,41 +455,9 @@ fn click_in(window: HWND, x: f64, y: f64) -> bool {
         x: x.round() as i32,
         y: y.round() as i32,
     };
-    // SAFETY: coordinate queries and synthetic mouse input on the calling desktop.
-    unsafe {
-        if !ClientToScreen(window, &mut point).as_bool() {
-            return false;
-        }
-        let (left, top) = (
-            GetSystemMetrics(SM_XVIRTUALSCREEN),
-            GetSystemMetrics(SM_YVIRTUALSCREEN),
-        );
-        let (width, height) = (
-            GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1),
-            GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1),
-        );
-        // Absolute coordinates run from 0 to 65535 over the virtual screen.
-        let normalize = |v: i32, origin: i32, size: i32| {
-            (((v - origin) as f64 + 0.5) * 65535.0 / size as f64).round() as i32
-        };
-        let mouse = |flags| INPUT {
-            r#type: INPUT_MOUSE,
-            Anonymous: INPUT_0 {
-                mi: MOUSEINPUT {
-                    dx: normalize(point.x, left, width),
-                    dy: normalize(point.y, top, height),
-                    mouseData: 0,
-                    dwFlags: flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        let inputs = [
-            mouse(MOUSEEVENTF_MOVE),
-            mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN),
-            mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP),
-        ];
-        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) == inputs.len() as u32
+    // SAFETY: a coordinate query on a window handle.
+    if !unsafe { ClientToScreen(window, &mut point) }.as_bool() {
+        return false;
     }
+    crate::win_support::click_at_screen(point.x, point.y)
 }

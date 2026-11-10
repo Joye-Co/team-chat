@@ -98,11 +98,13 @@ async fn claude(rt: &RuntimeConfig) -> Option<Vec<UsageWindow>> {
         "--no-session-persistence",
     ])
     .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
     .kill_on_drop(true);
     for (k, v) in &rt.env {
         cmd.env(k, v);
     }
-    let out = tokio::time::timeout(Duration::from_secs(60), cmd.output())
+    let out = tokio::time::timeout(Duration::from_secs(60), crate::health::output(&mut cmd))
         .await
         .ok()?
         .ok()?;

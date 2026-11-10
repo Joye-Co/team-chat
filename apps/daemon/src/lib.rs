@@ -33,6 +33,10 @@ pub mod upload;
 pub mod usage;
 pub mod vm_agent;
 #[cfg(windows)]
+pub mod winacl;
+#[cfg(windows)]
 pub mod winjob;
+#[cfg(windows)]
+pub mod winpty;
 pub mod wintrust;
 pub mod workspace;

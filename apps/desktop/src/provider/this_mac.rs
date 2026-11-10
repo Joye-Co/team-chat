@@ -412,8 +412,8 @@ fn sid_in(csv: &str) -> Option<String> {
 /// the computer anyway), inherited by the files made in it afterwards. The same set the
 /// install script writes and the daemon accepts. Two `icacls` runs, because the app has no
 /// access-list code: the first drops everything inherited, the second sets the three entries.
-/// When the daemon's own helpers exist (`apps/daemon/src/sys.rs`), the daemon should do this
-/// in `install-service` and this call goes away.
+/// The daemon checks this set when it starts (`daemon::sys::acl_problem`) and could write it
+/// itself in `install-service` (`daemon::sys::protect`); then this call goes away.
 #[cfg(windows)]
 fn only_this_user(dir: &Path) -> Result<(), String> {
     let sid = user_sid()?;

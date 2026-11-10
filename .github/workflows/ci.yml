@@ -209,8 +209,22 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: macos-test
+      # Unit tests, then tests/isolation.rs in a real WKWebView (hidden window, the same
+      # assertions the Windows job runs in WebView2).
+      - name: cargo test (artifact view, isolation in WKWebView)
+        env:
+          ARTIFACT_VIEW_ISOLATION_REPORT: ${{ runner.temp }}/artifact-view/isolation.json
+        run: cargo test --locked -p artifact-view --no-fail-fast
       - name: cargo test
+        if: always()
         run: cargo test --locked -p desktop
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: artifact-view-macos
+          path: ${{ runner.temp }}/artifact-view
+          if-no-files-found: warn
+          retention-days: 14
 
   desktop-windows:
     name: Desktop build and tests (Windows)
@@ -327,13 +341,15 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-daemon
-      # The unit tests, the chat-run client and tests/process_tree.rs: one run of a fake CLI in
-      # a Job Object, with cancel and pause (docs/plans/windows.zh.md, M1). The suites that
-      # need the Python fake CLIs and /bin/sh are Unix only.
+      # The unit tests (access lists, the named pipe), the chat-run client and doctor,
+      # tests/process_tree.rs (a fake CLI in a Job Object: run, cancel, pause, wrappers, ConPTY)
+      # and tests/runtimes.rs (the Codex, ACP and Claude runtimes against the Python fake CLIs,
+      # started through the fake-cli launcher of the test-fakes feature). See
+      # docs/plans/windows.zh.md, M1 and M2. tests/integration.rs and tests/setup.rs are Unix only.
       # Also tests/service_task.rs: the scheduled task of the runner's own user with a stand-in
       # daemon, against the real Task Scheduler (docs/plans/windows.zh.md, M3).
       - name: cargo test (daemon)
-        run: cargo test --locked -p daemon --no-fail-fast
+        run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
       # The install command for machines without the app, in Windows PowerShell 5.1, with the
       # daemon just built: SHA-256 check, config and token for this user only, the real daemon
       # as a scheduled task, an update by the replace protocol, uninstall.

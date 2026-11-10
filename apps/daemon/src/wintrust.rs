@@ -4,8 +4,9 @@
 //! refuses such a place ([`check_program`]).
 //!
 //! The rules are plain functions over security ids and access masks, tested on every system;
-//! reading the owner and the access list is Windows code. When `sys.rs` gets access-list
-//! helpers, this reading belongs there.
+//! reading the owner and the access list is Windows code. This is not `winacl::check`: that
+//! asks who may open a private file at all, this asks who may change a program that others
+//! are welcome to read (as in Program Files).
 
 /// SYSTEM, the Administrators group and TrustedInstaller (the owner of Windows' own files).
 /// Whoever is one of these can do anything on the computer already.

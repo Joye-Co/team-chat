@@ -2,7 +2,9 @@
 
 状态：W0 已完成（客户端能为 Windows 编译并链接出 exe）。C1 的系统集成部分已写完（见 C1 一节）。M1 已完成
 （daemon 能为 Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过
-真的 CLI）。C2（产出和图的 WebView2 后端）代码已完成并在 Windows CI 上跑通隔离测试，见下。其余进行中或未开始。
+真的 CLI）。M2 大部分已完成（访问列表、命名管道、审批、ConPTY、三个运行时的假 CLI 测试，都在 Windows CI 上
+跑过；端到端用例还没进 Windows CI，原因见 M2 一节）。C2（产出和图的 WebView2 后端）代码已完成并在 Windows
+CI 上跑通隔离测试，见下。其余进行中或未开始。
 
 M3 已完成（daemon 作为当前用户的计划任务、改名替换的自己更新、「用这台电脑」、PowerShell 安装命令；计划任务和
 安装命令在 Windows CI 上对着真的任务计划程序跑过，「用这台电脑」只编译过，都还没在真的 Windows 电脑上试过）。
@@ -62,7 +64,7 @@ M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之�
 | `runtime/pty.rs`（没有结构化协议的 CLI） | `openpty`、`setsid` | ConPTY |
 | `service.rs`、`selfupdate.rs` | launchd、systemd；程序文件被替换后退出，由服务管理器重启 | 当前用户的计划任务（登录时启动，结束后一分钟内再启动）。不能用 Windows 服务：服务跑在别的会话里，读不到用户的 CLI 登录状态。更新时先把运行中的 exe 改名再放新文件。已完成，见 M3 |
 | `health.rs`、`doctor.rs`（找 CLI） | 查 `PATH`、可执行位 | 按 `PATHEXT` 找，npm 装的 CLI 是 `.cmd` 文件，启动时要正确转义参数 |
-| 文件权限（配置、token、运行目录） | 0600 / 0700 | 放在用户目录下靠默认 ACL；配置文件夹（里面有机器 token）改成只有当前用户、SYSTEM 和 Administrators 能打开，见 M3 |
+| 文件权限（配置、token、运行目录） | 0600 / 0700 | 检查属主和访问列表（只许当前用户、SYSTEM、Administrators），daemon 自己建的目录和文件写明确的访问列表；机器 token 存 Credential Manager |
 | `workspace.rs`（git worktree、运行目录） | — | 打开长路径支持并用短的工作目录；删除运行目录时处理文件被占用 |
 | `runtime/claude.rs`（找原始会话文件） | 按 Unix 路径算目录名 | 按 Windows 路径（盘符、反斜杠）算 |
 
@@ -210,22 +212,36 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - origin：把 `artifact` 注册成带 authority 的自定义 scheme（`CoreWebView2CustomSchemeRegistration`），页面地址
   和 macOS 完全一样：`artifact://<id>-v<version>/`，每个版本一个 origin；内容由 `WebResourceRequested` 用同一个
   `resolve::serve_range` 提供，CSP 和其他响应头逐字相同（Windows 另加一条 `Permissions-Policy`）。
-- 断网三层：CSP；`WebResourceRequested` 过滤 `*`，当前版本 origin 之外的请求一律回 403；浏览器进程带
-  `--host-resolver-rules="MAP * ~NOTFOUND"` 启动，任何主机名和 IP 都解析不了（WebSocket、WebRTC 不经过请求
-  过滤，靠这一层和 CSP），并在每个 frame 里删掉 WebRTC 构造函数。
-- 跳转：`NavigationStarting` / `FrameNavigationStarting` 取消 origin 之外的一切；`NewWindowRequested` 一律不开窗；
+- 断网四层：CSP；`WebResourceRequested` 过滤 `*`，当前版本 origin 之外的请求一律回 403（页面已关或请求读
+  不出来时也回 403，没有走默认路径的情况）；浏览器进程带 `--host-resolver-rules="MAP * ~NOTFOUND"` 启动，
+  任何主机名都解析不了；所有连接（包括直连 IP 和本机）必须走一个连不上的代理（`--proxy-server` 指向
+  `0.0.0.0:1`，去掉回环豁免），Chromium 对这样给的代理不会退回直连。
+- WebRTC：macOS 在引擎里关掉；Windows 没有这个开关，靠上面的死代理加 `disable_non_proxied_udp`（UDP 不许
+  绕过代理，TCP 也走代理，于是没有任何传输通道），再在每个 frame 里删掉构造函数；页面通过
+  `contentWindow` / `contentDocument` 拿到的新 frame 窗口也当场清理。
+- 跳转：`NavigationStarting` 取消 origin 之外的一切，`FrameNavigationStarting` 取消所有 frame 跳转（CSP 本来
+  就不允许 frame，这样 frame 里只可能是 `about:blank` 或 `srcdoc`）；`NewWindowRequested` 一律不开窗；
   外部协议（`LaunchingExternalUriScheme`）取消。
 - 桥：`chrome.webview.postMessage`，只收主 frame、且来源是当前版本 origin 的消息，再交给同一个 `Bridge` 按
   `Capabilities` 检查。Host objects 关闭。
 - 关掉的浏览器功能：下载、权限弹窗、脚本对话框、右键菜单、开发者工具（调试构建除外）、浏览器快捷键、
   自动填充和保存密码、缩放、滑动导航、状态栏、内置错误页、SmartScreen。
-- 存储：每个页面都是 InPrivate；用户数据目录单独放在 `%LOCALAPPDATA%\team-chat\webview2`
+- 存储：每个页面都是 InPrivate，并且有自己的 profile（关闭页面时删除），和 macOS 每个视图一个全新存储
+  一致：同一 origin 的 localStorage 不会留到视图关闭之后，深浅色也按页面设置；用户数据目录单独放在 `%LOCALAPPDATA%\team-chat\webview2`
   （`ui::web_embed::prepare_process` 设置）。
 - 嵌入：GPUI 窗口的子 `HWND`（裁剪容器）里放 WebView2，每帧由宿主按布局摆放（物理像素 = 点 × 缩放）、裁剪、
   圆角（窗口 region）、隐藏。**GPUI 默认用置顶的 DirectComposition 树绘制，会盖住所有子窗口**，所以应用在
   Windows 上启动时设置 `GPUI_DISABLE_DIRECT_COMPOSITION=1`，让 GPUI 直接呈现到 `HWND`。
-- 「用户点过」的信号：页面里按下鼠标时父窗口收到 `WM_PARENTNOTIFY`；非文字按键走 `AcceleratorKeyPressed`。
+- 「用户点过」的信号：页面里按下鼠标时父窗口收到 `WM_PARENTNOTIFY`，只有落在网页区域内的才算（点版本
+  下拉框不算）；非文字按键走 `AcceleratorKeyPressed`。
+- 滚轮转交（话题里的内嵌页面）：宿主读系统的原始鼠标输入（Raw Input），指针在这种页面上时把滚轮消息发给
+  GPUI 窗口；页面发来的任何消息都不会让宿主滚动。
+- `window.print()`：WebView2 没有关打印的开关，在每个 frame 里把 `print` 换成空函数。还剩一种情况没有堵死：
+  页面如果能在脚本注入之前拿到一个新 frame 的窗口，可以调出打印预览；那只是一个需要用户自己确认的对话框，
+  不泄露数据，所以没有再加更重的手段。
 - 截图（图的 PNG、被遮住时的快照）走 DevTools 协议 `Page.captureScreenshot`，隐藏窗口固定 1 像素 = 1 CSS px。
+- 图渲染器起不来时（比如电脑上没有 WebView2 运行时）：等着的图立刻显示「没有画出来」，隔 2 秒、4 秒……最多
+  5 分钟再试一次，不会反复开关隐藏窗口；这些失败不写进磁盘缓存。
 - 桌面端接线：`ui/web_embed.rs`、`views/artifacts/window.rs`、`diagrams/mod.rs` 在 Windows 上走同一套代码；
   打开外部链接前的确认暂时用系统消息框。
 
@@ -234,12 +250,21 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - `tests/isolation.rs`：和 macOS 同一份页面、同一组断言（本 origin 文件能加载；http / https / ws / WebRTC /
   路径穿越 / 别的版本都拿不到；CSP 生效；跳转被拒；弹窗被拒；每个版本独立 origin；桥应答、拒绝未知方法、
   没有能力时拒绝 `emit` 和 `ask`）。
+- `tests/isolation.rs` 的「逃逸」页（两个平台同一份）：新建的 `about:blank` frame 里没有 WebRTC；对本机一个
+  TCP 监听端口用 TURN-over-TCP、fetch、图片、WebSocket、beacon、弹窗、跳转各试一遍，监听端口一个连接都没
+  收到；frame 自己发的桥消息被忽略；frame 加载本 origin 的页面被拒；地理位置、麦克风、通知、剪贴板都没有
+  被授权；blob 下载没有落盘；别的应用的 URL scheme 被拒；关掉窗口再开同 origin 的新窗口，localStorage 是空的。
 - `examples/win_embed_proto.rs`：普通窗口里嵌一个页面，对屏幕截图取像素验证位置、裁剪、圆角、隐藏和再显示、
-  关闭；`SendInput` 真实点击到达页面并算作用户输入；独立的产出窗口和版本下拉框。
+  关闭；`SendInput` 真实点击到达页面并算作用户输入，点版本下拉框不算；真实滚轮在开启转交时滚动宿主，页面
+  伪造的滚轮消息不起作用；独立的产出窗口和版本下拉框。
 - `apps/desktop/examples/win_embed_gpui.rs`：真的 GPUI 窗口里嵌一个页面。关掉 DirectComposition 时页面显示在
   GPUI 内容之上，点击、裁剪、隐藏都对；不关时页面被 GPUI 盖住（截图里看不到，但仍能收到点击），这是必须关掉
   它的证据。
 - `examples/diagram_selftest.rs`：8 个 Mermaid 样例在隐藏的 WebView2 里渲染并导出透明底的 2x PNG。
+
+测试顺带发现的 macOS 问题（不在这次范围内，没有改）：在 macOS 15 的 CI 上，页面点了一个 blob 下载链接之后
+脚本就不再运行（定时器不触发），应用本身不受影响，文件也没有保存；在 macOS 26 上页面照常运行。隔离测试
+两个平台都检查「文件没落盘、没有连接出去」，「页面还活着」只在 Windows 上要求，macOS 上只记录。
 
 只能在真机上确认的（CI 是 100% 缩放、软件渲染、没有人操作）：
 
@@ -247,7 +272,8 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - 焦点和 Tab 顺序：页面和 GPUI 输入框之间来回切换、Esc 和 Tab 交还焦点、中文输入法候选窗位置。
 - 页面有焦点时应用级快捷键（Ctrl+W 等）现在会被页面吃掉，要决定哪些转给应用。
 - 高 DPI 和多显示器不同缩放比：位置、清晰度、图的 PNG 尺寸。
-- 话题里内嵌页面的滚轮转交（页面脚本把滚轮转成宿主的 `WM_MOUSEWHEEL`）手感是否自然。
+- 话题里内嵌页面的滚轮转交（Raw Input）手感是否自然，触控板的精确滚动是否也走这条路。
+- 每个页面一个 profile 对打开速度和内存的影响；异常退出后留在用户数据目录里的 profile 文件夹要不要清理。
 - 只用键盘操作页面（不点击）时，文字按键不算「用户点过」，`emit` 可能被闸门挡住。
 - 关掉 DirectComposition 对整个应用的影响（缩放窗口时的流畅度；不再支持窗口透明，应用没用到）。
 - 版本下拉框是原生 COMBOBOX，外观要在 C4 里按设计规范重做；外部链接确认框同理。
@@ -324,16 +350,13 @@ daemon 有控制台，`CTRL_BREAK_EVENT` 送到了，假 CLI 以 `0xC000013A` �
 M1 里发现、留给后面的：
 
 - **Windows 上还没跑的测试**：`tests/integration.rs`、`tests/runtimes.rs`、`tests/setup.rs` 用 Python 写的
-  假 CLI（靠 `#!` 启动）、`/bin/sh`、信号和文件权限，现在只在 Unix 上跑。M2 把假 CLI 改成两个平台都能
-  启动的形式再打开。
+  假 CLI（靠 `#!` 启动）、`/bin/sh`、信号和文件权限，M1 时只在 Unix 上跑。（M2 打开了 `runtimes.rs`。）
 - **没有控制台时的取消**：`CTRL_BREAK_EVENT` 只能发给和 daemon 共用一个控制台的进程。M3 已定：计划任务用
   `conhost.exe --headless` 启动 daemon，daemon 和它启动的 CLI 共用一个没有窗口的控制台（CI 上确认了
   daemon 确实有控制台）。真的 CLI 在这个控制台里收到 `CTRL_BREAK_EVENT` 后能不能收尾，要在真机上看。
-- **审批（gates）**：Claude Code 的 PreToolUse 钩子通过 `chat-run` 的 socket 问 daemon，Windows 上还没有
-  这条通道，所以 Windows 机器暂时不上报 `gates` 能力，服务器不会把要审批的规则发给它。M2 有了命名管道
-  （或让钩子走文件传输）后打开；钩子命令的引号写法也要按 Windows 上 Claude Code 实际用的 shell 核对。
-- **旁聊（aside）的只读目录**：Unix 上去掉写权限；Windows 上只给已有文件加了只读属性，拦不住在目录里新建
-  文件，要用 ACL 才行。
+- **审批（gates）**：Claude Code 的 PreToolUse 钩子通过 `chat-run` 的 socket 问 daemon，M1 时 Windows 上
+  没有这条通道，Windows 机器不上报 `gates` 能力。（M2 已解决。）
+- **旁聊（aside）的只读目录**：M1 时只给已有文件加了只读属性，拦不住新建文件。（M2 已改成访问列表。）
 - **自己更新**：M3 已做，见下面的「替换协议」。
 - **机器 token**：仍然是用户目录下的文件，没有放进 Credential Manager（计划任务里的 daemon 也要读它，
   文件更简单）；M3 把它所在的文件夹改成只有当前用户、SYSTEM 和 Administrators 能打开。
@@ -342,11 +365,92 @@ M1 里发现、留给后面的：
   还能不能读到；Claude Code 在 Windows 上的会话目录名规则是否和上面一致；Claude Code 需要的 Git for
   Windows；杀毒软件对没签名的 daemon 和 Job Object 的反应。
 
-**M2 功能齐全（约 2 周）**
+**M2 功能齐全（大部分已完成，剩下的列在最后）**
 
-- `chat-run` 的命名管道传输；受控密钥（`chat-run secret`）；审批钩子。
-- Codex 和 ACP 运行时在 Windows 上验证；ConPTY 版的 `pty` 运行时。
-- Python 假 CLI 的三套测试在 Windows 上打开；旁聊只读目录的 ACL；`daemon doctor`。
+先做的是 M1 评审提出的四个安全问题，它们不解决就不能把 Windows 机器真正用起来：
+
+- **私有文件靠访问列表，不再靠「放在用户目录里」**（`winacl.rs`、`sys.rs`）。一个文件算私有，要求属主是
+  当前用户（或 SYSTEM、Administrators），并且访问列表里每一条允许项都只给这三者。检查的地方：机器 token
+  文件、配置文件、密钥库、`chat-run` 的请求目录和里面每一个请求文件。daemon 自己建的东西在**创建的那一下**
+  就带上访问列表（`CreateDirectoryW` / `CreateFileW` 带安全描述符，文件用 `CREATE_NEW`），不是先建再收紧，
+  所以不存在别人能钻进去、先放东西或先拿到句柄的空档：`<work_root>\runs`、每个 run 的目录（工作目录、
+  请求目录、设置文件都在它下面，自动继承）、密钥库文件、旁聊的设置文件。同名的目录或文件如果已经在那里
+  并且别人进得去，就拒绝使用，不接管。`work_root` 放在 `D:\runs` 这种默认谁都能写的地方也一样安全。放在
+  做不到这一点的卷上（FAT、exFAT、多数网络共享），run 会被拒绝并说明原因；token 或配置别人能读，daemon
+  不启动。还剩一个没堵的口：`work_root` 本身如果别人能写，别人可以把整个 `runs` 目录改名换掉，下一个 run
+  会发现并拒绝，但正在跑的 run 按路径打开文件时有被换的可能。所以 `work_root` 仍然应该放在自己的目录里。
+- **探测和登录用的子进程进 job**（`health::spawn`、`health::output`）：查版本、列模型、`claude --help`、
+  用量、登录和登录状态这些子进程，各自在一个 Job Object 里，放弃时（超时、取消）连它启动的东西一起结束。
+- **带换行的参数过不了非 npm 的 `.cmd`**：`cmd.exe` 的命令行到第一个换行为止，后面的会被当成别的命令。
+  这种情况现在在启动前就失败，并说明要把运行时的 `command` 指到 `.cmd` 实际启动的程序。npm 的 `.cmd`
+  不受影响（直接启动它指向的程序）。不带换行的参数由 Rust 标准库按 `cmd.exe` 规则转义，测试确认原样送到。
+- **旁聊的只读目录**：在工作目录的访问列表里加一条对当前用户的「拒绝写」（写入、追加、建文件、建目录、
+  改属性、删除），目录里已有的和以后建的都继承。和 Unix 的权限位一样，用户自己能手动改回去，只会写文件
+  的 CLI 改不了。例外见下面「发现的事」。
+
+然后是 M2 本来的内容：
+
+- **`chat-run` 的命名管道**（`chat_run.rs`）：`\\.\pipe\chat-run-<run 目录的哈希>-<daemon 进程号>`，访问列表
+  只给当前用户，拒绝远程客户端，要求自己是这个名字的第一个实例（别的程序抢先占名会让 run 的 `chat-run`
+  起不来，而不是被冒充）。请求和回答的格式跟 Unix socket 完全一样，变量还是 `CHAT_RUN_SOCKET`。客户端
+  以「只许识别身份」的方式连接，daemon 不能冒用它的身份。run 结束管道就没了。Windows 上现在和 Unix 一致：
+  Codex 走文件，其他运行时走管道。
+- **审批（gates）**：Windows 机器**仍然不上报** `gates` 能力。通道已经有了（管道），钩子在 Windows 上
+  也改成了问不到 daemon 就拒绝（Unix 保持原样：问不到就放行）；带审批的 run 如果传输起不来，run 直接失败
+  （两个平台一直如此）。但还有一种情况代码里堵不住：Claude Code 在 Windows 上如果根本没把钩子命令
+  `"C:/.../chat-run.exe" gate` 启动起来（用哪个 shell、怎么处理引号，没在真机上见过），所有命令都会放行，
+  而机器还在说自己会拦。所以在真机上确认钩子能被启动之前不打开，打开只需要改 `gates::enforced_by` 一行。
+- **受控密钥**：`chat-run secret` 在管道和文件两种传输上都测过（要审批，不会直接给值）。
+- **`pty` 运行时的 ConPTY 版**（`winpty.rs`、`runtime/pty.rs`）：程序在伪控制台里启动，同样先挂起、进 job
+  再运行。标准库不支持给子进程挂伪控制台，所以这里自己调 `CreateProcessW`（命令行引号和环境块自己拼）。
+  取消是往控制台里打一个 Ctrl+C，3 秒后结束 job。批处理文件不能当 `pty` 的程序（提示词会被 `cmd.exe`
+  当命令读），会明确报错。
+- **暂停和继续**：M1 已做；`pty` 的 run 现在也能被暂停。
+- **`tests/runtimes.rs` 在 Windows 上打开**：Codex、ACP、Claude 三个运行时对着 Python 假 CLI 跑。Windows
+  不认 `#!`，所以加了一个只在测试里编译的启动器 `fake-cli.exe`（`test-fakes` feature），它执行
+  `python %FAKE_CLI_SCRIPT%`。
+- **`daemon doctor`**：加了一个两个平台都跑的测试（按名字经 `PATHEXT` 找到程序、读到磁盘、私有的 token
+  文件通过检查、最后是 OK）。
+
+Windows CI（`daemon-windows`，`cargo test -p daemon --features test-fakes`）上实际跑过并通过的：85 个单元
+测试（访问列表的检查、创建时即私有的目录和文件、请求文件过滤、命名管道往返、只读目录、审批钩子问不到时的两种行为、命令行引号和环境块）；`chat-run.exe`
+经管道和请求目录要受控密钥；`daemon doctor`；`tests/process_tree.rs` 的 7 个用例（run、取消、暂停、npm 的
+`.cmd`、非 npm 的 `.cmd`、子进程 job、ConPTY 的输出、输入、退出码、暂停和取消）；`tests/runtimes.rs` 的 12 个
+用例（Codex 的审批、插话、续接、effort，ACP 的权限和追问，模型和 effort 的发现）；`normalize`、`redact`。
+
+M2 里发现的事：
+
+- **提升权限的进程不完全受只读目录约束**：Windows 建目录和删文件时带「备份意图」，持有恢复特权的进程
+  （提升权限的管理员，比如 CI 的 runner）会跳过访问列表。写文件、建文件仍然被拒绝。普通用户身份的 CLI
+  全部被拒绝。这和 Unix 上 root 不受权限位约束是一回事；结论是 daemon 不要以提升权限运行。
+- **Codex 的 Windows 沙箱和私有目录可能冲突**：Codex 在 Windows 上如果用另一个受限身份跑工具，并且往工作
+  目录的访问列表里加它自己的条目，请求目录就不再「只有当前用户」，`chat-run` 的请求会被丢掉。没有真机，
+  没法确认；真机上第一件事就是看这个。
+- **ConPTY 的输出是「画屏幕」**：程序用移动光标代替换行时，去掉转义码之后两行的字会连在一起。够用来看
+  结果和判断退出码，不适合逐行解析。
+- **登录时 CLI 打开的浏览器会跟着登录一起结束**：登录子进程在 job 里，它在这台机器上启动的浏览器也在 job
+  里。这是有意的：登录链接是通过应用发给人的（`BROWSER` 设成不开本机浏览器），放弃的登录不该在机器上留下
+  任何进程。
+- **只读目录的测试在 Windows 上没有断言「删除」和「建目录」被拒绝**：原因就是上面第一条，CI 的 runner 是
+  提升权限的。测试只证明了写文件和建文件被拒绝；普通用户身份下删除和建目录是否被拒绝，没有测试覆盖。
+
+还没做的：
+
+- **端到端用例没有接进 Windows CI**。没有在 Windows runner 上试过，所以不知道 runner 能不能跑
+  `wrangler dev`；卡住的是脚本本身，不是 runner：
+  - `tools/e2e` 的客户端是对着已部署的环境（staging）跑的，在 Linux CI 上也不跑。CI 里的端到端是
+    `apps/daemon/e2e/local-e2e.ts`（`wrangler dev`、真 daemon、Python 假 CLI），只有 Linux 任务。
+  - 这个脚本在 Windows 上会坏在四处：用 `process.kill(-pid, "SIGTERM")` 按进程组结束 wrangler 和 daemon
+    （Windows 没有负的 pid）；把 `fake_claude.py`、`fake_codex.py` 直接写成运行时的 `command`（Windows 不认
+    `#!`，要换成 `fake-cli.exe` 加 `FAKE_CLI_SCRIPT`）；程序路径没有 `.exe`；假 CLI 里有几种模式用
+    `/bin/sh`、`setsid` 和文件权限位。
+  - 要做的事：把这四处改成两个平台都能跑，再给 `daemon-windows` 加一步。`tools/e2e` 在 Windows 上能编译
+    （CI 有 `cargo check -p e2e`），对着一台真的 Windows 机器跑它是 M2 的完成标准，要等真机。
+- **`tests/integration.rs`、`tests/setup.rs` 仍然只在 Unix 上跑**（launchd/systemd、文件权限位、
+  `/bin/sh`、信号）。其中和平台无关的用例（协议 fixture、配置解析）值得拆出来在 Windows 上跑。
+- **机器 token 仍然是文件**（现在检查它的访问列表），没有放进 Credential Manager。
+- **真机**：M1 列的那些都还在，加上上面 Codex 沙箱那一条，以及 Claude Code 在 Windows 上到底用哪个 shell
+  执行钩子命令。
 
 完成标准：`tools/e2e` 的机器用例对着一台 Windows 机器全过。
 
@@ -379,7 +483,8 @@ M1 里发现、留给后面的：
 - **谁能换掉程序文件**（`apps/daemon/src/wintrust.rs`）：计划任务会一次次以这个用户的身份启动 daemon 的
   exe，所以这个文件、它的文件夹和往上每一层文件夹，只要有当前用户和管理员以外的人能改（比如装在
   `D:\Apps\X`，默认所有登录用户可改），`install-service` 就拒绝并说明原因。检查的是所有者和访问列表；
-  「在盘符根目录下能新建文件夹」不算。M2 的 ACL 函数进了 `sys.rs` 之后，读访问列表的那段挪过去。
+  「在盘符根目录下能新建文件夹」不算。它和 M2 的 `winacl::check` 问的不是一个问题：那边问「谁能打开」（私有
+  文件，别人连读都不行），这边问「谁能改」（Program Files 里的程序别人可以读），所以是单独一个模块。
 - **任务属于谁**：XML 里用当前用户的 SID，不用用户名（`whoami` 按控制台代码页输出，中文用户名会被读错）。
 - **为什么用 XML 加 `schtasks`，不用任务计划程序的 COM 接口**：XML 是纯文本，在每个系统上都能单元测试；
   `schtasks` 每台 Windows 都有；daemon 不用为此写 COM 代码。不解析 `schtasks` 的输出（它跟着系统语言和
@@ -413,9 +518,9 @@ M1 里发现、留给后面的：
   - 然后运行 `<slug>-daemon.exe install-service`（不弹窗口）。状态读 `task.xml`：没有就是没设置，里面的
     程序是自己旁边的 daemon 就是正常，是别处的就是「别处」。重启是运行 `<slug>-daemon.exe restart-service`；
   - 新登记的机器标签是 `windows`（Mac 上是 `mac`），名字取 `COMPUTERNAME`。
-  - 等 M2 在 `apps/daemon/src/sys.rs` 里有了 ACL 函数（`set_mode` 在 Windows 上真的生效），应该让 daemon
-    在 `install-service` 里自己收紧配置文件夹，`Config::problems` 里检查 token 文件有没有别人能读；到时
-    客户端的 `only_this_user` 和安装脚本里的 `icacls` 都可以删掉。
+  - M2 的 ACL 规则已经在 main 上（`sys.rs` / `winacl.rs`）：daemon 启动时检查配置文件和 token 的所有者和
+    访问列表，只认当前用户、SYSTEM、Administrators，客户端和安装脚本写的正是这一组。客户端不链接 daemon
+    的代码，所以它这边仍然用 `icacls` 写；以后可以改成让 daemon 在 `install-service` 里调 `sys::protect`。
 - **PowerShell 安装命令**（`scripts/install-daemon.ps1`，用法在 `docs/bots.md` 第 6 节）：给不装客户端的
   机器。下载 daemon（只接受 https）、用命令行给的 `-Sha256` 校验（下载时必填；哈希必须来自下载地址以外的
   可信来源，脚本不会去下载地址旁边取；不对就什么都不装）、写配置和 token（文件夹只有当前用户、SYSTEM 和 Administrators 能打开，token

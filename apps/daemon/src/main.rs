@@ -50,7 +50,15 @@ fn main() {
                 exit_with(&e);
             }
             let cfg = load_cfg();
-            let problems = cfg.problems();
+            let mut problems = cfg.problems();
+            // Windows: the config can hold a runtime's keys (`env`); like the token file it
+            // must not be readable by other users of the machine.
+            if let Some(why) = daemon::sys::acl_problem(&config_path) {
+                problems.push(format!(
+                    "config {} must be private to this user: {why}",
+                    config_path.display()
+                ));
+            }
             if !problems.is_empty() {
                 exit_with(&problems.join("\n"));
             }

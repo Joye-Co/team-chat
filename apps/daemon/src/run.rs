@@ -285,8 +285,7 @@ pub async fn supervise(ctx: RunCtx) {
                 None
             } else {
                 // In a VM `chat-run` always goes through the relayed socket.
-                // Windows has no socket transport yet: every run there uses the files.
-                let files = cfg!(windows) || (rt.kind == "codex" && !exec.isolated());
+                let files = rt.kind == "codex" && !exec.isolated();
                 // Files and 产出 go up over HTTP as the run's member, from its working folder.
                 outputs.set_local(crate::chat_run_files::Local {
                     server_url: cfg.server_url.clone(),
