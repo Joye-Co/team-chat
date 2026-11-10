@@ -147,7 +147,7 @@ fn shift_enter_adds_a_line_and_cmd_enter_sends(cx: &mut TestAppContext) {
     cx.simulate_input("cd");
     assert_eq!(h.text(cx), "ab\ncd");
     assert_eq!(h.count(TOPIC), before);
-    cx.simulate_keystrokes("cmd-enter");
+    cx.simulate_keystrokes(crate::secondary!("enter"));
     assert_eq!(h.count(TOPIC), before + 1);
     assert_eq!(h.last(TOPIC).body, "ab\ncd");
     // Enter on an empty composer sends nothing.
@@ -310,7 +310,7 @@ fn pending_files_become_chips_and_go_with_the_message(cx: &mut TestAppContext) {
     // Paste of an image from the clipboard.
     let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0x89, b'P', b'N', b'G']);
     cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes(crate::secondary!("v"));
     assert_eq!(h.view.update(cx, |this, _| this.files.len()), 3);
     assert_eq!(h.text(cx), "", "an image paste adds no text");
 
@@ -718,9 +718,9 @@ fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut
     // then removes both.
     quote(cx);
     cx.simulate_input("同意");
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
     assert!(!h.view.update(cx, |this, _| this.chips_selected));
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
     assert!(h.view.update(cx, |this, _| this.chips_selected));
     cx.simulate_keystrokes("backspace");
     assert_eq!(h.text(cx), "");
@@ -730,7 +730,8 @@ fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut
     // A single ⌘A selects the text only: Backspace keeps the quote.
     quote(cx);
     cx.simulate_input("嗯");
-    cx.simulate_keystrokes("cmd-a backspace");
+    cx.simulate_keystrokes(crate::secondary!("a"));
+    cx.simulate_keystrokes("backspace");
     assert_eq!(h.text(cx), "");
     assert!(quoted(cx));
     h.view.update(cx, |this, cx| this.remove_quote(cx));
@@ -738,14 +739,15 @@ fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut
     // ⌘A on an empty field: nothing more to select, the quote at once.
     h.provider.set_quote(&key, Some(target.id.clone()));
     cx.run_until_parked();
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
     cx.simulate_keystrokes("delete");
     assert!(!quoted(cx));
 
     // Moving the caret drops the chip selection: Backspace edits the text.
     quote(cx);
     cx.simulate_input("好");
-    cx.simulate_keystrokes("cmd-a cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
+    cx.simulate_keystrokes(crate::secondary!("a"));
     cx.simulate_keystrokes("right");
     assert!(!h.view.update(cx, |this, _| this.chips_selected));
     cx.simulate_keystrokes("backspace");

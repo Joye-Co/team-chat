@@ -1092,6 +1092,14 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+    }
+}
+
+impl RootView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
@@ -1106,6 +1114,11 @@ impl Render for RootView {
             .size_full()
             .bg(k.bg)
             .text_color(k.ink);
+        // Off the Mac the app ends with its last window and has no tray to
+        // come back from, so Ctrl+W does not close the main window: the
+        // action stops here. Other windows (设置, 团队管理) still close.
+        #[cfg(not(target_os = "macos"))]
+        let root = root.on_action(|_: &crate::views::nav::menus::CloseWindow, _, _| {});
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root =
             crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
@@ -1188,7 +1201,9 @@ impl Render for RootView {
         // flush with the window edge (traffic lights inside it), the page
         // column with its toolbar row, and the inspector edge to edge.
         use crate::views::columns::Column;
-        let fullscreen = window.is_fullscreen();
+        // Off the Mac there are no traffic lights either: the sidebar's top
+        // row takes the full-screen layout (the toggle at the leading edge).
+        let fullscreen = window.is_fullscreen() || crate::ui::native::window_chrome::drawn();
         self.services
             .nav
             .update(cx, |nav, cx| nav.set_fullscreen(fullscreen, cx));
@@ -1481,18 +1496,30 @@ pub fn bind_view_keys(cx: &mut App) {
 
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
+    // Windows quits with Alt+F4 and the close button; Ctrl+Q would end the
+    // app without a warning.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
+        KeyBinding::new(crate::secondary!(","), OpenSettings, None),
+        KeyBinding::new(crate::secondary!("alt-i"), ToggleSidePanel, None),
         // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
-        KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
-        KeyBinding::new("cmd-n", NewTopic, None),
-        KeyBinding::new("cmd-;", ToggleSideChat, None),
-        KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
-        KeyBinding::new("cmd-shift-h", OpenDesk, None),
-        KeyBinding::new("cmd-shift-m", OpenMembers, None),
-        KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
+        // Windows has no second command key: Ctrl+Alt+S.
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "ctrl-cmd-s"
+            } else {
+                "ctrl-alt-s"
+            },
+            ToggleSidebar,
+            None,
+        ),
+        KeyBinding::new(crate::secondary!("n"), NewTopic, None),
+        KeyBinding::new(crate::secondary!(";"), ToggleSideChat, None),
+        KeyBinding::new(crate::secondary!("alt-r"), ToggleTopicRail, None),
+        KeyBinding::new(crate::secondary!("shift-h"), OpenDesk, None),
+        KeyBinding::new(crate::secondary!("shift-m"), OpenMembers, None),
+        KeyBinding::new(crate::secondary!("shift-o"), OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     {
