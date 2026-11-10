@@ -112,6 +112,13 @@ try {
     # The scheduled task runs the daemon, hidden, and the daemon writes its log.
     & $schtasks /Query /TN $taskName | Out-Null
     Assert ($LASTEXITCODE -eq 0) "the task $taskName is registered"
+    # This computer has no coding CLI, and a daemon without a runtime does not run: give it
+    # one (never started here) and restart the service, which is what an operator does after
+    # changing the config.
+    $whoami = Join-Path $env:SystemRoot 'System32\whoami.exe'
+    Add-Content -LiteralPath (Join-Path $configDir 'daemon.toml') -Encoding Ascii -Value "`n[runtimes.ci]`nkind = `"claude`"`ncommand = '$whoami'"
+    & $exe restart-service
+    Assert ($LASTEXITCODE -eq 0) 'restart-service worked'
     Wait-For 60 'the daemon started and writes its log' {
         (Test-Path -LiteralPath $script:log) -and ((Get-Content -Raw -LiteralPath $script:log) -match 'daemon started')
     }
