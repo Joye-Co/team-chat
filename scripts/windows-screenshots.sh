@@ -11,7 +11,7 @@ set -euo pipefail
 
 dir="${1:?usage: windows-screenshots.sh <dir>}"
 exe="${CARGO_TARGET_DIR:-target}/debug/desktop.exe"
-main_screens="login,main,main-sidebar-hidden,window-inactive,settings-shortcuts,group-chat,dm-chat,desk,topic-v2,group-v2,members-v2,artifacts-v2,new-topic,switcher,account-menu,search,cards,settings-profile,settings-about"
+main_screens="login,main,main-sidebar-hidden,window-inactive,settings-shortcuts,group-chat,dm-chat,desk,topic-v2,group-v2,members-v2,artifacts-v2,new-topic,switcher,account-menu,search,cards,settings-profile,settings-about,media-audio,media-pdf"
 scenes="${SCENES:-$main_screens}"
 
 args=(--screenshot "$dir")
@@ -26,4 +26,9 @@ set +e
 code="${PIPESTATUS[0]}"
 set -e
 echo "screenshot self-test exit code: $code"
+if [ "$code" != 0 ]; then
+  # A crash leaves no line in the log; Windows records the faulting module.
+  powershell -NoProfile -Command "Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error','Windows Error Reporting'} -MaxEvents 4 -ErrorAction SilentlyContinue | Format-List TimeCreated, ProviderName, Message" \
+    2>&1 | tee -a "$dir/selftest.log" || true
+fi
 exit "$code"

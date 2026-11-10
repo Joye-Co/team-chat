@@ -1230,7 +1230,7 @@ fn poster_png(i: usize) -> Vec<u8> {
 
 /// `seconds` of speech-like sound: syllable bursts of noise under a slow envelope, with
 /// pauses between sentences. 16-bit mono PCM at 8 kHz.
-fn speech_wav(seconds: u32) -> Vec<u8> {
+pub(super) fn speech_wav(seconds: u32) -> Vec<u8> {
     let rate = 8000u32;
     let n = rate * seconds;
     let mut seed = 0x2545F491u32;
@@ -1271,7 +1271,7 @@ fn speech_wav(seconds: u32) -> Vec<u8> {
 }
 
 /// A 6-page inspection report: a summary page and table pages (ASCII text, Helvetica).
-fn report_pdf() -> Vec<u8> {
+pub(super) fn report_pdf() -> Vec<u8> {
     let checks = [
         "Login",
         "Send message",
