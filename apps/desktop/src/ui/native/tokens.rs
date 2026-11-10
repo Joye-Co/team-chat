@@ -1221,6 +1221,8 @@ pub mod monitor {
     /// A sidebar group label: this tall, this far below the rows above (Admin artboard: 18 + 16 + 6).
     pub const NAV_GROUP_HEIGHT: Pixels = px(24.);
     pub const NAV_GROUP_TOP: Pixels = space::S12;
+    /// Room under the sidebar's last row, above the account footer.
+    pub const NAV_END_PAD: Pixels = space::S8;
     /// The machine tile of the switcher.
     pub const MACHINE_TILE: Pixels = px(32.);
     /// A KPI card's sparkline.
@@ -1240,6 +1242,13 @@ pub mod monitor {
     pub const COL_TOKENS: Pixels = px(120.);
     pub const COL_DONE: Pixels = px(104.);
     pub const COL_SPEND: Pixels = px(152.);
+    /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the
+    /// inspector at the default width; cells pad 8 a side.
+    pub const TEAM_COL_LEVEL: Pixels = px(80.);
+    pub const TEAM_COL_TOPICS: Pixels = px(68.);
+    pub const TEAM_COL_SPEND: Pixels = px(136.);
+    pub const TEAM_COL_RECENT: Pixels = px(88.);
+    pub const TEAM_CELL_PAD: Pixels = space::S8;
     /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
     pub const FLEET_CARD_MIN: Pixels = px(320.);
     pub const FLEET_ADD_TEXT: Pixels = px(320.);

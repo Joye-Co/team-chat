@@ -164,6 +164,8 @@ pub struct AdminView {
     data_for: Option<(String, Range)>,
     load: Load,
     scroll: ScrollHandle,
+    /// The sidebar's page list, which scrolls above the account footer when the window is short.
+    nav_scroll: ScrollHandle,
     _poll: Task<()>,
     _subs: Vec<Subscription>,
     /// The live page: 概览, 订阅账号 or API 密钥.
@@ -239,6 +241,7 @@ impl AdminView {
             data_for: None,
             load: Load::Idle,
             scroll: ScrollHandle::new(),
+            nav_scroll: ScrollHandle::new(),
             page: accounts::Page::default(),
             acct,
             fleet: fleet::Fleet::default(),
@@ -688,13 +691,14 @@ impl AdminView {
                     .flex_1()
                     .min_h(gpui::Pixels::ZERO)
                     .overflow_y_scroll()
+                    .track_scroll(&self.nav_scroll)
+                    // Padding, not the first label's margin: a scroll area measures its content
+                    // from the first child's top, so a margin there would be cut from the end.
+                    .pt(t::NAV_GROUP_TOP)
+                    .pb(t::NAV_END_PAD)
                     .flex()
                     .flex_col()
-                    .child(
-                        group_label(m::NAV_TEAM, cx)
-                            .h(t::NAV_GROUP_HEIGHT)
-                            .mt(t::NAV_GROUP_TOP),
-                    )
+                    .child(group_label(m::NAV_TEAM, cx).h(t::NAV_GROUP_HEIGHT))
                     .child(live_page(
                         "nav-home",
                         m::NAV_HOME,
