@@ -188,3 +188,15 @@ fn delta_gate_final_message_replaces_held_text() {
     assert!(g.push(delta("p", "Password: ")).is_empty());
     assert_eq!(texts(&g.tick(later + daemon::redact::HOLD)), "Password: ");
 }
+
+/// `gh auth login` prints a one-time code that looks like an invite code. The person has to
+/// read it, so it stays, also in the card the CLI posts afterwards; other codes stay masked.
+#[test]
+fn device_sign_in_codes_are_shown() {
+    let red = Redactor::new(vec![]);
+    assert!(red.text("say 7AB5-DFD1 to nobody").contains(MASK));
+    let out = red.text("! First copy your one-time code: 7AB5-DFD1\nOpen this URL to continue in your web browser: https://github.com/login/device");
+    assert!(out.contains("7AB5-DFD1"), "{out}");
+    assert_eq!(red.text("输入验证码 7AB5-DFD1"), "输入验证码 7AB5-DFD1");
+    assert!(red.text("invite code 7K2M-9QXR").contains(MASK));
+}
