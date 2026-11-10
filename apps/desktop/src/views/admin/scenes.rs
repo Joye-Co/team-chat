@@ -58,6 +58,33 @@ fn open_usage_last_month(
     )
 }
 
+/// 用量 with the sidebar scrolled to its end: 团队记忆 sits above the account footer. Run with
+/// `--size 1216x640` to see the list scroll in a short window.
+fn open_nav_end(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(AdminPage::Usage, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    // After the machines came in and the list grew to its full length.
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(150))
+            .await;
+        let _ = view.update(cx, |v, cx| {
+            v.nav_scroll.scroll_to_bottom();
+            cx.notify();
+        });
+    })
+    .detach();
+    Ok(handle)
+}
+
 fn open_member_person(
     services: Services,
     _content: Size<Pixels>,
@@ -137,6 +164,11 @@ pub const SCENES: &[Scene] = &[
         "admin-member-ai",
         "团队管理 › 成员 with Forge selected: 最常找它的人",
         open_member_ai
+    ),
+    scene!(
+        "admin-nav-end",
+        "团队管理 › 用量 with the sidebar scrolled to its end (try --size 1216x640)",
+        open_nav_end
     ),
     scene!(
         "admin-home-month",

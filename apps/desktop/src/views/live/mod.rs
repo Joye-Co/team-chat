@@ -1587,12 +1587,16 @@ impl Render for LivePane {
         let live_now = run.status.is_active() && !held && replay_step.is_none();
         // Show the newest lines that fit the terminal window, from its top.
         let window_w = window.viewport_size().width;
-        // The shell gives the pane one width (D13: 400); full screen takes
-        // the window less the page's minimum.
+        // The shell gives the pane the one width of every right pane (D13:
+        // 400, or what the person dragged it to); full screen takes the
+        // window less the page's minimum.
+        let shell_w = cx
+            .try_global::<crate::views::columns::RightPaneWidth>()
+            .map_or(metrics::WIDE_PANE_WIDTH, |w| w.0);
         let pane_w = if self.expanded {
-            (window_w - theme::RAIL_WIDTH - theme::PAGE_MIN_WIDTH).max(metrics::WIDE_PANE_WIDTH)
+            (window_w - theme::RAIL_WIDTH - theme::PAGE_MIN_WIDTH).max(shell_w)
         } else {
-            metrics::WIDE_PANE_WIDTH
+            shell_w
         };
         let screen_h = (pane_w - SIDE * 2.) / SCREEN_RATIO;
         // The terminal: 84 % of the area under the menu bar, less its
