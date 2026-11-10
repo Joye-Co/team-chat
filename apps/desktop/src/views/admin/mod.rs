@@ -690,7 +690,11 @@ impl AdminView {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .child(group_label(m::NAV_TEAM, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_TEAM, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-home",
                         m::NAV_HOME,
@@ -719,7 +723,11 @@ impl AdminView {
                         accounts::Page::Activity,
                         None,
                     ))
-                    .child(group_label(m::NAV_MACHINES, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_MACHINES, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-machines",
                         m::NAV_ALL_MACHINES,
@@ -728,7 +736,11 @@ impl AdminView {
                         self.machines.as_ref().map(|l| count(l.len() as u32, false)),
                     ))
                     .children(machines)
-                    .child(group_label(m::NAV_ACCOUNTS, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_ACCOUNTS, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-subs",
                         m::NAV_SUBSCRIPTIONS,
@@ -748,7 +760,11 @@ impl AdminView {
                             .filter(|n| *n > 0)
                             .map(|n| count(n, false)),
                     ))
-                    .child(group_label(m::NAV_SETTINGS, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_SETTINGS, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-ai",
                         m::NAV_AI,
