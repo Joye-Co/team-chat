@@ -34,7 +34,7 @@
   if(reduce||!("IntersectionObserver" in window))return;
   root.classList.add("motion");
   /* scroll reveal */
-  var groups=[[".center",0],[".chap-head>div",.12],[".trio>div",.1],[".shot:not(.hero .shot)",0],[".gal .tabs",0],[".cmp .tabs",0],[".view",.1],[".team",0],[".legend li",.06],[".env",.08],[".tile",.1],[".blk",.12],[".conn",.12],[".split .txt>*",.08],[".cta>*",.1]];
+  var groups=[[".center",0],[".chap-head>div",.12],[".trio>div",.1],[".shot:not(.hero .shot)",0],[".gal .tabs",0],[".cmp .tabs",0],[".view",.1],[".team",0],[".mk",0],[".more3>div",.1],[".legend li",.06],[".env",.08],[".tile",.1],[".blk",.12],[".conn",.12],[".split .txt>*",.08],[".cta>*",.1]];
   var els=[];
   groups.forEach(function(g){var list=[].slice.call(document.querySelectorAll(g[0]));list.forEach(function(el,i){if(el.classList.contains("rv"))return;el.classList.add("rv");var sib=el.parentElement?[].indexOf.call(el.parentElement.children,el):i;el.style.setProperty("--dl",(Math.min(sib,6)*g[1])+"s");els.push(el);});});
   document.querySelectorAll(".cycle .st .n").forEach(function(n,i){n.style.setProperty("--dl",(.25+i*.28)+"s");});
@@ -91,4 +91,42 @@
     var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){el.classList.add("hint");Object.keys(G).forEach(pre);io.disconnect();}});},{threshold:.3});
     io.observe(el);
   });
+})();
+/* waitlist: GET /api/waitlist gives {count}; POST {email} books and gives the new {count}. The host serves that endpoint. */
+(function(){
+  var form=document.querySelector(".wl");if(!form)return;
+  var KEY="waitlist",input=form.querySelector("input"),btn=form.querySelector("button"),msg=document.querySelector(".wl-msg"),counts=document.querySelectorAll(".wl-count");
+  function count(n){if(typeof n!=="number"||n<10)return;[].forEach.call(counts,function(c){c.querySelector("b").textContent=n;c.hidden=false;});}
+  function say(t,cls){msg.className="wl-msg"+(cls?" "+cls:"");msg.textContent=t;}
+  function done(email){form.classList.add("done");say("已预约，上线时会发到 "+email,"ok");var b=document.createElement("button");b.type="button";b.textContent="换一个邮箱";
+    b.addEventListener("click",function(){try{localStorage.removeItem(KEY);}catch(e){}form.classList.remove("done");say("");input.value="";input.focus();});msg.appendChild(b);}
+  try{var saved=JSON.parse(localStorage.getItem(KEY)||"null");if(saved&&saved.email)done(saved.email);}catch(e){}
+  fetch("/api/waitlist").then(function(r){return r.ok?r.json():null;}).then(function(d){if(d)count(d.count);}).catch(function(){});
+  input.addEventListener("input",function(){input.removeAttribute("aria-invalid");if(msg.classList.contains("bad"))say("");});
+  form.addEventListener("submit",function(e){e.preventDefault();var email=input.value.trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){input.setAttribute("aria-invalid","true");say("这个邮箱看起来不太对","bad");input.focus();return;}
+    btn.disabled=true;say("");
+    fetch("/api/waitlist",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email})})
+      .then(function(r){return r.json().catch(function(){return null;}).then(function(d){if(!r.ok)throw new Error("rejected");return d;});})
+      .then(function(d){if(d)count(d.count);try{localStorage.setItem(KEY,JSON.stringify({email:email}));}catch(e){}done(email);})
+      .catch(function(err){say(err&&err.message==="rejected"?"提交没成功，过一会儿再试一次":"网络不太顺，过一会儿再试一次","bad");})
+      .then(function(){btn.disabled=false;});});
+})();
+/* build a member: the chips on the left drive the member card on the right */
+(function(){
+  var mk=document.querySelector(".mk");if(!mk)return;
+  var P={forge:["Forge","开发","Claude","Claude Code",["GitHub","数据库"]],tata:["Tata","产品","GPT","Codex",["Notion","日历"]],nova:["Nova","增长","DeepSeek","你自己的",["Gmail","自定义 connector"]],watch:["Watch","运维","Gemini","Claude Code",["GitHub","数据库","日历"]]};
+  var cur=P.forge,pres=[].slice.call(mk.querySelectorAll(".pre"));
+  function $(id){return document.getElementById(id);}
+  function opts(g){return [].slice.call(mk.querySelectorAll('[data-g="'+g+'"] .opt'));}
+  function on(g){return opts(g).filter(function(b){return b.getAttribute("aria-pressed")==="true";}).map(function(b){return b.dataset.v;});}
+  function put(id,t){var el=$(id);if(el.textContent===t)return;el.textContent=t;el.classList.remove("tick");void el.offsetWidth;el.classList.add("tick");}
+  function render(){var m=on("m")[0],h=on("h")[0],t=on("t");put("mk-av",cur[0].charAt(0));put("mk-n",cur[0]);put("mk-role",cur[1]);put("mk-m",m);put("mk-h",h);put("mk-t",t.length?t.join("、"):"还没选");
+    var text=cur[0]+" 用 "+m+" 跑在"+(h==="你自己的"?"你自己的 harness":h)+"上"+(t.length?"，能用"+(t.length>1?t.slice(0,-1).join("、")+"和"+t[t.length-1]:t[0]):"")+"。";
+    /* a space between Chinese and Latin text, none before punctuation */
+    put("mk-s",text.replace(/([\u4e00-\u9fff])([A-Za-z])/g,"$1 $2").replace(/([A-Za-z])([\u4e00-\u9fff])/g,"$1 $2"));}
+  function set(g,vals){opts(g).forEach(function(b){b.setAttribute("aria-pressed",vals.indexOf(b.dataset.v)>=0?"true":"false");});}
+  pres.forEach(function(b){b.addEventListener("click",function(){cur=P[b.dataset.p];pres.forEach(function(x){x.setAttribute("aria-selected",x===b?"true":"false");});set("m",[cur[2]]);set("h",[cur[3]]);set("t",cur[4]);render();});});
+  ["m","h"].forEach(function(g){opts(g).forEach(function(b){b.addEventListener("click",function(){set(g,[b.dataset.v]);render();});});});
+  opts("t").forEach(function(b){b.addEventListener("click",function(){b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")==="true"?"false":"true");render();});});
 })();

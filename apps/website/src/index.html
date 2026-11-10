@@ -18,8 +18,8 @@
 <nav>
   <div class="wrap">
     <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
-    <div class="links"><a href="#features">AI 成员</a><a href="#genui">交互</a><a href="#memory">记忆</a><a href="#machines">电脑</a><a href="#compare">对比</a><a href="#arch">架构</a></div>
-    <div class="nav-r"><a class="btn gh" href="https://github.com/Joye-Co/team-chat" rel="noopener"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.15.46.55.38A8 8 0 0 0 8 0z"/></svg>GitHub</a><a class="btn pri" href="https://github.com/Joye-Co/team-chat/releases/latest" rel="noopener">下载</a></div>
+    <div class="links"><a href="#features">AI 成员</a><a href="#genui">交互</a><a href="#memory">记忆</a><a href="#machines">电脑</a><a href="#custom">自定义</a><a href="#compare">对比</a><a href="#arch">架构</a></div>
+    <div class="nav-r"><a class="btn pri" href="#waitlist">预约 →</a></div>
   </div>
 </nav>
 
@@ -28,9 +28,9 @@
     <a class="pill" href="#memory"><b>1.2.6</b>AI 成员会记住团队的做法了 →</a>
     <h1>工作聊天和<span class="nb">所有 Agent，</span><br><span class="soft">共用</span>一份上下文。</h1>
     <p class="sub">聊工作的地方，就是 AI 成员干活的地方。背景不用再从群里搬进一个个会话；团队沉淀下来的做法，每个 AI 成员接活前就已经读过。</p>
-    <div class="ctas"><a class="btn pri" href="https://github.com/Joye-Co/team-chat/releases/latest" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.500v8M4.500 7.500 8 11l3.500-3.500M3 13.500h10"/></svg>下载 macOS 版</a><a class="btn" href="https://github.com/Joye-Co/team-chat" rel="noopener"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.15.46.55.38A8 8 0 0 0 8 0z"/></svg>在 GitHub 上看源码</a></div>
-    <div class="fine">开源（AGPL-3.0）· Windows 版和手机版正在开发</div>
-    <div class="shot demo" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="ctas"><a class="btn pri" href="#waitlist">上线时通知我</a><a class="btn" href="#look">先看一眼 ↓</a></div>
+    <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>先支持 macOS，Windows 版和手机版正在开发</div>
+    <div class="shot demo" id="look" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
     <div class="demo-bar" data-for="desk"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
   </div>
 
@@ -175,6 +175,40 @@
     </div>
   </section>
 
+  <section class="wrap" id="custom">
+    <div class="center">
+      <div class="eyebrow">Open source</div>
+      <h2>每个 AI 成员，<br>按你们的方式搭。</h2>
+      <p class="lead">模型、harness、工具，三样自由组合，搭出一个适合这个岗位的 AI 成员。{{PRODUCT_NAME}} 是开源的，不够用的地方，自己加。</p>
+    </div>
+    <div class="mk">
+      <div class="mk-l">
+        <div class="mk-row"><span class="mk-k">从一个岗位开始</span><div class="mk-opts" role="tablist" aria-label="示例成员">
+          <button type="button" class="pre" role="tab" aria-selected="true" data-p="forge">开发</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="tata">产品</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="nova">增长</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="watch">运维</button>
+        </div></div>
+        <div class="mk-row" data-g="m"><span class="mk-k">模型</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude" aria-pressed="true">Claude</button><button type="button" class="opt" data-v="GPT" aria-pressed="false">GPT</button><button type="button" class="opt" data-v="DeepSeek" aria-pressed="false">DeepSeek</button><button type="button" class="opt" data-v="Gemini" aria-pressed="false">Gemini</button><button type="button" class="opt" data-v="本地模型" aria-pressed="false">本地模型</button></div></div>
+        <div class="mk-row" data-g="h"><span class="mk-k">Harness</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude Code" aria-pressed="true">Claude Code</button><button type="button" class="opt" data-v="Codex" aria-pressed="false">Codex</button><button type="button" class="opt" data-v="你自己的" aria-pressed="false">你自己的</button></div></div>
+        <div class="mk-row" data-g="t"><span class="mk-k">工具<small>MCP 和 connector</small></span><div class="mk-opts"><button type="button" class="opt" data-v="GitHub" aria-pressed="true">GitHub</button><button type="button" class="opt" data-v="Gmail" aria-pressed="false">Gmail</button><button type="button" class="opt" data-v="Notion" aria-pressed="false">Notion</button><button type="button" class="opt" data-v="日历" aria-pressed="false">日历</button><button type="button" class="opt" data-v="数据库" aria-pressed="true">数据库</button><button type="button" class="opt" data-v="自定义 connector" aria-pressed="false">自定义 connector</button></div></div>
+      </div>
+      <div class="mk-r" aria-live="polite">
+        <div class="mk-card">
+          <div class="mk-top"><span class="mk-av" id="mk-av">F</span><div><b id="mk-n">Forge</b><span class="mk-role" id="mk-role">开发</span></div><span class="mk-on"><i></i>在线</span></div>
+          <dl>
+            <div><dt>模型</dt><dd id="mk-m">Claude</dd></div>
+            <div><dt>Harness</dt><dd id="mk-h">Claude Code</dd></div>
+            <div><dt>工具</dt><dd id="mk-t">GitHub、数据库</dd></div>
+          </dl>
+          <p id="mk-s">Forge 用 Claude 跑在 Claude Code 上，能用 GitHub 和数据库。</p>
+        </div>
+      </div>
+    </div>
+    <div class="more3">
+      <div><span class="mono">workflow</span><h3>工作流</h3><p>把几个成员串成一条流程：谁先做、谁来审、哪一步停下来等人点头。</p></div>
+      <div><span class="mono">cron</span><h3>定时任务</h3><p>每天早上巡检、每周五出周报，到点自己开工，结果发回群里。</p></div>
+      <div><span class="mono">plugin</span><h3>插件</h3><p>缺一种卡片、一个入口、一种接法，写一个插件加进来，不用等我们排期。</p></div>
+    </div>
+  </section>
+
   <section class="wrap">
     <div class="center"><div class="eyebrow">More</div><h2>还有这些常用功能。</h2></div>
     <div class="grid4">
@@ -310,11 +344,17 @@
     </div>
   </section>
 
-  <section class="wrap cta">
+  <section class="wrap cta" id="waitlist">
     <img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">
     <h2>同事和 AI 成员，<br>在同一个 App 里。</h2>
-    <div class="ctas"><a class="btn pri" href="https://github.com/Joye-Co/team-chat/releases/latest" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.500v8M4.500 7.500 8 11l3.500-3.500M3 13.500h10"/></svg>下载 macOS 版</a><a class="btn" href="https://github.com/Joye-Co/team-chat" rel="noopener"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.15.46.55.38A8 8 0 0 0 8 0z"/></svg>在 GitHub 上看源码</a></div>
-    <div class="fine">开源（AGPL-3.0）· Windows 版和手机版正在开发</div>
+    <p class="lead">留个邮箱，可以用的时候第一时间通知你。只发这一封，不转给任何人。</p>
+    <form class="wl" novalidate>
+      <label class="sr" for="wl-email">你的邮箱</label>
+      <input id="wl-email" type="email" name="email" autocomplete="email" inputmode="email" placeholder="你的邮箱" maxlength="254" required>
+      <button class="btn pri" type="submit">预约 →</button>
+    </form>
+    <p class="wl-msg" role="status" aria-live="polite"></p>
+    <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>先支持 macOS，Windows 版和手机版正在开发</div>
   </section>
 </main>
 

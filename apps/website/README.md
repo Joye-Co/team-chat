@@ -14,7 +14,7 @@ dependencies.
 | --- | --- |
 | `src/index.html` | The page. Write `{{PRODUCT_NAME}}` wherever the product name appears; the build fills it from `product.json`. |
 | `src/styles.css` | Tokens for light and dark mode, layout, and the scroll motion (only under `.motion`, which `main.js` adds unless the viewer asked for reduced motion) |
-| `src/main.js` | Scroll reveals, the card gallery, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view and the clickable app demos |
+| `src/main.js` | Scroll reveals, the card gallery, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view, the member builder (chips drive the member card) and the waitlist form and the clickable app demos |
 | `src/img/` | WebP screenshots in light and dark pairs (`*-light.webp`, `*-dark.webp`) and the app icon |
 | `src/img/ui/` | The screens of the clickable demos |
 
@@ -30,6 +30,15 @@ desktop --screenshot <dir> --theme both --size 1440x900 --scenes desk,topic-v2,â
 Then convert with `cwebp -q 88 -m 6`. `settings-machines` is the settings window without its
 toolbar (`-crop 0 190 1280 900`). Card images (`img/card-*`) are crops of the card gallery
 scenes (`compose-*`, `cards-v2-*`) taken at `--size 1440x1700`.
+
+## Waitlist
+
+The page has no download link yet. The buttons lead to the form at the end (`#waitlist`), which talks
+to `/api/waitlist` on the same host: `GET` answers `{ "count": n }`, `POST { "email": "â€¦" }` books
+the address and answers the new count (a repeated address is not counted twice). The static build
+does not include that endpoint: the host that serves the page provides it. Without it (also in
+`bun run dev:website`) the form says the booking did not go through and the count stays hidden. The
+count shows from 10 bookings on.
 
 ## Pins and legends
 
