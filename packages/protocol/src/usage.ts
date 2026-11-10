@@ -28,6 +28,8 @@ export const TeamUsage = z.object({
   /** Who asked for the runs (the person behind each run). */
   initiators: z.array(z.object({ memberId: Id, ...Spend })).max(500),
   machines: z.array(z.object({ machineId: Id, ...Spend })).max(200),
+  /** Who asked which AI member: one entry per (person, AI member), by cost. */
+  pairs: z.array(z.object({ initiatorId: Id, memberId: Id, ...Spend })).max(2000).optional(),
   /** Per runtime and machine, so a client can tell subscription from API key by the machine's login. */
   runtimes: z.array(z.object({ runtime: z.string().min(1).max(64), machineId: Id.optional(), ...Spend })).max(500),
   /** One bucket per 24 hours from `from`, each with the cost per AI member. */

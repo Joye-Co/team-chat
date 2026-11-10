@@ -1234,13 +1234,16 @@ TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
               bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
               machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
+              pairs?: (Spend & { initiatorId, memberId })[] /* who asked which AI member */,
               daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
 ```
 
 - Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
   subscription); runs without it (Codex today) count tokens and 0 cost.
-- `initiators` is the person who asked for each run (`requestedBy`). `runtimes` is split by machine,
-  so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
+- `initiators` is the person who asked for each run (`requestedBy`); `pairs` splits that by AI
+  member, so a client can show whom each person works with most (optional: older servers omit it).
+- `runtimes` is split by machine, so a client can tell subscription from API-key spend by the
+  machine's CLI login (`MonitorCli.method`).
 - Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
 - A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
 

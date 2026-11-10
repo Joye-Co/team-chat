@@ -179,7 +179,8 @@ pub fn included(u: &TeamUsage, method: &dyn Fn(&str, Option<&str>) -> Option<Str
         .iter()
         .filter(|r| method(&r.runtime, r.machine_id.as_deref()).as_deref() == Some("subscription"))
         .map(|r| r.spend.cost_usd)
-        .sum()
+        // A float sum of nothing is -0.0, which prints as "$-0.00".
+        .fold(0., |a, b| a + b)
 }
 
 impl AdminView {
@@ -334,10 +335,10 @@ impl AdminView {
             .flex()
             .gap(space::S16)
             .child(kpi_card(
-                if week {
-                    m::USAGE_SPENT_WEEK
-                } else {
-                    m::USAGE_SPENT_MONTH
+                match self.usage.range {
+                    UsageRange::Week => m::USAGE_SPENT_WEEK,
+                    UsageRange::Month => m::USAGE_SPENT_MONTH,
+                    UsageRange::LastMonth => m::USAGE_SPENT_LAST_MONTH,
                 },
                 Sym::BarChart,
                 usd(total),
@@ -497,7 +498,10 @@ impl AdminView {
                     })
                     .unwrap_or_default()
                 } else {
-                    t.map(|t| t.day().to_string()).unwrap_or_default()
+                    // A month's bars are too narrow for every date: the 1st and every 5th.
+                    t.filter(|t| t.day() == 1 || t.day() % 5 == 0)
+                        .map(|t| t.day().to_string())
+                        .unwrap_or_default()
                 }
             };
             div()
@@ -543,7 +547,14 @@ impl AdminView {
                                 )),
                         ),
                 )
-                .child(div().n_footnote().text_color(k.secondary).child(label))
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .n_footnote()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(label),
+                )
         });
         // The budget per day, as a line across the bars.
         let line = budget_cents.filter(|b| *b > 0).map(|b| {

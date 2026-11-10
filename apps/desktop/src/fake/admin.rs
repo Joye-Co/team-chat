@@ -119,6 +119,12 @@ fn with(id_key: &str, id: &str, cost: f64, topics: u32, extra: Value) -> Value {
     v
 }
 
+fn pair(initiator: &str, member: &str, cost: f64, topics: u32) -> Value {
+    let mut v = with("memberId", member, cost, topics, json!({}));
+    v["initiatorId"] = json!(initiator);
+    v
+}
+
 pub fn team_usage(from: u64, to: u64) -> TeamUsage {
     let bots = [
         ("m-coder", 86.4, 31_u32, Some(10_000_u64)),
@@ -155,6 +161,12 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
             with("memberId", "m-alex", 21.7, 14, json!({})),
         ],
         "machines": [ with("machineId", "mc-mini", total, 71, json!({})) ],
+        "pairs": [
+            pair(ME, "m-coder", 38.2, 11), pair(ME, "m-reviewer", 16.0, 7), pair(ME, "m-docs", 12.4, 5),
+            pair("m-xiaowang", "m-coder", 30.1, 9), pair("m-xiaowang", "m-reviewer", 11.7, 6),
+            pair("m-lixue", "m-tata", 12.1, 6), pair("m-lixue", "m-docs", 12.4, 5), pair("m-lixue", "m-reviewer", 8.7, 3),
+            pair("m-alex", "m-coder", 18.1, 11), pair("m-alex", "m-taro", 3.6, 3),
+        ],
         "runtimes": [
             with("runtime", "claude", 152.6, 58, json!({ "machineId": "mc-mini" })),
             with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini" })),
