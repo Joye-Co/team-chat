@@ -415,6 +415,8 @@ fn write_aside_settings(spec: &RunSpec) -> Option<PathBuf> {
         0o600,
     )
     .open(&path)
+    // Windows: closed to other users before the auth values are in it.
+    .and_then(|f| crate::sys::protect(&path).map(|_| f))
     .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
     match written {
         Ok(()) => Some(path),

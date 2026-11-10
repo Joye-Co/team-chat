@@ -44,35 +44,24 @@ impl Executor for Local {
         let found = crate::health::which_in(program, path.as_deref())
             .or_else(|| crate::health::which(program))
             .unwrap_or_else(|| PathBuf::from(program));
-        let job = Arc::new(Job::new()?);
-        let mut cmd = crate::health::command(&found);
-        cmd.args(args)
+        let launch = crate::health::launch(&found);
+        if let Some(why) = crate::health::batch_problem(&launch.program, args) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, why));
+        }
+        let mut cmd = tokio::process::Command::new(&launch.program);
+        cmd.args(&launch.args)
+            .args(args)
             .current_dir(&spec.cwd)
             .env_clear()
             .envs(spec.env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(stderr))
-            .creation_flags(winjob::CREATION_FLAGS)
             .kill_on_drop(true);
-        let mut child = cmd.spawn()?;
+        // In a job, and in a process group of its own for CTRL_BREAK_EVENT.
+        let (mut child, job) = winjob::spawn(&mut cmd, true)?;
+        let job = Arc::new(job);
         let pid = child.id().unwrap_or(0);
-        // Suspended until it is in the job: nothing it starts can be outside.
-        let assigned = match child.raw_handle() {
-            Some(h) => job.assign(h.cast()),
-            None => Err(std::io::Error::other("the CLI exited at once")),
-        };
-        if let Err(e) = assigned {
-            let _ = child.start_kill();
-            return Err(std::io::Error::new(
-                e.kind(),
-                format!("cannot put the CLI into a job: {e}"),
-            ));
-        }
-        if !winjob::resume_process(pid) {
-            job.terminate();
-            return Err(std::io::Error::other("cannot resume the CLI"));
-        }
         workspace::record_process(&spec.run_dir, pid as i32, program);
         jobs(|m| m.insert(spec.run_dir.clone(), job.clone()));
         let stdin = child.stdin.take().map(|s| Box::new(s) as super::Stdin);

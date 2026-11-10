@@ -48,6 +48,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             0o600,
         )
         .open(&tmp)?;
+        // Windows: closed to other users before the secret is in it.
+        crate::sys::protect(&tmp)?;
         std::io::Write::write_all(&mut f, bytes)?;
         f.sync_all()?;
     }
@@ -59,6 +61,7 @@ fn private_enough(path: &Path) -> bool {
     std::fs::metadata(path)
         .map(|m| !crate::sys::open_to_others(&m))
         .unwrap_or(false)
+        && crate::sys::acl_problem(path).is_none()
 }
 
 /// The machine's X25519 key pair.
@@ -339,16 +342,16 @@ pub async fn run_login(
         let _ = send.send(fail(format!("{} is not installed", rt.command())));
         return;
     };
-    let mut child = match crate::health::command(&program)
-        .args(&args)
-        .env_clear()
-        .envs(login_env(&rt))
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-    {
+    let mut child = match crate::health::spawn(
+        crate::health::command(&program)
+            .args(&args)
+            .env_clear()
+            .envs(login_env(&rt))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true),
+    ) {
         Ok(c) => c,
         Err(e) => {
             let _ = send.send(fail(format!("cannot start {}: {e}", rt.command())));
@@ -472,13 +475,16 @@ pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
         "claude" => {
             let out = tokio::time::timeout(
                 Duration::from_secs(20),
-                crate::health::command(&program)
-                    .args(["auth", "status", "--json"])
-                    .env_clear()
-                    .envs(login_env(rt))
-                    .stdin(std::process::Stdio::null())
-                    .kill_on_drop(true)
-                    .output(),
+                crate::health::output(
+                    crate::health::command(&program)
+                        .args(["auth", "status", "--json"])
+                        .env_clear()
+                        .envs(login_env(rt))
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .kill_on_drop(true),
+                ),
             )
             .await
             .ok()?
@@ -496,13 +502,16 @@ pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
         "codex" => {
             let out = tokio::time::timeout(
                 Duration::from_secs(20),
-                crate::health::command(&program)
-                    .args(["login", "status"])
-                    .env_clear()
-                    .envs(login_env(rt))
-                    .stdin(std::process::Stdio::null())
-                    .kill_on_drop(true)
-                    .output(),
+                crate::health::output(
+                    crate::health::command(&program)
+                        .args(["login", "status"])
+                        .env_clear()
+                        .envs(login_env(rt))
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .kill_on_drop(true),
+                ),
             )
             .await
             .ok()?

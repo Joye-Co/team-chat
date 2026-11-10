@@ -1,9 +1,10 @@
 //! The few things the daemon asks of the operating system that Unix and Windows spell
 //! differently: private files, the file owner, the host name, disk space and load.
 //!
-//! Windows has no file modes. The daemon's files (config, machine token, key store, run
-//! folders) live in the user's profile, whose ACL lets only that user, SYSTEM and
-//! administrators in, so the mode helpers do nothing there and the owner checks pass.
+//! Windows has no file modes: who may open a file is its owner and its access list
+//! ([`crate::winacl`]). There a mode without bits for the group and others (`0600`, `0700`)
+//! means an access list for the daemon's user, SYSTEM and Administrators only, and the checks
+//! of the mode bits `077` and of the owner are [`acl_problem`].
 
 use std::path::Path;
 
@@ -55,7 +56,8 @@ pub fn mode(opts: &mut std::fs::OpenOptions, mode: u32) -> &mut std::fs::OpenOpt
     opts
 }
 
-/// `chmod`.
+/// `chmod`. Windows: a mode that leaves the group and others out gives the file or folder an
+/// access list of its own for the daemon's user only ([`protect`]); any other mode does nothing.
 pub fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -64,12 +66,46 @@ pub fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     {
-        let _ = (path, mode);
+        if mode & 0o077 == 0 {
+            protect(path)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Windows: closes `path` (a file or a folder with all that is and will be in it) to everyone
+/// but the daemon's user, SYSTEM and Administrators, whatever the folder above allows. Fails
+/// on a volume without access lists. Unix: nothing, the mode of each file does this.
+pub fn protect(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        crate::winacl::protect(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
         Ok(())
     }
 }
 
-/// True when the group or everyone may read, write or run the file (mode bits `077`).
+/// Windows: why somebody other than the daemon's user (and SYSTEM and Administrators) can get
+/// at `path`: its owner or an entry of its access list. None when it is private. Unix: always
+/// None; the mode bits ([`open_to_others`]) and the owner ([`owner`]) are checked there.
+pub fn acl_problem(path: &Path) -> Option<String> {
+    #[cfg(windows)]
+    {
+        crate::winacl::check(path).err()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// True when the group or everyone may read, write or run the file (mode bits `077`). Always
+/// false on Windows: ask [`acl_problem`] there.
 pub fn open_to_others(meta: &std::fs::Metadata) -> bool {
     #[cfg(unix)]
     {
@@ -98,7 +134,8 @@ pub fn is_executable(path: &Path) -> bool {
     meta.is_file()
 }
 
-/// The effective user id of the daemon (0 on Windows, like [`owner`]).
+/// The effective user id of the daemon (0 on Windows, like [`owner`]: [`acl_problem`] checks
+/// the owner there).
 pub fn euid() -> u32 {
     #[cfg(unix)]
     // SAFETY: plain syscall without arguments.

@@ -52,6 +52,14 @@ fn main() {
             "an_npm_shim_starts_the_cli_without_cmd_exe",
             Box::pin(an_npm_shim_starts_the_cli_without_cmd_exe()),
         ),
+        (
+            "a_batch_wrapper_gets_no_argument_with_a_line_break",
+            Box::pin(a_batch_wrapper_gets_no_argument_with_a_line_break()),
+        ),
+        (
+            "a_helper_process_ends_with_everything_it_started",
+            Box::pin(a_helper_process_ends_with_everything_it_started()),
+        ),
     ];
     println!("\nrunning {} tests", cases.len());
     for (name, case) in cases {
@@ -498,3 +506,84 @@ async fn an_npm_shim_starts_the_cli_without_cmd_exe() {
 /// Unix starts the program file the kernel is given: there is no shim to resolve.
 #[cfg(not(windows))]
 async fn an_npm_shim_starts_the_cli_without_cmd_exe() {}
+
+/// Windows: a `.cmd` that is not an npm shim runs in `cmd.exe`. An argument with a line break
+/// cannot get through it: the run fails and says why, before anything starts. Arguments
+/// without one arrive unchanged, whatever `cmd.exe` syntax is in them.
+#[cfg(windows)]
+async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = dir.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // An absolute path: not what npm writes, so the daemon cannot start the target itself.
+    std::fs::write(
+        tools.join("wrapped.cmd"),
+        format!("@echo off\r\n\"{}\" %*\r\n", this_program()),
+    )
+    .unwrap();
+    let wrapper = tools.join("wrapped.cmd").to_string_lossy().into_owned();
+
+    let mut s = spec(&dir.path().join("r1"), &wrapper, "hello");
+    s.note = Some("first line\nsecond line & echo owned".into());
+    let work = s.cwd.clone();
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Failed, "{o:?}");
+    let why = o.error.unwrap_or_default();
+    assert!(
+        why.contains("line break") && why.contains("wrapped.cmd"),
+        "{why}"
+    );
+    assert!(
+        !work.join("argv.json").exists(),
+        "the CLI must not have started"
+    );
+
+    let mut s = spec(&dir.path().join("r2"), &wrapper, "hello");
+    let note = "say \"hi\" & echo %PATH% ^ | more > x 'q' !e! (a) %";
+    s.note = Some(note.into());
+    let work = s.cwd.clone();
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let argv: Vec<String> =
+        serde_json::from_slice(&std::fs::read(work.join("argv.json")).unwrap()).unwrap();
+    assert!(argv.iter().any(|a| a == note), "{argv:?}");
+}
+
+#[cfg(not(windows))]
+async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {}
+
+/// Windows: a probe or a sign-in the daemon starts is in a job of its own, so giving it up
+/// (a timeout, a cancel) also ends what it started; killing a `.cmd` wrapper alone would
+/// leave the real program running.
+#[cfg(windows)]
+async fn a_helper_process_ends_with_everything_it_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().to_path_buf();
+    let mut cmd = tokio::process::Command::new(std::env::current_exe().unwrap());
+    cmd.arg("--fake-mid")
+        .current_dir(&work)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let helper = daemon::health::spawn(&mut cmd).unwrap();
+    wait_for("the helper's children", || work.join("mid.ready").exists()).await;
+    let pid = |name: &str| -> u32 {
+        std::fs::read_to_string(work.join(name))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    };
+    let pids = [pid("mid.pid"), pid("grandchild.pid"), pid("detached.pid")];
+    assert!(pids.iter().all(|p| alive(*p)), "{pids:?}");
+    drop(helper);
+    wait_for("the helper and its children to end", || {
+        pids.iter().all(|p| !alive(*p))
+    })
+    .await;
+}
+
+/// Unix: a helper is a plain child; the CLIs there are not started through wrappers.
+#[cfg(not(windows))]
+async fn a_helper_process_ends_with_everything_it_started() {}

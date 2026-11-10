@@ -129,6 +129,25 @@ const MIRROR_REFSPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
 
 static GIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Windows: closes the run folder (and with it the working folder, the `chat-run` requests and
+/// the settings files, which hold secrets) to every other user of the machine, wherever
+/// `work_root` is. A volume that cannot do that (FAT, exFAT, a network share) gets no run.
+/// Unix: nothing; each of those files has its own mode there.
+fn private_run_dir(dir: &Path) -> Result<(), String> {
+    let refuse = |why: String| {
+        format!(
+            "run folder {} cannot be made private to this user ({why}); put work_root on an \
+NTFS volume of this machine",
+            dir.display()
+        )
+    };
+    crate::sys::protect(dir).map_err(|e| refuse(e.to_string()))?;
+    match crate::sys::acl_problem(dir) {
+        Some(why) => Err(refuse(why)),
+        None => Ok(()),
+    }
+}
+
 /// Makes `<run>/work`: a git worktree on a new branch `bot/<runId>`, or an empty folder.
 pub async fn prepare(
     cfg: &Config,
@@ -137,6 +156,7 @@ pub async fn prepare(
 ) -> Result<(PathBuf, RunMeta), String> {
     let dir = run_dir(cfg, run_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create run folder: {e}"))?;
+    private_run_dir(&dir)?;
     let work = dir.join("work");
     let mut meta = RunMeta {
         run_id: run_id.into(),
@@ -255,9 +275,29 @@ async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
 /// cannot write there whatever its own modes say), or gives the owner write access back
 /// (`u+w`). Symlinks are not followed. Errors are skipped: the walk does what it can.
 ///
-/// Windows: the read-only attribute of each file. It stops changes to the files that are
-/// there; it does not stop new files in a folder (that needs an ACL, which is not set yet).
+/// Windows: one entry in the folder's access list that denies the user the write rights, and
+/// that everything in the folder inherits ([`crate::winacl::set_read_only`]); files cannot be
+/// changed, made or removed there.
 pub fn set_read_only(dir: &Path, read_only: bool) {
+    #[cfg(windows)]
+    {
+        if dir.is_dir()
+            && let Err(e) = crate::winacl::set_read_only(dir, read_only)
+        {
+            eprintln!(
+                "{} {} not made {}: {e}",
+                now_ms(),
+                dir.display(),
+                if read_only { "read-only" } else { "writable" }
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    set_mode_bits(dir, read_only);
+}
+
+#[cfg(not(windows))]
+fn set_mode_bits(dir: &Path, read_only: bool) {
     #[cfg(unix)]
     let set = |p: &Path, m: &std::fs::Metadata| {
         use std::os::unix::fs::PermissionsExt;
@@ -272,13 +312,7 @@ pub fn set_read_only(dir: &Path, read_only: bool) {
         }
     };
     #[cfg(not(unix))]
-    let set = |p: &Path, m: &std::fs::Metadata| {
-        let mut perm = m.permissions();
-        if m.is_file() && perm.readonly() != read_only {
-            perm.set_readonly(read_only);
-            let _ = std::fs::set_permissions(p, perm);
-        }
-    };
+    let set = |_: &Path, _: &std::fs::Metadata| {};
     let Ok(meta) = std::fs::symlink_metadata(dir) else {
         return;
     };
@@ -294,7 +328,7 @@ pub fn set_read_only(dir: &Path, read_only: bool) {
     }
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
-            set_read_only(&e.path(), read_only);
+            set_mode_bits(&e.path(), read_only);
         }
     }
     if read_only {
@@ -436,4 +470,36 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
 
 pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A side chat run's checkout: nothing in it can be changed, made or removed until it is
+    /// writable again (the cleanup makes it so before it removes the run).
+    #[test]
+    fn a_read_only_checkout_refuses_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(work.join("src")).unwrap();
+        std::fs::write(work.join("src").join("a.txt"), "old").unwrap();
+        set_read_only(&work, true);
+        // Root ignores mode bits (a container that runs the tests as root).
+        let root = cfg!(unix) && crate::sys::euid() == 0;
+        if !root {
+            assert!(std::fs::write(work.join("src").join("a.txt"), "new").is_err());
+            assert!(std::fs::write(work.join("new.txt"), "x").is_err());
+            assert!(std::fs::write(work.join("src").join("new.txt"), "x").is_err());
+            assert!(std::fs::remove_file(work.join("src").join("a.txt")).is_err());
+        }
+        assert_eq!(
+            std::fs::read_to_string(work.join("src").join("a.txt")).unwrap(),
+            "old"
+        );
+        set_read_only(&work, false);
+        std::fs::write(work.join("src").join("a.txt"), "new").unwrap();
+        std::fs::write(work.join("new.txt"), "x").unwrap();
+        std::fs::remove_dir_all(&work).unwrap();
+    }
 }

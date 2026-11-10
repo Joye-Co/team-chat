@@ -27,11 +27,6 @@ use windows_sys::Win32::System::Threading::{
     THREAD_SUSPEND_RESUME, WaitForSingleObject,
 };
 
-/// `CreateProcess` flags of a run's CLI: its own process group (so `CTRL_BREAK_EVENT` can be
-/// sent to it alone) and suspended until it is in its job.
-pub const CREATION_FLAGS: u32 = windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP
-    | windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
-
 /// A job: the processes of one run.
 #[derive(Debug)]
 pub struct Job {
@@ -255,6 +250,42 @@ fn threads_of(pids: &HashSet<u32>) -> Vec<u32> {
         CloseHandle(snap);
     }
     out
+}
+
+/// Starts `cmd` suspended, puts it into a new job and lets it run: nothing it starts can be
+/// outside the job. `new_group`: also in a process group of its own, so [`ctrl_break`] can
+/// reach it. Dropping the job ends the process and everything it started.
+pub fn spawn(
+    cmd: &mut tokio::process::Command,
+    new_group: bool,
+) -> std::io::Result<(tokio::process::Child, Job)> {
+    use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_SUSPENDED};
+    let job = Job::new()?;
+    cmd.creation_flags(
+        CREATE_SUSPENDED
+            | if new_group {
+                CREATE_NEW_PROCESS_GROUP
+            } else {
+                0
+            },
+    );
+    let mut child = cmd.spawn()?;
+    let assigned = match child.raw_handle() {
+        Some(h) => job.assign(h.cast()),
+        None => Err(std::io::Error::other("the process exited at once")),
+    };
+    if let Err(e) = assigned {
+        let _ = child.start_kill();
+        return Err(std::io::Error::new(
+            e.kind(),
+            format!("cannot put the process into a job: {e}"),
+        ));
+    }
+    if !resume_process(child.id().unwrap_or(0)) {
+        job.terminate();
+        return Err(std::io::Error::other("cannot resume the process"));
+    }
+    Ok((child, job))
 }
 
 /// Lets a process that was started suspended run: resumes its threads (it has one).

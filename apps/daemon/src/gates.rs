@@ -36,9 +36,7 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(24 * 3600);
 /// under an approval policy that asks for (almost) every command, so its runs are not gated
 /// yet and the server keeps the rules in the prompt for them.
 pub fn enforced_by(kind: &str) -> bool {
-    // Not on Windows yet: the hook asks the daemon through the chat-run socket, which is not
-    // there. A machine that cannot stop a command must not say it can.
-    cfg!(unix) && kind == "claude"
+    kind == "claude"
 }
 
 /// The 设置 name of a kind, for the approval title (the server shows its own).
@@ -344,10 +342,24 @@ pub fn claude_settings(chat_run: &std::path::Path) -> Value {
         "matcher": "^(Bash|mcp__.*)$",
         "hooks": [{
             "type": "command",
-            "command": format!("{} gate", shell_quote(&chat_run.display().to_string())),
+            "command": hook_command_line(chat_run),
             "timeout": HOOK_WAIT.as_secs(),
         }],
     }] } })
+}
+
+/// The command line of the hook: the run's `chat-run` link and `gate`.
+///
+/// Windows: Claude Code runs hook commands in Git Bash when it is there and in `cmd.exe`
+/// otherwise. A path with forward slashes in double quotes is one word in both (a single-quoted
+/// word is not, for `cmd.exe`; a backslash is an escape, for bash).
+fn hook_command_line(chat_run: &std::path::Path) -> String {
+    let path = chat_run.display().to_string();
+    if cfg!(windows) {
+        format!("\"{}\" gate", path.replace('\\', "/"))
+    } else {
+        format!("{} gate", shell_quote(&path))
+    }
 }
 
 /// One shell word.
@@ -520,7 +532,12 @@ mod tests {
         let s = claude_settings(std::path::Path::new("/tmp/run dir/bin/chat-run"));
         let h = &s["hooks"]["PreToolUse"][0];
         assert_eq!(h["matcher"], "^(Bash|mcp__.*)$");
-        assert_eq!(h["hooks"][0]["command"], "'/tmp/run dir/bin/chat-run' gate");
+        let line = if cfg!(windows) {
+            "\"/tmp/run dir/bin/chat-run\" gate"
+        } else {
+            "'/tmp/run dir/bin/chat-run' gate"
+        };
+        assert_eq!(h["hooks"][0]["command"], line);
         assert_eq!(h["hooks"][0]["timeout"], HOOK_WAIT.as_secs());
     }
 
