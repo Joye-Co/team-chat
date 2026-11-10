@@ -366,12 +366,10 @@ mod isolation {
                                     h.starts_with(&format!("artifact://{v1_host}/"))
                                 }),
                             );
-                            // The page's script clicked its external link. WebKit calls it
-                            // a link activation and reports it; WebView2 reports only a
-                            // click of the viewer, so there the script gets no event.
-                            let expected = if cfg!(target_os = "macos") { 1 } else { 0 };
+                            // The page's script clicked its external link: reported once
+                            // (the `location.href` changes after it are not links).
                             let links = r.external_links;
-                            r.check("externalLinkReporting", links == expected);
+                            r.check("externalLinkReportedOnce", links == 1);
                             drop(r);
                             let spec = VersionSpec::new(
                                 2,
