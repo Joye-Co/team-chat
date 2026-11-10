@@ -135,7 +135,7 @@ impl AdminView {
                             m::ATT_INVITE_META,
                             &[("when", &model::duration(i.expires_at - now))],
                         ),
-                        tone: Tone::Quiet,
+                        tone: Tone::Info,
                     });
                 }
             }

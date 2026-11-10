@@ -3,7 +3,8 @@
 // messages and topic status, and later topic messages into run input. The normalized run log
 // lives in its SQLite. This class adds runs of external bots, plans over HTTP and reads to the
 // feature modules it extends (core, runs, events, stall, input, takeover, interact).
-import type { BotRun, RunPlan } from "@chat/protocol";
+import type { BotRun, RunPlan, RunStatus, TopicStatus } from "@chat/protocol";
+import { activityAfterRun } from "../../activity/events";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
@@ -26,6 +27,26 @@ import { DeskInteract } from "./interact";
 import { type DeskRollup, deskRollup } from "../../monitor/rollup";
 
 export class BotDesk extends DeskInteract {
+  /** After a run ended: 活动记录's 没跑成 and 到了预算 (activity/events.ts), off the run's turn. */
+  protected override async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false): Promise<void> {
+    await super.end(r, status, body, topicStatus, summary, success);
+    const botId = this.botId;
+    if (r.external || !botId) return;
+    this.ctx.waitUntil(
+      activityAfterRun(this.env, {
+        botId,
+        runId: r.id,
+        status,
+        requestedBy: r.requested_by,
+        machineId: r.machine_id,
+        groupId: r.group_id,
+        topicId: r.topic_id,
+        title: () => this.topicTitle(r),
+        runsSince: async (from) => this.usageRuns(botId, from, Number.MAX_SAFE_INTEGER),
+      }).catch((err) => this.log.warn("activity after run failed", { runId: r.id, err })),
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Runs of external bots and plans over HTTP (docs/protocol.md, "Run plans")
   // -------------------------------------------------------------------------
