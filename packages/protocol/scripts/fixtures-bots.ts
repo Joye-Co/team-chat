@@ -195,6 +195,14 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     hasMore: true,
   });
   ok("http/activity-response-empty.json", "ActivityResponse", { entries: [], hasMore: false });
+  ok("http/activity-response-server.json", "ActivityResponse", {
+    entries: [
+      { id: 45, at: T0, kind: "budget", action: "budget.reached", actorId: ID.bot, target: ID.bot, details: { budgetCents: 10000, spentCents: 10040 } },
+      { id: 44, at: T0 - 60_000, kind: "run", action: "run.failed", actorId: ID.bot, target: ID.topic, machineId: R.machine, details: { runId: "01JA0000000000000000000R09", groupId: ID.general, requestedBy: ID.owner, title: "对一下十月的账单" } },
+      { id: 43, at: T0 - 120_000, kind: "machine", action: "machine.online", target: R.machine, machineId: R.machine, details: { offlineMs: 2_400_000 } },
+    ],
+    hasMore: false,
+  });
 
   // 用量 (team admin)
   const spend = (c: number, runs: number) => ({ costUsd: c, inputTokens: runs * 90000, outputTokens: runs * 9000, runs, topics: runs - 1 });
@@ -207,7 +215,8 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000 }],
     initiators: [{ memberId: ID.owner, ...spend(74.5, 4) }],
     machines: [{ machineId: R.machine, ...spend(212.5, 12) }],
-    runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2) }],
+    pairs: [{ initiatorId: ID.owner, memberId: ID.bot, ...spend(52.5, 3) }],
+    runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2), estimatedUsd: 12.5 }],
     daily: [{ start: T0 - 7 * 86_400_000, costUsd: 32.5, bots: [{ memberId: ID.bot, costUsd: 32.5 }] }],
   });
 

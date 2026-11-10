@@ -1211,6 +1211,15 @@ transaction as the write, with a `kind` the page filters by:
 | `login` | `email.sign_in`, `machine.login.start` |
 | `machine` | `machine.create`, `machine.revoke` |
 
+The server also writes events it notices itself (`audit_id` 0, no actor but the AI member):
+
+| `kind` | Action | When |
+| --- | --- | --- |
+| `run` | `run.failed` | a run of an AI member ended failed; `actorId` the AI member, `target` the 话题, `details { runId, groupId, requestedBy, title? }` |
+| `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
+| `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
+| `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
+
 ```ts
 ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
 ActivityResponse = { entries: ActivityEntry[] /* newest first */, hasMore }
@@ -1229,18 +1238,24 @@ days) reads every runner bot's BotDesk for runs that ended in `[from, to)` and i
 before it, and stores nothing.
 
 ```ts
-Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */ }
+Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */,
+              estimatedUsd? /* the part of costUsd estimated from tokens */ }
 TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
               bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
               machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
+              pairs?: (Spend & { initiatorId, memberId })[] /* who asked which AI member */,
               daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
 ```
 
 - Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
-  subscription); runs without it (Codex today) count tokens and 0 cost.
-- `initiators` is the person who asked for each run (`requestedBy`). `runtimes` is split by machine,
-  so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
+  subscription). A run without it (Codex today) is priced from its tokens at list price for its
+  runtime and the AI member's model (`server/src/usage/prices.ts`, one table to update); that part
+  is also counted in `estimatedUsd`, so a client can mark it as an estimate.
+- `initiators` is the person who asked for each run (`requestedBy`); `pairs` splits that by AI
+  member, so a client can show whom each person works with most (optional: older servers omit it).
+- `runtimes` is split by machine, so a client can tell subscription from API-key spend by the
+  machine's CLI login (`MonitorCli.method`).
 - Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
 - A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
 

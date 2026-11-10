@@ -1,6 +1,7 @@
 // MachineLink: one per machine. Holds the daemon's WebSocket (hibernatable, at most one live
 // link), the runs assigned to the machine and their leases, and forwards run frames to the
 // bot's BotDesk before it acks them. It never runs anything itself. docs/machine-protocol.md.
+import { OFFLINE_GRACE_MS, recordActivity } from "../activity/events";
 import { DurableObject } from "cloudflare:workers";
 import {
   CliInfo,
@@ -273,6 +274,54 @@ export class MachineLink extends DurableObject<BotsEnv> {
     } catch {
       // Already closed.
     }
+    await this.wentOffline(Date.now());
+  }
+
+  // -------------------------------------------------------------------------
+  // 活动记录: offline and back online, debounced (activity/events.ts)
+  // -------------------------------------------------------------------------
+
+  /** The link closed: the alarm records 离线 if the machine is still gone after the grace. */
+  private async wentOffline(now: number): Promise<void> {
+    if (this.socket() !== null || this.meta("revoked") || this.meta("offline_since")) return;
+    this.setMeta("offline_since", String(now));
+    await this.ensureAlarm(now + OFFLINE_GRACE_MS);
+  }
+
+  /** A hello: 上线 again, recorded only when its 离线 was. A short reconnect records nothing. */
+  private backOnline(now: number): void {
+    const since = Number(this.meta("offline_since") ?? 0);
+    const logged = this.meta("offline_logged") !== null;
+    this.sql.exec("DELETE FROM meta WHERE key IN ('offline_since', 'offline_logged')");
+    if (!since || !logged || !this.machineId) return;
+    this.ctx.waitUntil(
+      recordActivity(this.env.DB, {
+        at: now,
+        kind: "machine",
+        action: "machine.online",
+        target: this.machineId,
+        machineId: this.machineId,
+        details: { offlineMs: now - since },
+      }).catch((err) => this.log.warn("activity online failed", { err })),
+    );
+  }
+
+  /** From the alarm: 离线 once the machine stayed away for the grace. */
+  private async offlineCheck(now: number): Promise<void> {
+    const since = Number(this.meta("offline_since") ?? 0);
+    if (!since || this.meta("offline_logged") !== null || this.socket() !== null || !this.machineId) return;
+    if (now - since < OFFLINE_GRACE_MS) {
+      await this.ensureAlarm(since + OFFLINE_GRACE_MS);
+      return;
+    }
+    this.setMeta("offline_logged", String(now));
+    await recordActivity(this.env.DB, {
+      at: since,
+      kind: "machine",
+      action: "machine.offline",
+      target: this.machineId,
+      machineId: this.machineId,
+    }).catch((err) => this.log.warn("activity offline failed", { err }));
   }
 
   async webSocketError(): Promise<void> {}
@@ -374,6 +423,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
     });
     att.ready = true;
     ws.serializeAttachment(att);
+    this.backOnline(now);
     // Assigns that got no answer yet, then queued inputs, approvals and cancels.
     for (const r of open) {
       if (r.state === "assigned") {
@@ -508,6 +558,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
 
   async alarm(): Promise<void> {
     const now = Date.now();
+    await this.offlineCheck(now);
     const ws = this.socket() ?? this.ctx.getWebSockets().find((s) => s.readyState === WebSocket.OPEN) ?? null;
     if (ws && now - Number(this.meta("last_frame_at") ?? 0) > LINK_IDLE_MS) {
       try {
