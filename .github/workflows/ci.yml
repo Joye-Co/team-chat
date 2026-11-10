@@ -250,10 +250,16 @@ jobs:
           retention-days: 14
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
-      # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
-      - name: cargo test (desktop, report only)
-        continue-on-error: true
-        run: cargo test --locked -p desktop
+      # Required. The skipped tests fail on Windows and belong to work in progress; whoever
+      # lands that work removes its line here (docs/plans/windows.zh.md):
+      # - diagrams::tests (two tests): the Mermaid renderer has no Windows backend yet (C2, WebView2).
+      # - provider::this_mac (one test): the launchd PATH builder joins with `\` on Windows (M3).
+      - name: cargo test (desktop)
+        run: >-
+          cargo test --locked -p desktop --
+          --skip diagrams::tests::a_rendered_scene_diagram_becomes_ready_with_nodes_in_source_order
+          --skip diagrams::tests::page_failures_show_their_reason
+          --skip provider::this_mac::tests::the_service_path_keeps_the_shell_path_first_and_adds_usual_folders
 
   daemon-windows:
     name: Daemon tests (Windows)
