@@ -35,7 +35,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D10 | Selected row | Muted fill (#f5f5f5 light / #262626 dark) + font-medium, radius 6 or 8. Never an inverted black row. | Today the palette, start-dm and mention popup use black rows and the sidebar uses gray. |
 | D11 | Cancel button | Outline variant (border + background). The secondary gray fill is not used for Cancel. | A disabled primary at 50% opacity must not look like Cancel. |
 | D12 | Progress | One Progress: h4, radius full, track = primary at 20%, value = primary. | Fixes the dark-mode inversion and the 3 progress styles. |
-| D13 | Right pane | 320 wide for the inspector, 改动, Home rail and side chat. 400 wide for the live pane (实时查看) and the artifact pane, which show a screen or a page. (Owner decision, v14.) | Today 280 / 320 / 380; a terminal or a web page at 320 is unreadable. |
+| D13 | Right pane | One width for every right pane (inspector, 改动, side chat, 群资料, the live pane 实时查看 and the artifact pane): 400 by default. A drag on the pane's leading edge resizes it from 320 to 960 (rubber band past the bounds, double-click resets); the width is shared by every pane kind and remembered, so the column never jumps when one pane replaces another. Command and output boxes never wrap or clip a long line: it scrolls sideways inside the box, with a scrollbar on the box's bottom edge whenever a line is cut. (Owner decision 2026-11-10; replaces the 320 / 400 split of v14.) | Three widths (320 / 400 / 520) made the column jump between panes; a cut command line read as truncated. |
 | D14 | Error text (owner decision v16) | Every error says its words in the foreground color with a red icon, the failed message ("没有发出") too. Red text is never the only carrier. | One error recipe (2.15). |
 | D15 | Group and desk list rows (owner decision v16) | The leading media of a 话题 row is the member's avatar (the kind icon when no member works on it); the state shows only in its StatusBadge. The group page splits its open 话题 into 等你 (asks to me) and 在做 (runs); a waiting row never sits under 在做. | One state carrier per row (2.12). |
 | D16 | Queued 话题 in the sidebar (owner decision v17, O-1) | A 排队 话题 has no sidebar badge: the sidebar stays quiet for the resting state. The title bar, inspector and pages still say 排队. | The sidebar right column carries what needs attention or is at work. |
@@ -220,8 +220,8 @@ Keep as they are (already consistent): sidebar row pitch 32 and right column at 
 ### 2.1 Window regions (main window, 1440 x 900)
 
 ```
-x: 0 ───── 264 ─────────────────────────── 1120 ──────── 1440
-   sidebar │ message column (856)           │ right pane (320)
+x: 0 ───── 264 ─────────────────────────── 1040 ──────── 1440
+   sidebar │ message column (776)           │ right pane (400)
 y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 52 across 264-1440)
 ```
 
@@ -232,7 +232,7 @@ y 0-52     traffic lights │ toolbar: title + actions (one band, border-b at y 
   4. `mt-auto` secondary items (Settings, Help) h32.
   5. Footer, pinned: user row h48, p8: avatar 32 (radius 8 for workspace logo, circle for the person), name 14 medium over 12 muted second line (workspace or role), chevrons-up-down 16 at the right. It opens account and Settings. The offline state replaces the second line and adds an Alert row above the footer (2.15). Groups scroll above the footer.
 - **Message column** (x 264-1120, or 264-1440 when the right pane is closed): gutter 24, so content x 288-1096. Two left edges only: **gutter** x 288 (toolbar title, avatars, date-divider rule start, banners, composer frame, page rows) and **text column** x 332 (= 288 + 32 + 12: names, message bodies, in-thread cards, attachment items).
-- **Right pane** (x 1120-1440, 320 wide; x 1040-1440, 400 wide for the live and artifact panes, D13): border-l, fill background. One anatomy for inspector, Home rail and side chat (2.5).
+- **Right pane** (x 1040-1440, 400 wide by default for every pane kind, resizable 320-960, D13): border-l, fill background. One anatomy for inspector, Home rail and side chat (2.5).
 - Every pane runs to the bottom of the window. No blank band taller than 24% of the pane height (216 at 900) unless it holds a designed Empty state. On pages (首页, 群, 成员, 产出), space below the last frame is allowed: frames hug their rows and footer row and never stretch to the window bottom (A1).
 
 ### 2.2 Toolbar and pane headers
@@ -633,7 +633,7 @@ Run every check on the light, dark and worst-case 1x PNG of a scene before the s
 
 ### B. Structure
 - B1. A luminance step (border token) at y 52 at x 700 and x 1280 (both panes open).
-- B2. Right pane: width 320 (400 for the live and artifact panes, D13); first content ink at y 68 +- 2 in every right-pane scene.
+- B2. Right pane: width 400 for every pane kind at its default (D13); first content ink at y 68 +- 2 in every right-pane scene.
 - B3. Message column: every block starts at x 288 or x 332 (+- 1).
 - B4. Every card has a header (title + description or action); in-thread cards in one screen share one width.
 - B5. Every list or table sits in a frame or card and has a footer or a count.

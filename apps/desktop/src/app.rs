@@ -1035,13 +1035,13 @@ impl RootView {
             .into_any_element()
     }
 
-    /// The 产出 pane's resize handle: an 8 pt strip centred on its leading edge with the
-    /// resize cursor. A drag to the left widens the pane (400–960 pt, rubber band past the
-    /// bounds); a double-click resets the width.
-    fn artifact_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The right pane's resize handle: an 8 pt strip centred on its leading edge with the
+    /// resize cursor. A drag to the left widens the pane (320–960 pt, rubber band past the
+    /// bounds); a double-click resets the width. Every pane kind shares the one width.
+    fn right_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::views::columns::Column;
         div()
-            .id("artifact-pane-resize")
+            .id("right-pane-resize")
             .absolute()
             .top_0()
             .bottom_0()
@@ -1053,9 +1053,9 @@ impl RootView {
                 cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     if e.click_count >= 2 {
-                        this.columns.reset(Column::ArtifactPane);
+                        this.columns.reset(Column::RightPane);
                     } else {
-                        this.columns.start_drag(Column::ArtifactPane, e.position.x);
+                        this.columns.start_drag(Column::RightPane, e.position.x);
                     }
                     cx.notify();
                 }),
@@ -1273,15 +1273,19 @@ impl Render for RootView {
         } else {
             px(0.)
         };
-        let artifact_pane = matches!(drawn_pane, RightPane::Artifact { .. });
-        let full_pane_w = if artifact_pane {
-            // The 产出 pane takes the width it was dragged to.
-            self.columns
-                .width(crate::views::columns::Column::ArtifactPane)
+        // Every pane kind takes the one width the pane was dragged to (D13).
+        let full_pane_w = if drawn_pane == RightPane::None {
+            px(0.)
         } else {
-            self.panes
-                .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx)
+            self.columns.width(Column::RightPane)
         };
+        if drawn_pane != RightPane::None
+            && cx
+                .try_global::<crate::views::columns::RightPaneWidth>()
+                .is_none_or(|w| w.0 != full_pane_w)
+        {
+            cx.set_global(crate::views::columns::RightPaneWidth(full_pane_w));
+        }
         let pane_w = full_pane_w * right;
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
@@ -1325,16 +1329,16 @@ impl Render for RootView {
                         .into_any_element()
                 })
         };
-        // The 产出 pane's leading edge resizes it (a page needs room for its own layout).
+        // The pane's leading edge resizes it.
         let pane_el = match pane_el {
-            Some(el) if artifact_pane && !floats && right >= 1. => Some(
+            Some(el) if !floats && right >= 1. => Some(
                 div()
                     .relative()
                     .flex_none()
                     .h_full()
                     .flex()
                     .child(el)
-                    .child(self.artifact_pane_handle(cx))
+                    .child(self.right_pane_handle(cx))
                     .into_any_element(),
             ),
             el => el,
