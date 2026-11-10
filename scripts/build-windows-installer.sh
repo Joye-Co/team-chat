@@ -18,6 +18,9 @@
 #
 # The installer holds <name>.exe, <slug>-update.exe (apps/update-helper) and, with DAEMON=1,
 # <slug>-daemon.exe. Names, the bundle id and the URL scheme come from product.json.
+# With DAEMON=1 it also writes dist/<slug>-daemon-<version>-x86_64-pc-windows-msvc.exe and its
+# .sha256: the same daemon alone, for machines without the app (scripts/build-daemon.sh makes
+# the files of the other systems).
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -155,12 +158,25 @@ if [ "$SIGNED" = 1 ]; then
   "$ROOT/scripts/windows/sign.sh" "$OUT"
 fi
 
-# shasum is a Perl script that Git Bash may lack; sha256sum prints the same line.
-(
-  cd "$DIST"
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$(basename "$OUT")"; else shasum -a 256 "$(basename "$OUT")"; fi |
-    sed 's/ \*/  /' >"$(basename "$OUT").sha256"
-)
+# sha256_file <file>: writes <file>.sha256 next to it. shasum is a Perl script that Git Bash
+# may lack; sha256sum prints the same line.
+sha256_file() {
+  (
+    cd "$(dirname "$1")"
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$(basename "$1")"; else shasum -a 256 "$(basename "$1")"; fi |
+      sed 's/ \*/  /' >"$(basename "$1").sha256"
+  )
+}
+sha256_file "$OUT"
+
+# The daemon alone (signed when the programs are), named like the files of build-daemon.sh.
+if [ "$WITH_DAEMON" = 1 ]; then
+  DAEMON_OUT="$DIST/$SLUG-daemon-$VERSION-x86_64-pc-windows-msvc.exe"
+  rm -f "$DAEMON_OUT" "$DAEMON_OUT.sha256"
+  cp "$STAGE/$SLUG-daemon.exe" "$DAEMON_OUT"
+  sha256_file "$DAEMON_OUT"
+  log "wrote $DAEMON_OUT"
+fi
 
 log "wrote $OUT"
 printf '%s\n' "$OUT"

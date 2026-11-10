@@ -337,7 +337,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-installer-${{ env.VERSION }}
-          path: dist/*-setup.exe*
+          # The installer, the daemon alone (for machines without the app) and their .sha256.
+          path: dist/*.exe*
           if-no-files-found: error
           retention-days: 7
 
@@ -413,9 +414,10 @@ jobs:
       - name: Publish
         if: env.NO_INSTALLER != '1'
         run: |
-          (cd dist && sha256sum -c ./*-setup.exe.sha256)
+          (cd dist && for sum in ./*.sha256; do sha256sum -c "$sum"; done)
           if [ "$MODE" = release ]; then
-            gh release upload "v$VERSION" dist/*-setup.exe dist/*-setup.exe.sha256 --clobber
+            # The installer, the Windows daemon alone, and their .sha256 files.
+            gh release upload "v$VERSION" dist/*.exe dist/*.exe.sha256 --clobber
           fi
           args=("$VERSION" --env production --upload-only --platform windows)
           notes="docs/releases/$VERSION.md"

@@ -129,15 +129,18 @@ Section "Install"
 
   SetOutPath "$INSTDIR"
   !ifdef HAS_DAEMON
-    ; A daemon that runs keeps its file open: a rename works, an overwrite does not.
+    ; A daemon that runs keeps its file open: a rename works, an overwrite does not. The
+    ; daemon is not stopped: it sees the new file, exits when idle, its task starts the new
+    ; one, and a starting daemon removes the <daemon>.exe.old-* files next to it.
     ${If} ${FileExists} "$INSTDIR\${DAEMON_EXE}"
-      Delete "$INSTDIR\${DAEMON_EXE}.old"
-      Rename "$INSTDIR\${DAEMON_EXE}" "$INSTDIR\${DAEMON_EXE}.old"
+      System::Call 'kernel32::GetTickCount()i.r1'
+      Rename "$INSTDIR\${DAEMON_EXE}" "$INSTDIR\${DAEMON_EXE}.old-$1"
     ${EndIf}
   !endif
   File /r "${STAGE}\*.*"
   !ifdef HAS_DAEMON
-    Delete "$INSTDIR\${DAEMON_EXE}.old"
+    ; Gone at once when no daemon runs from it.
+    Delete "$INSTDIR\${DAEMON_EXE}.old-$1"
   !endif
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
 
@@ -213,11 +216,21 @@ SectionEnd
 Section "Uninstall"
   !insertmacro CheckAppClosed
   !ifdef HAS_DAEMON
-    ; The machine daemon of this install; nothing else has this file name.
+    ; The machine daemon of this install: remove its task (用这台电脑), then stop it; nothing
+    ; else has this file name.
+    ${If} ${FileExists} "$INSTDIR\${DAEMON_EXE}"
+      nsExec::Exec '"$INSTDIR\${DAEMON_EXE}" uninstall-service'
+      Pop $1
+    ${EndIf}
     nsExec::Exec 'taskkill /F /IM "${DAEMON_EXE}"'
     Pop $1
     Delete "$INSTDIR\${DAEMON_EXE}"
-    Delete "$INSTDIR\${DAEMON_EXE}.old"
+    FindFirst $2 $3 "$INSTDIR\${DAEMON_EXE}.old-*"
+    ${DoWhile} $3 != ""
+      Delete "$INSTDIR\$3"
+      FindNext $2 $3
+    ${Loop}
+    FindClose $2
   !endif
   Delete "$INSTDIR\${APP_EXE}"
   Delete "$INSTDIR\${HELPER_EXE}"
