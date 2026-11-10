@@ -87,9 +87,10 @@ Only the families differ (`theme.rs`, `UI_FONT_STACK`, `MONO_FONT_STACK`, `UI_FO
   (`gpui_component::UiFontFallbacks`).
 - Weight 500 (Medium): Segoe UI Variable has it. Segoe UI (Windows 10) and Microsoft YaHei UI
   have no Medium face, so 500 draws Regular there: Chinese text and Windows 10 lose the step
-  between 400 and 500, and keep the one to 600. The theme asks for exactly 500 on Windows
-  (`MEDIUM_WEIGHT`); one unit more and DirectWrite draws Bold, which made every name and button
-  heavy in the first Windows screenshots.
+  between 400 and 500, and keep the one to 600. The theme asks for 499 on Windows
+  (`MEDIUM_WEIGHT`): at 500 and above DirectWrite takes the heavier face, which drew section
+  headers and labels in Bold in the Windows screenshots. Use `MEDIUM_WEIGHT`, never
+  `FontWeight::MEDIUM`, for the same reason.
 - Tabular figures (`tnum`) work in both Segoe families.
 - Pages drawn by a web view (产出, diagrams, previews) must name the same families in their CSS:
   `"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI"` after `-apple-system`, and

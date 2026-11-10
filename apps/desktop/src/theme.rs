@@ -525,13 +525,13 @@ pub const FONT_FAMILY: &str = UI_FONT_STACK[UI_FONT_STACK.len() - 1];
 /// face, Medium.
 #[cfg(not(target_os = "windows"))]
 pub const MEDIUM_WEIGHT: FontWeight = FontWeight(501.);
-/// Windows: exactly 500. Segoe UI Variable has that weight. Segoe UI and
-/// Microsoft YaHei UI have none between Regular and Semibold or Bold, and
-/// DirectWrite sends 500 down to Regular but anything above it up to Bold:
-/// at 501 every name, button and label in Chinese drew Bold (seen in the
-/// Windows CI screenshots). Regular is the nearer miss.
+/// Windows: just under 500. Segoe UI Variable draws it as Medium. Segoe UI
+/// and Microsoft YaHei UI have no face between Regular and Semibold or
+/// Bold, and DirectWrite sends 500 and above up to the heavier one: at 501
+/// and at 500 every section header and label in Chinese drew Bold (seen in
+/// the Windows CI screenshots). Regular is the nearer miss.
 #[cfg(target_os = "windows")]
-pub const MEDIUM_WEIGHT: FontWeight = FontWeight(500.);
+pub const MEDIUM_WEIGHT: FontWeight = FontWeight(499.);
 /// The monospace font every version of this system has. Prefer
 /// [`mono_font_family`]: the best installed one.
 pub const MONO_FONT_FAMILY: &str = MONO_FONT_STACK[MONO_FONT_STACK.len() - 1];
