@@ -830,8 +830,12 @@ pub mod layout {
     pub const TOPIC_LIST_WIDTH: Pixels = px(320.);
     pub const TOPIC_LIST_MIN_WIDTH: Pixels = px(280.);
     pub const TOPIC_LIST_MAX_WIDTH: Pixels = px(400.);
-    /// The right pane (D13).
-    pub const RIGHT_PANE: Pixels = px(320.);
+    /// The right pane (D13, owner decision 2026-11-10): every pane kind
+    /// opens 400 wide and shares the one width a drag on its leading edge
+    /// gives, between the two bounds.
+    pub const RIGHT_PANE: Pixels = px(400.);
+    pub const RIGHT_PANE_MIN: Pixels = px(320.);
+    pub const RIGHT_PANE_MAX: Pixels = px(960.);
     pub const SIDE_PANEL_WIDTH: Pixels = px(300.);
     pub const TOPIC_VIEW_MIN_WIDTH: Pixels = px(480.);
     pub const TOOLBAR_HEIGHT: Pixels = height::TOOLBAR;
@@ -847,9 +851,8 @@ pub mod layout {
     pub const LIVE_PANE_SHARE: f32 = 0.5;
     pub const LIVE_PANE_MIN_WIDTH: Pixels = px(460.);
     pub const LIVE_PANE_MAX_WIDTH: Pixels = px(760.);
-    /// The live and 产出 panes (owner decision, v14): 400.
-    pub const LIVE_PANE_WIDTH: Pixels = px(400.);
-    pub const ARTIFACT_PANE_WIDTH: Pixels = px(400.);
+    pub const LIVE_PANE_WIDTH: Pixels = RIGHT_PANE;
+    pub const ARTIFACT_PANE_WIDTH: Pixels = RIGHT_PANE;
     pub const ARTIFACT_RAIL_WIDTH: Pixels = RIGHT_PANE;
     pub const DESK_SIDE_WIDTH: Pixels = RIGHT_PANE;
     pub const MEMBERS_LIST_WIDTH: Pixels = px(480.);
@@ -945,8 +948,8 @@ pub mod metrics {
     pub const SIDEBAR_SECTION: Pixels = height::ROW;
     /// Every right pane (D13).
     pub const INSPECTOR_WIDTH: Pixels = super::layout::RIGHT_PANE;
-    /// The live and 产出 panes.
-    pub const WIDE_PANE_WIDTH: Pixels = px(400.);
+    /// The same width under its older name (the live and 产出 panes).
+    pub const WIDE_PANE_WIDTH: Pixels = super::layout::RIGHT_PANE;
     pub const PANE_TOP: Pixels = TOOLBAR_ROW;
 
     // Buttons (§1.8)
@@ -1211,6 +1214,9 @@ pub mod monitor {
     /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
     pub const FLEET_CARD_MIN: Pixels = px(320.);
     pub const FLEET_ADD_TEXT: Pixels = px(320.);
+    /// The member inspector beside the 成员 table (inside the page, not a
+    /// right pane of the main window).
+    pub const MEMBER_INSPECTOR: Pixels = px(320.);
     /// The 要注意 card's share of the row next to 容量.
     pub const ATTENTION_SHARE: f32 = 0.41;
 }
@@ -1497,10 +1503,10 @@ mod tests {
         assert_eq!(metrics::CONTENT_LEADING, metrics::CONTENT_GAP);
         assert_eq!(metrics::TOOLBAR_LEADING, metrics::CONTENT_LEADING);
         assert_eq!(metrics::PANE_TOP, metrics::TOOLBAR_ROW);
-        assert_eq!(metrics::INSPECTOR_WIDTH, px(320.));
-        // Owner decision (v14): 320 for inspector and side chat, 400 for the
-        // live and 产出 panes; one in-thread width of 640.
-        assert_eq!(layout::SIDE_CHAT_WIDTH, px(320.));
+        // Owner decision (2026-11-10): one right pane width, 400, for the
+        // inspector, side chat, live and 产出 panes; one in-thread width of 640.
+        assert_eq!(metrics::INSPECTOR_WIDTH, px(400.));
+        assert_eq!(layout::SIDE_CHAT_WIDTH, px(400.));
         assert_eq!(metrics::WIDE_PANE_WIDTH, px(400.));
         assert_eq!(layout::ARTIFACT_PANE_WIDTH, px(400.));
         assert_eq!(layout::IN_THREAD, px(640.));

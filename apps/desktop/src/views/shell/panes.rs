@@ -52,11 +52,10 @@ impl Panes {
         }
     }
 
-    /// The width `pane` takes; zero for none. One width per kind on every
-    /// screen (coordinator decision): the inspector and 改动 are 280 pt,
-    /// 单独问, the 产出 pane and 实时查看 are 400 pt. The panes' own
-    /// `PaneView::width` is not asked, so the trailing column never jumps
-    /// between screens.
+    /// The default width `pane` takes; zero for none. One width for every
+    /// kind (D13); the shell draws the width the person dragged it to
+    /// (`Column::RightPane`). The panes' own `PaneView::width` is not asked,
+    /// so the trailing column never jumps between screens.
     pub fn width(&self, pane: &RightPane, _window_w: Pixels, _cx: &App) -> Pixels {
         pane_width(pane)
     }
@@ -151,17 +150,13 @@ impl Panes {
     }
 }
 
-/// The one width of a pane kind (D13, owner decision): 320 for the
-/// inspector, 改动 and 单独问; 400 for 实时查看 and the 产出 pane, which
-/// show a screen or a page.
+/// The default width of a pane (D13, owner decision 2026-11-10): one
+/// width, 400, for every kind, so the trailing column never jumps when one
+/// pane replaces another.
 pub fn pane_width(pane: &RightPane) -> Pixels {
     match pane {
         RightPane::None => gpui::px(0.),
-        RightPane::TopicRail
-        | RightPane::Changes
-        | RightPane::SideChat(_)
-        | RightPane::GroupInfo => metrics::INSPECTOR_WIDTH,
-        RightPane::Live(_) | RightPane::Artifact { .. } => metrics::WIDE_PANE_WIDTH,
+        _ => crate::theme::RIGHT_PANE,
     }
 }
 
@@ -226,19 +221,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_pane_kind_has_one_of_two_widths() {
-        // D13: the inspector is 320 wide.
-        assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(320.));
-        assert_eq!(pane_width(&RightPane::Changes), gpui::px(320.));
+    fn every_pane_kind_has_the_one_width() {
+        // D13: every right pane is 400 wide.
+        assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(400.));
+        assert_eq!(pane_width(&RightPane::Changes), gpui::px(400.));
         assert_eq!(
             pane_width(&RightPane::SideChat("m-ledger".into())),
-            gpui::px(320.)
+            gpui::px(400.)
         );
         assert_eq!(pane_width(&RightPane::Live("r-1".into())), gpui::px(400.));
         assert_eq!(pane_width(&RightPane::None), gpui::px(0.));
         assert!(header_less(&RightPane::TopicRail));
-        // 群资料 is the 群聊's 详情: the inspector width, the shell's header.
-        assert_eq!(pane_width(&RightPane::GroupInfo), gpui::px(320.));
+        // 群资料 is the 群聊's 详情: the same width, the shell's header.
+        assert_eq!(pane_width(&RightPane::GroupInfo), gpui::px(400.));
         assert!(header_less(&RightPane::GroupInfo));
         assert_eq!(pane_title(&RightPane::GroupInfo), "群资料");
     }

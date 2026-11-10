@@ -90,9 +90,17 @@ fn block(_cx: &App) -> gpui::Div {
 
 /// Command lines and output, in the thread's code recipe (§2.17, R2-07):
 /// `code` 13/20 Menlo, a 1 px border, radius 8, px 12, and lines that never
-/// wrap mid-token: a long line scrolls sideways inside the box. Explicit
-/// line breaks stay. `id` is unique within the step list.
-fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+/// wrap mid-token: a long line scrolls sideways inside the box, with a
+/// scrollbar along its bottom edge that shows whenever a line is cut (owner
+/// decision 2026-11-10), so the box never reads as clipped. Explicit line
+/// breaks stay. `id` is unique within the step list.
+fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > px(0.);
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
     // The thread's scroll cue (R1-04): a 16 fade into the box fill at the
@@ -120,22 +128,43 @@ fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> 
         .bg(k.code_bg)
         .overflow_hidden()
         .child(
-            div().id(id).w_full().overflow_x_scroll().child(
-                div()
-                    .pl(space::S12)
-                    .pr(space::S16)
-                    .py(space::S8)
-                    .t_code()
-                    .whitespace_nowrap()
-                    .text_color(k.text_1)
-                    .children(
-                        text.lines()
-                            .map(|l| div().child(l.to_string()))
-                            .collect::<Vec<_>>(),
-                    ),
-            ),
+            div()
+                .id(id)
+                .w_full()
+                // A row whose one item keeps its content width: the lines
+                // are as wide as the longest one, so the box has something
+                // to scroll (a block child would take the box's width and
+                // only overflow its paint).
+                .flex()
+                .overflow_x_scroll()
+                .track_scroll(&scroll)
+                .child(
+                    div()
+                        .flex_none()
+                        .min_w_full()
+                        .pl(space::S12)
+                        .pr(space::S16)
+                        .pt(space::S8)
+                        // Room for the scrollbar under the last line.
+                        .pb(if scrolls { space::S16 } else { space::S8 })
+                        .t_code()
+                        .whitespace_nowrap()
+                        .text_color(k.text_1)
+                        .children(
+                            text.lines()
+                                .map(|l| div().child(l.to_string()))
+                                .collect::<Vec<_>>(),
+                        ),
+                ),
         )
         .child(fade)
+        // Draws nothing while every line fits.
+        .child(
+            div().absolute().inset_0().child(
+                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+            ),
+        )
 }
 
 /// Where a path is cut: the folders before the last two parts, and those

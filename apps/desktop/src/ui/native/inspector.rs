@@ -18,7 +18,7 @@ use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
 type Click = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// The inspector column (§2.1, §2.5): 320 wide, edge to edge, the
+/// The inspector column (§2.1, §2.5): the right pane's default width, edge to edge, the
 /// `background` fill (T1-10), a 1 px `separator` on its leading edge.
 pub fn inspector_column(cx: &App) -> gpui::Div {
     right_pane(metrics::INSPECTOR_WIDTH, cx)
@@ -31,9 +31,8 @@ pub fn pane_fill(cx: &App) -> Hsla {
 }
 
 /// A right pane of `width` (§2.1, §2.5): edge to edge, [`pane_fill`], a
-/// 1 px `separator` on its leading edge, a column. Use
-/// `metrics::INSPECTOR_WIDTH` (320: inspector, side chat, Home rail) or
-/// `metrics::WIDE_PANE_WIDTH` (400: live and 产出 panes).
+/// 1 px `separator` on its leading edge, a column. Every pane kind has the
+/// one width of `layout::RIGHT_PANE` (D13).
 pub fn right_pane(width: gpui::Pixels, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
