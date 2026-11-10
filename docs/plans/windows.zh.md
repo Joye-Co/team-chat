@@ -6,6 +6,9 @@
 跑过；端到端用例还没进 Windows CI，原因见 M2 一节）。C2（产出和图的 WebView2 后端）代码已完成并在 Windows
 CI 上跑通隔离测试，见下。其余进行中或未开始。
 
+M3 已完成（daemon 作为当前用户的计划任务、改名替换的自己更新、「用这台电脑」、PowerShell 安装命令；计划任务和
+安装命令在 Windows CI 上对着真的任务计划程序跑过，「用这台电脑」只编译过，都还没在真的 Windows 电脑上试过）。
+
 R1（安装包、更新程序、发版流程）已完成：Windows CI 上真的装、更新、回滚、卸载了一遍；还缺证书、第一次真实
 发版和真机确认，见 R1 一节。
 
@@ -62,7 +65,7 @@ M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之�
 | 取消、暂停、继续 | `SIGTERM` 后 `SIGKILL`；`SIGSTOP`/`SIGCONT` | 先发 `CTRL_BREAK_EVENT`（CLI 用 `CREATE_NEW_PROCESS_GROUP` 启动），超时后结束 job；暂停用挂起 job 里各进程的线程 |
 | `chat_run.rs`（CLI 向群里说话） | Unix socket（0600，只许本用户连）；`bin/chat-run` 是指向 daemon 的符号链接 | 命名管道，ACL 只给当前用户；`chat-run.exe` 用硬链接（不行就复制）。Codex 用的文件传输方式不用改 |
 | `runtime/pty.rs`（没有结构化协议的 CLI） | `openpty`、`setsid` | ConPTY |
-| `service.rs`、`selfupdate.rs` | launchd、systemd；程序文件被替换后退出，由服务管理器重启 | 当前用户的计划任务（登录时启动，失败后重启）。不能用 Windows 服务：服务跑在别的会话里，读不到用户的 CLI 登录状态。更新时先把运行中的 exe 改名再放新文件 |
+| `service.rs`、`selfupdate.rs` | launchd、systemd；程序文件被替换后退出，由服务管理器重启 | 当前用户的计划任务（登录时启动，结束后一分钟内再启动）。不能用 Windows 服务：服务跑在别的会话里，读不到用户的 CLI 登录状态。更新时先把运行中的 exe 改名再放新文件。已完成，见 M3 |
 | `health.rs`、`doctor.rs`（找 CLI） | 查 `PATH`、可执行位 | 按 `PATHEXT` 找，npm 装的 CLI 是 `.cmd` 文件，启动时要正确转义参数 |
 | 文件权限（配置、token、运行目录） | 0600 / 0700 | 检查属主和访问列表（只许当前用户、SYSTEM、Administrators），daemon 自己建的目录和文件写明确的访问列表；机器 token 存 Credential Manager |
 | `workspace.rs`（git worktree、运行目录） | — | 打开长路径支持并用短的工作目录；删除运行目录时处理文件被占用 |
@@ -331,7 +334,7 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
   mode 函数在 Windows 上不做事）；磁盘空间用 `GetDiskFreeSpaceExW`，负载报 0；git 加
   `core.longpaths=true`；删除运行目录遇到文件被占用会重试几秒，还删不掉就留给下一次清理；Claude Code
   会话目录名按去掉 `\\?\` 前缀的路径算（`C:\Users\me\work` 是 `C--Users-me-work`）；自己更新的文件指纹
-  用大小、写入时间和创建时间。
+  用卷序列号、文件索引、大小和写入时间（M3 改的：只看时间会被 NTFS 的文件名隧道骗过）。
 - **先不支持、会明确报错的**：`pty` 运行时、`install-service` / `uninstall-service`、`[vm]`。
 - `tools/e2e` 能为 Windows 编译。
 
@@ -351,15 +354,15 @@ M1 里发现、留给后面的：
 
 - **Windows 上还没跑的测试**：`tests/integration.rs`、`tests/runtimes.rs`、`tests/setup.rs` 用 Python 写的
   假 CLI（靠 `#!` 启动）、`/bin/sh`、信号和文件权限，M1 时只在 Unix 上跑。（M2 打开了 `runtimes.rs`。）
-- **没有控制台时的取消**：`CTRL_BREAK_EVENT` 只能发给和 daemon 共用一个控制台的进程。以后 daemon 由计划
-  任务在后台启动时可能没有控制台，那时取消会跳过宽限直接结束 job，CLI 来不及收尾。M3 定启动方式时
-  一起决定（给 daemon 配一个隐藏的控制台，或者接受直接结束）。
+- **没有控制台时的取消**：`CTRL_BREAK_EVENT` 只能发给和 daemon 共用一个控制台的进程。M3 已定：计划任务用
+  `conhost.exe --headless` 启动 daemon，daemon 和它启动的 CLI 共用一个没有窗口的控制台（CI 上确认了
+  daemon 确实有控制台）。真的 CLI 在这个控制台里收到 `CTRL_BREAK_EVENT` 后能不能收尾，要在真机上看。
 - **审批（gates）**：Claude Code 的 PreToolUse 钩子通过 `chat-run` 的 socket 问 daemon，M1 时 Windows 上
   没有这条通道，Windows 机器不上报 `gates` 能力。（M2 已解决。）
 - **旁聊（aside）的只读目录**：M1 时只给已有文件加了只读属性，拦不住新建文件。（M2 已改成访问列表。）
-- **自己更新**：发现程序文件被替换后 daemon 会退出等服务管理器重启，Windows 上还没有服务（M3），在那之前
-  替换 exe 之后要手动重启。
-- **机器 token**：仍然是用户目录下的文件，没有放进 Credential Manager。
+- **自己更新**：M3 已做，见下面的「替换协议」。
+- **机器 token**：仍然是用户目录下的文件，没有放进 Credential Manager（计划任务里的 daemon 也要读它，
+  文件更简单）；M3 把它所在的文件夹改成只有当前用户、SYSTEM 和 Administrators 能打开。
 - **要在真机上核实的**：真的 Claude Code 和 Codex 各跑一个 run；它们的 Windows 版把登录放在哪
   （`%USERPROFILE%\.claude`、`%USERPROFILE%\.codex`，还是 Credential Manager），daemon 清空环境变量后它们
   还能不能读到；Claude Code 在 Windows 上的会话目录名规则是否和上面一致；Claude Code 需要的 Git for
@@ -454,13 +457,122 @@ M2 里发现的事：
 
 完成标准：`tools/e2e` 的机器用例对着一台 Windows 机器全过。
 
-**M3 服务和「用这台电脑」（约 1.5 周）**
+**M3 服务和「用这台电脑」（已完成）**
 
-- `daemon install-service` / `uninstall-service` 的 Windows 版（计划任务）；自己更新（改名再替换）。
-- 客户端的「用这台电脑」：写配置和机器 token，注册并启动计划任务，显示状态，重启。
-- PowerShell 安装命令，给不装客户端的机器用。
+做了什么：
 
-完成标准：在设置里点一下，这台 Windows 电脑出现在团队的机器列表里，重启电脑后自己上线。
+- **计划任务**（`apps/daemon/src/service.rs`）：`daemon install-service` 生成一份任务计划程序的 XML，用
+  `schtasks /Create /XML` 注册成当前用户的任务（名字是 `<bundleId>.daemon`），马上启动；
+  `uninstall-service` 结束并删除它。任务的内容：
+  - 这个用户登录时启动，只在这个用户已登录的会话里跑（不存密码，用用户自己的令牌，不提权），所以 CLI 能
+    读到用户的登录状态；
+  - 只允许一个实例；另有一个每分钟触发一次的触发器：daemon 在跑时什么都不发生，daemon 不管因为什么结束
+    （崩溃、被杀、发现新版本后自己退出），一分钟内被重新启动。这相当于 launchd 的 `KeepAlive`。只靠
+    「失败后重启」不够：它不管退出码是 0 的情况，而且 daemon 是经过 conhost 启动的；
+  - 没有运行时间上限，用电池、离开空闲状态都不停；
+  - 启动的程序是 `conhost.exe --headless <daemon> run --config … --log-file …`：daemon 是控制台程序，
+    直接启动会一直挂着一个黑窗口。无窗口的 conhost 给它一个真的控制台但不显示，run 启动的 CLI 继承这个
+    控制台（它们也不弹窗），礼貌取消要用的 `CTRL_BREAK_EVENT` 也有了着落；
+  - 没人看得到无窗口控制台的输出，所以 daemon 自己把日志写到 `%LOCALAPPDATA%\<slug>-daemon\daemon.log`
+    （新增 `run --log-file`，只在 Windows 上有；超过 10 MB 启动时挪成 `daemon.log.1`）；
+  - `PATH` 不像 macOS 那样在安装时存进去：计划任务每次启动拿到的是用户当前的环境变量。
+- **停止和重启**：结束计划任务只会结束 conhost，后面的 daemon 还活着（CI 上第二轮看到的）。所以任务里的
+  daemon 把自己的 pid 和进程创建时间写到 `%LOCALAPPDATA%\<slug>-daemon\daemon.pid`，并等一个命名事件
+  `Local\<slug>-daemon-stop-<pid>`。`uninstall-service`、重新 `install-service` 和新增的
+  `restart-service`（只在 Windows 上有）按 pid 加创建时间找到进程（只有 pid 可能已经是别的程序），设这个
+  事件，daemon 像收到 Ctrl+C 一样收尾（取消并上报手上的 run）。事件只在 daemon 自己的登录会话里看得到：
+  从同一用户的另一个会话（SSH、WinRM）来停，或者 20 秒还没退出，就直接结束进程。停不掉时命令报错，不会
+  装作成功。
+- **谁能换掉程序文件**（`apps/daemon/src/wintrust.rs`）：计划任务会一次次以这个用户的身份启动 daemon 的
+  exe，所以这个文件、它的文件夹和往上每一层文件夹，只要有当前用户和管理员以外的人能改（比如装在
+  `D:\Apps\X`，默认所有登录用户可改），`install-service` 就拒绝并说明原因。检查的是所有者和访问列表；
+  「在盘符根目录下能新建文件夹」不算。它和 M2 的 `winacl::check` 问的不是一个问题：那边问「谁能打开」（私有
+  文件，别人连读都不行），这边问「谁能改」（Program Files 里的程序别人可以读），所以是单独一个模块。
+- **装之前先查**：Windows 上 `install-service` 先做 daemon 启动时会做的检查（token 在不在、配置和 token 是否
+  只有当前用户、SYSTEM、Administrators 能打开），不过就不注册。否则任务每分钟启动一次、每次都马上退出，
+  原因只写在日志里。
+- **任务属于谁**：XML 里用当前用户的 SID，不用用户名（`whoami` 按控制台代码页输出，中文用户名会被读错）。
+- **为什么用 XML 加 `schtasks`，不用任务计划程序的 COM 接口**：XML 是纯文本，在每个系统上都能单元测试；
+  `schtasks` 每台 Windows 都有；daemon 不用为此写 COM 代码。不解析 `schtasks` 的输出（它跟着系统语言和
+  代码页变，中文系统上是 GBK），只看退出码；任务定义另存一份在 `%LOCALAPPDATA%\<slug>-daemon\task.xml`，
+  客户端读它来判断状态，和 macOS 上读 plist 一样。
+- **没有管理员权限的用户**：受管的电脑上普通用户可能不许注册「登录时」触发器。注册失败时自动去掉这个
+  触发器再注册一次，靠每分钟的触发器在登录后一分钟内启动。
+- **替换协议**（`apps/daemon/src/selfupdate.rs`，`docs/machine-protocol.md` 里也写了）。Windows 上运行中的
+  exe 不能覆盖、不能删，但能改名。所有更新方（客户端的更新程序、PowerShell 安装命令、手动）都这样做：
+  1. 把新程序完整写到同一个文件夹的 `<名字>.exe.new`，校验 SHA-256；
+  2. 把运行中的 `<名字>.exe` 改名成同一个文件夹里的 `<名字>.exe.old-<任意不重复的后缀>`；
+  3. 把 `<名字>.exe.new` 改名成 `<名字>.exe`；这一步失败就把旧文件改回去。
+
+  两次改名之间断电会留下「没有 `<名字>.exe`、只有 `.old-*`」的状态。这时没有 daemon 可以自救，所以由计划
+  任务兜底：`install-service` 在日志旁边留一份 daemon 的副本（`repair.exe`，更新永远不碰它），任务的第一个
+  动作运行 `repair.exe repair-program <daemon 路径>`：程序文件不在而 `.old-*` 在，就把最新的那个改名回去，
+  然后第二个动作才启动 daemon。（先试过用一行 `cmd` 做，在 CI 上不生效，换成了自己的代码，各系统都有单元测试。）更新方不用为此做任何事；留下的 `.exe.new` 下次更新时覆盖。
+
+  更新方不要停 daemon，也不要结束计划任务（那会取消正在跑的 run）。剩下的 daemon 自己做：每分钟看一次
+  自己路径上的文件，指纹（卷序列号、文件索引、大小、写入时间）变了、连续两次一样、手上没有 run 时退出，计划任务
+  一分钟内启动新文件；daemon 每次启动时删掉旁边的 `<名字>.exe.old-*`，删不掉的（旧进程还没退出）留到
+  下一次。`bin\chat-run.exe` 是指向旧文件的硬链接，改名不影响它，daemon 启动时会重新建。
+- **「用这台电脑」**（`apps/desktop/src/provider/this_mac.rs`，对外的函数没变，设置页不用改）：
+  - daemon 是安装目录里和客户端 exe 放在一起的 `<slug>-daemon.exe`（**R1 的安装包要按这个名字放**）。
+    debug 构建、或者 exe 在 cargo 的 `target` 文件夹里时一律当作没有 daemon，不会接管已安装的那一个；
+  - 配置和机器 token 写在 `%USERPROFILE%\.config\<slug>\`（和 daemon 默认找的位置一致）。写 token 之前先用
+    `icacls` 把这个文件夹的继承关掉，只留三条完全控制：当前用户、SYSTEM、Administrators（后两个本来就能读
+    这台电脑上的任何文件），文件夹里之后建的文件都继承这三条。安装脚本写的、daemon 认可的是同一组，和
+    M2 在 `sys.rs` 里的规则一致。
+    token 只写进文件，不上命令行、不进日志；
+  - 然后运行 `<slug>-daemon.exe install-service`（不弹窗口）。状态读 `task.xml`：没有就是没设置，里面的
+    程序是自己旁边的 daemon 就是正常，是别处的就是「别处」。重启是运行 `<slug>-daemon.exe restart-service`；
+  - 新登记的机器标签是 `windows`（Mac 上是 `mac`），名字取 `COMPUTERNAME`。
+  - M2 的 ACL 规则已经在 main 上（`sys.rs` / `winacl.rs`）：daemon 启动时检查配置文件和 token 的所有者和
+    访问列表，只认当前用户、SYSTEM、Administrators，客户端和安装脚本写的正是这一组。客户端不链接 daemon
+    的代码，所以它这边仍然用 `icacls` 写；以后可以改成让 daemon 在 `install-service` 里调 `sys::protect`。
+- **PowerShell 安装命令**（`scripts/install-daemon.ps1`，用法在 `docs/bots.md` 第 6 节）：给不装客户端的
+  机器。下载 daemon（只接受 https）、用命令行给的 `-Sha256` 校验（下载时必填；哈希必须来自下载地址以外的
+  可信来源，脚本不会去下载地址旁边取；不对就什么都不装）、写配置和 token（文件夹只有当前用户、SYSTEM 和 Administrators 能打开，token
+  不回显地输入或从文件读，不上命令行）、跑 `doctor`、`install-service`。`-Update` 只按替换协议换程序。
+  Windows PowerShell 5.1 能跑，不需要管理员权限。**R1 要出的发布产物**：
+  `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe` 和同名的 `.sha256`。
+
+测试：
+
+- 每个系统：任务 XML 的单元测试（用 XML 解析器逐项检查触发器、用户、单实例、无时限、电池、conhost 命令
+  行、带空格和 `&` 的路径的转义，UTF-16 带 BOM）；`.old-*` 清理；客户端这边的状态判断、SID 解析、
+  「只有安装的构建才有 daemon」。
+- Windows CI（`daemon-windows` 任务，对着 runner 自己用户的真任务计划程序）：
+  - `apps/daemon/tests/service_task.rs`：测试程序自己当替身 daemon。注册并启动任务 → 替身在跑且有控制台
+    → 再触发一次不会有第二个实例 → `taskkill /F` 杀掉后被重新启动 → 按替换协议换程序文件（运行中的 exe
+    改名成功），替身用 daemon 的同一段代码发现新文件后退出，任务启动新文件，新进程删掉旧文件 →
+    `restart-service` 的那段代码让它停下再起一个新的 → 模拟更新中途断电（程序文件被改名走、进程被杀），
+    任务的第一个动作把文件改回来再启动 → 卸载后
+    任务没了、进程没了、过 75 秒也没有再被启动。
+  - 同一个测试程序还检查：放在 `C:\Users\Public` 下的程序被 `install-service` 拒绝；注册下来的任务带着
+    「登录时」触发器（用 SID 写的用户被任务计划程序接受了）。
+  - `scripts/test-install-daemon.ps1`（用 Windows PowerShell 5.1 跑）：用刚编译的真 daemon 走一遍安装命令。
+    SHA-256 不对、下载地址不是 https、下载时没给 `-Sha256`，都什么都没装；配置文件夹和 token 的访问列表里只有当前用户、SYSTEM 和 Administrators，且不继承上层；任务注册了，真 daemon 在跑、
+    没有窗口、日志写出来了；`-Update` 之后真 daemon 自己发现新版本、退出、被任务重新启动、旧文件被删；
+    日志里没有 token；卸载后任务和进程都没了。
+  - 另有一步只报告不拦截：新建一个没有管理员权限的本地用户，用它运行 `install-service` 和
+    `uninstall-service`。结果：都成功（退出码 0），带「登录时」触发器的任务普通用户可以给自己注册，没有走
+    去掉触发器的退路。（受组策略管的公司电脑仍要在真机上看。）
+
+还要在真机上看的：
+
+- 真的注销再登录、重启电脑后 daemon 自己上线（CI 上任务是手动触发和每分钟触发器启动的，没有真的登录）。
+- 睡眠、唤醒、合盖、切换电池之后任务还在，daemon 重新连上。
+- 计划任务里的 daemon 启动的 Claude Code、Codex 能读到用户的登录（这是用计划任务而不用服务的原因）。
+- `conhost.exe --headless` 在 Windows 10 22H2 上的表现（CI 是 Windows Server 2025）；真的 CLI 在这个
+  控制台里的取消。
+- 「用这台电脑」整条路：在设置里点一下，机器出现在列表里；用户名是中文时的路径；没有管理员权限的用户；
+  公司电脑的组策略是否禁止普通用户建计划任务。
+- 快速用户切换、同一台电脑两个用户各装一个；远程桌面会话。
+- 杀毒软件和 SmartScreen 对没签名的 daemon、对「每分钟触发的计划任务」的反应。
+
+留给后面的：
+
+- 设置页「添加机器」对话框给出的安装命令还是 macOS / Linux 的 bash 版，Windows 版要在界面上加一个选择
+  （界面归客户端那条线）。
+- 日志只保留一份旧的（`daemon.log.1`），daemon 长时间不重启时不会轮转。
 
 ### 发布
 

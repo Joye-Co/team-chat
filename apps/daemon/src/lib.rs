@@ -38,4 +38,5 @@ pub mod winacl;
 pub mod winjob;
 #[cfg(windows)]
 pub mod winpty;
+pub mod wintrust;
 pub mod workspace;
