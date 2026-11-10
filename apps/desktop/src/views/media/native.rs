@@ -436,6 +436,33 @@ mod tests {
         ]
     }
 
+    /// Not a check: what Media Foundation reports for every fixture, in the CI log.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn media_foundation_describes_the_fixtures() {
+        for name in [
+            "quadrants.mp4",
+            "quadrants-rotated.mp4",
+            "quadrants-hevc.mp4",
+            "tone.mp3",
+            "tone.m4a",
+            "tone-stereo.m4a",
+        ] {
+            println!("--- {name}\n{}", win::describe(&fixture(name)));
+        }
+        let b = video_frames(&fixture("quadrants-rotated.mp4"), &[0.5], 1920.)
+            .pop()
+            .flatten()
+            .unwrap();
+        println!("rotated: {}x{} {:?}", b.width, b.height, quarters(&b));
+        for name in ["tone.m4a", "tone-stereo.m4a"] {
+            println!(
+                "{name}: {:?}",
+                audio_peaks(&fixture(name), 10).map(|(d, p)| (d, p.len()))
+            );
+        }
+    }
+
     #[test]
     fn a_video_gives_its_length_its_size_and_upright_frames() {
         let clip = fixture("quadrants.mp4");

@@ -881,3 +881,69 @@ impl Drop for AudioPlayer {
         }
     }
 }
+
+/// What Media Foundation says about a file, step by step (for a failing test's log).
+#[cfg(test)]
+pub fn describe(path: &Path) -> String {
+    let path = path.to_path_buf();
+    run(Duration::from_secs(30), move || unsafe {
+        let mut out = String::new();
+        let Some(mf) = mf() else {
+            return Some("no Media Foundation".to_string());
+        };
+        let Some(reader) = mf.reader(&path, true) else {
+            return Some("no source reader".to_string());
+        };
+        for (name, stream) in [("video", VIDEO), ("audio", AUDIO)] {
+            for i in 0..4 {
+                match reader.GetNativeMediaType(stream, i) {
+                    Ok(ty) => out.push_str(&format!(
+                        "{name} native {i}: subtype {:?}, rotation {:?}, size {:?}, rate {:?}, channels {:?}\n",
+                        ty.GetGUID(&MF_MT_SUBTYPE),
+                        ty.GetUINT32(&MF_MT_VIDEO_ROTATION),
+                        ty.GetUINT64(&MF_MT_FRAME_SIZE).map(|s| (s >> 32, s as u32)),
+                        ty.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND),
+                        ty.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS),
+                    )),
+                    Err(e) => {
+                        out.push_str(&format!("{name} native {i}: {e:?}\n"));
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = reader.SetStreamSelection(ALL_STREAMS, true);
+        for (name, stream, major, subtype) in [
+            ("rgb32", VIDEO, MFMediaType_Video, MFVideoFormat_RGB32),
+            ("pcm", AUDIO, MFMediaType_Audio, MFAudioFormat_PCM),
+            ("float", AUDIO, MFMediaType_Audio, MFAudioFormat_Float),
+        ] {
+            let Some(ty) = mf.media_type(&major, &subtype) else {
+                continue;
+            };
+            let set = reader.SetCurrentMediaType(stream, None, &ty);
+            out.push_str(&format!("set {name}: {set:?}\n"));
+            if set.is_ok() {
+                if let Ok(now) = reader.GetCurrentMediaType(stream) {
+                    out.push_str(&format!(
+                        "  now: subtype {:?}, rotation {:?}, size {:?}, stride {:?}, bits {:?}\n",
+                        now.GetGUID(&MF_MT_SUBTYPE),
+                        now.GetUINT32(&MF_MT_VIDEO_ROTATION),
+                        now.GetUINT64(&MF_MT_FRAME_SIZE).map(|s| (s >> 32, s as u32)),
+                        now.GetUINT32(&MF_MT_DEFAULT_STRIDE).map(|s| s as i32),
+                        now.GetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE),
+                    ));
+                }
+                let (mut flags, mut sample) = (0u32, None);
+                let read =
+                    reader.ReadSample(stream, 0, None, Some(&mut flags), None, Some(&mut sample));
+                out.push_str(&format!(
+                    "  read: {read:?}, flags {flags:#x}, sample {}\n",
+                    sample.is_some()
+                ));
+            }
+        }
+        Some(out)
+    })
+    .unwrap_or_else(|| "no answer in 30 s".to_string())
+}

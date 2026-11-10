@@ -235,10 +235,6 @@ jobs:
       - name: Install Media Foundation
         shell: pwsh
         run: Install-WindowsFeature Server-Media-Foundation
-      # Video frames, audio peaks and playback, PDF pages on the system's own decoders
-      # (src/views/media/native_windows.rs).
-      - name: cargo test (media previews)
-        run: cargo test --locked -p desktop views::media::native -- --nocapture
       # How to use the screenshots: docs/plans/windows.zh.md, 「怎么看 Windows 界面」.
       # The runner's screen is 1024x768 and Windows keeps a window inside the screen.
       - name: Set the screen to 1920x1080
@@ -257,6 +253,11 @@ jobs:
           path: ${{ runner.temp }}/windows-screenshots
           if-no-files-found: warn
           retention-days: 14
+      # Video frames, audio peaks and playback, PDF pages on the system's own decoders
+      # (src/views/media/native_windows.rs).
+      - name: cargo test (media previews)
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p desktop views::media::native -- --nocapture
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
       # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
