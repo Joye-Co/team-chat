@@ -52,6 +52,18 @@ fn main() {
             "an_npm_shim_starts_the_cli_without_cmd_exe",
             Box::pin(an_npm_shim_starts_the_cli_without_cmd_exe()),
         ),
+        (
+            "a_batch_wrapper_gets_no_argument_with_a_line_break",
+            Box::pin(a_batch_wrapper_gets_no_argument_with_a_line_break()),
+        ),
+        (
+            "a_helper_process_ends_with_everything_it_started",
+            Box::pin(a_helper_process_ends_with_everything_it_started()),
+        ),
+        (
+            "the_pty_runtime_runs_a_program_in_a_pseudoconsole",
+            Box::pin(the_pty_runtime_runs_a_program_in_a_pseudoconsole()),
+        ),
     ];
     println!("\nrunning {} tests", cases.len());
     for (name, case) in cases {
@@ -498,3 +510,157 @@ async fn an_npm_shim_starts_the_cli_without_cmd_exe() {
 /// Unix starts the program file the kernel is given: there is no shim to resolve.
 #[cfg(not(windows))]
 async fn an_npm_shim_starts_the_cli_without_cmd_exe() {}
+
+/// Windows: a `.cmd` that is not an npm shim runs in `cmd.exe`. An argument with a line break
+/// cannot get through it: the run fails and says why, before anything starts. Arguments
+/// without one arrive unchanged, whatever `cmd.exe` syntax is in them.
+#[cfg(windows)]
+async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = dir.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // An absolute path: not what npm writes, so the daemon cannot start the target itself.
+    std::fs::write(
+        tools.join("wrapped.cmd"),
+        format!("@echo off\r\n\"{}\" %*\r\n", this_program()),
+    )
+    .unwrap();
+    let wrapper = tools.join("wrapped.cmd").to_string_lossy().into_owned();
+
+    let mut s = spec(&dir.path().join("r1"), &wrapper, "hello");
+    s.note = Some("first line\nsecond line & echo owned".into());
+    let work = s.cwd.clone();
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Failed, "{o:?}");
+    let why = o.error.unwrap_or_default();
+    assert!(
+        why.contains("line break") && why.contains("wrapped.cmd"),
+        "{why}"
+    );
+    assert!(
+        !work.join("argv.json").exists(),
+        "the CLI must not have started"
+    );
+
+    let mut s = spec(&dir.path().join("r2"), &wrapper, "hello");
+    let note = "say \"hi\" & echo %PATH% ^ | more > x 'q' !e! (a) %";
+    s.note = Some(note.into());
+    let work = s.cwd.clone();
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let argv: Vec<String> =
+        serde_json::from_slice(&std::fs::read(work.join("argv.json")).unwrap()).unwrap();
+    assert!(argv.iter().any(|a| a == note), "{argv:?}");
+}
+
+#[cfg(not(windows))]
+async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {}
+
+/// Windows: a probe or a sign-in the daemon starts is in a job of its own, so giving it up
+/// (a timeout, a cancel) also ends what it started; killing a `.cmd` wrapper alone would
+/// leave the real program running.
+#[cfg(windows)]
+async fn a_helper_process_ends_with_everything_it_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().to_path_buf();
+    let mut cmd = tokio::process::Command::new(std::env::current_exe().unwrap());
+    cmd.arg("--fake-mid")
+        .current_dir(&work)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let helper = daemon::health::spawn(&mut cmd).unwrap();
+    wait_for("the helper's children", || work.join("mid.ready").exists()).await;
+    let pid = |name: &str| -> u32 {
+        std::fs::read_to_string(work.join(name))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    };
+    let pids = [pid("mid.pid"), pid("grandchild.pid"), pid("detached.pid")];
+    assert!(pids.iter().all(|p| alive(*p)), "{pids:?}");
+    drop(helper);
+    wait_for("the helper and its children to end", || {
+        pids.iter().all(|p| !alive(*p))
+    })
+    .await;
+}
+
+/// Unix: a helper is a plain child; the CLIs there are not started through wrappers.
+#[cfg(not(windows))]
+async fn a_helper_process_ends_with_everything_it_started() {}
+
+/// A run of the `pty` runtime with `cmd.exe` and `args`.
+#[cfg(windows)]
+fn pty_spec(dir: &Path, args: &[&str], prompt: &str) -> RunSpec {
+    let mut s = spec(dir, "cmd.exe", prompt);
+    s.runtime_name = "shell".into();
+    s.cfg.kind = "pty".into();
+    s.cfg.args = args.iter().map(|a| a.to_string()).collect();
+    s
+}
+
+/// Windows: the `pty` kind starts the program in a pseudoconsole (ConPTY). Its output comes
+/// back as text, a prompt without a placeholder is typed into it, and a cancel ends it.
+#[cfg(windows)]
+async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // The prompt as an argument.
+    let s = pty_spec(
+        &dir.path().join("r1"),
+        &["/d", "/c", "echo {prompt}"],
+        "conpty-hello",
+    );
+    let log = s.run_dir.join("pty.log");
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.exit_code, Some(0));
+    let text = o.result_text.unwrap_or_default();
+    assert!(text.contains("conpty-hello"), "{text:?}");
+    assert!(size(&log) > 0, "the raw output is kept");
+
+    // The prompt typed into the console; the exit code is the program's.
+    let s = pty_spec(
+        &dir.path().join("r2"),
+        &["/d", "/q"],
+        "echo typed-marker& exit 7",
+    );
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Failed, "{o:?}");
+    assert_eq!(o.exit_code, Some(7));
+    assert!(
+        o.result_text.unwrap_or_default().contains("typed-marker"),
+        "the typed command ran"
+    );
+
+    // A shell that waits for input is ended by a cancel.
+    let s = pty_spec(&dir.path().join("r3"), &["/d", "/q", "/k"], "echo started");
+    let run_dir = s.run_dir.clone();
+    let mut run = start(s);
+    let mut seen = String::new();
+    while !seen.contains("started") {
+        match run.events.recv().await {
+            Some(RunEvent::MessageDelta { text, .. }) => seen.push_str(&text),
+            Some(_) => {}
+            None => panic!("the run ended before it printed: {seen:?}"),
+        }
+    }
+    let pid = workspace::read_meta(&run_dir).unwrap().pgid.unwrap() as u32;
+    assert!(alive(pid));
+    // 接管 finds the pseudoconsole program too.
+    let stopped = daemon::executor::local()
+        .stop(&run_dir)
+        .expect("a pty run can be stopped");
+    stopped.resume();
+    run.control.send(Control::Cancel).unwrap();
+    let o = run.outcome.await.unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    wait_for("the shell to end", || !alive(pid)).await;
+}
+
+/// Unix: `tests/runtimes.rs` covers the pty runtime there.
+#[cfg(not(windows))]
+async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {}
