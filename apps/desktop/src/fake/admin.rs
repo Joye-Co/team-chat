@@ -128,7 +128,7 @@ fn pair(initiator: &str, member: &str, cost: f64, topics: u32) -> Value {
 pub fn team_usage(from: u64, to: u64) -> TeamUsage {
     let bots = [
         ("m-coder", 86.4, 31_u32, Some(10_000_u64)),
-        ("m-reviewer", 41.2, 18, Some(6_000)),
+        ("m-reviewer", 41.2, 18, Some(4_000)),
         ("m-docs", 24.8, 12, None),
         ("m-tata", 12.1, 6, Some(5_000)),
         ("m-taro", 6.3, 4, None),
@@ -154,6 +154,10 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         "teamBudgetCents": 21_000,
         "bots": bots.iter().map(|b| {
             let mut extra = b.3.map(|c| json!({ "budgetCents": c })).unwrap_or(json!({}));
+            // Scout reached its budget: one run waits for an owner (到了预算先停下来问).
+            if b.0 == "m-reviewer" {
+                extra["heldRuns"] = json!(1);
+            }
             // Taro runs on Codex: its cost is estimated from tokens.
             if b.0 == "m-taro" {
                 extra["estimatedUsd"] = json!(b.1);
@@ -250,6 +254,15 @@ pub fn team_activity() -> ActivityResponse {
         v
     };
     let mut entries: Vec<Value> = vec![
+        e(
+            13,
+            MIN,
+            "budget",
+            "budget.paused",
+            "m-reviewer",
+            "m-reviewer",
+            json!({ "details": { "budgetCents": 4000, "spentCents": 4120, "title": "回归一遍断线重连" } }),
+        ),
         e(
             12,
             2 * MIN,
