@@ -31,6 +31,21 @@ fn jobs<T>(f: impl FnOnce(&mut HashMap<PathBuf, Arc<Job>>) -> T) -> T {
     f(g.get_or_insert_with(HashMap::new))
 }
 
+/// A run's job that another module started (the pty runtime starts its program itself): while
+/// the value lives, [`Executor::stop`] finds the job by the run folder.
+pub struct Tracked(PathBuf);
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        jobs(|m| m.remove(&self.0));
+    }
+}
+
+pub fn track(run_dir: &Path, job: Arc<Job>) -> Tracked {
+    jobs(|m| m.insert(run_dir.to_path_buf(), job));
+    Tracked(run_dir.to_path_buf())
+}
+
 impl Executor for Local {
     fn spawn(&self, spec: &RunSpec, program: &str, args: &[String]) -> std::io::Result<Spawned> {
         let stderr = std::fs::File::create(spec.run_dir.join("stderr.log"))?;

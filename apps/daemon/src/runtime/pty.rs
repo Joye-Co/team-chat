@@ -141,6 +141,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
             Err(e) => return Outcome::failed(format!("cannot start {command}: {e}")),
         };
     crate::workspace::record_process(&spec.run_dir, pty.pid as i32, &command);
+    // 接管 (pause) finds the job by the run folder.
+    let _tracked = crate::executor::local::track(&spec.run_dir, pty.job.clone());
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let raw_path = spec.run_dir.join("pty.log");
     std::thread::spawn(move || {

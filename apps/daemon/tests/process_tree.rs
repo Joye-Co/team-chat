@@ -650,6 +650,11 @@ async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {
     }
     let pid = workspace::read_meta(&run_dir).unwrap().pgid.unwrap() as u32;
     assert!(alive(pid));
+    // 接管 finds the pseudoconsole program too.
+    let stopped = daemon::executor::local()
+        .stop(&run_dir)
+        .expect("a pty run can be stopped");
+    stopped.resume();
     run.control.send(Control::Cancel).unwrap();
     let o = run.outcome.await.unwrap();
     assert_eq!(o.status, Status::Cancelled, "{o:?}");

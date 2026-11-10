@@ -132,8 +132,8 @@ pub struct Pty {
     pub pid: u32,
     process: Owned,
     console: Option<HPCON>,
-    /// Ends the program and everything it started when dropped.
-    pub job: Job,
+    /// The program and everything it started; ended when the Pty drops.
+    pub job: std::sync::Arc<Job>,
 }
 
 // SAFETY: process and pseudoconsole handles may be used from any thread.
@@ -312,7 +312,7 @@ pub fn spawn(
             pid: pi.dwProcessId,
             process,
             console: pty_console,
-            job,
+            job: std::sync::Arc::new(job),
         },
         input,
         output,

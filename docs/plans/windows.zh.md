@@ -2,6 +2,7 @@
 
 状态：W0 已完成（客户端能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。M1 已完成（daemon 能为
 Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过真的 CLI）。
+M2 大部分已完成（访问列表、命名管道、审批、ConPTY、三个运行时的假 CLI 测试；端到端用例还没进 Windows CI）。
 其余未开始。
 
 ## 目标
@@ -59,7 +60,7 @@ M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之�
 | `runtime/pty.rs`（没有结构化协议的 CLI） | `openpty`、`setsid` | ConPTY |
 | `service.rs`、`selfupdate.rs` | launchd、systemd；程序文件被替换后退出，由服务管理器重启 | 当前用户的计划任务（登录时启动，失败后重启）。不能用 Windows 服务：服务跑在别的会话里，读不到用户的 CLI 登录状态。更新时先把运行中的 exe 改名再放新文件 |
 | `health.rs`、`doctor.rs`（找 CLI） | 查 `PATH`、可执行位 | 按 `PATHEXT` 找，npm 装的 CLI 是 `.cmd` 文件，启动时要正确转义参数 |
-| 文件权限（配置、token、运行目录） | 0600 / 0700 | 放在用户目录下靠默认 ACL；机器 token 存 Credential Manager |
+| 文件权限（配置、token、运行目录） | 0600 / 0700 | 检查属主和访问列表（只许当前用户、SYSTEM、Administrators），daemon 自己建的目录和文件写明确的访问列表；机器 token 存 Credential Manager |
 | `workspace.rs`（git worktree、运行目录） | — | 打开长路径支持并用短的工作目录；删除运行目录时处理文件被占用 |
 | `runtime/claude.rs`（找原始会话文件） | 按 Unix 路径算目录名 | 按 Windows 路径（盘符、反斜杠）算 |
 
@@ -205,16 +206,13 @@ daemon 有控制台，`CTRL_BREAK_EVENT` 送到了，假 CLI 以 `0xC000013A` �
 M1 里发现、留给后面的：
 
 - **Windows 上还没跑的测试**：`tests/integration.rs`、`tests/runtimes.rs`、`tests/setup.rs` 用 Python 写的
-  假 CLI（靠 `#!` 启动）、`/bin/sh`、信号和文件权限，现在只在 Unix 上跑。M2 把假 CLI 改成两个平台都能
-  启动的形式再打开。
+  假 CLI（靠 `#!` 启动）、`/bin/sh`、信号和文件权限，M1 时只在 Unix 上跑。（M2 打开了 `runtimes.rs`。）
 - **没有控制台时的取消**：`CTRL_BREAK_EVENT` 只能发给和 daemon 共用一个控制台的进程。以后 daemon 由计划
   任务在后台启动时可能没有控制台，那时取消会跳过宽限直接结束 job，CLI 来不及收尾。M3 定启动方式时
   一起决定（给 daemon 配一个隐藏的控制台，或者接受直接结束）。
-- **审批（gates）**：Claude Code 的 PreToolUse 钩子通过 `chat-run` 的 socket 问 daemon，Windows 上还没有
-  这条通道，所以 Windows 机器暂时不上报 `gates` 能力，服务器不会把要审批的规则发给它。M2 有了命名管道
-  （或让钩子走文件传输）后打开；钩子命令的引号写法也要按 Windows 上 Claude Code 实际用的 shell 核对。
-- **旁聊（aside）的只读目录**：Unix 上去掉写权限；Windows 上只给已有文件加了只读属性，拦不住在目录里新建
-  文件，要用 ACL 才行。
+- **审批（gates）**：Claude Code 的 PreToolUse 钩子通过 `chat-run` 的 socket 问 daemon，M1 时 Windows 上
+  没有这条通道，Windows 机器不上报 `gates` 能力。（M2 已解决。）
+- **旁聊（aside）的只读目录**：M1 时只给已有文件加了只读属性，拦不住新建文件。（M2 已改成访问列表。）
 - **自己更新**：发现程序文件被替换后 daemon 会退出等服务管理器重启，Windows 上还没有服务（M3），在那之前
   替换 exe 之后要手动重启。
 - **机器 token**：仍然是用户目录下的文件，没有放进 Credential Manager。
@@ -223,11 +221,66 @@ M1 里发现、留给后面的：
   还能不能读到；Claude Code 在 Windows 上的会话目录名规则是否和上面一致；Claude Code 需要的 Git for
   Windows；杀毒软件对没签名的 daemon 和 Job Object 的反应。
 
-**M2 功能齐全（约 2 周）**
+**M2 功能齐全（大部分已完成，剩下的列在最后）**
 
-- `chat-run` 的命名管道传输；受控密钥（`chat-run secret`）；审批钩子。
-- Codex 和 ACP 运行时在 Windows 上验证；ConPTY 版的 `pty` 运行时。
-- Python 假 CLI 的三套测试在 Windows 上打开；旁聊只读目录的 ACL；`daemon doctor`。
+先做的是 M1 评审提出的四个安全问题，它们不解决就不能把 Windows 机器真正用起来：
+
+- **私有文件靠访问列表，不再靠「放在用户目录里」**（`winacl.rs`、`sys.rs`）。一个文件算私有，要求属主是
+  当前用户（或 SYSTEM、Administrators），并且访问列表里每一条允许项都只给这三者。检查的地方：机器 token
+  文件、配置文件、密钥库、`chat-run` 的请求目录和里面每一个请求文件。daemon 自己建的东西写明确的访问
+  列表并切断从上级目录的继承：每个 run 的目录（工作目录、请求目录、设置文件都在它下面，自动继承）、
+  密钥库文件、旁聊的设置文件。`work_root` 放在 `D:\runs` 这种默认谁都能进的地方也一样安全。放在做不到
+  这一点的卷上（FAT、exFAT、多数网络共享），run 会被拒绝并说明原因；token 或配置别人能读，daemon 不启动。
+- **探测和登录用的子进程进 job**（`health::spawn`、`health::output`）：查版本、列模型、`claude --help`、
+  用量、登录和登录状态这些子进程，各自在一个 Job Object 里，放弃时（超时、取消）连它启动的东西一起结束。
+- **带换行的参数过不了非 npm 的 `.cmd`**：`cmd.exe` 的命令行到第一个换行为止，后面的会被当成别的命令。
+  这种情况现在在启动前就失败，并说明要把运行时的 `command` 指到 `.cmd` 实际启动的程序。npm 的 `.cmd`
+  不受影响（直接启动它指向的程序）。不带换行的参数由 Rust 标准库按 `cmd.exe` 规则转义，测试确认原样送到。
+- **旁聊的只读目录**：在工作目录的访问列表里加一条对当前用户的「拒绝写」（写入、追加、建文件、建目录、
+  改属性、删除），目录里已有的和以后建的都继承。和 Unix 的权限位一样，用户自己能手动改回去，只会写文件
+  的 CLI 改不了。例外见下面「发现的事」。
+
+然后是 M2 本来的内容：
+
+- **`chat-run` 的命名管道**（`chat_run.rs`）：`\\.\pipe\chat-run-<run 目录的哈希>-<daemon 进程号>`，访问列表
+  只给当前用户，拒绝远程客户端，要求自己是这个名字的第一个实例（别的程序抢先占名会让 run 的 `chat-run`
+  起不来，而不是被冒充）。请求和回答的格式跟 Unix socket 完全一样，变量还是 `CHAT_RUN_SOCKET`。客户端
+  以「只许识别身份」的方式连接，daemon 不能冒用它的身份。run 结束管道就没了。Windows 上现在和 Unix 一致：
+  Codex 走文件，其他运行时走管道。
+- **审批（gates）**：有了管道，Windows 机器重新上报 `gates` 能力。钩子命令在 Windows 上写成
+  `"C:/.../chat-run.exe" gate`（正斜杠加双引号，Git Bash 和 `cmd.exe` 都认）。
+- **受控密钥**：`chat-run secret` 在管道和文件两种传输上都测过（要审批，不会直接给值）。
+- **`pty` 运行时的 ConPTY 版**（`winpty.rs`、`runtime/pty.rs`）：程序在伪控制台里启动，同样先挂起、进 job
+  再运行。标准库不支持给子进程挂伪控制台，所以这里自己调 `CreateProcessW`（命令行引号和环境块自己拼）。
+  取消是往控制台里打一个 Ctrl+C，3 秒后结束 job。批处理文件不能当 `pty` 的程序（提示词会被 `cmd.exe`
+  当命令读），会明确报错。
+- **暂停和继续**：M1 已做；`pty` 的 run 现在也能被暂停。
+- **`tests/runtimes.rs` 在 Windows 上打开**：Codex、ACP、Claude 三个运行时对着 Python 假 CLI 跑。Windows
+  不认 `#!`，所以加了一个只在测试里编译的启动器 `fake-cli.exe`（`test-fakes` feature），它执行
+  `python %FAKE_CLI_SCRIPT%`。
+- **`daemon doctor`**：加了一个两个平台都跑的测试（按名字经 `PATHEXT` 找到程序、读到磁盘、私有的 token
+  文件通过检查、最后是 OK）。
+
+M2 里发现的事：
+
+- **提升权限的进程不完全受只读目录约束**：Windows 建目录和删文件时带「备份意图」，持有恢复特权的进程
+  （提升权限的管理员，比如 CI 的 runner）会跳过访问列表。写文件、建文件仍然被拒绝。普通用户身份的 CLI
+  全部被拒绝。这和 Unix 上 root 不受权限位约束是一回事；结论是 daemon 不要以提升权限运行。
+- **Codex 的 Windows 沙箱和私有目录可能冲突**：Codex 在 Windows 上如果用另一个受限身份跑工具，并且往工作
+  目录的访问列表里加它自己的条目，请求目录就不再「只有当前用户」，`chat-run` 的请求会被丢掉。没有真机，
+  没法确认；真机上第一件事就是看这个。
+- **ConPTY 的输出是「画屏幕」**：程序用移动光标代替换行时，去掉转义码之后两行的字会连在一起。够用来看
+  结果和判断退出码，不适合逐行解析。
+
+还没做的：
+
+- **`tools/e2e` 的机器用例没有接进 Windows CI**。`apps/daemon/e2e/local-e2e.ts`（`wrangler dev` 加真 daemon
+  加假 CLI）现在按进程组发信号、用 `chmod`、直接执行 `.py`，要先改成两个平台都能跑。
+- **`tests/integration.rs`、`tests/setup.rs` 仍然只在 Unix 上跑**（launchd/systemd、文件权限位、
+  `/bin/sh`、信号）。其中和平台无关的用例（协议 fixture、配置解析）值得拆出来在 Windows 上跑。
+- **机器 token 仍然是文件**（现在检查它的访问列表），没有放进 Credential Manager。
+- **真机**：M1 列的那些都还在，加上上面 Codex 沙箱那一条，以及 Claude Code 在 Windows 上到底用哪个 shell
+  执行钩子命令。
 
 完成标准：`tools/e2e` 的机器用例对着一台 Windows 机器全过。
 
