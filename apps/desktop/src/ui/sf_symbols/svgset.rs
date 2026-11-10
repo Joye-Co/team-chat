@@ -148,7 +148,9 @@ svg_set! {
         Grid = LayoutGrid @ 0.91, 0.88;
         Table = Table @ 1.16, 0.88;
         Download = Download @ 0.87, 1.05;
-        Upload = Upload @ 0.87, 1.07;
+        // One symbol on the Mac (`square.and.arrow.up`), so one icon here: an
+        // asset path names the symbol, not the concept.
+        Upload = Share @ 0.87, 1.07;
         Share = Share @ 0.87, 1.07;
         Diagram = Workflow @ 1.05, 0.85;
         Video = Video @ 1.21, 0.77;
@@ -368,7 +370,9 @@ fn geometry(sym: Sym) -> Option<Geometry> {
     measured
 }
 
-/// The concept of a symbol name (two concepts with one symbol share an icon).
+/// The concept of a symbol name. Concepts with one symbol must have one icon
+/// (`concepts_with_one_symbol_have_one_icon`): the asset path carries the
+/// symbol's name, so the first concept of a name stands for all of them.
 fn concept(name: &str) -> Option<Sym> {
     static NAMES: LazyLock<HashMap<&'static str, Sym>> = LazyLock::new(|| {
         let mut names = HashMap::new();
@@ -492,6 +496,24 @@ mod tests {
                     "{sym:?} at {size:?}: off center by {ex} {ey}"
                 );
             }
+        }
+    }
+
+    /// Every concept draws the icon its table row names: an asset path
+    /// carries the symbol name, so two concepts with one symbol (上传 and
+    /// 共享…, both `square.and.arrow.up`) must name one icon, or the second
+    /// would silently draw the first's.
+    #[test]
+    fn concepts_with_one_symbol_have_one_icon() {
+        for sym in concepts() {
+            let drawn = concept(sym.name()).expect("a concept of the name");
+            assert_eq!(
+                source(drawn),
+                source(sym),
+                "{sym:?} draws the icon of {drawn:?} (both are `{}`)",
+                sym.name()
+            );
+            assert_eq!(ink_em(drawn), ink_em(sym), "{sym:?} and {drawn:?}");
         }
     }
 

@@ -16,7 +16,7 @@ real machine shows otherwise.
 
 ## 1. Title bar and window buttons
 
-- The app draws its own title bar; Windows draws none. It is the same 52 px toolbar row as on the
+- The app draws its own title bar; Windows draws none. It is the same 64 px toolbar row as on the
   Mac (NATIVE.md §2), so the page title, subtitle and toolbar groups do not move.
 - There are no traffic lights. The window buttons are Windows' own three at the trailing edge of
   the row, in Windows' order: minimize, maximize or restore, close. Each is 46 px wide and as
@@ -215,7 +215,7 @@ Drawn for this app (7): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill
 | Grid | `square.grid.2x2` | Lucide `layout-grid` | 1 |
 | Table | `tablecells` | Lucide `table` | 4 |
 | Download | `square.and.arrow.down` | Lucide `download` | 5 |
-| Upload | `square.and.arrow.up` | Lucide `upload` | 0 |
+| Upload | `square.and.arrow.up` | Lucide `share` | 0 |
 | Share | `square.and.arrow.up` | Lucide `share` | 0 |
 | Diagram | `point.3.connected.trianglepath.dotted` | Lucide `workflow` | 7 |
 | Video | `video` | Lucide `video` | 5 |
@@ -289,12 +289,8 @@ or an older Lucide name reaches it.
 
 ## 6. Scrollbars
 
-- The same overlay scrollbar as on the Mac: thin, over the content, no track,
-  no arrow buttons, never Windows' classic 17 px bar.
-- Most Windows users scroll with a mouse wheel, so the thumb must be easy to reach: it shows
-  while scrolling and whenever the pointer is over the scroll area's trailing 12 px, and it can
-  be dragged; a click on the empty lane pages.
-- A wheel notch scrolls three lines of the list's row height, or what the system setting says.
+- The same scrollbar as on the Mac, with the same behavior: the app's own thin overlay bar, no
+  track, no arrow buttons, never Windows' classic 17 px bar.
 
 Only compiled.
 
