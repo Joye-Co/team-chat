@@ -15,6 +15,21 @@ pub struct Spend {
     /// The part of `cost_usd` estimated from tokens at list price (absent: all reported).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub estimated_usd: Option<f64>,
+    /// Tokens of models with no known price, left out of `cost_usd` ("价格未知").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unpriced_tokens: Option<u64>,
+}
+
+/// One model's spend: its id, its name from the price list and the CLIs it ran in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSpend {
+    pub model: String,
+    pub name: String,
+    #[serde(default)]
+    pub runtimes: Vec<String>,
+    #[serde(flatten)]
+    pub spend: Spend,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -32,6 +47,9 @@ pub struct BotSpend {
     pub spend: Spend,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_cents: Option<u64>,
+    /// The models this AI member used, by cost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +115,9 @@ pub struct TeamUsage {
     pub bots: Vec<BotSpend>,
     pub initiators: Vec<MemberSpend>,
     pub machines: Vec<MachineSpend>,
+    /// By model (absent from older servers).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelSpend>,
     /// Who asked which AI member (absent from older servers).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pairs: Vec<PairSpend>,
