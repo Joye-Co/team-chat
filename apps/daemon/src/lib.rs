@@ -36,4 +36,6 @@ pub mod vm_agent;
 pub mod winacl;
 #[cfg(windows)]
 pub mod winjob;
+#[cfg(windows)]
+pub mod winpty;
 pub mod workspace;

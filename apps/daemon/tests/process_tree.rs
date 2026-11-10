@@ -60,6 +60,10 @@ fn main() {
             "a_helper_process_ends_with_everything_it_started",
             Box::pin(a_helper_process_ends_with_everything_it_started()),
         ),
+        (
+            "the_pty_runtime_runs_a_program_in_a_pseudoconsole",
+            Box::pin(the_pty_runtime_runs_a_program_in_a_pseudoconsole()),
+        ),
     ];
     println!("\nrunning {} tests", cases.len());
     for (name, case) in cases {
@@ -587,3 +591,71 @@ async fn a_helper_process_ends_with_everything_it_started() {
 /// Unix: a helper is a plain child; the CLIs there are not started through wrappers.
 #[cfg(not(windows))]
 async fn a_helper_process_ends_with_everything_it_started() {}
+
+/// A run of the `pty` runtime with `cmd.exe` and `args`.
+#[cfg(windows)]
+fn pty_spec(dir: &Path, args: &[&str], prompt: &str) -> RunSpec {
+    let mut s = spec(dir, "cmd.exe", prompt);
+    s.runtime_name = "shell".into();
+    s.cfg.kind = "pty".into();
+    s.cfg.args = args.iter().map(|a| a.to_string()).collect();
+    s
+}
+
+/// Windows: the `pty` kind starts the program in a pseudoconsole (ConPTY). Its output comes
+/// back as text, a prompt without a placeholder is typed into it, and a cancel ends it.
+#[cfg(windows)]
+async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // The prompt as an argument.
+    let s = pty_spec(
+        &dir.path().join("r1"),
+        &["/d", "/c", "echo {prompt}"],
+        "conpty-hello",
+    );
+    let log = s.run_dir.join("pty.log");
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.exit_code, Some(0));
+    let text = o.result_text.unwrap_or_default();
+    assert!(text.contains("conpty-hello"), "{text:?}");
+    assert!(size(&log) > 0, "the raw output is kept");
+
+    // The prompt typed into the console; the exit code is the program's.
+    let s = pty_spec(
+        &dir.path().join("r2"),
+        &["/d", "/q"],
+        "echo typed-marker& exit 7",
+    );
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Failed, "{o:?}");
+    assert_eq!(o.exit_code, Some(7));
+    assert!(
+        o.result_text.unwrap_or_default().contains("typed-marker"),
+        "the typed command ran"
+    );
+
+    // A shell that waits for input is ended by a cancel.
+    let s = pty_spec(&dir.path().join("r3"), &["/d", "/q", "/k"], "echo started");
+    let run_dir = s.run_dir.clone();
+    let mut run = start(s);
+    let mut seen = String::new();
+    while !seen.contains("started") {
+        match run.events.recv().await {
+            Some(RunEvent::MessageDelta { text, .. }) => seen.push_str(&text),
+            Some(_) => {}
+            None => panic!("the run ended before it printed: {seen:?}"),
+        }
+    }
+    let pid = workspace::read_meta(&run_dir).unwrap().pgid.unwrap() as u32;
+    assert!(alive(pid));
+    run.control.send(Control::Cancel).unwrap();
+    let o = run.outcome.await.unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    wait_for("the shell to end", || !alive(pid)).await;
+}
+
+/// Unix: `tests/runtimes.rs` covers the pty runtime there.
+#[cfg(not(windows))]
+async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {}
