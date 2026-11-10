@@ -665,6 +665,8 @@ export const CreateInviteRequest = z.object({
   role: z.string().optional(),
   /** Sign-in code for this existing member: redeeming it adds a token, not a member. */
   memberId: Id.optional(),
+  /** How long the code works, 1-168 hours (default 168, a week). */
+  expiresInHours: z.int().min(1).max(168).optional(),
 });
 export type CreateInviteRequest = z.infer<typeof CreateInviteRequest>;
 export const CreateInviteResponse = z.object({ code: z.string(), expiresAt: Millis });
