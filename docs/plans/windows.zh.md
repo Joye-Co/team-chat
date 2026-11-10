@@ -1,10 +1,11 @@
 # Windows 端计划
 
-状态：W0 已完成（客户端能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。C1 的系统集成部分已写完
-（见 C1 一节）。M1 已完成（daemon 能为 Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；
-还没在真的 Windows 电脑上跑过真的 CLI）。M3 已完成（daemon 作为当前用户的计划任务、改名替换的自己更新、
-「用这台电脑」、PowerShell 安装命令；计划任务和安装命令在 Windows CI 上对着真的任务计划程序跑过，
-「用这台电脑」只编译过，都还没在真的 Windows 电脑上试过）。其余见各阶段。
+状态：W0 已完成（客户端能为 Windows 编译并链接出 exe）。C1 的系统集成部分已写完（见 C1 一节）。M1 已完成
+（daemon 能为 Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过
+真的 CLI）。C2（产出和图的 WebView2 后端）代码已完成并在 Windows CI 上跑通隔离测试，见下。其余进行中或未开始。
+
+M3 已完成（daemon 作为当前用户的计划任务、改名替换的自己更新、「用这台电脑」、PowerShell 安装命令；计划任务和
+安装命令在 Windows CI 上对着真的任务计划程序跑过，「用这台电脑」只编译过，都还没在真的 Windows 电脑上试过）。
 
 ## 目标
 
@@ -33,8 +34,8 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 
 | 模块 | 现在用的 macOS 接口 | Windows 方案 |
 | --- | --- | --- |
-| `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2：虚拟主机或 `WebResourceRequested` 提供内容，请求拦截做网络封锁，子 HWND 嵌入 |
-| `src/diagrams`（Mermaid 图） | 隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例 |
+| `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2（已做，见 C2）：注册自定义 scheme，`WebResourceRequested` 提供内容并拦截其余请求，子 HWND 嵌入 |
+| `src/diagrams`（Mermaid 图） | 隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例（已做） |
 | `src/views/media/native.rs`（音视频、PDF 预览） | AVFoundation、AVFAudio、PDFKit | Media Foundation 加 `Windows.Data.Pdf` |
 | `src/provider/macos.rs`（通知、睡眠唤醒、网络变化） | `UNUserNotificationCenter`、`NSWorkspace` | WinRT Toast（需要 AUMID）、`WM_POWERBROADCAST`、`NotifyIpInterfaceChange` |
 | `crates/chat-core/src/token.rs` | Keychain | Windows Credential Manager |
@@ -183,14 +184,64 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 8. 关闭系统的动画效果后，客户端的装饰动画停掉；打开对比度主题后颜色切到高对比。
 9. 文件卡片上的预览用默认程序打开，分享会打开资源管理器并选中文件（路径里有空格和逗号也行）。
 
-**C2 产出和图（约 3 周，客户端里风险最大）**
+**C2 产出和图（代码已完成，Windows CI 上跑通；嵌入的手感还要真机看）**
 
-- `artifact-view` 增加 WebView2 后端，对外接口不变：每个版本一个 origin、同样严格的 CSP、拦截所有
-  外部请求和跨 origin 跳转、`window.artifact` 桥按 `Capabilities` 检查、嵌入宿主窗口。
-- 第一周先做只嵌一个页面的原型，确认子 HWND 和 GPUI 的渲染叠在一起没有闪烁和焦点问题。
-- Mermaid 渲染器用同一个后端。安装包带 WebView2 的 Evergreen bootstrapper。
+做法：
 
-完成标准：两个平台通过同一套隔离测试，Mermaid 图能显示。
+- `crates/artifact-view` 增加 WebView2 后端（`src/win.rs`、`src/win_embed.rs`），对外接口和 macOS 一样
+  （`ArtifactWindow`、`EmbeddedArtifact`、`DiagramRenderer`，主线程凭证统一叫 `MainThread`）。两个后端共用的
+  判断（版本切换、桥、导航放行规则）抽到 `src/page.rs`。
+- 绑定直接用 `webview2-com`（和 GPUI 同一个 `windows` 0.62），不用 `wry`：隔离要用到自定义 scheme 注册、
+  对所有 URL 的请求过滤、各项设置开关、权限 / 下载 / 新窗口事件，`wry` 没有暴露这些。
+- origin：把 `artifact` 注册成带 authority 的自定义 scheme（`CoreWebView2CustomSchemeRegistration`），页面地址
+  和 macOS 完全一样：`artifact://<id>-v<version>/`，每个版本一个 origin；内容由 `WebResourceRequested` 用同一个
+  `resolve::serve_range` 提供，CSP 和其他响应头逐字相同（Windows 另加一条 `Permissions-Policy`）。
+- 断网三层：CSP；`WebResourceRequested` 过滤 `*`，当前版本 origin 之外的请求一律回 403；浏览器进程带
+  `--host-resolver-rules="MAP * ~NOTFOUND"` 启动，任何主机名和 IP 都解析不了（WebSocket、WebRTC 不经过请求
+  过滤，靠这一层和 CSP），并在每个 frame 里删掉 WebRTC 构造函数。
+- 跳转：`NavigationStarting` / `FrameNavigationStarting` 取消 origin 之外的一切；`NewWindowRequested` 一律不开窗；
+  外部协议（`LaunchingExternalUriScheme`）取消。
+- 桥：`chrome.webview.postMessage`，只收主 frame、且来源是当前版本 origin 的消息，再交给同一个 `Bridge` 按
+  `Capabilities` 检查。Host objects 关闭。
+- 关掉的浏览器功能：下载、权限弹窗、脚本对话框、右键菜单、开发者工具（调试构建除外）、浏览器快捷键、
+  自动填充和保存密码、缩放、滑动导航、状态栏、内置错误页、SmartScreen。
+- 存储：每个页面都是 InPrivate；用户数据目录单独放在 `%LOCALAPPDATA%\team-chat\webview2`
+  （`ui::web_embed::prepare_process` 设置）。
+- 嵌入：GPUI 窗口的子 `HWND`（裁剪容器）里放 WebView2，每帧由宿主按布局摆放（物理像素 = 点 × 缩放）、裁剪、
+  圆角（窗口 region）、隐藏。**GPUI 默认用置顶的 DirectComposition 树绘制，会盖住所有子窗口**，所以应用在
+  Windows 上启动时设置 `GPUI_DISABLE_DIRECT_COMPOSITION=1`，让 GPUI 直接呈现到 `HWND`。
+- 「用户点过」的信号：页面里按下鼠标时父窗口收到 `WM_PARENTNOTIFY`；非文字按键走 `AcceleratorKeyPressed`。
+- 截图（图的 PNG、被遮住时的快照）走 DevTools 协议 `Page.captureScreenshot`，隐藏窗口固定 1 像素 = 1 CSS px。
+- 桌面端接线：`ui/web_embed.rs`、`views/artifacts/window.rs`、`diagrams/mod.rs` 在 Windows 上走同一套代码；
+  打开外部链接前的确认暂时用系统消息框。
+
+在 Windows CI（`windows-2025`，任务 `artifact-view-windows` 和 `desktop-windows`）上实际跑过的：
+
+- `tests/isolation.rs`：和 macOS 同一份页面、同一组断言（本 origin 文件能加载；http / https / ws / WebRTC /
+  路径穿越 / 别的版本都拿不到；CSP 生效；跳转被拒；弹窗被拒；每个版本独立 origin；桥应答、拒绝未知方法、
+  没有能力时拒绝 `emit` 和 `ask`）。
+- `examples/win_embed_proto.rs`：普通窗口里嵌一个页面，对屏幕截图取像素验证位置、裁剪、圆角、隐藏和再显示、
+  关闭；`SendInput` 真实点击到达页面并算作用户输入；独立的产出窗口和版本下拉框。
+- `apps/desktop/examples/win_embed_gpui.rs`：真的 GPUI 窗口里嵌一个页面。关掉 DirectComposition 时页面显示在
+  GPUI 内容之上，点击、裁剪、隐藏都对；不关时页面被 GPUI 盖住（截图里看不到，但仍能收到点击），这是必须关掉
+  它的证据。
+- `examples/diagram_selftest.rs`：8 个 Mermaid 样例在隐藏的 WebView2 里渲染并导出透明底的 2x PNG。
+
+只能在真机上确认的（CI 是 100% 缩放、软件渲染、没有人操作）：
+
+- 嵌入页面跟随滚动和窗口缩放时有没有闪烁、拖影；和 GPUI 弹层切换（隐藏换快照）时有没有闪一下。
+- 焦点和 Tab 顺序：页面和 GPUI 输入框之间来回切换、Esc 和 Tab 交还焦点、中文输入法候选窗位置。
+- 页面有焦点时应用级快捷键（Ctrl+W 等）现在会被页面吃掉，要决定哪些转给应用。
+- 高 DPI 和多显示器不同缩放比：位置、清晰度、图的 PNG 尺寸。
+- 话题里内嵌页面的滚轮转交（页面脚本把滚轮转成宿主的 `WM_MOUSEWHEEL`）手感是否自然。
+- 只用键盘操作页面（不点击）时，文字按键不算「用户点过」，`emit` 可能被闸门挡住。
+- 关掉 DirectComposition 对整个应用的影响（缩放窗口时的流畅度；不再支持窗口透明，应用没用到）。
+- 版本下拉框是原生 COMBOBOX，外观要在 C4 里按设计规范重做；外部链接确认框同理。
+- `<video>` 的分段加载（206）和自动播放。
+
+安装包带 WebView2 Evergreen bootstrapper 属于 R1。
+
+完成标准：两个平台通过同一套隔离测试（已满足，CI 上跑），Mermaid 图能显示（CI 上导出了 PNG；应用内显示待真机）。
 
 **C3 媒体和文件（约 2 周）**：视频首帧和时长、音频波形和播放、PDF 预览；打开、定位、分享文件。
 
@@ -400,7 +451,8 @@ M1 里发现、留给后面的：
 ## 风险
 
 - **GPUI 是预发布版本**（`gpui-pre =0.3.10`）：Windows 上的输入法、DPI 问题可能要给上游打补丁或先 vendor。
-- **WebView2 嵌入**：子 HWND 和 GPUI 的渲染叠在一起可能闪烁或抢焦点，C2 先做原型。
+- **WebView2 嵌入**：原型已在 CI 上证实能显示，但前提是关掉 GPUI 的 DirectComposition（否则子窗口被盖住）；
+  闪烁和焦点还要真机看，清单在 C2。
 - **CLI 在 Windows 上的行为**：Claude Code 和 Codex 的 Windows 版比 Mac 版新，工具调用、沙箱、
   会话文件位置可能不一样；M1 第一周先手动在 Windows 上各跑一遍确认。
 - **进程逃出 job**：极少数程序会主动脱离 job。Job 设成不允许脱离，`tests/process_tree.rs` 里有一个要求

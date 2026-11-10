@@ -26,7 +26,7 @@ use crate::{
 /// Open 产出 windows and the 产出 being fetched.
 #[derive(Default)]
 pub struct ArtifactWindows {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     open: HashMap<String, artifact_view::ArtifactWindow>,
     /// 产出 ids whose version is being fetched (cards show 正在打开…).
     opening: HashSet<String>,
@@ -84,7 +84,7 @@ pub fn open_artifact(
     version: Option<u32>,
     cx: &mut App,
 ) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
     {
@@ -132,7 +132,7 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
         }
         return;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         let (title, items) = version_items(provider, &folder.artifact_id);
         let items: Vec<artifact_view::VersionItem> = items
@@ -172,7 +172,7 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             cx,
         );
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = provider;
         cx.open_with_system(&folder.dir.join(&folder.entry));
@@ -187,7 +187,7 @@ fn opens_in_window(folder: &ArtifactFolder) -> bool {
 /// Opens an HTML file attached to a message in its own isolated window
 /// (one version, no version list).
 pub fn open_html_file(file: &FileAttachment, path: &Path, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         use artifact_view::{Content, VersionSpec};
         let Some(dir) = path.parent() else { return };
@@ -216,14 +216,14 @@ pub fn open_html_file(file: &FileAttachment, path: &Path, cx: &mut App) {
             cx,
         );
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = file;
         cx.reveal_path(path);
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn open_window(
     provider: Arc<dyn ChatProvider>,
     artifact_id: String,
@@ -236,7 +236,7 @@ fn open_window(
     open_window_with(Some(provider), artifact_id, title, spec, items, caps, cx);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn open_window_with(
     provider: Option<Arc<dyn ChatProvider>>,
     artifact_id: String,
@@ -248,12 +248,15 @@ fn open_window_with(
 ) {
     use artifact_view::{ArtifactWindow, OpenOptions};
     use futures::StreamExt as _;
-    use objc2_foundation::MainThreadMarker;
 
-    let Some(mtm) = MainThreadMarker::new() else {
+    #[cfg(target_os = "macos")]
+    let Some(mtm) = artifact_view::MainThread::new() else {
         tracing::error!("the 产出 window must open on the main thread");
         return;
     };
+    // The app context lives on the thread of GPUI's message loop.
+    #[cfg(windows)]
+    let mtm = artifact_view::MainThread::current();
     let mut options = OpenOptions::new(title, artifact_id.clone(), spec);
     // Only a bot's version that declares events may send them (R10).
     options.capabilities = caps;
@@ -289,7 +292,7 @@ fn open_window_with(
     .detach();
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn on_event(
     provider: Option<&Arc<dyn ChatProvider>>,
     artifact_id: &str,
@@ -336,7 +339,7 @@ pub(crate) fn push_to_window(
     snap: &artifact_view::Snapshot,
     cx: &mut App,
 ) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
     {
@@ -354,7 +357,7 @@ pub(crate) fn finish_in_window(
     result: Result<serde_json::Value, artifact_view::Reject>,
     cx: &mut App,
 ) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
     {
@@ -367,7 +370,7 @@ pub(crate) fn finish_in_window(
 /// A new version exists: a window that showed the latest (`before`) reloads in place and
 /// says 已更新到 v{n} in its title for 3 s; one on an older version says 有 v{n}.
 pub(crate) fn on_version_added(artifact_id: &str, before: u32, version: u32, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         use crate::copy::page_host as cp;
         let Some(shown) = windows(cx)
@@ -411,12 +414,12 @@ pub(crate) fn on_version_added(artifact_id: &str, before: u32, version: u32, cx:
             }
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (artifact_id, before, version, cx);
 }
 
 /// Loads `version` into the open window of `artifact_id` (reload in place).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u32, cx: &mut App) {
     let rx = provider.open_artifact_version(artifact_id, Some(version));
     let provider = provider.clone();
@@ -455,9 +458,9 @@ fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u
 /// Asks before a 产出 page opens a web link (also for pages embedded in the
 /// main window).
 pub(crate) fn ask_before_link(url: String) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     ask_to_open_link(url);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = url;
 }
 
@@ -466,7 +469,7 @@ static PROMPTING: AtomicBool = AtomicBool::new(false);
 
 /// Asks with a native alert before a 产出 page opens a web link. The alert
 /// runs on a later main-queue turn, outside any GPUI update.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn ask_to_open_link(url: String) {
     let ask = Ask {
         title: ca::LINK_TITLE.to_string(),
@@ -484,7 +487,7 @@ pub(crate) fn ask_before_screen_share(name: &str, url: String) {
         tracing::warn!("screen sharing address refused");
         return;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         use crate::copy::live as cl;
         let ask = Ask {
@@ -495,17 +498,35 @@ pub(crate) fn ask_before_screen_share(name: &str, url: String) {
         };
         ask_then_open(ask, url, artifact_view::open_screen_share_url);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = name;
 }
 
 /// The text of one open-a-link alert.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 struct Ask {
     title: String,
     detail: String,
+    // The Windows message box has the system's own 确定 / 取消 buttons.
+    #[cfg_attr(windows, allow(dead_code))]
     open: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
     cancel: &'static str,
+}
+
+/// Shows `ask` as a native message box on a later turn of the message loop (outside any
+/// GPUI update) and calls `open` with `url` only when the user agrees.
+#[cfg(windows)]
+fn ask_then_open(ask: Ask, url: String, open: fn(&str) -> bool) {
+    if PROMPTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    artifact_view::confirm_later(&ask.title, &ask.detail, move |agreed| {
+        if agreed && !open(&url) {
+            tracing::warn!("external link refused");
+        }
+        PROMPTING.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Shows `ask` as a native alert on a later main-queue turn (outside any
@@ -586,7 +607,7 @@ mod tests {
     /// Trust boundary: the separate 产出 window's page events go through the same
     /// user-activation gate as a page in the main window. An `emitEvent` or `ask` the page
     /// sends without the viewer's input in that window is dropped; with it, it is sent.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     #[gpui::test]
     fn window_page_events_need_the_viewer_s_input(cx: &mut gpui::TestAppContext) {
         use crate::data::page_host::PageEventKind;
