@@ -10,6 +10,6 @@ crate::copy! {
     BANNER_DISCONNECTED = "连接已断开",
     BANNER_RETRY_IN = "{s} 秒后重连",
     TOKEN_UNREADABLE = "无法读取已保存的登录",
-    TOKEN_UNREADABLE_HINT = "在系统提示中允许访问钥匙串后重试",
+    TOKEN_UNREADABLE_HINT = crate::copy::per_system("在系统提示中允许访问钥匙串后重试", "重试一次；还是不行就重新登录"),
     RETRY_TOKEN = "重试",
 }

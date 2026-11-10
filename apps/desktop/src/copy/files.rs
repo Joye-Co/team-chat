@@ -2,7 +2,7 @@
 
 crate::copy! {
     OPEN = "打开",
-    REVEAL = "在访达中显示",
+    REVEAL = crate::copy::per_system("在访达中显示", "在文件资源管理器中显示"),
     DOWNLOAD = "下载",
     RETRY = "重试",
     OPEN_IMAGE = "用默认应用打开",

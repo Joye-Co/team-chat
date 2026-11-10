@@ -66,6 +66,18 @@ pub mod overlays;
 pub mod kit;
 // --- end r1-kit ---
 
+/// A catalog text that differs by system: `mac` on macOS, `other` on
+/// Windows and Linux. The Mac app names the Mac, the Finder, the menu bar and
+/// the keychain; elsewhere the text says 电脑 and names what that system has.
+/// A device that really is a Mac (a name from the server) is never rewritten.
+pub const fn per_system(mac: &'static str, other: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        mac
+    } else {
+        other
+    }
+}
+
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
 macro_rules! copy {
