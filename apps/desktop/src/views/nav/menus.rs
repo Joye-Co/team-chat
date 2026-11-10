@@ -283,6 +283,9 @@ fn show_character_palette(cx: &mut App) {
 
 /// Sets the menus and the bindings and handlers of the menu-only actions.
 pub fn install(cx: &mut App) {
+    // The Mac's own window and app keys. Windows has its own for these
+    // (Win+↓, Win+., Alt+F4), so there only closing and full screen are bound.
+    #[cfg(target_os = "macos")]
     cx.bind_keys([
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("cmd-alt-h", HideOthers, None),
@@ -290,6 +293,11 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, None),
+    ]);
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-w", CloseWindow, None),
+        KeyBinding::new("f11", ToggleFullScreen, None),
     ]);
     install_server_actions(cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
@@ -303,7 +311,14 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Minimize, cx| with_key_window(cx, |window| window.minimize_window()));
     // Like the red traffic light: the app keeps running, and a click on the
     // Dock icon opens the main window again.
-    cx.on_action(|_: &CloseWindow, cx| with_key_window(cx, |window| window.remove_window()));
+    cx.on_action(|_: &CloseWindow, cx| {
+        // Off the Mac the app ends with its last window: Ctrl+W never closes
+        // that one (the close button and Alt+F4 do).
+        if cfg!(not(target_os = "macos")) && cx.windows().len() <= 1 {
+            return;
+        }
+        with_key_window(cx, |window| window.remove_window())
+    });
     cx.on_action(|_: &Zoom, cx| with_key_window(cx, |window| window.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| {
         with_key_window(cx, |window| window.toggle_fullscreen())

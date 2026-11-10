@@ -895,7 +895,13 @@ pub mod layout {
     /// The red light's origin: the lights centre on the toolbar row's centre
     /// line (y 32), with the page title and the sidebar toggle.
     pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(25.));
-    pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
+    /// The room the traffic lights take at the leading edge; off the Mac
+    /// there are none, and only the sidebar toggle sits there.
+    pub const TRAFFIC_LIGHTS_INSET: Pixels = if cfg!(target_os = "macos") {
+        px(84.)
+    } else {
+        px(56.)
+    };
     /// The sidebar toggle (隐藏侧栏 / 显示侧栏) sits right after the traffic
     /// lights, on the toolbar row's center line, and stays there whether the
     /// sidebar is shown or hidden.
@@ -939,6 +945,9 @@ pub mod metrics {
     pub const FOCUS_RING: Pixels = px(3.);
 
     // Window (§2.1, §2.2)
+    /// The caption strip of a window off the Mac (`window_chrome`): the
+    /// height of a Windows title bar at 100 %.
+    pub const CAPTION: Pixels = height::DEFAULT;
     pub const TOOLBAR_ROW: Pixels = height::TOOLBAR;
     pub const TOOLBAR_GROUP: Pixels = height::DEFAULT;
     pub const TOOLBAR_ITEM: Pixels = height::DEFAULT;

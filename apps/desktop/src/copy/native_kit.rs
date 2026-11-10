@@ -49,7 +49,11 @@ crate::copy! {
     SEC_STATES = "按钮状态",
     STATE_HOVER = "悬停",
     STATE_LOADING = "加载",
-    KEY_CMD = "⌘",
+    KEY_CMD = if cfg!(target_os = "macos") {
+        "⌘"
+    } else {
+        "Ctrl"
+    },
     KEY_K = "K",
     CARD_TITLE = "这周",
     CARD_DESCRIPTION = "完成的话题和产出",
@@ -166,8 +170,16 @@ crate::copy! {
     MENU_COPY_LINK = "拷贝链接",
     MENU_OPEN_WINDOW = "在新窗口中打开",
     MENU_LEAVE = "离开群…",
-    SHORTCUT_OPEN = "⌘O",
-    SHORTCUT_COPY = "⇧⌘C",
+    SHORTCUT_OPEN = if cfg!(target_os = "macos") {
+        "⌘O"
+    } else {
+        "Ctrl+O"
+    },
+    SHORTCUT_COPY = if cfg!(target_os = "macos") {
+        "⇧⌘C"
+    } else {
+        "Ctrl+Shift+C"
+    },
     // Inspector
     INS_OWNER = "负责",
     INS_PLAN = "计划",
