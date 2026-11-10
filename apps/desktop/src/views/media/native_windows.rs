@@ -208,8 +208,11 @@ const MAX_SAMPLES_PER_FRAME: usize = 1200;
 struct Video {
     reader: IMFSourceReader,
     duration: f64,
-    /// Clockwise quarter turns that make the decoded picture upright.
+    /// `MF_MT_VIDEO_ROTATION` of the file and its size before any rotation.
     rotation: u32,
+    coded: (u32, u32),
+    /// Degrees to turn the decoded picture clockwise to make it upright.
+    turn: u32,
     /// The decoded picture.
     width: u32,
     height: u32,
@@ -225,6 +228,8 @@ impl Video {
             let reader = mf.reader(path, true)?;
             let native = reader.GetNativeMediaType(VIDEO, 0).ok()?;
             let rotation = native.GetUINT32(&MF_MT_VIDEO_ROTATION).unwrap_or(0) % 360;
+            let coded = native.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
+            let coded = ((coded >> 32) as u32, coded as u32);
             let _ = reader.SetStreamSelection(ALL_STREAMS, false);
             reader.SetStreamSelection(VIDEO, true).ok()?;
             // Fails here when Windows has no decoder for the stream.
@@ -234,6 +239,8 @@ impl Video {
                 duration: duration(&reader)?,
                 reader,
                 rotation,
+                coded,
+                turn: 0,
                 width: 0,
                 height: 0,
                 stride: 0,
@@ -254,6 +261,16 @@ impl Video {
             }
             self.width = w;
             self.height = h;
+            // The reader's video processor turns a sideways recording upright itself
+            // (seen on Windows Server 2025): its picture then has the sides swapped.
+            // Only a picture that still has the file's own shape is turned here.
+            let sideways = self.rotation == 90 || self.rotation == 270;
+            let untouched = (w, h) == self.coded && w != h;
+            self.turn = if sideways && untouched {
+                self.rotation
+            } else {
+                0
+            };
             self.stride = ty
                 .GetUINT32(&MF_MT_DEFAULT_STRIDE)
                 .map(|s| s as i32)
@@ -286,7 +303,7 @@ impl Video {
     /// The upright size.
     fn shown_size(&self) -> (u32, u32) {
         let (_, _, w, h) = self.crop;
-        if self.rotation == 90 || self.rotation == 270 {
+        if self.turn == 90 || self.turn == 270 {
             (h, w)
         } else {
             (w, h)
@@ -385,7 +402,7 @@ impl Video {
                 }
             }
             let picture = image::RgbaImage::from_raw(w as u32, h as u32, rgba)?;
-            let picture = match self.rotation {
+            let picture = match self.turn {
                 90 => image::imageops::rotate90(&picture),
                 180 => image::imageops::rotate180(&picture),
                 270 => image::imageops::rotate270(&picture),
@@ -474,6 +491,28 @@ impl Pcm {
     }
 }
 
+/// The format of the samples the reader hands out now: the sample layout, the
+/// channels and the frames per second.
+unsafe fn format(reader: &IMFSourceReader) -> Option<(Pcm, usize, f64)> {
+    unsafe {
+        let ty = reader.GetCurrentMediaType(AUDIO).ok()?;
+        let subtype = ty.GetGUID(&MF_MT_SUBTYPE).ok()?;
+        let float = subtype == MFAudioFormat_Float;
+        if !float && subtype != MFAudioFormat_PCM {
+            return None;
+        }
+        let channels = ty.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).ok()? as usize;
+        let rate = ty.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).ok()? as f64;
+        let bytes = ty.GetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE).ok()? as usize / 8;
+        let known = if float {
+            matches!(bytes, 4 | 8)
+        } else {
+            matches!(bytes, 1..=4)
+        };
+        (channels > 0 && rate > 0. && known).then_some((Pcm { float, bytes }, channels, rate))
+    }
+}
+
 /// The most peak groups kept while decoding (64 MB; days of audio in groups of 64).
 const MAX_GROUPS: usize = 16 << 20;
 
@@ -493,24 +532,7 @@ unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
         if !set {
             return None;
         }
-        let ty = reader.GetCurrentMediaType(AUDIO).ok()?;
-        let subtype = ty.GetGUID(&MF_MT_SUBTYPE).ok()?;
-        let float = subtype == MFAudioFormat_Float;
-        if !float && subtype != MFAudioFormat_PCM {
-            return None;
-        }
-        let channels = ty.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).ok()? as usize;
-        let rate = ty.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).ok()? as f64;
-        let bytes = ty.GetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE).ok()? as usize / 8;
-        let known = if float {
-            matches!(bytes, 4 | 8)
-        } else {
-            matches!(bytes, 1..=4)
-        };
-        if channels == 0 || rate <= 0. || !known {
-            return None;
-        }
-        let pcm = Pcm { float, bytes };
+        let (mut pcm, mut channels, mut rate) = format(&reader)?;
         let buckets = buckets.clamp(1, 4000);
         // The length is only known at the end (the header of an MP3 file guesses), so
         // the loudest sample of every small group of frames is kept and the groups are
@@ -522,17 +544,22 @@ unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
             64
         };
         let mut groups: Vec<f32> = Vec::new();
-        let (mut loudest, mut in_group, mut frames) = (0f32, 0usize, 0u64);
+        let (mut loudest, mut in_group, mut frames, mut seconds) = (0f32, 0usize, 0u64, 0f64);
         loop {
             let (mut flags, mut sample) = (0u32, None);
             if reader
                 .ReadSample(AUDIO, 0, None, Some(&mut flags), None, Some(&mut sample))
                 .is_err()
                 || flags & MF_SOURCE_READERF_ERROR.0 as u32 != 0
-                || flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0
             {
                 break;
             }
+            // The decoder learned the real format from the stream (an AAC file whose
+            // header says half the sample rate does this on its first sample).
+            if flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0 {
+                (pcm, channels, rate) = format(&reader)?;
+            }
+            let bytes = pcm.bytes;
             if let Some(sample) = sample {
                 let buffer = sample.ConvertToContiguousBuffer().ok()?;
                 let (mut data, mut len) = (std::ptr::null_mut(), 0u32);
@@ -549,7 +576,9 @@ unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
                             (loudest, in_group) = (0., 0);
                         }
                     }
-                    frames += (len as usize / (channels * bytes)) as u64;
+                    let n = len as usize / (channels * bytes);
+                    frames += n as u64;
+                    seconds += n as f64 / rate;
                 }
                 let _ = buffer.Unlock();
             }
@@ -577,7 +606,7 @@ unsafe fn peaks(path: &Path, buckets: usize) -> Option<(f64, Vec<f32>)> {
                 *p /= max;
             }
         }
-        Some((frames as f64 / rate, out))
+        Some((seconds, out))
     }
 }
 

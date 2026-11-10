@@ -73,7 +73,12 @@ impl TokenStorage {
             TokenStorage::Keychain => {
                 Box::new(chat_core::KeychainTokenStore::new(app_id(), server_url))
             }
-            #[cfg(not(target_os = "macos"))]
+            // The Credential Manager, one generic credential per server.
+            #[cfg(target_os = "windows")]
+            TokenStorage::Keychain => {
+                Box::new(chat_core::CredentialTokenStore::new(app_id(), server_url))
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             TokenStorage::Keychain => Box::new(chat_core::FileTokenStore::new(
                 default_data_root().join("token"),
             )),

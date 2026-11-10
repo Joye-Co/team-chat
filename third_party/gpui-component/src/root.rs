@@ -708,6 +708,13 @@ impl WindowState {
     }
 }
 
+/// TeamChat: the font families every window tries, in order, for glyphs the
+/// theme's UI font lacks, before the system's own fallback (the Simplified
+/// Chinese font on Windows). Unset: the system's fallback alone.
+pub struct UiFontFallbacks(pub gpui::FontFallbacks);
+
+impl gpui::Global for UiFontFallbacks {}
+
 impl gpui_base::RootPlugin for WindowState {
     fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_removed_tooltip(window, cx);
@@ -717,6 +724,11 @@ impl gpui_base::RootPlugin for WindowState {
 
     fn style(&self, surface: &mut gpui::Stateful<gpui::Div>, _window: &mut Window, cx: &mut App) {
         use gpui::Refineable as _;
+        // TeamChat (docs/design/WINDOWS.md §4): the families for glyphs the
+        // UI font lacks, when the application names them.
+        if let Some(fallbacks) = cx.try_global::<UiFontFallbacks>() {
+            surface.style().text.font_fallbacks = Some(fallbacks.0.clone());
+        }
         surface.style().refine(
             &gpui::StyleRefinement::default()
                 .font_family(cx.theme().font_family.clone())

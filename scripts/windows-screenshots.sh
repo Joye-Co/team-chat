@@ -11,7 +11,7 @@ set -euo pipefail
 
 dir="${1:?usage: windows-screenshots.sh <dir>}"
 exe="${CARGO_TARGET_DIR:-target}/debug/desktop.exe"
-main_screens="login,main,group-chat,dm-chat,desk,topic-v2,group-v2,members-v2,artifacts-v2,new-topic,switcher,account-menu,search,cards,settings-profile,settings-about,media-video,media-audio,media-pdf,media-code"
+main_screens="login,main,group-chat,dm-chat,desk,topic-v2,group-v2,members-v2,artifacts-v2,new-topic,switcher,account-menu,search,cards,settings-profile,settings-about,media-video,media-audio,media-pdf"
 scenes="${SCENES:-$main_screens}"
 
 args=(--screenshot "$dir")

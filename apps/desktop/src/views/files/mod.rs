@@ -98,6 +98,101 @@ pub fn rejected_text(r: &RejectedFile) -> String {
 /// Files that run code or open other places when opened. "Open" shows them
 /// in Finder instead, so one click on a teammate's file never runs it.
 pub fn opens_unsafely(name: &str) -> bool {
+    opens_unsafely_on(name, cfg!(target_os = "windows"))
+}
+
+/// What Windows runs, installs, mounts or follows when it "opens" a file, beyond the list
+/// every system shares: programs and screen savers, installers and packages, script hosts,
+/// shell and registry files, shortcuts to other places, disk images, Office files that
+/// carry macros.
+const WINDOWS_RISKY: &[&str] = &[
+    "com",
+    "scr",
+    "pif",
+    "cpl",
+    "dll",
+    "ocx",
+    "sys",
+    "drv",
+    "msi",
+    "msp",
+    "mst",
+    "msu",
+    "appx",
+    "appxbundle",
+    "msix",
+    "msixbundle",
+    "appinstaller",
+    "application",
+    "appref-ms",
+    "gadget",
+    "cab",
+    "hta",
+    "js",
+    "jse",
+    "vb",
+    "vbe",
+    "wsf",
+    "wsh",
+    "ws",
+    "wsc",
+    "sct",
+    "psm1",
+    "psd1",
+    "ps1xml",
+    "psc1",
+    "pyw",
+    "pyz",
+    "reg",
+    "scf",
+    "inf",
+    "msc",
+    "job",
+    "chm",
+    "hlp",
+    "library-ms",
+    "search-ms",
+    "searchconnector-ms",
+    "settingcontent-ms",
+    "website",
+    "theme",
+    "themepack",
+    "diagcab",
+    "diagpkg",
+    "vhd",
+    "vhdx",
+    "img",
+    "docm",
+    "dotm",
+    "xlsm",
+    "xltm",
+    "xlam",
+    "xll",
+    "pptm",
+    "potm",
+    "ppam",
+    "ppsm",
+    "sldm",
+    "ade",
+    "adp",
+    "mde",
+    "accde",
+];
+
+/// The name as Windows resolves it: it drops trailing dots and spaces, so `a.bat.` and
+/// `a.bat ` are `a.bat`.
+fn windows_name(name: &str) -> &str {
+    name.trim_end_matches(['.', ' '])
+}
+
+/// [`opens_unsafely`] for a given system (`windows` adds what only Windows runs and reads
+/// the name as Windows does), so the Windows rules are tested on every host.
+pub fn opens_unsafely_on(name: &str, windows: bool) -> bool {
+    let name = if windows { windows_name(name) } else { name };
+    // `file.txt:other.exe` names an alternate data stream on NTFS.
+    if windows && name.contains(':') {
+        return true;
+    }
     const RISKY: &[&str] = &[
         "app",
         "command",
@@ -166,7 +261,9 @@ pub fn opens_unsafely(name: &str) -> bool {
         .map(|e| e.to_string_lossy().into_owned())
         .unwrap_or_default();
     // A name without an extension may be an executable script.
-    ext.is_empty() || RISKY.contains(&ext.as_str())
+    ext.is_empty()
+        || RISKY.contains(&ext.as_str())
+        || (windows && WINDOWS_RISKY.contains(&ext.as_str()))
 }
 
 /// A page that can run scripts (HTML, XHTML, SVG): it opens in the isolated
@@ -192,14 +289,24 @@ pub enum OpenKind {
 /// Decides from both the attachment's name and the name of the path that opens (macOS
 /// picks the app by the path), so a safe name can never open a file with a risky name.
 pub fn open_kind(name: &str, path: &Path) -> OpenKind {
+    open_kind_on(name, path, cfg!(target_os = "windows"))
+}
+
+/// [`open_kind`] for a given system, so the Windows rules are tested on every host.
+pub fn open_kind_on(name: &str, path: &Path, windows: bool) -> OpenKind {
     let on_disk = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if is_html(name) && is_html(&on_disk) {
+    let (name, on_disk) = if windows {
+        (windows_name(name), windows_name(&on_disk))
+    } else {
+        (name, on_disk.as_str())
+    };
+    let unsafe_name = |n: &str| opens_unsafely_on(n, windows);
+    if is_html(name) && is_html(on_disk) {
         OpenKind::Page
-    } else if opens_unsafely(name) || opens_unsafely(&on_disk) || is_html(name) || is_html(&on_disk)
-    {
+    } else if unsafe_name(name) || unsafe_name(on_disk) || is_html(name) || is_html(on_disk) {
         OpenKind::Reveal
     } else {
         OpenKind::System
@@ -336,6 +443,124 @@ mod tests {
         assert_eq!(size_text(112_400_000), "112.4 MB");
         assert_eq!(size_text(25_600_000), "25.6 MB");
         assert_eq!(size_text(2_400_000_000), "2.4 GB");
+    }
+
+    /// Every type Windows would run, install, mount or follow is only shown in Explorer,
+    /// however the name is cased and whatever dots and spaces trail it.
+    #[test]
+    fn windows_never_opens_what_it_would_run() {
+        let p = |n: &str| std::path::PathBuf::from(format!("/cache/abc/{n}"));
+        let risky = [
+            "exe",
+            "bat",
+            "cmd",
+            "lnk",
+            "ps1",
+            "vbs",
+            "com",
+            "scr",
+            "pif",
+            "msi",
+            "hta",
+            "js",
+            "jse",
+            "vbe",
+            "wsf",
+            "wsh",
+            "reg",
+            "scf",
+            "cpl",
+            "msc",
+            "jar",
+            "url",
+            "chm",
+            "dll",
+            "appx",
+            "msix",
+            "appinstaller",
+            "application",
+            "settingcontent-ms",
+            "library-ms",
+            "website",
+            "iso",
+            "img",
+            "vhd",
+            "vhdx",
+            "docm",
+            "xlsm",
+            "pptm",
+            "psm1",
+            "pyw",
+            "py",
+        ];
+        for ext in risky {
+            for name in [
+                format!("report.{ext}"),
+                format!("report.{}", ext.to_uppercase()),
+                format!("Report.pdf.{ext}"),
+                format!("report.{ext}."),
+                format!("report.{ext} "),
+                format!("report.{ext}. . "),
+                format!("report.{}...", ext.to_uppercase()),
+            ] {
+                assert!(opens_unsafely_on(&name, true), "{name:?}");
+                assert_eq!(
+                    open_kind_on(&name, &p(&name), true),
+                    OpenKind::Reveal,
+                    "{name:?}"
+                );
+                // A safe attachment name over a risky cached name, and the reverse.
+                assert_eq!(open_kind_on("notes.txt", &p(&name), true), OpenKind::Reveal);
+                assert_eq!(open_kind_on(&name, &p("notes.txt"), true), OpenKind::Reveal);
+            }
+        }
+        // HTML never goes to the browser: the 产出 window when both names say so,
+        // Explorer otherwise; trailing dots and spaces do not hide it.
+        for name in [
+            "page.html",
+            "page.HTM",
+            "page.html.",
+            "page.svg ",
+            "page.xhtml. ",
+        ] {
+            assert_ne!(
+                open_kind_on(name, &p(name), true),
+                OpenKind::System,
+                "{name:?}"
+            );
+            assert_eq!(open_kind_on("notes.txt", &p(name), true), OpenKind::Reveal);
+        }
+        // An alternate data stream, and a name with no extension left.
+        assert!(opens_unsafely_on("notes.txt:evil.exe", true));
+        assert!(opens_unsafely_on("notes.", true));
+        assert!(opens_unsafely_on("...", true));
+        // Documents and media still open.
+        for name in [
+            "notes.txt",
+            "a.PDF",
+            "photo.jpg",
+            "sheet.xlsx",
+            "clip.mp4",
+            "notes.txt.",
+        ] {
+            assert_eq!(
+                open_kind_on(name, &p(name), true),
+                OpenKind::System,
+                "{name:?}"
+            );
+        }
+    }
+
+    /// The Windows list and the Windows reading of names apply on Windows only.
+    #[test]
+    fn other_systems_keep_their_own_rules() {
+        assert!(!opens_unsafely_on("saver.scr", false));
+        assert!(!opens_unsafely_on("sheet.xlsm", false));
+        assert!(opens_unsafely_on("run.bat", false));
+        assert_eq!(
+            opens_unsafely("run.bat"),
+            opens_unsafely_on("run.bat", cfg!(windows))
+        );
     }
 
     #[test]

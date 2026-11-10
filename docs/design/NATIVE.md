@@ -215,6 +215,8 @@ shape. The text inside every control is Body 13 pt unless noted.
 - Color: `secondary` in sidebars and rows; `label` in the toolbar; state color only when the symbol
   *is* the state.
 - One symbol per concept. Use this table; add a row here before you use a new concept.
+- Windows draws each concept from an SVG set at the symbol's size, weight and place
+  ([WINDOWS.md](WINDOWS.md) §5); a new concept needs its icon there too.
 
 | Concept | Symbol |
 | --- | --- |

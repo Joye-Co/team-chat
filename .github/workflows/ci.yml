@@ -260,19 +260,103 @@ jobs:
         run: cargo test --locked -p desktop views::media::native -- --nocapture
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
+      # The Windows system integration (docs/plans/windows.zh.md, C1) must pass: the Run key,
+      # the notification-area icon's images, the network adapters, the window menus.
+      - name: cargo test (desktop, Windows system integration)
+        run: >-
+          cargo test --locked -p desktop --
+          settings::login_item:: provider::windows:: provider::system_events::
+          nav::status_item:: nav::tray_icon:: settings::window_fit::
+          files::native:: files::tests:: the_window_menus_drop
       # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
       - name: cargo test (desktop, report only)
         continue-on-error: true
         run: cargo test --locked -p desktop
+      # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
+      # to the HWND, as the app runs, the page must show. The DirectComposition run is the
+      # record of why the app turns it off (the page stays under GPUI's content).
+      - name: Embedded page in a GPUI window (screenshots)
+        run: |
+          cargo build --locked -p desktop --example win_embed_gpui
+          GPUI_DISABLE_DIRECT_COMPOSITION=1 cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/hwnd-swap-chain"
+          cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/direct-composition" \
+            || echo "::notice::with DirectComposition the child window is covered, as expected"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: windows-embed-gpui
+          path: ${{ runner.temp }}/embed-gpui
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The WebView2 backend of crates/artifact-view runs only here: nobody develops on Windows.
+  artifact-view-windows:
+    name: Artifact view (Windows, WebView2)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-artifact-view
+      - name: cargo build (tests and examples)
+        run: cargo build --locked -p artifact-view --tests --examples
+      # Unit tests, then tests/isolation.rs in a real WebView2 (the same assertions as WKWebView).
+      - name: cargo test (isolation in WebView2)
+        env:
+          ARTIFACT_VIEW_ISOLATION_REPORT: ${{ runner.temp }}/artifact-view/isolation.json
+        run: cargo test --locked -p artifact-view --no-fail-fast
+      - name: Embedded view in a host window (screenshots)
+        if: always()
+        run: cargo run --locked -p artifact-view --example win_embed_proto -- "$RUNNER_TEMP/artifact-view/embed"
+      - name: Diagram renderer (PNG per sample)
+        if: always()
+        run: cargo run --locked -p artifact-view --example diagram_selftest -- "$RUNNER_TEMP/artifact-view/diagrams"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: artifact-view-windows
+          path: ${{ runner.temp }}/artifact-view
+          if-no-files-found: warn
+          retention-days: 14
+
+  daemon-windows:
+    name: Daemon tests (Windows)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-daemon
+      # The unit tests, the chat-run client and tests/process_tree.rs: one run of a fake CLI in
+      # a Job Object, with cancel and pause (docs/plans/windows.zh.md, M1). The suites that
+      # need the Python fake CLIs and /bin/sh are Unix only.
+      - name: cargo test (daemon)
+        run: cargo test --locked -p daemon --no-fail-fast
+      - name: cargo check (e2e tool)
+        run: cargo check --locked -p e2e --all-targets
 
   rust-lint:
-    name: Rust fmt and clippy (report only)
+    name: Rust fmt and clippy
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Report only until main is clean: fmt and clippy fail on main today. Remove this line then.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml

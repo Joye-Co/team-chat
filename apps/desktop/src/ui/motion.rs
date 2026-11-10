@@ -31,7 +31,47 @@ fn system_accessibility() -> (bool, bool) {
     )
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: 设置 › 辅助功能 › 视觉效果 › 动画效果 off is "Reduce motion"
+/// (`SPI_GETCLIENTAREAANIMATION`), a 对比度主题 is "Increase contrast"
+/// (`SPI_GETHIGHCONTRAST`).
+#[cfg(target_os = "windows")]
+fn system_accessibility() -> (bool, bool) {
+    use windows::Win32::UI::{
+        Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
+        WindowsAndMessaging::{
+            SPI_GETCLIENTAREAANIMATION, SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            SystemParametersInfoW,
+        },
+    };
+    use windows::core::BOOL;
+    let mut animations = BOOL(1);
+    let mut contrast = HIGHCONTRASTW {
+        cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: each call writes the type its action documents into a valid pointer; on
+    // failure the defaults (animations on, no contrast theme) stay.
+    unsafe {
+        let _ = SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut animations).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+        let _ = SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            contrast.cbSize,
+            Some((&raw mut contrast).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+    }
+    (
+        !animations.as_bool(),
+        contrast.dwFlags.contains(HCF_HIGHCONTRASTON),
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn system_accessibility() -> (bool, bool) {
     (false, false)
 }
@@ -77,7 +117,35 @@ pub fn watch_reduce_motion(cx: &mut App) {
     .detach();
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows tells every top-level window about a changed setting with `WM_SETTINGCHANGE`;
+/// the hidden events window hears it. Call once on the main thread.
+#[cfg(target_os = "windows")]
+pub fn watch_reduce_motion(cx: &mut App) {
+    use futures::StreamExt as _;
+    use windows::Win32::UI::WindowsAndMessaging::WM_SETTINGCHANGE;
+
+    if crate::win32::events_window().is_none() {
+        return;
+    }
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+    crate::win32::on_message(move |_, msg, _, _| {
+        if msg == WM_SETTINGCHANGE {
+            let _ = tx.unbounded_send(());
+        }
+    });
+    cx.spawn(async move |cx| {
+        while rx.next().await.is_some() {
+            cx.update(|cx| {
+                if sync_accessibility(cx) {
+                    crate::theme::refresh_accessibility(cx);
+                }
+            });
+        }
+    })
+    .detach();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn watch_reduce_motion(_cx: &mut App) {}
 
 /// An enter animation: opacity plus the travel that `travel` adds (0 → 1).
