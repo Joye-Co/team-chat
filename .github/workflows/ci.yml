@@ -10,6 +10,10 @@ on:
         description: Also build the macOS desktop DMG (macOS minutes cost 10x)
         type: boolean
         default: true
+      windows_scenes:
+        description: Scenes of the Windows screenshot self-test, comma separated (empty = the main screens, all = every scene)
+        type: string
+        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -86,6 +90,7 @@ jobs:
             desktop:
               - *rust
               - apps/desktop/**
+              - scripts/windows-screenshots.sh
               - assets/**
               - third_party/**
 
@@ -221,8 +226,28 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-test
+          # The screenshot step can fail while the port is young; keep the build for the next run.
+          cache-on-failure: true
       - name: cargo build
         run: cargo build --locked -p desktop
+      # How to use the screenshots: docs/plans/windows.zh.md, 「怎么看 Windows 界面」.
+      # The runner's screen is 1024x768 and Windows keeps a window inside the screen.
+      - name: Set the screen to 1920x1080
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+      - name: Screenshot self-test (light and dark)
+        env:
+          SCENES: ${{ inputs.windows_scenes }}
+          RUST_BACKTRACE: "1"
+        run: scripts/windows-screenshots.sh "$RUNNER_TEMP/windows-screenshots"
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-screenshots
+          path: ${{ runner.temp }}/windows-screenshots
+          if-no-files-found: warn
+          retention-days: 14
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
       # The Windows system integration (docs/plans/windows.zh.md, C1) must pass: the Run key,

@@ -23,7 +23,7 @@ use crate::{
         native::{
             Alert, AlertTone, Badge, NativeType as _, PushSize, PushStyle, SearchField, Segment,
             Segmented, StatusBadge, TruncText, card_surface, native_colors, progress, push_button,
-            tokens::{avatar, height, metrics, monitor as t, radius, space},
+            tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
     },
@@ -349,7 +349,7 @@ impl AdminView {
                     .child(div().flex_1().min_w(gpui::Pixels::ZERO).child(table))
                     .child(
                         div()
-                            .w(metrics::INSPECTOR_WIDTH)
+                            .w(t::MEMBER_INSPECTOR)
                             .flex_none()
                             .child(self.member_inspector(window, cx)),
                     ),
