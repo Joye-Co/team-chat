@@ -20,6 +20,16 @@ name: Release
 # Secrets (docs/RUNBOOK.md, "Release from GitHub Actions"): SIGNING_KEY_PEM, SIGNING_CERT_PEM,
 # ADMIN_SECRET_PRODUCTION. A release refuses to run without them: an ad-hoc signature would
 # change the designated requirement and the Keychain would stop trusting the app.
+#
+# Windows: the job "Windows installer" builds, signs and tests <name>-<version>-setup.exe on a
+# Windows runner in the modes dry-run and release, from the same commit with the version set in
+# its working tree. "Publish the Windows installer" then adds it to the GitHub Release and
+# uploads it to production as the Windows file of the release (release), or uploads the
+# installer of the GitHub Release again (upload-only). Both wait for nothing a Mac does except
+# the GitHub Release itself. A prerelease has no Windows installer (the app updates only to
+# MAJOR.MINOR.PATCH). Optional secrets WINDOWS_SIGN_PFX_BASE64 and WINDOWS_SIGN_PASSWORD (a
+# code-signing certificate as a base64 PFX): without them the installer is not signed and
+# Windows shows the SmartScreen warning.
 
 on:
   workflow_dispatch:
@@ -218,3 +228,200 @@ jobs:
       - name: Remove the secret files
         if: always()
         run: rm -rf "$RUNNER_TEMP/signing" "$RUNNER_TEMP/team-chat"
+
+  windows:
+    name: Windows installer ${{ inputs.version }} (${{ inputs.mode }})
+    # A prerelease is not offered as an app update and gets no installer.
+    if: inputs.mode != 'upload-only' && !contains(inputs.version, '-')
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      MODE: ${{ inputs.mode }}
+      INPUT_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check the inputs
+        run: |
+          version="${INPUT_VERSION#v}"
+          if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::'$INPUT_VERSION' is not a version like 1.2.6"
+            exit 1
+          fi
+          if [ "$MODE" != dry-run ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::mode $MODE runs only on main (this run is on $GITHUB_REF); use dry-run on a branch"
+            exit 1
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Write the server URLs
+        # The same URLs the Mac build embeds (the app's server menu): the repository variable
+        # SERVERS_JSON, as an ops folder that holds servers.json alone.
+        env:
+          TC_SERVERS_JSON: ${{ vars.SERVERS_JSON }}
+        run: |
+          if ! printf '%s' "$TC_SERVERS_JSON" | jq -e '.production | strings' >/dev/null 2>&1; then
+            echo "::error::set the repository variable SERVERS_JSON to {\"staging\": \"<url>\", \"production\": \"<url>\"}; see docs/ENVIRONMENTS.md"
+            exit 1
+          fi
+          dir="$RUNNER_TEMP/release-ops"
+          mkdir -p "$dir/deploy"
+          printf '%s' "$TC_SERVERS_JSON" | jq -c . >"$dir/deploy/servers.json"
+          echo "TC_OPS_DIR=$(cygpath -w "$dir")" >>"$GITHUB_ENV"
+
+      - name: Import the signing certificate
+        # Into the runner user's certificate store, so no password is on a command line. The
+        # thumbprint is public: it is in every signed file.
+        shell: pwsh
+        env:
+          WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_SIGN_PFX_BASE64) {
+            Write-Output "::warning::WINDOWS_SIGN_PFX_BASE64 is missing: the installer is not signed, and Windows shows the SmartScreen warning when it runs"
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGN_PFX_BASE64))
+          try {
+            $password = New-Object System.Security.SecureString
+            foreach ($c in $env:WINDOWS_SIGN_PASSWORD.ToCharArray()) { $password.AppendChar($c) }
+            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          } finally {
+            Remove-Item -LiteralPath $pfx -Force
+          }
+          "WINDOWS_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          # A time stamp keeps the signature valid after the certificate expires.
+          "WINDOWS_SIGN_TIMESTAMP_URL=http://timestamp.digicert.com" >> $env:GITHUB_ENV
+          Write-Output "signing as: $($cert.Subject)"
+
+      - name: Install NSIS
+        run: |
+          if ! command -v makensis >/dev/null 2>&1 && [ ! -x "/c/Program Files (x86)/NSIS/makensis.exe" ]; then
+            choco install nsis -y --no-progress
+          fi
+
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-release
+
+      - name: Set the version
+        # As scripts/release.sh does on the Mac: the version in the working tree, nothing
+        # committed here. The release commit on main comes from the macOS job.
+        run: |
+          cargo fetch --locked
+          . scripts/lib.sh
+          set_workspace_version "$VERSION"
+          cargo update --workspace --offline
+
+      - name: Build the installer
+        run: scripts/build-windows-installer.sh
+
+      # The installer test draws one screen of the installed app.
+      - name: Set the screen to 1920x1080
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+
+      - name: Test the installer (install, check, start, uninstall)
+        run: |
+          if [ -n "${WINDOWS_SIGN_THUMBPRINT:-}" ]; then export EXPECT_SIGNED=1; fi
+          scripts/test-windows-installer.sh
+
+      - name: Keep the installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer-${{ env.VERSION }}
+          path: dist/*-setup.exe*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove the signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_SIGN_THUMBPRINT) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:WINDOWS_SIGN_THUMBPRINT" -DeleteKey -ErrorAction SilentlyContinue
+          }
+
+  windows-publish:
+    name: Publish the Windows installer ${{ inputs.version }} (${{ inputs.mode }})
+    # After the GitHub Release exists. In upload-only mode the Windows job did not run.
+    needs: [release, windows]
+    if: >-
+      !cancelled() && !contains(inputs.version, '-') && needs.release.result == 'success' &&
+      ((inputs.mode == 'release' && needs.windows.result == 'success') || inputs.mode == 'upload-only')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MODE: ${{ inputs.mode }}
+      INPUT_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the inputs
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::mode $MODE runs only on main"; exit 1; }
+          echo "VERSION=${INPUT_VERSION#v}" >>"$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the server URLs
+        env:
+          TC_SERVERS_JSON: ${{ vars.SERVERS_JSON }}
+        run: |
+          if ! printf '%s' "$TC_SERVERS_JSON" | jq -e '.production | strings' >/dev/null 2>&1; then
+            echo "::error::set the repository variable SERVERS_JSON; see docs/ENVIRONMENTS.md"
+            exit 1
+          fi
+          echo "TC_SERVERS_JSON=$(printf '%s' "$TC_SERVERS_JSON" | jq -c .)" >>"$GITHUB_ENV"
+
+      - name: Write the admin secret
+        env:
+          ADMIN_SECRET_PRODUCTION: ${{ secrets.ADMIN_SECRET_PRODUCTION }}
+        run: |
+          if [ -z "$ADMIN_SECRET_PRODUCTION" ]; then
+            echo "::error::the secret ADMIN_SECRET_PRODUCTION is missing, so the installer cannot be uploaded to production; see docs/RUNBOOK.md"
+            exit 1
+          fi
+          # release.sh reads $TEAM_CHAT_CONFIG_DIR/production/admin-secret and never prints it.
+          config="$RUNNER_TEMP/team-chat"
+          (umask 077; mkdir -p "$config/production"
+           printf '%s' "$ADMIN_SECRET_PRODUCTION" >"$config/production/admin-secret")
+          echo "TEAM_CHAT_CONFIG_DIR=$config" >>"$GITHUB_ENV"
+
+      - name: Get the installer built by the Windows job
+        if: inputs.mode == 'release'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-${{ env.VERSION }}
+          path: dist
+
+      - name: Get the installer of the GitHub Release
+        if: inputs.mode == 'upload-only'
+        run: |
+          mkdir -p dist
+          if ! gh release download "v$VERSION" --pattern '*-setup.exe' --pattern '*-setup.exe.sha256' --dir dist; then
+            echo "::notice::release v$VERSION has no Windows installer; nothing to upload"
+            echo "NO_INSTALLER=1" >>"$GITHUB_ENV"
+          fi
+
+      - name: Publish
+        if: env.NO_INSTALLER != '1'
+        run: |
+          (cd dist && sha256sum -c ./*-setup.exe.sha256)
+          if [ "$MODE" = release ]; then
+            gh release upload "v$VERSION" dist/*-setup.exe dist/*-setup.exe.sha256 --clobber
+          fi
+          args=("$VERSION" --env production --upload-only --platform windows)
+          notes="docs/releases/$VERSION.md"
+          [ -f "$notes" ] && args+=(--notes "$notes")
+          scripts/release.sh "${args[@]}"
+
+      - name: Remove the secret files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/team-chat"

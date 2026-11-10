@@ -39,6 +39,7 @@ jobs:
       rust: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' }}
       ops: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.ops == 'true' }}
       desktop: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.desktop == 'true' }}
+      installer: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.installer == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -74,6 +75,7 @@ jobs:
               - product.json
               - crates/**
               - apps/daemon/**
+              - apps/update-helper/**
               - protocol/**
             # ops/restore's config test reads server/wrangler.jsonc and ops/monitor/wrangler.jsonc.
             ops:
@@ -93,6 +95,29 @@ jobs:
               - scripts/windows-screenshots.sh
               - assets/**
               - third_party/**
+            # The Windows installer, the update helper and the app's updater: a release build,
+            # so only what can change them.
+            installer:
+              - *common
+              - .github/workflows/release.yml
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+              - product.json
+              - scripts/build-windows-installer.sh
+              - scripts/test-windows-installer.sh
+              - scripts/test-windows-update.sh
+              - scripts/windows/**
+              - apps/update-helper/**
+              - apps/desktop/build.rs
+              - apps/desktop/Cargo.toml
+              - apps/desktop/src/main.rs
+              - apps/desktop/src/updater/**
+              - crates/chat-core/src/updates.rs
+              - crates/chat-protocol/src/updates.rs
+              - server/src/files/**
+              - server/migrations/**
+              - assets/brand/AppIcon.ico
 
   packages:
     name: Packages (bun)
@@ -149,7 +174,7 @@ jobs:
         with:
           shared-key: linux-test
       - name: cargo test
-        run: cargo test --locked -p chat-protocol -p chat-core -p daemon
+        run: cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper
 
   daemon-e2e:
     name: Daemon local e2e (Linux, fake Claude and Codex)
@@ -278,6 +303,115 @@ jobs:
         run: cargo test --locked -p daemon --no-fail-fast
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
+
+  # The Windows release from end to end (docs/plans/windows.zh.md, R1): a release build of the
+  # app, the update helper and the daemon, the NSIS installer, a silent install with its files,
+  # registry entries and shortcut, the installed app's start, the uninstall; then the app's own
+  # update from this version to the next one against a local server, a rollback, and the same
+  # with installers signed by a certificate made for this run.
+  windows-installer:
+    name: Windows installer and update (install, update, roll back, uninstall)
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-release
+          # The install and update steps can fail while the port is young; keep the build.
+          cache-on-failure: true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.10
+      # wrangler, for the local server of the update test.
+      - run: bun install --frozen-lockfile
+      - name: Install NSIS
+        run: |
+          if ! command -v makensis >/dev/null 2>&1 && [ ! -x "/c/Program Files (x86)/NSIS/makensis.exe" ]; then
+            choco install nsis -y --no-progress
+          fi
+      # The installer test draws one screen of the installed app; see desktop-windows.
+      - name: Set the screen to 1920x1080
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+      - name: Make a signing certificate for this run
+        # A self-signed code-signing certificate that only this runner trusts. It stands in for
+        # the operator's certificate, so the signing step and the same-publisher rule of the
+        # update helper run here too. Nothing signed with it leaves the runner.
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=CI Test Publisher" `
+            -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(2)
+          $file = Join-Path $env:RUNNER_TEMP "ci-test-publisher.cer"
+          Export-Certificate -Cert $cert -FilePath $file | Out-Null
+          Import-Certificate -FilePath $file -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath $file -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+          "TEST_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Build the installer
+        run: |
+          . scripts/lib.sh
+          a="$(workspace_version)"
+          IFS=. read -r major minor patch <<<"$a"
+          echo "A_VERSION=$a" >>"$GITHUB_ENV"
+          echo "B_VERSION=$major.$minor.$((patch + 1))" >>"$GITHUB_ENV"
+          echo "APP_NAME=$(product name)" >>"$GITHUB_ENV"
+          DIST=dist/unsigned scripts/build-windows-installer.sh
+      - name: Pack the same build signed
+        run: WINDOWS_SIGN_THUMBPRINT="$TEST_SIGN_THUMBPRINT" DIST=dist/signed scripts/build-windows-installer.sh --skip-build
+      - name: Upload the installer
+        # Unsigned, as a build without the operator's certificate is: for a look on a real
+        # Windows machine. Not a release.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer
+          path: dist/unsigned/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Test the installer (install, check, start, uninstall)
+        run: scripts/test-windows-installer.sh "dist/unsigned/$APP_NAME-$A_VERSION-setup.exe"
+      - name: Test the signed installer
+        run: EXPECT_SIGNED=1 scripts/test-windows-installer.sh "dist/signed/$APP_NAME-$A_VERSION-setup.exe"
+      - name: Build the next version (the update of the test)
+        # The version is compiled into the app, so the update is a second build. Only the
+        # workspace crates compile again.
+        run: |
+          . scripts/lib.sh
+          set_workspace_version "$B_VERSION"
+          cargo update --workspace --offline
+          DIST=dist/unsigned scripts/build-windows-installer.sh
+          WINDOWS_SIGN_THUMBPRINT="$TEST_SIGN_THUMBPRINT" DIST=dist/signed scripts/build-windows-installer.sh --skip-build
+      - name: Test the update (the installed app updates itself, then a rollback)
+        run: scripts/test-windows-update.sh "dist/unsigned/$APP_NAME-$A_VERSION-setup.exe" "dist/unsigned/$APP_NAME-$B_VERSION-setup.exe"
+      - name: Test the update of a signed app
+        run: EXPECT_SIGNED=1 scripts/test-windows-update.sh "dist/signed/$APP_NAME-$A_VERSION-setup.exe" "dist/signed/$APP_NAME-$B_VERSION-setup.exe" 8836
+      - name: Upload the test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer-logs
+          path: |
+            .tmp/windows-installer
+            .tmp/windows-update
+            !.tmp/windows-update/state
+            !.tmp/windows-update/**/*.exe
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Remove the signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:TEST_SIGN_THUMBPRINT) {
+            foreach ($store in "Cert:\CurrentUser\My", "Cert:\LocalMachine\Root", "Cert:\LocalMachine\TrustedPublisher") {
+              Remove-Item -LiteralPath "$store\$env:TEST_SIGN_THUMBPRINT" -DeleteKey -ErrorAction SilentlyContinue
+            }
+          }
 
   rust-lint:
     name: Rust fmt and clippy (report only)
