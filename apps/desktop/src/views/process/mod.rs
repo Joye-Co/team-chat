@@ -446,7 +446,11 @@ impl ProcessView {
                     .find(|p| p.state == crate::data::PlanState::Current)
                     .map(|p| crate::markdown::clip(&p.text, 120))
             });
-        let second = [took, about].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+        let second = [took, about]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
         div()
             .id(gpui::ElementId::Name(format!("run-{}", run.id).into()))
             .focus_row(selected, cx)
