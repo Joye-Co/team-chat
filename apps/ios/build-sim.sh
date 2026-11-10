@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Builds the iPhone client for the simulator without an Xcode project:
+# Builds the iPhone client for the simulator:
 #   1. chat-ffi as a static library for the simulator, and for the host (the binding generator
 #      reads the host library)
 #   2. the Swift bindings (UniFFI)
-#   3. the app bundle with swiftc
-# Output: .tmp/ios/<name>.app, printed on the last line. Run it from anywhere.
+#   3. the Xcode project from project.yml (XcodeGen: brew install xcodegen)
+#   4. the app and its two extensions with xcodebuild
+# Output: the .app, printed on the last line. Run it from anywhere.
 #
 #   apps/ios/build-sim.sh            build
 #   apps/ios/build-sim.sh --run      build, install on the booted simulator and launch it signed
@@ -20,9 +21,9 @@ MIN_OS=17.0
 NAME="$(jq -r .name "$ROOT/product.json")"
 BUNDLE_ID="$(jq -r .bundleId "$ROOT/product.json").mobile"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
-APP="$OUT/$NAME.app"
+APP="$OUT/derived/Build/Products/Debug-iphonesimulator/Mobile.app"
 
-. "$HOME/.cargo/env"
+[[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
 command -v sccache >/dev/null 2>&1 && export RUSTC_WRAPPER=sccache
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}" CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/.tmp/target-ios}"
@@ -30,45 +31,30 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/.tmp/target-ios}"
 export IPHONEOS_DEPLOYMENT_TARGET="$MIN_OS"
 
 cd "$ROOT"
-cargo build -p chat-ffi --target "$TRIPLE"
-cargo build -p chat-ffi
+cargo build --locked -p chat-ffi --target "$TRIPLE"
+cargo build --locked -p chat-ffi
 
-rm -rf "$GEN" "$APP"
-mkdir -p "$GEN" "$APP"
-cargo run -q -p chat-ffi --features cli --bin uniffi-bindgen -- \
+rm -rf "$GEN"
+mkdir -p "$GEN"
+cargo run --locked -q -p chat-ffi --features cli --bin uniffi-bindgen -- \
   generate --library "$CARGO_TARGET_DIR/debug/libchat_ffi.dylib" --language swift --out-dir "$GEN"
 
-SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-xcrun --sdk iphonesimulator swiftc \
-  -target "arm64-apple-ios$MIN_OS-simulator" -sdk "$SDK" \
-  -parse-as-library -module-name Mobile \
-  -I "$GEN" -Xcc "-fmodule-map-file=$GEN/chat_ffiFFI.modulemap" \
-  "$ROOT"/apps/ios/Sources/*.swift "$GEN/chat_ffi.swift" \
-  "$CARGO_TARGET_DIR/$TRIPLE/debug/libchat_ffi.a" \
-  -framework SystemConfiguration -framework Security -framework CoreFoundation \
-  -o "$APP/Mobile"
-
-cat > "$APP/Info.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-<key>CFBundleExecutable</key><string>Mobile</string>
-<key>CFBundleName</key><string>$NAME</string>
-<key>CFBundleDisplayName</key><string>$NAME</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>$VERSION</string>
-<key>CFBundleVersion</key><string>1</string>
-<key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
-<key>LSRequiresIPhoneOS</key><true/>
-<key>MinimumOSVersion</key><string>$MIN_OS</string>
-<key>UIDeviceFamily</key><array><integer>1</integer></array>
-<key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>
-<key>UILaunchScreen</key><dict/>
-<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
-</dict></plist>
+# What project.yml cannot know: the product (product.json), the version and where the core is.
+cat > "$OUT/Product.xcconfig" <<EOF
+PRODUCT_DISPLAY_NAME = $NAME
+APP_BUNDLE_ID = $BUNDLE_ID
+APP_VERSION = $VERSION
+IPHONEOS_DEPLOYMENT_TARGET = $MIN_OS
+CORE_GEN_DIR = $GEN
+CORE_LIB_DIR = $CARGO_TARGET_DIR/$TRIPLE/debug
 EOF
-codesign --force --sign - "$APP" >/dev/null 2>&1
+
+command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen is missing: brew install xcodegen" >&2; exit 1; }
+xcodegen generate --quiet --spec "$ROOT/apps/ios/project.yml"
+# Rust targets one architecture here, so build only that one.
+xcodebuild -quiet -project "$ROOT/apps/ios/Mobile.xcodeproj" -scheme Mobile -configuration Debug \
+  -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath "$OUT/derived" \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=NO build
 
 if [[ "${1:-}" == "--run" ]]; then
   SANDBOX="$ROOT/.tmp/sandbox"
