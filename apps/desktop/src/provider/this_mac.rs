@@ -407,20 +407,25 @@ fn sid_in(csv: &str) -> Option<String> {
     ok.then(|| last.to_string())
 }
 
-/// Makes `dir` a folder only this user can open: inherited entries (SYSTEM, administrators,
-/// whatever the parent folder gives) are dropped and one entry is set, full control for this
-/// user, inherited by the files made in it afterwards. `icacls` does it because the app has no
-/// access-list code; when the daemon's own helpers exist (`apps/daemon/src/sys.rs`), the daemon
-/// should do this in `install-service` and this call goes away.
+/// Makes `dir` a private folder: nothing inherited from the parent folder, and exactly three
+/// entries, full control for this user, SYSTEM and Administrators (who can read any file on
+/// the computer anyway), inherited by the files made in it afterwards. The same set the
+/// install script writes and the daemon accepts. Two `icacls` runs, because the app has no
+/// access-list code: the first drops everything inherited, the second sets the three entries.
+/// When the daemon's own helpers exist (`apps/daemon/src/sys.rs`), the daemon should do this
+/// in `install-service` and this call goes away.
 #[cfg(windows)]
 fn only_this_user(dir: &Path) -> Result<(), String> {
     let sid = user_sid()?;
-    let mut cmd = system_command("icacls.exe");
-    cmd.arg(dir)
-        .arg("/inheritance:r")
-        .arg("/grant:r")
-        .arg(format!("*{sid}:(OI)(CI)F"));
-    run_quiet(cmd, "icacls").map(|_| ())
+    let mut cut = system_command("icacls.exe");
+    cut.arg(dir).arg("/inheritance:r");
+    run_quiet(cut, "icacls")?;
+    let mut grant = system_command("icacls.exe");
+    grant.arg(dir).arg("/grant:r");
+    for who in [sid.as_str(), "S-1-5-18", "S-1-5-32-544"] {
+        grant.arg(format!("*{who}:(OI)(CI)F"));
+    }
+    run_quiet(grant, "icacls").map(|_| ())
 }
 
 /// Restarts the daemon service now (`launchctl kickstart -k`): it starts again from the
@@ -458,8 +463,8 @@ pub(super) struct NewMachine {
     pub token: String,
 }
 
-/// Writes the config and token of a new machine (folder 700, files 600; on Windows a folder
-/// only this user can open, set before the token is written into it). An existing config is
+/// Writes the config and token of a new machine (folder 700, files 600; on Windows a private
+/// folder, made so before the token is written into it). An existing config is
 /// kept as it is: it already names a machine and its token.
 fn write_config(new: &NewMachine) -> Result<(), String> {
     let dir = config_dir();

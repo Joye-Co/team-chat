@@ -97,12 +97,15 @@ try {
     Assert ($config.Contains('labels = ["windows", "ci"]')) 'the config has the labels'
     Assert ([IO.File]::ReadAllText((Join-Path $configDir 'machine-token')) -eq $token) 'the token file holds the token'
 
-    # Only this user may open the config folder and the token in it.
+    # The config folder and the token in it are private: this user, SYSTEM and Administrators,
+    # nobody else, and nothing inherited from the parent folder.
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $allowed = @($me, 'S-1-5-18', 'S-1-5-32-544')
     foreach ($path in @($configDir, (Join-Path $configDir 'machine-token'), (Join-Path $configDir 'daemon.toml'))) {
         $acl = Get-Acl -LiteralPath $path
         $who = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
-        Assert ($who.Count -eq 1 -and $who[0] -eq $me) "only this user ($me) is on the access list of $(Split-Path -Leaf $path): $($who -join ', ')"
+        $others = @($who | Where-Object { $allowed -notcontains $_ })
+        Assert ($who -contains $me -and $others.Count -eq 0) "only this user, SYSTEM and Administrators are on the access list of $(Split-Path -Leaf $path): $($who -join ', ')"
     }
     Assert ((Get-Acl -LiteralPath $configDir).AreAccessRulesProtected) 'the config folder inherits no access from its parent'
 

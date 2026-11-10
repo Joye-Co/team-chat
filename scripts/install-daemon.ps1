@@ -4,7 +4,7 @@ Makes this Windows computer one of the team's machines without the desktop app.
 
 .DESCRIPTION
 Downloads the machine daemon over HTTPS, checks it against the SHA-256 you give, writes the daemon config and the machine
-token into a folder only you can open, and registers the daemon as a scheduled task of your
+token into a private folder (you, SYSTEM and Administrators; nothing inherited), and registers the daemon as a scheduled task of your
 user (it starts when you log on and is started again when it ends). Run it as the user whose
 CLI logins (Claude Code, Codex) the bots should use, in Windows PowerShell 5.1 or later. It
 needs no administrator rights.
@@ -161,12 +161,18 @@ if ($Update) {
     return
 }
 
-# 3. A config folder only this user can open, before the token is written into it.
+# 3. A private config folder, before the token is written into it: nothing inherited from the
+#    parent folder, and exactly three entries (you, SYSTEM, Administrators), which the files
+#    made in it inherit. The same set the app writes and the daemon accepts.
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
-& $icacls $configDir /inheritance:r /grant:r "*${sid}:(OI)(CI)F" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Could not restrict $configDir to your user (icacls exit code $LASTEXITCODE)." }
+$acl = New-Object Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true, $false)
+$inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+foreach ($who in @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')) {
+    $sid = New-Object Security.Principal.SecurityIdentifier $who
+    $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', $inherit, 'None', 'Allow')))
+}
+[IO.Directory]::SetAccessControl($configDir, $acl)
 
 # 4. The token: from a file, or typed without showing it. Never printed.
 if ($TokenFile) {

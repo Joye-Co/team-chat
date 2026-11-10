@@ -62,7 +62,7 @@ M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之�
 | `runtime/pty.rs`（没有结构化协议的 CLI） | `openpty`、`setsid` | ConPTY |
 | `service.rs`、`selfupdate.rs` | launchd、systemd；程序文件被替换后退出，由服务管理器重启 | 当前用户的计划任务（登录时启动，结束后一分钟内再启动）。不能用 Windows 服务：服务跑在别的会话里，读不到用户的 CLI 登录状态。更新时先把运行中的 exe 改名再放新文件。已完成，见 M3 |
 | `health.rs`、`doctor.rs`（找 CLI） | 查 `PATH`、可执行位 | 按 `PATHEXT` 找，npm 装的 CLI 是 `.cmd` 文件，启动时要正确转义参数 |
-| 文件权限（配置、token、运行目录） | 0600 / 0700 | 放在用户目录下靠默认 ACL；配置文件夹（里面有机器 token）改成只有当前用户能打开，见 M3 |
+| 文件权限（配置、token、运行目录） | 0600 / 0700 | 放在用户目录下靠默认 ACL；配置文件夹（里面有机器 token）改成只有当前用户、SYSTEM 和 Administrators 能打开，见 M3 |
 | `workspace.rs`（git worktree、运行目录） | — | 打开长路径支持并用短的工作目录；删除运行目录时处理文件被占用 |
 | `runtime/claude.rs`（找原始会话文件） | 按 Unix 路径算目录名 | 按 Windows 路径（盘符、反斜杠）算 |
 
@@ -336,7 +336,7 @@ M1 里发现、留给后面的：
   文件，要用 ACL 才行。
 - **自己更新**：M3 已做，见下面的「替换协议」。
 - **机器 token**：仍然是用户目录下的文件，没有放进 Credential Manager（计划任务里的 daemon 也要读它，
-  文件更简单）；M3 把它所在的文件夹改成只有当前用户能打开。
+  文件更简单）；M3 把它所在的文件夹改成只有当前用户、SYSTEM 和 Administrators 能打开。
 - **要在真机上核实的**：真的 Claude Code 和 Codex 各跑一个 run；它们的 Windows 版把登录放在哪
   （`%USERPROFILE%\.claude`、`%USERPROFILE%\.codex`，还是 Credential Manager），daemon 清空环境变量后它们
   还能不能读到；Claude Code 在 Windows 上的会话目录名规则是否和上面一致；Claude Code 需要的 Git for
@@ -406,7 +406,9 @@ M1 里发现、留给后面的：
   - daemon 是安装目录里和客户端 exe 放在一起的 `<slug>-daemon.exe`（**R1 的安装包要按这个名字放**）。
     debug 构建、或者 exe 在 cargo 的 `target` 文件夹里时一律当作没有 daemon，不会接管已安装的那一个；
   - 配置和机器 token 写在 `%USERPROFILE%\.config\<slug>\`（和 daemon 默认找的位置一致）。写 token 之前先用
-    `icacls` 把这个文件夹的继承关掉，只留当前用户一条完全控制，文件夹里之后建的文件都继承这一条。
+    `icacls` 把这个文件夹的继承关掉，只留三条完全控制：当前用户、SYSTEM、Administrators（后两个本来就能读
+    这台电脑上的任何文件），文件夹里之后建的文件都继承这三条。安装脚本写的、daemon 认可的是同一组，和
+    M2 在 `sys.rs` 里的规则一致。
     token 只写进文件，不上命令行、不进日志；
   - 然后运行 `<slug>-daemon.exe install-service`（不弹窗口）。状态读 `task.xml`：没有就是没设置，里面的
     程序是自己旁边的 daemon 就是正常，是别处的就是「别处」。重启是运行 `<slug>-daemon.exe restart-service`；
@@ -416,7 +418,7 @@ M1 里发现、留给后面的：
     客户端的 `only_this_user` 和安装脚本里的 `icacls` 都可以删掉。
 - **PowerShell 安装命令**（`scripts/install-daemon.ps1`，用法在 `docs/bots.md` 第 6 节）：给不装客户端的
   机器。下载 daemon（只接受 https）、用命令行给的 `-Sha256` 校验（下载时必填；哈希必须来自下载地址以外的
-  可信来源，脚本不会去下载地址旁边取；不对就什么都不装）、写配置和 token（文件夹只有当前用户能打开，token
+  可信来源，脚本不会去下载地址旁边取；不对就什么都不装）、写配置和 token（文件夹只有当前用户、SYSTEM 和 Administrators 能打开，token
   不回显地输入或从文件读，不上命令行）、跑 `doctor`、`install-service`。`-Update` 只按替换协议换程序。
   Windows PowerShell 5.1 能跑，不需要管理员权限。**R1 要出的发布产物**：
   `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe` 和同名的 `.sha256`。
@@ -436,7 +438,7 @@ M1 里发现、留给后面的：
   - 同一个测试程序还检查：放在 `C:\Users\Public` 下的程序被 `install-service` 拒绝；注册下来的任务带着
     「登录时」触发器（用 SID 写的用户被任务计划程序接受了）。
   - `scripts/test-install-daemon.ps1`（用 Windows PowerShell 5.1 跑）：用刚编译的真 daemon 走一遍安装命令。
-    SHA-256 不对、下载地址不是 https、下载时没给 `-Sha256`，都什么都没装；配置文件夹和 token 的访问列表里只有当前用户；任务注册了，真 daemon 在跑、
+    SHA-256 不对、下载地址不是 https、下载时没给 `-Sha256`，都什么都没装；配置文件夹和 token 的访问列表里只有当前用户、SYSTEM 和 Administrators，且不继承上层；任务注册了，真 daemon 在跑、
     没有窗口、日志写出来了；`-Update` 之后真 daemon 自己发现新版本、退出、被任务重新启动、旧文件被删；
     日志里没有 token；卸载后任务和进程都没了。
   - 另有一步只报告不拦截：新建一个没有管理员权限的本地用户，用它运行 `install-service`，看注册是否被拒。

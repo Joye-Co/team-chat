@@ -462,7 +462,7 @@ set it up once per machine:
    where you trust the release (the release page, your operator), never from the download
    location itself; the script does not fetch it. It asks for the machine token
    without showing it (or reads `-TokenFile`), writes `%USERPROFILE%\.config\team-chat\daemon.toml`
-   and the token into a folder only your user can open, runs `doctor`, and registers the
+   and the token into a private folder (your user, SYSTEM and Administrators; nothing inherited), runs `doctor`, and registers the
    scheduled task with `install-service`. `-DaemonFile <path>` takes a daemon that is already on
    the computer. `install-service` refuses a daemon in a folder that other users of the computer
    can change (the task would run whatever they put there as you). The log is
@@ -645,7 +645,7 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
    [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) 下载 daemon(只接受 https)并用 `-Sha256`
    校验。下载时 `-Sha256` 必填:哈希要从你信任的地方拿(发布页、运营方),不能从下载地址旁边拿,脚本也
    不会去取。daemon 所在的文件夹如果别的用户能改,`install-service` 会拒绝。脚本不回显地问机器令牌(或用 `-TokenFile` 读文件),把
-   `%USERPROFILE%\.config\team-chat\daemon.toml` 和令牌写进只有当前用户能打开的文件夹,运行 `doctor`,
+   `%USERPROFILE%\.config\team-chat\daemon.toml` 和令牌写进只有当前用户、SYSTEM 和 Administrators 能打开的文件夹,运行 `doctor`,
    再用 `install-service` 注册计划任务。`-DaemonFile <路径>` 用电脑上已有的 daemon。日志在
    `%LOCALAPPDATA%\team-chat-daemon\daemon.log`。以后更新运行 `install-daemon.ps1 -Update -DaemonUrl <地址> -Sha256 <hex>`:
    随时可以运行,daemon 等手上没有活的时候自己换到新版本。
