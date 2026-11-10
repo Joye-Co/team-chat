@@ -230,6 +230,11 @@ jobs:
           cache-on-failure: true
       - name: cargo build
         run: cargo build --locked -p desktop
+      # Windows Server comes without Media Foundation (video and audio decoders, the media
+      # player); Windows 10 and 11 have it. The media previews and their tests need it.
+      - name: Install Media Foundation
+        shell: pwsh
+        run: Install-WindowsFeature Server-Media-Foundation
       # How to use the screenshots: docs/plans/windows.zh.md, 「怎么看 Windows 界面」.
       # The runner's screen is 1024x768 and Windows keeps a window inside the screen.
       - name: Set the screen to 1920x1080
@@ -250,6 +255,10 @@ jobs:
           retention-days: 14
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
+      # Video frames, audio peaks and playback, PDF pages on the system's own decoders
+      # (src/views/media/native_windows.rs).
+      - name: cargo test (media previews)
+        run: cargo test --locked -p desktop views::media::native -- --nocapture
       # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
       - name: cargo test (desktop, report only)
         continue-on-error: true

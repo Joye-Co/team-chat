@@ -31,7 +31,7 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 | --- | --- | --- |
 | `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2：虚拟主机或 `WebResourceRequested` 提供内容，请求拦截做网络封锁，子 HWND 嵌入 |
 | `src/diagrams`（Mermaid 图） | 隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例 |
-| `src/views/media/native.rs`（音视频、PDF 预览） | AVFoundation、AVFAudio、PDFKit | Media Foundation 加 `Windows.Data.Pdf` |
+| `src/views/media/native.rs`（音视频、PDF 预览） | AVFoundation、AVFAudio、PDFKit | 已完成（C3）：Media Foundation、`Windows.Data.Pdf`、`Windows.Media.Playback` |
 | `src/provider/macos.rs`（通知、睡眠唤醒、网络变化） | `UNUserNotificationCenter`、`NSWorkspace` | WinRT Toast（需要 AUMID）、`WM_POWERBROADCAST`、`NotifyIpInterfaceChange` |
 | `crates/chat-core/src/token.rs` | Keychain | Windows Credential Manager |
 | `src/views/settings/login_item.rs`（开机启动） | `SMAppService` | `HKCU\...\Run` |
@@ -137,6 +137,31 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 完成标准：两个平台通过同一套隔离测试，Mermaid 图能显示。
 
 **C3 媒体和文件（约 2 周）**：视频首帧和时长、音频波形和播放、PDF 预览；打开、定位、分享文件。
+
+媒体预览已完成，代码在 `apps/desktop/src/views/media/native_windows.rs`，对外还是 `native.rs` 那几个函数，
+macOS 的代码没动：
+
+- 视频：Media Foundation 的 `IMFSourceReader` 解出 RGB32 的帧，按显示区域裁剪、按旋转信息转正、缩到调用方
+  要的大小；时长取自 `MF_PD_DURATION`。
+- 音频波形：同一个 source reader 解成 PCM（8/16/24/32 位整数或浮点），算出峰值；时长按实际解出的帧数算。
+- 音频播放：`Windows.Media.Playback.MediaPlayer`（播放、暂停、跳转、位置、倍速），不进系统的媒体控制条。
+- PDF：`Windows.Data.Pdf` 把每页渲染成 PNG 流再解成位图；页数和页面大小也从它来。
+- 线程：进程用 `CoIncrementMTAUsage` 加入多线程套间一次；每次解码在自己的线程里跑，调用方带超时等结果，
+  解码器卡住也只占一个线程；播放器在后台线程里打开，界面线程只发短命令。
+- Media Foundation 按名字动态加载（`mfplat.dll`、`mfreadwrite.dll`），不静态链接：Windows N 版和 Windows
+  Server 默认没有它，应用照样能启动，媒体预览退回文件行。
+- 系统没有解码器的格式（比如没装 HEVC 扩展时的 HEVC）和坏文件一样返回「没有预览」，界面显示原来的文件行。
+
+测试在 `native.rs` 末尾，macOS 和 Windows CI 跑同一套：MP4 的时长、尺寸和各帧的朝向与颜色，带旋转信息的
+MP4，HEVC，WAV、MP3、M4A 的峰值，PDF 的页数和渲染结果，每种各有坏文件。样本在
+`apps/desktop/src/views/media/fixtures/`（ffmpeg 用纯色和正弦波生成，每个几 KB）。CI 的 `desktop-windows`
+任务先装 `Server-Media-Foundation`（Windows Server 才需要），再跑 `cargo test -p desktop views::media::native`
+（失败会拦截），截图自测默认多跑 `media-video`、`media-audio`、`media-pdf` 三个场景。
+
+还要在真的 Windows 电脑上确认的：声音确实能放出来（CI 的机器没有声卡）、拖动进度和倍速的手感、
+Windows 10 22H2 上的表现、MOV 和 HEVC 等格式在装了和没装扩展时的覆盖范围、大文件的耗时。
+
+打开、定位、分享文件（`src/views/files/native.rs`）在系统集成那个 PR 里做。
 
 **C4 设计验收（约 2 周，可以和 C2、C3 同时做）**
 

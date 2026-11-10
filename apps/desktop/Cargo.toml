@@ -72,4 +72,15 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_Storage_Xps",
     "Win32_UI_WindowsAndMessaging",
+    # 产出 media previews (src/views/media/native_windows.rs): Media Foundation's source
+    # reader, Windows.Data.Pdf, Windows.Media.Playback.
+    "Data_Pdf",
+    "Foundation",
+    "Media_Core",
+    "Media_Playback",
+    "Storage_Streams",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Variant",
 ] }
