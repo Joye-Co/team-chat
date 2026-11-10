@@ -366,8 +366,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $user = 'tcstandard'
           $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
-          & net.exe user $user $secret /add | Out-Null
-          $cred = New-Object Management.Automation.PSCredential($user, (ConvertTo-SecureString $secret -AsPlainText -Force))
+          $secure = ConvertTo-SecureString $secret -AsPlainText -Force
+          New-LocalUser -Name $user -Password $secure -AccountNeverExpires | Out-Null
+          Add-LocalGroupMember -Group 'Users' -Member $user
+          $cred = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
           # A folder that user may read but not change (install-service refuses a daemon that
           # others can replace, such as one under C:\Users\Public).
           $dir = 'C:\tc-standard'
@@ -381,7 +383,7 @@ jobs:
             Write-Host "$verb as a standard user: exit code $($p.ExitCode)"
             Get-Content "$dir\out.txt", "$dir\err.txt"
           }
-          & net.exe user $user /delete | Out-Null
+          Remove-LocalUser -Name $user
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
 
