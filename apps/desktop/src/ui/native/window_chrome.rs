@@ -33,8 +33,8 @@ pub fn framed(
     frame(title.into(), Kind::Plain, content, window, cx)
 }
 
-/// [`framed`] for the main window: the app's menus sit in the caption strip,
-/// before the title (Windows has no menu bar outside the window).
+/// [`framed`] for the main window: the app's menus sit in the caption strip
+/// in place of the title (Windows has no menu bar outside the window).
 pub fn framed_main(
     title: impl Into<SharedString>,
     content: impl IntoElement,
@@ -120,12 +120,13 @@ fn caption(title: SharedString, kind: Kind, window: &mut Window, cx: &mut App) -
                 .items_center()
                 .gap(space::S12)
                 .children(menus)
-                .child(
+                // The main window's first menu is the app's name already.
+                .children((kind != Kind::Main).then(|| {
                     div()
                         .n_footnote()
                         .text_color(ink)
                         .whitespace_nowrap()
-                        .child(title),
-                ),
+                        .child(title)
+                })),
         )
 }
