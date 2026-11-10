@@ -74,6 +74,8 @@ jobs:
               - product.json
               - crates/**
               - apps/daemon/**
+              - scripts/install-daemon.ps1
+              - scripts/test-install-daemon.ps1
               - protocol/**
             # ops/restore's config test reads server/wrangler.jsonc and ops/monitor/wrangler.jsonc.
             ops:
@@ -274,8 +276,38 @@ jobs:
       # The unit tests, the chat-run client and tests/process_tree.rs: one run of a fake CLI in
       # a Job Object, with cancel and pause (docs/plans/windows.zh.md, M1). The suites that
       # need the Python fake CLIs and /bin/sh are Unix only.
+      # Also tests/service_task.rs: the scheduled task of the runner's own user with a stand-in
+      # daemon, against the real Task Scheduler (docs/plans/windows.zh.md, M3).
       - name: cargo test (daemon)
         run: cargo test --locked -p daemon --no-fail-fast
+      # The install command for machines without the app, in Windows PowerShell 5.1, with the
+      # daemon just built: SHA-256 check, config and token for this user only, the real daemon
+      # as a scheduled task, an update by the replace protocol, uninstall.
+      - name: PowerShell install command (real daemon as a scheduled task)
+        shell: powershell
+        run: ./scripts/test-install-daemon.ps1
+      # Report only: whether a user without administrator rights may register the task (the
+      # runner's own user is an administrator). The answer is in this step's output: that user is
+      # not logged on, so starting the task (schtasks /Run) may fail; /Create is what is asked.
+      - name: Register the task as a standard user (report only)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $user = 'tcstandard'
+          $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
+          & net.exe user $user $secret /add | Out-Null
+          $cred = New-Object Management.Automation.PSCredential($user, (ConvertTo-SecureString $secret -AsPlainText -Force))
+          $dir = 'C:\Users\Public\tc-standard'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item target\debug\daemon.exe "$dir\daemon.exe"
+          [IO.File]::WriteAllText("$dir\daemon.toml", "server_url = `"http://127.0.0.1:9`"`ntoken_file = `"C:\\Users\\Public\\tc-standard\\token`"`n")
+          foreach ($verb in 'install-service', 'uninstall-service') {
+            $p = Start-Process -FilePath "$dir\daemon.exe" -ArgumentList $verb, '--config', "$dir\daemon.toml" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
+            Write-Host "$verb as a standard user: exit code $($p.ExitCode)"
+            Get-Content "$dir\out.txt", "$dir\err.txt"
+          }
+          & net.exe user $user /delete | Out-Null
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
 
