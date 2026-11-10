@@ -85,8 +85,11 @@ Only the families differ (`theme.rs`, `UI_FONT_STACK`, `MONO_FONT_STACK`, `UI_FO
   a Japanese or Traditional Chinese system would draw Simplified Chinese text in the wrong
   glyphs. Every window root names Microsoft YaHei UI ahead of the system fallback
   (`gpui_component::UiFontFallbacks`).
-- Weight 500 (Medium): Segoe UI Variable has it. Segoe UI on Windows 10 has no Medium face and
-  DirectWrite draws the nearest one, Semibold, so 500 and 600 look alike there. Accepted.
+- Weight 500 (Medium): Segoe UI Variable has it. Segoe UI (Windows 10) and Microsoft YaHei UI
+  have no Medium face, so 500 draws Regular there: Chinese text and Windows 10 lose the step
+  between 400 and 500, and keep the one to 600. The theme asks for exactly 500 on Windows
+  (`MEDIUM_WEIGHT`); one unit more and DirectWrite draws Bold, which made every name and button
+  heavy in the first Windows screenshots.
 - Tabular figures (`tnum`) work in both Segoe families.
 - Pages drawn by a web view (产出, diagrams, previews) must name the same families in their CSS:
   `"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI"` after `-apple-system`, and
@@ -103,8 +106,8 @@ icons drawn for this app on Lucide's grid (`assets/icons/drawn/`). macOS keeps S
 - Views do not change: they name a concept (`Sym::Home.sidebar()`), and the asset source serves
   the symbol on macOS and the SVG icon elsewhere (`ui::sf_symbols::svgset`). gpui-component's own
   glyphs (chevrons, checkbox check, dialog close, spinner) go the same way.
-- **Size**: the icon is drawn as large as fits in the ink box its SF Symbol has at that size, and
-  centered in the same slot, so rows, buttons and tabs keep their rhythm. The §6 sizes stay:
+- **Size**: the icon is drawn as large as fits in the ink box its SF Symbol has at that size (an
+  icon squarer than its symbol may cover the same area instead), and centered in the same slot, so rows, buttons and tabs keep their rhythm. The §6 sizes stay:
   sidebar 15 in 18, toolbar 16 in 20, inline 13 in 16, small 11 in 14, tabs 18 in 24, pop-up
   mark 9.
 - **Weight**: one stroke for every icon of a context, as thick as the symbol's at that size and
@@ -137,7 +140,7 @@ Drawn for this app (7): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill
 | Concept (`Sym::`) | SF Symbol (macOS) | Windows icon | Uses |
 | --- | --- | --- | --- |
 | Home | `tray` | Lucide `inbox` | 1 |
-| Outputs | `square.stack` | Lucide `square-stack` | 4 |
+| Outputs | `square.stack` | Lucide `gallery-vertical-end` | 4 |
 | Members | `person.2` | Lucide `users` | 14 |
 | Topic | `number` | Lucide `hash` | 21 |
 | Compose | `square.and.pencil` | Lucide `square-pen` | 5 |
