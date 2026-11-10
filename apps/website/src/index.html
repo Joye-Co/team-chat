@@ -18,7 +18,7 @@
 <nav>
   <div class="wrap">
     <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
-    <div class="links"><a href="#features">AI 成员</a><a href="#genui">交互</a><a href="#memory">记忆</a><a href="#machines">电脑</a><a href="#custom">自定义</a><a href="#compare">对比</a><a href="#arch">架构</a></div>
+    <div class="links"><a href="#features">AI 成员</a><a href="#genui">交互</a><a href="#memory">记忆</a><a href="#machines">电脑</a><a href="#custom">自定义</a><a href="#compare">对比</a></div>
     <div class="nav-r"><a class="btn pri" href="#waitlist">预约 →</a></div>
   </div>
 </nav>
@@ -27,19 +27,26 @@
   <div class="wrap hero">
     <a class="pill" href="#memory"><b>1.2.6</b>AI 成员会记住团队的做法了 →</a>
     <h1>工作聊天和<span class="nb">所有 Agent，</span><br><span class="soft">共用</span>一份上下文。</h1>
-    <p class="sub">聊工作的地方，就是 AI 成员干活的地方。背景不用再从群里搬进一个个会话；团队沉淀下来的做法，每个 AI 成员接活前就已经读过。</p>
-    <div class="ctas"><a class="btn pri" href="#waitlist">上线时通知我</a><a class="btn" href="#look">先看一眼 ↓</a></div>
+    <p class="sub">聊工作的地方，就是 AI 成员干活的地方。背景不用再搬进一个个会话，团队的做法它接活前就读过。</p>
+    <div class="ctas"><a class="btn pri" href="#waitlist">上线时通知我</a><a class="btn" href="#look">看它怎么干活 ↓</a></div>
     <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>先支持 macOS，Windows 版和手机版正在开发</div>
-    <div class="shot demo pan" id="look" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
-    <div class="demo-bar" data-for="desk"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
-    <div class="pan-hint">← 左右滑动看全 →</div>
+    <div class="player" id="look" aria-label="一件事从交代到交付的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/ask" data-f="29.3,13.6,41.5,40.8"><button type="button"><span class="n">1</span>交代</button><p>按 ⌘K 写一句话，交给哪个成员、发到哪个群都能选。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="20,22.5,36,9.5"><button type="button"><span class="n">2</span>接活</button><p>主助手把事转给合适的成员，它回一句就开工。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,8.5,26,52"><button type="button"><span class="n">3</span>干活</button><p>终端、计划和验收标准，就在话题旁边实时看。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/desk" data-f="20,37,56,34"><button type="button"><span class="n">4</span>拍板</button><p>要你决定的事汇到首页，看完原地就能批准。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-merged" data-f="22.5,44,45,43"><button type="button"><span class="n">5</span>交付</button><p>改动、测试和录屏一起交回，批准后自动合并。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/ask-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/ask-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
   </div>
 
   <section class="wrap">
     <div class="center">
       <div class="eyebrow">One window</div>
       <h2>上班要开的窗口，<br>从 7 个变成 1 个。</h2>
-      <p class="lead">聊工作在聊天软件里，干活在一堆终端和 Agent 工具里，结果还得自己复制回群里。{{PRODUCT_NAME}} 把它们收进一个窗口，共用一份上下文。</p>
+      <p class="lead">聊工作在聊天软件里，干活在一堆终端和 Agent 工具里，结果还得自己复制回群里。{{PRODUCT_NAME}} 把它们收进一个窗口。</p>
     </div>
     <div class="windows" aria-label="以前要开的 7 个窗口，现在只开 {{PRODUCT_NAME}} 一个">
       <div class="before"><span class="cap">以前</span><div class="many">
@@ -55,101 +62,95 @@
       <div class="after"><span class="cap">现在</span><div class="one"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt=""><div><b>{{PRODUCT_NAME}}</b><small><i></i>一个窗口，一份上下文</small></div></div></div>
     </div>
     <div class="trio">
-      <div><h3>工作聊天</h3><p>群、私聊、话题、@、引用、已读和搜索，一样不少。原生应用，一万条消息的话题也能马上打开。</p></div>
-      <div><h3>所有 Agent</h3><p>Claude Code、Codex，或者别家的 harness，都以成员的身份进群。Gmail、Notion 这些工具，用 MCP 和自定义 connector 接进来。开发、产品、增长的活，都在这里派。</p></div>
-      <div><h3>一份上下文</h3><p>群里聊过的背景、定下的决定、团队的约定，AI 成员接活时自己去读，不用你再转述一遍。</p></div>
+      <div><h3>工作聊天</h3><p>群、私聊、话题、@ 和已读一样不少，原生应用，一万条消息的话题也能马上打开。</p></div>
+      <div><h3>所有 Agent</h3><p>各家模型和 harness 都以成员的身份进群，Gmail、Notion 用 MCP 和 connector 接进来。</p></div>
+      <div><h3>一份上下文</h3><p>群里聊过的背景、定下的决定和团队的约定，AI 成员接活时自己去读，不用再转述。</p></div>
     </div>
   </section>
 
   <section class="wrap chap" id="features">
     <div class="chap-head">
       <div><div class="eyebrow">AI members</div><h2>不是一次性的会话，<br>是长期共事的成员。</h2></div>
-      <div class="r">
-        <p>每个 AI 成员都有名字、岗位和在线状态，身份是长期的：它记得上周交付过什么、你们定过什么规矩，下一件事从这里接着做。你可以像信任一位同事那样，把事情交给它。</p>
-        <ul class="ticks">
-          <li>和人一样，是群里的一等成员：可以被 @、被追问，也对自己的交付负责</li>
-          <li>任务可以流转：一个成员把活转交给另一个，或者拆出一部分并行去做</li>
-          <li>做的过程不刷屏，需要你拍板的事固定在输入框上方</li>
-        </ul>
-      </div>
+      <div class="r"><p>每个 AI 成员有名字、岗位和长期的身份，记得做过什么、你们定过什么。和人一样是群里的一等成员：能被 @、能转交、能拆活，也对自己的交付负责。</p></div>
     </div>
-    <div class="shot demo pan" data-pan=".3" data-start="topic-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：话题"><div class="pins" aria-hidden="true"><i class="pin" data-n="1" style="left:33.6%;top:24.2%;--i:0">1</i><i class="pin" data-n="2" style="left:44.2%;top:39.6%;--i:1">2</i><i class="pin" data-n="3" style="left:65.6%;top:47.4%;--i:2">3</i><i class="pin" data-n="4" style="left:75.6%;top:80.4%;--i:3">4</i><i class="pin" data-n="5" style="left:78.6%;top:39.8%;--i:4">5</i></div><div class="stack"><img class="l" src="img/ui/topic-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/topic-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
-    <div class="demo-bar" data-for="topic-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
-    <div class="pan-hint">← 左右滑动看全 →</div>
-    <ol class="legend"><li data-n="1"><i>1</i><div><b>转交</b><span>Jojo 把这件事转给了 Forge</span></div></li><li data-n="2"><i>2</i><div><b>一问一答</b><span>它问方案，你选完留一行记录</span></div></li><li data-n="3"><i>3</i><div><b>交付</b><span>改动、测试结果和录屏一起回来</span></div></li><li data-n="4"><i>4</i><div><b>等你拍板</b><span>要你决定的事固定在输入框上方</span></div></li><li data-n="5"><i>5</i><div><b>同一份名单</b><span>人和 AI 成员都在这个话题的成员里</span></div></li></ol>
+    <div class="player" aria-label="AI 成员的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/members-v2" data-f="42,8.5,57,44"><button type="button"><span class="n">1</span>身份</button><p>有自己的页面：岗位、向谁汇报、现在在做什么。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/members-memory" data-f="42,11,56,47"><button type="button"><span class="n">2</span>记忆</button><p>记得做过什么、学到什么，每天整理，记错能撤回。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="78.5,36,20.5,37"><button type="button"><span class="n">3</span>名单</button><p>人和 AI 成员在同一份名单里，谁负责一目了然。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="20,32.5,34,8"><button type="button"><span class="n">4</span>追问</button><p>拿不准就在话题里问你，你选完它接着往下做。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="22.5,44,54,44"><button type="button"><span class="n">5</span>负责</button><p>改动、测试和录屏一起交回，等你点头再合并。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/members-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/members-v2-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
   </section>
 
   <section class="wrap chap" id="genui">
     <div class="chap-head">
       <div><div class="eyebrow">Generative UI</div><h2>交互就发生在<br>你们正聊着的地方。</h2></div>
-      <div class="r">
-        <p>AI 成员回给你的不只是一段文字，而是可以直接操作的界面：方案对比、审批、问卷、图表，都按当时的情况生成，就出现在话题里。你的每一次选择原样回到它那里，它接着往下做，谁都不用被打断。</p>
-        <ul class="ticks">
-          <li>流程图、时序图、甘特图直接画在消息里</li>
-          <li>图表的一个点、表格的一格，都能选中追问</li>
-          <li>交付的网页也是活的：页面里的操作会回到做它的成员那里</li>
-        </ul>
-      </div>
+      <div class="r"><p>AI 成员回给你的不只是文字，而是能直接操作的界面，就出现在话题里。你的每次选择原样回到它那里，它接着往下做，谁都不用被打断。</p></div>
     </div>
-    <div class="gal">
-      <div class="tabs" role="tablist" aria-label="卡片类型">
-        <button type="button" class="tab" role="tab" aria-selected="true" data-k="compare" data-d="两个可以点开的原型并排，各写清好处和代价，选一个就行。" data-w="1294" data-h="992">方案对比</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="diff" data-d="只展开最关键的一段改动，看完直接通过或要求修改。" data-w="1294" data-h="1022">代码改动</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="chart" data-d="三个关键数字和近 4 周的趋势，和上个月对比。" data-w="1294" data-h="816">指标和图表</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="approve" data-d="发布到生产前先问你，写清楚包含什么、影响多大、怎么回滚。" data-w="1294" data-h="498">审批</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="draft" data-d="要发出去的内容先给你看，可以改了再确认。" data-w="1294" data-h="552">确认草稿</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="time" data-d="AI 成员先看了每个人的日历，标出谁来不了、哪个时间都能来。" data-w="1294" data-h="814">时间段</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="poll" data-d="群里每人一票，谁投了什么都看得到，截止前能改。" data-w="1294" data-h="610">投票</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="image" data-d="选项是图片，下面写着名字和推荐理由。" data-w="1294" data-h="806">图片选择</button>
-      </div>
-      <figure class="view" role="tabpanel" aria-live="polite">
-        <div class="card pan"><img class="l" id="v-l" src="img/card-compare-light.webp" alt="方案对比卡片" width="1294" height="992"><img class="d" id="v-d" src="img/card-compare-dark.webp" alt="方案对比卡片" width="1294" height="992"></div>
-        <figcaption id="v-c"><b>方案对比</b>：两个可以点开的原型并排，各写清好处和代价，选一个就行。</figcaption>
-      </figure>
+    <div class="player fit" aria-label="AI 成员生成的卡片">
+    <ol class="pl">
+      <li class="ps on" data-img="img/card-compare"><button type="button"><span class="n">1</span>方案对比</button><p>两个能点开的原型并排，写清好处和代价，选一个就行。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-diff"><button type="button"><span class="n">2</span>代码改动</button><p>只展开最关键的一段改动，看完直接通过或要求修改。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-chart"><button type="button"><span class="n">3</span>指标和图表</button><p>三个关键数字和近 4 周的趋势，图上每个点都能追问。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-approve"><button type="button"><span class="n">4</span>审批</button><p>上生产前先问你，写清包含什么、影响多大、怎么回滚。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-draft"><button type="button"><span class="n">5</span>确认草稿</button><p>要发出去的内容先给你看，可以改完再确认发出。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-time"><button type="button"><span class="n">6</span>时间段</button><p>先看过每个人的日历，标出谁来不了、哪个时间都行。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-poll"><button type="button"><span class="n">7</span>投票</button><p>群里每人一票，谁投了什么都看得到，截止前能改。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-image"><button type="button"><span class="n">8</span>图片选择</button><p>选项就是图片，下面写着名字和推荐它的理由。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/card-compare-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/card-compare-dark.webp" alt="" width="2880" height="1800"></div>
     </div>
   </section>
 
   <section class="wrap chap">
     <div class="chap-head">
       <div><div class="eyebrow">Live view</div><h2>AI 成员在做什么，<br>都能实时看到。</h2></div>
-      <div class="r">
-        <p>话题旁边能看到它的终端、计划和验收标准。需要时可以接管，你改完交还，它从当前这一步继续。</p>
-      </div>
+      <div class="r"><p>不用等它汇报，也不用开终端。它的屏幕、计划和验收标准就在话题旁边，需要时接管，改完交还。</p></div>
     </div>
-    <div class="shot pinned pan" data-pan="1"><div class="pins" aria-hidden="true"><i class="pin" data-n="1" style="left:72.4%;top:10.3%;--i:0">1</i><i class="pin" data-n="2" style="left:72.4%;top:35.1%;--i:1">2</i><i class="pin" data-n="3" style="left:72.4%;top:45.4%;--i:2">3</i><i class="pin" data-n="4" style="left:72.4%;top:65.0%;--i:3">4</i><i class="pin" data-n="5" style="left:98.3%;top:94.7%;--i:4">5</i></div><img class="l" src="img/live-light.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"><img class="d" src="img/live-dark.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"></div>
-    <div class="pan-hint">← 左右滑动看全 →</div>
-    <ol class="legend"><li data-n="1"><i>1</i><div><b>终端</b><span>它正在敲什么，实时看得到</span></div></li><li data-n="2"><i>2</i><div><b>回放</b><span>每一步都留着，可以拖回去看</span></div></li><li data-n="3"><i>3</i><div><b>验收标准</b><span>逐条显示达标没有</span></div></li><li data-n="4"><i>4</i><div><b>计划</b><span>做到第几步，每步用了多久</span></div></li><li data-n="5"><i>5</i><div><b>接管</b><span>它先停下，你改完交还</span></div></li></ol>
+    <div class="player" aria-label="实时查看的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/live" data-f="73,8.5,26,24.5"><button type="button"><span class="n">1</span>终端</button><p>它正在敲什么命令、输出了什么，实时可见。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,35,26,7"><button type="button"><span class="n">2</span>回放</button><p>每一步都留着，拖动进度条回到任何时刻。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,42.5,26,18.5"><button type="button"><span class="n">3</span>验收标准</button><p>你提的要求变成验收项，逐条显示达标没有。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,62.5,26,25.5"><button type="button"><span class="n">4</span>计划</button><p>做到第几步、每一步用了多久，清清楚楚。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live-takeover" data-f="73,8.3,26,7"><button type="button"><span class="n">5</span>接管</button><p>接管时它先停下，你改完点交还，它接着做。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/live-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/live-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
   </section>
 
   <section class="wrap chap">
     <div class="chap-head">
       <div><div class="eyebrow">Artifacts</div><h2>交付的报表和网页，<br>直接在 App 里打开。</h2></div>
-      <div class="r">
-        <p>AI 成员做的网页、文档、视频都放在产出里。每个版本都留着，也能看到它来自哪个话题、是谁要的。网页里的按钮点了，会发给做它的那个成员。</p>
-      </div>
+      <div class="r"><p>AI 成员做的网页、文档和视频都放在产出里，每一版都留着。页面里的按钮点下去，会发给做它的那个成员。</p></div>
     </div>
-    <div class="shot demo pan" data-start="artifact-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：产出"><div class="stack"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
-    <div class="demo-bar" data-for="artifact-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
-    <div class="pan-hint">← 左右滑动看全 →</div>
+    <div class="player" aria-label="产出的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/artifact-v2" data-f="19.5,8.5,57.5,57"><button type="button"><span class="n">1</span>活的网页</button><p>交付的网页直接打开，图表能点，数据能追问。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="19.5,70,57,28"><button type="button"><span class="n">2</span>页面里提问</button><p>页面里也能问你，你的选择回到做它的成员。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,8,21.5,16"><button type="button"><span class="n">3</span>来龙去脉</button><p>来自哪个话题、谁做的、谁提的要求都写着。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,27.5,21.5,14"><button type="button"><span class="n">4</span>版本</button><p>每一版都留着，随时和上一版对比着看。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,73,21.5,22"><button type="button"><span class="n">5</span>关联</button><p>用到群里哪条决定、被哪些话题引用，都连着。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
   </section>
 
-  <section class="wrap chap" id="memory">
-    <div class="chap-head">
-      <div><div class="eyebrow">Team memory</div><h2>团队的做法，<br>成为每个成员的常识。</h2></div>
-      <div class="r">
-        <p>谁负责什么、对外怎么说、哪些事要先问谁，这些原本靠老同事口口相传。在 {{PRODUCT_NAME}} 里，它们是团队约定，每个 AI 成员接活前必读。几个成员都记下的同一条经验，会自动升为约定；每一条都看得见、能改、能撤回。</p>
+  <section class="wrap" id="memory">
+    <div class="mem2">
+      <div class="txt">
+        <div class="eyebrow">Team memory</div>
+        <h2>团队的做法，<br>成为每个成员的常识。</h2>
+        <p class="lead">谁负责什么、对外怎么说、哪些事要先问谁，原本靠老同事口口相传。现在它们是团队约定，每个 AI 成员接活前必读。</p>
+        <ul class="src">
+          <li><b>群里说一句</b><span>明确说过的约定，自动记下来</span></li>
+          <li><b>经验升级</b><span>几个成员都记下的，升为约定</span></li>
+          <li><b>手动记一条</b><span>马上生效，看得见，能撤回</span></li>
+        </ul>
       </div>
-    </div>
-    <div class="cycle" aria-label="一件事的流程：派活、执行、确认、交付、记录经验，下次接活前先读记录">
-      <div class="steps">
-        <div class="st"><span class="n">1</span><b>派活</b><span>在群里 @ 它，或按 ⌘K</span></div>
-        <div class="st"><span class="n">2</span><b>执行</b><span>在分配给它的电脑上做</span></div>
-        <div class="st"><span class="n">3</span><b>确认</b><span>需要决定时发卡片问你</span></div>
-        <div class="st"><span class="n">4</span><b>交付</b><span>带着改动和测试结果</span></div>
-        <div class="st"><span class="n">5</span><b>沉淀</b><span>经验记下来，共通的升为团队约定</span></div>
-      </div>
-      <div class="back"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M100 0 V24 Q100 36 88 36 H12 Q0 36 0 24 V0"/></svg><em>下一个接活的成员，先读这些约定</em></div>
-    </div>
     <div class="team" aria-label="团队约定的例子">
       <div class="team-h"><b>团队约定</b><span>每个成员做事前都会读到</span></div>
       <ul>
@@ -160,6 +161,7 @@
         <li><span class="kd">术语</span><div><p>对外统一说「AI 成员」，不说「机器人」。</p><small>来自产品群里的决定 · 上周</small></div></li>
       </ul>
     </div>
+    </div>
   </section>
 
   <section class="wrap" id="machines">
@@ -168,22 +170,21 @@
       <div class="txt">
         <div class="eyebrow">Machines</div>
         <h2>给每个 AI 成员，<br>分配一台电脑。</h2>
-        <p class="lead">团队的电脑统一在一处管理。装一个守护进程，这台电脑就出现在列表里；每个 AI 成员用哪一台，或者用任意一台空闲的，由你指定。守护进程主动连出来，不需要开放端口。</p>
+        <p class="lead">团队的电脑统一管理。每个 AI 成员用哪一台，或者任意一台空闲的，由你指定；守护进程主动连出来，不用开端口。</p>
         <div class="envs">
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span><div><h3>同事的 Mac</h3><p>点一下「用这台电脑」就加入，用上面装好的工具和登录过的账号。</p></div></div>
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><div><h3>团队的 VPS</h3><p>一台常开的 Linux 服务器。同事下班、电脑合上，AI 成员照常干活；每个任务一台单独的虚拟机，做完就删。</p></div></div>
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.6-1.5A4.5 4.5 0 0 1 17 18z"/></svg></span><div><h3>云主机</h3><p>阿里云、AWS 都行，装好守护进程，就和别的电脑一样分配。</p></div></div>
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><div><h3>托管虚拟机 <span class="soon">开发中</span></h3><p>不想自己维护机器，可以用我们提供的虚拟机，按需开启，用完回收。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span><div><h3>同事的 Mac</h3><p>点「用这台电脑」就加入，用现成的工具和账号。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><div><h3>团队的 VPS</h3><p>常开的 Linux 服务器，每个任务一台虚拟机。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.6-1.5A4.5 4.5 0 0 1 17 18z"/></svg></span><div><h3>云主机</h3><p>阿里云、AWS 都行，装好守护进程就能分配。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><div><h3>托管虚拟机 <span class="soon">开发中</span></h3><p>不想维护机器，就用我们的，按需开启。</p></div></div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="wrap" id="custom">
-    <div class="center">
-      <div class="eyebrow">Open source</div>
-      <h2>每个 AI 成员，<br>按你们的方式搭。</h2>
-      <p class="lead">模型、harness、工具，三样自由组合，搭出一个适合这个岗位的 AI 成员。{{PRODUCT_NAME}} 是开源的，不够用的地方，自己加。</p>
+  <section class="wrap chap" id="custom">
+    <div class="chap-head">
+      <div><div class="eyebrow">Open source</div><h2>每个 AI 成员，<br>按你们的方式搭。</h2></div>
+      <div class="r"><p>模型、harness、工具，三样自由组合，搭出适合这个岗位的 AI 成员。{{PRODUCT_NAME}} 是开源的，工作流、定时任务、插件，不够用的地方自己加。</p></div>
     </div>
     <div class="mk">
       <div class="mk-l">
@@ -213,33 +214,20 @@
     </div>
   </section>
 
-  <section class="wrap">
-    <div class="center"><div class="eyebrow">More</div><h2>还有这些常用功能。</h2></div>
-    <div class="grid4">
-      <div class="tile">
-        <div><h3>交代或搜索 <kbd>⌘K</kbd></h3><p>输入一句话，交给指定的成员，或者让主助手来安排。话题、产出和成员也在这里搜。</p></div>
-        <div class="shot"><img class="l" src="img/ask-light.webp" alt="⌘K 交代或搜索" width="2880" height="1800" loading="lazy"><img class="d" src="img/ask-dark.webp" alt="⌘K 交代或搜索" width="2880" height="1800" loading="lazy"></div>
-      </div>
-      <div class="tile">
-        <div><h3>单独问 <kbd>⌘;</kbd></h3><p>在话题旁边私下问 AI 成员。它看过整个话题，只有你能看到，觉得有用再放回话题。</p></div>
-        <div class="shot"><img class="l" src="img/side-chat-light.webp" alt="单独问：在话题旁边私下问 Jojo" width="2880" height="1800" loading="lazy"><img class="d" src="img/side-chat-dark.webp" alt="单独问：在话题旁边私下问 Jojo" width="2880" height="1800" loading="lazy"></div>
-      </div>
-      <div class="tile">
-        <div><h3>话题</h3><p>一件事开一个话题，就是一份独立的上下文：背景交代在这里，追问、搜索、产出也都留在这里，不会和群里别的事混在一起。</p></div>
-        <div class="shot"><img class="l" src="img/ui/group-v2-light.webp" alt="群里的话题：进行中的和最近完成的" width="2880" height="1800" loading="lazy"><img class="d" src="img/ui/group-v2-dark.webp" alt="群里的话题：进行中的和最近完成的" width="2880" height="1800" loading="lazy"></div>
-      </div>
-      <div class="tile">
-        <div><h3>权限和记录</h3><p>每个 AI 成员有自己的级别、电脑和凭证，不和别的成员共用。合并、上线、对外发布这类动作会停下来等人点头，每一次改动都留有记录。</p></div>
-        <div class="shot"><img class="l" src="img/ui/members-v2-light.webp" alt="成员页：每个 AI 成员能用的工具、电脑和需要批准的事" width="2880" height="1800" loading="lazy"><img class="d" src="img/ui/members-v2-dark.webp" alt="成员页：每个 AI 成员能用的工具、电脑和需要批准的事" width="2880" height="1800" loading="lazy"></div>
-      </div>
+  <section class="wrap more">
+    <div class="eyebrow">More</div>
+    <div class="more4">
+      <div><h3>交代或搜索 <kbd>⌘K</kbd></h3><p>一句话交给成员，话题、产出和成员也在这里搜。</p></div>
+      <div><h3>单独问 <kbd>⌘;</kbd></h3><p>在话题旁边私下问 AI 成员，只有你看得到。</p></div>
+      <div><h3>话题</h3><p>一件事开一个话题，就是一份独立的上下文。</p></div>
+      <div><h3>权限和记录</h3><p>每个成员单独的电脑和凭证，改动都留记录。</p></div>
     </div>
   </section>
 
   <section class="wrap" id="compare">
-    <div class="center">
-      <div class="eyebrow">Compare</div>
-      <h2>为什么不直接在<br>Slack、飞书里<span class="nb">加个 bot？</span></h2>
-      <p class="lead">在现有的聊天软件里加 bot，或者另装一个 bot 应用，各有卡住的地方。{{PRODUCT_NAME}} 是照着这些地方做的。</p>
+    <div class="chap-head">
+      <div><div class="eyebrow">Compare</div><h2>为什么不直接在<br>Slack、飞书里<span class="nb">加个 bot？</span></h2></div>
+      <div class="r"><p>在现有的聊天软件里加 bot，或者另装一个 bot 应用，各有卡住的地方。{{PRODUCT_NAME}} 是照着这些地方做的。</p></div>
     </div>
     <div class="cmp">
       <div class="tabs" role="tablist" aria-label="和哪种做法比">
@@ -318,33 +306,6 @@
         <p class="vs-when"><b>什么时候选它</b>一个人写代码、不需要同事看到过程时，这些就够用。</p>
       </div>
       <p class="cmp-note">依据各产品的公开文档和仓库整理，2026 年 11 月。产品名称归各自所有者。</p>
-    </div>
-  </section>
-
-  <section class="wrap" id="arch">
-    <div class="center">
-      <div class="eyebrow">Architecture</div>
-      <h2>技术架构</h2>
-      <p class="lead">前台加执行者：前台在服务端接活、派活、盯进度，执行者在团队的电脑上把事做完。两边的模型各自可配。</p>
-    </div>
-    <div class="arch">
-      <div class="blk">
-        <span class="k">Client · Rust</span>
-        <div><h3>Mac 客户端</h3><p>Rust 和 GPUI 写的原生应用，界面读本地缓存，不用等网络。</p></div>
-        <ul><li><span>一万条消息的话题打开</span><span>&lt;100ms</span></li><li><span>冷启动到可用</span><span>&lt;1s</span></li><li><span>离线一天后补齐</span><span>&lt;2s</span></li></ul>
-      </div>
-      <div class="conn"><svg viewBox="0 0 72 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 6H68M4 6l5-4M4 6l5 4M68 6l-5-4M68 6l-5 4" stroke="currentColor" stroke-width="1.3" fill="none" vector-effect="non-scaling-stroke"/></svg>WebSocket</div>
-      <div class="blk">
-        <span class="k">Edge · Cloudflare</span>
-        <div><h3>实时服务和前台</h3><p>每个群、每个成员、每台电脑各用一个 Durable Object。每个 AI 成员有一个常驻的前台（router），用便宜、快的模型接活和盯活。</p></div>
-        <ul><li><span>消息送达 p95</span><span>&lt;300ms</span></li><li><span>数据库和文件</span><span>D1 · R2</span></li><li><span>前台模型</span><span>自选服务商</span></li></ul>
-      </div>
-      <div class="conn"><svg viewBox="0 0 72 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 6H68M4 6l5-4M4 6l5 4M68 6l-5-4M68 6l-5 4" stroke="currentColor" stroke-width="1.3" fill="none" vector-effect="non-scaling-stroke"/></svg>派工 · 汇报</div>
-      <div class="blk">
-        <span class="k">Runner · Rust</span>
-        <div><h3>团队的电脑和执行者</h3><p>守护进程在分配的电脑上启动执行者（worker），一件事一个会话。harness 不绑定哪一家，模型和思考强度按成员单独配。</p></div>
-        <ul><li><span>Harness</span><span>Claude Code · Codex · 更多</span></li><li><span>隔离</span><span>microVM</span></li><li><span>过程</span><span>逐步回放</span></li></ul>
-      </div>
     </div>
   </section>
 

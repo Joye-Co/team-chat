@@ -14,9 +14,9 @@ dependencies.
 | --- | --- |
 | `src/index.html` | The page. Write `{{PRODUCT_NAME}}` wherever the product name appears; the build fills it from `product.json`. |
 | `src/styles.css` | Tokens for light and dark mode, layout, and the scroll motion (only under `.motion`, which `main.js` adds unless the viewer asked for reduced motion) |
-| `src/main.js` | Scroll reveals, the card gallery, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view, the member builder (chips drive the member card) and the waitlist form and the clickable app demos |
+| `src/main.js` | Scroll reveals, the screenshot tours, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view, the member builder (chips drive the member card) and the waitlist form |
 | `src/img/` | WebP screenshots in light and dark pairs (`*-light.webp`, `*-dark.webp`) and the app icon |
-| `src/img/ui/` | The screens of the clickable demos |
+| `src/img/ui/` | The screens of the screenshot tours |
 
 ## Screenshots
 
@@ -33,9 +33,9 @@ scenes (`compose-*`, `cards-v2-*`) taken at `--size 1440x1700`.
 
 ## Phones
 
-Up to 640 px a `.shot` with the class `pan` keeps a readable width and scrolls sideways instead of
-shrinking; `data-pan` (0 to 1) says where it starts, so the subject is in view. Tab rows scroll in one
-line, and the comparison stacks each row (theirs, then ours).
+Up to 760 px a tour puts the frame above its steps and zooms in further, so the ringed part stays
+readable. Up to 640 px the machines screenshot keeps a readable width and scrolls sideways, tab rows
+scroll in one line, and the comparison stacks each row (theirs, then ours).
 
 ## Waitlist
 
@@ -46,16 +46,12 @@ does not include that endpoint: the host that serves the page provides it. Witho
 `bun run dev:website`) the form says the booking did not go through and the count stays hidden. The
 count shows from 10 bookings on.
 
-## Pins and legends
+## Screenshot tours
 
-A screenshot can carry numbered pins and a legend under it: `<div class="pins">` inside the `.shot`
-holds one `<i class="pin" data-n="1" style="left:..%;top:..%">` per point (percent of the image), and
-the `<ol class="legend">` after the shot explains each number. Pointing at a legend item lights its
-pin. On a clickable demo the pins show only on the start screen.
-
-## Clickable demos
-
-A `<div class="shot demo" data-start="<screen>">` becomes a clickable copy of the app. The screens and
-their click areas live in `G` in `src/main.js`: each area is `[left, top, width, height]` in percent of
-the window, the screen it opens, and its tooltip. `SB` holds the sidebar areas shared by every main
-window screen. When you add a screen, capture it at 1440x900 so the percentages line up.
+A `<div class="player">` is a tour of the app: an `<ol class="pl">` of steps and a `.pf` frame. Each
+step `<li class="ps">` names its screen in `data-img` (the path without `-light.webp`/`-dark.webp`)
+and the part to point at in `data-f` (left, top, width, height in percent of the screenshot). The
+frame zooms toward that part and rings it; when the step's bar fills, the next step starts. Pointing
+at the tour, or scrolling it out of view, holds it; with reduced motion nothing plays on its own. A
+tour with the class `fit` shows whole images (the cards) without zoom. Screens come from the app at
+1440x900, so the percentages line up.
