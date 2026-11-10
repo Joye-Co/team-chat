@@ -266,6 +266,13 @@ fn pack(c: Rgba) -> u32 {
 /// A symbol in a square slot of `slot` pt, in `color`; Lucide when this
 /// system has no such symbol.
 pub fn symbol(sf: Sf, slot: Pixels, weight: Weight, color: Hsla, window: &Window) -> AnyElement {
+    // No SF Symbols here: the concept's icon of the SVG set, fitted like
+    // every other icon (the mask below would find no symbol and fall back
+    // to a raw Lucide icon at Lucide's own size and stroke).
+    if svgset::active() {
+        let size = SymSize::new(point_for_slot(f32::from(slot)), f32::from(slot), weight);
+        return icons::sym(sf.sym(), size, color).into_any_element();
+    }
     match image(sf, f32::from(slot), weight, color, window.scale_factor()) {
         Some(image) => img(ImageSource::Render(image))
             .size(slot)

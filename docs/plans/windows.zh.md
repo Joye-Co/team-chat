@@ -1,9 +1,10 @@
 # Windows 端计划
 
-状态：W0 已完成（客户端能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。M1 已完成（daemon 能为
-Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过真的 CLI）。
-M2 大部分已完成（访问列表、命名管道、审批、ConPTY、三个运行时的假 CLI 测试；端到端用例还没进 Windows CI）。
-其余未开始。
+状态：W0 已完成（客户端能为 Windows 编译并链接出 exe）。C1 的系统集成部分已写完（见 C1 一节）。M1 已完成
+（daemon 能为 Windows 编译；Windows CI 上用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过
+真的 CLI）。M2 大部分已完成（访问列表、命名管道、审批、ConPTY、三个运行时的假 CLI 测试，都在 Windows CI 上
+跑过；端到端用例还没进 Windows CI，原因见 M2 一节）。C2（产出和图的 WebView2 后端）代码已完成并在 Windows
+CI 上跑通隔离测试，见下。其余进行中或未开始。
 
 ## 目标
 
@@ -32,8 +33,8 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 
 | 模块 | 现在用的 macOS 接口 | Windows 方案 |
 | --- | --- | --- |
-| `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2：虚拟主机或 `WebResourceRequested` 提供内容，请求拦截做网络封锁，子 HWND 嵌入 |
-| `src/diagrams`（Mermaid 图） | 隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例 |
+| `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2（已做，见 C2）：注册自定义 scheme，`WebResourceRequested` 提供内容并拦截其余请求，子 HWND 嵌入 |
+| `src/diagrams`（Mermaid 图） | 隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例（已做） |
 | `src/views/media/native.rs`（音视频、PDF 预览） | AVFoundation、AVFAudio、PDFKit | Media Foundation 加 `Windows.Data.Pdf` |
 | `src/provider/macos.rs`（通知、睡眠唤醒、网络变化） | `UNUserNotificationCenter`、`NSWorkspace` | WinRT Toast（需要 AUMID）、`WM_POWERBROADCAST`、`NotifyIpInterfaceChange` |
 | `crates/chat-core/src/token.rs` | Keychain | Windows Credential Manager |
@@ -130,14 +131,116 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 
 完成标准：在 Windows 上登录，收发消息、看话题、收通知、断线重连都正常。
 
-**C2 产出和图（约 3 周，客户端里风险最大）**
+**C1 系统集成部分（已写完，Windows CI 跑过单元测试，没有在真机上看过）**
 
-- `artifact-view` 增加 WebView2 后端，对外接口不变：每个版本一个 origin、同样严格的 CSP、拦截所有
-  外部请求和跨 origin 跳转、`window.artifact` 桥按 `Capabilities` 检查、嵌入宿主窗口。
-- 第一周先做只嵌一个页面的原型，确认子 HWND 和 GPUI 的渲染叠在一起没有闪烁和焦点问题。
-- Mermaid 渲染器用同一个后端。安装包带 WebView2 的 Evergreen bootstrapper。
+做了什么：
 
-完成标准：两个平台通过同一套隔离测试，Mermaid 图能显示。
+| 功能 | Windows 上的做法 | 代码 |
+| --- | --- | --- |
+| Token | Credential Manager 的普通凭据，目标名是 `<app id>:<服务器地址>`（和 Keychain 的 service、account 同一对），只存本机 | `crates/chat-core/src/token.rs` 的 `CredentialTokenStore` |
+| 通知 | GPUI 自带的 WinRT Toast（`App::show_system_notification`）。没有包身份，GPUI 给进程设 AppUserModelID 并在 `HKCU\Software\Classes\AppUserModelId\<id>` 登记显示名，不需要开始菜单快捷方式，开发构建也走这条路。Toast 的 tag 带群和话题，点击后打开对应话题。同时闪任务栏按钮；声音由客户端自己播系统通知音（GPUI 的 Toast 是静音的） | `apps/desktop/src/provider/windows.rs` |
+| 睡眠唤醒 | GPUI 的 `on_system_wake`（`WM_POWERBROADCAST`），再加时钟跳变兜底 | 同上 |
+| 网络变化 | 每 3 秒用 `GetAdaptersAddresses` 比较一次网卡地址，和 Mac 的做法一样 | 同上 |
+| 开机启动 | `HKCU\...\Run` 下以 app id 命名的值；同时读写 `Explorer\StartupApproved\Run`，所以在任务管理器里关掉后开关会显示关 | `views/settings/login_item.rs` |
+| 托盘图标 | `Shell_NotifyIconW`，挂在一个隐藏的顶层窗口上。图标用菜单栏的模板图按任务栏深浅色染成白或黑，有未读时带点；左键打开主窗口，右键菜单是 Mac 上 Dock 菜单的几项加「设置…」和「退出」 | `views/nav/status_item_win.rs`、`tray_icon.rs`、`src/win32.rs` |
+| 应用菜单 | GPUI 在 Windows 上的 `set_menus` 只把菜单存起来，不画。菜单列表去掉了只有 macOS 才有的项（服务、隐藏、前置全部窗口、表情与符号、空的帮助）；`menus::window_menu_bar` 返回 gpui-component 的 `AppMenuBar`，由窗口标题栏放进去 | `views/nav/menus.rs` |
+| 减弱动画、高对比度 | `SPI_GETCLIENTAREAANIMATION`、`SPI_GETHIGHCONTRAST`，设置变化靠隐藏窗口收到的 `WM_SETTINGCHANGE` | `ui/motion.rs` |
+| 文件操作 | 打开和定位本来就走 GPUI（Windows 上可用）。Quick Look 改为用默认程序打开，和「打开」走同一道检查：Windows 会运行、安装、挂载的类型（`exe`、`bat`、`scr`、`msi`、`hta`、`js`、带宏的 Office 文件等）和网页只在资源管理器里选中，文件名按 Windows 的读法判断（忽略末尾的点和空格）；分享改为在资源管理器里选中文件 | `views/files/native.rs` |
+| 设置窗口高度 | `SetWindowPos`，顶边不动、不超出显示器工作区；首次定高前用 DWM cloak 隐藏；去掉最小化和最大化按钮 | `views/settings/window_fit.rs` |
+
+过程中发现的：
+
+- GPUI 的 Windows 平台已经有 Toast、唤醒通知、打开和定位文件、系统深浅色，这些不用自己写 Win32。
+- GPUI 在 macOS 以外默认关掉最后一个窗口就退出（`QuitMode::Default`）。托盘图标在通知区域里时改成
+  `QuitMode::Explicit`，关窗后程序留在托盘（和 Mac 一样），用托盘菜单的「退出」退出；图标被隐藏或没加上时
+  保持默认，关掉最后一个窗口就退出，不会留下一个找不到的进程。
+- GPUI 的 `hide_other_apps` 在 Windows 上是 `unimplemented!()`，调到就崩；对应的动作现在只在 macOS 注册。
+- 系统强调色没有接：Windows 总有一个强调色（默认蓝），接了就不再是黑白规范，所以保持石墨色。
+- 外观跟随系统不用改：`window.appearance()` 和它的变化通知在 Windows 上由 GPUI 提供。
+
+这部分还没做的：
+
+- `window_menu_bar` 还没有放进主窗口标题栏（标题栏在窗口那部分工作里），放进去之前菜单在窗口里没有入口。
+- 快捷键没有动，`menus.rs` 里仍是 `cmd-…`，随整套键位一起映射。
+- 任务栏按钮上的未读角标（`ITaskbarList3::SetOverlayIcon`，对应 Dock 角标）。
+- 「关于」在 Windows 上打开设置窗口，没有单独的关于面板。
+- 系统分享面板（`DataTransferManager`）留到 C3。
+- 程序退出后，留在通知中心里的 Toast 点了没有反应（没有注册 COM 激活器）；安装包阶段（R1）可以一起做。
+- Toast 没有群头像和按群分组。
+
+要在真机上看的（CI 没法验证）：
+
+1. Toast 能弹出，标题是产品名；点击后窗口到前台并打开对应话题；读完后通知中心里那条消失。
+2. 专注助手打开时不弹 Toast，任务栏按钮仍然闪；设置里关掉声音后不响。
+3. 睡眠再唤醒、切换 Wi-Fi 或拔网线后几秒内重连（日志里有 `system change`）。
+4. 托盘图标在深色和浅色任务栏上都看得清，100% 和 150% 缩放下不糊；有未读时带点，悬停提示是未读数；
+   右键菜单每一项都能用，「退出」后图标立刻消失；重启资源管理器后图标回来；设置里关掉后图标消失。
+   关掉主窗口后程序还在托盘里，点图标能再打开；设置里隐藏图标后，关掉最后一个窗口程序退出。
+5. 开机启动：打开开关后重新登录，程序自己启动；在任务管理器里禁用后，开关显示为关。
+6. 登录后重启程序不用再登录（Token 在「凭据管理器 › Windows 凭据」里能看到一条，以 app id 开头）；退出登录后那条消失。
+7. 设置窗口：切换分页时高度变化顺滑、顶边不动，打开时不闪一下再跳到位，没有最小化和最大化按钮；
+   如果设置窗口打不开或看不见，先查 DWM cloak 那段。
+8. 关闭系统的动画效果后，客户端的装饰动画停掉；打开对比度主题后颜色切到高对比。
+9. 文件卡片上的预览用默认程序打开，分享会打开资源管理器并选中文件（路径里有空格和逗号也行）。
+
+**C2 产出和图（代码已完成，Windows CI 上跑通；嵌入的手感还要真机看）**
+
+做法：
+
+- `crates/artifact-view` 增加 WebView2 后端（`src/win.rs`、`src/win_embed.rs`），对外接口和 macOS 一样
+  （`ArtifactWindow`、`EmbeddedArtifact`、`DiagramRenderer`，主线程凭证统一叫 `MainThread`）。两个后端共用的
+  判断（版本切换、桥、导航放行规则）抽到 `src/page.rs`。
+- 绑定直接用 `webview2-com`（和 GPUI 同一个 `windows` 0.62），不用 `wry`：隔离要用到自定义 scheme 注册、
+  对所有 URL 的请求过滤、各项设置开关、权限 / 下载 / 新窗口事件，`wry` 没有暴露这些。
+- origin：把 `artifact` 注册成带 authority 的自定义 scheme（`CoreWebView2CustomSchemeRegistration`），页面地址
+  和 macOS 完全一样：`artifact://<id>-v<version>/`，每个版本一个 origin；内容由 `WebResourceRequested` 用同一个
+  `resolve::serve_range` 提供，CSP 和其他响应头逐字相同（Windows 另加一条 `Permissions-Policy`）。
+- 断网三层：CSP；`WebResourceRequested` 过滤 `*`，当前版本 origin 之外的请求一律回 403；浏览器进程带
+  `--host-resolver-rules="MAP * ~NOTFOUND"` 启动，任何主机名和 IP 都解析不了（WebSocket、WebRTC 不经过请求
+  过滤，靠这一层和 CSP），并在每个 frame 里删掉 WebRTC 构造函数。
+- 跳转：`NavigationStarting` / `FrameNavigationStarting` 取消 origin 之外的一切；`NewWindowRequested` 一律不开窗；
+  外部协议（`LaunchingExternalUriScheme`）取消。
+- 桥：`chrome.webview.postMessage`，只收主 frame、且来源是当前版本 origin 的消息，再交给同一个 `Bridge` 按
+  `Capabilities` 检查。Host objects 关闭。
+- 关掉的浏览器功能：下载、权限弹窗、脚本对话框、右键菜单、开发者工具（调试构建除外）、浏览器快捷键、
+  自动填充和保存密码、缩放、滑动导航、状态栏、内置错误页、SmartScreen。
+- 存储：每个页面都是 InPrivate；用户数据目录单独放在 `%LOCALAPPDATA%\team-chat\webview2`
+  （`ui::web_embed::prepare_process` 设置）。
+- 嵌入：GPUI 窗口的子 `HWND`（裁剪容器）里放 WebView2，每帧由宿主按布局摆放（物理像素 = 点 × 缩放）、裁剪、
+  圆角（窗口 region）、隐藏。**GPUI 默认用置顶的 DirectComposition 树绘制，会盖住所有子窗口**，所以应用在
+  Windows 上启动时设置 `GPUI_DISABLE_DIRECT_COMPOSITION=1`，让 GPUI 直接呈现到 `HWND`。
+- 「用户点过」的信号：页面里按下鼠标时父窗口收到 `WM_PARENTNOTIFY`；非文字按键走 `AcceleratorKeyPressed`。
+- 截图（图的 PNG、被遮住时的快照）走 DevTools 协议 `Page.captureScreenshot`，隐藏窗口固定 1 像素 = 1 CSS px。
+- 桌面端接线：`ui/web_embed.rs`、`views/artifacts/window.rs`、`diagrams/mod.rs` 在 Windows 上走同一套代码；
+  打开外部链接前的确认暂时用系统消息框。
+
+在 Windows CI（`windows-2025`，任务 `artifact-view-windows` 和 `desktop-windows`）上实际跑过的：
+
+- `tests/isolation.rs`：和 macOS 同一份页面、同一组断言（本 origin 文件能加载；http / https / ws / WebRTC /
+  路径穿越 / 别的版本都拿不到；CSP 生效；跳转被拒；弹窗被拒；每个版本独立 origin；桥应答、拒绝未知方法、
+  没有能力时拒绝 `emit` 和 `ask`）。
+- `examples/win_embed_proto.rs`：普通窗口里嵌一个页面，对屏幕截图取像素验证位置、裁剪、圆角、隐藏和再显示、
+  关闭；`SendInput` 真实点击到达页面并算作用户输入；独立的产出窗口和版本下拉框。
+- `apps/desktop/examples/win_embed_gpui.rs`：真的 GPUI 窗口里嵌一个页面。关掉 DirectComposition 时页面显示在
+  GPUI 内容之上，点击、裁剪、隐藏都对；不关时页面被 GPUI 盖住（截图里看不到，但仍能收到点击），这是必须关掉
+  它的证据。
+- `examples/diagram_selftest.rs`：8 个 Mermaid 样例在隐藏的 WebView2 里渲染并导出透明底的 2x PNG。
+
+只能在真机上确认的（CI 是 100% 缩放、软件渲染、没有人操作）：
+
+- 嵌入页面跟随滚动和窗口缩放时有没有闪烁、拖影；和 GPUI 弹层切换（隐藏换快照）时有没有闪一下。
+- 焦点和 Tab 顺序：页面和 GPUI 输入框之间来回切换、Esc 和 Tab 交还焦点、中文输入法候选窗位置。
+- 页面有焦点时应用级快捷键（Ctrl+W 等）现在会被页面吃掉，要决定哪些转给应用。
+- 高 DPI 和多显示器不同缩放比：位置、清晰度、图的 PNG 尺寸。
+- 话题里内嵌页面的滚轮转交（页面脚本把滚轮转成宿主的 `WM_MOUSEWHEEL`）手感是否自然。
+- 只用键盘操作页面（不点击）时，文字按键不算「用户点过」，`emit` 可能被闸门挡住。
+- 关掉 DirectComposition 对整个应用的影响（缩放窗口时的流畅度；不再支持窗口透明，应用没用到）。
+- 版本下拉框是原生 COMBOBOX，外观要在 C4 里按设计规范重做；外部链接确认框同理。
+- `<video>` 的分段加载（206）和自动播放。
+
+安装包带 WebView2 Evergreen bootstrapper 属于 R1。
+
+完成标准：两个平台通过同一套隔离测试（已满足，CI 上跑），Mermaid 图能显示（CI 上导出了 PNG；应用内显示待真机）。
 
 **C3 媒体和文件（约 2 周）**：视频首帧和时长、音频波形和播放、PDF 预览；打开、定位、分享文件。
 
@@ -261,6 +364,12 @@ M1 里发现、留给后面的：
 - **`daemon doctor`**：加了一个两个平台都跑的测试（按名字经 `PATHEXT` 找到程序、读到磁盘、私有的 token
   文件通过检查、最后是 OK）。
 
+Windows CI（`daemon-windows`，`cargo test -p daemon --features test-fakes`）上实际跑过并通过的：85 个单元
+测试（访问列表的检查和写入、请求文件过滤、命名管道往返、只读目录、命令行引号和环境块）；`chat-run.exe`
+经管道和请求目录要受控密钥；`daemon doctor`；`tests/process_tree.rs` 的 7 个用例（run、取消、暂停、npm 的
+`.cmd`、非 npm 的 `.cmd`、子进程 job、ConPTY 的输出、输入、退出码、暂停和取消）；`tests/runtimes.rs` 的 12 个
+用例（Codex 的审批、插话、续接、effort，ACP 的权限和追问，模型和 effort 的发现）；`normalize`、`redact`。
+
 M2 里发现的事：
 
 - **提升权限的进程不完全受只读目录约束**：Windows 建目录和删文件时带「备份意图」，持有恢复特权的进程
@@ -274,8 +383,16 @@ M2 里发现的事：
 
 还没做的：
 
-- **`tools/e2e` 的机器用例没有接进 Windows CI**。`apps/daemon/e2e/local-e2e.ts`（`wrangler dev` 加真 daemon
-  加假 CLI）现在按进程组发信号、用 `chmod`、直接执行 `.py`，要先改成两个平台都能跑。
+- **端到端用例没有接进 Windows CI**。没有在 Windows runner 上试过，所以不知道 runner 能不能跑
+  `wrangler dev`；卡住的是脚本本身，不是 runner：
+  - `tools/e2e` 的客户端是对着已部署的环境（staging）跑的，在 Linux CI 上也不跑。CI 里的端到端是
+    `apps/daemon/e2e/local-e2e.ts`（`wrangler dev`、真 daemon、Python 假 CLI），只有 Linux 任务。
+  - 这个脚本在 Windows 上会坏在四处：用 `process.kill(-pid, "SIGTERM")` 按进程组结束 wrangler 和 daemon
+    （Windows 没有负的 pid）；把 `fake_claude.py`、`fake_codex.py` 直接写成运行时的 `command`（Windows 不认
+    `#!`，要换成 `fake-cli.exe` 加 `FAKE_CLI_SCRIPT`）；程序路径没有 `.exe`；假 CLI 里有几种模式用
+    `/bin/sh`、`setsid` 和文件权限位。
+  - 要做的事：把这四处改成两个平台都能跑，再给 `daemon-windows` 加一步。`tools/e2e` 在 Windows 上能编译
+    （CI 有 `cargo check -p e2e`），对着一台真的 Windows 机器跑它是 M2 的完成标准，要等真机。
 - **`tests/integration.rs`、`tests/setup.rs` 仍然只在 Unix 上跑**（launchd/systemd、文件权限位、
   `/bin/sh`、信号）。其中和平台无关的用例（协议 fixture、配置解析）值得拆出来在 Windows 上跑。
 - **机器 token 仍然是文件**（现在检查它的访问列表），没有放进 Credential Manager。
@@ -313,7 +430,8 @@ M2 里发现的事：
 ## 风险
 
 - **GPUI 是预发布版本**（`gpui-pre =0.3.10`）：Windows 上的输入法、DPI 问题可能要给上游打补丁或先 vendor。
-- **WebView2 嵌入**：子 HWND 和 GPUI 的渲染叠在一起可能闪烁或抢焦点，C2 先做原型。
+- **WebView2 嵌入**：原型已在 CI 上证实能显示，但前提是关掉 GPUI 的 DirectComposition（否则子窗口被盖住）；
+  闪烁和焦点还要真机看，清单在 C2。
 - **CLI 在 Windows 上的行为**：Claude Code 和 Codex 的 Windows 版比 Mac 版新，工具调用、沙箱、
   会话文件位置可能不一样；M1 第一周先手动在 Windows 上各跑一遍确认。
 - **进程逃出 job**：极少数程序会主动脱离 job。Job 设成不允许脱离，`tests/process_tree.rs` 里有一个要求

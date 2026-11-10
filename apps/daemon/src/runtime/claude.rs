@@ -14,6 +14,28 @@ use std::collections::{HashMap, VecDeque};
 
 pub struct ClaudeRuntime;
 
+/// Claude Code's `modelUsage` of a result: per model its tokens (input apart from cache reads and
+/// writes) and its own cost. None when the result has none.
+pub fn model_usage(v: &Value) -> Option<Vec<crate::proto::ModelUsage>> {
+    let map = v.as_object()?;
+    let n = |m: &Value, k: &str| m[k].as_u64().unwrap_or(0);
+    let mut out: Vec<crate::proto::ModelUsage> = map
+        .iter()
+        .filter(|(k, _)| !k.is_empty())
+        .map(|(model, m)| crate::proto::ModelUsage {
+            model: model.chars().take(200).collect(),
+            input_tokens: n(m, "inputTokens"),
+            output_tokens: n(m, "outputTokens"),
+            cache_read_tokens: Some(n(m, "cacheReadInputTokens")).filter(|x| *x > 0),
+            cache_write_tokens: Some(n(m, "cacheCreationInputTokens")).filter(|x| *x > 0),
+            cost_usd: m["costUSD"].as_f64().filter(|c| c.is_finite() && *c >= 0.),
+        })
+        .collect();
+    out.sort_by(|a, b| a.model.cmp(&b.model));
+    out.truncate(32);
+    (!out.is_empty()).then_some(out)
+}
+
 #[derive(Default)]
 pub struct ClaudeNormalizer {
     pub session_id: Option<String>,
@@ -199,6 +221,8 @@ impl ClaudeNormalizer {
                         + u["cache_creation_input_tokens"].as_u64().unwrap_or(0),
                     output_tokens: prev.output_tokens + u["output_tokens"].as_u64().unwrap_or(0),
                     cost_usd: v["total_cost_usd"].as_f64().or(prev.cost_usd),
+                    // `modelUsage` covers the session so far, like `total_cost_usd`.
+                    models: model_usage(&v["modelUsage"]).unwrap_or(prev.models),
                 });
                 let mut out = vec![];
                 let done = self.turns.pop_front().unwrap_or_else(|| "t0".into());

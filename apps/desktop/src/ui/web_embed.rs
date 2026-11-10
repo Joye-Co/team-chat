@@ -7,7 +7,8 @@
 //!     .on_event(|event, window, cx| { /* Emit, ExternalLink, Loaded … */ })
 //! ```
 //!
-//! The page is a native, isolated WKWebView from `crates/artifact-view`
+//! The page is a native, isolated web view (WKWebView; WebView2 on Windows) from
+//! `crates/artifact-view`
 //! ([`artifact_view::EmbeddedArtifact`]: per-version origin, scheme handler, strict CSP,
 //! no network, navigation policy, bridge capabilities). It is a sibling view above GPUI's
 //! own view, so every frame the element:
@@ -239,7 +240,7 @@ pub struct WebEmbedState {
     end: Option<Pixels>,
     /// The host base stylesheet given to the page, by its token values.
     base: Option<String>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     native: Option<artifact_view::EmbeddedArtifact>,
     _events: Option<gpui::Task<()>>,
     /// Bounds of the element in window points, for self-tests.
@@ -280,7 +281,7 @@ impl WebEmbedState {
             fade: None,
             end: None,
             base: None,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             native: None,
             _events: None,
             last_bounds: None,
@@ -298,18 +299,18 @@ impl WebEmbedState {
 
     /// True while a native page exists (on screen or parked).
     pub fn has_native(&self) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             self.native.is_some()
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         false
     }
 
     /// Gives the page of `version` a data snapshot (the 产出 page host). False when no
     /// such page shows.
     pub fn push_data(&self, version: u32, snap: Snapshot) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             return n.push_data(version, snap);
         }
@@ -325,7 +326,7 @@ impl WebEmbedState {
         reply_id: &serde_json::Value,
         result: Result<serde_json::Value, Reject>,
     ) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             return n.finish(version, reply_id, result);
         }
@@ -340,7 +341,7 @@ impl WebEmbedState {
         }
         self.parked = true;
         self.focused = false;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.set_hidden(true);
         }
@@ -348,7 +349,7 @@ impl WebEmbedState {
 
     /// Gives up the native page (it loads again when it shows); the snapshot stays.
     fn release_native(&mut self) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if self.native.take().is_some() {
             self._events = None;
             self.phase = Phase::Loading;
@@ -374,11 +375,11 @@ impl WebEmbedState {
 
     /// True while the native view is on screen.
     pub fn shown(&self) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             self.native.as_ref().is_some_and(|n| n.is_shown())
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         false
     }
 
@@ -388,7 +389,7 @@ impl WebEmbedState {
 
     /// Moves keyboard focus into the page.
     pub fn focus(&self) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.focus();
         }
@@ -396,18 +397,18 @@ impl WebEmbedState {
 
     /// Runs JavaScript in the page (self-tests and developer tools).
     pub fn evaluate_script(&self, script: &str) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.evaluate_script(script);
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = script;
     }
 
     /// Runs JavaScript in the page and gives its string value (self-tests). `done` runs
     /// once, with `None` when there is no page or the value is not a string.
     pub fn evaluate_text(&self, script: &str, done: impl FnOnce(Option<String>) + 'static) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.evaluate_text(script, done);
             return;
@@ -420,7 +421,7 @@ impl WebEmbedState {
     /// point in the page (points from its top-left corner), or with `in_page` false at a
     /// point in the window's content. Self-tests only. False when it could not be posted.
     pub fn post_click(&self, x: f64, y: f64, in_page: bool) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             return if in_page {
                 n.post_click(x, y)
@@ -445,7 +446,7 @@ impl WebEmbedState {
         self.spec.ref_menu = embed.spec.ref_menu.clone();
         let same = self.spec.artifact_id == embed.spec.artifact_id
             && self.spec.version.version == embed.spec.version.version;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.set_pass_scroll(embed.pass_scroll);
         }
@@ -454,7 +455,7 @@ impl WebEmbedState {
             // record arrived, or the version's declared events did).
             if self.spec.capabilities != embed.spec.capabilities {
                 self.spec.capabilities = embed.spec.capabilities;
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", windows))]
                 if let Some(n) = &self.native {
                     n.set_capabilities(self.spec.capabilities);
                 }
@@ -465,7 +466,7 @@ impl WebEmbedState {
         self.spec = embed.spec.clone();
         self.snapshot = None;
         self.phase = Phase::Loading;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             if new_id {
                 // A different 产出: a new view (the origin family changes).
@@ -476,7 +477,7 @@ impl WebEmbedState {
                 self.phase = Phase::Failed(e.to_string());
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = new_id;
     }
 
@@ -554,7 +555,7 @@ impl WebEmbedState {
         if self.fade.as_deref() == Some(rgb.as_str()) {
             return;
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.evaluate_script(&fade_script(&rgb));
             self.fade = Some(rgb);
@@ -575,7 +576,7 @@ impl WebEmbedState {
         if self.base.as_deref() == Some(css.as_str()) {
             return;
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
             n.evaluate_script(&base_script(&css));
             self.base = Some(css);
@@ -589,7 +590,7 @@ impl WebEmbedState {
         if !self.pass_scroll {
             return;
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(delay_ms))
@@ -623,13 +624,13 @@ impl WebEmbedState {
             }
         })
         .detach();
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = (cx, delay_ms);
     }
 
     /// Takes a new snapshot after `delay_ms` (only while the page is on screen).
     fn snapshot_later(&self, cx: &mut Context<Self>, delay_ms: u64) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         cx.spawn(async move |this, cx| {
             if delay_ms > 0 {
                 cx.background_executor()
@@ -663,31 +664,16 @@ impl WebEmbedState {
             }
         })
         .detach();
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = (cx, delay_ms);
     }
 
     /// Creates the native view on the first paint.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     fn attach(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.native.is_some() || matches!(self.phase, Phase::Failed(_)) {
             return;
         }
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        let Some(mtm) = objc2_foundation::MainThreadMarker::new() else {
-            return;
-        };
-        let Ok(handle) = HasWindowHandle::window_handle(window) else {
-            return;
-        };
-        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
-            return;
-        };
-        // SAFETY: GPUI's AppKit handle points at the window's live content NSView, and paint
-        // runs on the main thread.
-        let Some(host) = (unsafe { artifact_view::view_from_ptr(appkit.ns_view.as_ptr()) }) else {
-            return;
-        };
         self.window = Some(Window::window_handle(window));
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<ArtifactEvent>();
         let mut options = artifact_view::EmbedOptions::new(
@@ -702,9 +688,12 @@ impl WebEmbedState {
         options.inspectable = cfg!(debug_assertions);
         options.viewer = self.spec.viewer.clone();
         options.ref_menu = self.spec.ref_menu.clone();
-        match artifact_view::EmbeddedArtifact::attach(mtm, host, options, move |e| {
+        let Some(attached) = attach_native(window, options, move |e| {
             let _ = tx.unbounded_send(e);
-        }) {
+        }) else {
+            return;
+        };
+        match attached {
             Ok(native) => {
                 self.native = Some(native);
                 self._events = Some(cx.spawn(async move |this, cx| {
@@ -735,7 +724,7 @@ impl WebEmbedState {
         // above the page: the page shows only below it (§2.17, A4).
         let visible = below_bands(window, visible, cx);
         self.cover_covered = covers_overlap(window, visible, cx);
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             self.attach(window, cx);
             let covered = self.covered();
@@ -760,7 +749,7 @@ impl WebEmbedState {
                     s.check_pending = false;
                     if s.hit_covered != covered {
                         s.hit_covered = covered;
-                        #[cfg(target_os = "macos")]
+                        #[cfg(any(target_os = "macos", windows))]
                         if let Some(n) = &s.native {
                             n.set_hidden(s.covered());
                         }
@@ -815,7 +804,7 @@ fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
         ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
 --tc-fill:{fill};--tc-primary:{fg};color-scheme:{scheme}}}\
 @layer tc-base{{\
-html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;\
+html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue','Segoe UI Variable Text','Segoe UI','Microsoft YaHei UI',sans-serif;\
 color:var(--tc-fg);background:transparent;-webkit-font-smoothing:antialiased}}\
 body{{margin:0;padding:var(--tc-pad)}}\
 h1{{font-size:24px;line-height:32px;font-weight:600;margin:0 0 8px}}\
@@ -828,7 +817,7 @@ th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:star
 [data-tc-num]{{text-align:right!important}}\
 th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
 hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
-code,pre{{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px}}\
+code,pre{{font-family:ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace;font-size:13px}}\
 pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}}}",
         pad = f32::from(pad).round(),
         bg = hex(k.content),
@@ -935,7 +924,70 @@ fn sample_points(visible: Bounds<Pixels>) -> Vec<Point<Pixels>> {
     out
 }
 
+/// Adds a page above GPUI's own view of `window` (an AppKit sibling view). `None` when
+/// the window has no native view yet.
 #[cfg(target_os = "macos")]
+fn attach_native(
+    window: &Window,
+    options: artifact_view::EmbedOptions,
+    on_event: impl Fn(ArtifactEvent) + 'static,
+) -> Option<Result<artifact_view::EmbeddedArtifact, artifact_view::Error>> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let mtm = objc2_foundation::MainThreadMarker::new()?;
+    let handle = HasWindowHandle::window_handle(window).ok()?;
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return None;
+    };
+    // SAFETY: GPUI's AppKit handle points at the window's live content NSView, and paint
+    // runs on the main thread.
+    let host = unsafe { artifact_view::view_from_ptr(appkit.ns_view.as_ptr()) }?;
+    Some(artifact_view::EmbeddedArtifact::attach(
+        mtm, host, options, on_event,
+    ))
+}
+
+/// Adds a page above GPUI's content of `window` (a child window of its `HWND`). `None`
+/// when the window has no native handle yet. [`prepare_process`] must have run: a child
+/// window shows only when GPUI does not draw through DirectComposition.
+#[cfg(windows)]
+fn attach_native(
+    window: &Window,
+    options: artifact_view::EmbedOptions,
+    on_event: impl Fn(ArtifactEvent) + 'static,
+) -> Option<Result<artifact_view::EmbeddedArtifact, artifact_view::Error>> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = HasWindowHandle::window_handle(window).ok()?;
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return None;
+    };
+    // Paint runs on the thread of GPUI's message loop.
+    Some(artifact_view::EmbeddedArtifact::attach(
+        artifact_view::MainThread::current(),
+        win32.hwnd.get(),
+        options,
+        on_event,
+    ))
+}
+
+/// Sets up the process for embedded pages. Call it first in `main`, before GPUI starts.
+///
+/// On Windows: GPUI draws through a HWND swap chain instead of a topmost DirectComposition
+/// tree, which would cover every child window (the embedded WebView2 pages); and the
+/// WebView2 user data goes to a folder of its own under the app's cache folder.
+pub fn prepare_process() {
+    #[cfg(windows)]
+    {
+        // SAFETY: `main` calls this before it starts any thread.
+        unsafe { std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "1") };
+        artifact_view::set_user_data_dir(
+            crate::paths::cache_base()
+                .join("team-chat")
+                .join("webview2"),
+        );
+    }
+}
+
+#[cfg(any(target_os = "macos", windows))]
 fn rect(b: Bounds<Pixels>) -> artifact_view::Rect {
     artifact_view::Rect::new(
         f32::from(b.origin.x) as f64,
@@ -1080,7 +1132,7 @@ impl Element for NativeSlot {
                 return;
             }
             let _ = weak.update(cx, |_s, _| {
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", windows))]
                 if let Some(n) = &_s.native {
                     n.resign_focus();
                 }

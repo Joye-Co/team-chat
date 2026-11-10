@@ -392,7 +392,7 @@ const INLINE_HTML: &str = concat!(
     r#"<!doctype html><html><head><meta charset="utf-8"><style>"#,
     r#"
 :root{color-scheme:light dark;--t1:var(--tc-fg,#0a0a0a);--t2:var(--tc-muted,#737373);--line:var(--tc-border,#e5e5e5);--bar:var(--tc-primary,#171717);--soft:color-mix(in srgb,var(--bar) 20%,transparent)}
-html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
+html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC","Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{padding:0}
 .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
 .chart{display:flex;align-items:flex-end;gap:14px;height:120px;border-bottom:1px solid var(--line);padding:0 4px}
@@ -423,7 +423,7 @@ const PANE_HTML: &str = concat!(
     r#"<!doctype html><html><head><meta charset="utf-8"><style>"#,
     r#"
 :root{color-scheme:light dark;--t1:var(--tc-fg,#0a0a0a);--t2:var(--tc-muted,#737373);--line:var(--tc-border,#e5e5e5);--bar:var(--tc-primary,#171717)}
-html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.6 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
+html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.6 -apple-system,"PingFang SC","Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{padding:0}
 .sub{color:var(--t2);font-size:12px;margin:0 0 12px}
 video{display:block;width:100%;border-radius:8px;background:#000;aspect-ratio:16/9}

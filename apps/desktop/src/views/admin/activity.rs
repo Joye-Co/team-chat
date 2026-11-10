@@ -232,6 +232,35 @@ pub fn sentence(
                 });
             (f(m::ACT_MACHINE_ONLINE, &[]), meta)
         }
+        "budget.paused" => {
+            let spent = e
+                .details
+                .as_ref()
+                .and_then(|d| d.get("spentCents"))
+                .map(money)
+                .unwrap_or_default();
+            let meta = match detail_str(e, "title") {
+                Some(t) if !t.is_empty() => fill(
+                    m::ACT_BUDGET_PAUSED_META,
+                    &[("title", t), ("spent", &spent)],
+                ),
+                _ => fill(m::ACT_BUDGET_PAUSED_SPENT, &[("spent", &spent)]),
+            };
+            (f(m::ACT_BUDGET_PAUSED, &[]), Some(meta))
+        }
+        "budget.raised" => {
+            let extra = e
+                .details
+                .as_ref()
+                .and_then(|d| d.get("extraCents"))
+                .map(money)
+                .unwrap_or_default();
+            (f(m::ACT_BUDGET_RAISED, &[("extra", &extra)]), None)
+        }
+        "budget.stopped" => (
+            f(m::ACT_BUDGET_STOPPED, &[]),
+            detail_str(e, "title").map(str::to_string),
+        ),
         "budget.reached" => {
             let d = e.details.as_ref();
             let budget = d
@@ -709,5 +738,29 @@ mod tests {
             "Forge 本周花费到了预算 $100"
         );
         assert_eq!(kind_label("run"), m::KIND_RUN);
+        let mut p = entry(
+            "budget.paused",
+            "budget",
+            serde_json::json!({"spentCents": 10230, "title": "对一下账单"}),
+        );
+        p.actor_id = Some("forge".into());
+        assert_eq!(
+            sentence(&p, &name, &machine),
+            (
+                "Forge 到了这周的预算，停下来等你决定".into(),
+                Some("对一下账单 · 这周花了 $102".into())
+            )
+        );
+        let r = entry(
+            "budget.raised",
+            "budget",
+            serde_json::json!({"extraCents": 5000}),
+        );
+        assert_eq!(
+            sentence(&r, &name, &machine).0,
+            "Joye 这周给 Forge 加了 $50 预算"
+        );
+        let s = entry("budget.stopped", "budget", serde_json::json!({}));
+        assert_eq!(sentence(&s, &name, &machine).0, "Joye 让 Forge 先停下");
     }
 }
