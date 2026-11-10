@@ -152,8 +152,14 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         "total": spend(total, 71),
         "previous": { "costUsd": 151.0, "topics": 63 },
         "teamBudgetCents": 21_000,
-        "bots": bots.iter().map(|b| with("memberId", b.0, b.1, b.2,
-            b.3.map(|c| json!({ "budgetCents": c })).unwrap_or(json!({})))).collect::<Vec<_>>(),
+        "bots": bots.iter().map(|b| {
+            let mut extra = b.3.map(|c| json!({ "budgetCents": c })).unwrap_or(json!({}));
+            // Taro runs on Codex: its cost is estimated from tokens.
+            if b.0 == "m-taro" {
+                extra["estimatedUsd"] = json!(b.1);
+            }
+            with("memberId", b.0, b.1, b.2, extra)
+        }).collect::<Vec<_>>(),
         "initiators": [
             with("memberId", ME, 74.1, 26, json!({})),
             with("memberId", "m-xiaowang", 41.8, 17, json!({})),
@@ -169,7 +175,7 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         ],
         "runtimes": [
             with("runtime", "claude", 152.6, 58, json!({ "machineId": "mc-mini" })),
-            with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini" })),
+            with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini", "estimatedUsd": 18.2 })),
         ],
         "daily": daily
     }))
