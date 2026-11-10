@@ -59,7 +59,55 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
         })
         .detach();
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        use super::windows;
+        let mode = windows::install_notifications(cx);
+        tracing::info!(?mode, "notifications");
+
+        let reconnect = core.clone();
+        windows::watch_system(
+            Arc::new(move |why| {
+                tracing::info!(why, "system change");
+                reconnect.reconnect_now_inner();
+            }),
+            cx,
+        );
+
+        let mut notices = core.notices();
+        cx.spawn(async move |cx| {
+            while let Some(notice) = notices.next().await {
+                // Runs on the main thread.
+                if !windows::app_is_active() {
+                    cx.update(|cx| {
+                        windows::post(&notice, crate::views::settings::prefs::get().sound, cx)
+                    });
+                }
+            }
+        })
+        .detach();
+
+        let mut clicks = windows::clicks();
+        cx.spawn(async move |cx| {
+            while let Some((group_id, topic_id)) = clicks.next().await {
+                let nav = services.nav.clone();
+                cx.update(|cx| {
+                    // The window may be closed (the app lives on in the notification
+                    // area): open it, then go to the 话题.
+                    crate::views::nav::show_main_window(cx);
+                    nav.update(cx, |nav, cx| {
+                        if topic_id.is_empty() {
+                            nav.open_group_chat(group_id, cx)
+                        } else {
+                            nav.open_topic(group_id, topic_id, cx)
+                        }
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (core, services, cx);
     }

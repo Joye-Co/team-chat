@@ -29,6 +29,8 @@ pub mod files;
 mod files_live;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "windows")]
+pub mod windows;
 mod panes;
 pub mod persist;
 // Proof chips from done cards (1.1.0).
@@ -50,6 +52,7 @@ pub mod sandbox;
 pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
+mod system_events;
 mod settings;
 mod this_mac;
 #[cfg(test)]
