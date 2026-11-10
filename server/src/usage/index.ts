@@ -6,15 +6,14 @@ import { deskStub } from "../bots/env";
 import type { UsageRun } from "../bots/desk/external";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
-import { estimate, priceOf } from "./prices";
+import { type Priced, priceRun } from "./prices";
+
+export { priceRun } from "./prices";
 
 const DAY_MS = 86_400_000;
 
 type Spend = TeamUsage["total"];
 const zero = (): Spend => ({ costUsd: 0, inputTokens: 0, outputTokens: 0, runs: 0, topics: 0 });
-
-/** A run with its cost settled: reported, or estimated from its tokens (`estimated`). */
-type Priced = UsageRun & { estimated: number };
 
 /** Adds runs to a spend; topics are counted once per spend. */
 class Tally {
@@ -50,21 +49,6 @@ class Tally {
 }
 
 const round = (x: number) => Math.round(x * 100) / 100;
-
-/**
- * A run's cost: what the CLI reported, else its tokens at list price (`prices.ts`) for the run's
- * runtime and the AI member's model. Codex reports tokens only.
- */
-export function priceRun(run: UsageRun, runner?: { runtime: string | null; model: string | null }): Priced {
-  if (run.costUsd > 0 || run.inputTokens + run.outputTokens === 0) return { ...run, estimated: 0 };
-  const runtime = run.runtime ?? runner?.runtime ?? null;
-  // The member's model belongs to the member's runtime; a run on another CLI uses its default.
-  const model = runner && (!run.runtime || run.runtime === runner.runtime) ? runner.model : null;
-  const price = priceOf(runtime, model);
-  if (!price) return { ...run, estimated: 0 };
-  const cost = estimate(price, run.inputTokens, run.outputTokens);
-  return { ...run, costUsd: cost, estimated: cost };
-}
 
 export function buildUsage(input: {
   from: number;
