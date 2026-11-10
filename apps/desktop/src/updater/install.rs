@@ -11,6 +11,10 @@
 //! under a hidden name until the new one starts: a marker file names it, and
 //! [`finish_on_launch`] in the new process removes it. [`relaunch`] starts a small shell
 //! that waits for this process to exit and then opens the new bundle.
+//!
+//! On Windows the same seam ([`install_update`], [`launch_after`], [`relaunch`],
+//! [`finish_on_launch`]) hands the downloaded installer to the update helper; see
+//! [`windows`]. There the "bundle" is the install folder and the "DMG" is the installer.
 
 use std::{
     ffi::OsString,
@@ -23,6 +27,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::version;
+
+pub mod windows;
 
 /// What an install needs.
 #[derive(Clone, Debug)]
@@ -124,6 +130,41 @@ pub fn staging_path(bundle: &Path, version: &str) -> PathBuf {
 /// Where the old bundle waits until the new one starts.
 pub fn old_path(bundle: &Path, version: &str) -> PathBuf {
     sibling(bundle, &format!("old-{version}"))
+}
+
+/// What [`install_update`] leaves for [`launch_after`].
+pub struct Installed {
+    pub marker: Marker,
+    /// Windows: the helper that does the replacing once the app has quit.
+    helper: Option<windows::Staged>,
+}
+
+/// The install step of this system. macOS: the new bundle is in place when it returns
+/// ([`install`]). Windows: the installer and the install folder are checked and the
+/// update helper is ready; the files change after the app quits ([`windows::prepare`]).
+pub fn install_update(plan: &Plan) -> Result<Installed, InstallError> {
+    if cfg!(windows) {
+        let (marker, staged) = windows::prepare(plan, Vec::new())?;
+        return Ok(Installed {
+            marker,
+            helper: Some(staged),
+        });
+    }
+    let marker = install(plan)?;
+    // The bundle is replaced; the image is used up.
+    let _ = std::fs::remove_file(&plan.dmg);
+    Ok(Installed {
+        marker,
+        helper: None,
+    })
+}
+
+/// How to start the new version after [`install_update`].
+pub fn launch_after(installed: Installed) -> Launch {
+    match installed.helper {
+        Some(staged) => Launch::Helper(staged),
+        None => Launch::Open(installed.marker.bundle),
+    }
 }
 
 /// Runs the whole install. On success the new bundle is at `plan.bundle`, the old one at
@@ -503,19 +544,26 @@ fn remove_stale_staging(bundle: &Path) {
 
 /// How to start the new version.
 #[derive(Clone, Debug)]
+// Windows starts only the helper; the other two carry what macOS runs.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub enum Launch {
     /// `open <bundle>` through Launch Services (the app).
     Open(PathBuf),
     /// Run a program directly (tests).
     Exec(Vec<OsString>),
+    /// Windows: the update helper installs and then starts the app.
+    Helper(windows::Staged),
 }
 
 /// Starts a detached shell that waits (at most 60 s) for `pid` to exit, then launches.
 /// The caller quits right after.
 #[cfg(not(unix))]
-pub fn relaunch(_pid: u32, _launch: &Launch) -> std::io::Result<()> {
-    // The Windows updater (docs/plans/windows.zh.md, W4) is not written yet.
-    Err(std::io::ErrorKind::Unsupported.into())
+pub fn relaunch(pid: u32, launch: &Launch) -> std::io::Result<()> {
+    match launch {
+        Launch::Helper(staged) => windows::start(staged, pid),
+        // Only the helper can replace the app on Windows.
+        Launch::Open(_) | Launch::Exec(_) => Err(std::io::ErrorKind::Unsupported.into()),
+    }
 }
 
 /// See the twin above.
@@ -525,6 +573,7 @@ pub fn relaunch(pid: u32, launch: &Launch) -> std::io::Result<()> {
     let argv: Vec<OsString> = match launch {
         Launch::Open(bundle) => vec!["/usr/bin/open".into(), bundle.into()],
         Launch::Exec(argv) => argv.clone(),
+        Launch::Helper(staged) => return windows::start(staged, pid),
     };
     Command::new("/bin/sh")
         .arg("-c")

@@ -9,6 +9,9 @@ CI 上跑通隔离测试，见下。其余进行中或未开始。
 M3 已完成（daemon 作为当前用户的计划任务、改名替换的自己更新、「用这台电脑」、PowerShell 安装命令；计划任务和
 安装命令在 Windows CI 上对着真的任务计划程序跑过，「用这台电脑」只编译过，都还没在真的 Windows 电脑上试过）。
 
+R1（安装包、更新程序、发版流程）已完成：Windows CI 上真的装、更新、回滚、卸载了一遍；还缺证书、第一次真实
+发版和真机确认，见 R1 一节。
+
 ## 目标
 
 Windows 电脑能做 Mac 电脑现在能做的每一件事。不是只做一个聊天客户端，是三样东西一起：
@@ -48,7 +51,7 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 | `src/theme.rs`、`src/ui/motion.rs` | 系统外观、减弱动画 | `UISettings`、`SPI_GETCLIENTAREAANIMATION` |
 | `src/views/settings/window_fit.rs` | NSWindow 尺寸和位置 | `GetMonitorInfo` 和工作区 |
 | `src/provider/this_mac.rs`（用这台电脑） | 应用包里的 daemon 加 launchd | 安装目录里的 daemon 加计划任务，见 M3 |
-| `src/updater` | DMG、`hdiutil`、替换 `.app` | 安装包加单独的更新程序 |
+| `src/updater` | DMG、`hdiutil`、替换 `.app` | 已完成：安装包加单独的更新程序（`apps/update-helper`），见 R1 |
 | `src/selftest/capture.rs`（截图自测） | NSWindow 编号、`screencapture` | 已完成：`PrintWindow` 加 `PW_RENDERFULLCONTENT`，见「怎么看 Windows 界面」 |
 
 ### 机器（`apps/daemon`，约 1.15 万行）
@@ -571,16 +574,71 @@ M2 里发现的事：
 
 ### 发布
 
-**R1 安装包、签名、更新（约 2 周）**
+**R1 安装包、签名、更新（已完成，等第一次真实发版和真机确认）**
 
-- 安装包（NSIS）：客户端、daemon、WebView2 bootstrapper。
-- 代码签名（证书由运营方提供，放在 CI secret 里，不进仓库）。
-- 客户端更新器：下载、校验 SHA-256，由单独的更新程序在主程序退出后替换文件再重启；daemon 跟着更新：
-  `<slug>-daemon.exe` 按 M3 的「替换协议」换（改名再放新文件，不停 daemon、不动计划任务），daemon 自己重启。
-- `release.yml` 增加 Windows 任务；服务器的版本接口按平台返回产物（只加字段，不改已有字段的含义）；
-  `docs/INSTALL.md` 加 Windows 一节。
+做了什么：
 
-完成标准：从上一个版本自动更新到新版本，客户端和 daemon 都换成新的。
+- **安装包**：`scripts/build-windows-installer.sh`（Windows runner 上的 Git Bash）出
+  `dist/<名字>-<版本>-setup.exe` 和 `.sha256`，NSIS 脚本在 `scripts/windows/installer.nsi`。只装给当前
+  用户，不要管理员权限：文件在 `%LOCALAPPDATA%\Programs\<名字>`，注册表都在 `HKCU`（卸载项、URL scheme、
+  AppUserModelID）。开始菜单快捷方式上带 AppUserModelID（等于 `product.json` 的 bundle id，和客户端
+  进程设的一致，通知要靠它）。带 WebView2 Evergreen bootstrapper，只在系统里没有 runtime 时才运行。
+  里面有客户端、更新程序和 daemon（`DAEMON=0` 可以不带）。客户端的 release 版是窗口程序（没有控制台），
+  exe 里有图标（`assets/brand/AppIcon.ico`）和版本信息。
+- **更新**：检查、下载、SHA-256 校验和界面不变；安装这一步在 `apps/desktop/src/updater/install/windows.rs`。
+  运行中的 exe 不能被覆盖，所以由单独的更新程序 `apps/update-helper`（装在客户端旁边，
+  `<slug>-update.exe`）来做：客户端把它复制到安装目录外面，启动它，自己退出；它等客户端进程结束，再校验
+  一次安装包，写下日志（journal），把安装目录里的文件改名挪到旁边的备份目录，静默运行安装包，写标记文件
+  并启动新版本。新版本启动后删掉标记和备份（和 Mac 同一段代码）。安装包失败、新版本提前退出或 90 秒内
+  没删标记，更新程序就把备份放回去、恢复系统里显示的版本号、重新打开旧版本。
+- **更新中途被打断**（更新程序被杀、用户注销、断电）：动任何文件之前，更新程序先把要做的事写进
+  `%APPDATA%\<id>\updates\update-journal.json`，并在 `HKCU\...\RunOnce` 里登记
+  `<更新程序> --recover <journal>`。恢复在三个时候跑：下次登录（RunOnce）、客户端下次启动、下一次更新
+  开始前。恢复按 journal 里记的阶段做：旧文件还在挪的时候被打断，就把已经挪走的挪回来；安装包跑到一半，
+  就清掉装了一半的文件再把备份放回去；新版本已经启动并删了标记，说明更新其实成功了，只清理 journal。
+  更新程序还活着的时候恢复什么都不碰。恢复可以重复跑。
+- **daemon 跟着换，但不停它**：按 M3 的「替换协议」。更新程序不挪 `<slug>-daemon.exe`（`--keep`），只往
+  备份里复制一份；安装包把新 daemon 完整写成 `.exe.new`，把运行中的改名成 `.exe.old-<后缀>`，再把 `.new`
+  改名到位（失败就改回去并中止）。回滚和恢复时，更新程序用同一个协议把备份里的旧 daemon 换回去，所以
+  「程序文件被改名走、新文件还没到位」时被打断也能恢复。正在跑 bot 的 daemon 始终不会被杀。
+- **为什么是单独的程序，不是让安装包自己做**：安装包不知道新版本有没有真的启动起来，回滚只能写在
+  NSIS 脚本里，没法测。更新程序是普通 Rust 代码，整个流程的测试在 Mac、Linux、Windows 上都跑。
+- **签名**：可选。`scripts/windows/sign.sh` 在设置了 `WINDOWS_SIGN_THUMBPRINT`（证书在用户证书库里）或
+  `WINDOWS_SIGN_CMD` 时给客户端、更新程序、daemon、卸载程序和安装包签名；没设置就不签，安装时会有
+  SmartScreen 提示。更新时的规则：已安装的版本有有效签名，只接受同一个发布者的有效签名；已安装的版本
+  签了名但这台电脑不信任那张证书，只接受同一张证书签的；没签名的版本接受没签名或有效签名的安装包，
+  签名对不上内容的一律拒绝。读不出签名（查询失败）算错误，不当成「没签名」。更新程序调用系统工具
+  （PowerShell、reg）一律用 System32 里的绝对路径。
+- **服务器**：版本信息按平台给。`UpdateInfo` 多了可选字段 `platform`，`GET /v1/updates/latest` 和下载
+  接口多了可选参数 `platform`，上传 Windows 安装包用 `PUT /v1/admin/releases/:version/assets/windows`
+  （新表 `release_assets`，DMG 还在原来的 `releases` 表）。不带参数就是 Mac，旧的 Mac 客户端和发版脚本
+  完全不受影响；Windows 客户端只接受 `platform` 是 `windows` 的回答，所以永远不会拿到 DMG。邀请链接
+  的下载页在 Windows 浏览器里给安装包。细节在 `docs/protocol.md`「Updates and downloads」。
+- **发版**：`release.yml` 多了两个任务：Windows runner 上构建、签名、测试安装包；发版成功后把安装包加进
+  GitHub Release 并上传到服务器（`scripts/release.sh <版本> --upload-only --platform windows`）。
+- **CI**：`windows-installer` 任务（`windows-2025`）每次都真的跑一遍：release 构建，静默安装，检查文件、
+  注册表、快捷方式和 AppUserModelID，启动装好的客户端（自报版本，再画一屏登录页），覆盖安装，静默卸载，
+  检查没有残留；再构建下一个版本，让装好的客户端对着本地服务器（`wrangler dev`）自己更新过去，检查新
+  版本在跑；再测一次回滚；再在安装目录被搬空的那一刻真的杀掉更新程序，检查 RunOnce 里登记了恢复，
+  运行恢复后安装目录逐字节回到原样；最后用本次运行临时生成的证书把上面的安装和更新再跑一遍带签名的。没签名的
+  安装包会作为产物 `windows-installer` 保留 7 天，有 Windows 电脑的人可以直接下载来试。
+- `docs/INSTALL.md`、`docs/INSTALL.zh.md` 加了 Windows 一节，`docs/RUNBOOK.md` 加了发 Windows 版的说明。
+
+还没做、要人来做的：
+
+- **证书**：运营方买代码签名证书，按 `docs/RUNBOOK.md` 加两个 secret。在那之前发出去的是没签名的
+  安装包。新证书在 SmartScreen 里也要积累一段时间信誉。
+- **第一次真实发版**：先部署服务器（新表和新接口），再跑 Release workflow。
+- **真机上看**：安装界面（中文）、SmartScreen 提示的实际样子、开始菜单和任务栏图标、点通知能不能回到
+  客户端、点 `<scheme>://` 链接（现在只是打开客户端，还不会跳到链接指向的地方）、Windows 10 上没有
+  WebView2 时 bootstrapper 的安装（CI 的机器自带 runtime，只走了「已经有」这条路）。
+- **daemon**：CI 上验证的是 daemon 的文件按协议被换掉、回滚和恢复后回到原样；「正在跑的 daemon 发现新
+  文件、空闲时退出、计划任务拉起新的」这一段是 M3 的代码，要和 M3（PR #134）合在一起后在真机上看一次。
+  卸载时会先调 `<slug>-daemon.exe uninstall-service`。
+- **读签名靠 PowerShell**：公司电脑如果禁了 PowerShell，读不出签名，更新会被拒绝（装的版本不变）。
+  M3 的 `apps/daemon/src/wintrust.rs` 是直接调系统接口读签名的，合并后可以换成它。
+
+完成标准：从上一个版本自动更新到新版本，客户端和 daemon 都换成新的。CI 上已经做到（daemon 换的是文件）。
 
 ### 工期
 

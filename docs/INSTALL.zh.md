@@ -1,6 +1,6 @@
 # 在 Mac 上安装 TeamChat
 
-English version: [INSTALL.md](INSTALL.md)。
+English version: [INSTALL.md](INSTALL.md)。Windows 电脑看下面的[在 Windows 上安装](#在-windows-上安装)。
 
 需要一台 Apple 芯片(M1 或更新)的 Mac,系统 macOS 13 或更新。这个 App 没有经过 Apple 公证,
 所以第一次打开时 macOS 会要你手动允许一次(第 3 步)。
@@ -92,9 +92,62 @@ cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
 3. 可选:删除登录凭证:在"钥匙串访问"里删除 `co.joye.teamchat` 项目,或在终端运行
    `security delete-generic-password -s co.joye.teamchat`。
 
+## 在 Windows 上安装
+
+需要 64 位的 Windows 10(22H2)或 Windows 11。安装不需要管理员权限,只装给当前登录的用户。
+
+### 下载和安装
+
+1. 拿到 `TeamChat-<版本号>-setup.exe`:在这台 Windows 电脑的浏览器里打开邀请链接(在 Windows 上
+   下载的是安装包,在 Mac 上是 DMG),或者到 <https://github.com/Joye-Co/team-chat/releases>
+   的 Assets 里下载。邀请码留着,登录时要用。
+2. 可选:在 PowerShell 里检查文件是否完整(和同一个版本里的 `.sha256` 文件对比):
+
+   ```powershell
+   Get-FileHash .\TeamChat-<版本号>-setup.exe -Algorithm SHA256
+   ```
+
+3. 双击安装包。在安装包用 Windows 认可的证书签名之前,会出现
+   **Windows 已保护你的电脑**(SmartScreen):点 **更多信息**,再点 **仍要运行**。
+   如果浏览器先拦住了下载,选 **保留**。
+4. 装好后开始菜单里会有 TeamChat,安装程序也会问你要不要立刻打开。登录方法和上面第 4 步一样。
+   在 Windows 上,登录凭证存在"Windows 凭据管理器"里。
+
+如果电脑上没有 Microsoft Edge WebView2 Runtime(Windows 11 自带,部分 Windows 10 没有),安装程序会
+联网下载并安装它。没有它 App 也能用,但产出页面和图表显示不出来。
+
+脚本里静默安装:`TeamChat-<版本号>-setup.exe /S`。
+
+### 更新
+
+和 Mac 一样:App 检查服务器,下载新的安装包,校验 SHA-256,然后提示"重启安装"。点了以后 App 退出,
+一个很小的更新程序(`team-chat-update.exe`)替换文件并打开新版本。如果新版本打不开,更新程序会把
+旧版本放回去并重新打开。想手动更新:直接运行新的安装包,覆盖安装。
+
+### 数据存在哪里
+
+| 内容 | 位置 |
+| --- | --- |
+| App 本身 | `%LOCALAPPDATA%\Programs\TeamChat\` |
+| 本地缓存(消息、打开过的文件、设置)和日志 | `%APPDATA%\co.joye.teamchat\`(日志在 `logs\` 里) |
+| 登录凭证 | "Windows 凭据管理器"里名为 `co.joye.teamchat` 的项目 |
+| 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\TeamChat.lnk` |
+
+把带 `%...%` 的路径粘到资源管理器的地址栏里就能打开。
+
+### 卸载
+
+1. 退出 TeamChat(通知区域的图标里也要退出)。
+2. 打开 **设置 → 应用 → 安装的应用**,找到 TeamChat,选 **卸载**。或者运行
+   `"%LOCALAPPDATA%\Programs\TeamChat\uninstall.exe"`(加 `/S` 不显示窗口)。
+3. 卸载会删掉 App、开始菜单快捷方式和它的注册表项,**保留你的本地数据**。可选:删除
+   `%APPDATA%\co.joye.teamchat\`,并在 **凭据管理器 → Windows 凭据** 里删除 `co.joye.teamchat`。
+
 ## 常见问题
 
 - **提示"已损坏,无法打开"**:运行第 3 步里的 `xattr` 命令,再打开。
 - **"隐私与安全性"里找不到"仍要打开"**:先从"应用程序"里打开一次 App,看到提示后再去设置里找;
   这个按钮只在最近一次尝试打开后的一小时内出现。
 - **一直显示"连接中"**:检查网络;如果网络正常还是这样,发送诊断信息并告诉管理员。
+- **Windows 上提示"Windows 已保护你的电脑"**:安装包还没有签名时会这样。点 **更多信息**,再点
+  **仍要运行**。

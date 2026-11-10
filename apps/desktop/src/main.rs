@@ -31,6 +31,10 @@
 //!   desktop --selftest-settings --report <path> [--live <url> --token-file <path>]
 //!       drive the settings window and its forms (views/settings/selftest.rs).
 
+// A release build on Windows is a window program: no console opens behind it. Debug builds
+// keep the console for logs and the self-tests.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
 #[allow(dead_code)]
@@ -162,6 +166,10 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or("--hold-ms needs a number")?
             }
             "--help" | "-h" => return Err(String::new()),
+            // Windows starts the app with the link as its argument when the user opens a
+            // `<scheme>://` link (the installer registers the scheme). The app opens; it
+            // does not go to the link's target yet.
+            link if link.starts_with(concat!(env!("PRODUCT_URL_SCHEME"), ":")) => {}
             other => return Err(format!("unknown argument: {other}")),
         }
     }
