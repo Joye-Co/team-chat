@@ -473,6 +473,7 @@ impl Render for AdminView {
 impl AdminView {
     /// The window's content, under the caption strip off the Mac.
     fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_budget_field(window, cx);
         let k = native_colors(cx);
         div()
             .id("admin-root")
