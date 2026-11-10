@@ -24,13 +24,13 @@ pub mod topic_menu;
 pub mod welcome;
 
 // The v2 shell (1.1.0) and one folder per feature track.
+pub mod admin;
 pub mod artifact_page;
 pub mod desk;
 pub mod group_page;
 pub mod live;
 pub mod members_page;
 pub mod memory;
-pub mod admin;
 pub mod rail;
 // --- inc-base: 引用提问 entry point (inc-refs implements it).
 pub mod refs;
