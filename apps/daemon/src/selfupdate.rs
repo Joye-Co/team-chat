@@ -2,8 +2,11 @@
 //! itself, or someone copied a new binary over it), the running process still runs the old
 //! code. The daemon notices the new file and, once no run is active, exits so that the service
 //! manager (launchd `KeepAlive`, systemd `Restart=always`) starts the new version. Nobody has to restart anything by hand.
+//!
+//! Windows: a running program file cannot be written, but it can be renamed, so an update
+//! moves it aside and puts the new file in its place; the stamp there is the file's size,
+//! write time and creation time.
 
-use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
 /// What identifies one version of the program file on disk.
@@ -17,7 +20,9 @@ pub struct Stamp {
 }
 
 impl Stamp {
+    #[cfg(unix)]
     pub fn of(path: &Path) -> Option<Stamp> {
+        use std::os::unix::fs::MetadataExt as _;
         let m = std::fs::metadata(path).ok()?;
         (m.is_file() && m.mode() & 0o111 != 0).then(|| Stamp {
             dev: m.dev(),
@@ -25,6 +30,21 @@ impl Stamp {
             size: m.size(),
             mtime: m.mtime(),
             mtime_nsec: m.mtime_nsec(),
+        })
+    }
+
+    /// Windows keeps no inode number in the standard metadata: the creation time stands in
+    /// for it (a new file moved into place has a new one).
+    #[cfg(windows)]
+    pub fn of(path: &Path) -> Option<Stamp> {
+        use std::os::windows::fs::MetadataExt as _;
+        let m = std::fs::metadata(path).ok()?;
+        m.is_file().then(|| Stamp {
+            dev: 0,
+            ino: m.creation_time(),
+            size: m.file_size(),
+            mtime: m.last_write_time() as i64,
+            mtime_nsec: 0,
         })
     }
 }
@@ -76,12 +96,11 @@ impl Watch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt as _;
 
     fn write_exe(path: &Path, body: &str) {
         let tmp = path.with_extension("new");
         std::fs::write(&tmp, body).unwrap();
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::sys::set_mode(&tmp, 0o755).unwrap();
         // Replaced the way an update replaces it: a new file moved over the old one.
         std::fs::rename(&tmp, path).unwrap();
     }
@@ -111,9 +130,13 @@ mod tests {
         std::fs::remove_file(&exe).unwrap();
         assert!(!w.check());
         assert!(!w.check());
-        std::fs::write(&exe, "half written").unwrap();
-        assert!(!w.check());
-        assert!(!w.check());
+        // Not executable (a mode Windows does not have: any file there is a version).
+        #[cfg(unix)]
+        {
+            std::fs::write(&exe, "half written").unwrap();
+            assert!(!w.check());
+            assert!(!w.check());
+        }
         // No file at start: nothing to watch.
         let mut none = Watch::new(dir.path().join("missing"));
         assert!(!none.check());

@@ -310,8 +310,18 @@ fn tool_title(name: &str, input: &Value) -> String {
 /// `~/.claude/projects` folder name for a working directory.
 pub fn project_dir_name(cwd: &Path) -> String {
     let real = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    real.to_string_lossy()
-        .chars()
+    project_dir_name_of(&real.to_string_lossy())
+}
+
+/// [`project_dir_name`] of a path as the CLI sees it. Windows: `canonicalize` gives the
+/// `\\?\` form (`\\?\C:\Users\me\work`), which the CLI never sees; without that prefix
+/// `C:\Users\me\work` is `C--Users-me-work`.
+pub fn project_dir_name_of(path: &str) -> String {
+    let path = match path.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}"),
+        None => path.strip_prefix(r"\\?\").unwrap_or(path).to_string(),
+    };
+    path.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
@@ -364,7 +374,7 @@ pub const ASIDE_SETTINGS: &str = ".aside-settings.json";
 pub fn config_dir(spec: &RunSpec) -> PathBuf {
     spec.env_var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".claude"))
+        .unwrap_or_else(|| spec.home().join(".claude"))
 }
 
 /// The settings a side chat run keeps from the user's `settings.json`: only `env`,
@@ -397,16 +407,15 @@ pub fn aside_settings(config_dir: &Path) -> Option<Value> {
 /// hold auth values, which must not go on the command line) and returns its path.
 fn write_aside_settings(spec: &RunSpec) -> Option<PathBuf> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     let settings = aside_settings(&config_dir(spec))?;
     let path = spec.run_dir.join(ASIDE_SETTINGS);
     let _ = std::fs::remove_file(&path);
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-        .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
+    let written = crate::sys::mode(
+        std::fs::OpenOptions::new().write(true).create_new(true),
+        0o600,
+    )
+    .open(&path)
+    .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
     match written {
         Ok(()) => Some(path),
         Err(e) => {
