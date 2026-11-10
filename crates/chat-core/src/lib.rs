@@ -54,7 +54,9 @@ pub use store::{
 };
 #[cfg(target_os = "macos")]
 pub use token::KeychainTokenStore;
-pub use token::{FileTokenStore, TokenStore, TokenStoreError};
+#[cfg(target_os = "windows")]
+pub use token::CredentialTokenStore;
+pub use token::{FileTokenStore, TokenStore, TokenStoreError, credential_target};
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {
