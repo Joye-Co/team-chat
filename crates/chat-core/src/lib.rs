@@ -52,7 +52,7 @@ pub use store::{
     Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
     TopicRow,
 };
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use token::KeychainTokenStore;
 pub use token::{FileTokenStore, TokenStore, TokenStoreError};
 

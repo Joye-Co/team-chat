@@ -26,6 +26,69 @@ impl From<chat_core::ClientError> for CoreError {
     }
 }
 
+impl From<chat_core::TokenStoreError> for CoreError {
+    fn from(e: chat_core::TokenStoreError) -> Self {
+        CoreError::Failed {
+            message: e.to_string(),
+        }
+    }
+}
+
+/// Where the sign-in token is kept: the Keychain item `service` + `account` (the bundle id and
+/// the server address). `access_group` shares it with the app's extensions and needs the
+/// matching entitlement.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn token_store(
+    service: String,
+    account: String,
+    access_group: Option<String>,
+) -> Result<Box<dyn chat_core::TokenStore>, CoreError> {
+    let store = chat_core::KeychainTokenStore::new(service, account);
+    Ok(Box::new(match access_group {
+        Some(group) => store.with_access_group(group),
+        None => store,
+    }))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+fn token_store(
+    _service: String,
+    _account: String,
+    _access_group: Option<String>,
+) -> Result<Box<dyn chat_core::TokenStore>, CoreError> {
+    Err(CoreError::Failed {
+        message: "no keychain on this platform".into(),
+    })
+}
+
+#[uniffi::export]
+pub fn save_token(
+    service: String,
+    account: String,
+    access_group: Option<String>,
+    token: String,
+) -> Result<(), CoreError> {
+    Ok(token_store(service, account, access_group)?.save(&token)?)
+}
+
+#[uniffi::export]
+pub fn load_token(
+    service: String,
+    account: String,
+    access_group: Option<String>,
+) -> Result<Option<String>, CoreError> {
+    Ok(token_store(service, account, access_group)?.load()?)
+}
+
+#[uniffi::export]
+pub fn clear_token(
+    service: String,
+    account: String,
+    access_group: Option<String>,
+) -> Result<(), CoreError> {
+    Ok(token_store(service, account, access_group)?.clear()?)
+}
+
 /// A 群 or a 私聊 in the list.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct GroupItem {
