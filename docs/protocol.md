@@ -877,7 +877,10 @@ stops trying, and the topic gets one note.
 
 - **Silent 5 minutes**: one `run.input` to the CLI (`inputId` `desk-nudge-…`) asking where it
   stands. It is not a member's message, so it never starts a follow-up run. Any event clears it.
-- **Silent 10 minutes, the daemon's `stalled` report, or the machine gone** (no heartbeat for
+  A run with a `tool.call` that has no `tool.result` yet waits for a step it started (a build, a
+  test run): it gets no nudge, and it counts as silent only after 30 minutes. A run out of tries
+  gets no nudge either.
+- **Silent 10 minutes (30 with a step open), the daemon's `stalled` report, or the machine gone** (no heartbeat for
   2 minutes, or `runLost` past the lease): the run is cancelled without a message (`cancelled`,
   summary `restarted: …`), and its request starts again with the same work order on a healthy
   machine. The topic hears nothing. Out of tries, the old behavior applies: `blocked` with one
