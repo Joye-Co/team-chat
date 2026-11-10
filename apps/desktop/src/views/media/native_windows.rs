@@ -32,7 +32,7 @@ use windows::{
     },
     Storage::{
         StorageFile,
-        Streams::{DataReader, InMemoryRandomAccessStream},
+        Streams::{DataReader, DataWriter, InMemoryRandomAccessStream},
     },
     Win32::{
         Media::MediaFoundation::{
@@ -629,6 +629,63 @@ fn open_file(path: &Path) -> Option<StorageFile> {
         .ok()
 }
 
+/// A one-page empty PDF.
+fn blank_pdf() -> Vec<u8> {
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 8 8] >>",
+    ];
+    let mut out = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.push_str(&format!("{} 0 obj\n{body}\nendobj\n", i + 1));
+    }
+    let xref = out.len();
+    out.push_str(&format!(
+        "xref\n0 {}\n0000000000 65535 f \n",
+        objects.len() + 1
+    ));
+    for offset in offsets {
+        out.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    out.push_str(&format!(
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+        objects.len() + 1
+    ));
+    out.into_bytes()
+}
+
+/// Keeps one document and its page open until the process ends.
+///
+/// `Windows.Data.Pdf.dll` owns a Direct3D device that its documents share. When the
+/// last of them is gone, the DLL releases the device in a static destructor while the
+/// process exits; on the software renderer (a machine without a GPU, a VM) that
+/// release needs threads that are already gone, and the process ends as a crash
+/// (0xC000000D in `d3d10warp!Task::ScheduleTask`, seen on Windows Server 2025). A
+/// document that is never closed keeps the device out of that destructor.
+pub(super) fn keep_pdf_engine() -> bool {
+    static KEPT: OnceLock<Option<(PdfDocument, PdfPage)>> = OnceLock::new();
+    KEPT.get_or_init(|| {
+        let stream = InMemoryRandomAccessStream::new().ok()?;
+        let writer = DataWriter::CreateDataWriter(&stream).ok()?;
+        writer.WriteBytes(&blank_pdf()).ok()?;
+        writer.StoreAsync().ok()?.join().ok()?;
+        writer.DetachStream().ok()?;
+        stream.Seek(0).ok()?;
+        let doc = PdfDocument::LoadFromStreamAsync(&stream)
+            .ok()?
+            .join()
+            .ok()?;
+        let page = doc.GetPage(0).ok()?;
+        // Drawing is what makes the device.
+        draw_page(&page, 8, 8)?;
+        Some((doc, page))
+    })
+    .is_some()
+}
+
 /// Draws `page` as a `width` x `height` picture on white.
 fn draw_page(page: &PdfPage, width: u32, height: u32) -> Option<Bitmap> {
     let options = PdfPageRenderOptions::new().ok()?;
@@ -670,6 +727,7 @@ pub fn pdf_pages(path: &Path, width: u32, max_pages: usize) -> Option<(usize, Ve
     let limit = Duration::from_secs(30 + 5 * max_pages.min(600) as u64);
     run(limit, move || {
         let file = open_file(&path)?;
+        let _ = keep_pdf_engine();
         // Fails for a file that is not a PDF and for one that needs a password.
         let doc = PdfDocument::LoadFromFileAsync(&file).ok()?.join().ok()?;
         let count = doc.PageCount().ok()? as usize;

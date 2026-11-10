@@ -610,6 +610,14 @@ mod tests {
         );
     }
 
+    /// Without it the process can crash while it exits (see `keep_pdf_engine`).
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_pdf_engine_stays_open_until_the_process_ends() {
+        let ok = std::thread::spawn(win::keep_pdf_engine).join().unwrap();
+        assert!(ok, "the blank PDF did not open");
+    }
+
     #[test]
     fn a_file_that_is_not_a_pdf_has_no_pages() {
         let dir = tempfile::tempdir().unwrap();
