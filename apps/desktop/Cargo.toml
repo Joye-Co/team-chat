@@ -63,3 +63,13 @@ objc2-avf-audio = "0.3"
 objc2-core-graphics = "0.3"
 objc2-core-foundation = "0.3"
 # --- end v11/media
+
+# The screenshot self-test captures its own window (src/selftest/capture.rs).
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_Xps",
+    "Win32_UI_WindowsAndMessaging",
+] }
