@@ -13,6 +13,11 @@ path = "src/lib.rs"
 name = "daemon"
 path = "src/main.rs"
 
+# Its own fake CLI: the test program starts itself as the processes of a run.
+[[test]]
+name = "process_tree"
+harness = false
+
 [dependencies]
 chat-protocol.workspace = true
 serde.workspace = true
@@ -29,6 +34,18 @@ regex = "1"
 # Feature "accounts": API keys sealed to the machine's X25519 key (libsodium sealed boxes).
 crypto_box = { version = "0.9.1", features = ["seal", "std"] }
 base64 = "0.22"
+
+# Windows: the run's process tree is a Job Object (src/winjob.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = "3"

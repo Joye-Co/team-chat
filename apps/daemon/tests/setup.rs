@@ -1,4 +1,9 @@
 //! Protocol fixtures, config, launchd and systemd services, run folders and cleanup.
+//!
+//! Unix only: the fake CLIs are Python scripts started by their `#!` line, and the cases use
+//! `/bin/sh`, signals and file modes. Windows has `tests/process_tree.rs`.
+
+#![cfg(unix)]
 
 use daemon::config::Config;
 use daemon::proto::{Down, RepoSpec, Up};

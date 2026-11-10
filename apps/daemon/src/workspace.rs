@@ -97,6 +97,10 @@ pub fn validate_repo(cfg: &Config, repo: &RepoSpec) -> Result<(), String> {
 
 async fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     let mut c = tokio::process::Command::new("git");
+    // Windows: paths over 260 characters (deep trees under the run folder).
+    if cfg!(windows) {
+        c.args(["-c", "core.longpaths=true"]);
+    }
     if let Some(d) = dir {
         c.arg("-C").arg(d);
     }
@@ -250,9 +254,13 @@ async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
 /// Makes `dir` and everything below it read-only (`a-w`; a side chat run's checkout, so its CLI
 /// cannot write there whatever its own modes say), or gives the owner write access back
 /// (`u+w`). Symlinks are not followed. Errors are skipped: the walk does what it can.
+///
+/// Windows: the read-only attribute of each file. It stops changes to the files that are
+/// there; it does not stop new files in a folder (that needs an ACL, which is not set yet).
 pub fn set_read_only(dir: &Path, read_only: bool) {
-    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
     let set = |p: &Path, m: &std::fs::Metadata| {
+        use std::os::unix::fs::PermissionsExt;
         let mode = m.permissions().mode();
         let next = if read_only {
             mode & !0o222
@@ -261,6 +269,14 @@ pub fn set_read_only(dir: &Path, read_only: bool) {
         };
         if next != mode {
             let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(next));
+        }
+    };
+    #[cfg(not(unix))]
+    let set = |p: &Path, m: &std::fs::Metadata| {
+        let mut perm = m.permissions();
+        if m.is_file() && perm.readonly() != read_only {
+            perm.set_readonly(read_only);
+            let _ = std::fs::set_permissions(p, perm);
         }
     };
     let Ok(meta) = std::fs::symlink_metadata(dir) else {
@@ -327,7 +343,30 @@ pub async fn remove_run(dir: &Path) {
         }
         let _ = git(Some(gd), &["worktree", "prune"]).await;
     }
-    let _ = tokio::fs::remove_dir_all(dir).await;
+    remove_dir(dir).await;
+}
+
+/// Removes the folder `dir`. Windows cannot remove a file that a program still has open (a
+/// tool that is just ending, an indexer or a virus scanner looking at it): tries again for a
+/// few seconds, and leaves what is still held to the next cleanup.
+async fn remove_dir(dir: &Path) {
+    let tries = if cfg!(windows) { 10 } else { 1 };
+    for n in 1..=tries {
+        match tokio::fs::remove_dir_all(dir).await {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if n == tries => {
+                if cfg!(windows) {
+                    eprintln!(
+                        "{} cleanup: {} not removed yet: {e}",
+                        now_ms(),
+                        dir.display()
+                    );
+                }
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(300)).await,
+        }
+    }
 }
 
 /// Removes the `chat-run` request folders (`work/.chat-run-<run id>`) that a daemon crash left

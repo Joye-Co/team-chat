@@ -603,7 +603,7 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String>
     let home = spec
         .env_var("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".codex"));
+        .unwrap_or_else(|| spec.home().join(".codex"));
     let files = std::iter::once(home.join("config.toml"))
         .chain(spec.cwd.ancestors().map(|d| d.join(".codex/config.toml")));
     let mut names: Vec<(String, bool)> = vec![];

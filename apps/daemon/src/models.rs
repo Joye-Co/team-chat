@@ -273,7 +273,7 @@ impl CodexModelList {
 /// A short `codex app-server` session for `model/list`, within [`LIMIT`]. The process group is
 /// killed after it, however it ends.
 async fn codex_models(program: &Path, rt: &RuntimeConfig) -> Option<Vec<CliModel>> {
-    let mut cmd = tokio::process::Command::new(program);
+    let mut cmd = crate::health::command(program);
     cmd.arg("app-server")
         .args(&rt.args)
         .envs(&rt.env)
@@ -281,9 +281,11 @@ async fn codex_models(program: &Path, rt: &RuntimeConfig) -> Option<Vec<CliModel
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .process_group(0)
         .kill_on_drop(true);
+    #[cfg(unix)]
+    cmd.process_group(0);
     let mut child = cmd.spawn().ok()?;
+    #[cfg(unix)]
     let pgid = child.id().map(|p| p as i32);
     let mut stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
@@ -313,6 +315,10 @@ async fn codex_models(program: &Path, rt: &RuntimeConfig) -> Option<Vec<CliModel
         }
     };
     let out = tokio::time::timeout(LIMIT, session).await.ok().flatten();
+    // Windows has no process groups to signal: the app-server itself is ended.
+    #[cfg(not(unix))]
+    let _ = child.start_kill();
+    #[cfg(unix)]
     if let Some(pgid) = pgid.filter(|p| *p > 1) {
         // SAFETY: signals the process group this function started.
         unsafe {
@@ -401,7 +407,7 @@ pub fn claude_help_efforts(help: &str) -> Option<Vec<String>> {
 
 async fn claude(program: &Path, rt: &RuntimeConfig) -> Found {
     let default = claude_settings_model(&claude_config_dir(rt));
-    let mut cmd = tokio::process::Command::new(program);
+    let mut cmd = crate::health::command(program);
     cmd.arg("--help")
         .envs(&rt.env)
         .stdin(Stdio::null())

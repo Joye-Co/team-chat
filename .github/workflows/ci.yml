@@ -309,6 +309,30 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  daemon-windows:
+    name: Daemon tests (Windows)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-daemon
+      # The unit tests, the chat-run client and tests/process_tree.rs: one run of a fake CLI in
+      # a Job Object, with cancel and pause (docs/plans/windows.zh.md, M1). The suites that
+      # need the Python fake CLIs and /bin/sh are Unix only.
+      - name: cargo test (daemon)
+        run: cargo test --locked -p daemon --no-fail-fast
+      - name: cargo check (e2e tool)
+        run: cargo check --locked -p e2e --all-targets
+
   rust-lint:
     name: Rust fmt and clippy (report only)
     needs: changes

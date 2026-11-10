@@ -1,7 +1,8 @@
 # Windows 端计划
 
-状态：W0 已完成（客户端能为 Windows 编译并链接出 exe）。C2（产出和图的 WebView2 后端）代码已完成并在
-Windows CI 上跑通隔离测试，见下。其余进行中或未开始。
+状态：W0 已完成（客户端能为 Windows 编译并链接出 exe）。M1 已完成（daemon 能为 Windows 编译；Windows CI 上
+用假 CLI 跑通了一个 run、取消和暂停；还没在真的 Windows 电脑上跑过真的 CLI）。C2（产出和图的 WebView2 后端）
+代码已完成并在 Windows CI 上跑通隔离测试，见下。其余进行中或未开始。
 
 ## 目标
 
@@ -38,7 +39,7 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 | `src/views/settings/login_item.rs`（开机启动） | `SMAppService` | `HKCU\...\Run` |
 | `src/views/nav/menus.rs`、`status_item.rs` | 菜单栏、状态栏图标、关于面板 | 窗口内菜单加系统托盘图标 |
 | `src/views/files/native.rs` | Quick Look、分享面板 | 用默认程序打开、资源管理器里定位、`DataTransferManager` 分享 |
-| `src/ui/sf_symbols` | SF Symbols 栅格化 | 自带一套 SVG 图标 |
+| `src/ui/sf_symbols` | SF Symbols 栅格化 | Lucide 加几个自绘 SVG（已完成，见 C4） |
 | `src/theme.rs`、`src/ui/motion.rs` | 系统外观、减弱动画 | `UISettings`、`SPI_GETCLIENTAREAANIMATION` |
 | `src/views/settings/window_fit.rs` | NSWindow 尺寸和位置 | `GetMonitorInfo` 和工作区 |
 | `src/provider/this_mac.rs`（用这台电脑） | 应用包里的 daemon 加 launchd | 安装目录里的 daemon 加计划任务，见 M3 |
@@ -47,8 +48,8 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 
 ### 机器（`apps/daemon`，约 1.15 万行）
 
-现在为 Windows 编译有 57 处错误，集中在 6 个地方。协议、运行时对各 CLI 的解析、脱敏、模型列表、
-配置这些大头和平台无关。
+M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之后是 0。协议、运行时对各 CLI 的解析、
+脱敏、模型列表、配置这些大头和平台无关。下表是每一块的 Windows 方案；M1 做了哪些见「阶段」里的 M1。
 
 | 模块 | 现在的 Unix 做法 | Windows 方案 |
 | --- | --- | --- |
@@ -191,28 +192,94 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 
 **C4 设计验收（约 2 周，可以和 C2、C3 同时做）**
 
-- 写 `docs/design/WINDOWS.md`（NATIVE.md 的 Windows 版）；COMPLETENESS.md 的黑白 token 和尺寸规范照用。
-- 一套 SVG 图标替换 SF Symbols。
+- 已完成：`docs/design/WINDOWS.md`，只写和 NATIVE.md 不同的地方（标题栏和窗口按钮、窗口内菜单和托盘、
+  Ctrl 快捷键写法、字体、图标、滚动条、对话框、设置窗口）；COMPLETENESS.md 两端通用。
+- 已完成：图标。macOS 仍画 SF Symbols；其他系统用 Lucide（ISC，`third_party/lucide/`）加 7 个自己画的
+  SVG（`assets/icons/drawn/`），调用处不用改。每个图标按对应 SF Symbol 的墨迹尺寸、线宽和位置来画
+  （`ui/sf_symbols/svgset.rs`），新增概念没配 SVG 就编译不过，另有测试。在 Mac 上用 `TC_SVG_ICONS=1`
+  看过主窗口、首页、设置的浅色和深色截图；没在 Windows 上看过。
+- 已完成：字体。界面 Segoe UI Variable → Segoe UI，中文 Microsoft YaHei UI，等宽 Cascadia Mono → Consolas，
+  字号不变（`theme.rs`）。只编译过。
+- 待做：线条没有对齐到整像素，100 % 缩放下 1 px 的线可能发虚，要在真机或 Windows CI 截图上确认。
+- 待做：`views/settings` 里两处直接用 `theme::MONO_FONT_FAMILY`（Windows 上是 Consolas），改成
+  `theme::mono_font_family()`；内嵌网页的 CSS 字体栈（`ui/web_embed.rs`、`diagrams`、`views/artifacts`、
+  `views/media`）加上 Windows 字体。
 - 截图自测移植到 Windows，浅色深色都截；每个页面过 COMPLETENESS.md §4 清单。
 
 ### 机器
 
-**M1 能编译、能跑一个 run（约 2 周）**
+**M1 能编译、能跑一个 run（已完成）**
 
-- `executor/local.rs` 和 `proctree.rs` 抽出平台层；Windows 实现用 Job Object 启动和结束进程树。
-- 取消：`CTRL_BREAK_EVENT`，超时后结束 job。
-- 找 CLI（`PATHEXT`、`.cmd`）、主机名、文件权限、工作区路径。
-- CI 的 Windows 任务加上 `cargo test -p daemon`。
+做了什么：
 
-完成标准：Windows 上 `daemon run` 连上服务器，一个 Claude Code run 从开始跑到结束，取消能杀干净整棵进程树。
+- **进程树**（`executor/local_windows.rs`、`winjob.rs`）：CLI 以挂起状态启动（`CREATE_SUSPENDED`，同时
+  `CREATE_NEW_PROCESS_GROUP`），放进一个新的 Job Object 之后才恢复运行，所以它启动的每个进程从第一条指令起
+  就在 job 里。job 设了「句柄关闭就全杀」，不允许脱离，句柄只有 daemon 自己有。Unix 的代码
+  （`executor/local.rs`、`proctree.rs`）一行没动，两边在 `executor/mod.rs` 和 `lib.rs` 按平台选文件。
+- **取消**：先向 CLI 的进程组发 `CTRL_BREAK_EVENT`，等和 Unix 一样的宽限时间，再 `TerminateJobObject`。
+  事件发不出去（daemon 没有控制台）就直接结束 job。CLI 自己退出后也会结束 job，清掉它留下的工具进程。
+- **暂停和继续**（原计划放 M2，M1 一起做了）：挂起 job 里所有进程的所有线程，继续时恢复；重复扫描直到
+  没有新线程，暂停期间新启动的进程也会停住。
+- **daemon 崩溃后的残留**：不需要处理。daemon 一没，job 的句柄被系统关掉，整棵树跟着结束，所以 Windows 上
+  `kill_leftover` 是空的。
+- **找 CLI**（`health.rs`）：按 `PATHEXT` 找，只认 `.com/.exe/.bat/.cmd`，不认没有扩展名的同名文件（npm
+  会在 `claude.cmd` 旁边放一个 shell 脚本 `claude`）。在 run 自己的 `PATH` 里找。
+- **`.cmd`**：npm、pnpm、yarn 生成的 `.cmd` 只是转一道手。daemon 读出它真正启动的东西（包里的 `.exe`，或
+  `node` 加脚本）直接启动，提示词和参数不经过 `cmd.exe`。认不出来的 `.cmd`/`.bat` 照原样启动，由 Rust
+  标准库按 `cmd.exe` 的规则转义，转义不了的参数会报错而不是硬传。
+- **`chat-run`**：文件传输（`CHAT_RUN_DIR`）在 Windows 上可用，M1 里 Windows 上所有运行时都走它（Unix 上
+  仍然只有 Codex 走文件）。`bin\chat-run.exe` 是指向 daemon 的硬链接，跨盘时复制。socket 传输在 Windows 上
+  返回明确的「还不支持」。
+- **环境变量**：Windows 上给 CLI 多带一组系统变量（`SystemRoot`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、
+  `TEMP`、`PATHEXT` 等）。少了 `SystemRoot`，Node 的网络和加密都起不来。
+- **其他**：主机名取 `COMPUTERNAME`；用户目录取 `USERPROFILE`；文件权限靠用户目录的 ACL（`sys.rs` 里的
+  mode 函数在 Windows 上不做事）；磁盘空间用 `GetDiskFreeSpaceExW`，负载报 0；git 加
+  `core.longpaths=true`；删除运行目录遇到文件被占用会重试几秒，还删不掉就留给下一次清理；Claude Code
+  会话目录名按去掉 `\\?\` 前缀的路径算（`C:\Users\me\work` 是 `C--Users-me-work`）；自己更新的文件指纹
+  用大小、写入时间和创建时间。
+- **先不支持、会明确报错的**：`pty` 运行时、`install-service` / `uninstall-service`、`[vm]`。
+- `tools/e2e` 能为 Windows 编译。
+
+测试（`apps/daemon/tests/process_tree.rs`，Unix 和 Windows 跑同一份）：测试程序自己当假 CLI，说 Claude Code
+的 stream-json，不需要真的 CLI 和登录。四个用例：一个 run 启动、分段输出、结束；取消后整棵树没有活着的
+进程（CLI、它的子进程、它的工具、工具启动的自成进程组的孙进程、没有控制台的后台进程、一个要求脱离 job 的
+进程）；暂停后整棵树不再有输出，继续后恢复，暂停中取消也能杀干净；通过 npm 式的 `.cmd` 按名字找到并启动
+CLI，带引号、`&`、`%`、换行的参数原样送到。CI 新增 `daemon-windows` 任务（`windows-2025`）：
+`cargo test -p daemon`（单元测试、`chat-run` 客户端、上面这份）和 `cargo check -p e2e`。
+
+Windows CI 上实际看到的：四个用例都过；要求脱离 job 的进程被系统拒绝启动（Access is denied）；CI 里
+daemon 有控制台，`CTRL_BREAK_EVENT` 送到了，假 CLI 以 `0xC000013A` 退出。
+
+在 Mac 上检查：`cargo check --target x86_64-pc-windows-gnu -p daemon -p e2e --all-targets`。
+
+M1 里发现、留给后面的：
+
+- **Windows 上还没跑的测试**：`tests/integration.rs`、`tests/runtimes.rs`、`tests/setup.rs` 用 Python 写的
+  假 CLI（靠 `#!` 启动）、`/bin/sh`、信号和文件权限，现在只在 Unix 上跑。M2 把假 CLI 改成两个平台都能
+  启动的形式再打开。
+- **没有控制台时的取消**：`CTRL_BREAK_EVENT` 只能发给和 daemon 共用一个控制台的进程。以后 daemon 由计划
+  任务在后台启动时可能没有控制台，那时取消会跳过宽限直接结束 job，CLI 来不及收尾。M3 定启动方式时
+  一起决定（给 daemon 配一个隐藏的控制台，或者接受直接结束）。
+- **审批（gates）**：Claude Code 的 PreToolUse 钩子通过 `chat-run` 的 socket 问 daemon，Windows 上还没有
+  这条通道，所以 Windows 机器暂时不上报 `gates` 能力，服务器不会把要审批的规则发给它。M2 有了命名管道
+  （或让钩子走文件传输）后打开；钩子命令的引号写法也要按 Windows 上 Claude Code 实际用的 shell 核对。
+- **旁聊（aside）的只读目录**：Unix 上去掉写权限；Windows 上只给已有文件加了只读属性，拦不住在目录里新建
+  文件，要用 ACL 才行。
+- **自己更新**：发现程序文件被替换后 daemon 会退出等服务管理器重启，Windows 上还没有服务（M3），在那之前
+  替换 exe 之后要手动重启。
+- **机器 token**：仍然是用户目录下的文件，没有放进 Credential Manager。
+- **要在真机上核实的**：真的 Claude Code 和 Codex 各跑一个 run；它们的 Windows 版把登录放在哪
+  （`%USERPROFILE%\.claude`、`%USERPROFILE%\.codex`，还是 Credential Manager），daemon 清空环境变量后它们
+  还能不能读到；Claude Code 在 Windows 上的会话目录名规则是否和上面一致；Claude Code 需要的 Git for
+  Windows；杀毒软件对没签名的 daemon 和 Job Object 的反应。
 
 **M2 功能齐全（约 2 周）**
 
-- `chat-run` 的命名管道传输和 `chat-run.exe`；受控密钥（`chat-run secret`）。
+- `chat-run` 的命名管道传输；受控密钥（`chat-run secret`）；审批钩子。
 - Codex 和 ACP 运行时在 Windows 上验证；ConPTY 版的 `pty` 运行时。
-- 暂停和继续；原始会话文件的路径；`daemon doctor`。
+- Python 假 CLI 的三套测试在 Windows 上打开；旁聊只读目录的 ACL；`daemon doctor`。
 
-完成标准：`tools/e2e` 的机器用例对着一台 Windows 机器全过（`tools/e2e` 本身也要能在 Windows 上编译）。
+完成标准：`tools/e2e` 的机器用例对着一台 Windows 机器全过。
 
 **M3 服务和「用这台电脑」（约 1.5 周）**
 
@@ -247,7 +314,8 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
   闪烁和焦点还要真机看，清单在 C2。
 - **CLI 在 Windows 上的行为**：Claude Code 和 Codex 的 Windows 版比 Mac 版新，工具调用、沙箱、
   会话文件位置可能不一样；M1 第一周先手动在 Windows 上各跑一遍确认。
-- **进程逃出 job**：极少数程序会主动脱离 job。Job 设成不允许脱离，再加一个测试覆盖。
+- **进程逃出 job**：极少数程序会主动脱离 job。Job 设成不允许脱离，`tests/process_tree.rs` 里有一个要求
+  脱离的进程覆盖这一点（M1 已做）。
 - **代码签名**：新证书在 SmartScreen 里要积累信誉；没签名的 daemon 还可能被杀毒软件拦。
 - **需要真机**：界面、输入法、计划任务、CLI 登录都要在真的 Windows 上看，CI 只能管编译和单元测试。
 

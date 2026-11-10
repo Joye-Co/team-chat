@@ -69,6 +69,15 @@ impl RunSpec {
             .find(|(n, _)| n == k)
             .map(|(_, v)| v.as_str())
     }
+
+    /// The home folder of the run's CLI: `HOME`, or on Windows the profile folder
+    /// (`USERPROFILE`) when `HOME` is not set. `/` when the run has neither.
+    pub fn home(&self) -> PathBuf {
+        let home = self
+            .env_var("HOME")
+            .or_else(|| self.env_var("USERPROFILE").filter(|_| cfg!(windows)));
+        PathBuf::from(home.unwrap_or("/"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

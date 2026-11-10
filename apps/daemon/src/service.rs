@@ -64,9 +64,24 @@ pub fn plist_path(dir: &Path) -> PathBuf {
     dir.join(format!("{}.plist", crate::product::service_label()))
 }
 
+#[cfg(unix)]
 fn uid() -> u32 {
     // SAFETY: getuid has no preconditions.
     unsafe { libc::getuid() }
+}
+
+/// Windows has no user ids; launchd is not there either (see [`windows_unsupported`]).
+#[cfg(not(unix))]
+fn uid() -> u32 {
+    0
+}
+
+/// The error of `install-service` and `uninstall-service` on Windows, where the service will
+/// be a scheduled task of the logged-in user.
+pub fn windows_unsupported() -> String {
+    "install-service is not supported on Windows yet: start `daemon run` yourself (a scheduled \
+task that does it at logon is planned)"
+        .into()
 }
 
 fn launchctl(args: &[&str]) -> Result<(), String> {
