@@ -23,6 +23,8 @@ tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
 # Updater: checks the downloaded DMG again before it installs (src/updater/).
 sha2 = "0.10"
+# Updater on Windows: the command line of the update helper (src/updater/install/windows.rs).
+update-helper = { path = "../update-helper" }
 # Thumbnails of image attachments (src/provider/files.rs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # The 产出 window (src/views/artifacts/window.rs) and pages inside the window
@@ -41,6 +43,11 @@ gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] 
 
 [build-dependencies]
 serde_json.workspace = true
+
+# The exe's icon and version resources (build.rs). A build dependency's target is the build
+# host, so only builds made on Windows compile it.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 # The screenshot self-test reads the NSWindow number (src/selftest/capture.rs);
 # navigation uses AppKit for the about panel and the menu bar item.
