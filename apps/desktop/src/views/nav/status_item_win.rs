@@ -4,8 +4,12 @@
 //!
 //! The brand's template image, tinted white or black for the taskbar's theme, with a dot
 //! when something waits on you; the tooltip says what. A click opens the main window. A
-//! right click opens the menu the Dock icon has on macOS, plus 设置… and 退出: on Windows
-//! the app keeps running after its window closes, and this menu is then the way to quit.
+//! right click opens the menu the Dock icon has on macOS, plus 设置… and 退出.
+//!
+//! While the icon is in the notification area the app keeps running after its last window
+//! closes, as on macOS (GPUI quits then by default off macOS): the icon opens the window
+//! again and its menu quits. With the icon hidden or not added, closing the last window
+//! quits, so the app never runs with no way to reach it.
 //!
 //! The icon belongs to the hidden events window ([`crate::win32`]). Its procedure only
 //! sends on a channel that a GPUI task drains. The menu is the system's own popup menu; its
@@ -362,6 +366,20 @@ pub fn install(services: Services, cx: &mut App) {
     .detach();
 }
 
+/// Keeps the app alive without windows only while the icon is there to bring it back.
+fn sync_quit_mode(cx: &mut App) {
+    let added = cx.try_global::<StatusItem>().is_some_and(|s| s.added);
+    cx.set_quit_mode(quit_mode(added));
+}
+
+fn quit_mode(icon_added: bool) -> gpui::QuitMode {
+    if icon_added {
+        gpui::QuitMode::Explicit
+    } else {
+        gpui::QuitMode::LastWindowClosed
+    }
+}
+
 /// 菜单栏里显示: hides or shows the icon (its state stays, so the totals keep updating).
 pub fn set_visible(shown: bool, cx: &mut App) {
     if !cx.has_global::<StatusItem>() {
@@ -371,6 +389,7 @@ pub fn set_visible(shown: bool, cx: &mut App) {
     state.visible = shown;
     let waiting = state.shown.is_some_and(|(u, m)| u > 0 || m > 0);
     state.sync(waiting);
+    sync_quit_mode(cx);
 }
 
 fn update(services: &Services, cx: &mut App) {
@@ -399,6 +418,7 @@ fn update(services: &Services, cx: &mut App) {
     };
     // The dot says that something waits; the tooltip says what.
     state.sync(unread > 0 || mentions > 0);
+    sync_quit_mode(cx);
 }
 
 /// For the self-test: the icon's state matches the totals, and it is in the notification
@@ -433,6 +453,12 @@ mod tests {
                 unsafe { DestroyIcon(icon).unwrap() };
             }
         }
+    }
+
+    #[test]
+    fn the_app_outlives_its_windows_only_with_the_icon() {
+        assert_eq!(quit_mode(true), gpui::QuitMode::Explicit);
+        assert_eq!(quit_mode(false), gpui::QuitMode::LastWindowClosed);
     }
 
     #[test]
