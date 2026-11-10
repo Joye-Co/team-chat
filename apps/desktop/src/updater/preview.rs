@@ -32,6 +32,7 @@ fn sample() -> UpdateInfo {
         sha256: "0".repeat(64),
         published_at: 0,
         download_url: String::new(),
+        platform: None,
     }
 }
 

@@ -906,6 +906,84 @@ async fn members_prefs_avatars_audit_and_hooks() {
     assert!(http.with(|s| s.hooks.is_empty()));
 }
 
+/// A Windows client asks for `platform=windows`, takes only an answer that says
+/// `windows`, and so never gets the DMG: not from a server without a Windows release, and
+/// not from an older server that ignores the platform.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_check_is_per_platform() {
+    let http = MockHttp::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = http_client(&http, dir.path(), |_| {});
+    let dmg = noise(1000, 5);
+    let mac = UpdateInfo {
+        version: "1.10.0".into(),
+        notes: "notes".into(),
+        size: dmg.len() as u64,
+        sha256: sha(&dmg),
+        published_at: 1,
+        download_url: format!("{}/v1/updates/1.10.0/download", http.base_url()),
+        platform: None,
+    };
+    http.with(|s| s.release = Some((mac.clone(), dmg.clone())));
+    let check = |platform: &'static str| {
+        let job = client.check_update_for("1.0.0", platform);
+        async move { job.await.unwrap().unwrap() }
+    };
+    // Only a DMG: nothing for Windows, with a new server and with an old one.
+    assert_eq!(check("windows").await, None);
+    http.with(|s| s.ignores_platform = true);
+    assert_eq!(check("windows").await, None);
+    assert_eq!(check("macos").await, Some(mac.clone()));
+    http.with(|s| s.ignores_platform = false);
+
+    let exe = noise(2000, 6);
+    let win = UpdateInfo {
+        version: "1.9.0".into(),
+        size: exe.len() as u64,
+        sha256: sha(&exe),
+        download_url: format!(
+            "{}/v1/updates/1.9.0/download?platform=windows",
+            http.base_url()
+        ),
+        platform: Some("windows".into()),
+        ..mac.clone()
+    };
+    http.with(|s| s.windows_release = Some((win.clone(), exe.clone())));
+    assert_eq!(check("windows").await, Some(win.clone()));
+    // The Mac request names no platform and its answer is the DMG, as before.
+    assert_eq!(check("macos").await, Some(mac.clone()));
+    assert!(http.with(|s| {
+        s.requests
+            .iter()
+            .all(|(_, path)| !path.contains("platform=macos"))
+    }));
+    // A server that names macos is fine for a Mac and refused by Windows.
+    let named = UpdateInfo {
+        platform: Some("macos".into()),
+        ..mac.clone()
+    };
+    http.with(|s| {
+        s.release = Some((named.clone(), dmg.clone()));
+        s.ignores_platform = true;
+    });
+    assert_eq!(check("macos").await, Some(named.clone()));
+    assert_eq!(check("windows").await, None);
+    http.with(|s| s.ignores_platform = false);
+
+    // Downloads: each platform takes only its own file.
+    let h = client.http();
+    let dest = dir.path().join("dl/setup.exe");
+    let progress = no_progress();
+    chat_core::updates::download_for(&h, &win, &dest, &progress, "windows")
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&dest).unwrap(), exe);
+    let refused = chat_core::updates::download_for(&h, &named, &dest, &progress, "windows").await;
+    assert!(matches!(refused, Err(ApiError::Decode(_))), "{refused:?}");
+    let refused = chat_core::updates::download_for(&h, &win, &dest, &progress, "macos").await;
+    assert!(matches!(refused, Err(ApiError::Decode(_))), "{refused:?}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_check_download_and_sha256() {
     let http = MockHttp::start().await;
@@ -921,6 +999,7 @@ async fn update_check_download_and_sha256() {
         sha256: sha(&dmg),
         published_at: 1,
         download_url: format!("{}/v1/updates/1.10.0/download", http.base_url()),
+        platform: None,
     };
     http.with(|s| s.release = Some((info.clone(), dmg.clone())));
     assert_eq!(
