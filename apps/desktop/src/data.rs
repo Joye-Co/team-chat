@@ -1858,7 +1858,12 @@ pub trait ChatProvider: Send + Sync + 'static {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: the code the sign-in page showed.
-    fn machine_login_code(&self, _machine_id: &str, _login_id: &str, _code: &str) -> AdminReply<()> {
+    fn machine_login_code(
+        &self,
+        _machine_id: &str,
+        _login_id: &str,
+        _code: &str,
+    ) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: stops a sign-in.
