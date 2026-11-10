@@ -1239,19 +1239,28 @@ before it, and stores nothing.
 
 ```ts
 Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */,
-              estimatedUsd? /* the part of costUsd estimated from tokens */ }
+              estimatedUsd? /* the part of costUsd estimated from tokens */,
+              unpricedTokens? /* tokens of models with no known price, not in costUsd */ }
 TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
-              bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
+              bots: (Spend & { memberId, budgetCents?, models?: string[] /* by cost */ })[],
+              initiators: (Spend & { memberId })[],
+              models?: (Spend & { model, name, runtimes: string[] })[] /* by model the runs used */,
               machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
               pairs?: (Spend & { initiatorId, memberId })[] /* who asked which AI member */,
               daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
 ```
 
-- Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
-  subscription). A run without it (Codex today) is priced from its tokens at list price for its
-  runtime and the AI member's model (`server/src/usage/prices.ts`, one table to update); that part
-  is also counted in `estimatedUsd`, so a client can mark it as an estimate.
+- Cost is priced per model. A daemon from 1.3 sends `run.done.usage.models` (machine-protocol.md
+  `ModelUsage`): the model each turn used, its input, output, cache read and cache write tokens,
+  and, from Claude Code, its own cost. A model's cost is the CLI's figure when it gives one, else
+  its tokens at that model's list price by kind; that part also counts in `estimatedUsd`. The
+  list comes from models.dev (`server/src/usage/prices.ts`): the daily cron stores the last good
+  copy in D1 (`model_prices`, migration 0014), and a small built-in list stands in only before the
+  first good sync. A model matches its own entry only (a date or `-latest` suffix and a provider
+  prefix are ignored); one with no price adds `unpricedTokens`, never another model's price.
+  Runs from older daemons keep their reported cost; with none, they are priced only by the model
+  the AI member is set to run (`bot_runners.model`), else unpriced.
 - `initiators` is the person who asked for each run (`requestedBy`); `pairs` splits that by AI
   member, so a client can show whom each person works with most (optional: older servers omit it).
 - `runtimes` is split by machine, so a client can tell subscription from API-key spend by the
