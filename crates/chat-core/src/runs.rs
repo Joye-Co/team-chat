@@ -332,11 +332,20 @@ impl HttpClient {
     }
 
     /// Owner: the code the sign-in page showed, for the CLI on the machine.
-    pub async fn machine_login_code(&self, machine_id: &str, login_id: &str, code: &str) -> ApiResult<()> {
+    pub async fn machine_login_code(
+        &self,
+        machine_id: &str,
+        login_id: &str,
+        code: &str,
+    ) -> ApiResult<()> {
         let _: serde_json::Value = self
             .call(
                 Method::POST,
-                &format!("/v1/machines/{}/logins/{}/code", enc(machine_id), enc(login_id)),
+                &format!(
+                    "/v1/machines/{}/logins/{}/code",
+                    enc(machine_id),
+                    enc(login_id)
+                ),
                 Some(&crate::proto::monitor::LoginCodeRequest {
                     code: code.to_string(),
                 }),
@@ -410,13 +419,19 @@ impl HttpClient {
 
     /// Owner: when members joined, who added them, devices and open invites.
     pub async fn team_roster(&self) -> ApiResult<crate::proto::TeamRoster> {
-        self.call::<(), _>(Method::GET, "/v1/team/roster", None, true).await
+        self.call::<(), _>(Method::GET, "/v1/team/roster", None, true)
+            .await
     }
 
     /// Owner: 用量 of AI members' runs that ended in [from, to) (docs/protocol.md "Team usage").
     pub async fn team_usage(&self, from: u64, to: u64) -> ApiResult<crate::proto::TeamUsage> {
-        self.call::<(), _>(Method::GET, &format!("/v1/usage?from={from}&to={to}"), None, true)
-            .await
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/usage?from={from}&to={to}"),
+            None,
+            true,
+        )
+        .await
     }
 
     /// Owner: 活动记录, newest first (docs/protocol.md "Activity"). `kinds` empty = every kind.
@@ -440,8 +455,13 @@ impl HttpClient {
         if let Some(m) = machine {
             q.push(format!("machine={}", enc(m)));
         }
-        self.call::<(), _>(Method::GET, &format!("/v1/activity?{}", q.join("&")), None, true)
-            .await
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/activity?{}", q.join("&")),
+            None,
+            true,
+        )
+        .await
     }
 
     /// Owner. Revokes the machine token and closes its link.
@@ -890,9 +910,12 @@ mod seal_tests {
     fn a_sealed_value_opens_with_the_machine_secret_key() {
         use base64::Engine as _;
         let secret = crypto_box::SecretKey::from([7u8; 32]);
-        let public = base64::engine::general_purpose::STANDARD.encode(secret.public_key().as_bytes());
+        let public =
+            base64::engine::general_purpose::STANDARD.encode(secret.public_key().as_bytes());
         let sealed = super::seal_secret(&public, "sk-test-0123456789").unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD.decode(sealed).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(sealed)
+            .unwrap();
         assert_eq!(secret.unseal(&bytes).unwrap(), b"sk-test-0123456789");
         assert!(super::seal_secret("short", "x").is_err());
     }

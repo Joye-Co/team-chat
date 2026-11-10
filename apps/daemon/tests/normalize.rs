@@ -487,3 +487,65 @@ fn plan_items_get_their_start_and_end_times() {
     );
     chat_protocol::check_plan("plan", &c).unwrap();
 }
+
+#[test]
+fn claude_reports_each_models_tokens_and_cost() {
+    let mut n = ClaudeNormalizer::default();
+    let result: Value = serde_json::from_str(
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"s","total_cost_usd":0.31,
+            "usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":5,"output_tokens":20},
+            "modelUsage":{"claude-opus-5-5":{"inputTokens":10,"outputTokens":18,"cacheReadInputTokens":100,"cacheCreationInputTokens":5,"costUSD":0.3},
+                          "claude-haiku-4-5-20251001":{"inputTokens":0,"outputTokens":2,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"costUSD":0.01}}}"#,
+    )
+    .unwrap();
+    n.on_line(&result);
+    let u = n.usage.clone().unwrap();
+    assert_eq!(u.cost_usd, Some(0.31));
+    let m: Vec<_> = u
+        .models
+        .iter()
+        .map(|m| {
+            (
+                m.model.as_str(),
+                m.input_tokens,
+                m.cache_read_tokens,
+                m.cache_write_tokens,
+                m.cost_usd,
+            )
+        })
+        .collect();
+    assert_eq!(
+        m,
+        [
+            ("claude-haiku-4-5-20251001", 0, None, None, Some(0.01)),
+            ("claude-opus-5-5", 10, Some(100), Some(5), Some(0.3)),
+        ]
+    );
+}
+
+#[test]
+fn codex_reports_its_model_with_cached_input_apart() {
+    let mut n = CodexNormalizer::default();
+    n.model = Some("gpt-5.1-codex".into());
+    let p: Value = serde_json::from_str(
+        r#"{"threadId":"th","turnId":"tu","tokenUsage":{"total":{"totalTokens":1100,"inputTokens":1000,"cachedInputTokens":600,"cacheWriteInputTokens":0,"outputTokens":100,"reasoningOutputTokens":40}}}"#,
+    )
+    .unwrap();
+    n.on_notification("thread/tokenUsage/updated", &p);
+    let u = n.usage.clone().unwrap();
+    assert_eq!(
+        (u.input_tokens, u.output_tokens, u.cost_usd),
+        (1000, 100, None)
+    );
+    assert_eq!(u.models.len(), 1);
+    let m = &u.models[0];
+    assert_eq!(
+        (
+            m.model.as_str(),
+            m.input_tokens,
+            m.output_tokens,
+            m.cache_read_tokens
+        ),
+        ("gpt-5.1-codex", 400, 100, Some(600))
+    );
+}

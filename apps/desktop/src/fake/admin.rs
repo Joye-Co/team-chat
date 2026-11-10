@@ -128,7 +128,7 @@ fn pair(initiator: &str, member: &str, cost: f64, topics: u32) -> Value {
 pub fn team_usage(from: u64, to: u64) -> TeamUsage {
     let bots = [
         ("m-coder", 86.4, 31_u32, Some(10_000_u64)),
-        ("m-reviewer", 41.2, 18, Some(6_000)),
+        ("m-reviewer", 41.2, 18, Some(4_000)),
         ("m-docs", 24.8, 12, None),
         ("m-tata", 12.1, 6, Some(5_000)),
         ("m-taro", 6.3, 4, None),
@@ -154,10 +154,20 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         "teamBudgetCents": 21_000,
         "bots": bots.iter().map(|b| {
             let mut extra = b.3.map(|c| json!({ "budgetCents": c })).unwrap_or(json!({}));
+            // Scout reached its budget: one run waits for an owner (到了预算先停下来问).
+            if b.0 == "m-reviewer" {
+                extra["heldRuns"] = json!(1);
+            }
             // Taro runs on Codex: its cost is estimated from tokens.
             if b.0 == "m-taro" {
                 extra["estimatedUsd"] = json!(b.1);
             }
+            extra["models"] = json!(match b.0 {
+                "m-coder" => vec!["claude-opus-5-5", "claude-haiku-4-5"],
+                "m-reviewer" => vec!["claude-sonnet-5-5", "claude-haiku-4-5"],
+                "m-taro" => vec!["gpt-5.1-codex", "glm-5-air"],
+                _ => vec!["claude-sonnet-5-5"],
+            });
             with("memberId", b.0, b.1, b.2, extra)
         }).collect::<Vec<_>>(),
         "initiators": [
@@ -176,6 +186,13 @@ pub fn team_usage(from: u64, to: u64) -> TeamUsage {
         "runtimes": [
             with("runtime", "claude", 152.6, 58, json!({ "machineId": "mc-mini" })),
             with("runtime", "codex", 18.2, 13, json!({ "machineId": "mc-mini", "estimatedUsd": 18.2 })),
+        ],
+        "models": [
+            with("model", "claude-opus-5-5", 118.4, 41, json!({ "name": "Claude Opus 5.5", "runtimes": ["claude"] })),
+            with("model", "claude-sonnet-5-5", 31.9, 22, json!({ "name": "Claude Sonnet 5.5", "runtimes": ["claude"] })),
+            with("model", "gpt-5.1-codex", 18.2, 13, json!({ "name": "GPT-5.1 Codex", "runtimes": ["codex"], "estimatedUsd": 18.2 })),
+            with("model", "claude-haiku-4-5", 2.3, 9, json!({ "name": "Claude Haiku 4.5", "runtimes": ["claude"] })),
+            with("model", "glm-5-air", 0.0, 2, json!({ "name": "glm-5-air", "runtimes": ["codex"], "unpricedTokens": 41000 })),
         ],
         "daily": daily
     }))
@@ -237,6 +254,15 @@ pub fn team_activity() -> ActivityResponse {
         v
     };
     let mut entries: Vec<Value> = vec![
+        e(
+            13,
+            MIN,
+            "budget",
+            "budget.paused",
+            "m-reviewer",
+            "m-reviewer",
+            json!({ "details": { "budgetCents": 4000, "spentCents": 4120, "title": "回归一遍断线重连" } }),
+        ),
         e(
             12,
             2 * MIN,

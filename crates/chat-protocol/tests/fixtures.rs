@@ -204,11 +204,26 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("ActivityResponse", plain::<ActivityResponse>),
     ("TeamUsage", plain::<TeamUsage>),
     ("TeamRoster", plain::<TeamRoster>),
-    ("StartLoginRequest", plain::<chat_protocol::monitor::StartLoginRequest>),
-    ("LoginCodeRequest", plain::<chat_protocol::monitor::LoginCodeRequest>),
-    ("MachineLogin", plain::<chat_protocol::monitor::MachineLogin>),
-    ("MachineSecretsResponse", plain::<chat_protocol::monitor::MachineSecretsResponse>),
-    ("SetSecretRequest", plain::<chat_protocol::monitor::SetSecretRequest>),
+    (
+        "StartLoginRequest",
+        plain::<chat_protocol::monitor::StartLoginRequest>,
+    ),
+    (
+        "LoginCodeRequest",
+        plain::<chat_protocol::monitor::LoginCodeRequest>,
+    ),
+    (
+        "MachineLogin",
+        plain::<chat_protocol::monitor::MachineLogin>,
+    ),
+    (
+        "MachineSecretsResponse",
+        plain::<chat_protocol::monitor::MachineSecretsResponse>,
+    ),
+    (
+        "SetSecretRequest",
+        plain::<chat_protocol::monitor::SetSecretRequest>,
+    ),
     ("MachineUpFrame", plain::<Up>),
     ("MachineDownFrame", plain::<Down>),
     // 1.1

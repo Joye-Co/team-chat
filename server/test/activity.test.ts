@@ -3,6 +3,7 @@ import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test"
 import { ActivityResponse } from "@chat/protocol";
 import { describe, expect, it } from "vitest";
 import { OFFLINE_GRACE_MS, weekStart } from "../src/activity/events";
+import { resetPriceCache } from "../src/usage/prices";
 import type { BotsEnv } from "../src/bots/env";
 import { Daemon, mention, world } from "./daemon";
 import { Client, api, createMember, waitUntil } from "./helpers";
@@ -84,8 +85,13 @@ describe("activity the server notices", () => {
     await mention(c, w);
     const assign = await d.next((f) => f.t === "run.assign");
     d.send({ t: "run.accept", runId: assign.runId });
-    // Codex reports tokens only: 1M input tokens at list price pass the $1 budget.
-    const done = d.done(assign.runId, { status: "failed", usage: { inputTokens: 1_000_000, outputTokens: 0 }, error: "boom" });
+    // Codex reports its model and tokens, no cost: 1M input tokens at list price pass the $1 budget.
+    resetPriceCache();
+    const done = d.done(assign.runId, {
+      status: "failed",
+      usage: { inputTokens: 1_000_000, outputTokens: 0, models: [{ model: "gpt-5-codex", inputTokens: 1_000_000, outputTokens: 0 }] },
+      error: "boom",
+    });
     await d.acked(assign.runId, done);
     const got = await entriesWhen(w.owner.token, "kind=run,budget", (e) => e.length >= 2, "run and budget activity");
     const failed = got.find((e) => e.action === "run.failed");
