@@ -13,8 +13,8 @@
 //! - **Optical size**: the icon is as large as fits in the symbol's ink box at
 //!   that point size, so it is never larger than the symbol in either
 //!   direction (the `@` numbers of the table: the width and height of the
-//!   symbol's ink per em, measured on macOS and checked by
-//!   `the_table_matches_sf_symbols`).
+//!   symbol's ink per em, measured on macOS 26; `TC_SVG_TABLE=1` with the
+//!   test `the_table_matches_sf_symbols` measures them again).
 //! - **Weight**: the stroke is as thick as the symbol's at that point size
 //!   and weight ([`stroke_em`]), whatever the icon's scale.
 //! - **Alignment**: the ink box is centered in the slot, like the symbol's.
@@ -542,12 +542,19 @@ mod tests {
         column as f32 / 255. / SCALE / POINT
     }
 
-    /// The table's sizes and [`stroke_em`] are what this Mac's SF Symbols
-    /// measure. `TC_SVG_TABLE=1` prints the measured numbers for the table.
+    /// `TC_SVG_TABLE=1` measures this Mac's SF Symbols, prints the numbers for
+    /// the table and [`stroke_em`], and fails where the table is off. Without
+    /// it the test does nothing: Apple redraws symbols between system
+    /// versions (`arrow.triangle.merge` is 0.79 em tall on macOS 15 and 0.93
+    /// on macOS 26), so the numbers are those of the macOS the table was last
+    /// measured on (26), not a fact every host agrees on.
     #[cfg(target_os = "macos")]
     #[test]
     fn the_table_matches_sf_symbols() {
-        let print = std::env::var_os("TC_SVG_TABLE").is_some();
+        if std::env::var_os("TC_SVG_TABLE").is_none() {
+            return;
+        }
+        let print = true;
         let mut off = Vec::new();
         for sym in concepts() {
             let ((mw, mh), (tw, th)) = (sf_ink_em(sym), ink_em(sym));
