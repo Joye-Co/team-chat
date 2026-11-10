@@ -370,10 +370,17 @@ M1 里发现、留给后面的：
     （新增 `run --log-file`，只在 Windows 上有；超过 10 MB 启动时挪成 `daemon.log.1`）；
   - `PATH` 不像 macOS 那样在安装时存进去：计划任务每次启动拿到的是用户当前的环境变量。
 - **停止和重启**：结束计划任务只会结束 conhost，后面的 daemon 还活着（CI 上第二轮看到的）。所以任务里的
-  daemon 把自己的 pid 写到 `%LOCALAPPDATA%\<slug>-daemon\daemon.pid`，并等一个命名事件
+  daemon 把自己的 pid 和进程创建时间写到 `%LOCALAPPDATA%\<slug>-daemon\daemon.pid`，并等一个命名事件
   `Local\<slug>-daemon-stop-<pid>`。`uninstall-service`、重新 `install-service` 和新增的
-  `restart-service`（只在 Windows 上有）设这个事件，daemon 像收到 Ctrl+C 一样收尾（取消并上报手上的 run），
-  20 秒还没退出才强杀。事件同时用来确认那个 pid 还是 daemon，不会误杀别的程序。
+  `restart-service`（只在 Windows 上有）按 pid 加创建时间找到进程（只有 pid 可能已经是别的程序），设这个
+  事件，daemon 像收到 Ctrl+C 一样收尾（取消并上报手上的 run）。事件只在 daemon 自己的登录会话里看得到：
+  从同一用户的另一个会话（SSH、WinRM）来停，或者 20 秒还没退出，就直接结束进程。停不掉时命令报错，不会
+  装作成功。
+- **谁能换掉程序文件**（`apps/daemon/src/wintrust.rs`）：计划任务会一次次以这个用户的身份启动 daemon 的
+  exe，所以这个文件、它的文件夹和往上每一层文件夹，只要有当前用户和管理员以外的人能改（比如装在
+  `D:\Apps\X`，默认所有登录用户可改），`install-service` 就拒绝并说明原因。检查的是所有者和访问列表；
+  「在盘符根目录下能新建文件夹」不算。M2 的 ACL 函数进了 `sys.rs` 之后，读访问列表的那段挪过去。
+- **任务属于谁**：XML 里用当前用户的 SID，不用用户名（`whoami` 按控制台代码页输出，中文用户名会被读错）。
 - **为什么用 XML 加 `schtasks`，不用任务计划程序的 COM 接口**：XML 是纯文本，在每个系统上都能单元测试；
   `schtasks` 每台 Windows 都有；daemon 不用为此写 COM 代码。不解析 `schtasks` 的输出（它跟着系统语言和
   代码页变，中文系统上是 GBK），只看退出码；任务定义另存一份在 `%LOCALAPPDATA%\<slug>-daemon\task.xml`，
@@ -385,6 +392,10 @@ M1 里发现、留给后面的：
   1. 把新程序完整写到同一个文件夹的 `<名字>.exe.new`，校验 SHA-256；
   2. 把运行中的 `<名字>.exe` 改名成同一个文件夹里的 `<名字>.exe.old-<任意不重复的后缀>`；
   3. 把 `<名字>.exe.new` 改名成 `<名字>.exe`；这一步失败就把旧文件改回去。
+
+  两次改名之间断电会留下「没有 `<名字>.exe`、只有 `.old-*`」的状态。这时没有 daemon 可以自救，所以由计划
+  任务兜底：任务的第一个动作是一行 `cmd`，发现程序文件不在而 `.old-*` 在，就把它改名回去，然后第二个动作
+  才启动 daemon。更新方不用为此做任何事；留下的 `.exe.new` 下次更新时覆盖。
 
   更新方不要停 daemon，也不要结束计划任务（那会取消正在跑的 run）。剩下的 daemon 自己做：每分钟看一次
   自己路径上的文件，指纹（卷序列号、文件索引、大小、写入时间）变了、连续两次一样、手上没有 run 时退出，计划任务
@@ -403,7 +414,8 @@ M1 里发现、留给后面的：
     在 `install-service` 里自己收紧配置文件夹，`Config::problems` 里检查 token 文件有没有别人能读；到时
     客户端的 `only_this_user` 和安装脚本里的 `icacls` 都可以删掉。
 - **PowerShell 安装命令**（`scripts/install-daemon.ps1`，用法在 `docs/bots.md` 第 6 节）：给不装客户端的
-  机器。下载 daemon、校验 SHA-256（不对就什么都不装）、写配置和 token（文件夹只有当前用户能打开，token
+  机器。下载 daemon（只接受 https）、用命令行给的 `-Sha256` 校验（下载时必填；哈希必须来自下载地址以外的
+  可信来源，脚本不会去下载地址旁边取；不对就什么都不装）、写配置和 token（文件夹只有当前用户能打开，token
   不回显地输入或从文件读，不上命令行）、跑 `doctor`、`install-service`。`-Update` 只按替换协议换程序。
   Windows PowerShell 5.1 能跑，不需要管理员权限。**R1 要出的发布产物**：
   `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe` 和同名的 `.sha256`。
@@ -417,10 +429,13 @@ M1 里发现、留给后面的：
   - `apps/daemon/tests/service_task.rs`：测试程序自己当替身 daemon。注册并启动任务 → 替身在跑且有控制台
     → 再触发一次不会有第二个实例 → `taskkill /F` 杀掉后被重新启动 → 按替换协议换程序文件（运行中的 exe
     改名成功），替身用 daemon 的同一段代码发现新文件后退出，任务启动新文件，新进程删掉旧文件 →
-    `restart-service` 的那段代码让它停下再起一个新的 → 卸载后
+    `restart-service` 的那段代码让它停下再起一个新的 → 模拟更新中途断电（程序文件被改名走、进程被杀），
+    任务的第一个动作把文件改回来再启动 → 卸载后
     任务没了、进程没了、过 75 秒也没有再被启动。
+  - 同一个测试程序还检查：放在 `C:\Users\Public` 下的程序被 `install-service` 拒绝；注册下来的任务带着
+    「登录时」触发器（用 SID 写的用户被任务计划程序接受了）。
   - `scripts/test-install-daemon.ps1`（用 Windows PowerShell 5.1 跑）：用刚编译的真 daemon 走一遍安装命令。
-    SHA-256 不对时什么都没装；配置文件夹和 token 的访问列表里只有当前用户；任务注册了，真 daemon 在跑、
+    SHA-256 不对、下载地址不是 https、下载时没给 `-Sha256`，都什么都没装；配置文件夹和 token 的访问列表里只有当前用户；任务注册了，真 daemon 在跑、
     没有窗口、日志写出来了；`-Update` 之后真 daemon 自己发现新版本、退出、被任务重新启动、旧文件被删；
     日志里没有 token；卸载后任务和进程都没了。
   - 另有一步只报告不拦截：新建一个没有管理员权限的本地用户，用它运行 `install-service`，看注册是否被拒。

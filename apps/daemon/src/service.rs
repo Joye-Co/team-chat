@@ -324,12 +324,9 @@ pub struct Task<'a> {
 pub fn task_xml(t: &Task) -> String {
     let e = |p: &Path| xml_escape(&p.to_string_lossy());
     let user = xml_escape(t.user);
-    let exe_name = xml_escape(
-        &t.exe
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-    );
+    // The file name of a Windows path, also when this runs on another system (the tests).
+    let exe_path = t.exe.to_string_lossy();
+    let exe_name = xml_escape(exe_path.rsplit(['\\', '/']).next().unwrap_or_default());
     let logon = if t.at_logon {
         format!(
             "    <LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>{user}</UserId>\n    </LogonTrigger>\n"
@@ -674,6 +671,7 @@ fn process_made(process: windows_sys::Win32::Foundation::HANDLE) -> Option<u64> 
 }
 
 /// What the task's daemon wrote into its pid file: the pid and when the process was made.
+#[cfg(any(windows, test))]
 fn pid_and_made(text: &str) -> Option<(u32, u64)> {
     let mut parts = text.split_whitespace();
     let pid = parts.next()?.parse().ok()?;
