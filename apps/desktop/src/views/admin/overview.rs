@@ -33,6 +33,7 @@ fn tone_color(tone: Tone, k: &NativeColors) -> Hsla {
         Tone::Warn => k.amber,
         Tone::Bad => k.red,
         Tone::Quiet => k.secondary,
+        Tone::Info => k.blue,
     }
 }
 
@@ -607,7 +608,12 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                         .flex_none()
                         .size(height::DEFAULT)
                         .rounded(radius::CONTROL)
-                        .bg(k.fill)
+                        // The tone's color, faint, under the symbol in that color (Admin artboard).
+                        .bg(c.opacity(if k.is_dark() {
+                            t::ATTENTION_TINT_DARK
+                        } else {
+                            t::ATTENTION_TINT
+                        }))
                         .flex()
                         .items_center()
                         .justify_center()
