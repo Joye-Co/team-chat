@@ -54,12 +54,14 @@ export function buildUsage(input: {
   const people = new Tally();
   const machines = new Tally();
   const runtimes = new Tally();
+  const pairs = new Tally();
   const days = Math.max(1, Math.ceil(span / DAY_MS));
   const daily = Array.from({ length: Math.min(days, 62) }, (_, i) => ({ start: from + i * DAY_MS, bots: new Map<string, number>() }));
   for (const { botId, run } of inSpan) {
     total.add("all", run);
     bots.add(botId, run);
     people.add(run.requestedBy, run);
+    pairs.add(`${run.requestedBy}\u0000${botId}`, run);
     if (run.machineId) machines.add(run.machineId, run);
     runtimes.add(`${run.runtime ?? "unknown"}\u0000${run.machineId ?? ""}`, run);
     const d = daily[Math.floor((run.endedAt - from) / DAY_MS)];
@@ -79,6 +81,10 @@ export function buildUsage(input: {
     })),
     initiators: people.entries().map(([memberId, s]) => ({ memberId, ...s })),
     machines: machines.entries().map(([machineId, s]) => ({ machineId, ...s })),
+    pairs: pairs.entries().map(([key, s]) => {
+      const [initiatorId, memberId] = key.split("\u0000");
+      return { initiatorId, memberId, ...s };
+    }),
     runtimes: runtimes.entries().map(([key, s]) => {
       const [runtime, machineId] = key.split("\u0000");
       return { runtime, ...(machineId ? { machineId } : {}), ...s };

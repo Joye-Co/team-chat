@@ -31,6 +31,7 @@ describe("team usage", () => {
     expect(u.bots).toEqual([expect.objectContaining({ memberId: w.bot.id, costUsd: 1.25, budgetCents: 10_000 })]);
     expect(u.initiators).toEqual([expect.objectContaining({ memberId: w.human.id, runs: 1 })]);
     expect(u.machines).toEqual([expect.objectContaining({ machineId: w.machineId, costUsd: 1.25 })]);
+    expect(u.pairs).toEqual([expect.objectContaining({ initiatorId: w.human.id, memberId: w.bot.id, costUsd: 1.25, runs: 1 })]);
     expect(u.runtimes).toEqual([expect.objectContaining({ runtime: "codex", machineId: w.machineId })]);
     expect(u.daily).toHaveLength(2);
     expect(u.daily[0].bots).toEqual([{ memberId: w.bot.id, costUsd: 1.25 }]);
