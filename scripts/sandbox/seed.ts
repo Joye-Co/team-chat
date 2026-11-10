@@ -86,6 +86,17 @@ export async function seedMachine(o: SeedOptions, owner: string, ids: Record<str
   return m.machine.id;
 }
 
+/**
+ * Weekly budgets in cents. Scout's two sample runs run straight through (machine.ts asks for
+ * approval on every third Claude run and fails 8% at random), and one costs $0.36-2.70, so its
+ * $0.40 is passed once either ends; Forge and Tata stay well under theirs.
+ */
+const BUDGETS = [
+  ["scout", 40],
+  ["forge", 2000],
+  ["tata", 5000],
+] as const;
+
 const HUMANS = [
   { key: "xiaowang", name: "小王", role: "前端实习" },
   { key: "lixue", name: "李雪", role: "运营实习" },
@@ -165,6 +176,15 @@ export async function seed(o: SeedOptions): Promise<Json> {
     tokens[b.key] = r.token;
   }
   log(`members: ${Object.keys(ids).length}`);
+
+  // 团队管理 samples: weekly budgets (Scout's is low, so its sample runs pass 80% and reach it:
+  // 要注意 and 活动记录 show it), and an invite nobody accepted that ends in 36 hours.
+  for (const [k, cents] of BUDGETS) {
+    await call(url, "PATCH", `/v1/members/${ids[k]}`, { token: owner, body: { weeklyBudgetCents: cents } });
+  }
+  await call(url, "POST", "/v1/invites", { token: owner, body: { name: "Lina", kind: "human", level: "member", role: "运营", expiresInHours: 36 } });
+  await call(url, "POST", "/v1/invites", { token: owner, body: { name: "周周", kind: "human", level: "member", role: "设计" } });
+  log("budgets: 3 · invites: 2 pending");
 
   // --- 群 ---
   const group = async (name: string, purpose: string, members: Key[]) => {
