@@ -1001,7 +1001,25 @@ async fn update_check_download_and_sha256() {
         download_url: format!("{}/v1/updates/1.10.0/download", http.base_url()),
         platform: None,
     };
-    http.with(|s| s.release = Some((info.clone(), dmg.clone())));
+    // The client takes the release of the platform it is built for: on Windows that is the
+    // installer, which the server keeps apart from the DMG.
+    let info = if cfg!(windows) {
+        UpdateInfo {
+            download_url: format!("{}?platform=windows", info.download_url),
+            platform: Some("windows".into()),
+            ..info
+        }
+    } else {
+        info
+    };
+    http.with(|s| {
+        let release = Some((info.clone(), dmg.clone()));
+        if cfg!(windows) {
+            s.windows_release = release;
+        } else {
+            s.release = release;
+        }
+    });
     assert_eq!(
         client.check_update("1.9.9").await.unwrap().unwrap(),
         Some(info.clone())
