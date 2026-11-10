@@ -16,7 +16,7 @@ real machine shows otherwise.
 
 ## 1. Title bar and window buttons
 
-- The app draws its own title bar; Windows draws none. It is the same 52 px toolbar row as on the
+- The app draws its own title bar; Windows draws none. It is the same 64 px toolbar row as on the
   Mac (NATIVE.md §2), so the page title, subtitle and toolbar groups do not move.
 - There are no traffic lights. The window buttons are Windows' own three at the trailing edge of
   the row, in Windows' order: minimize, maximize or restore, close. Each is 46 px wide and as
@@ -85,8 +85,12 @@ Only the families differ (`theme.rs`, `UI_FONT_STACK`, `MONO_FONT_STACK`, `UI_FO
   a Japanese or Traditional Chinese system would draw Simplified Chinese text in the wrong
   glyphs. Every window root names Microsoft YaHei UI ahead of the system fallback
   (`gpui_component::UiFontFallbacks`).
-- Weight 500 (Medium): Segoe UI Variable has it. Segoe UI on Windows 10 has no Medium face and
-  DirectWrite draws the nearest one, Semibold, so 500 and 600 look alike there. Accepted.
+- Weight 500 (Medium): Segoe UI Variable has it. Segoe UI (Windows 10) and Microsoft YaHei UI
+  have no Medium face, so 500 draws Regular there: Chinese text and Windows 10 lose the step
+  between 400 and 500, and keep the one to 600. The theme asks for 499 on Windows
+  (`MEDIUM_WEIGHT`): at 500 and above DirectWrite takes the heavier face, which drew section
+  headers and labels in Bold in the Windows screenshots. Use `MEDIUM_WEIGHT`, never
+  `FontWeight::MEDIUM`, for the same reason.
 - Tabular figures (`tnum`) work in both Segoe families.
 - Pages drawn by a web view (产出, diagrams, previews) must name the same families in their CSS:
   `"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI"` after `-apple-system`, and
@@ -103,8 +107,8 @@ icons drawn for this app on Lucide's grid (`assets/icons/drawn/`). macOS keeps S
 - Views do not change: they name a concept (`Sym::Home.sidebar()`), and the asset source serves
   the symbol on macOS and the SVG icon elsewhere (`ui::sf_symbols::svgset`). gpui-component's own
   glyphs (chevrons, checkbox check, dialog close, spinner) go the same way.
-- **Size**: the icon is drawn as large as fits in the ink box its SF Symbol has at that size, and
-  centered in the same slot, so rows, buttons and tabs keep their rhythm. The §6 sizes stay:
+- **Size**: the icon is drawn as large as fits in the ink box its SF Symbol has at that size (an
+  icon squarer than its symbol may cover the same area instead), and centered in the same slot, so rows, buttons and tabs keep their rhythm. The §6 sizes stay:
   sidebar 15 in 18, toolbar 16 in 20, inline 13 in 16, small 11 in 14, tabs 18 in 24, pop-up
   mark 9.
 - **Weight**: one stroke for every icon of a context, as thick as the symbol's at that size and
@@ -137,7 +141,7 @@ Drawn for this app (7): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill
 | Concept (`Sym::`) | SF Symbol (macOS) | Windows icon | Uses |
 | --- | --- | --- | --- |
 | Home | `tray` | Lucide `inbox` | 1 |
-| Outputs | `square.stack` | Lucide `square-stack` | 4 |
+| Outputs | `square.stack` | Lucide `gallery-vertical-end` | 4 |
 | Members | `person.2` | Lucide `users` | 14 |
 | Topic | `number` | Lucide `hash` | 21 |
 | Compose | `square.and.pencil` | Lucide `square-pen` | 5 |
@@ -215,7 +219,7 @@ Drawn for this app (7): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill
 | Grid | `square.grid.2x2` | Lucide `layout-grid` | 1 |
 | Table | `tablecells` | Lucide `table` | 4 |
 | Download | `square.and.arrow.down` | Lucide `download` | 5 |
-| Upload | `square.and.arrow.up` | Lucide `upload` | 0 |
+| Upload | `square.and.arrow.up` | Lucide `share` | 0 |
 | Share | `square.and.arrow.up` | Lucide `share` | 0 |
 | Diagram | `point.3.connected.trianglepath.dotted` | Lucide `workflow` | 7 |
 | Video | `video` | Lucide `video` | 5 |
@@ -289,12 +293,8 @@ or an older Lucide name reaches it.
 
 ## 6. Scrollbars
 
-- The same overlay scrollbar as on the Mac: thin, over the content, no track,
-  no arrow buttons, never Windows' classic 17 px bar.
-- Most Windows users scroll with a mouse wheel, so the thumb must be easy to reach: it shows
-  while scrolling and whenever the pointer is over the scroll area's trailing 12 px, and it can
-  be dragged; a click on the empty lane pages.
-- A wheel notch scrolls three lines of the list's row height, or what the system setting says.
+- The same scrollbar as on the Mac, with the same behavior: the app's own thin overlay bar, no
+  track, no arrow buttons, never Windows' classic 17 px bar.
 
 Only compiled.
 
