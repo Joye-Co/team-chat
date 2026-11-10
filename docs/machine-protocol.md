@@ -53,7 +53,8 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
   // machine.id is the configured id (optional); the token is authoritative.
   // runs = every run the daemon still holds (running, or finished with frames not yet acked)
 
-{ t: "heartbeat", at, health: Health, runs: RunCursor[] }      // every 30 s; renews leases
+{ t: "heartbeat", at, health: Health, runs: RunCursor[],
+  metrics?: MachineMetrics }                                     // every 30 s; renews leases; metrics: see "Metrics"
 { t: "run.accept", runId }
 { t: "run.reject", runId, reason: "busy" | "runtime_unavailable" | "disk_low" | "invalid" | "draining",
   message: string }
@@ -92,10 +93,12 @@ KnownRun = { runId, ackedSeq: number }
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
   sessionUpload?: { url: string, headers?: Record<string, string> },
   kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
-  resumeSessionId?: string }       // 1.1, feature "resume": continue this CLI session (<= 128)
+  resumeSessionId?: string,        // 1.1, feature "resume": continue this CLI session (<= 128)
+  gates?: RunGate[] }              // feature "gates": kinds the run stops at, see "Gated actions"
 { t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
-{ t: "run.approval", runId, approvalId, decision: "approve" | "deny" }
+{ t: "run.approval", runId, approvalId, decision: "approve" | "deny",
+  scope?: "run" }                                                // feature "gates": 这件事里都同意
 { t: "run.cancel",   runId, reason? }
 { t: "run.pause",    runId, by? }                                // 1.1, feature "pause"
 { t: "run.resume",   runId, note? /* <= 2000 */ }                // 1.1, feature "pause"
@@ -126,7 +129,8 @@ RunEvent =
   | { type: "tool.call",        itemId, turnId?, tool, title, input?: unknown }
   | { type: "tool.result",      itemId, turnId?, ok: boolean, output? /* <= 16 KiB */, exitCode? }
   | { type: "file.change",      itemId, turnId?, changes: { path, kind: "add" | "modify" | "delete", diff? }[] }
-  | { type: "approval.request", approvalId, itemId?, title, detail? }   // answer with run.approval
+  | { type: "approval.request", approvalId, itemId?, title, detail?,    // answer with run.approval
+      kind?, command? }                                                 // feature "gates": a stopped command
   | { type: "approval.resolved", approvalId, decision: "approve" | "deny" }
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
   | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md); the daemon sets startedAt / endedAt when a step becomes current / done
@@ -197,6 +201,87 @@ RunEvent =
   `run.reject` makes it try the next qualifying machine; with none left the run fails with a
   note in the topic.
 
+## Metrics
+
+Since 1.2.7 every heartbeat carries `metrics`, the numbers of the owner's monitor (protocol.md,
+"Machine monitor"). Old servers ignore the field; the server reads it apart from the heartbeat, so
+metrics it cannot parse are dropped and the heartbeat still renews the leases. Every number is
+optional: a platform may not have it.
+
+```ts
+MachineMetrics = { at /* sample time, machine clock */, uptimeSecs?, cpuPct? /* 0-100 */, cpuThreads?,
+                   memTotalBytes?, memAvailableBytes?, netRxBps?, netTxBps?, vmSlots?,
+                   boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[] }
+VmRunMetrics   = { runId, phase: "booting" | "running" | "paused", startedAt, bootMs?, cpuCores?, memBytes?, scratchBytes? }
+CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", method?: "subscription" | "api_key" }
+```
+
+- **Host**: CPU busy since the previous sample over all threads (Linux `/proc/stat`, macOS
+  `host_statistics`), `MemTotal` and `MemAvailable` (`/proc/meminfo`; macOS free + inactive +
+  speculative pages), uptime, and bytes per second received and sent on the host's own interfaces
+  (`/proc/net/dev` without `lo`, `tap*`, `fc*`, `veth*`, `docker*`, `virbr*`, `br-*`; Linux only).
+- **VMs** (`[vm]`): the executor records each run's VM as it boots (`booting`), answers
+  (`running`, with `bootMs`: Firecracker start to a connected guest agent), is paused by 接管
+  (`paused`) and goes. `cpuCores` is the Firecracker process's CPU time since the previous sample
+  divided by the wall time (1.0 = one thread); `memBytes` its `VmRSS` (the guest pages it
+  touched); `scratchBytes` the blocks the sparse scratch disk uses. `vmSlots` is
+  `max_parallel_runs`; `boot` covers the last 50 boots. Without `[vm]`, `runs` lists the daemon's
+  unfinished runs with `phase: "running"` and their start, nothing else.
+- **Logins**: for `claude` and `codex` runtimes only, checked for presence, never read out:
+  Claude Code is `logged_in` (`subscription`) with `claudeAiOauth` tokens in
+  `$CLAUDE_CONFIG_DIR/.credentials.json` (on macOS, where the credential is in the Keychain, an
+  `oauthAccount` in `.claude.json`), else (`api_key`) when the CLI gets `ANTHROPIC_API_KEY` (the
+  runtime's `env`, or `env_passthrough` with the daemon's own value); Codex is `logged_in` with
+  `tokens` (`subscription`) or `OPENAI_API_KEY` (`api_key`) in `$CODEX_HOME/auth.json`, or the
+  same variable as above. Otherwise `logged_out`.
+
+## Accounts and keys (feature `accounts`)
+
+The owner signs the machine's CLIs in and gives it API keys from the app (团队管理 › 订阅账号 and
+API 密钥), never through a shell on the machine. A daemon that can do this reports feature
+`accounts` and its public key; the server sends these frames only to such a daemon.
+
+```ts
+hello.machine += { publicKey?: string }   // X25519, base64 of 32 bytes
+// server -> daemon
+{ t: "account.login", loginId, runtime, op: "start" | "code" | "cancel", code? /* <= 2048 */ }
+{ t: "secret.set", name /* [A-Z_][A-Z0-9_]{0,63} */, sealed /* base64 sealed box */, members: string[] }
+{ t: "secret.delete", name }
+// daemon -> server
+{ t: "account.login.status", loginId, runtime, state, url?, userCode?, account?: { email?, plan? }, error? }
+MachineMetrics += { secrets?: SecretInfo[], usage?: CliUsage[] }   // CliLogin += { email?, plan? }
+SecretInfo = { name, last4, members: string[] /* empty = every run */, updatedAt }
+CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
+```
+
+- **Machine key**: made once next to the token file (`machine.key`, mode 600; a group- or
+  world-readable file turns the feature off). The app seals a key's value to it with a libsodium
+  sealed box (X25519 + XSalsa20-Poly1305, `crypto_box_seal`), so the server only relays
+  ciphertext.
+- **Keys**: `secrets.json` next to it (mode 600) keeps each value, its members and when it
+  changed. A name that a run variable or the base environment uses (`CHAT_*`, `PATH`, `HOME`, …)
+  is refused. Runs of a listed member (every run when the list is empty) get the keys as
+  environment variables, under the runtime's own fixed `env`; side chat runs get none. Every
+  value the daemon has held is masked like the machine token in all it sends. The heartbeat
+  reports names and the last 4 characters only (none for values shorter than 12).
+- **Sign-in** (`op: "start"`): the daemon runs the CLI's own login with the runtime's
+  environment and `BROWSER=true`, reads its output and reports each step. Claude Code:
+  `claude auth login --claudeai` prints a link (`state: "open_url"`, `url`); the person signs in
+  in their own browser and pastes the code it shows; `op: "code"` writes it to the CLI's standard
+  input (`state: "checking"`). Codex: `codex login --device-auth` prints a link and a one-time code
+  (`state: "device_code"`, `url`, `userCode`); the person enters the code there. When the CLI exits
+  0 the state is `done` with the account (`claude auth status --json`, `codex login status`), else
+  `failed` with the CLI's last line (masked). `op: "cancel"` stops it (`cancelled`); after 15 minutes
+  it fails. A new `start` for the same `loginId` replaces the old one. Credentials stay in the CLI's
+  own files on the machine (`$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`), which the VMs share.
+- **Usage** (every 10 minutes and after a sign-in): Claude Code's windows from `claude -p /usage
+  --output-format json --tools "" --strict-mcp-config --setting-sources "" --no-session-persistence`
+  (a local command: no model request, no new window), parsed from its `Current session: N% used ·
+  resets …` and `Current week (…): N% used` lines (`kind` `session`, `week`, `week_model`; the reset
+  stays in `label`). Codex's from `GET https://chatgpt.com/backend-api/wham/usage` with the
+  machine's own Codex sign-in (`rate_limit.primary_window` / `secondary_window`: `used_percent`,
+  `reset_at`). Only percentages and reset times leave the machine.
+
 ## Leases
 
 - `run.assign.leaseMs` is the time the server waits without hearing about a run before it
@@ -220,9 +305,10 @@ RunEvent =
 - Input that reaches the daemon after the run's last turn has ended and the CLI exits is not
   taken: no `input.accepted` comes, `run.done` follows. BotDesk must then start a new run for
   that input (with the topic context in its prompt).
-- `approval.request` comes from CLIs that ask (ACP `session/request_permission`) and from
-  `chat-run secret` (see **Environment**). The server answers `run.approval`; the daemon
-  answers the CLI (or keeps the secret's answer) and emits `approval.resolved`. Since 1.2.1
+- `approval.request` comes from CLIs that ask (ACP `session/request_permission`), from
+  `chat-run secret` (see **Environment**) and from gated commands (see "Gated actions"). The
+  server answers `run.approval`; the daemon answers the CLI (or keeps the secret's answer, or
+  lets the waiting command run or not) and emits `approval.resolved`. Since 1.2.1
   an AI member always has every permission and nothing in `daemon.toml` narrows it: Claude Code
   runs with `--permission-mode bypassPermissions` and `--allowedTools` for the shell, edit, web,
   todo and task tools and `Bash(chat-run:*)` (`-p` has nobody to ask); Codex runs with sandbox
@@ -248,6 +334,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
 | `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`), see "Topic context". |
+| `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
 
 How the 1.1 daemon does each one:
 
@@ -530,6 +617,55 @@ reports no `models`, and settings then let the owner type a model id.
 with the CLI's default and the daemon logs it). Ids and efforts are passed as one argument, never
 through a shell. The `session` run event's `model` reports the model the CLI really used.
 
+### Gated actions (feature `gates`)
+
+```ts
+CliInfo += { gates?: boolean }       // runs of this CLI stop at gated commands
+run.assign += { gates?: RunGate[] }  // <= 16; only to a daemon with "gates" whose CLI says gates: true
+RunGate = { kind: string /* [A-Za-z][A-Za-z0-9_-]{0,31} */, patterns: string[] /* 1..64, each <= 200 */ }
+approval.request += { kind?: string /* <= 32 */, command?: string /* <= 4000, redacted */ }
+run.approval += { scope?: "run" }
+```
+
+An AI member runs with every permission; only the few kinds the team checked need a person
+(protocol.md, "Gated actions"), and only at the moment a command would run.
+
+- **Matching**: each pattern is a regular expression, matched case-insensitively against each
+  simple command of the tool's shell line (split at newlines, `;`, `&`, `|`; whitespace runs as
+  one space), so a pattern cannot span two commands. An MCP tool call is matched as
+  `<tool name> <input JSON>`. The first kind (assignment order) with a matching pattern wins. A
+  pattern the daemon cannot compile is left out and logged; a kind left with none is dropped.
+- **Claude Code** (`CliInfo.gates = true`): the run gets `--settings <run folder>/.gate-settings.json`
+  with a PreToolUse hook (matcher `^(Bash|mcp__.*)$`, anchored: Claude Code reads a matcher with
+  other characters than letters, digits and `|` as an unanchored regex) that runs
+  `<run folder>/bin/chat-run gate` (timeout 24 h instead of the 600 s default; the run's own
+  deadline ends it sooner). Claude Code merges hooks of all settings files, so the user's own
+  stay; a `disableAllHooks` in the user's settings would turn the hook off. The hook reads the hook input on standard input and sends `gate.check
+  { tool, command }` over the run's `chat-run` socket. No match: it exits 0 at once with no
+  output. A match: the daemon emits `approval.request { approvalId: "daemon-gate-<n>", title: <the
+  kind's 设置 name>, detail: command, kind, command }` and the hook waits. `run.approval approve`
+  lets the command run; `deny` (or the run ending) prints the PreToolUse `deny` decision with a
+  reason the CLI reads ("a person declined it … do the rest another way"). The daemon emits
+  `approval.resolved`. Hooks run before the permission flow, so the deny holds although the run
+  uses `bypassPermissions` (Claude Code hooks reference, "PreToolUse decision control"; checked
+  with the fake CLI in `tests/integration.rs`, not yet with the real one).
+- **One question at a time**: the server keeps one open approval per run, so a second gated
+  command waits until the first is answered, then asks (or passes, see scope).
+- **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
+  without asking. The server leaves the kind out of `gates` of the run's follow-ups and retries.
+- **While a command waits** the daemon sends no `stalled` status and the run keeps its deadline;
+  `run.cancel` stops the CLI as usual (the hook ends with it).
+- **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
+  fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
+  run, socket gone), the command runs and the reason goes to the hook's standard error: the
+  daemon is the run's parent, so this happens only when the run is ending anyway.
+- **Codex** (`gates` absent): not gated yet. Its app-server asks
+  (`item/commandExecution/requestApproval`) only under an approval policy (`untrusted`,
+  `on-request`, `granular`) that asks for nearly every command and changes how the model works
+  with its sandbox, so the daemon would have to answer every command itself; that was not
+  checked against the real CLI. Codex runs keep approval `never`, and the server keeps the
+  rules in the prompt for them. Side chat runs and ACP / PTY runtimes are never gated.
+
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 
 The prompt carries a budget of the topic (see protocol.md, "Run context"), not all of it. A run
@@ -636,6 +772,28 @@ later audits have the complete record:
   commits is kept, and the daemon log names it. Below half of `min_free_gb` new runs are
   rejected with `disk_low`.
 
+## MicroVM runs (`[vm]`, Linux)
+
+With `[vm]` in the config each run's CLI runs in its own Firecracker microVM instead of as a
+process of the daemon's machine. Nothing in this protocol changes. The VM boots the read-only
+base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
+Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
+that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
+folder, the run's git dir and `[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS
+shares of the host, mounted at their host paths, so the worktree, session files, `stderr.log`
+and 产出 stay where the daemon reads them. Stdin and stdout go over vsock (port 1024) as
+frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
+the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
+folder. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
+before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
+
+The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
+their traffic to the host (except NFS), to private, link-local and metadata ranges and to each
+other; strict reverse-path filtering stops address spoofing. The daemon runs as an unprivileged
+user; the tap device and the NFS exports go through the root helper `runner-vm` with `sudo -n`.
+`scripts/runner/host-setup.sh` installs all of it; `scripts/runner/net-check.py` boots a VM and
+checks its network.
+
 ## Environment
 
 The CLI process starts with an empty environment plus: `PATH HOME USER LOGNAME SHELL TMPDIR
@@ -676,8 +834,10 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
-`command`, `args`, `env`, `model`. `approval_policy`, `sandbox`, `permission_mode` and
+`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
+`command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
+(a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
+`shares`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 
@@ -699,4 +859,4 @@ found on PATH.
   the real daemon and the fake Claude Code CLI. A member mentions the bot; the run must show
   the acknowledgement reaction, no progress message, the done card with `resultMessageId`, the
   topic status `done`, the run log and the uploaded session. It writes `report.json` in a temp folder and stops both processes by
-  the PIDs it started.
+  the PIDs it started. With `--vm` on a runner host every run's CLI runs in a microVM.

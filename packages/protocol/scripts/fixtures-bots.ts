@@ -140,6 +140,86 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   const offline = { id: R.machine, name: "laptop", labels: [], createdBy: ID.owner, createdAt: T0, connected: false, healthy: false, runningRuns: [] };
   ok("entities/machine.json", "Machine", machine);
   ok("entities/machine-never-connected.json", "Machine", offline, "made, daemon never connected");
+  // Machine monitor (owners)
+  const series = (vals: (number | null)[]) => vals;
+  const monitor = {
+    machine: { id: R.machine, name: "runner-1", connected: true, lastHeartbeatAt: T0, connectedAt: T0 - 10_800_000, daemonVersion: "1.2.7", os: "linux", arch: "x86_64" },
+    sampledAt: T0 - 400,
+    host: { cpuPct: 62.4, cpuThreads: 12, load1: 7.4, memTotalBytes: 67216998400, memAvailableBytes: 28883582976, memVmBytes: 31567822438, diskTotalBytes: 996000000000, diskFreeBytes: 896000000000, netRxBps: 3565158.5, netTxBps: 1153433.5, uptimeSecs: 10800 },
+    series: { range: "1h", from: T0 - 3_600_000, stepMs: 60_000, cpuPct: series([22.5, null, 61.5]), memPct: series([40.5, null, 57.1]), diskPct: series([9.5, null, 10.1]), netRxBps: series([4000.5, null, 3565158.5]), netTxBps: series([1000.5, null, 1153433.5]) },
+    capacity: { slots: 34, running: 23, canTake: 11, avgVmBytes: 1395864371, reserveBytes: 12884901888 },
+    boot: { avgMs: 1300, maxMs: 2100, samples: 50 },
+    queue: { count: 4, oldestAt: T0 - 130_000 },
+    today: { finished: 186, succeeded: 175, failed: 11, finishedYesterday: 163, tokens: 14100000 },
+    clis: [
+      { runtime: "claude", kind: "claude", available: true, version: "2.1.0", login: "logged_in", failedToday: 0 },
+      { runtime: "codex", kind: "codex", available: true, login: "logged_out", failedToday: 2 },
+    ],
+    runs: [
+      { runId: "01JA0000000000000000000R01", memberId: ID.bot, state: "running", startedAt: T0 - 600_000, bootMs: 1250, cpuCores: 1.25, memBytes: 1395864371, scratchBytes: 734003200 },
+      { runId: "01JA0000000000000000000R02", memberId: ID.bot, state: "waiting", startedAt: T0 - 60_000 },
+      { runId: "01JA0000000000000000000R03", state: "queued" },
+    ],
+    members: [{ memberId: ID.bot, running: 6, waiting: 2, queued: 1, cpuCores: 2.65, memBytes: 10307921510, tokensToday: 6800000, finishedToday: 48 }],
+    lastFailure: { runId: "01JA0000000000000000000R09", memberId: ID.bot, at: T0 - 900_000, title: "对一下十月的账单" },
+  };
+  ok("http/machine-monitor.json", "MachineMonitor", monitor);
+  ok("http/machine-monitor-offline.json", "MachineMonitor", {
+    machine: { id: R.machine, name: "laptop", connected: false },
+    series: { range: "15m", from: T0 - 900_000, stepMs: 30_000, cpuPct: [], memPct: [], diskPct: [], netRxBps: [], netTxBps: [] },
+    capacity: { slots: 0, running: 0, canTake: 0 },
+    queue: { count: 0 },
+    today: { finished: 0, succeeded: 0, failed: 0, finishedYesterday: 0, tokens: 0 },
+    clis: [],
+    runs: [],
+    members: [],
+  }, "never sent metrics");
+  bad("http/machine-monitor-negative.json", "MachineMonitor", { ...monitor, queue: { count: -1 } }, "counts are not negative");
+
+  // Sign in and API keys from the app (feature "accounts")
+  ok("http/start-login-request.json", "StartLoginRequest", { runtime: "claude" });
+  ok("http/login-code-request.json", "LoginCodeRequest", { code: "abc123#state456" });
+  ok("http/machine-login.json", "MachineLogin", { loginId: "L01", runtime: "codex", state: "device_code", url: "https://auth.openai.com/codex/device", userCode: "ABCD-12345", updatedAt: T0 });
+  ok("http/machine-login-done.json", "MachineLogin", { loginId: "L01", runtime: "claude", state: "done", account: { email: "owner@example.com", plan: "max" }, updatedAt: T0 });
+  ok("http/machine-secrets.json", "MachineSecretsResponse", { publicKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", secrets: [{ name: "OPENAI_API_KEY", last4: "x9Qz", members: [], updatedAt: T0 }] });
+  ok("http/machine-secrets-old-daemon.json", "MachineSecretsResponse", { secrets: [] }, "the daemon cannot take keys");
+  ok("http/set-secret-request.json", "SetSecretRequest", { sealed: "c2VhbGVkLWJveC1ieXRlcw==", members: [ID.bot] });
+
+  // 活动记录 (team admin)
+  ok("http/activity-response.json", "ActivityResponse", {
+    entries: [
+      { id: 42, at: T0, kind: "level", action: "member.update", actorId: ID.owner, target: ID.bot, details: { level: ["member", "owner"] } },
+      { id: 41, at: T0 - 60_000, kind: "key", action: "machine.secret.set", actorId: ID.owner, target: R.machine, machineId: R.machine, details: { name: "OPENAI_API_KEY", members: [] } },
+      { id: 40, at: T0 - 120_000, kind: "login", action: "email.sign_in", actorId: ID.alice, target: ID.alice },
+    ],
+    hasMore: true,
+  });
+  ok("http/activity-response-empty.json", "ActivityResponse", { entries: [], hasMore: false });
+
+  // 用量 (team admin)
+  const spend = (c: number, runs: number) => ({ costUsd: c, inputTokens: runs * 90000, outputTokens: runs * 9000, runs, topics: runs - 1 });
+  ok("http/team-usage.json", "TeamUsage", {
+    from: T0 - 7 * 86_400_000,
+    to: T0,
+    total: spend(212.5, 12),
+    previous: { costUsd: 180.25, topics: 9 },
+    teamBudgetCents: 40000,
+    bots: [{ memberId: ID.bot, ...spend(86.5, 5), budgetCents: 10000 }],
+    initiators: [{ memberId: ID.owner, ...spend(74.5, 4) }],
+    machines: [{ machineId: R.machine, ...spend(212.5, 12) }],
+    runtimes: [{ runtime: "claude", machineId: R.machine, ...spend(200.5, 10) }, { runtime: "codex", ...spend(12.5, 2) }],
+    daily: [{ start: T0 - 7 * 86_400_000, costUsd: 32.5, bots: [{ memberId: ID.bot, costUsd: 32.5 }] }],
+  });
+
+  // 成员 (team admin)
+  ok("http/team-roster.json", "TeamRoster", {
+    members: [
+      { memberId: ID.owner, joinedAt: T0 - 30 * 86_400_000, lastSeenAt: T0, devices: [{ label: "Joye 的 MacBook Pro", createdAt: T0 - 30 * 86_400_000, lastUsedAt: T0 }] },
+      { memberId: ID.alice, joinedAt: T0 - 20 * 86_400_000, addedBy: ID.owner, devices: [] },
+    ],
+    invites: [{ id: ID.msg, name: "Lina", kind: "human", level: "member", createdBy: ID.owner, createdAt: T0 - 3 * 86_400_000, expiresAt: T0 + 4 * 86_400_000 }],
+  });
+
   // Front desk
   const decision = { messageId: ID.msg, topicId: ID.topic, authorId: ID.owner, action: "dispatch", reason: "needs the repo", confidence: 0.9, brief: { goal: "修好登录页的测试", doneWhen: ["cargo test 通过"] }, model: "deepseek-chat", ms: 1800, inputTokens: 900, outputTokens: 60, at: T0 };
   ok("entities/front-desk-decision.json", "FrontDeskDecision", decision);
@@ -173,7 +253,12 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/set-bot-runner-request-effort-clear.json", "SetBotRunnerRequest", { runtime: "claude", effort: null }, "null clears the effort");
   bad("http/set-bot-runner-request-bad-effort.json", "SetBotRunnerRequest", { runtime: "claude", effort: "" }, "effort is not empty");
   ok("http/bot-runner-effort.json", "BotRunner", { botId: ID.bot, runtime: "claude", labels: [], model: "opus", effort: "high", envAllowlist: [], enabled: true, updatedAt: T0 });
-  ok("http/create-machine-request.json", "CreateMachineRequest", { name: "mac-mini", labels: ["mac", "main"] });
+  // Gated actions (feature "gates")
+  ok("entities/machine-gates.json", "Machine", { ...machine, features: ["effort", "gates"], clis: [codexCli, { ...claudeCli, gates: true }] }, "Claude Code runs stop at gated commands, Codex runs do not");
+  const gated = { t: "run.assign", runId: "r1", botMemberId: ID.bot, groupId: ID.general, topicId: ID.topic, runtime: "claude", prompt: "合并 PR 12", envAllowlist: [], leaseMs: 600_000 };
+  ok("machine/down-run.assign-gates.json", "MachineDownFrame", { ...gated, gates: [{ kind: "mergeMain", patterns: ["\\bgh pr merge\\b"] }, { kind: "deployProd", patterns: ["\\bfly(ctl)? deploy\\b", "\\bdeploy-prod\\.sh\\b"] }] }, "the team's active kinds with their patterns");
+  ok("machine/run-event-approval.request-gate.json", "RunEvent", { type: "approval.request", approvalId: "daemon-gate-1", title: "合并到 main", detail: "gh pr merge 12 --squash", kind: "mergeMain", command: "gh pr merge 12 --squash" }, "the daemon stopped a gated command");
+  ok("machine/down-run.approval-scope-run.json", "MachineDownFrame", { t: "run.approval", runId: "r1", approvalId: "daemon-gate-1", decision: "approve", scope: "run" }, "这件事里都同意");  ok("http/create-machine-request.json", "CreateMachineRequest", { name: "mac-mini", labels: ["mac", "main"] });
   bad("http/create-machine-request-bad-label.json", "CreateMachineRequest", { name: "mac-mini", labels: ["has space"] }, "label with a space");
   ok("http/create-machine-response.json", "CreateMachineResponse", { machine: offline, token: "tm_MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM" }, "token is a fake placeholder");
   ok("http/machines-response.json", "MachinesResponse", [machine, { ...offline, revoked: true }]);

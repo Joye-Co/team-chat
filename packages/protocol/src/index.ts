@@ -118,6 +118,10 @@ import {
 } from "./bots.ts";
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
+import { ActivityResponse } from "./activity.ts";
+import { TeamUsage } from "./usage.ts";
+import { TeamRoster } from "./roster.ts";
+import { LoginCodeRequest, MachineLogin, MachineMonitor, MachineSecretsResponse, SetSecretRequest, StartLoginRequest } from "./monitor.ts";
 import {
   AiServiceConfig,
   AiServiceTestResult,
@@ -169,6 +173,10 @@ export * from "./diagnostics.ts";
 export * from "./hooks.ts";
 export * from "./audit.ts";
 export * from "./machine.ts";
+export * from "./monitor.ts";
+export * from "./activity.ts";
+export * from "./usage.ts";
+export * from "./roster.ts";
 export * from "./bots.ts";
 export * from "./plan.ts";
 export * from "./settings.ts";
@@ -795,6 +803,15 @@ export const schemas = {
   CreateMachineRequest,
   CreateMachineResponse,
   MachinesResponse,
+  MachineMonitor,
+  ActivityResponse,
+  TeamUsage,
+  TeamRoster,
+  StartLoginRequest,
+  LoginCodeRequest,
+  MachineLogin,
+  MachineSecretsResponse,
+  SetSecretRequest,
   MachineUpFrame,
   MachineDownFrame,
   // 1.1

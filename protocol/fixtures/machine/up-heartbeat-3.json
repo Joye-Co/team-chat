@@ -1,0 +1,72 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "heartbeat",
+    "at": 1793627460000,
+    "health": {
+      "diskFreeBytes": 896000000000,
+      "diskTotalBytes": 996000000000,
+      "load1": 2.5,
+      "load5": 2.25,
+      "load15": 1.75,
+      "cpuCount": 12,
+      "activeRuns": 0
+    },
+    "runs": [],
+    "metrics": {
+      "at": 1793627459900,
+      "runs": [],
+      "logins": [
+        {
+          "runtime": "claude",
+          "state": "logged_in",
+          "method": "subscription",
+          "email": "owner@example.com",
+          "plan": "max"
+        },
+        {
+          "runtime": "codex",
+          "state": "logged_in",
+          "method": "api_key"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "OPENAI_API_KEY",
+          "last4": "x9Qz",
+          "members": [],
+          "updatedAt": 1793627000000
+        },
+        {
+          "name": "GITHUB_TOKEN",
+          "last4": "a1b2",
+          "members": [
+            "01JBX0BOT00000000000000AAA"
+          ],
+          "updatedAt": 1793627100000
+        }
+      ],
+      "usage": [
+        {
+          "runtime": "claude",
+          "at": 1793627400000,
+          "windows": [
+            {
+              "kind": "session",
+              "label": "Current session",
+              "usedPct": 13.5,
+              "resetsAt": 1793640000000
+            },
+            {
+              "kind": "week",
+              "label": "Current week (all models)",
+              "usedPct": 41.5
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

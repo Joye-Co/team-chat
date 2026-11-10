@@ -209,6 +209,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
     Down::RunAssign(RunAssign {
         kind: None,
         resume_session_id: None,
+        gates: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
@@ -823,11 +824,15 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "output",
                         "resume",
                         "context",
-                        "effort"
+                        "effort",
+                        "gates",
+                        "accounts"
                     ]
                     .map(String::from)[..]
                 )
             );
+            // Feature "accounts": the machine key made next to the token file.
+            assert_eq!(machine.public_key.as_deref().map(str::len), Some(44));
             assert_eq!(
                 machine.takeover_url.as_deref(),
                 Some("vnc://mac-mini.tailnet")
@@ -1823,6 +1828,137 @@ async fn pause_and_cancel_cover_orphaned_tools() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(!alive(orphan), "orphan left after cancel");
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+fn gated(run: &str, prompt: &str) -> Down {
+    let mut a = assign(run, "fake", prompt, None);
+    if let Down::RunAssign(r) = &mut a {
+        r.gates = Some(vec![RunGate {
+            kind: "mergeMain".into(),
+            patterns: vec![r"\bgh pr merge\b".into()],
+        }]);
+    }
+    a
+}
+
+fn approval(run: &str, approval_id: &str, decision: &str, scope: Option<&str>) -> Down {
+    Down::RunApproval {
+        run_id: run.into(),
+        approval_id: approval_id.into(),
+        decision: decision.into(),
+        scope: scope.map(str::to_string),
+    }
+}
+
+/// The approval.request of a gated command (the last frame of `frames`).
+fn gate_request(frames: &[Up]) -> (String, Option<String>, Option<String>) {
+    match frames.last() {
+        Some(Up::RunEvent {
+            event:
+                RunEvent::ApprovalRequest {
+                    approval_id,
+                    kind,
+                    command,
+                    ..
+                },
+            ..
+        }) => (approval_id.clone(), kind.clone(), command.clone()),
+        f => panic!("expected approval.request, got {f:?}"),
+    }
+}
+
+fn is_request(f: &Up) -> bool {
+    matches!(
+        f,
+        Up::RunEvent {
+            event: RunEvent::ApprovalRequest { .. },
+            ..
+        }
+    )
+}
+
+/// M4: a Claude Code run with gates gets the PreToolUse hook; `gh pr merge` waits for
+/// `run.approval` (deny blocks it with a reason the CLI reads, approve runs it), other commands
+/// never ask, and 这件事里都同意 (scope "run") lets later merges of the run pass.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gated_commands_wait_for_a_person() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { machine, clis, .. } => {
+            assert!(machine.features.unwrap().iter().any(|f| f == "gates"));
+            assert_eq!(clis[0].gates, Some(true), "a claude runtime is gated");
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+    let work = |run: &str| tmp.path().join(format!("work/runs/{run}/work"));
+    let report = |run: &str| work(run).join("gate-1.json");
+
+    // 1. Deny: the command does not run and the CLI reads why.
+    send(&mut ws, &gated("g1", "gated")).await;
+    let fr = collect(&mut ws, "g1", true, is_request).await;
+    let (id, kind, command) = gate_request(&fr);
+    assert_eq!(kind.as_deref(), Some("mergeMain"));
+    assert_eq!(command.as_deref(), Some("gh pr merge 12 --squash"));
+    let argv: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(work("g1").join("argv.json")).unwrap())
+            .unwrap();
+    assert!(
+        argv.iter().any(|a| a.ends_with(".gate-settings.json")),
+        "{argv:?}"
+    );
+    send(&mut ws, &approval("g1", &id, "deny", None)).await;
+    let fr = collect(&mut ws, "g1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(events(&fr).iter().any(|e| matches!(
+        e,
+        RunEvent::ApprovalResolved { approval_id, decision } if *approval_id == id && decision == "deny"
+    )));
+    assert_eq!(done(&fr).status, "succeeded");
+    let r: serde_json::Value = serde_json::from_str(&wait_file(&report("g1")).await).unwrap();
+    assert_eq!(r["hooks"], 1);
+    let why = r["commands"][0]["denied"].as_str().expect("merge denied");
+    assert!(why.contains("declined"), "{why}");
+    assert!(r["commands"][1]["denied"].is_null(), "ls never asks: {r}");
+    // The settings file goes with the run.
+    assert!(!tmp.path().join("work/runs/g1/.gate-settings.json").exists());
+
+    // 2. 这件事里都同意: the first merge asks, the second passes without a card.
+    send(&mut ws, &gated("g2", "gated twice")).await;
+    let fr = collect(&mut ws, "g2", true, is_request).await;
+    let (id, _, _) = gate_request(&fr);
+    send(&mut ws, &approval("g2", &id, "approve", Some("run"))).await;
+    let fr = collect(&mut ws, "g2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(
+        fr.iter().filter(|f| is_request(f)).count(),
+        0,
+        "asked again"
+    );
+    let r: serde_json::Value = serde_json::from_str(&wait_file(&report("g2")).await).unwrap();
+    let cmds = r["commands"].as_array().unwrap();
+    assert_eq!(cmds.len(), 3);
+    assert!(cmds.iter().all(|c| c["denied"].is_null()), "{r}");
+
+    // 3. No gates: no hook, nothing asks.
+    send(&mut ws, &assign("g3", "fake", "gated", None)).await;
+    let fr = collect(&mut ws, "g3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(!fr.iter().any(is_request));
+    let r: serde_json::Value = serde_json::from_str(&wait_file(&report("g3")).await).unwrap();
+    assert_eq!(r["hooks"], 0);
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

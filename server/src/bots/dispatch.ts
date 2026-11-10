@@ -46,12 +46,33 @@ export const TEXT = {
     `需要你确认：${title}${detail ? `\n\n${detail}` : ""}\n\n回复「同意」或「拒绝」。`,
   approve: "同意",
   deny: "拒绝",
+  /** A gated command (feature "gates"): the kind, the command, and the third answer. */
+  approvalGate: (kind: string, command?: string) =>
+    `需要你确认：${kind}${command ? `\n\n${command}` : ""}\n\n回复「同意」「拒绝」或「这件事里都同意」。`,
+  approveRun: "这件事里都同意",
+  approveRunConfirm: "这件事里之后同类的操作都不再问你。",
+  /** 设置 › 默认规则 names of the gated kinds. */
+  gateKinds: {
+    mergeMain: "合并到 main",
+    deployProd: "发布到生产",
+    prodConfig: "改生产环境配置",
+    deleteData: "删除数据或文件",
+    externalPublish: "对外发布",
+  } as Record<string, string>,
   noAsideMachine: "现在没有能单独回答的电脑，请稍后再问。",
 } as const;
 
 /** The machine's daemon reports this 1.1 feature (docs/machine-protocol.md, "1.1 features"). */
 export function hasFeature(m: Pick<MachineView, "info">, feature: string): boolean {
   return (m.info?.features ?? []).includes(feature);
+}
+
+/**
+ * The machine stops this runtime's gated commands itself: its daemon has feature "gates" and the
+ * CLI reports `gates` (machine-protocol.md, "Gated actions").
+ */
+export function gatesRuntime(m: Pick<MachineView, "info" | "clis">, runtime: string): boolean {
+  return hasFeature(m, "gates") && (m.clis ?? []).some((c) => c.runtime === runtime && c.gates === true);
 }
 
 export interface MachineView {
@@ -158,6 +179,15 @@ export function approvalDecision(body: string): "approve" | "deny" | null {
   if (["同意", "可以", "批准", "好", "好的", "行", "approve", "yes", "y", "ok"].includes(t)) return "approve";
   if (["拒绝", "不同意", "不行", "不可以", "不要", "deny", "no", "n"].includes(t)) return "deny";
   return null;
+}
+
+/** "这件事里都同意" (and "都同意") answers a gated approval for the whole piece of work. */
+export function approvesWholeWork(body: string): boolean {
+  const t = body
+    .replace(/@\S+/g, "")
+    .trim()
+    .replace(/[。.!！,，\s]+$/u, "");
+  return t === TEXT.approveRun || t === "都同意";
 }
 
 /** Cuts text to at most `max` code points. */

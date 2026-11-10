@@ -1,0 +1,13 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "account.login.status",
+    "loginId": "L02",
+    "runtime": "codex",
+    "state": "device_code",
+    "url": "https://auth.openai.com/codex/device",
+    "userCode": "ABCD-12345"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "kind": "TeamUsage",
+  "valid": true,
+  "value": {
+    "from": 1761523200000,
+    "to": 1762128000000,
+    "total": {
+      "costUsd": 212.5,
+      "inputTokens": 1080000,
+      "outputTokens": 108000,
+      "runs": 12,
+      "topics": 11
+    },
+    "previous": {
+      "costUsd": 180.25,
+      "topics": 9
+    },
+    "teamBudgetCents": 40000,
+    "bots": [
+      {
+        "memberId": "01JBX0BOT000000000000000AC",
+        "costUsd": 86.5,
+        "inputTokens": 450000,
+        "outputTokens": 45000,
+        "runs": 5,
+        "topics": 4,
+        "budgetCents": 10000
+      }
+    ],
+    "initiators": [
+      {
+        "memberId": "01JBX0OWNER0000000000000AA",
+        "costUsd": 74.5,
+        "inputTokens": 360000,
+        "outputTokens": 36000,
+        "runs": 4,
+        "topics": 3
+      }
+    ],
+    "machines": [
+      {
+        "machineId": "01JBX0MACHINE00000000000AV",
+        "costUsd": 212.5,
+        "inputTokens": 1080000,
+        "outputTokens": 108000,
+        "runs": 12,
+        "topics": 11
+      }
+    ],
+    "runtimes": [
+      {
+        "runtime": "claude",
+        "machineId": "01JBX0MACHINE00000000000AV",
+        "costUsd": 200.5,
+        "inputTokens": 900000,
+        "outputTokens": 90000,
+        "runs": 10,
+        "topics": 9
+      },
+      {
+        "runtime": "codex",
+        "costUsd": 12.5,
+        "inputTokens": 180000,
+        "outputTokens": 18000,
+        "runs": 2,
+        "topics": 1
+      }
+    ],
+    "daily": [
+      {
+        "start": 1761523200000,
+        "costUsd": 32.5,
+        "bots": [
+          {
+            "memberId": "01JBX0BOT000000000000000AC",
+            "costUsd": 32.5
+          }
+        ]
+      }
+    ]
+  }
+}

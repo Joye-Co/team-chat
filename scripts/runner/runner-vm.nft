@@ -1,0 +1,37 @@
+# Network rules for the runner's microVMs (taps rvm*, addresses 10.200.0.0/16).
+# VMs reach the internet. They never reach this host (except NFS), private or link-local
+# ranges, or each other. NFS and rpcbind answer only the VMs.
+destroy table inet runner_vm
+
+table inet runner_vm {
+	set private4 {
+		type ipv4_addr
+		flags interval
+		elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16,
+			     172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 }
+	}
+
+	chain input {
+		type filter hook input priority -10; policy accept;
+		iifname "rvm*" ct state established,related accept
+		iifname "rvm*" tcp dport 2049 accept
+		iifname "rvm*" drop
+		iifname != { "rvm*", "lo" } tcp dport { 111, 2049, 20048 } drop
+		iifname != { "rvm*", "lo" } udp dport { 111, 2049, 20048 } drop
+	}
+
+	chain forward {
+		type filter hook forward priority -10; policy accept;
+		iifname "rvm*" oifname "rvm*" drop
+		iifname "rvm*" meta nfproto ipv6 drop
+		iifname "rvm*" ip daddr @private4 drop
+		iifname "rvm*" accept
+		oifname "rvm*" ct state established,related accept
+		oifname "rvm*" drop
+	}
+
+	chain postrouting {
+		type nat hook postrouting priority 100;
+		ip saddr 10.200.0.0/16 oifname != "rvm*" masquerade
+	}
+}

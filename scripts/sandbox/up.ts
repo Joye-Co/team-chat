@@ -8,12 +8,15 @@
 //   bun scripts/sandbox/up.ts --reset    throw the data away and seed again
 //   bun scripts/sandbox/up.ts --stop     stop this worktree's server
 //
+// The sample machine (machine.ts, the 机器监控 sample) runs next to the server: started here,
+// PID in .tmp/sandbox/machine.pid, stopped with the server.
+//
 // Migrations run on every start, so new tables of main arrive without a reset. The app reads
 // .tmp/sandbox/server-url and owner-token (`desktop --sandbox .tmp/sandbox`).
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { seed } from "./seed.ts";
+import { seed, seedMachine } from "./seed.ts";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../..");
 const DIR = join(ROOT, ".tmp", "sandbox");
@@ -38,7 +41,51 @@ function runningPid(): number | undefined {
   return cmd.includes(STATE) ? pid : undefined;
 }
 
+const MACHINE_PID = join(DIR, "machine.pid");
+const MACHINE_LOG = join(DIR, "machine.log");
+const MACHINE_SCRIPT = join(ROOT, "scripts", "sandbox", "machine.ts");
+
+/** The sample machine's PID when it is this worktree's machine.ts and still runs. */
+function machinePid(): number | undefined {
+  const pid = Number(read(MACHINE_PID));
+  if (!pid) return undefined;
+  const cmd = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).stdout.trim();
+  return cmd.includes(MACHINE_SCRIPT) ? pid : undefined;
+}
+
+function stopMachine() {
+  const pid = machinePid();
+  if (pid) {
+    process.kill(pid, "SIGTERM");
+    log(`stopped the sample machine (pid ${pid})`);
+  }
+  rmSync(MACHINE_PID, { force: true });
+}
+
+/** Starts the sample machine when it has a token and does not run yet; waits until it is connected. */
+async function startMachine(url: string): Promise<void> {
+  const token = join(DIR, "machine-token");
+  if (!existsSync(token) || machinePid()) return;
+  const out = openSync(MACHINE_LOG, "a");
+  const child = spawn(process.execPath, [MACHINE_SCRIPT, "--url", url, "--token-file", token], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ["ignore", out, out],
+  });
+  child.unref();
+  write(MACHINE_PID, String(child.pid));
+  const owner = read(join(DIR, "owner-token"));
+  for (let i = 0; i < 40 && owner; i++) {
+    const r = await fetch(`${url}/v1/machines`, { headers: { authorization: `Bearer ${owner}` } }).catch(() => null);
+    const list = r?.ok ? ((await r.json()) as { connected: boolean; healthy: boolean }[]) : [];
+    if (list.some((m) => m.connected && m.healthy)) return;
+    await Bun.sleep(500);
+  }
+  log(`the sample machine did not connect; see ${MACHINE_LOG}`);
+}
+
 function stop() {
+  stopMachine();
   const pid = runningPid();
   if (pid) {
     // wrangler starts workerd as a child: stop the whole process group.
@@ -147,7 +194,7 @@ async function main() {
   if (args.includes("--stop")) return stop();
   if (args.includes("--reset")) {
     stop();
-    for (const f of ["state", "seed.json", "owner-token", "app"]) rmSync(join(DIR, f), { recursive: true, force: true });
+    for (const f of ["state", "seed.json", "owner-token", "machine-token", "app"]) rmSync(join(DIR, f), { recursive: true, force: true });
     log("reset");
   }
   // A seed that stopped halfway leaves data without seed.json: start over.
@@ -160,8 +207,23 @@ async function main() {
   write(join(DIR, "server-url"), url);
   if (!existsSync(join(DIR, "seed.json"))) {
     log("seeding the sample team…");
-    await seed({ url, adminSecret: adminSecret().secret, out: DIR, log: (l) => log(l) });
+    await seed({ url, adminSecret: adminSecret().secret, out: DIR, log: (l) => log(l), startMachine: () => startMachine(url) });
+  } else {
+    // A sandbox seeded before the sample machine: add it once.
+    const seeded = JSON.parse(readFileSync(join(DIR, "seed.json"), "utf8")) as { members: Record<string, string>; groups: { dev: string; growth: string }; machineId?: string };
+    const owner = read(join(DIR, "owner-token"));
+    if (!seeded.machineId && owner) {
+      log("adding the sample machine…");
+      seeded.machineId = await seedMachine(
+        { url, adminSecret: "", out: DIR, log: (l) => log(l), startMachine: () => startMachine(url) },
+        owner,
+        seeded.members,
+        seeded.groups,
+      );
+      writeFileSync(join(DIR, "seed.json"), `${JSON.stringify(seeded, null, 2)}\n`);
+    }
   }
+  await startMachine(url);
   log(`server ${url} (log ${LOG})`);
 }
 

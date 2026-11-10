@@ -64,6 +64,8 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         available: found.is_some(),
         models: can_run.models,
         efforts: can_run.efforts,
+        // Only Claude Code runs stop at gated commands (a PreToolUse hook); Codex cannot yet.
+        gates: crate::gates::enforced_by(&rt.kind).then_some(true),
     }
 }
 

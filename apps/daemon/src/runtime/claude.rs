@@ -417,6 +417,18 @@ fn write_aside_settings(spec: &RunSpec) -> Option<PathBuf> {
     }
 }
 
+/// The file name (in the run folder) of the settings that install the gate hook.
+pub const GATE_SETTINGS: &str = ".gate-settings.json";
+
+/// Writes [`crate::gates::claude_settings`] to `<run folder>/.gate-settings.json` and returns
+/// its path. Claude Code merges the hooks of every settings source, so the user's own settings
+/// stay as they are.
+fn write_gate_settings(spec: &RunSpec, link: &Path) -> std::io::Result<PathBuf> {
+    let path = spec.run_dir.join(GATE_SETTINGS);
+    std::fs::write(&path, crate::gates::claude_settings(link).to_string())?;
+    Ok(path)
+}
+
 /// Permission flags and the configured extra args. A side chat run (`spec.aside`) is
 /// read-only whatever `daemon.toml` or the CLI's own settings say: permission mode `plan`, only
 /// [`ASIDE_TOOLS`], [`ASIDE_DISALLOWED_TOOLS`] denied, no MCP servers, and neither
@@ -539,7 +551,17 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     } else {
         None
     };
-    if let Some(p) = &aside_settings {
+    // Gated actions: a PreToolUse hook asks the daemon before each command (never for a side
+    // chat, which has no command tool).
+    // A run that should stop at gated commands never runs without the hook.
+    let gate_settings = match (&spec.gate_hook, spec.aside) {
+        (Some(link), false) => match write_gate_settings(&spec, link) {
+            Ok(p) => Some(p),
+            Err(e) => return Outcome::failed(format!("cannot install the approval hook: {e}")),
+        },
+        _ => None,
+    };
+    if let Some(p) = aside_settings.as_ref().or(gate_settings.as_ref()) {
         args.push("--settings".into());
         args.push(p.display().to_string());
     }
@@ -551,6 +573,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let program = spec.cfg.command();
     // The settings file holds auth values: it goes when the run ends, however it ends.
     let _settings = aside_settings.map(RemoveOnDrop);
+    let _gate_settings = gate_settings.map(RemoveOnDrop);
 
     let mut p = match Proc::spawn(&spec, &program, &args) {
         Ok(p) => p,

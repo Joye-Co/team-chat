@@ -51,6 +51,8 @@ pub mod desk;
 pub mod group_page;
 pub mod live;
 pub mod members_page;
+pub mod memory;
+pub mod admin;
 pub mod rail;
 pub mod side_chat;
 pub mod topic_rail;
@@ -98,6 +100,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "common",
         entries: common::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "memory",
+        entries: memory::ENTRIES,
         developer: false,
     },
     Section {
@@ -178,6 +185,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "dev",
         entries: dev::ENTRIES,
+        developer: true,
+    },
+    Section {
+        name: "admin",
+        entries: admin::ENTRIES,
         developer: true,
     },
     Section {

@@ -38,6 +38,7 @@ mod pages;
 // --- inc-host track ---
 mod page_host;
 // --- end inc-host track ---
+mod memory;
 mod process;
 mod realtime;
 #[cfg(test)]
@@ -2043,6 +2044,149 @@ impl ChatProvider for CoreProvider {
         self.machines_inner()
     }
 
+    fn start_machine_login(&self, machine_id: &str, runtime: &str) -> AdminReply<String> {
+        let (id, rt) = (machine_id.to_string(), runtime.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .start_machine_login(&id, &rt)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_login(
+        &self,
+        machine_id: &str,
+        login_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineLogin> {
+        let (id, login) = (machine_id.to_string(), login_id.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_login(&id, &login)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_login_code(&self, machine_id: &str, login_id: &str, code: &str) -> AdminReply<()> {
+        let (id, login, code) = (machine_id.to_string(), login_id.to_string(), code.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_login_code(&id, &login, &code)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn cancel_machine_login(&self, machine_id: &str, login_id: &str) -> AdminReply<()> {
+        let (id, login) = (machine_id.to_string(), login_id.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .cancel_machine_login(&id, &login)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_secrets(
+        &self,
+        machine_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineSecretsResponse> {
+        let id = machine_id.to_string();
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_secrets(&id)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn set_machine_secret(
+        &self,
+        machine_id: &str,
+        public_key: &str,
+        name: &str,
+        value: crate::data::SecretText,
+        members: Vec<String>,
+    ) -> AdminReply<()> {
+        let (id, key, name) = (machine_id.to_string(), public_key.to_string(), name.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .set_machine_secret(&id, &key, &name, value.expose(), members)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn delete_machine_secret(&self, machine_id: &str, name: &str) -> AdminReply<()> {
+        let (id, name) = (machine_id.to_string(), name.to_string());
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .delete_machine_secret(&id, &name)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn set_member_budget(&self, member_id: &str, cents: Option<u64>) -> AdminReply<Member> {
+        self.set_member_budget_inner(member_id, cents)
+    }
+
+    fn team_roster(&self) -> AdminReply<chat_core::proto::TeamRoster> {
+        self.request(move |client, _| async move {
+            client.http().team_roster().await.map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn team_usage(&self, from: u64, to: u64) -> AdminReply<chat_core::proto::TeamUsage> {
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .team_usage(from, to)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn team_activity(
+        &self,
+        before: Option<u64>,
+        actor: Option<String>,
+        kinds: Vec<String>,
+        machine: Option<String>,
+    ) -> AdminReply<chat_core::proto::ActivityResponse> {
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .activity(before, actor.as_deref(), &kinds, machine.as_deref())
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
+    fn machine_monitor(
+        &self,
+        machine_id: &str,
+        range: &'static str,
+        day_start: u64,
+    ) -> AdminReply<chat_core::proto::MachineMonitor> {
+        let id = machine_id.to_string();
+        self.request(move |client, _| async move {
+            client
+                .http()
+                .machine_monitor(&id, range, day_start)
+                .await
+                .map_err(|e| settings::api_error(&e))
+        })
+    }
+
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_inner(name, labels)
     }
@@ -2099,6 +2243,34 @@ impl ChatProvider for CoreProvider {
     }
     fn approval_defaults(&self) -> AdminReply<crate::data::ApprovalDefaults> {
         self.approval_defaults_inner()
+    }
+    fn memories(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> AdminReply<Vec<crate::data::memory::Memory>> {
+        self.memories_inner(scope)
+    }
+    fn memory_updates(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> AdminReply<crate::data::memory::MemoryDay> {
+        self.memory_updates_inner(scope)
+    }
+    fn create_memory(
+        &self,
+        new: crate::data::memory::NewMemory,
+    ) -> AdminReply<crate::data::memory::Memory> {
+        self.create_memory_inner(new)
+    }
+    fn update_memory(
+        &self,
+        memory_id: &str,
+        edit: crate::data::memory::MemoryEdit,
+    ) -> AdminReply<crate::data::memory::Memory> {
+        self.update_memory_inner(memory_id, edit)
+    }
+    fn undo_memory_update(&self, update_id: &str) -> AdminReply<crate::data::memory::MemoryUpdate> {
+        self.undo_memory_update_inner(update_id)
     }
     fn set_approval_defaults(
         &self,

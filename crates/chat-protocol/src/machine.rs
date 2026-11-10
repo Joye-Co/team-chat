@@ -31,6 +31,24 @@ pub mod feature {
     pub const CONTEXT: &str = "context";
     /// `CliInfo.models` / `efforts` and `run.assign.effort`.
     pub const EFFORT: &str = "effort";
+    /// `run.assign.gates`, `CliInfo.gates`, `approval.request.kind`/`command` and
+    /// `run.approval.scope`: the run stops at gated commands for a person's approval.
+    pub const GATES: &str = "gates";
+    /// `machine.publicKey`, `account.login`, `secret.set` / `secret.delete` and the
+    /// `secrets` / `usage` metrics: sign in and API keys from the app.
+    pub const ACCOUNTS: &str = "accounts";
+}
+
+/// `run.approval.scope = "run"` (这件事里都同意): later matches of the same kind in the run pass.
+pub const APPROVAL_SCOPE_RUN: &str = "run";
+
+/// One gated action kind of a run (feature "gates"): before a tool runs a shell command that a
+/// pattern matches (case-insensitive regex), the daemon asks for approval and waits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGate {
+    pub kind: String,
+    pub patterns: Vec<String>,
 }
 
 /// A model a CLI can run (machine-protocol.md, "Models and effort").
@@ -66,6 +84,9 @@ pub struct MachineInfo {
     /// 1.1: screen sharing address (e.g. `vnc://mac-mini.tailnet`) for 接管.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub takeover_url: Option<String>,
+    /// Feature "accounts": the machine's X25519 public key (base64, 32 bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,6 +106,9 @@ pub struct CliInfo {
     /// Efforts the CLI takes (feature "effort").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub efforts: Option<Vec<String>>,
+    /// Feature "gates": runs of this CLI stop at `run.assign.gates` matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gates: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -97,6 +121,185 @@ pub struct Health {
     pub load15: f64,
     pub cpu_count: u32,
     pub active_runs: u32,
+}
+
+/// `VmRunMetrics.phase` values (any short string is read).
+pub mod vm_phase {
+    pub const BOOTING: &str = "booting";
+    pub const RUNNING: &str = "running";
+    pub const PAUSED: &str = "paused";
+}
+
+/// `CliLogin.state` values (any short string is read).
+pub mod login_state {
+    pub const LOGGED_IN: &str = "logged_in";
+    pub const LOGGED_OUT: &str = "logged_out";
+    pub const UNKNOWN: &str = "unknown";
+}
+
+/// At most this many runs in `MachineMetrics.runs`.
+pub const MAX_METRIC_RUNS: usize = 64;
+
+/// One run's VM (or local process tree) as the daemon measured it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VmRunMetrics {
+    pub run_id: String,
+    /// [`vm_phase`]
+    pub phase: String,
+    pub started_at: u64,
+    /// Start of the VM to a connected guest agent, once it booted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_ms: Option<u64>,
+    /// CPU since the previous sample, in cores (1.0 = one thread busy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_cores: Option<f64>,
+    /// Resident memory of the VM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_bytes: Option<u64>,
+    /// Blocks the run's scratch disk uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scratch_bytes: Option<u64>,
+}
+
+/// Whether a runtime's CLI has a credential on the machine; never the credential itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliLogin {
+    pub runtime: String,
+    /// [`login_state`]
+    pub state: String,
+    /// "subscription" | "api_key" when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// Feature "accounts": the signed-in account and plan, when the CLI says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+/// An API key the machine holds: never the value, only its last 4 characters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretInfo {
+    pub name: String,
+    pub last4: String,
+    /// AI members whose runs get it; empty = every run.
+    #[serde(default)]
+    pub members: Vec<String>,
+    pub updated_at: u64,
+}
+
+/// One usage window of a subscription.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageWindow {
+    /// "session" | "week" | "week_model" | "primary" | "secondary" | another short word.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub used_pct: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<u64>,
+}
+
+/// A runtime's subscription usage as the daemon last read it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliUsage {
+    pub runtime: String,
+    pub at: u64,
+    #[serde(default)]
+    pub windows: Vec<UsageWindow>,
+}
+
+/// `account.login.status.state` values.
+pub mod login_phase {
+    pub const STARTING: &str = "starting";
+    pub const OPEN_URL: &str = "open_url";
+    pub const DEVICE_CODE: &str = "device_code";
+    pub const CHECKING: &str = "checking";
+    pub const DONE: &str = "done";
+    pub const FAILED: &str = "failed";
+    pub const CANCELLED: &str = "cancelled";
+}
+
+/// The account a sign-in reached.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginAccount {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+/// Daemon to server (feature "accounts"): where a sign-in stands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginStatus {
+    pub login_id: String,
+    pub runtime: String,
+    /// [`login_phase`]
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<LoginAccount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// VM boot times of the last (at most 50) runs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootStats {
+    pub avg_ms: u64,
+    pub max_ms: u64,
+    pub samples: u32,
+}
+
+/// Host and VM numbers sent with each heartbeat (docs/machine-protocol.md, "Metrics"). Every
+/// number is optional: a platform may not have it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineMetrics {
+    /// When the sample was taken (machine clock).
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_secs: Option<u64>,
+    /// Whole-host CPU busy since the previous sample, 0-100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_threads: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_available_bytes: Option<u64>,
+    /// Bytes per second over the non-loopback, non-VM interfaces since the previous sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_rx_bps: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net_tx_bps: Option<f64>,
+    /// VM slots of the machine (`[vm]`), absent without VMs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm_slots: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot: Option<BootStats>,
+    #[serde(default)]
+    pub runs: Vec<VmRunMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logins: Option<Vec<CliLogin>>,
+    /// Feature "accounts": the API keys the machine holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<Vec<SecretInfo>>,
+    /// Feature "accounts": subscription usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Vec<CliUsage>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -166,6 +369,9 @@ pub struct RunAssign {
     /// 1.1 (feature "resume"): the CLI session of the topic's last run on this machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_session_id: Option<String>,
+    /// Feature "gates": the action kinds the run stops at for a person's approval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gates: Option<Vec<RunGate>>,
 }
 
 /// A Card v2 answer given to a run (`run.input.answer`).
@@ -439,6 +645,12 @@ pub enum RunEvent {
         title: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
+        /// Feature "gates": the gate kind the command matched.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        /// Feature "gates": the command the CLI was about to run (redacted).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
     },
     #[serde(rename = "approval.resolved", rename_all = "camelCase")]
     ApprovalResolved {
@@ -568,6 +780,9 @@ pub enum Up {
         at: u64,
         health: Health,
         runs: Vec<RunCursor>,
+        /// Host and VM metrics (daemons since 1.2.7); old servers ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metrics: Option<MachineMetrics>,
     },
     #[serde(rename = "run.accept", rename_all = "camelCase")]
     RunAccept { run_id: String },
@@ -589,6 +804,9 @@ pub enum Up {
     RunDone(RunDone),
     #[serde(rename = "run.session")]
     RunSession(RunSession),
+    /// Feature "accounts": where a sign-in stands.
+    #[serde(rename = "account.login.status")]
+    AccountLoginStatus(LoginStatus),
 }
 
 /// Server to daemon.
@@ -627,6 +845,9 @@ pub enum Down {
         approval_id: String,
         /// "approve" | "deny"
         decision: String,
+        /// Feature "gates": "run" = 这件事里都同意 ([`APPROVAL_SCOPE_RUN`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
     },
     #[serde(rename = "run.cancel", rename_all = "camelCase")]
     RunCancel {
@@ -661,6 +882,27 @@ pub enum Down {
     /// 1.1 (feature "output").
     #[serde(rename = "run.output.result")]
     RunOutputResult(RunOutputResult),
+    /// Feature "accounts": start, finish (`code`) or cancel a CLI sign-in.
+    #[serde(rename = "account.login", rename_all = "camelCase")]
+    AccountLogin {
+        login_id: String,
+        runtime: String,
+        /// "start" | "code" | "cancel"
+        op: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
+    /// Feature "accounts": keep an API key, sealed to the machine's public key.
+    #[serde(rename = "secret.set", rename_all = "camelCase")]
+    SecretSet {
+        name: String,
+        sealed: String,
+        #[serde(default)]
+        members: Vec<String>,
+    },
+    /// Feature "accounts": forget an API key.
+    #[serde(rename = "secret.delete", rename_all = "camelCase")]
+    SecretDelete { name: String },
 }
 
 impl Up {

@@ -61,6 +61,8 @@ pub struct GeneralPage {
     versions: usize,
     /// AI 服务, shown to owners only.
     ai: Entity<super::ai_service::AiServicePanel>,
+    /// Self-tests only: AI 服务 under 通用 (it lives in 团队管理).
+    ai_here: bool,
     updater: Option<Entity<updater::Updater>>,
     description: Entity<TextareaState>,
     status: Status,
@@ -101,6 +103,7 @@ impl GeneralPage {
             versions: updater::notes::history_len(),
             services,
             ai,
+            ai_here: false,
             updater,
             description,
             status: Status::Idle,
@@ -114,6 +117,12 @@ impl GeneralPage {
 
     pub fn ai_service(&self) -> &Entity<super::ai_service::AiServicePanel> {
         &self.ai
+    }
+
+    /// Self-tests: draw 通用 › AI 服务 as before it moved to 团队管理.
+    pub fn show_ai_here(&mut self, cx: &mut Context<Self>) {
+        self.ai_here = true;
+        cx.notify();
     }
 
     pub fn set_description(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -696,9 +705,11 @@ impl Render for GeneralPage {
         let _ = k;
         let owner = self.me.owner;
         widgets::pane()
+            .when(owner, |p| p.child(admin_card(cx)))
             .child(startup)
             .child(alerts)
-            .when(owner, |p| p.child(self.ai.clone()))
+            // AI 服务 lives in 团队管理; the self-tests still show it here.
+            .when(owner && self.ai_here, |p| p.child(self.ai.clone()))
             .child(version)
             .child(developer_section)
     }
@@ -820,4 +831,36 @@ fn dev_value_with_copy(
             }),
         )
         .into_any_element()
+}
+
+/// Owners: the way from 设置 to 团队管理 (its own window), on top of 通用.
+fn admin_card(cx: &App) -> impl IntoElement {
+    use crate::copy::admin as a;
+    use crate::ui::native::{PushSize, PushStyle, push_button, tokens::{monitor as t, radius}};
+    let k = native_colors(cx);
+    GroupedForm::new().row(
+        FormRow::new(a::HEADER_TITLE)
+            .detail(a::SETTINGS_CARD_DESC)
+            .leading(
+                div()
+                    .flex_none()
+                    .size(t::MACHINE_TILE)
+                    .rounded(radius::CONTROL)
+                    .bg(k.primary)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::ui::icons::sym(
+                        crate::ui::Sym::Shield,
+                        crate::ui::sf_symbols::SymSize::INLINE,
+                        k.on_primary,
+                    )),
+            )
+            .control(
+                push_button("open-admin", a::SETTINGS_CARD_OPEN, PushStyle::Default, PushSize::Small, cx)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(crate::views::admin::OpenTeamAdmin), cx)
+                    }),
+            ),
+    )
 }

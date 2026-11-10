@@ -1,0 +1,57 @@
+#!/bin/sh
+# PID 1 of a run's microVM (kernel argument init=/sbin/vm-init).
+#
+# Disks: vda the read-only base image, vdb the tools disk (vm-agent, chat-run), vdc the run's
+# scratch disk. Stage 1 puts a writable overlay (upper layer on vdc) over the read-only root and
+# pivots into it; stage 2 mounts the basics and execs vm-agent from the tools disk, which then
+# waits for the daemon on vsock. Without vdb and vdc (the boot test) it lists the tools and
+# powers off.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root
+
+poweroff_now() {
+  sync
+  # No init system: a sysrq reboot makes Firecracker exit (kernel argument reboot=k).
+  echo 1 > /proc/sys/kernel/sysrq
+  echo b > /proc/sysrq-trigger
+}
+
+if [ "$1" != stage2 ]; then
+  mount -t proc proc /proc
+  mount -t devtmpfs dev /dev 2>/dev/null
+  if [ -b /dev/vdc ]; then
+    mount -t ext4 -o noatime /dev/vdc /mnt/scratch || { echo "vm-init: no scratch disk"; poweroff_now; }
+    mkdir -p /mnt/scratch/upper /mnt/scratch/work
+    mount -t overlay overlay -o lowerdir=/,upperdir=/mnt/scratch/upper,workdir=/mnt/scratch/work /mnt/newroot \
+      || { echo "vm-init: overlay failed"; poweroff_now; }
+    umount /proc /dev 2>/dev/null
+    cd /mnt/newroot
+    pivot_root . mnt/oldroot
+    exec chroot . /sbin/vm-init stage2
+  fi
+  umount /proc /dev 2>/dev/null
+fi
+
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /dev/shm
+mount -t tmpfs -o mode=755 tmpfs /run
+chmod 1777 /tmp
+hostname vm
+ip link set lo up
+if [ "$1" = stage2 ]; then
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+  printf '127.0.0.1 localhost vm\n::1 localhost\n' > /etc/hosts
+fi
+
+echo "vm-init: ready after $(cut -d' ' -f1 /proc/uptime)s"
+if [ -b /dev/vdb ] && mount -t ext4 -o ro /dev/vdb /opt/runner && [ -x /opt/runner/vm-agent ]; then
+  exec /opt/runner/vm-agent
+fi
+for c in git node claude codex pi bun uv gh python3; do
+  printf '%s: %s\n' "$c" "$(command -v $c >/dev/null && $c --version 2>&1 | head -1 || echo missing)"
+done
+echo "vm-init: tools listed after $(cut -d' ' -f1 /proc/uptime)s"
+poweroff_now

@@ -22,6 +22,8 @@ pub mod cards_v2;
 // --- inc-host track: 产出 page host types ---
 pub mod page_host;
 // --- end inc-host track ---
+/// 沉淀: 记得的事, 团队约定 and the daily 记忆更新.
+pub mod memory;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -1081,6 +1083,8 @@ pub enum AdminError {
     TooLarge,
     /// Too many requests; try again later.
     RateLimited,
+    /// Someone changed it first (a memory line undone twice, a version clash).
+    Conflict,
     Other,
 }
 
@@ -1793,6 +1797,35 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
+    // --- memory (docs/protocol.md "Memory"; all have defaults) ---
+
+    /// The memories of `scope` people see: active, pending (today's, made active by the
+    /// daily consolidation) and retired, newest change first.
+    fn memories(&self, _scope: &memory::MemoryScope) -> AdminReply<Vec<memory::Memory>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The newest day's 记忆更新 of `scope`.
+    fn memory_updates(&self, _scope: &memory::MemoryScope) -> AdminReply<memory::MemoryDay> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 记一条 (writers of the scope): active at once.
+    fn create_memory(&self, _new: memory::NewMemory) -> AdminReply<memory::Memory> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Edits, 停用 or 恢复 a memory (writers): a new version.
+    fn update_memory(
+        &self,
+        _memory_id: &str,
+        _edit: memory::MemoryEdit,
+    ) -> AdminReply<memory::Memory> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 撤回 one line of a day's 记忆更新 (writers). A flagged line cannot be undone
+    /// (`Invalid`); a second undo is `Conflict`.
+    fn undo_memory_update(&self, _update_id: &str) -> AdminReply<memory::MemoryUpdate> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+
     /// Owners: 汇报给 and 限额 of a member (`PATCH /v1/members/:id` with `reportsTo` and
     /// `weeklyBudgetCents`; `None` clears). Answers with the stored member.
     fn set_member_plan(&self, _member_id: &str, _plan: pages::MemberPlan) -> AdminReply<Member> {
@@ -1800,6 +1833,80 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// The machines and their health, fresh from the server.
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: the monitor of one machine (`GET /v1/machines/:id/monitor`); `range` is "15m",
+    /// "1h" or "24h", `day_start` local midnight in ms.
+    fn machine_monitor(
+        &self,
+        _machine_id: &str,
+        _range: &'static str,
+        _day_start: u64,
+    ) -> AdminReply<chat_core::proto::MachineMonitor> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner (feature "accounts"): starts a CLI sign-in on a machine; answers its id.
+    fn start_machine_login(&self, _machine_id: &str, _runtime: &str) -> AdminReply<String> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: where a sign-in on a machine stands.
+    fn machine_login(
+        &self,
+        _machine_id: &str,
+        _login_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineLogin> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: the code the sign-in page showed.
+    fn machine_login_code(&self, _machine_id: &str, _login_id: &str, _code: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: stops a sign-in.
+    fn cancel_machine_login(&self, _machine_id: &str, _login_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: a machine's public key and the API keys it holds (names and last 4).
+    fn machine_secrets(
+        &self,
+        _machine_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineSecretsResponse> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: gives a machine an API key, sealed to its public key on this Mac.
+    fn set_machine_secret(
+        &self,
+        _machine_id: &str,
+        _public_key: &str,
+        _name: &str,
+        _value: SecretText,
+        _members: Vec<String>,
+    ) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: removes an API key from a machine.
+    fn delete_machine_secret(&self, _machine_id: &str, _name: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: an AI member's weekly budget alone (用量 › 改预算); `None` clears it.
+    fn set_member_budget(&self, _member_id: &str, _cents: Option<u64>) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: when members joined, who added them, their devices and open invites.
+    fn team_roster(&self) -> AdminReply<chat_core::proto::TeamRoster> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: 用量 of AI members' runs that ended in [from, to).
+    fn team_usage(&self, _from: u64, _to: u64) -> AdminReply<chat_core::proto::TeamUsage> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: 活动记录, newest first; `before` pages back, the filters narrow it.
+    fn team_activity(
+        &self,
+        _before: Option<u64>,
+        _actor: Option<String>,
+        _kinds: Vec<String>,
+        _machine: Option<String>,
+    ) -> AdminReply<chat_core::proto::ActivityResponse> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: registers a machine.

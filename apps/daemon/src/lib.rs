@@ -2,6 +2,7 @@
 //! normalized progress back. See docs/machine-protocol.md.
 
 pub mod acceptance;
+pub mod accounts;
 pub mod chat_run;
 pub mod chat_run_context;
 pub mod chat_run_files;
@@ -9,8 +10,10 @@ pub mod config;
 pub mod daemon;
 pub mod doctor;
 pub mod executor;
+pub mod gates;
 pub mod health;
 pub mod input;
+pub mod metrics;
 pub mod models;
 pub mod proctree;
 pub mod product;
@@ -22,4 +25,6 @@ pub mod secrets;
 pub mod selfupdate;
 pub mod service;
 pub mod upload;
+pub mod usage;
+pub mod vm_agent;
 pub mod workspace;

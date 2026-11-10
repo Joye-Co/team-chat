@@ -470,7 +470,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             approvals.insert(aid.clone(), id.clone());
                             let _ = emit.send(RunEvent::ApprovalRequest {
                                 approval_id: aid, item_id: params["itemId"].as_str().map(str::to_string),
-                                title, detail,
+                                title, detail, kind: None, command: None,
                             });
                         } else {
                             let _ = p.write_json(&json!({ "id": id, "error": {

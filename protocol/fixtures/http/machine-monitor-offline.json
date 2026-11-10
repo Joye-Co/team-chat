@@ -1,0 +1,40 @@
+{
+  "kind": "MachineMonitor",
+  "valid": true,
+  "description": "never sent metrics",
+  "value": {
+    "machine": {
+      "id": "01JBX0MACHINE00000000000AV",
+      "name": "laptop",
+      "connected": false
+    },
+    "series": {
+      "range": "15m",
+      "from": 1762127100000,
+      "stepMs": 30000,
+      "cpuPct": [],
+      "memPct": [],
+      "diskPct": [],
+      "netRxBps": [],
+      "netTxBps": []
+    },
+    "capacity": {
+      "slots": 0,
+      "running": 0,
+      "canTake": 0
+    },
+    "queue": {
+      "count": 0
+    },
+    "today": {
+      "finished": 0,
+      "succeeded": 0,
+      "failed": 0,
+      "finishedYesterday": 0,
+      "tokens": 0
+    },
+    "clis": [],
+    "runs": [],
+    "members": []
+  }
+}

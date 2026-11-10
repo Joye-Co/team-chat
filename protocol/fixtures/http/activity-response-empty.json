@@ -1,0 +1,8 @@
+{
+  "kind": "ActivityResponse",
+  "valid": true,
+  "value": {
+    "entries": [],
+    "hasMore": false
+  }
+}

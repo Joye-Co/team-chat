@@ -1,0 +1,27 @@
+{
+  "kind": "ApprovalPolicy",
+  "valid": true,
+  "description": "team patterns and an approver per kind",
+  "value": {
+    "askBefore": {
+      "mergeMain": true,
+      "deployProd": true,
+      "prodConfig": true,
+      "deleteData": true,
+      "externalPublish": false
+    },
+    "maxSpendCny": 50,
+    "approver": "owners",
+    "updatedAt": 1762128000000,
+    "patterns": {
+      "deployProd": [
+        "\\bdeploy-prod\\.sh\\b"
+      ],
+      "mergeMain": []
+    },
+    "approvers": {
+      "deployProd": "owners",
+      "mergeMain": "requester"
+    }
+  }
+}

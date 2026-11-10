@@ -187,6 +187,7 @@ crate::copy! {
     ERROR_TOO_LARGE = "文件太大",
     ERROR_RATE_LIMITED = "操作太频繁，请稍后再试",
     ERROR_OTHER = "出了点问题，请稍后再试",
+    ERROR_CONFLICT = "刚有人改过，请再看一眼",
     NOT_AVAILABLE_YET = "这项功能还没有接通",
 
     // --- v12/settings track: the native settings window (NATIVE.md §8) ---
@@ -288,7 +289,7 @@ crate::copy! {
     TEAM_COMPUTERS_FOOTER = "AI 成员被 @ 后，在这些电脑上干活。",
     NO_COMPUTERS = "还没有连接的电脑",
     COMPUTER_ADD = "添加电脑",
-    COMPUTER_ADD_HINT = "最简单的做法：在那台电脑上安装并打开应用，到「设置 › 机器」里点「用这台电脑」。也可以在这里添加，再到那台电脑的终端里运行安装命令。",
+    COMPUTER_ADD_HINT = "最简单的做法：在那台电脑上安装并打开应用，到「团队管理 › 机器」里点「用这台电脑」。也可以在这里添加，再到那台电脑的终端里运行安装命令。",
     CLOUD = "云端",
     CLOUD_NOT_YET = "还没有开放",
     CLOUD_COMING_SOON = "即将推出",

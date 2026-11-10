@@ -69,6 +69,10 @@ pub enum Start {
     /// The sample data with one part reshaped for a state scene
     /// ([`super::shaped`]): no messages, older messages loading, first sync.
     Shaped(super::shaped::Shape),
+    /// The v2 sample team whose 记得的事 answer in one shape (memory scenes).
+    V2Memory(crate::fake::memory::MemoryShape),
+    /// The sample data whose 团队约定 answer in one shape (memory scenes).
+    Memory(crate::fake::memory::MemoryShape),
 }
 
 pub struct Scene {
@@ -895,7 +899,9 @@ pub fn all() -> Vec<&'static Scene> {
         crate::views::nav::ask_scenes::SCENES,
         crate::views::group_page::scenes::SCENES,
         crate::views::members_page::scenes::SCENES,
+        crate::views::memory::scenes::SCENES,
         crate::views::artifact_page::scenes::SCENES,
+        crate::views::admin::scenes::SCENES,
         V2_SHARED,
         // --- provider track ---
         CORE_SCENES,

@@ -277,6 +277,173 @@ impl HttpClient {
             .await
     }
 
+    /// Owner. The monitor of one machine (docs/protocol.md, "Machine monitor"): `range` is
+    /// "15m", "1h" or "24h", `day_start` the viewer's local midnight in ms.
+    pub async fn machine_monitor(
+        &self,
+        machine_id: &str,
+        range: &str,
+        day_start: u64,
+    ) -> ApiResult<crate::proto::MachineMonitor> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!(
+                "/v1/machines/{}/monitor?range={}&dayStart={day_start}",
+                enc(machine_id),
+                enc(range)
+            ),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Owner (feature "accounts"): starts a CLI sign-in on the machine; answers its id.
+    pub async fn start_machine_login(&self, machine_id: &str, runtime: &str) -> ApiResult<String> {
+        let v: serde_json::Value = self
+            .call(
+                Method::POST,
+                &format!("/v1/machines/{}/logins", enc(machine_id)),
+                Some(&crate::proto::monitor::StartLoginRequest {
+                    runtime: runtime.to_string(),
+                }),
+                true,
+            )
+            .await?;
+        v.get("loginId")
+            .and_then(|x| x.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Invalid("no loginId".into()))
+    }
+
+    /// Owner: where a sign-in stands.
+    pub async fn machine_login(
+        &self,
+        machine_id: &str,
+        login_id: &str,
+    ) -> ApiResult<crate::proto::monitor::MachineLogin> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/machines/{}/logins/{}", enc(machine_id), enc(login_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Owner: the code the sign-in page showed, for the CLI on the machine.
+    pub async fn machine_login_code(&self, machine_id: &str, login_id: &str, code: &str) -> ApiResult<()> {
+        let _: serde_json::Value = self
+            .call(
+                Method::POST,
+                &format!("/v1/machines/{}/logins/{}/code", enc(machine_id), enc(login_id)),
+                Some(&crate::proto::monitor::LoginCodeRequest {
+                    code: code.to_string(),
+                }),
+                true,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Owner: stops a sign-in.
+    pub async fn cancel_machine_login(&self, machine_id: &str, login_id: &str) -> ApiResult<()> {
+        let _: serde_json::Value = self
+            .call::<(), _>(
+                Method::DELETE,
+                &format!("/v1/machines/{}/logins/{}", enc(machine_id), enc(login_id)),
+                None,
+                true,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Owner: the machine's public key and the keys it holds (names and last 4).
+    pub async fn machine_secrets(
+        &self,
+        machine_id: &str,
+    ) -> ApiResult<crate::proto::monitor::MachineSecretsResponse> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/machines/{}/secrets", enc(machine_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Owner: gives the machine an API key. The value is sealed to `public_key` here, so only
+    /// the machine can open it.
+    pub async fn set_machine_secret(
+        &self,
+        machine_id: &str,
+        public_key: &str,
+        name: &str,
+        value: &str,
+        members: Vec<String>,
+    ) -> ApiResult<()> {
+        let sealed = seal_secret(public_key, value).map_err(ApiError::Invalid)?;
+        let _: serde_json::Value = self
+            .call(
+                Method::PUT,
+                &format!("/v1/machines/{}/secrets/{}", enc(machine_id), enc(name)),
+                Some(&crate::proto::monitor::SetSecretRequest { sealed, members }),
+                true,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Owner: removes an API key from the machine.
+    pub async fn delete_machine_secret(&self, machine_id: &str, name: &str) -> ApiResult<()> {
+        let _: serde_json::Value = self
+            .call::<(), _>(
+                Method::DELETE,
+                &format!("/v1/machines/{}/secrets/{}", enc(machine_id), enc(name)),
+                None,
+                true,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Owner: when members joined, who added them, devices and open invites.
+    pub async fn team_roster(&self) -> ApiResult<crate::proto::TeamRoster> {
+        self.call::<(), _>(Method::GET, "/v1/team/roster", None, true).await
+    }
+
+    /// Owner: 用量 of AI members' runs that ended in [from, to) (docs/protocol.md "Team usage").
+    pub async fn team_usage(&self, from: u64, to: u64) -> ApiResult<crate::proto::TeamUsage> {
+        self.call::<(), _>(Method::GET, &format!("/v1/usage?from={from}&to={to}"), None, true)
+            .await
+    }
+
+    /// Owner: 活动记录, newest first (docs/protocol.md "Activity"). `kinds` empty = every kind.
+    pub async fn activity(
+        &self,
+        before: Option<u64>,
+        actor: Option<&str>,
+        kinds: &[String],
+        machine: Option<&str>,
+    ) -> ApiResult<crate::proto::ActivityResponse> {
+        let mut q = vec!["limit=100".to_string()];
+        if let Some(b) = before {
+            q.push(format!("before={b}"));
+        }
+        if let Some(a) = actor {
+            q.push(format!("actor={}", enc(a)));
+        }
+        if !kinds.is_empty() {
+            q.push(format!("kind={}", enc(&kinds.join(","))));
+        }
+        if let Some(m) = machine {
+            q.push(format!("machine={}", enc(m)));
+        }
+        self.call::<(), _>(Method::GET, &format!("/v1/activity?{}", q.join("&")), None, true)
+            .await
+    }
+
     /// Owner. Revokes the machine token and closes its link.
     pub async fn delete_machine(&self, machine_id: &str) -> ApiResult<()> {
         let _: serde_json::Value = self
@@ -698,5 +865,35 @@ impl ProcessView {
             | RunEvent::Output { .. }
             | RunEvent::Unknown => {}
         }
+    }
+}
+
+/// Seals `value` to a machine's X25519 public key (base64 of 32 bytes) as a libsodium sealed
+/// box, base64-encoded: what `PUT /v1/machines/:id/secrets/:name` takes.
+pub fn seal_secret(public_key_b64: &str, value: &str) -> Result<String, String> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let raw: [u8; 32] = b64
+        .decode(public_key_b64.trim())
+        .ok()
+        .and_then(|v| v.try_into().ok())
+        .ok_or("the machine key is not 32 bytes of base64")?;
+    let sealed = crypto_box::PublicKey::from(raw)
+        .seal(&mut crypto_box::aead::OsRng, value.as_bytes())
+        .map_err(|_| "cannot seal the key".to_string())?;
+    Ok(b64.encode(sealed))
+}
+
+#[cfg(test)]
+mod seal_tests {
+    #[test]
+    fn a_sealed_value_opens_with_the_machine_secret_key() {
+        use base64::Engine as _;
+        let secret = crypto_box::SecretKey::from([7u8; 32]);
+        let public = base64::engine::general_purpose::STANDARD.encode(secret.public_key().as_bytes());
+        let sealed = super::seal_secret(&public, "sk-test-0123456789").unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(sealed).unwrap();
+        assert_eq!(secret.unseal(&bytes).unwrap(), b"sk-test-0123456789");
+        assert!(super::seal_secret("short", "x").is_err());
     }
 }

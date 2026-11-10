@@ -11,6 +11,7 @@
 //! Parse a server frame with [`parse_server_frame`]; encode a client frame with
 //! [`encode_client_frame`], which runs [`ClientFrame::validate`] first.
 
+pub mod activity;
 pub mod audit;
 pub mod bots;
 pub mod card;
@@ -33,13 +34,16 @@ pub mod media;
 pub mod members;
 pub mod memory;
 pub mod message;
+pub mod monitor;
 pub mod reactions;
 pub mod reads;
+pub mod roster;
 pub mod search;
 mod serde_util;
 pub mod settings;
 pub mod topic;
 pub mod updates;
+pub mod usage;
 
 pub use audit::*;
 pub use bots::*;
@@ -58,6 +62,10 @@ pub use hooks::*;
 pub use http::*;
 pub use limits::*;
 pub use links::*;
+pub use monitor::MachineMonitor;
+pub use activity::ActivityResponse;
+pub use usage::TeamUsage;
+pub use roster::TeamRoster;
 pub use media::*;
 pub use members::*;
 pub use memory::*;

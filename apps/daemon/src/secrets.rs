@@ -118,6 +118,8 @@ impl Gate {
             item_id: None,
             title: format!("使用 {name}"),
             detail: Some(format!("chat-run secret {name}")),
+            kind: None,
+            command: None,
         });
         err(
             "pending",

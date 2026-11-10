@@ -1,0 +1,12 @@
+{
+  "kind": "MachineLogin",
+  "valid": true,
+  "value": {
+    "loginId": "L01",
+    "runtime": "codex",
+    "state": "device_code",
+    "url": "https://auth.openai.com/codex/device",
+    "userCode": "ABCD-12345",
+    "updatedAt": 1762128000000
+  }
+}

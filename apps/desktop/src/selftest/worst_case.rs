@@ -379,6 +379,37 @@ impl ChatProvider for WorstCase {
             quiet_end: ClockTime::new(23, 59),
         }))
     }
+    fn memories(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> crate::data::AdminReply<Vec<crate::data::memory::Memory>> {
+        self.inner.memories(scope)
+    }
+    fn memory_updates(
+        &self,
+        scope: &crate::data::memory::MemoryScope,
+    ) -> crate::data::AdminReply<crate::data::memory::MemoryDay> {
+        self.inner.memory_updates(scope)
+    }
+    fn create_memory(
+        &self,
+        new: crate::data::memory::NewMemory,
+    ) -> crate::data::AdminReply<crate::data::memory::Memory> {
+        self.inner.create_memory(new)
+    }
+    fn update_memory(
+        &self,
+        memory_id: &str,
+        edit: crate::data::memory::MemoryEdit,
+    ) -> crate::data::AdminReply<crate::data::memory::Memory> {
+        self.inner.update_memory(memory_id, edit)
+    }
+    fn undo_memory_update(
+        &self,
+        update_id: &str,
+    ) -> crate::data::AdminReply<crate::data::memory::MemoryUpdate> {
+        self.inner.undo_memory_update(update_id)
+    }
     /// The largest spend limit.
     fn approval_defaults(&self) -> AdminReply<ApprovalDefaults> {
         reply_now(Ok(ApprovalDefaults {

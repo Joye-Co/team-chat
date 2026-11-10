@@ -12,8 +12,8 @@ pub mod ai_service;
 pub mod appearance;
 pub(crate) mod general;
 pub mod login_item;
-mod machines;
-mod members;
+pub(crate) mod machines;
+pub(crate) mod members;
 // pages track: the 成员 page reuses the invite and add-member forms.
 pub(crate) use members::{open_add_bot, open_invite};
 mod notifications;
@@ -59,17 +59,20 @@ pub enum Page {
     Account,
     Notifications,
     Members,
+    /// 团队约定 (沉淀, team scope).
+    Memory,
     Machines,
     Appearance,
     Shortcuts,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::General,
         Page::Account,
         Page::Notifications,
         Page::Members,
+        Page::Memory,
         Page::Machines,
         Page::Appearance,
         Page::Shortcuts,
@@ -82,6 +85,7 @@ impl Page {
             Page::Account => s::PANE_ACCOUNT,
             Page::Notifications => s::PANE_NOTIFICATIONS,
             Page::Members => s::PANE_MEMBERS,
+            Page::Memory => crate::copy::memory::TEAM_TITLE,
             Page::Machines => s::PANE_MACHINES,
             Page::Appearance => s::PANE_APPEARANCE,
             Page::Shortcuts => s::PANE_SHORTCUTS,
@@ -95,6 +99,7 @@ impl Page {
             Page::Account => Sym::Account,
             Page::Notifications => Sym::Bell,
             Page::Members => Sym::Members,
+            Page::Memory => Sym::Book,
             // desktopcomputer: its ink fills the 18 box; macmini is 22 × 10
             // (2.19, C1-09).
             Page::Machines => Sym::Computer,
@@ -110,10 +115,26 @@ impl Page {
             Page::Account => "account",
             Page::Notifications => "notifications",
             Page::Members => "members",
+            Page::Memory => "memory",
             Page::Machines => "machines",
             Page::Appearance => "appearance",
             Page::Shortcuts => "shortcuts",
         }
+    }
+
+    /// The tabs of the settings window: my own preferences. 成员 (with 默认规则), 团队约定 and
+    /// 机器 live in 团队管理 (`views::admin`); their panes stay here for the self-tests.
+    pub const TABS: [Page; 5] = [
+        Page::General,
+        Page::Account,
+        Page::Notifications,
+        Page::Appearance,
+        Page::Shortcuts,
+    ];
+
+    /// The pane belongs to 团队管理, not to the settings window.
+    pub fn in_admin(self) -> bool {
+        !Self::TABS.contains(&self)
     }
 
     pub fn from_slug(slug: &str) -> Option<Page> {
@@ -153,6 +174,7 @@ pub struct SettingsView {
     account: Entity<AccountPage>,
     notifications: Entity<NotificationsPage>,
     members: Entity<MembersPage>,
+    memory: Entity<crate::views::memory::MemoryBoard>,
     machines: Entity<MachinesPage>,
     appearance: Entity<AppearancePage>,
     shortcuts: Entity<ShortcutsPage>,
@@ -185,6 +207,15 @@ impl SettingsView {
         let account = cx.new(|cx| AccountPage::new(services.clone(), window, cx));
         let notifications = cx.new(|cx| NotificationsPage::new(services.clone(), window, cx));
         let members = cx.new(|cx| MembersPage::new(services.clone(), window, cx));
+        let memory = cx.new(|cx| {
+            crate::views::memory::MemoryBoard::new(
+                services.clone(),
+                crate::data::memory::MemoryScope::Team,
+                crate::views::memory::Host::Settings,
+                String::new(),
+                cx,
+            )
+        });
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
         let shortcuts = cx.new(|cx| ShortcutsPage::new(window, cx));
@@ -196,6 +227,7 @@ impl SettingsView {
             account,
             notifications,
             members,
+            memory,
             machines,
             appearance,
             shortcuts,
@@ -246,6 +278,7 @@ impl SettingsView {
             }),
             Page::Notifications => self.notifications.update(cx, |n, cx| n.refresh(cx)),
             Page::Members => self.members.update(cx, |m, cx| m.refresh_rules(window, cx)),
+            Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
             _ => {}
         }
         cx.notify();
@@ -279,6 +312,10 @@ impl SettingsView {
         &self.members
     }
 
+    pub fn memory(&self) -> &Entity<crate::views::memory::MemoryBoard> {
+        &self.memory
+    }
+
     pub fn machines(&self) -> &Entity<MachinesPage> {
         &self.machines
     }
@@ -289,6 +326,7 @@ impl SettingsView {
             Page::Account => self.account.clone().into_any_element(),
             Page::Notifications => self.notifications.clone().into_any_element(),
             Page::Members => self.members.clone().into_any_element(),
+            Page::Memory => self.memory.clone().into_any_element(),
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Appearance => self.appearance.clone().into_any_element(),
             Page::Shortcuts => self.shortcuts.clone().into_any_element(),
@@ -320,7 +358,7 @@ impl Render for SettingsView {
             window.set_window_title(self.page.title());
             self.titled = Some(self.page);
         }
-        let tabs: Vec<Button> = Page::ALL
+        let tabs: Vec<Button> = Page::TABS
             .into_iter()
             .map(|p| self.tab(p, window, cx))
             .collect();
@@ -445,6 +483,7 @@ fn last_page() -> Page {
         .last_pane
         .as_deref()
         .and_then(Page::from_slug)
+        .filter(|p| !p.in_admin())
         .unwrap_or(Page::General)
 }
 
@@ -485,6 +524,21 @@ pub fn toggle(services: Services, cx: &mut App) {
 /// v12/fx-overlays: opens the settings window at `page` (the app menu's
 /// 检查更新… opens 通用), or brings the open one to the front.
 pub fn open_page(services: Services, page: Page, cx: &mut App) {
+    // 成员, 团队约定 and 机器 moved to 团队管理.
+    // Members other than owners have the read-only 成员 page in the main window.
+    let page = if page.in_admin() && !i_am_owner(&services) {
+        Page::General
+    } else {
+        page
+    };
+    if page.in_admin() {
+        let target = match page {
+            Page::Memory => crate::views::admin::AdminPage::Memory,
+            Page::Machines => crate::views::admin::AdminPage::Machines,
+            _ => crate::views::admin::AdminPage::Members,
+        };
+        return crate::views::admin::open_at(services, target, cx);
+    }
     if let Some(handle) = cx.try_global::<SettingsWindow>().and_then(|w| w.0)
         && handle
             .update(cx, |_, window, _| window.activate_window())

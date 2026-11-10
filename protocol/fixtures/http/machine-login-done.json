@@ -1,0 +1,14 @@
+{
+  "kind": "MachineLogin",
+  "valid": true,
+  "value": {
+    "loginId": "L01",
+    "runtime": "claude",
+    "state": "done",
+    "account": {
+      "email": "owner@example.com",
+      "plan": "max"
+    },
+    "updatedAt": 1762128000000
+  }
+}

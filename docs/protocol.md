@@ -787,6 +787,17 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `POST /v1/machines` | owner | `CreateMachineRequest` | `CreateMachineResponse` |
 | `GET /v1/machines` | member | | `Machine[]`; members other than owners get only `id`, `name`, `createdBy`, `createdAt`, `revoked`, `connected` and `healthy` (`labels` and `runningRuns` empty) |
 | `DELETE /v1/machines/:id` | owner | | `{ ok: true }`; revokes the token, closes the link |
+| `GET /v1/machines/:id/monitor?range=15m\|1h\|24h&dayStart=<ms>` | owner | | `MachineMonitor`, see "Machine monitor" |
+| `POST /v1/machines/:id/logins` | owner | `StartLoginRequest` | `{ loginId }`; see "Machine accounts" |
+| `GET /v1/machines/:id/logins/:loginId` | owner | | `MachineLogin` |
+| `POST /v1/machines/:id/logins/:loginId/code` | owner | `LoginCodeRequest` | `{ ok: true }` |
+| `DELETE /v1/machines/:id/logins/:loginId` | owner | | `{ ok: true }`; cancels the sign-in |
+| `GET /v1/machines/:id/secrets` | owner | | `MachineSecretsResponse` |
+| `GET /v1/activity?before=&limit=&actor=&kind=&machine=` | owner | | `ActivityResponse`, see "Activity" |
+| `GET /v1/usage?from=&to=` | owner | | `TeamUsage`, see "Team usage" |
+| `GET /v1/team/roster` | owner | | `TeamRoster`, see "Team roster" |
+| `PUT /v1/machines/:id/secrets/:name` | owner | `SetSecretRequest` | `{ ok: true }` |
+| `DELETE /v1/machines/:id/secrets/:name` | owner | | `{ ok: true }` |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
 | `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
 | `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
@@ -1105,6 +1116,147 @@ that the server makes (an answer, a retract, an expiry of a card ask; a ref whos
 deleted). 1.0.1 shows the mark for every `message.updated`, and such an update carries
 `editedAt` (see "Edit marks" under Cards v2). The message content does not change. A 1.1 client
 does not show the mark. The server sends these updates to 1.0.x connections unchanged.
+
+## Machine monitor
+
+Owners watch a machine in the monitor window (开发者视图 level: VM, CLI and token are allowed
+words there). `GET /v1/machines/:id/monitor` (owner only, `not_found` for an unknown machine,
+`invalid` for another `range`) joins the machine's MachineLink with every runner bot's BotDesk.
+`dayStart` is the viewer's local midnight (今天); without it 今天 is the last 24 hours. The
+schema is `MachineMonitor` in `packages/protocol/src/monitor.ts` and
+`crates/chat-protocol/src/monitor.rs`.
+
+```ts
+MachineMonitor = {
+  machine: { id, name, connected, revoked?, lastHeartbeatAt?, connectedAt? /* this link */, daemonVersion?, os?, arch? },
+  sampledAt?,                       // when the latest heartbeat metrics arrived (server clock)
+  host?: { cpuPct?, cpuThreads?, load1, memTotalBytes?, memAvailableBytes?, memVmBytes,
+           diskTotalBytes, diskFreeBytes, netRxBps?, netTxBps?, uptimeSecs? },
+  series: { range, from, stepMs, cpuPct, memPct, diskPct, netRxBps, netTxBps },   // (number | null)[]
+  capacity: { slots, running, canTake, avgVmBytes?, reserveBytes? },
+  boot?: { avgMs, maxMs, samples },
+  queue: { count, oldestAt? },      // runs of every runner bot waiting for a machine (排队)
+  today: { finished, succeeded, failed, finishedYesterday, tokens },
+  clis: { runtime, kind, available, version?, login: "logged_in" | "logged_out" | "unknown", failedToday }[],
+  runs: { runId, memberId?, state, startedAt?, bootMs?, cpuCores?, memBytes?, scratchBytes? }[],
+  members: { memberId, running, waiting, queued, cpuCores, memBytes, tokensToday, finishedToday }[],
+  lastFailure?: { runId, memberId, at, title? },
+}
+```
+
+- **Series**: MachineLink keeps one row per heartbeat for 25 hours (named migration
+  `machine-2-metrics`). `15m` is 30 buckets of 30 s, `1h` 60 of 1 min, `24h` 48 of 30 min, the
+  last one holding now; each value is the bucket's average, `null` when it has no sample. Memory
+  and disk are percent used; network is bytes per second.
+- **Runs**: the VMs of the latest heartbeat (machine-protocol.md, "Metrics"), each joined to the
+  member of its run. `state` is `booting` (起机中), `paused` (接管), `waiting` (等你: the run's
+  BotDesk status is `waiting`), else `running` (在跑); queued runs (排队) of every runner bot follow
+  with `state: "queued"`. A daemon without metrics gives the server's open runs on the machine
+  instead. Clients read an unknown `state` as `running`.
+- **Capacity**: `slots` is the daemon's `vmSlots`, else `maxParallelRuns`. `canTake` is the free
+  slots, and no more than fit in the available memory above `reserveBytes` (a fifth of the host,
+  at least 2 GiB) at the average memory of the running VMs.
+- **Today**: runs that ended on the machine since `dayStart`: `succeeded` are `done`, `failed`
+  are `failed` or `blocked` (cancelled runs are neither); `tokens` add input and output tokens of
+  `run.done.usage`. `finishedYesterday` counts the 24 hours before `dayStart`.
+- **Members**: one row per runner bot that has runs on the machine, queued runs, or runs that
+  ended there today. `cpuCores` and `memBytes` add up its VMs.
+- **CLIs**: the machine's `CliInfo` with the login the daemon reported (`unknown` when it did not)
+  and the runs of that runtime that failed today; with feature `accounts` also `method`, `email`,
+  `plan`, and the subscription `usage` windows with `usageAt` (server clock). No credential ever
+  leaves the machine.
+
+## Machine accounts
+
+Owners sign a machine's CLIs in and give it API keys from 团队管理, relayed by MachineLink to a
+daemon with feature `accounts` (docs/machine-protocol.md, "Accounts and keys"). Every route is
+owner only, answers `not_found` for an unknown machine, and `conflict` with reason
+`machine.offline` when the daemon is not connected or `machine.too_old` when it lacks the feature.
+Nothing is queued: these act on the machine now.
+
+```ts
+StartLoginRequest = { runtime }
+LoginCodeRequest  = { code }                  // what the CLI's page showed (Claude's code#state)
+MachineLogin      = { loginId, runtime, state, url?, userCode?, account?: { email?, plan? }, error?, updatedAt }
+MachineSecretsResponse = { publicKey?, secrets: { name, last4, members, updatedAt }[] }
+SetSecretRequest  = { sealed, members: string[] /* AI members; empty = every run */ }
+```
+
+- A sign-in: `POST …/logins` starts it and answers its `loginId`; the app reads `GET …/logins/:id`
+  until `state` is `open_url` (show `url`, ask for the code, `POST …/code`), `device_code` (show
+  `url` and `userCode`), then `done`, `failed` (with `error`) or `cancelled`. MachineLink keeps each
+  sign-in's last status for a day (named migration `machine-3-logins`). The code is relayed, never
+  stored or logged.
+- A key: the app seals the value to `publicKey` on the owner's Mac and `PUT`s only the sealed box
+  (at most 16 KiB of base64). `:name` is an environment variable name. The server stores nothing of
+  it; the list comes back from the machine's next heartbeat (within 30 s). Writes are audited as
+  `machine.login.start`, `machine.secret.set` and `machine.secret.delete` with the name and members,
+  never a value.
+
+
+## Activity
+
+团队管理 › 活动记录 shows who changed what in the team. D1 migration `0013_activity` adds an
+`activity` table and a trigger on `audit`: every audit row of these actions is copied in the same
+transaction as the write, with a `kind` the page filters by:
+
+| `kind` | Audit actions |
+| --- | --- |
+| `level` | `member.update` that changes `level` |
+| `budget` | `member.update` that changes `weeklyBudgetCents` |
+| `member` | other `member.update`, `member.deactivate`, `bot.create`, `bot.runner.set`, `bot.runner.delete`, `token.revoke` |
+| `invite` | `invite.create`, `invite.redeem` |
+| `key` | `machine.secret.set`, `machine.secret.delete` |
+| `approval` | `run.approval`, `settings.approvals` |
+| `login` | `email.sign_in`, `machine.login.start` |
+| `machine` | `machine.create`, `machine.revoke` |
+
+```ts
+ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
+ActivityResponse = { entries: ActivityEntry[] /* newest first */, hasMore }
+```
+
+`GET /v1/activity` (owner) takes `before` (an entry id, for the next page), `limit` (1-200,
+default 100), `actor` (a member id), `kind` (comma-separated kinds) and `machine`. Entries are
+kept 90 days: the route leaves older ones out and the daily cron deletes them. The migration copies
+the last 90 days of the audit log once. `details` are the audit details (names, levels, budgets,
+member lists), never a secret value.
+
+## Team usage
+
+团队管理 › 用量: what AI members' runs cost. `GET /v1/usage?from=<ms>&to=<ms>` (owner; at most 62
+days) reads every runner bot's BotDesk for runs that ended in `[from, to)` and in the same span
+before it, and stores nothing.
+
+```ts
+Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */ }
+TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
+              teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
+              bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
+              machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
+              daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
+```
+
+- Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
+  subscription); runs without it (Codex today) count tokens and 0 cost.
+- `initiators` is the person who asked for each run (`requestedBy`). `runtimes` is split by machine,
+  so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
+- Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
+- A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
+
+## Team roster
+
+团队管理 › 成员 shows what the member directory does not carry. `GET /v1/team/roster` (owner):
+
+```ts
+TeamRoster = { members: { memberId, joinedAt, addedBy?, lastSeenAt?, devices: { label, createdAt, lastUsedAt? }[] }[],
+               invites: { id, name, kind, level, role?, createdBy, createdAt, expiresAt }[] }
+```
+
+`joinedAt` and `addedBy` are the member row's `created_at` and `created_by`; `devices` are the
+member's tokens that are not revoked (their sign-in labels), newest use first, and `lastSeenAt` the
+newest `last_used_at` of them. `invites` are invite codes not used and not expired (at most 200),
+newest first. No hash or code is returned.
 
 ## Cards v2
 
@@ -1775,8 +1927,15 @@ ApprovalActions = { mergeMain, deployProd, prodConfig, deleteData, externalPubli
 ApprovalPolicy = { askBefore: ApprovalActions,
                    maxSpendCny: number | null,   // 单次花费超过, whole yuan 1..1000000; null = 不限; default 50
                    approver: "owners" | "requester", // who approves; default "requester"; open: Rust reads unknown as Unknown
-                   updatedAt: number }           // 0 = never changed
-UpdateApprovalPolicyRequest = { askBefore?: Partial<ApprovalActions>, maxSpendCny?: number | null, approver? }
+                   updatedAt: number,            // 0 = never changed
+                   patterns?: ApprovalPatterns,  // M4: the team's own matching rules; absent = none
+                   approvers?: ApprovalApprovers } // M4: who approves each kind; absent = approver
+GateKind = "mergeMain" | "deployProd" | "prodConfig" | "deleteData" | "externalPublish"  // the ApprovalActions keys
+ApprovalPatterns = { [k in GateKind]?: string[] }   // <= 20 per kind, each 1..200 characters
+ApprovalApprovers = { [k in GateKind]?: "owners" | "requester" }
+UpdateApprovalPolicyRequest = { askBefore?: Partial<ApprovalActions>, maxSpendCny?: number | null, approver?,
+                                patterns?: ApprovalPatterns,   // replaces the kinds given; [] clears one
+                                approvers?: ApprovalApprovers } // sets the kinds given
 ```
 
 | Method and path | Who | Body | Response |
@@ -1792,8 +1951,52 @@ Rules:
   wait. With `approver: "owners"`, only owners answer the run's approvals (card or 同意/拒绝),
   and the approval card mentions and waits on the active human owners in the group instead of
   the requester. With `"requester"` the released rule stays: the requester or an owner.
-- The server cannot tell which action an approval is for, so `approver` is one value for all
-  actions.
+- An approval without a kind (a CLI's own question, `chat-run secret`) is answered as above,
+  by `approver`.
+
+### Gated actions (M4, 要批准的动作)
+
+AI members run with every permission. Only the kinds checked in `askBefore` need a person, and
+only at the moment a command would run: the machine stops the command and asks
+(machine-protocol.md, "Gated actions"). Nothing else is stopped and no other card is shown.
+
+- A run whose machine has feature `gates` and whose CLI reports `gates: true` gets
+  `run.assign.gates`: each checked kind with the default patterns below and the team's own
+  `patterns` of that kind. Side chat runs get none. The run's prompt then says that the machine
+  asks for these and the CLI should ask in the topic only when it does such an action another
+  way (an API call, a web page) or spends over `maxSpendCny`. A run on a CLI that cannot stop
+  commands (Codex today) keeps the plain "Team rule" paragraph. A queued run gets the gated
+  wording only when every machine with its runtime stops commands.
+- Patterns are regular expressions matched case-insensitively against each simple command of a
+  shell line (split at newlines, `;`, `&&`, `||`, `|`; whitespace runs count as one space), and
+  against `<tool name> <input JSON>` of MCP tool calls. `PATCH` rejects a pattern that
+  JavaScript cannot compile or that uses lookaround, backreferences or possessive forms (Rust's
+  `regex` on the daemon does not have them). They are meant to be few and sure: a wrong match is
+  a useless card; GitHub branch protection and approval-gated deploy environments catch the rest.
+- Default patterns (`DEFAULT_GATE_PATTERNS` in `packages/protocol`):
+
+  | Kind | Matches |
+  | --- | --- |
+  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
+  | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
+  | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
+  | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
+  | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
+
+  A force push to a work branch is not gated (the agent rebases its own PR branch); a force push
+  to `main` is `mergeMain`. A plain `git push` while `main` is checked out is not seen.
+- The daemon's `approval.request` carries `kind` and `command` (redacted). BotDesk posts the
+  approval card titled `需要你确认：<kind's 设置 name>` with the command, mentions the kind's
+  approver (`approvers[kind]`, else `approver`) and has three actions: 同意 (`approve:<id>`),
+  这件事里都同意 (`approveall:<id>`) and 拒绝 (`deny:<id>`). Only that approver (or an owner)
+  answers, by card or by text (同意 / 拒绝 / 这件事里都同意 or 都同意).
+- 这件事里都同意 answers `run.approval { decision: "approve", scope: "run" }`: the daemon lets
+  later matches of that kind in the run pass, and BotDesk adds the kind to the run's request
+  (`approvedGates`), which follow-up runs and retries of it inherit; their `run.assign.gates`
+  leave the kind out. A new request starts with every kind gated again.
+- Approve lets the command run; deny blocks it and the CLI reads that a person declined and
+  should do the rest another way. While the command waits the run is `waiting` and the topic
+  `waiting_answer`, neither is marked stuck, and `run.cancel` ends the wait.
 
 ## AI 服务 (the team's model provider)
 

@@ -19,7 +19,7 @@ export const Labels = z.array(Label).max(MAX_LABELS);
 export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
-export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort"] as const;
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort", "gates", "accounts"] as const;
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -34,6 +34,8 @@ export const MachineInfo = z.object({
   features: z.array(MachineFeature).max(MAX_MACHINE_FEATURES).optional(),
   /** 1.1: a screen sharing address (e.g. `vnc://mac-mini.tailnet`) people use for 接管. */
   takeoverUrl: z.string().min(1).max(2048).optional(),
+  /** Feature "accounts": the machine's X25519 public key (base64, 32 bytes); API keys are sealed to it. */
+  publicKey: z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional(),
 });
 export type MachineInfo = z.infer<typeof MachineInfo>;
 
@@ -68,6 +70,8 @@ export const CliInfo = z.object({
   models: z.array(CliModel).max(MAX_CLI_MODELS).optional(),
   /** Efforts the CLI takes (feature "effort"); absent or empty = no effort setting. */
   efforts: z.array(Effort).max(MAX_EFFORTS).optional(),
+  /** Feature "gates": runs of this CLI stop at `run.assign.gates` matches; absent = they cannot. */
+  gates: z.boolean().optional(),
 });
 export type CliInfo = z.infer<typeof CliInfo>;
 
@@ -81,6 +85,122 @@ export const Health = z.object({
   activeRuns: z.int().nonnegative(),
 });
 export type Health = z.infer<typeof Health>;
+
+// ---------------------------------------------------------------------------
+// Machine metrics (heartbeat.metrics, docs/machine-protocol.md "Metrics")
+// ---------------------------------------------------------------------------
+
+export const MAX_METRIC_RUNS = 64;
+/** `VmRunMetrics.phase` values; read as any short string so a newer daemon's phase never fails a heartbeat. */
+export const VM_PHASES = ["booting", "running", "paused"] as const;
+/** One run's VM (or local process tree) as the daemon measured it. */
+export const VmRunMetrics = z.object({
+  runId: RunId,
+  /** "booting" | "running" | "paused" */
+  phase: z.string().min(1).max(32),
+  startedAt: Millis,
+  /** Start of the VM to a connected guest agent, once it booted. */
+  bootMs: z.int().nonnegative().optional(),
+  /** CPU since the previous sample, in cores (1.0 = one thread busy). */
+  cpuCores: z.number().nonnegative().optional(),
+  /** Resident memory of the VM (the guest pages it touched). */
+  memBytes: z.int().nonnegative().optional(),
+  /** Blocks the run's scratch disk uses. */
+  scratchBytes: z.int().nonnegative().optional(),
+});
+export type VmRunMetrics = z.infer<typeof VmRunMetrics>;
+/** `CliLogin.state` values. */
+export const CLI_LOGIN_STATES = ["logged_in", "logged_out", "unknown"] as const;
+/** Whether a runtime's CLI has a credential on the machine; never the credential itself. */
+export const CliLogin = z.object({
+  runtime: z.string().min(1).max(64),
+  /** "logged_in" | "logged_out" | "unknown" */
+  state: z.string().min(1).max(32),
+  /** "subscription" | "api_key" when known. */
+  method: z.string().min(1).max(32).optional(),
+  /** Feature "accounts": the signed-in account and plan, when the CLI says. */
+  email: z.string().max(320).optional(),
+  plan: z.string().max(64).optional(),
+});
+export type CliLogin = z.infer<typeof CliLogin>;
+/** VM boot times of the last (at most 50) runs. */
+export const BootStats = z.object({
+  avgMs: z.int().nonnegative(),
+  maxMs: z.int().nonnegative(),
+  samples: z.int().nonnegative(),
+});
+export type BootStats = z.infer<typeof BootStats>;
+/** Host and VM numbers the daemon sends with each heartbeat; every number is optional (a platform may not have it). */
+// ---------------------------------------------------------------------------
+// Accounts and API keys (feature "accounts", docs/machine-protocol.md "Accounts and keys")
+// ---------------------------------------------------------------------------
+
+/** An API key's name: an environment variable name. */
+export const SecretName = z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/);
+/** A key the machine holds, as it reports it: never the value, only its last 4 characters. */
+export const SecretInfo = z.object({
+  name: SecretName,
+  last4: z.string().max(4),
+  /** AI members whose runs get it; empty = every run. */
+  members: z.array(Id).max(100),
+  updatedAt: Millis,
+});
+export type SecretInfo = z.infer<typeof SecretInfo>;
+/** One usage window of a subscription (Claude 5 h / week, Codex primary / secondary). */
+export const UsageWindow = z.object({
+  /** "session" | "week" | "week_model" | "primary" | "secondary" | another short word. */
+  kind: z.string().min(1).max(32),
+  /** What the CLI calls it, e.g. "Current week (Opus)". */
+  label: z.string().max(80).optional(),
+  usedPct: z.number().min(0).max(100),
+  resetsAt: Millis.optional(),
+});
+export type UsageWindow = z.infer<typeof UsageWindow>;
+export const CliUsage = z.object({
+  runtime: z.string().min(1).max(64),
+  /** When the daemon read it (machine clock). */
+  at: Millis,
+  windows: z.array(UsageWindow).max(8),
+});
+export type CliUsage = z.infer<typeof CliUsage>;
+/** `account.login.status.state` values. */
+export const LOGIN_STATES = ["starting", "open_url", "device_code", "checking", "done", "failed", "cancelled"] as const;
+export const LoginStatusFrame = z.object({
+  t: z.literal("account.login.status"),
+  loginId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  runtime: z.string().min(1).max(64),
+  /** "starting" | "open_url" (open url, paste the code) | "device_code" (open url, enter userCode) | "checking" | "done" | "failed" | "cancelled" */
+  state: z.string().min(1).max(32),
+  url: z.string().max(4096).optional(),
+  userCode: z.string().max(64).optional(),
+  account: z.object({ email: z.string().max(320).optional(), plan: z.string().max(64).optional() }).optional(),
+  error: z.string().max(1000).optional(),
+});
+export type LoginStatusFrame = z.infer<typeof LoginStatusFrame>;
+
+export const MachineMetrics = z.object({
+  /** When the daemon took the sample (machine clock). */
+  at: Millis,
+  uptimeSecs: z.int().nonnegative().optional(),
+  /** Whole-host CPU busy since the previous sample, 0-100. */
+  cpuPct: z.number().min(0).max(100).optional(),
+  cpuThreads: z.int().nonnegative().optional(),
+  memTotalBytes: z.int().nonnegative().optional(),
+  memAvailableBytes: z.int().nonnegative().optional(),
+  /** Bytes per second over the non-loopback, non-VM interfaces since the previous sample. */
+  netRxBps: z.number().nonnegative().optional(),
+  netTxBps: z.number().nonnegative().optional(),
+  /** VM slots of the machine (`[vm]`), absent without VMs. */
+  vmSlots: z.int().nonnegative().optional(),
+  boot: BootStats.optional(),
+  runs: z.array(VmRunMetrics).max(MAX_METRIC_RUNS),
+  logins: z.array(CliLogin).max(64).optional(),
+  /** Feature "accounts": the API keys the machine holds (names and last 4 only). */
+  secrets: z.array(SecretInfo).max(100).optional(),
+  /** Feature "accounts": subscription usage windows, read every 10 minutes. */
+  usage: z.array(CliUsage).max(16).optional(),
+});
+export type MachineMetrics = z.infer<typeof MachineMetrics>;
 
 export const RunCursor = z.object({ runId: RunId, lastSeq: Seq, done: z.boolean() });
 export type RunCursor = z.infer<typeof RunCursor>;
@@ -171,6 +291,10 @@ export const RunEvent = z.discriminatedUnion("type", [
     itemId: z.string().optional(),
     title: z.string(),
     detail: z.string().optional(),
+    /** Feature "gates": the gate kind the command matched (`RunGate.kind`). */
+    kind: z.string().min(1).max(32).optional(),
+    /** Feature "gates": the command the CLI was about to run (redacted, <= 4000). */
+    command: z.string().max(4000).optional(),
   }),
   z.object({ type: z.literal("approval.resolved"), approvalId: z.string().min(1), decision: z.enum(["approve", "deny"]) }),
   z.object({ type: z.literal("input.accepted"), inputId: z.string().min(1) }),
@@ -241,7 +365,14 @@ export const MachineUpFrame = z.discriminatedUnion("t", [
     health: Health,
     runs: z.array(RunCursor),
   }),
-  z.object({ t: z.literal("heartbeat"), at: Millis, health: Health, runs: z.array(RunCursor) }),
+  z.object({
+    t: z.literal("heartbeat"),
+    at: Millis,
+    health: Health,
+    runs: z.array(RunCursor),
+    /** Host and VM metrics (daemons since 1.2.7); old servers ignore it. */
+    metrics: MachineMetrics.optional(),
+  }),
   z.object({ t: z.literal("run.accept"), runId: RunId }),
   z.object({
     t: z.literal("run.reject"),
@@ -252,12 +383,25 @@ export const MachineUpFrame = z.discriminatedUnion("t", [
   RunEventFrame,
   RunDoneFrame,
   RunSessionFrame,
+  LoginStatusFrame,
 ]);
 export type MachineUpFrame = z.infer<typeof MachineUpFrame>;
 
 // ---------------------------------------------------------------------------
 // Server to daemon
 // ---------------------------------------------------------------------------
+
+/**
+ * One gated action kind of a run (feature "gates"): before a tool runs a shell command that a
+ * pattern matches (case-insensitive regex, the subset JavaScript and Rust share), the daemon asks
+ * for approval (`approval.request` with this `kind`) and waits.
+ */
+export const RunGate = z.object({
+  kind: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,31}$/),
+  patterns: z.array(z.string().min(1).max(200)).min(1).max(64),
+});
+export type RunGate = z.infer<typeof RunGate>;
+export const MAX_RUN_GATES = 16;
 
 export const RunAssignFrame = z.object({
   t: z.literal("run.assign"),
@@ -279,6 +423,8 @@ export const RunAssignFrame = z.object({
   kind: z.string().min(1).max(32).optional(),
   /** 1.1 (feature "resume"): the CLI session of the topic's last run on this machine, to continue. */
   resumeSessionId: z.string().min(1).max(128).optional(),
+  /** Feature "gates": the action kinds the run stops at for a person's approval. */
+  gates: z.array(RunGate).max(MAX_RUN_GATES).optional(),
 });
 export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
 
@@ -385,7 +531,14 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     /** 1.1 (feature "answer"): an event from an interactive 产出 page. */
     artifactEvent: RunArtifactEvent.optional(),
   }),
-  z.object({ t: z.literal("run.approval"), runId: RunId, approvalId: z.string().min(1), decision: z.enum(["approve", "deny"]) }),
+  z.object({
+    t: z.literal("run.approval"),
+    runId: RunId,
+    approvalId: z.string().min(1),
+    decision: z.enum(["approve", "deny"]),
+    /** Feature "gates": "run" = 这件事里都同意, later matches of the same kind in this run pass. */
+    scope: z.enum(["run"]).optional(),
+  }),
   z.object({ t: z.literal("run.cancel"), runId: RunId, reason: z.string().optional() }),
   /** 1.1 (feature "pause"): stop the CLI (SIGSTOP of its process group) for 接管; deadlines stop too. */
   z.object({ t: z.literal("run.pause"), runId: RunId, by: Id.optional() }),
@@ -397,6 +550,23 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
   RunAnswerFrame,
   RunInteractionFrame,
   RunOutputResultFrame,
+  // feature "accounts"
+  z.object({
+    t: z.literal("account.login"),
+    loginId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+    runtime: z.string().min(1).max(64),
+    op: z.enum(["start", "code", "cancel"]),
+    /** op "code": what the person pasted (Claude's code#state). */
+    code: z.string().min(1).max(2048).optional(),
+  }),
+  z.object({
+    t: z.literal("secret.set"),
+    name: SecretName,
+    /** base64 of a libsodium sealed box (X25519 + XSalsa20-Poly1305) to `machine.publicKey`. */
+    sealed: z.string().min(1).max(16384),
+    members: z.array(Id).max(100),
+  }),
+  z.object({ t: z.literal("secret.delete"), name: SecretName }),
 ]);
 export type MachineDownFrame = z.infer<typeof MachineDownFrame>;
 

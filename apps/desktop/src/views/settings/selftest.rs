@@ -632,6 +632,49 @@ scene_opener!(open_profile, Page::Account);
 scene_opener!(open_members, Page::Members);
 scene_opener!(open_machines, Page::Machines);
 scene_opener!(open_notifications, Page::Notifications);
+scene_opener!(open_memory, Page::Memory);
+
+/// 团队约定 scrolled to its end: the kind groups and 已停用.
+pub fn open_memory_end(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Memory, cx)?;
+    after_fit(handle, cx, move |_, cx| view.read(cx).scroll_to_end());
+    Ok(handle)
+}
+
+fn open_memory_sheet(
+    edit: bool,
+    services: Services,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Memory, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let board = view.read(cx).memory().clone();
+        board.update(cx, |b, cx| b.open_for_scene(edit, window, cx));
+    });
+    Ok(handle)
+}
+
+/// 团队约定 with the 记一条 sheet open.
+pub fn open_memory_add(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_memory_sheet(false, services, cx)
+}
+
+/// 团队约定 with the 编辑 sheet of the newest convention open.
+pub fn open_memory_edit(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_memory_sheet(true, services, cx)
+}
 /// 通用 after 检查更新 (the version row says 已是最新版本), so it differs
 /// from `settings-general`.
 pub fn open_about(
@@ -730,7 +773,9 @@ pub fn open_ai_service(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |_, cx| {
-        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        let general = view.read(cx).general().clone();
+        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| p.test(cx));
     });
     Ok(handle)
@@ -745,7 +790,9 @@ pub fn open_ai_service_failed(
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |window, cx| {
-        let ai = view.read(cx).general().read(cx).ai_service().clone();
+        let general = view.read(cx).general().clone();
+        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| {
             p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
             p.fill_for_test(
