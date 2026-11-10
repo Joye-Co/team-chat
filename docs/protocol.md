@@ -212,7 +212,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `POST /v1/auth/redeem` | anyone with an invite code | `{ inviteCode, deviceName }` | `{ token, member }` |
 | `GET /v1/me` | member | | `Member` |
 | `GET /v1/members` | member | | `Member[]` |
-| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member |
+| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId?, expiresInHours? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member; `expiresInHours` 1-168, default 168 (a week) |
 | `POST /v1/bots` | owner | `{ name, role?, character? }` | `{ member, token }` |
 | `POST /v1/tokens/revoke` | owner, or the token's member | `{ memberId?, all? }` | `{ revoked }` |
 | `GET /v1/groups` | member | | `GroupSummary[]` |
@@ -1210,6 +1210,15 @@ transaction as the write, with a `kind` the page filters by:
 | `approval` | `run.approval`, `settings.approvals` |
 | `login` | `email.sign_in`, `machine.login.start` |
 | `machine` | `machine.create`, `machine.revoke` |
+
+The server also writes events it notices itself (`audit_id` 0, no actor but the AI member):
+
+| `kind` | Action | When |
+| --- | --- | --- |
+| `run` | `run.failed` | a run of an AI member ended failed; `actorId` the AI member, `target` the 话题, `details { runId, groupId, requestedBy, title? }` |
+| `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
+| `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
+| `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
 
 ```ts
 ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }

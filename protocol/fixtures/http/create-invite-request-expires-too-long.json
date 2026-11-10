@@ -1,0 +1,11 @@
+{
+  "kind": "CreateInviteRequest",
+  "valid": false,
+  "description": "at most a week",
+  "value": {
+    "name": "Lina",
+    "kind": "human",
+    "level": "member",
+    "expiresInHours": 169
+  }
+}

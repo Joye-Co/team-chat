@@ -1215,6 +1215,12 @@ pub mod monitor {
     pub const HEADER_PAD_BOTTOM: Pixels = px(20.);
     /// Room under the last section of a page.
     pub const BODY_PAD_BOTTOM: Pixels = px(28.);
+    /// A 要注意 tile: its tone's color at this opacity under the symbol.
+    pub const ATTENTION_TINT: f32 = 0.10;
+    pub const ATTENTION_TINT_DARK: f32 = 0.14;
+    /// A sidebar group label: this tall, this far below the rows above (Admin artboard: 18 + 16 + 6).
+    pub const NAV_GROUP_HEIGHT: Pixels = px(24.);
+    pub const NAV_GROUP_TOP: Pixels = space::S12;
     /// The machine tile of the switcher.
     pub const MACHINE_TILE: Pixels = px(32.);
     /// A KPI card's sparkline.

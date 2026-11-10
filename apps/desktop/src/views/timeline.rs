@@ -1352,6 +1352,46 @@ mod keyboard_tests {
         );
     }
 
+    /// A click on an avatar @s the sender once and quotes nothing.
+    #[gpui::test]
+    fn avatar_click_mentions_once_without_a_quote(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &TimelineEvent, _| {
+                sink.borrow_mut().push(e.clone())
+            })
+            .detach()
+        });
+        let theirs = view.update(cx, |this, cx| {
+            let m = this
+                .messages
+                .iter()
+                .find(|m| this.me.as_deref() != Some(m.author_id.as_str()))
+                .cloned()
+                .expect("a message from someone else");
+            this.mention(&m.author_id, cx);
+            m
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[TimelineEvent::Mention {
+                member_id: theirs.author_id.clone(),
+            }]
+        );
+    }
+
     /// 撤回: my own messages within 24 hours; never someone else's.
     #[gpui::test]
     fn recall_is_mine_within_a_day(cx: &mut gpui::TestAppContext) {

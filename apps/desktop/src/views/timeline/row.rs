@@ -575,14 +575,13 @@ impl TimelineView {
                 })
                 .into_any_element()
         } else {
-            // A click on someone else's avatar quotes this message and @s
-            // them in the composer, as in Feishu; the avatar keeps the row's
-            // message menu off it.
+            // A click on someone else's avatar @s them in the composer, once
+            // and without a quote (回复 and a double click on the message
+            // quote it); the avatar keeps the row's message menu off it.
             let mention = author
                 .as_ref()
                 .filter(|a| self.me.as_deref() != Some(a.id.as_str()))
                 .map(|a| (a.id.clone(), a.name.clone()));
-            let quoted = (!deleted && !message.id.is_empty()).then(|| message.clone());
             div()
                 .id(ElementId::Name(format!("avatar-{key}").into()))
                 .w(gutter_w)
@@ -593,12 +592,7 @@ impl TimelineView {
                     el.tooltip(move |window, cx| {
                         gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                     })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(m) = &quoted {
-                            this.quote(m, cx);
-                        }
-                        this.mention(&id, cx)
-                    }))
+                    .on_click(cx.listener(move |this, _, _, cx| this.mention(&id, cx)))
                 })
                 .child(if v2 {
                     // v2: tiles and circles only; presence lives in the rail.
