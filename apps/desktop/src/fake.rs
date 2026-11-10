@@ -14,6 +14,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use crate::{data::*, drafts::DraftStore};
 
+pub mod admin;
 pub mod memory;
 mod settings;
 /// The v2 sample team of the 1.1.0 artboards.
@@ -1924,6 +1925,37 @@ impl ChatProvider for FakeProvider {
 
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
         self.machines_fake()
+    }
+
+    // 团队管理 samples for the screenshot self-test.
+    fn machine_monitor(
+        &self,
+        machine_id: &str,
+        range: &'static str,
+        _day_start: u64,
+    ) -> AdminReply<chat_core::proto::MachineMonitor> {
+        reply_now(Ok(admin::machine_monitor(machine_id, range)))
+    }
+    fn machine_secrets(
+        &self,
+        _machine_id: &str,
+    ) -> AdminReply<chat_core::proto::monitor::MachineSecretsResponse> {
+        reply_now(Ok(admin::machine_secrets()))
+    }
+    fn team_roster(&self) -> AdminReply<chat_core::proto::TeamRoster> {
+        reply_now(Ok(admin::team_roster()))
+    }
+    fn team_usage(&self, from: u64, to: u64) -> AdminReply<chat_core::proto::TeamUsage> {
+        reply_now(Ok(admin::team_usage(from, to)))
+    }
+    fn team_activity(
+        &self,
+        _before: Option<u64>,
+        _actor: Option<String>,
+        _kinds: Vec<String>,
+        _machine: Option<String>,
+    ) -> AdminReply<chat_core::proto::ActivityResponse> {
+        reply_now(Ok(admin::team_activity()))
     }
 
     // --- settings-backend track ---
