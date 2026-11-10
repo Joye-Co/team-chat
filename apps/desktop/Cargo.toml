@@ -68,6 +68,7 @@ objc2-core-foundation = "0.3"
 # notification-area icon, 登录时启动, the settings window's height), and the screenshot
 # self-test, which captures its own window (src/selftest/capture.rs). The windows crates at
 # the versions GPUI already uses.
+# Embedded 产出 pages are child windows of GPUI's HWND (src/ui/web_embed.rs).
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
 windows-registry = "0.6"

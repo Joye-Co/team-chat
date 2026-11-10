@@ -251,16 +251,67 @@ jobs:
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
       # Required, every desktop test (this replaces the Windows system integration subset and
-      # the report-only full run). The skipped tests fail on Windows and belong to work in progress; whoever
-      # lands that work removes its line here (docs/plans/windows.zh.md):
-      # - diagrams::tests (two tests): the Mermaid renderer has no Windows backend yet (C2, WebView2).
+      # the report-only full run). The skipped test fails on Windows and belongs to work in
+      # progress; whoever lands that work removes its line here (docs/plans/windows.zh.md):
       # - provider::this_mac (one test): the launchd PATH builder joins with `\` on Windows (M3).
       - name: cargo test (desktop)
         run: >-
           cargo test --locked -p desktop --
-          --skip diagrams::tests::a_rendered_scene_diagram_becomes_ready_with_nodes_in_source_order
-          --skip diagrams::tests::page_failures_show_their_reason
           --skip provider::this_mac::tests::the_service_path_keeps_the_shell_path_first_and_adds_usual_folders
+      # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
+      # to the HWND, as the app runs, the page must show. The DirectComposition run is the
+      # record of why the app turns it off (the page stays under GPUI's content).
+      - name: Embedded page in a GPUI window (screenshots)
+        run: |
+          cargo build --locked -p desktop --example win_embed_gpui
+          GPUI_DISABLE_DIRECT_COMPOSITION=1 cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/hwnd-swap-chain"
+          cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/direct-composition" \
+            || echo "::notice::with DirectComposition the child window is covered, as expected"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: windows-embed-gpui
+          path: ${{ runner.temp }}/embed-gpui
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The WebView2 backend of crates/artifact-view runs only here: nobody develops on Windows.
+  artifact-view-windows:
+    name: Artifact view (Windows, WebView2)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-artifact-view
+      - name: cargo build (tests and examples)
+        run: cargo build --locked -p artifact-view --tests --examples
+      # Unit tests, then tests/isolation.rs in a real WebView2 (the same assertions as WKWebView).
+      - name: cargo test (isolation in WebView2)
+        env:
+          ARTIFACT_VIEW_ISOLATION_REPORT: ${{ runner.temp }}/artifact-view/isolation.json
+        run: cargo test --locked -p artifact-view --no-fail-fast
+      - name: Embedded view in a host window (screenshots)
+        if: always()
+        run: cargo run --locked -p artifact-view --example win_embed_proto -- "$RUNNER_TEMP/artifact-view/embed"
+      - name: Diagram renderer (PNG per sample)
+        if: always()
+        run: cargo run --locked -p artifact-view --example diagram_selftest -- "$RUNNER_TEMP/artifact-view/diagrams"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: artifact-view-windows
+          path: ${{ runner.temp }}/artifact-view
+          if-no-files-found: warn
+          retention-days: 14
 
   daemon-windows:
     name: Daemon tests (Windows)

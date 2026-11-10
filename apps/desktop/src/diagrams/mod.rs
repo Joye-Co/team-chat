@@ -276,7 +276,7 @@ struct Running {
 }
 
 enum Msg {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     Renderer(renderer::RendererEvent),
     Png {
         req_id: u64,
@@ -290,7 +290,7 @@ struct Service {
     mem: Lru<String, State>,
     queue: VecDeque<Job>,
     running: Option<Running>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     renderer: Option<renderer::DiagramRenderer>,
     renderer_ready: bool,
     disk: DiskCache,
@@ -311,7 +311,7 @@ fn init(cx: &mut App) {
         mem: Lru::new(cache::MEMORY_ENTRIES),
         queue: VecDeque::new(),
         running: None,
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         renderer: None,
         renderer_ready: false,
         disk: DiskCache::open(
@@ -432,16 +432,27 @@ pub fn clear_memory(cx: &mut App) {
     }
 }
 
-#[cfg(target_os = "macos")]
+/// The CSS font stack of diagram text: the system's interface and Chinese fonts.
+#[cfg(not(windows))]
+const DIAGRAM_FONTS: &str =
+    "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Helvetica Neue\", sans-serif";
+#[cfg(windows)]
+const DIAGRAM_FONTS: &str = "\"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", sans-serif";
+
+#[cfg(any(target_os = "macos", windows))]
 fn ensure_renderer(cx: &mut App) -> bool {
     let s = cx.global_mut::<Service>();
     if s.renderer.as_ref().is_some_and(|r| !r.is_closed()) {
         return s.renderer_ready;
     }
     s.renderer_ready = false;
-    let Some(mtm) = objc2_foundation::MainThreadMarker::new() else {
+    #[cfg(target_os = "macos")]
+    let Some(mtm) = artifact_view::MainThread::new() else {
         return false;
     };
+    // The app's globals live on the thread of GPUI's message loop.
+    #[cfg(windows)]
+    let mtm = artifact_view::MainThread::current();
     let tx = s.tx.clone();
     match renderer::DiagramRenderer::open(mtm, move |event| {
         let _ = tx.unbounded_send(Msg::Renderer(event));
@@ -452,7 +463,7 @@ fn ensure_renderer(cx: &mut App) -> bool {
     false
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn ensure_renderer(_cx: &mut App) -> bool {
     false
 }
@@ -468,7 +479,7 @@ fn pump(cx: &mut App) {
         }
     }
     if !ensure_renderer(cx) {
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         {
             let s = cx.global_mut::<Service>();
             while let Some(job) = s.queue.pop_front() {
@@ -489,11 +500,11 @@ fn pump(cx: &mut App) {
         source: job.source.clone(),
         theme: theme_vars(job.theme),
     };
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(r) = &s.renderer {
         r.request(&request);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = request;
     s.running = Some(Running { job, req_id });
     let tx = s.tx.clone();
@@ -589,7 +600,7 @@ fn take_running(req_id: u64, cx: &mut App) -> Option<Job> {
 
 fn handle(msg: Msg, cx: &mut App) {
     match msg {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         Msg::Renderer(event) => handle_renderer(event, cx),
         Msg::Png {
             req_id,
@@ -630,7 +641,7 @@ fn handle(msg: Msg, cx: &mut App) {
             let Some(job) = take_running(req_id, cx) else {
                 return;
             };
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             {
                 let s = cx.global_mut::<Service>();
                 s.renderer_ready = false;
@@ -643,7 +654,7 @@ fn handle(msg: Msg, cx: &mut App) {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn handle_renderer(event: renderer::RendererEvent, cx: &mut App) {
     use renderer::RendererEvent;
     match event {
@@ -825,9 +836,7 @@ pub fn theme_vars(id: ThemeId) -> ThemeVars {
         live_mix: mix(k.ink, k.raised, 0.26),
         ok_mix: mix(k.ink, k.raised, 0.12),
         bad_mix: mix(k.ink, k.raised, 0.4),
-        font_family:
-            "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Helvetica Neue\", sans-serif"
-                .into(),
+        font_family: DIAGRAM_FONTS.into(),
         font_size_px: 13,
     }
 }
