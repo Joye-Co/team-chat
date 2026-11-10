@@ -224,7 +224,11 @@ pub fn team_activity() -> ActivityResponse {
              actor: &str,
              target: &str,
              extra: Value| {
-        let mut v = json!({ "id": id, "at": now - ago, "kind": kind, "action": action, "actorId": actor, "target": target });
+        let mut v =
+            json!({ "id": id, "at": now - ago, "kind": kind, "action": action, "target": target });
+        if !actor.is_empty() {
+            v["actorId"] = json!(actor);
+        }
         if let Value::Object(m) = extra {
             for (k, x) in m {
                 v[k] = x;
@@ -232,22 +236,110 @@ pub fn team_activity() -> ActivityResponse {
         }
         v
     };
+    let mut entries: Vec<Value> = vec![
+        e(
+            12,
+            2 * MIN,
+            "budget",
+            "budget.reached",
+            "m-coder",
+            "m-coder",
+            json!({ "details": { "budgetCents": 10000, "spentCents": 10040 } }),
+        ),
+        e(
+            9,
+            4 * MIN,
+            "approval",
+            "run.approval",
+            ME,
+            "m-reviewer",
+            json!({ "details": { "decision": "approved", "botId": "m-reviewer" } }),
+        ),
+        e(
+            11,
+            2 * HOUR + 10 * MIN,
+            "run",
+            "run.failed",
+            "m-taro",
+            "t-weibo",
+            json!({ "machineId": "mc-mini", "details": { "title": "把这周的微博排期发出来", "requestedBy": "m-lixue" } }),
+        ),
+        e(
+            10,
+            3 * HOUR,
+            "machine",
+            "machine.online",
+            "",
+            "mc-mini",
+            json!({ "machineId": "mc-mini", "details": { "offlineMs": 40 * MIN } }),
+        ),
+        e(
+            8,
+            50 * MIN,
+            "key",
+            "machine.secret.set",
+            ME,
+            "mc-mini",
+            json!({ "machineId": "mc-mini", "details": { "name": "OPENAI_API_KEY", "members": ["m-coder"] } }),
+        ),
+        e(
+            7,
+            2 * HOUR,
+            "login",
+            "machine.login.start",
+            ME,
+            "mc-mini",
+            json!({ "machineId": "mc-mini", "details": { "runtime": "claude" } }),
+        ),
+        e(
+            6,
+            5 * HOUR,
+            "budget",
+            "member.update",
+            ME,
+            "m-coder",
+            json!({ "details": { "weeklyBudgetCents": [8000, 10000] } }),
+        ),
+        e(
+            5,
+            DAY + 2 * HOUR,
+            "invite",
+            "invite.create",
+            ME,
+            "inv-1",
+            json!({ "details": { "name": "Lina" } }),
+        ),
+        e(
+            4,
+            DAY + 5 * HOUR,
+            "level",
+            "member.update",
+            ME,
+            "m-tata",
+            json!({ "details": { "level": ["member", "owner"] } }),
+        ),
+        e(
+            3,
+            2 * DAY,
+            "member",
+            "invite.redeem",
+            "m-alex",
+            "m-alex",
+            json!({}),
+        ),
+        e(
+            2,
+            3 * DAY,
+            "machine",
+            "machine.create",
+            ME,
+            "mc-mini",
+            json!({ "machineId": "mc-mini", "details": { "name": "办公室 Mac mini" } }),
+        ),
+    ];
+    entries.sort_by_key(|v| std::cmp::Reverse(v["at"].as_u64().unwrap_or(0)));
     parse(json!({
-        "entries": [
-            e(9, 4 * MIN, "approval", "run.approval", ME, "m-reviewer", json!({ "details": { "decision": "approved" } })),
-            e(8, 50 * MIN, "key", "machine.secret.set", ME, "mc-mini",
-              json!({ "machineId": "mc-mini", "details": { "name": "OPENAI_API_KEY", "members": ["m-coder"] } })),
-            e(7, 2 * HOUR, "login", "machine.login.start", ME, "mc-mini",
-              json!({ "machineId": "mc-mini", "details": { "runtime": "claude" } })),
-            e(6, 5 * HOUR, "budget", "member.update", ME, "m-coder",
-              json!({ "details": { "weeklyBudgetCents": [8000, 10000] } })),
-            e(5, DAY + 2 * HOUR, "invite", "invite.create", ME, "inv-1", json!({ "details": { "name": "Lina" } })),
-            e(4, DAY + 5 * HOUR, "level", "member.update", ME, "m-tata",
-              json!({ "details": { "level": ["member", "owner"] } })),
-            e(3, 2 * DAY, "member", "invite.redeem", "m-alex", "m-alex", json!({})),
-            e(2, 3 * DAY, "machine", "machine.create", ME, "mc-mini",
-              json!({ "machineId": "mc-mini", "details": { "name": "办公室 Mac mini" } })),
-        ],
+        "entries": entries,
         "hasMore": false
     }))
 }
