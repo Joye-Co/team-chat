@@ -246,10 +246,16 @@ mod isolation {
         r.href = location.href;
       } catch (e) { r.error = String(e); }
       await window.artifact.emitEvent('v4-results', r);
-      var a = document.getElementById('dl');
-      a.href = URL.createObjectURL(new Blob(['isolation'], { type: 'application/octet-stream' }));
-      a.click();
-      setTimeout(function () { window.artifact.emitEvent('v4-late', { href: location.href }); }, 1500);
+      // The late report is scheduled first: whatever the download does, it still comes.
+      var late = { step: 'scheduled' };
+      setTimeout(function () { late.href = location.href; window.artifact.emitEvent('v4-late', late); }, 1500);
+      try {
+        var a = document.getElementById('dl');
+        a.href = URL.createObjectURL(new Blob(['isolation'], { type: 'application/octet-stream' }));
+        late.step = 'url made';
+        a.click();
+        late.step = 'clicked';
+      } catch (e) { late.error = String(e); }
     })();
     </script></body></html>"#;
 
@@ -459,6 +465,20 @@ mod isolation {
         let handler_slot2 = handler_slot.clone();
         let handler: Handler = Rc::new(move |event| {
             let mut r = report2.lock().unwrap();
+            // The order of events, for a report that stops half way.
+            let seen = match &event {
+                ArtifactEvent::Emit { name, .. } => format!("emit {name}"),
+                ArtifactEvent::Ref { label, .. } => format!("ref {label}"),
+                other => format!("{other:?}").chars().take(60).collect(),
+            };
+            if let Some(Value::Array(log)) = r
+                .details
+                .entry("events")
+                .or_insert_with(|| Value::Array(Vec::new()))
+                .into()
+            {
+                log.push(json!(seen));
+            }
             match event {
                 ArtifactEvent::Loaded { version } => {
                     r.check(&format!("v{version}Loaded"), true);
