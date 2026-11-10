@@ -18,6 +18,11 @@ path = "src/main.rs"
 name = "process_tree"
 harness = false
 
+# Its own stand-in daemon: the scheduled task starts the test program (Windows).
+[[test]]
+name = "service_task"
+harness = false
+
 [dependencies]
 chat-protocol.workspace = true
 serde.workspace = true

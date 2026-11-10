@@ -1,7 +1,7 @@
 use daemon::config::{self, Config};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|example-config> [--config <file>] [--no-load]";
+const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|example-config> [--config <file>] [--no-load] [--log-file <file>]";
 
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
@@ -17,6 +17,7 @@ fn main() {
     let cmd = args.next().unwrap_or_default();
     let mut config_path = config::default_config_path();
     let mut load = true;
+    let mut log_file: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" => match args.next() {
@@ -24,12 +25,22 @@ fn main() {
                 None => exit_with(USAGE),
             },
             "--no-load" => load = false,
+            "--log-file" => match args.next() {
+                Some(p) => log_file = Some(PathBuf::from(p)),
+                None => exit_with(USAGE),
+            },
             _ => exit_with(USAGE),
         }
     }
     let load_cfg = || Config::load(&config_path).unwrap_or_else(|e| exit_with(&e));
     match cmd.as_str() {
         "run" => {
+            // The Windows scheduled task: its headless console shows nothing.
+            if let Some(file) = &log_file
+                && let Err(e) = daemon::service::log_to(file)
+            {
+                exit_with(&e);
+            }
             let cfg = load_cfg();
             let problems = cfg.problems();
             if !problems.is_empty() {
@@ -72,12 +83,21 @@ fn main() {
             print!("{report}");
             std::process::exit(if ok { 0 } else { 1 });
         }
-        "install-service" | "uninstall-service" if cfg!(windows) => {
-            exit_with(&daemon::service::windows_unsupported())
-        }
         "install-service" => {
             let _ = load_cfg();
-            let res = if cfg!(target_os = "linux") {
+            let res = if cfg!(windows) {
+                std::env::current_exe()
+                    .map_err(|e| e.to_string())
+                    .and_then(|exe| {
+                        daemon::service::install_task(
+                            &daemon::service::task_name(),
+                            &exe,
+                            &config_path,
+                            &daemon::service::task_dir(),
+                            load,
+                        )
+                    })
+            } else if cfg!(target_os = "linux") {
                 daemon::service::install_systemd(
                     &daemon::service::units_dir(),
                     &config_path,
@@ -98,7 +118,13 @@ fn main() {
             }
         }
         "uninstall-service" => {
-            let res = if cfg!(target_os = "linux") {
+            let res = if cfg!(windows) {
+                daemon::service::uninstall_task(
+                    &daemon::service::task_name(),
+                    &daemon::service::task_dir(),
+                    load,
+                )
+            } else if cfg!(target_os = "linux") {
                 daemon::service::uninstall_systemd(&daemon::service::units_dir(), load)
             } else {
                 daemon::service::uninstall(&daemon::service::agents_dir(), load)
