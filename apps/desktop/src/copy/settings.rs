@@ -309,7 +309,11 @@ crate::copy! {
     SHORTCUT_RESET = "恢复默认",
     SHORTCUT_RESET_ALL = "全部恢复默认",
     SHORTCUT_TAKEN = "已被「{name}」使用",
-    SHORTCUT_NEEDS_MODIFIER = "要带上 ⌘、⌃ 或 ⌥",
+    SHORTCUT_NEEDS_MODIFIER = if cfg!(target_os = "macos") {
+        "要带上 ⌘、⌃ 或 ⌥"
+    } else {
+        "要带上 Ctrl 或 Alt"
+    },
     // --- end v12/settings track ---
     // --- v14/t4 lists ---
     DEVICES_HINT = "你的账号在这些设备上登录着。",

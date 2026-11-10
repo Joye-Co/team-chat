@@ -43,7 +43,11 @@ crate::copy! {
     RECOMMENDED = "推荐",
     RANK_UP = "上移",
     RANK_DOWN = "下移",
-    RANK_KEYS = "选中一项后按 ⌥↑ 或 ⌥↓ 移动",
+    RANK_KEYS = if cfg!(target_os = "macos") {
+        "选中一项后按 ⌥↑ 或 ⌥↓ 移动"
+    } else {
+        "选中一项后按 Alt+↑ 或 Alt+↓ 移动"
+    },
     RANK_RESET = "恢复 {name} 排的顺序",
     RATING_VALUE = "{n} 分",
     RATING_VALUE_LABEL = "{label} · {n} 分",

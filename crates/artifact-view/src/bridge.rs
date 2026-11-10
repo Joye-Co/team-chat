@@ -639,6 +639,7 @@ pub fn data_script(data: &Value, meta: &Value) -> String {
 
 const PAGE_TEMPLATE: &str = r#"(function(){
   var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge;
+  if (!h) { var c = window.chrome && window.chrome.webview; if (c) h = { postMessage: function (m) { c.postMessage(m); } }; }
   if (!h) return;
   var init = __INIT__;
   var n = 0, pending = new Map(), subs = [], last = null, asking = false;

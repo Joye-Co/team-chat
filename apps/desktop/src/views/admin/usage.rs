@@ -91,6 +91,8 @@ pub struct Usage {
     pub error: Option<String>,
     /// 改预算 for this AI member.
     pub budget_for: Option<String>,
+    /// The member whose budget the field was filled with (it fills once each time it opens).
+    budget_filled: Option<String>,
     budget: Entity<InputState>,
     pub budget_error: Option<String>,
     saving: bool,
@@ -105,6 +107,7 @@ impl Usage {
             loading: false,
             error: None,
             budget_for: None,
+            budget_filled: None,
             budget: cx
                 .new(|cx| InputState::new(window, cx).placeholder(m::USAGE_BUDGET_PLACEHOLDER)),
             budget_error: None,
@@ -206,6 +209,36 @@ fn usd_of(s: &Spend) -> String {
     }
 }
 
+/// The editor's text as cents: whole dollars or dollars with up to two decimals, at most $1,000,000.
+fn parse_budget(text: &str) -> Option<u64> {
+    let (whole, frac) = text.split_once('.').unwrap_or((text, ""));
+    if whole.is_empty()
+        || frac.len() > 2
+        || !whole
+            .chars()
+            .chain(frac.chars())
+            .all(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+    let dollars: u64 = whole.parse().ok()?;
+    let cents: u64 = if frac.is_empty() {
+        0
+    } else {
+        format!("{frac:0<2}").parse().ok()?
+    };
+    (dollars <= 1_000_000).then_some(dollars * 100 + cents)
+}
+
+/// A weekly budget as the editor shows it: whole dollars, or with cents when it has them.
+fn budget_text(cents: u64) -> String {
+    if cents % 100 == 0 {
+        (cents / 100).to_string()
+    } else {
+        format!("{:.2}", cents as f64 / 100.)
+    }
+}
+
 fn cents(c: u64) -> String {
     format!("${}", (c as f64 / 100.).round() as u64)
 }
@@ -277,9 +310,9 @@ impl AdminView {
         let cents = if text.is_empty() {
             None
         } else {
-            match text.parse::<u64>() {
-                Ok(d) if d <= 1_000_000 => Some(d * 100),
-                _ => {
+            match parse_budget(&text) {
+                Some(c) => Some(c),
+                None => {
                     self.usage.budget_error = Some(m::USAGE_BUDGET_INVALID.into());
                     cx.notify();
                     return;
@@ -333,6 +366,38 @@ impl AdminView {
             })
         })
         .into_any_element()
+    }
+
+    /// 改预算 opened for a member: the field starts with the current weekly budget in dollars,
+    /// selected so it can be typed over at once; a member with no budget gets the placeholder.
+    pub(super) fn sync_budget_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.usage.budget_filled == self.usage.budget_for {
+            return;
+        }
+        // The budget comes with 用量: wait for it rather than fill the field empty.
+        if self.usage.budget_for.is_some() && self.usage.data.is_none() && self.team.week.is_none()
+        {
+            return;
+        }
+        self.usage.budget_filled = self.usage.budget_for.clone();
+        let Some(id) = self.usage.budget_for.clone() else {
+            return;
+        };
+        let cents = self
+            .usage
+            .data
+            .iter()
+            .chain(self.team.week.iter())
+            .find_map(|u| u.bots.iter().find(|b| b.member_id == id))
+            .and_then(|b| b.budget_cents);
+        let text = cents.map(budget_text).unwrap_or_default();
+        self.usage.budget.update(cx, |field, cx| {
+            field.set_value(text.clone(), window, cx);
+            field.focus(window, cx);
+            if !text.is_empty() {
+                field.select_all(window, cx);
+            }
+        });
     }
 
     pub(super) fn usage_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1211,5 +1276,18 @@ mod tests {
         };
         assert_eq!(model_names(&u, "forge"), ["Claude Opus 5.5", "mystery-1"]);
         assert!(model_names(&u, "scout").is_empty());
+    }
+
+    #[test]
+    fn the_budget_field_shows_and_reads_dollars() {
+        assert_eq!(budget_text(4_000), "40");
+        assert_eq!(budget_text(40), "0.40");
+        assert_eq!(parse_budget("40"), Some(4_000));
+        assert_eq!(parse_budget("0.40"), Some(40));
+        assert_eq!(parse_budget("12.5"), Some(1_250));
+        assert_eq!(parse_budget(&budget_text(4_000)), Some(4_000));
+        assert_eq!(parse_budget("1.234"), None);
+        assert_eq!(parse_budget("-3"), None);
+        assert_eq!(parse_budget("2000000"), None);
     }
 }

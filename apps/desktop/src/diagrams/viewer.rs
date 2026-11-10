@@ -279,7 +279,7 @@ impl DiagramViewer {
 
     fn on_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
-        let cmd = k.modifiers.platform;
+        let cmd = crate::command_key(&k.modifiers);
         if k.key == "enter"
             && let Some(i) = self.key_node
             && let Some(r) = self.ready(cx)
@@ -659,7 +659,7 @@ impl Render for DiagramViewer {
                                     .track_scroll(&self.scroll)
                                     .cursor_grab()
                                     .on_scroll(cx.listener(|this, e: &ScrollEvent, _, cx| {
-                                        if e.modifiers.platform {
+                                        if crate::command_key(&e.modifiers) {
                                             let dy = f32::from(e.delta.pixel_delta(px(16.)).y);
                                             if dy > 0. {
                                                 this.set_zoom(zoom_in(this.zoom), cx);

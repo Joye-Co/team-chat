@@ -4,7 +4,7 @@
 //!
 //! `cargo run -p artifact-view --example diagram_selftest -- <out-dir>`
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 mod selftest {
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -15,9 +15,43 @@ mod selftest {
     use artifact_view::diagram::{
         DiagramRenderer, RenderOutcome, RenderRequest, RendererEvent, ThemeVars,
     };
-    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
-    use objc2_foundation::MainThreadMarker;
     use serde_json::{Value, json};
+
+    #[cfg(target_os = "macos")]
+    mod platform {
+        use artifact_view::MainThread;
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+        pub fn start() -> MainThread {
+            let mtm = MainThread::new().expect("main thread");
+            NSApplication::sharedApplication(mtm)
+                .setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
+            mtm
+        }
+
+        pub fn run(mtm: MainThread) {
+            NSApplication::sharedApplication(mtm).run();
+        }
+    }
+
+    #[cfg(windows)]
+    mod platform {
+        use artifact_view::MainThread;
+
+        pub fn start() -> MainThread {
+            artifact_view::win_support::set_dpi_aware();
+            artifact_view::set_user_data_dir(
+                std::env::temp_dir().join(format!("artifact-view-diagram-{}", std::process::id())),
+            );
+            MainThread::current()
+        }
+
+        pub fn run(_main: MainThread) {
+            loop {
+                artifact_view::win_support::pump(std::time::Duration::from_secs(3600), || false);
+            }
+        }
+    }
 
     const SAMPLES: &[(&str, bool, &str)] = &[
         (
@@ -119,11 +153,9 @@ mod selftest {
     pub fn main() {
         let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| ".".into()));
         std::fs::create_dir_all(&out).expect("out dir");
-        let mtm = MainThreadMarker::new().expect("main thread");
-        let app = NSApplication::sharedApplication(mtm);
-        app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
+        let mtm = platform::start();
         std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_secs(60));
+            std::thread::sleep(Duration::from_secs(120));
             eprintln!("diagram selftest: timed out");
             std::process::exit(2);
         });
@@ -199,11 +231,11 @@ mod selftest {
         })
         .expect("open renderer");
         run.borrow_mut().renderer = Some(renderer);
-        app.run();
+        platform::run(mtm);
     }
 }
 
 fn main() {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     selftest::main();
 }

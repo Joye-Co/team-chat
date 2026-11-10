@@ -66,7 +66,11 @@ const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
 /// Binds [`OpenTeamAdmin`] and ⌥⌘,. The window itself checks again that I am an owner.
 pub fn install(services: Services, cx: &mut App) {
-    cx.bind_keys([gpui::KeyBinding::new("cmd-alt-,", OpenTeamAdmin, None)]);
+    cx.bind_keys([gpui::KeyBinding::new(
+        crate::secondary!("alt-,"),
+        OpenTeamAdmin,
+        None,
+    )]);
     cx.on_action(move |_: &OpenTeamAdmin, cx| {
         if i_am_owner(&services) {
             open(services.clone(), cx)
@@ -461,6 +465,15 @@ fn error_text(e: AdminError) -> String {
 
 impl Render for AdminView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed(m::WINDOW_TITLE, body, window, cx)
+    }
+}
+
+impl AdminView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_budget_field(window, cx);
         let k = native_colors(cx);
         div()
             .id("admin-root")

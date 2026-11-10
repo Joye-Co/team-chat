@@ -38,6 +38,31 @@
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
 #[allow(dead_code)]
+/// A key with the platform's command modifier: `secondary!("k")` is `cmd-k`
+/// on the Mac and `ctrl-k` on Windows and Linux. GPUI's own `secondary-`
+/// prefix does not parse in a static binding (`KeyBinding::new`).
+#[macro_export]
+macro_rules! secondary {
+    ($key:literal) => {
+        if cfg!(target_os = "macos") {
+            concat!("cmd-", $key)
+        } else {
+            concat!("ctrl-", $key)
+        }
+    };
+}
+
+/// Whether the platform's command key is down: ⌘ on the Mac, Ctrl on
+/// Windows and Linux. Key and scroll handlers that read modifiers
+/// themselves use this, never `modifiers.platform` (the Windows key there).
+pub(crate) fn command_key(modifiers: &gpui::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.platform
+    } else {
+        modifiers.control
+    }
+}
+
 mod app;
 mod characters;
 #[allow(dead_code)]
@@ -164,6 +189,8 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() {
     let started = Instant::now();
+    // Before GPUI starts: on Windows, embedded 产出 pages need this (see the function).
+    ui::web_embed::prepare_process();
     // `--screenshot` and other self-tests in `selftest/` parse their own arguments.
     if let Some(code) = selftest::main_if_requested() {
         std::process::exit(code);
