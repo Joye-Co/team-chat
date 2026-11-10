@@ -205,17 +205,21 @@ log "ok: an installer with another checksum is refused"
 if [ "${EXPECT_SIGNED:-0}" = 1 ]; then
   log "signatures"
   [ "$(signature_status "$EXE")" = Valid ] || fail "the installed app is not signed"
-  # Bytes added after signing: the signature no longer matches.
+  # Bytes changed after signing (in the middle of the file, inside what the signature
+  # covers): the signature no longer matches the content.
   cp "$A_SETUP" "$WORK/tampered-setup.exe"
-  printf 'x' >>"$WORK/tampered-setup.exe"
-  [ "$(signature_status "$WORK/tampered-setup.exe")" != Valid ] || fail "the tampered installer still verifies"
+  printf 'TAMPERED' | dd of="$WORK/tampered-setup.exe" bs=1 seek="$(($(stat -c %s "$A_SETUP") / 2))" conv=notrunc 2>/dev/null
+  TAMPERED="$(signature_status "$WORK/tampered-setup.exe")"
+  [ "$TAMPERED" != Valid ] || fail "the tampered installer still verifies"
   RC="$(helper tampered "$WORK/tampered-setup.exe" --selftest-installed)"
   [ "$RC" = 2 ] || { show_log "$WORK/tampered.log"; fail "a tampered installer ended with exit code $RC, not 2"; }
-  jq -e '.error | test("signature")' "$WORK/tampered-result.json" >/dev/null || fail "refused for another reason: $(jq -c . "$WORK/tampered-result.json")"
+  log "a tampered installer (Windows says $TAMPERED) is refused: $(jq -r .error "$WORK/tampered-result.json")"
+  jq -e '.error | test("signature|signed")' "$WORK/tampered-result.json" >/dev/null || fail "refused for another reason: $(jq -c . "$WORK/tampered-result.json")"
   # A validly signed program of another publisher (Windows' own).
   cp "$(cygpath -u "$SYSTEMROOT")/System32/whoami.exe" "$WORK/other-setup.exe"
   RC="$(helper other "$WORK/other-setup.exe" --selftest-installed)"
   [ "$RC" = 2 ] || { show_log "$WORK/other.log"; fail "another publisher's program ended with exit code $RC, not 2"; }
+  log "a program of another publisher is refused: $(jq -r .error "$WORK/other-result.json")"
   jq -e '.error | test("publisher|signed")' "$WORK/other-result.json" >/dev/null || fail "refused for another reason: $(jq -c . "$WORK/other-result.json")"
   [ "$(snapshot)" = "$BEFORE" ] || fail "a refused installer changed the install folder"
   log "ok: a tampered installer and another publisher's program are refused"
