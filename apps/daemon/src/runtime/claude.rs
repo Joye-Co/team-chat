@@ -1,9 +1,12 @@
 //! Claude Code headless: `claude -p --input-format stream-json --output-format stream-json
-//! --verbose --include-partial-messages`.
+//! --verbose --include-partial-messages --replay-user-messages`.
 //!
-//! Each user line written to stdin is one turn; each `result` line ends one turn. Follow-ups
-//! are written while a turn runs and the CLI queues them. When every turn has its result, stdin
-//! is closed and the CLI exits. The raw session is
+//! Each `result` line ends one turn. A user line written while a turn runs does not always get
+//! a turn of its own: the CLI folds it into the running turn when it reads it before the turn
+//! ends. So the daemon counts consumed lines, not written ones: the CLI echoes every user line
+//! it takes up (`isReplay`), and a new turn follows a `result` only while a written line is
+//! still unread. When no turn is open and no line is unread, stdin is closed and the CLI
+//! exits. The raw session is
 //! `$CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as '-'>/<session id>.jsonl`
 //! (default config dir `~/.claude`).
 
@@ -42,7 +45,12 @@ pub struct ClaudeNormalizer {
     pub last_result: Option<String>,
     pub last_is_error: bool,
     pub usage: Option<Usage>,
-    turns: VecDeque<String>,
+    /// The open turn.
+    open: Option<String>,
+    /// User lines written to the CLI that it has not taken up yet.
+    unread: usize,
+    /// The CLI echoes the lines it takes up (older CLIs do not: then each line is one turn).
+    echoes: bool,
     turn_n: u32,
     current_msg: Option<String>,
     consumed: HashMap<String, usize>,
@@ -53,25 +61,31 @@ pub struct ClaudeNormalizer {
 }
 
 impl ClaudeNormalizer {
-    /// Called when the daemon writes a user line. Returns turn.started when it is the only
-    /// open turn (otherwise the turn starts when the previous one ends).
+    /// Called when the daemon writes a user line. Returns turn.started when no turn is open;
+    /// otherwise the line joins the running turn, or starts the next one when that turn ends
+    /// before the CLI reads it.
     pub fn queue_turn(&mut self) -> Vec<RunEvent> {
-        self.turn_n += 1;
-        let id = format!("t{}", self.turn_n);
-        self.turns.push_back(id.clone());
-        if self.turns.len() == 1 {
-            vec![RunEvent::TurnStarted { turn_id: id }]
-        } else {
-            vec![]
+        self.unread += 1;
+        if self.open.is_some() {
+            return vec![];
         }
+        vec![self.start_turn()]
     }
 
+    fn start_turn(&mut self) -> RunEvent {
+        self.turn_n += 1;
+        let id = format!("t{}", self.turn_n);
+        self.open = Some(id.clone());
+        RunEvent::TurnStarted { turn_id: id }
+    }
+
+    /// 1 while a turn runs or is due (a written line the CLI has not answered), else 0.
     pub fn open_turns(&self) -> usize {
-        self.turns.len()
+        usize::from(self.open.is_some())
     }
 
     fn turn(&self) -> Option<String> {
-        self.turns.front().cloned()
+        self.open.clone()
     }
 
     pub fn on_line(&mut self, v: &Value) -> Vec<RunEvent> {
@@ -158,6 +172,11 @@ impl ClaudeNormalizer {
             }
             "user" => {
                 let mut out = vec![];
+                if v["isReplay"].as_bool() == Some(true) {
+                    self.echoes = true;
+                    self.unread = self.unread.saturating_sub(1);
+                    return out;
+                }
                 let Some(blocks) = v["message"]["content"].as_array() else {
                     return out;
                 };
@@ -225,16 +244,17 @@ impl ClaudeNormalizer {
                     models: model_usage(&v["modelUsage"]).unwrap_or(prev.models),
                 });
                 let mut out = vec![];
-                let done = self.turns.pop_front().unwrap_or_else(|| "t0".into());
+                let done = self.open.take().unwrap_or_else(|| "t0".into());
+                if !self.echoes {
+                    self.unread = self.unread.saturating_sub(1);
+                }
                 out.push(RunEvent::TurnCompleted {
                     turn_id: done,
                     status: if is_error { "failed" } else { "completed" }.into(),
                     error: if is_error { text } else { None },
                 });
-                if let Some(next) = self.turns.front() {
-                    out.push(RunEvent::TurnStarted {
-                        turn_id: next.clone(),
-                    });
+                if self.unread > 0 {
+                    out.push(self.start_turn());
                 }
                 out
             }
@@ -561,6 +581,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         "stream-json",
         "--verbose",
         "--include-partial-messages",
+        "--replay-user-messages",
     ]
     .iter()
     .map(|s| s.to_string())
