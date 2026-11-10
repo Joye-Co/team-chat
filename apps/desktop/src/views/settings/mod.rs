@@ -352,7 +352,7 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
-        crate::ui::native::window_chrome::framed(self.page.title(), body, window, cx)
+        crate::ui::native::window_chrome::framed_fixed(self.page.title(), body, window, cx)
     }
 }
 

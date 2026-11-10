@@ -48,6 +48,17 @@ macro_rules! secondary {
     };
 }
 
+/// Whether the platform's command key is down: ⌘ on the Mac, Ctrl on
+/// Windows and Linux. Key and scroll handlers that read modifiers
+/// themselves use this, never `modifiers.platform` (the Windows key there).
+pub(crate) fn command_key(modifiers: &gpui::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.platform
+    } else {
+        modifiers.control
+    }
+}
+
 mod app;
 mod characters;
 #[allow(dead_code)]

@@ -23,7 +23,19 @@ gpui::actions!(search, [SearchInGroup, SearchEverywhere]);
 pub fn install(cx: &mut App) {
     // ⌘F finds in the open 话题 and falls back to SearchInGroup elsewhere
     // (`timeline::find`).
-    cx.bind_keys([KeyBinding::new(crate::secondary!("shift-f"), SearchEverywhere, None)]);
+    // ⇧⌘F on the Mac. Ctrl+Shift+F is the Simplified/Traditional switch of
+    // Microsoft Pinyin (and Sogou), so Windows uses Ctrl+Alt+F: no input
+    // method takes Ctrl+Alt keys, and it sits with the app's other Ctrl+Alt
+    // commands (详情, 显示侧栏, 团队管理).
+    cx.bind_keys([KeyBinding::new(
+        if cfg!(target_os = "macos") {
+            "cmd-shift-f"
+        } else {
+            "ctrl-alt-f"
+        },
+        SearchEverywhere,
+        None,
+    )]);
     crate::views::timeline::find::install(cx);
     cx.on_action(|_: &SearchInGroup, cx| open_deferred(false, cx));
     cx.on_action(|_: &SearchEverywhere, cx| open_deferred(true, cx));

@@ -324,9 +324,28 @@ pub fn shortcut_groups(cx: &App) -> Vec<ShortcutGroup> {
     out
 }
 
+/// Whether a menu command exists on this platform. Hiding the app, showing
+/// the other apps, bringing all windows forward and the character viewer are
+/// the Mac's; off the Mac they have no handler and are not listed.
+fn on_this_platform(action: &dyn Action) -> bool {
+    use crate::views::nav::menus::{
+        BringAllToFront, Hide, HideOthers, ShowAll, ShowCharacterPalette,
+    };
+    cfg!(target_os = "macos")
+        || ![
+            Hide.name(),
+            HideOthers.name(),
+            ShowAll.name(),
+            BringAllToFront.name(),
+            ShowCharacterPalette.name(),
+        ]
+        .contains(&action.name())
+}
+
 fn collect(items: &[gpui::MenuItem], keymap: &gpui::Keymap, rows: &mut Vec<ShortcutRow>) {
     for item in items {
         match item {
+            gpui::MenuItem::Action { action, .. } if !on_this_platform(action.as_ref()) => {}
             gpui::MenuItem::Action { name, action, .. } => {
                 // The last binding wins for display, as in the menu bar.
                 let keys = keymap
