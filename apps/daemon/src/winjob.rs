@@ -90,7 +90,9 @@ impl Job {
     }
 
     /// Puts the process behind `process` (a handle with `PROCESS_SET_QUOTA` and
-    /// `PROCESS_TERMINATE` access, such as a child's) into the job.
+    /// `PROCESS_TERMINATE` access, such as a child's) into the job. A handle that is not one
+    /// is an error from the kernel, not undefined behaviour.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn assign(&self, process: HANDLE) -> std::io::Result<()> {
         // SAFETY: both handles are open.
         if unsafe { AssignProcessToJobObject(self.handle, process) } == 0 {

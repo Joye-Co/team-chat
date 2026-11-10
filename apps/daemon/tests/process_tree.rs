@@ -7,6 +7,9 @@
 //! `PROCESS_TREE_FAKE=cli` it speaks Claude Code's stream-json, and with `--fake-mid` or
 //! `--fake-tick` it is one of the processes below the CLI. No real CLI, no login.
 
+// The fake processes start children and never wait for them: ending those is the daemon's job.
+#![allow(clippy::zombie_processes)]
+
 use daemon::config::RuntimeConfig;
 use daemon::proto::RunEvent;
 use daemon::runtime::{self, Control, Outcome, RunSpec, Status};

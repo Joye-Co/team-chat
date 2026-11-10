@@ -714,7 +714,7 @@ mod tests {
         std::fs::create_dir_all(&claude).unwrap();
         std::fs::create_dir_all(&codex).unwrap();
         let toml = format!(
-            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\nenv = {{ CLAUDE_CONFIG_DIR = \"{}\" }}\n[runtimes.codex]\nkind = \"codex\"\nenv = {{ CODEX_HOME = \"{}\" }}\n",
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\nenv = {{ CLAUDE_CONFIG_DIR = '{}' }}\n[runtimes.codex]\nkind = \"codex\"\nenv = {{ CODEX_HOME = '{}' }}\n",
             claude.display(),
             codex.display()
         );

@@ -75,47 +75,13 @@ const BASE_ENV: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
 ];
 
-/// What a Windows program needs besides [`BASE_ENV`]: without `SystemRoot` sockets and
-/// crypto fail to load, and the CLIs find their logins and caches through the profile folders.
-#[cfg(windows)]
-const WINDOWS_ENV: &[&str] = &[
-    "SystemRoot",
-    "SystemDrive",
-    "windir",
-    "ComSpec",
-    "PATHEXT",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "USERNAME",
-    "USERDOMAIN",
-    "COMPUTERNAME",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "ProgramData",
-    "ProgramFiles",
-    "ProgramFiles(x86)",
-    "ProgramW6432",
-    "CommonProgramFiles",
-    "CommonProgramFiles(x86)",
-    "TEMP",
-    "TMP",
-    "OS",
-    "PROCESSOR_ARCHITECTURE",
-    "NUMBER_OF_PROCESSORS",
-];
-
 pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = vec![];
     let mut put = |k: &str, v: String| {
         env.retain(|(n, _)| n != k);
         env.push((k.to_string(), v));
     };
-    #[cfg(not(windows))]
-    let base = BASE_ENV.iter();
-    #[cfg(windows)]
-    let base = BASE_ENV.iter().chain(WINDOWS_ENV);
-    for k in base {
+    for k in BASE_ENV.iter().chain(crate::sys::OS_ENV) {
         if let Ok(v) = std::env::var(k) {
             put(k, v);
         }

@@ -292,6 +292,7 @@ fn login_env(rt: &RuntimeConfig) -> Vec<(String, String)> {
         "CLAUDE_CONFIG_DIR",
     ]
     .iter()
+    .chain(crate::sys::OS_ENV)
     .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
     .collect();
     for (k, v) in &rt.env {

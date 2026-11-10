@@ -10,6 +10,39 @@ use std::path::Path;
 /// What separates the folders of `PATH`.
 pub const PATH_SEP: char = if cfg!(windows) { ';' } else { ':' };
 
+/// Variables every program on this system needs, which a run's CLI and a sign-in get besides
+/// the daemon's own list. Windows: without `SystemRoot` sockets and crypto fail to load, and
+/// the CLIs find their logins and caches through the profile folders. None on Unix.
+#[cfg(not(windows))]
+pub const OS_ENV: &[&str] = &[];
+#[cfg(windows)]
+pub const OS_ENV: &[&str] = &[
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    "USERDOMAIN",
+    "COMPUTERNAME",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "TEMP",
+    "TMP",
+    "OS",
+    "PROCESSOR_ARCHITECTURE",
+    "NUMBER_OF_PROCESSORS",
+];
+
 /// Sets the Unix mode a new file is made with.
 pub fn mode(opts: &mut std::fs::OpenOptions, mode: u32) -> &mut std::fs::OpenOptions {
     #[cfg(unix)]

@@ -154,6 +154,9 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 CLI，带引号、`&`、`%`、换行的参数原样送到。CI 新增 `daemon-windows` 任务（`windows-2025`）：
 `cargo test -p daemon`（单元测试、`chat-run` 客户端、上面这份）和 `cargo check -p e2e`。
 
+Windows CI 上实际看到的：四个用例都过；要求脱离 job 的进程被系统拒绝启动（Access is denied）；CI 里
+daemon 有控制台，`CTRL_BREAK_EVENT` 送到了，假 CLI 以 `0xC000013A` 退出。
+
 在 Mac 上检查：`cargo check --target x86_64-pc-windows-gnu -p daemon -p e2e --all-targets`。
 
 M1 里发现、留给后面的：

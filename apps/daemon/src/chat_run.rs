@@ -1817,13 +1817,21 @@ mod tests {
             r(&["file", "get", "--id", "F1"]).unwrap(),
             ("file.get", json!({ "fileId": "F1" }))
         );
-        let (op, body) = r(&["file", "get", "--id", "F1", "--out", "/w/a.pdf"]).unwrap();
+        let abs = if cfg!(windows) {
+            r"C:\w\a.pdf"
+        } else {
+            "/w/a.pdf"
+        };
+        let (op, body) = r(&["file", "get", "--id", "F1", "--out", abs]).unwrap();
         assert_eq!(op, "file.get");
-        assert_eq!(body["out"], "/w/a.pdf");
+        assert_eq!(body["out"], abs);
         // A relative out is made absolute against the current folder, a folder keeps its `/`.
         let (_, body) = r(&["file", "get", "--id", "F1", "--out", "in/"]).unwrap();
         let out = body["out"].as_str().unwrap();
-        assert!(out.starts_with('/') && out.ends_with("/in/"), "{out}");
+        assert!(
+            Path::new(out).is_absolute() && out.ends_with("/in/"),
+            "{out}"
+        );
         assert!(crate::chat_run_context::OPS.contains(&op));
 
         for bad in [
