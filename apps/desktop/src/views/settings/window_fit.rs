@@ -155,7 +155,100 @@ fn set_height(ns_window: NsWindow, now: Pixels, height: Pixels, animate: bool, f
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// A window's top edge and height on its screen, in pixels counted down from the top
+/// (Windows).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Span {
+    top: i32,
+    height: i32,
+}
+
+/// Where a window at `frame` goes when its height changes by `delta`, on a screen whose
+/// usable area is `work`: the top edge stays, the height stops at the screen's, the first
+/// height centers the window, and the window never leaves the usable area.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn fit_span(frame: Span, work: Span, delta: i32, first: bool) -> Span {
+    let height = (frame.height + delta).min(work.height).max(0);
+    let mut top = frame.top;
+    if first {
+        top = work.top + (work.height - height) / 2;
+    }
+    let bottom = work.top + work.height;
+    if top + height > bottom {
+        top = bottom - height;
+    }
+    if top < work.top {
+        top = work.top;
+    }
+    Span { top, height }
+}
+
+/// Windows: the window's rectangle changes with its top edge fixed (`animate` is unused:
+/// the app steps the height itself).
+#[cfg(target_os = "windows")]
+fn set_height(hwnd: NsWindow, now: Pixels, height: Pixels, _animate: bool, first: bool) {
+    use windows::Win32::{
+        Foundation::{HWND, RECT},
+        Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow},
+        UI::{
+            HiDpi::GetDpiForWindow,
+            WindowsAndMessaging::{
+                GetWindowRect, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+            },
+        },
+    };
+
+    let hwnd = HWND(hwnd);
+    // SAFETY: `hwnd` is a live window of this thread (from GPUI's handle); every out
+    // pointer is valid for its call.
+    unsafe {
+        let scale = match GetDpiForWindow(hwnd) {
+            0 => 1.,
+            dpi => dpi as f32 / 96.,
+        };
+        let delta = ((f32::from(height) - f32::from(now)) * scale).round() as i32;
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return;
+        }
+        let frame = Span {
+            top: rect.top,
+            height: rect.bottom - rect.top,
+        };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let next = if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            let work = Span {
+                top: info.rcWork.top,
+                height: info.rcWork.bottom - info.rcWork.top,
+            };
+            fit_span(frame, work, delta, first)
+        } else {
+            Span {
+                top: frame.top,
+                height: frame.height + delta,
+            }
+        };
+        if next == frame {
+            return;
+        }
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            rect.left,
+            next.top,
+            rect.right - rect.left,
+            next.height,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn set_height(_: NsWindow, _: Pixels, _: Pixels, _: bool, _: bool) {}
 
 /// Keeps a new window transparent until its first height is set.
@@ -170,7 +263,37 @@ pub fn hide_until_fitted(window: &Window) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: DWM cloaks the window (it is laid out and painted, but not shown) until
+/// [`reveal`].
+#[cfg(target_os = "windows")]
+pub fn hide_until_fitted(window: &Window) {
+    if let Some(hwnd) = ns_window(window) {
+        cloak(hwnd, true);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cloak(hwnd: NsWindow, on: bool) {
+    use windows::{
+        Win32::{
+            Foundation::HWND,
+            Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute},
+        },
+        core::BOOL,
+    };
+    let value = BOOL::from(on);
+    // SAFETY: the attribute takes a BOOL; the pointer and its size match.
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            HWND(hwnd),
+            DWMWA_CLOAK,
+            (&raw const value).cast(),
+            std::mem::size_of::<BOOL>() as u32,
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn hide_until_fitted(_window: &Window) {}
 
 #[cfg(target_os = "macos")]
@@ -181,7 +304,12 @@ fn reveal(ns_window: NsWindow) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn reveal(hwnd: NsWindow) {
+    cloak(hwnd, false);
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn reveal(_: NsWindow) {}
 
 /// Pins the drawn frame to the window's top edge, unscaled. The layer's
@@ -241,7 +369,43 @@ pub fn dim_window_buttons(window: &Window) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: the window loses its minimize and maximize boxes (and with them maximize on
+/// a double click of the title bar and Snap's maximize).
+#[cfg(target_os = "windows")]
+pub fn dim_window_buttons(window: &Window) {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{
+            GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_MAXIMIZEBOX,
+            WS_MINIMIZEBOX,
+        },
+    };
+    let Some(hwnd) = ns_window(window) else {
+        return;
+    };
+    let hwnd = HWND(hwnd);
+    // SAFETY: `hwnd` is a live window of this thread; the style is read, two bits are
+    // cleared and the frame is told to redraw.
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let next = style & !((WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) as isize);
+        if next != style {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, next);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn dim_window_buttons(_window: &Window) {}
 
 #[cfg(target_os = "macos")]
@@ -249,7 +413,13 @@ type NsWindow = *mut objc2::runtime::AnyObject;
 #[cfg(not(target_os = "macos"))]
 type NsWindow = *mut std::ffi::c_void;
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: the HWND.
+#[cfg(target_os = "windows")]
+fn ns_window(window: &Window) -> Option<NsWindow> {
+    crate::win32::hwnd(window).map(|hwnd| hwnd.0)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn ns_window(_: &Window) -> Option<NsWindow> {
     None
 }
@@ -268,4 +438,85 @@ fn ns_window(window: &Window) -> Option<NsWindow> {
     // `window` is a getter on the main thread.
     let ns_window: *mut AnyObject = unsafe { msg_send![view, window] };
     (!ns_window.is_null()).then_some(ns_window)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Span, fit_span};
+
+    const WORK: Span = Span {
+        top: 0,
+        height: 1000,
+    };
+
+    #[test]
+    fn the_top_edge_stays_while_the_height_changes() {
+        let frame = Span {
+            top: 200,
+            height: 400,
+        };
+        assert_eq!(
+            fit_span(frame, WORK, 150, false),
+            Span {
+                top: 200,
+                height: 550
+            }
+        );
+        assert_eq!(
+            fit_span(frame, WORK, -100, false),
+            Span {
+                top: 200,
+                height: 300
+            }
+        );
+    }
+
+    #[test]
+    fn the_first_height_centers_the_window() {
+        let frame = Span {
+            top: 30,
+            height: 400,
+        };
+        assert_eq!(
+            fit_span(frame, WORK, 200, true),
+            Span {
+                top: 200,
+                height: 600
+            }
+        );
+    }
+
+    #[test]
+    fn the_window_stays_inside_the_usable_area() {
+        let work = Span {
+            top: 40,
+            height: 1000,
+        };
+        // Growing past the bottom moves the window up.
+        let low = Span {
+            top: 700,
+            height: 300,
+        };
+        assert_eq!(
+            fit_span(low, work, 200, false),
+            Span {
+                top: 540,
+                height: 500
+            }
+        );
+        // Taller than the screen: the screen's height, from its top.
+        assert_eq!(
+            fit_span(low, work, 5000, false),
+            Span {
+                top: 40,
+                height: 1000
+            }
+        );
+        // Above the usable area: back inside.
+        let high = Span {
+            top: -50,
+            height: 300,
+        };
+        assert_eq!(fit_span(high, work, 0, false).top, 40);
+    }
 }

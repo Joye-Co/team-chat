@@ -3,7 +3,11 @@
 //!
 //! Both run on a later main-queue turn, outside any GPUI update: the panel's key-window
 //! change and the picker's menu loop call back into GPUI, which must not be borrowed then.
-//! Off macOS every call does nothing.
+//!
+//! Windows has neither. Quick Look becomes "open with the default app" (the closest thing
+//! a stock Windows has to a preview), and 分享 shows the file selected in Explorer, where
+//! the system's own 共享 command and drag and drop are. On other systems every call does
+//! nothing.
 
 use std::path::PathBuf;
 
@@ -14,7 +18,9 @@ use gpui::{Pixels, Point, Window};
 pub fn toggle_quick_look(path: PathBuf) {
     #[cfg(target_os = "macos")]
     dispatch2::DispatchQueue::main().exec_async(move || mac::toggle_quick_look(&path));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    win::shell_open(&path);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = path;
 }
 
@@ -33,8 +39,66 @@ pub fn share(paths: Vec<PathBuf>, at: Point<Pixels>, window: &Window) {
             mac::share(&view, &paths, x, y);
         });
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (at, window);
+        if let Some(path) = paths.first() {
+            win::reveal(path);
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (paths, at, window);
+}
+
+/// The argument that makes Explorer open a folder with `path` selected. Explorer splits
+/// its command line at commas, so the path is always quoted.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn explorer_select_arg(path: &std::path::Path) -> String {
+    format!("/select,\"{}\"", path.display())
+}
+
+#[cfg(target_os = "windows")]
+mod win {
+    use std::path::Path;
+
+    use windows::{
+        Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
+        core::{PCWSTR, w},
+    };
+
+    use crate::win32::wide;
+
+    /// Opens `path` with the app Windows has for its type.
+    pub fn shell_open(path: &Path) {
+        let file = wide(&path.display().to_string());
+        // SAFETY: both strings are NUL-terminated and outlive the call.
+        unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(file.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+        }
+    }
+
+    /// Shows `path` selected in an Explorer window.
+    pub fn reveal(path: &Path) {
+        let args = wide(&super::explorer_select_arg(path));
+        // SAFETY: as in `shell_open`.
+        unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                w!("explorer.exe"),
+                PCWSTR(args.as_ptr()),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+        }
+    }
 }
 
 /// The point in an AppKit view's own coordinates for a point measured from the top left:
@@ -256,6 +320,15 @@ mod mac {
 #[cfg(test)]
 mod tests {
     use super::view_point;
+
+    #[test]
+    fn explorer_selects_a_quoted_path() {
+        let path = std::path::Path::new(r"C:\Users\a b\x, y.txt");
+        assert_eq!(
+            super::explorer_select_arg(path),
+            r#"/select,"C:\Users\a b\x, y.txt""#
+        );
+    }
 
     #[test]
     fn a_point_from_the_top_left_lands_in_view_coordinates() {
