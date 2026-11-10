@@ -259,9 +259,11 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 媒体预览已完成，代码在 `apps/desktop/src/views/media/native_windows.rs`，对外还是 `native.rs` 那几个函数，
 macOS 的代码没动：
 
-- 视频：Media Foundation 的 `IMFSourceReader` 解出 RGB32 的帧，按显示区域裁剪、按旋转信息转正、缩到调用方
-  要的大小；时长取自 `MF_PD_DURATION`。
+- 视频：Media Foundation 的 `IMFSourceReader` 解出 RGB32 的帧，按显示区域裁剪、缩到调用方要的大小；时长取自
+  `MF_PD_DURATION`。横着录的视频由 source reader 的视频处理器自己转正（输出的宽高已经对调），代码只在它
+  没转的时候按 `MF_MT_VIDEO_ROTATION` 转。
 - 音频波形：同一个 source reader 解成 PCM（8/16/24/32 位整数或浮点），算出峰值；时长按实际解出的帧数算。
+  AAC 文件可能在第一个采样就报告格式变了（文件头写的采样率是实际的一半），这时重新读格式接着解。
 - 音频播放：`Windows.Media.Playback.MediaPlayer`（播放、暂停、跳转、位置、倍速），不进系统的媒体控制条。
 - PDF：`Windows.Data.Pdf` 把每页渲染成 PNG 流再解成位图；页数和页面大小也从它来。
 - 线程：进程用 `CoIncrementMTAUsage` 加入多线程套间一次；每次解码在自己的线程里跑，调用方带超时等结果，
@@ -269,15 +271,27 @@ macOS 的代码没动：
 - Media Foundation 按名字动态加载（`mfplat.dll`、`mfreadwrite.dll`），不静态链接：Windows N 版和 Windows
   Server 默认没有它，应用照样能启动，媒体预览退回文件行。
 - 系统没有解码器的格式（比如没装 HEVC 扩展时的 HEVC）和坏文件一样返回「没有预览」，界面显示原来的文件行。
+- 退出时的崩溃：`Windows.Data.Pdf.dll` 自己持有一个 Direct3D 设备，最后一个文档关掉后，它在进程退出时的
+  静态析构里释放这个设备；用软件渲染（没有显卡的电脑、虚拟机、CI）时这一步需要的线程已经没了，进程以
+  0xC000000D 崩溃结束（栈在 `d3d10warp!Task::ScheduleTask`）。所以第一次读 PDF 时打开一个内置的空白文档并
+  一直不关（`keep_pdf_engine`），设备就不会走到那个析构。
 
 测试在 `native.rs` 末尾，macOS 和 Windows CI 跑同一套：MP4 的时长、尺寸和各帧的朝向与颜色，带旋转信息的
-MP4，HEVC，WAV、MP3、M4A 的峰值，PDF 的页数和渲染结果，每种各有坏文件。样本在
-`apps/desktop/src/views/media/fixtures/`（ffmpeg 用纯色和正弦波生成，每个几 KB）。CI 的 `desktop-windows`
-任务先装 `Server-Media-Foundation`（Windows Server 才需要），再跑 `cargo test -p desktop views::media::native`
-（失败会拦截），截图自测默认多跑 `media-video`、`media-audio`、`media-pdf` 三个场景。
+MP4，HEVC，WAV、MP3、M4A 的峰值，PDF 的页数和渲染结果，每种各有坏文件；Windows 上另有播放器的控制和
+Media Foundation 对每个样本的描述（只打日志）。样本在 `apps/desktop/src/views/media/fixtures/`（ffmpeg 用纯色
+和正弦波生成，每个几 KB）。CI 的 `desktop-windows` 任务先装 `Server-Media-Foundation`（Windows Server 才
+需要，不用重启），单独跑一步 `cargo test -p desktop views::media::native -- --nocapture`，截图自测默认多跑
+`media-audio`、`media-pdf` 两个场景；`media-video` 用 `windows_scenes=media-video` 手动跑过，也正常。
+`scripts/windows-screenshots.sh` 在自测以错误码退出时打印 Windows 的崩溃记录（出错的模块）。Git Bash 把以
+NTSTATUS 错误结束的进程报成退出码 127。
 
-还要在真的 Windows 电脑上确认的：声音确实能放出来（CI 的机器没有声卡）、拖动进度和倍速的手感、
-Windows 10 22H2 上的表现、MOV 和 HEVC 等格式在装了和没装扩展时的覆盖范围、大文件的耗时。
+CI（`windows-2025`，没有显卡和声卡）上确认过的：H.264 的 MP4 能取到时长、尺寸和朝向颜色都对的帧，带旋转
+信息的 MP4 是正的；WAV、MP3、AAC 能算出波形；PDF 的页数和每页的图是对的；HEVC 没有解码器，退回文件行；
+播放器在没有声卡时能创建，播放、暂停、跳转都不卡界面线程。
+
+还要在真的 Windows 电脑上确认的：声音确实能放出来、进度在走（CI 的机器没有声卡，位置不动）、拖动进度和
+倍速的手感、Windows 10 22H2 上的表现、MOV 和 HEVC 等格式在装了和没装扩展时的覆盖范围、大文件的耗时、
+有显卡时退出是否干净。
 
 打开、定位、分享文件（`src/views/files/native.rs`）在系统集成那个 PR 里做。
 
