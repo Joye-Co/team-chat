@@ -1093,7 +1093,7 @@ impl RootView {
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
-        crate::ui::native::window_chrome::framed(env!("PRODUCT_NAME"), body, window, cx)
+        crate::ui::native::window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
     }
 }
 
