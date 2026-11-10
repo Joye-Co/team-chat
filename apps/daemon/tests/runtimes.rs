@@ -1,9 +1,10 @@
 //! Runtime drivers against fake CLIs that follow each CLI's documented protocol.
 //!
-//! Unix only: the fake CLIs are Python scripts started by their `#!` line, and the cases use
-//! `/bin/sh`, signals and file modes. Windows has `tests/process_tree.rs`.
+//! The fake CLIs are Python scripts. Unix starts them by their `#!` line. Windows needs the
+//! `fake-cli` launcher of the `test-fakes` feature (`cargo test --features test-fakes`), and
+//! `python` on PATH; without the feature this file has no tests there.
 
-#![cfg(unix)]
+#![cfg(any(unix, feature = "test-fakes"))]
 
 use daemon::config::RuntimeConfig;
 use daemon::proto::RunEvent;
@@ -16,15 +17,40 @@ fn fake(name: &str) -> String {
     format!("{}/tests/fake/{name}", env!("CARGO_MANIFEST_DIR"))
 }
 
+/// How a fake CLI script is started: the script itself on Unix; on Windows the `fake-cli`
+/// launcher, with the script in `FAKE_CLI_SCRIPT`.
+fn launch(command: &str) -> (String, Option<(String, String)>) {
+    #[cfg(windows)]
+    if command.ends_with(".py") {
+        return (
+            env!("CARGO_BIN_EXE_fake-cli").to_string(),
+            Some(("FAKE_CLI_SCRIPT".into(), command.into())),
+        );
+    }
+    (command.to_string(), None)
+}
+
 fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt: &str) -> RunSpec {
     let cwd = dir.join("work");
     std::fs::create_dir_all(&cwd).unwrap();
+    let (command, script) = launch(command);
+    let mut env = vec![
+        ("PATH".into(), std::env::var("PATH").unwrap()),
+        ("HOME".into(), dir.to_string_lossy().into()),
+    ];
+    // What every program on this system needs (Windows: SystemRoot and the like).
+    for k in daemon::sys::OS_ENV {
+        if let Ok(v) = std::env::var(k) {
+            env.push((k.to_string(), v));
+        }
+    }
+    env.extend(script);
     RunSpec {
         run_id: "r1".into(),
         runtime_name: kind.into(),
         cfg: RuntimeConfig {
             kind: kind.into(),
-            command: Some(command.into()),
+            command: Some(command),
             args: args.iter().map(|s| s.to_string()).collect(),
             env: BTreeMap::new(),
             model: None,
@@ -40,10 +66,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         effort: None,
         cwd,
         run_dir: dir.to_path_buf(),
-        env: vec![
-            ("PATH".into(), std::env::var("PATH").unwrap()),
-            ("HOME".into(), dir.to_string_lossy().into()),
-        ],
+        env,
         aside: false,
         note: None,
         resume_session_id: None,
@@ -232,6 +255,7 @@ async fn acp_follow_up_is_next_prompt() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pty_prompt_input_and_exit_code() {
     let dir = tempfile::tempdir().unwrap();
@@ -260,6 +284,7 @@ async fn pty_prompt_input_and_exit_code() {
     assert!(dir.path().join("pty.log").is_file());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn pty_cancel_kills_group() {
     let dir = tempfile::tempdir().unwrap();
@@ -449,6 +474,7 @@ fn aside_runs_ignore_widening_config() {
 /// loads a server's config file: here an untrusted project's `.codex/config.toml`, which Codex
 /// skips, and a user config with a stdio and a URL server. Every server ends up disabled.
 /// `codex mcp list` reads the config without a model call. Skipped without `codex` on PATH.
+#[cfg(unix)]
 #[test]
 fn codex_aside_mcp_overrides_load_in_real_cli() {
     let Some(codex) = std::env::var_os("PATH").and_then(|p| {
@@ -505,6 +531,7 @@ fn codex_aside_mcp_overrides_load_in_real_cli() {
     }
 }
 
+#[cfg(unix)]
 /// `codex app-server` with `args`: runs `command` through `command/exec` (the server's sandbox,
 /// no model call) and returns its result.
 fn codex_exec(
@@ -557,6 +584,7 @@ fn codex_exec(
 /// model call) with the app-server args the daemon builds. The sandbox blocks the run's unix
 /// socket, so a Codex run uses the request folder in its working folder. Skipped without
 /// `codex` on PATH.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_sandbox_lets_chat_run_answer_without_network() {
     let Some(codex) = std::env::var_os("PATH").and_then(|p| {
@@ -865,29 +893,39 @@ async fn discovery_reports_models_and_efforts() {
     let claude_dir = dir.path().join("claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), r#"{"model":"sonnet"}"#).unwrap();
+    // The paths are TOML literal strings: a Windows path has backslashes.
+    let (codex, codex_script) = launch(&fake("fake_codex.py"));
+    let (claude, claude_script) = launch(&fake("fake_claude.py"));
+    let script = |s: &Option<(String, String)>| match s {
+        Some((k, v)) => format!("{k} = '{v}'"),
+        None => String::new(),
+    };
     let cfg = daemon::config::Config::parse(&format!(
         r#"
 server_url = "http://127.0.0.1:1"
-token_file = "{token}"
+token_file = '{token}'
 [runtimes.cx]
 kind = "codex"
-command = "{codex}"
+command = '{codex}'
+env = {{ {codex_env} }}
 [runtimes.cl]
 kind = "claude"
-command = "{claude}"
-env = {{ CLAUDE_CONFIG_DIR = "{claude_dir}" }}
+command = '{claude}'
+env = {{ CLAUDE_CONFIG_DIR = '{claude_dir}', {claude_env} }}
 [runtimes.fixed]
 kind = "codex"
-command = "{codex}"
+command = '{codex}'
+env = {{ {codex_env} }}
 models = ["fake-codex", "other"]
 [runtimes.sh]
 kind = "pty"
-command = "/bin/sh"
+command = '{shell}'
 "#,
         token = dir.path().join("token").display(),
-        codex = fake("fake_codex.py"),
-        claude = fake("fake_claude.py"),
+        codex_env = script(&codex_script),
+        claude_env = script(&claude_script),
         claude_dir = claude_dir.display(),
+        shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" },
     ))
     .unwrap();
     let clis = daemon::health::discover_clis(&cfg).await;

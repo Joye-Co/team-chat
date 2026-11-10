@@ -439,7 +439,8 @@ set it up once per machine:
    `codex --version` works in a Terminal).
 2. Short way (1.2.1 and later): install the app on that machine, sign in as an owner, and click
    用这台电脑 in 设置 › 机器. The app registers the machine, writes the daemon config and token,
-   installs the launchd service and updates the daemon with the app.
+   installs the launchd service (on Windows a scheduled task of your user) and updates the
+   daemon with the app.
 3. Manual way: build the daemon (`scripts/build-daemon.sh`) or download it from a release,
    register the machine (`bun server/scripts/admin.ts machine --env <env> --name <name> --labels <label>`
    writes the machine token file), copy the binary and the token to the machine, write
@@ -447,6 +448,25 @@ set it up once per machine:
    `server_url`, `token_file`, `name`, `labels` and the `[runtimes.<name>]` you use), then run
    `team-chat-daemon doctor` and `team-chat-daemon install-service` from a Terminal where the
    CLI is on `PATH`.
+
+   On Windows the manual way is one PowerShell command, run as the user whose CLI logins the
+   bots should use (no administrator rights). Register the machine first (the `admin.ts machine`
+   command above, or 设置 › 机器 in the app), then on the Windows computer:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl <server url> -MachineId <machine id> -DaemonUrl <https url of team-chat-daemon-<version>-x86_64-pc-windows-msvc.exe> -Sha256 <hex>
+   ```
+
+   [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) downloads the daemon (https
+   only) and checks it against `-Sha256`, which is required for a download: take the hash from
+   where you trust the release (the release page, your operator), never from the download
+   location itself; the script does not fetch it. It asks for the machine token
+   without showing it (or reads `-TokenFile`), writes `%USERPROFILE%\.config\team-chat\daemon.toml`
+   and the token into a private folder (your user, SYSTEM and Administrators; nothing inherited), runs `doctor`, and registers the
+   scheduled task with `install-service`. `-DaemonFile <path>` takes a daemon that is already on
+   the computer. `install-service` refuses a daemon in a folder that other users of the computer
+   can change (the task would run whatever they put there as you). The log is
+   `%LOCALAPPDATA%\team-chat-daemon\daemon.log`.
 4. Make the bot runner-backed:
    `bun server/scripts/admin.ts runner --env <env> --bot <botId> --runtime <claude|codex> --labels <label>`
    (add `--repo-url <git url>` or `--repo-path <path>` for a repository), and check
@@ -455,6 +475,9 @@ set it up once per machine:
 
 To update a hand-installed daemon, wait until the machine has no running work (stopping the
 daemon cancels its runs), replace the binary, and run `doctor` and `install-service` again.
+On Windows run `install-daemon.ps1 -Update -DaemonUrl <url> -Sha256 <hex>` instead, at any time: it renames
+the running program aside and puts the new one in its place, and the daemon restarts on the new
+version by itself once it has no running work.
 
 ---
 
@@ -606,11 +629,26 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
 
 1. 在那台电脑上装好命令行工具并登录(终端里 `claude --version` 或 `codex --version` 能运行)。
 2. 简单做法(1.2.1 起):在那台电脑上装 App,用 owner 账号登录,在「设置 › 机器」里点「用这台电脑」。
-   App 会登记电脑、写好 daemon 配置和令牌、装好服务,以后跟着 App 自动更新。
+   App 会登记电脑、写好 daemon 配置和令牌、装好服务(Windows 上是当前用户的计划任务),以后跟着 App 自动更新。
 3. 手动做法:`scripts/build-daemon.sh` 编译(或从发布页下载)daemon,
    `bun server/scripts/admin.ts machine --env <env> --name <名字> --labels <标签>` 登记电脑并保存令牌文件,
    把程序和令牌拷到那台电脑,写 `~/.config/team-chat/daemon.toml`(`team-chat-daemon example-config`
    打印示例),再在能找到命令行工具的终端里运行 `team-chat-daemon doctor` 和 `team-chat-daemon install-service`。
+
+   Windows 上手动做法是一条 PowerShell 命令,用 bot 要借用其命令行登录的那个用户运行(不需要管理员权限)。
+   先登记电脑(上面的 `admin.ts machine`,或 App 的「设置 › 机器」),再在那台 Windows 电脑上运行:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl <服务器地址> -MachineId <机器 id> -DaemonUrl <team-chat-daemon-<版本>-x86_64-pc-windows-msvc.exe 的 https 地址> -Sha256 <hex>
+   ```
+
+   [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) 下载 daemon(只接受 https)并用 `-Sha256`
+   校验。下载时 `-Sha256` 必填:哈希要从你信任的地方拿(发布页、运营方),不能从下载地址旁边拿,脚本也
+   不会去取。daemon 所在的文件夹如果别的用户能改,`install-service` 会拒绝。脚本不回显地问机器令牌(或用 `-TokenFile` 读文件),把
+   `%USERPROFILE%\.config\team-chat\daemon.toml` 和令牌写进只有当前用户、SYSTEM 和 Administrators 能打开的文件夹,运行 `doctor`,
+   再用 `install-service` 注册计划任务。`-DaemonFile <路径>` 用电脑上已有的 daemon。日志在
+   `%LOCALAPPDATA%\team-chat-daemon\daemon.log`。以后更新运行 `install-daemon.ps1 -Update -DaemonUrl <地址> -Sha256 <hex>`:
+   随时可以运行,daemon 等手上没有活的时候自己换到新版本。
 4. 打开机器人的 runner:
    `bun server/scripts/admin.ts runner --env <env> --bot <botId> --runtime <claude|codex> --labels <标签>`,
    再用 `bun server/scripts/admin.ts machines --env <env>` 确认电脑健康。

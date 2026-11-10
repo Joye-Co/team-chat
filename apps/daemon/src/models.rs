@@ -284,7 +284,7 @@ async fn codex_models(program: &Path, rt: &RuntimeConfig) -> Option<Vec<CliModel
         .kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
-    let mut child = cmd.spawn().ok()?;
+    let mut child = crate::health::spawn(&mut cmd).ok()?;
     #[cfg(unix)]
     let pgid = child.id().map(|p| p as i32);
     let mut stdin = child.stdin.take()?;
@@ -411,8 +411,10 @@ async fn claude(program: &Path, rt: &RuntimeConfig) -> Found {
     cmd.arg("--help")
         .envs(&rt.env)
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let help = match tokio::time::timeout(LIMIT, cmd.output()).await {
+    let help = match tokio::time::timeout(LIMIT, crate::health::output(&mut cmd)).await {
         Ok(Ok(o)) => format!(
             "{}\n{}",
             String::from_utf8_lossy(&o.stdout),

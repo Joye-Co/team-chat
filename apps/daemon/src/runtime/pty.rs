@@ -6,7 +6,6 @@
 //! status; the result text is the end of the output.
 
 use super::*;
-#[cfg(unix)]
 use crate::proto::{RunEvent, truncate};
 #[cfg(unix)]
 use std::io::{Read, Write};
@@ -93,16 +92,162 @@ fn open_pty() -> std::io::Result<(OwnedFd, OwnedFd)> {
     Ok(unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) })
 }
 
-#[cfg(unix)]
 const KEEP: usize = 256 * 1024;
 
-/// Windows has no PTY runtime yet (ConPTY will take the place of `openpty`).
-#[cfg(not(unix))]
-async fn run(spec: RunSpec, _emit: Emit, _control: mpsc::UnboundedReceiver<Control>) -> Outcome {
-    Outcome::failed(format!(
-        "runtime {}: the pty kind is not supported on Windows yet",
-        spec.runtime_name
-    ))
+/// Windows: the program runs in a pseudoconsole ([`crate::winpty`]) inside a Job Object. The
+/// screen it draws arrives as text with escape codes, which are removed like on Unix; where a
+/// program moves the cursor instead of writing a line break, the text of two lines runs
+/// together. Cancel types Ctrl+C, then ends the job after 3 s.
+#[cfg(windows)]
+async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
+    use std::io::{Read, Write};
+    let command = spec.cfg.command();
+    let has_placeholder = spec.cfg.args.iter().any(|a| a.contains("{prompt}"));
+    let args: Vec<String> = spec
+        .cfg
+        .args
+        .iter()
+        .map(|a| a.replace("{prompt}", &spec.prompt))
+        .collect();
+    let path = spec
+        .env
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+        .map(|(_, v)| std::ffi::OsString::from(v));
+    let found = crate::health::which_in(&command, path.as_deref())
+        .or_else(|| crate::health::which(&command))
+        .unwrap_or_else(|| PathBuf::from(&command));
+    let launch = crate::health::launch(&found);
+    let ext = launch
+        .program
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext == "cmd" || ext == "bat" {
+        // A batch file runs in cmd.exe, which would read the prompt as commands.
+        return Outcome::failed(format!(
+            "cannot start {command}: {} is a batch file; the pty kind needs the program itself",
+            launch.program.display()
+        ));
+    }
+    let mut all_args = launch.args.clone();
+    all_args.extend(args);
+    let mut env = spec.env.clone();
+    env.retain(|(k, _)| !k.eq_ignore_ascii_case("TERM"));
+    env.push(("TERM".into(), "dumb".into()));
+    let (mut pty, mut writer, mut reader) =
+        match crate::winpty::spawn(&launch.program, &all_args, &spec.cwd, &env, (200, 50)) {
+            Ok(p) => p,
+            Err(e) => return Outcome::failed(format!("cannot start {command}: {e}")),
+        };
+    crate::workspace::record_process(&spec.run_dir, pty.pid as i32, &command);
+    // 接管 (pause) finds the job by the run folder.
+    let _tracked = crate::executor::local::track(&spec.run_dir, pty.job.clone());
+    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let raw_path = spec.run_dir.join("pty.log");
+    std::thread::spawn(move || {
+        let mut raw = std::fs::File::create(raw_path).ok();
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if let Some(r) = raw.as_mut() {
+                        let _ = r.write_all(&buf[..n]);
+                    }
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    // Enter is a carriage return on a console.
+    if !has_placeholder {
+        let _ = writer.write_all(format!("{}\r", spec.prompt).as_bytes());
+    }
+    let _ = emit.send(RunEvent::TurnStarted {
+        turn_id: "t1".into(),
+    });
+    let waiter = match pty.waiter() {
+        Ok(w) => w,
+        Err(e) => return Outcome::failed(format!("cannot watch {command}: {e}")),
+    };
+    let mut exited = tokio::task::spawn_blocking(move || waiter.wait());
+    let mut out = String::new();
+    let mut pending = Vec::<u8>::new();
+    let mut take = |b: &[u8], out: &mut String| {
+        pending.extend_from_slice(b);
+        // Keep an incomplete UTF-8 tail for the next chunk.
+        let cut = match std::str::from_utf8(&pending) {
+            Ok(_) => pending.len(),
+            Err(e) if e.error_len().is_none() => e.valid_up_to(),
+            Err(_) => pending.len(),
+        };
+        let text = String::from_utf8_lossy(&pending[..cut]).into_owned();
+        pending.drain(..cut);
+        let clean = strip_ansi(&text);
+        if !clean.is_empty() {
+            out.push_str(&clean);
+            if out.len() > KEEP * 2 {
+                let mut start = out.len() - KEEP;
+                while !out.is_char_boundary(start) {
+                    start += 1;
+                }
+                out.drain(..start);
+            }
+            let _ = emit.send(RunEvent::MessageDelta {
+                item_id: "out".into(),
+                turn_id: Some("t1".into()),
+                text: clean,
+            });
+        }
+    };
+    let mut control_open = true;
+    let mut cancelled = false;
+    let code: Option<i64> = loop {
+        tokio::select! {
+            Some(b) = rx.recv() => take(&b, &mut out),
+            code = &mut exited => break code.ok().flatten(),
+            c = control.recv(), if control_open => match c {
+                None => control_open = false,
+                Some(Control::Input { input_id, text }) => {
+                    let _ = emit.send(RunEvent::InputAccepted { input_id });
+                    let _ = writer.write_all(format!("{text}\r").as_bytes());
+                }
+                Some(Control::Approval { .. }) => {}
+                Some(Control::Cancel) => {
+                    cancelled = true;
+                    // Ctrl+C, typed.
+                    let _ = writer.write_all(b"\x03");
+                    let code = match tokio::time::timeout(Duration::from_secs(3), &mut exited).await {
+                        Ok(code) => code.ok().flatten(),
+                        Err(_) => {
+                            pty.job.terminate();
+                            (&mut exited).await.ok().flatten()
+                        }
+                    };
+                    break code;
+                }
+            },
+        }
+    };
+    // What the program left running goes; then the console closes, which ends the output
+    // stream once the reader thread has taken the rest of it.
+    pty.job.terminate();
+    drop(writer);
+    let closing = tokio::task::spawn_blocking(move || {
+        pty.close_console();
+        pty
+    });
+    let rest = async {
+        while let Some(b) = rx.recv().await {
+            take(&b, &mut out);
+        }
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(5), rest).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), closing).await;
+    conclude(&spec, &emit, &out, code, cancelled)
 }
 
 #[cfg(unix)]
@@ -272,6 +417,12 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     }
     kill(libc::SIGKILL);
     let code = exit.and_then(|s| s.code()).map(i64::from);
+    let _ = writer.as_raw_fd();
+    conclude(&spec, &emit, &out, code, cancelled)
+}
+
+/// The end of a run: the whole output as the message, the turn's status and the outcome.
+fn conclude(spec: &RunSpec, emit: &Emit, out: &str, code: Option<i64>, cancelled: bool) -> Outcome {
     let text = out.trim().to_string();
     let tail = {
         let mut start = text.len().saturating_sub(4096);
@@ -303,7 +454,6 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         .into(),
         error: None,
     });
-    let _ = writer.as_raw_fd();
     Outcome {
         status,
         exit_code: code,

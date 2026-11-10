@@ -15,9 +15,9 @@ pub mod preview;
 pub mod view;
 pub mod viewer;
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use artifact_view::diagram::{self as renderer, FailReason, RenderOutcome, ThemeVars};
 use futures::{StreamExt as _, channel::mpsc};
@@ -286,6 +286,41 @@ enum Msg {
     Timeout(u64),
 }
 
+/// Renderer starts that ended before the page was ready, and when the next start may run.
+///
+/// Without it a renderer that cannot start (no web view runtime on the computer, a broken
+/// profile folder) is opened again at once, forever, and its diagrams never leave 正在画.
+#[derive(Default)]
+struct StartBackoff {
+    failures: u32,
+    retry_at: Option<Instant>,
+}
+
+impl StartBackoff {
+    /// The wait after the first failed start; it doubles up to [`Self::MAX`].
+    const FIRST: Duration = Duration::from_secs(2);
+    const MAX: Duration = Duration::from_secs(300);
+
+    /// True while no new renderer may be opened.
+    fn blocked(&self, now: Instant) -> bool {
+        self.retry_at.is_some_and(|at| now < at)
+    }
+
+    /// Records a failed start and gives the wait before the next one.
+    fn failed(&mut self, now: Instant) -> Duration {
+        self.failures = self.failures.saturating_add(1);
+        let doubled = Self::FIRST.saturating_mul(1u32 << (self.failures - 1).min(16));
+        let wait = doubled.min(Self::MAX);
+        self.retry_at = Some(now + wait);
+        wait
+    }
+
+    /// The renderer's page is ready: the next failure starts from the first wait again.
+    fn ready(&mut self) {
+        *self = Self::default();
+    }
+}
+
 struct Service {
     mem: Lru<String, State>,
     queue: VecDeque<Job>,
@@ -293,6 +328,10 @@ struct Service {
     #[cfg(any(target_os = "macos", windows))]
     renderer: Option<renderer::DiagramRenderer>,
     renderer_ready: bool,
+    start_backoff: StartBackoff,
+    /// Keys that failed because the renderer did not start: asked for again after the
+    /// wait, they are tried again.
+    start_failed: HashSet<String>,
     disk: DiskCache,
     tx: mpsc::UnboundedSender<Msg>,
     seq: u64,
@@ -314,6 +353,8 @@ fn init(cx: &mut App) {
         #[cfg(any(target_os = "macos", windows))]
         renderer: None,
         renderer_ready: false,
+        start_backoff: StartBackoff::default(),
+        start_failed: HashSet::new(),
         disk: DiskCache::open(
             preview::CACHE_DIR
                 .lock()
@@ -368,6 +409,12 @@ fn request_theme(n: &Normalized, theme: ThemeId, scale: u32, visible: bool, cx: 
     let s = cx.global_mut::<Service>();
     if scale == INLINE_SCALE {
         s.recent.insert(n.source.clone(), n.kind);
+    }
+    // A diagram that failed only because the renderer did not start gets another try once
+    // the wait is over.
+    if s.start_failed.contains(&key) && !s.start_backoff.blocked(Instant::now()) {
+        s.start_failed.remove(&key);
+        s.mem.remove(&key);
     }
     if let Some(state) = s.mem.get(&key).cloned() {
         if state.is_pending()
@@ -428,7 +475,9 @@ pub fn idle(cx: &App) -> bool {
 /// Forgets what is in memory (self-tests start clean; the disk cache stays).
 pub fn clear_memory(cx: &mut App) {
     if cx.has_global::<Service>() {
-        cx.global_mut::<Service>().mem.clear();
+        let s = cx.global_mut::<Service>();
+        s.mem.clear();
+        s.start_failed.clear();
     }
 }
 
@@ -446,6 +495,13 @@ fn ensure_renderer(cx: &mut App) -> bool {
         return s.renderer_ready;
     }
     s.renderer_ready = false;
+    if s.start_backoff.blocked(Instant::now()) {
+        return false;
+    }
+    // Unit tests never open a web view (on Windows any thread could).
+    if cfg!(test) {
+        return false;
+    }
     #[cfg(target_os = "macos")]
     let Some(mtm) = artifact_view::MainThread::new() else {
         return false;
@@ -458,9 +514,54 @@ fn ensure_renderer(cx: &mut App) -> bool {
         let _ = tx.unbounded_send(Msg::Renderer(event));
     }) {
         Ok(r) => s.renderer = Some(r),
-        Err(e) => tracing::warn!(target: "diagrams", error = %e, "diagram renderer did not open"),
+        Err(e) => renderer_start_failed(&e.to_string(), cx),
     }
     false
+}
+
+/// The renderer ended before its page was ready (or did not open): every waiting diagram
+/// fails now, and no new renderer opens until the wait is over.
+fn renderer_start_failed(reason: &str, cx: &mut App) {
+    let s = cx.global_mut::<Service>();
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        s.renderer = None;
+    }
+    s.renderer_ready = false;
+    let wait = s.start_backoff.failed(Instant::now());
+    tracing::warn!(
+        target: "diagrams",
+        %reason,
+        failures = s.start_backoff.failures,
+        wait_secs = wait.as_secs(),
+        "diagram renderer did not start; waiting before the next try"
+    );
+    fail_waiting(cx);
+}
+
+/// Fails the running and every queued diagram as "the renderer is not there": in memory
+/// only, so they are tried again after the wait.
+fn fail_waiting(cx: &mut App) {
+    let s = cx.global_mut::<Service>();
+    let jobs: Vec<Job> = s
+        .running
+        .take()
+        .map(|r| r.job)
+        .into_iter()
+        .chain(s.queue.drain(..))
+        .collect();
+    if jobs.is_empty() {
+        return;
+    }
+    let reason = FailReason::Internal;
+    for job in jobs {
+        s.mem.insert(
+            job.key.clone(),
+            State::Failed(ErrorKind::from_reason(reason), Hint::of(reason, "")),
+        );
+        s.start_failed.insert(job.key);
+    }
+    cx.refresh_windows();
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -479,6 +580,10 @@ fn pump(cx: &mut App) {
         }
     }
     if !ensure_renderer(cx) {
+        // No renderer for a while: say so instead of leaving the diagrams waiting.
+        if cx.global::<Service>().start_backoff.blocked(Instant::now()) {
+            fail_waiting(cx);
+        }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
             let s = cx.global_mut::<Service>();
@@ -659,10 +764,18 @@ fn handle_renderer(event: renderer::RendererEvent, cx: &mut App) {
     use renderer::RendererEvent;
     match event {
         RendererEvent::Ready => {
-            cx.global_mut::<Service>().renderer_ready = true;
+            let s = cx.global_mut::<Service>();
+            s.renderer_ready = true;
+            s.start_backoff.ready();
             pump(cx);
         }
         RendererEvent::Crashed(reason) => {
+            // Before its page was ever ready, the renderer cannot start here: opening
+            // another one at once would do the same, forever.
+            if !cx.global::<Service>().renderer_ready {
+                renderer_start_failed(&reason, cx);
+                return;
+            }
             tracing::warn!(target: "diagrams", %reason, "diagram renderer ended; opening a new one");
             let s = cx.global_mut::<Service>();
             s.renderer = None;

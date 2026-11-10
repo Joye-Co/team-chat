@@ -589,7 +589,7 @@ impl CoreProvider {
                 None
             } else {
                 let name = super::this_mac::computer_name();
-                let labels = vec!["mac".to_string()];
+                let labels = super::this_mac::default_labels();
                 let req = CreateMachineRequest {
                     name: name.clone(),
                     labels: Some(labels.clone()),

@@ -618,6 +618,80 @@ describe("releases and updates", () => {
     const audit = await env.DB.prepare("SELECT count(*) AS n FROM audit WHERE action IN ('release.withdraw', 'release.restore')").first<{ n: number }>();
     expect(audit?.n).toBe(2);
   });
+
+  it("keeps the Windows installer apart from the DMG", async () => {
+    const { owner, member } = await setup();
+    const publishWindows = async (version: string, bytes: Uint8Array, secret = "test-admin-secret") =>
+      raw(`/v1/admin/releases/${version}/assets/windows`, {
+        method: "PUT",
+        body: bytes,
+        headers: { "x-admin-secret": secret, "x-sha256": await sha(bytes), "x-release-notes": btoa("notes") },
+      });
+    const dmg = enc.encode("the dmg of 30.0.0");
+    const exe = enc.encode("MZ the installer of 30.0.0");
+    const latest = (query = "") => api(`/v1/updates/latest${query}`, { token: member.token });
+
+    // Only a DMG: a Mac gets it, a Windows client gets nothing (never the DMG).
+    expect((await publish("30.0.0", dmg)).status).toBe(200);
+    expect((await latest()).body).toMatchObject({ version: "30.0.0", platform: "macos", downloadUrl: `${BASE}/v1/updates/30.0.0/download` });
+    expect((await latest("?platform=macos")).body.sha256).toBe(await sha(dmg));
+    expect((await latest("?platform=windows")).status).toBe(404);
+    expect((await raw("/v1/updates/30.0.0/download?platform=windows", { token: member.token })).status).toBe(404);
+    expect((await latest("?platform=linux")).status).toBe(400);
+
+    expect((await publishWindows("30.0.0", exe, "wrong")).status).toBe(401);
+    expect((await raw("/v1/admin/releases/30.0.0/assets/linux", { method: "PUT", body: exe, headers: { "x-admin-secret": "test-admin-secret", "x-sha256": await sha(exe) } })).status).toBe(400);
+    const published = await publishWindows("30.0.0", exe);
+    expect(published.status).toBe(200);
+    const info = UpdateInfo.parse(await published.json());
+    expect(info).toMatchObject({ version: "30.0.0", platform: "windows", size: exe.length, sha256: await sha(exe), notes: "notes" });
+    expect(info.downloadUrl).toBe(`${BASE}/v1/updates/30.0.0/download?platform=windows`);
+    expect((await publishWindows("30.0.0", exe)).status).toBe(409);
+
+    // Each platform has its own latest: a newer installer does not move the Mac, and the other way round.
+    const exe31 = enc.encode("MZ the installer of 30.1.0");
+    expect((await publishWindows("30.1.0", exe31)).status).toBe(200);
+    expect((await latest("?platform=windows")).body).toMatchObject({ version: "30.1.0", platform: "windows" });
+    expect((await latest()).body.version).toBe("30.0.0");
+    expect((await publish("30.2.0", enc.encode("the dmg of 30.2.0"))).status).toBe(200);
+    expect((await latest()).body.version).toBe("30.2.0");
+    expect((await latest("?platform=windows")).body.version).toBe("30.1.0");
+
+    const dl = await raw("/v1/updates/30.0.0/download?platform=windows", { token: member.token });
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-disposition")).toContain('filename="team-chat-30.0.0-setup.exe"');
+    expect(dl.headers.get("content-type")).toBe("application/vnd.microsoft.portable-executable");
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(exe);
+    const mac = await raw("/v1/updates/30.0.0/download", { token: member.token });
+    expect(mac.headers.get("content-type")).toBe("application/x-apple-diskimage");
+    expect(new Uint8Array(await mac.arrayBuffer())).toEqual(dmg);
+    expect((await raw("/v1/updates/30.2.0/download?platform=windows", { token: member.token })).status).toBe(404);
+    expect(await env.FILES.head("releases/30.0.0/team-chat-30.0.0-setup.exe")).not.toBeNull();
+
+    // The invite download serves the installer to a browser on Windows.
+    const inv = await api("/v1/invites", { token: owner.token, body: { name: "实习生", kind: "human", level: "member" } });
+    const code = inv.body.code as string;
+    const ip = { "cf-connecting-ip": "203.0.113.21" };
+    const post = (fields: Record<string, string>) =>
+      raw("/download", { method: "POST", headers: { ...ip, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString() });
+    const win = await post({ code, platform: "windows" });
+    expect(win.headers.get("content-disposition")).toContain('filename="team-chat-30.1.0-setup.exe"');
+    expect(new Uint8Array(await win.arrayBuffer())).toEqual(exe31);
+    expect(await (await post({ code })).text()).toBe("the dmg of 30.2.0");
+    expect(await (await post({ code, platform: "amiga" })).text()).toBe("the dmg of 30.2.0");
+    expect(await (await raw("/download", { headers: ip })).text()).toContain('"windows"');
+
+    // Withdrawing a version takes every platform's file of it.
+    const withdraw = (version: string, body: unknown) =>
+      api(`/v1/admin/releases/${version}/withdraw`, { headers: { "x-admin-secret": "test-admin-secret" }, body });
+    expect((await withdraw("30.1.0", {})).body).toMatchObject({ version: "30.1.0", withdrawn: true, latest: { version: "30.2.0" } });
+    expect((await latest("?platform=windows")).body.version).toBe("30.0.0");
+    expect((await raw("/v1/updates/30.1.0/download?platform=windows", { token: member.token })).status).toBe(404);
+    expect((await withdraw("30.0.0", {})).status).toBe(200);
+    expect((await latest("?platform=windows")).status).toBe(404);
+    expect((await withdraw("30.0.0", { restore: true })).status).toBe(200);
+    expect((await latest("?platform=windows")).body.version).toBe("30.0.0");
+  });
 });
 
 describe("files: review fixes", () => {

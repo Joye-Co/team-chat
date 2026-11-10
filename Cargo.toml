@@ -6,6 +6,7 @@ members = [
     "crates/artifact-view",
     "apps/desktop",
     "apps/daemon",
+    "apps/update-helper",
     "tools/e2e",
 ]
 

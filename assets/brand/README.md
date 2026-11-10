@@ -7,6 +7,7 @@ Chrome, `iconutil`, `tiffutil`). The design is in [docs/DESIGN.md](../../docs/DE
 | File | Use |
 | --- | --- |
 | `AppIcon.icns` | App icon; `scripts/build-dmg.sh` copies it into the bundle and the DMG volume |
+| `AppIcon.ico` | Windows icon (16 to 256 px, from the iconset by `ico.mjs`): the exe's resource (`apps/desktop/build.rs`), the installer and the shortcuts |
 | `AppIcon.iconset/` | Every `.icns` slot, 16 to 512 pt at 1x and 2x |
 | `menubar/StatusItemTemplate{,@2x}.png` | Menu bar status item, 16 pt template image |
 | `menubar/StatusItemWaitingTemplate{,@2x}.png` | The same with the dot: something waits on you |
