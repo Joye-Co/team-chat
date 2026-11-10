@@ -1021,6 +1021,28 @@ impl AdminView {
                     .children(
                         joined.map(|j| fact(m::TEAM_JOINED, div().child(j).into_any_element())),
                     )
+                    .when(bot, |d| {
+                        let models = self
+                            .team
+                            .week
+                            .as_ref()
+                            .map(|w| super::usage::model_names(w, &id))
+                            .unwrap_or_default();
+                        d.child(fact(
+                            m::TEAM_MODELS,
+                            if models.is_empty() {
+                                div().child(m::TEAM_NO_MODELS).into_any_element()
+                            } else {
+                                // One a line: names are long ("Claude Sonnet 5.5").
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_end()
+                                    .children(models.into_iter().map(TruncText::new))
+                                    .into_any_element()
+                            },
+                        ))
+                    })
                     .when(!bot, |d| {
                         d.child(fact(
                             m::TEAM_DEVICES,
