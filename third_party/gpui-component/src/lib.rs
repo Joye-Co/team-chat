@@ -110,6 +110,7 @@ pub use index_path::IndexPath;
 pub use input::{Rope, RopeExt, RopeLines};
 #[cfg(any(feature = "inspector", debug_assertions))]
 pub use inspector::*;
+pub use root::UiFontFallbacks;
 pub use resizable::{
     ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, h_resizable,
     resizable_panel, resize_handle, resize_handle_appearance, v_resizable,

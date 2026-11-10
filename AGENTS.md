@@ -27,7 +27,10 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   Mac client, not a web page: follow [docs/design/NATIVE.md](docs/design/NATIVE.md) (window,
   toolbar, sidebar, controls, SF Symbols, sheets, settings window, behavior), which wins over
   [docs/DESIGN.md](docs/DESIGN.md) where they differ; DESIGN.md still owns Card v2, status words
-  and content. Keep every color, size and duration in theme tokens. Look at your screens: capture
+  and content. The Windows app is the same app: [docs/design/WINDOWS.md](docs/design/WINDOWS.md) lists
+  the only differences from NATIVE.md there (title bar and window buttons, in-window menus and
+  tray, Ctrl shortcuts, fonts, the SVG icon set, scrollbars, dialogs), and COMPLETENESS.md binds
+  both systems. Keep every color, size and duration in theme tokens. Look at your screens: capture
   only the app's own window (`screencapture -l <window id> -o -x <png>`, or the app's
   screenshot self-test when it exists), never the full screen, in light and dark mode, and read
   the PNGs. Before merging UI work, check it with the vendored skills in
