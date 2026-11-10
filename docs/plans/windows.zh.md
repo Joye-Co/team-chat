@@ -304,6 +304,11 @@ M1 里发现、留给后面的：
   - 没人看得到无窗口控制台的输出，所以 daemon 自己把日志写到 `%LOCALAPPDATA%\<slug>-daemon\daemon.log`
     （新增 `run --log-file`，只在 Windows 上有；超过 10 MB 启动时挪成 `daemon.log.1`）；
   - `PATH` 不像 macOS 那样在安装时存进去：计划任务每次启动拿到的是用户当前的环境变量。
+- **停止和重启**：结束计划任务只会结束 conhost，后面的 daemon 还活着（CI 上第二轮看到的）。所以任务里的
+  daemon 把自己的 pid 写到 `%LOCALAPPDATA%\<slug>-daemon\daemon.pid`，并等一个命名事件
+  `Local\<slug>-daemon-stop-<pid>`。`uninstall-service`、重新 `install-service` 和新增的
+  `restart-service`（只在 Windows 上有）设这个事件，daemon 像收到 Ctrl+C 一样收尾（取消并上报手上的 run），
+  20 秒还没退出才强杀。事件同时用来确认那个 pid 还是 daemon，不会误杀别的程序。
 - **为什么用 XML 加 `schtasks`，不用任务计划程序的 COM 接口**：XML 是纯文本，在每个系统上都能单元测试；
   `schtasks` 每台 Windows 都有；daemon 不用为此写 COM 代码。不解析 `schtasks` 的输出（它跟着系统语言和
   代码页变，中文系统上是 GBK），只看退出码；任务定义另存一份在 `%LOCALAPPDATA%\<slug>-daemon\task.xml`，
@@ -327,7 +332,7 @@ M1 里发现、留给后面的：
     `icacls` 把这个文件夹的继承关掉，只留当前用户一条完全控制，文件夹里之后建的文件都继承这一条。
     token 只写进文件，不上命令行、不进日志；
   - 然后运行 `<slug>-daemon.exe install-service`（不弹窗口）。状态读 `task.xml`：没有就是没设置，里面的
-    程序是自己旁边的 daemon 就是正常，是别处的就是「别处」。重启是 `schtasks /End` 再 `/Run`；
+    程序是自己旁边的 daemon 就是正常，是别处的就是「别处」。重启是运行 `<slug>-daemon.exe restart-service`；
   - 新登记的机器标签是 `windows`（Mac 上是 `mac`），名字取 `COMPUTERNAME`。
   - 等 M2 在 `apps/daemon/src/sys.rs` 里有了 ACL 函数（`set_mode` 在 Windows 上真的生效），应该让 daemon
     在 `install-service` 里自己收紧配置文件夹，`Config::problems` 里检查 token 文件有没有别人能读；到时
@@ -346,7 +351,8 @@ M1 里发现、留给后面的：
 - Windows CI（`daemon-windows` 任务，对着 runner 自己用户的真任务计划程序）：
   - `apps/daemon/tests/service_task.rs`：测试程序自己当替身 daemon。注册并启动任务 → 替身在跑且有控制台
     → 再触发一次不会有第二个实例 → `taskkill /F` 杀掉后被重新启动 → 按替换协议换程序文件（运行中的 exe
-    改名成功），替身用 daemon 的同一段代码发现新文件后退出，任务启动新文件，新进程删掉旧文件 → 卸载后
+    改名成功），替身用 daemon 的同一段代码发现新文件后退出，任务启动新文件，新进程删掉旧文件 →
+    `restart-service` 的那段代码让它停下再起一个新的 → 卸载后
     任务没了、进程没了、过 75 秒也没有再被启动。
   - `scripts/test-install-daemon.ps1`（用 Windows PowerShell 5.1 跑）：用刚编译的真 daemon 走一遍安装命令。
     SHA-256 不对时什么都没装；配置文件夹和 token 的访问列表里只有当前用户；任务注册了，真 daemon 在跑、

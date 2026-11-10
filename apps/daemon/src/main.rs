@@ -1,7 +1,7 @@
 use daemon::config::{self, Config};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|example-config> [--config <file>] [--no-load] [--log-file <file>]";
+const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]";
 
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
@@ -65,7 +65,15 @@ fn main() {
                     use tokio::signal::windows::{ctrl_break, ctrl_close};
                     let mut brk = ctrl_break().expect("signal handler");
                     let mut close = ctrl_close().expect("signal handler");
+                    // The scheduled task's daemon is asked to stop through an event
+                    // (uninstall-service, restart-service): it shares no console with them.
+                    let (stop_tx, stop) = tokio::sync::oneshot::channel::<()>();
+                    std::thread::spawn(move || {
+                        daemon::service::wait_stop();
+                        let _ = stop_tx.send(());
+                    });
                     tokio::select! {
+                        _ = stop => {}
                         _ = tokio::signal::ctrl_c() => {}
                         _ = brk.recv() => {}
                         _ = close.recv() => {}
@@ -132,6 +140,15 @@ fn main() {
             match res {
                 Ok(p) => println!("removed {}", p.display()),
                 Err(e) => exit_with(&e),
+            }
+        }
+        // Windows: the scheduled task's daemon again, from the daemon file now on disk.
+        "restart-service" if cfg!(windows) => {
+            if let Err(e) = daemon::service::restart_task(
+                &daemon::service::task_name(),
+                &daemon::service::task_dir(),
+            ) {
+                exit_with(&e);
             }
         }
         "example-config" => print!("{}", config::EXAMPLE),

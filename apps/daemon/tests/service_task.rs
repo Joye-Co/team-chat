@@ -71,6 +71,12 @@ mod windows {
         std::fs::write(&tmp, &state).unwrap();
         std::fs::rename(&tmp, state_file(&config)).unwrap();
         eprintln!("stand-in started: {state}");
+        // Asked to stop (uninstall, restart): the daemon shuts down.
+        std::thread::spawn(|| {
+            service::wait_stop();
+            eprintln!("asked to stop");
+            std::process::exit(0);
+        });
         let start = Instant::now();
         while start.elapsed() < LIFE {
             std::thread::sleep(Duration::from_millis(500));
@@ -197,6 +203,15 @@ mod windows {
         wait_until(Duration::from_secs(30), "the old file is deleted", || {
             !aside.exists()
         });
+
+        // Restarted on request: the running one is stopped, another one runs.
+        service::restart_task(&name, &dir).expect("restart");
+        let third = wait_running(
+            &config,
+            Some(third.pid),
+            Duration::from_secs(60),
+            "started again on request",
+        );
 
         // Uninstalled: no task, no process.
         service::uninstall_task(&name, &dir, true).expect("uninstall");

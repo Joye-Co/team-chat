@@ -861,7 +861,12 @@ found on PATH.
   `conhost.exe --headless <daemon> run --config <file> --log-file <file>`: the daemon gets a
   console without a window, and writes its own log to `%LOCALAPPDATA%\<slug>-daemon\daemon.log`
   (moved to `daemon.log.1` above 10 MB at a start). `--no-load` only writes the definition file.
-  `daemon uninstall-service` ends and deletes the task.
+  `daemon uninstall-service` ends and deletes the task and stops its daemon;
+  `daemon restart-service` (Windows only) stops the daemon and starts the task again. Ending the
+  task ends only the console host, so the task's daemon writes its pid to
+  `%LOCALAPPDATA%\<slug>-daemon\daemon.pid` and waits on the event
+  `Local\<slug>-daemon-stop-<pid>`: setting it shuts the daemon down as Ctrl+C does (runs are
+  cancelled and reported); a daemon that has not ended after 20 s is killed.
 - Windows, replacing the program file (every updater follows this; the daemon is never stopped
   for an update): write the new program completely as `<name>.exe.new` in the same folder and
   check its SHA-256; rename the running `<name>.exe` to `<name>.exe.old-<anything unique>`;

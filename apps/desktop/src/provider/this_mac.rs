@@ -365,18 +365,18 @@ fn run_quiet(mut cmd: Command, what: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Restarts the daemon's scheduled task now: ends it and starts it again from the daemon
-/// file on disk.
+/// Restarts the daemon's scheduled task now (`<daemon> restart-service`): the running daemon
+/// is asked to stop and the task starts the daemon file now on disk. Ending the task alone
+/// would not do: that ends only the console host in front of the daemon.
 #[cfg(windows)]
 pub(super) fn restart() -> Result<(), String> {
-    let name = format!("{}.daemon", env!("PRODUCT_BUNDLE_ID"));
-    let mut end = system_command("schtasks.exe");
-    end.args(["/End", "/TN", &name]);
-    // Not running is fine: starting it is what was asked for.
-    let _ = run_quiet(end, "schtasks /End");
-    let mut run = system_command("schtasks.exe");
-    run.args(["/Run", "/TN", &name]);
-    run_quiet(run, "schtasks /Run").map(|_| ())
+    use std::os::windows::process::CommandExt as _;
+    let daemon = bundled_daemon().ok_or("this build has no daemon next to it")?;
+    let mut cmd = Command::new(daemon);
+    cmd.arg("restart-service")
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    run_quiet(cmd, "restart-service").map(|_| ())
 }
 
 /// The security id (`S-1-5-…`) of the user this app runs as, from `whoami /user`.

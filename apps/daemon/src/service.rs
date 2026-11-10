@@ -511,17 +511,27 @@ pub fn install_task(
             "the task could not be registered with a logon trigger; it starts within a minute of your logon instead"
         );
     }
-    let _ = schtasks(&["/End", "/TN", name]);
-    schtasks(&["/Run", "/TN", name])?;
+    restart_task(name, dir)?;
     Ok(file)
 }
 
-/// Ends and removes the task `name` and its definition file in `dir`.
+/// Ends the running task and its daemon and starts the task again: the daemon file now on
+/// disk is what runs.
+pub fn restart_task(name: &str, dir: &Path) -> Result<(), String> {
+    let _ = schtasks(&["/End", "/TN", name]);
+    stop_daemon(dir);
+    schtasks(&["/Run", "/TN", name])
+}
+
+/// Ends and removes the task `name`, stops its daemon and removes the definition file in `dir`.
 pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, String> {
     let file = task_file(dir);
-    if unload && task_exists(name) {
-        let _ = schtasks(&["/End", "/TN", name]);
-        schtasks(&["/Delete", "/TN", name, "/F"])?;
+    if unload {
+        if task_exists(name) {
+            let _ = schtasks(&["/End", "/TN", name]);
+            schtasks(&["/Delete", "/TN", name, "/F"])?;
+        }
+        stop_daemon(dir);
     }
     match std::fs::remove_file(&file) {
         Ok(()) => Ok(file),
@@ -533,15 +543,37 @@ pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, S
 /// Logs larger than this are moved to `daemon.log.1` when the daemon starts.
 const LOG_KEEP_BYTES: u64 = 10 * 1024 * 1024;
 
-/// `run --log-file`: sends everything the daemon prints to `path` (appending). For the
-/// scheduled task, whose headless console shows nothing.
+/// Where the task's daemon says which process it is (see [`stop_daemon`]).
+pub fn task_pid_file(dir: &Path) -> PathBuf {
+    dir.join("daemon.pid")
+}
+
+// Ending the task ends only the console host: the daemon behind it keeps running. So the
+// daemon of a task makes a named event (`Local\<slug>-daemon-stop-<pid>`, this logon session
+// only) and writes its pid next to its log; whoever stops it sets the event, the daemon shuts
+// down the way it does on Ctrl+C (its runs are cancelled and reported), and only a daemon
+// that does not end in time is killed. The event also tells that the pid still is a daemon.
+
+#[cfg(windows)]
+static STOP_EVENT: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[cfg(windows)]
+fn stop_event_name(pid: u32) -> Vec<u16> {
+    format!("Local\\{}-daemon-stop-{pid}\0", crate::product::slug())
+        .encode_utf16()
+        .collect()
+}
+
+/// `run --log-file`, what the scheduled task starts: sends everything the daemon prints to
+/// `path` (appending; the task's headless console shows nothing) and makes this daemon one
+/// that [`stop_daemon`] can stop.
 #[cfg(windows)]
 pub fn log_to(path: &Path) -> Result<(), String> {
     use std::os::windows::io::IntoRawHandle as _;
     use windows_sys::Win32::System::Console::{STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle};
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
-    }
+    use windows_sys::Win32::System::Threading::CreateEventW;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
     if std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_KEEP_BYTES) {
         let mut old = path.as_os_str().to_owned();
         old.push(".1");
@@ -559,15 +591,93 @@ pub fn log_to(path: &Path) -> Result<(), String> {
         SetStdHandle(STD_OUTPUT_HANDLE, handle as _);
         SetStdHandle(STD_ERROR_HANDLE, handle as _);
     }
-    Ok(())
+    let name = stop_event_name(std::process::id());
+    // SAFETY: the name is a NUL-terminated UTF-16 string; a manual-reset event, not set.
+    let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, name.as_ptr()) };
+    if event.is_null() {
+        return Err(format!(
+            "cannot make the stop event: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    STOP_EVENT.store(event as isize, std::sync::atomic::Ordering::SeqCst);
+    let pid_file = task_pid_file(dir);
+    std::fs::write(&pid_file, std::process::id().to_string())
+        .map_err(|e| format!("cannot write {}: {e}", pid_file.display()))
 }
 
 /// Unix service managers write the log themselves (launchd `StandardOutPath`, systemd
-/// `StandardOutput`).
+/// `StandardOutput`) and stop the daemon with SIGTERM.
 #[cfg(not(windows))]
 pub fn log_to(_path: &Path) -> Result<(), String> {
     let _ = LOG_KEEP_BYTES;
     Err("--log-file is for the Windows scheduled task: redirect the output yourself".into())
+}
+
+/// Blocks until someone asks this daemon to stop ([`stop_daemon`]). Never returns for a
+/// daemon that was not started with `--log-file`. Run it on a thread of its own.
+pub fn wait_stop() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{INFINITE, WaitForSingleObject};
+        let event = STOP_EVENT.load(std::sync::atomic::Ordering::SeqCst);
+        if event != 0 {
+            // SAFETY: the event handle is ours and is never closed.
+            unsafe { WaitForSingleObject(event as _, INFINITE) };
+            return;
+        }
+    }
+    loop {
+        std::thread::park();
+    }
+}
+
+/// How long a daemon that was asked to stop may take (it gives its runs ten seconds).
+#[cfg(windows)]
+const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Stops the daemon that wrote its pid into `dir`: asks, waits, then kills. True when one was
+/// running. Its runs end with it: each is a Job Object that closes with the daemon.
+#[cfg(windows)]
+pub fn stop_daemon(dir: &Path) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{EVENT_MODIFY_STATE, OpenEventW, SetEvent};
+    let pid_file = task_pid_file(dir);
+    let pid = std::fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|t| t.trim().parse::<u32>().ok());
+    let _ = std::fs::remove_file(&pid_file);
+    let Some(pid) = pid else {
+        return false;
+    };
+    let name = stop_event_name(pid);
+    // SAFETY: the name is a NUL-terminated UTF-16 string.
+    let event = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) };
+    if event.is_null() {
+        // No such event: that process is gone, or the pid is another program's now.
+        return false;
+    }
+    // SAFETY: the handle is an open event, closed here.
+    unsafe {
+        SetEvent(event);
+        CloseHandle(event);
+    }
+    let start = std::time::Instant::now();
+    while crate::winjob::pid_alive(pid) {
+        if start.elapsed() > STOP_WAIT {
+            let _ = system_command("taskkill.exe")
+                .args(["/F", "/PID", &pid.to_string()])
+                .output();
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    true
+}
+
+#[cfg(not(windows))]
+pub fn stop_daemon(_dir: &Path) -> bool {
+    false
 }
 
 #[cfg(test)]
