@@ -9,7 +9,8 @@
 //!   answers anything outside the origin of the version shown with 403. Below it, the
 //!   browser process starts with `--host-resolver-rules="MAP * ~NOTFOUND"`, so no host name
 //!   or IP literal resolves (this also covers WebSocket and WebRTC, which the handler does
-//!   not see), and the WebRTC constructors are removed in every frame.
+//!   not see) and every connection must use a proxy nothing can reach, so WebRTC has no
+//!   transport; the WebRTC constructors and `print` are removed in every frame.
 //! - **No navigation away**: `NavigationStarting` and `FrameNavigationStarting` cancel
 //!   everything outside the origin; `NewWindowRequested` never opens a window; launching
 //!   another app's URL scheme is cancelled.
@@ -18,8 +19,8 @@
 //! - **Browser features off**: downloads, permission prompts, script dialogs, context
 //!   menus, dev tools (unless `inspectable`), browser shortcut keys, autofill, password
 //!   saving, zoom, swipe navigation, the status bar, the built-in error page, SmartScreen.
-//! - **Storage**: every page is InPrivate, in a user-data folder of its own
-//!   ([`set_user_data_dir`]).
+//! - **Storage**: every page is InPrivate with a profile of its own, deleted when the page
+//!   closes, in a user-data folder of its own ([`set_user_data_dir`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
@@ -27,6 +28,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use serde_json::{Value, json};
@@ -53,11 +55,15 @@ use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, IStr
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetActiveWindow, SetFocus};
+use windows::Win32::UI::Input::{
+    GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
+    RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE, RegisterRawInputDevices,
+};
 use windows::Win32::UI::Shell::{SHCreateMemStream, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR, w};
 
-use crate::page::{self, NO_NETWORK_SCRIPT, Nav, State};
+use crate::page::{self, Nav, State};
 use crate::resolve::{self, SCHEME};
 use crate::win_support::decode_base64;
 use crate::{
@@ -96,6 +102,11 @@ thread_local! {
 }
 
 unsafe extern "system" fn dispatch_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if msg == WM_INPUT {
+        route_wheel(l);
+        // SAFETY: the default handling frees the input of a foreground WM_INPUT.
+        return unsafe { DefWindowProcW(hwnd, msg, w, l) };
+    }
     if msg == WM_RUN_JOBS {
         loop {
             let job = JOBS.with(|q| q.borrow_mut().pop_front());
@@ -162,6 +173,126 @@ pub(crate) fn post(job: impl FnOnce() + 'static) {
     }
 }
 
+// --- Wheel scrolling that goes to the host -----------------------------------------------
+
+thread_local! {
+    /// Containers of embedded pages whose wheel scrolling the host takes, with the host
+    /// window each belongs to.
+    static WHEEL_ROUTES: RefCell<Vec<(isize, isize)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Gives the wheel over `container` (the window an embedded page lives in) to `host`, or
+/// back to the page (`None`).
+///
+/// The wheel goes to the web view's own window in another process, so the host never
+/// sees the message. It reads the system's raw mouse input instead and, when the pointer
+/// is over such a container, posts the wheel message the host would have got. Only real
+/// input moves the host: a page has no way to produce raw input.
+pub(crate) fn set_wheel_route(container: HWND, host: Option<HWND>) {
+    let (was_empty, is_empty) = WHEEL_ROUTES.with(|r| {
+        let mut routes = r.borrow_mut();
+        let was_empty = routes.is_empty();
+        routes.retain(|(c, _)| *c != container.0 as isize);
+        if let Some(host) = host {
+            routes.push((container.0 as isize, host.0 as isize));
+        }
+        (was_empty, routes.is_empty())
+    });
+    if was_empty == is_empty {
+        return;
+    }
+    // Generic desktop page, mouse. INPUTSINK: also while another process's window (the
+    // web view) has the focus.
+    let device = RAWINPUTDEVICE {
+        usUsagePage: 1,
+        usUsage: 2,
+        dwFlags: if is_empty {
+            RIDEV_REMOVE
+        } else {
+            RIDEV_INPUTSINK
+        },
+        hwndTarget: if is_empty {
+            HWND::default()
+        } else {
+            dispatcher()
+        },
+    };
+    // SAFETY: registers (or removes) this thread's message-only window for raw mouse input.
+    unsafe {
+        let _ = RegisterRawInputDevices(&[device], std::mem::size_of::<RAWINPUTDEVICE>() as u32);
+    }
+}
+
+/// Handles one WM_INPUT: a wheel step with the pointer over a routed container becomes a
+/// wheel message for its host.
+fn route_wheel(input: LPARAM) {
+    let mut raw = RAWINPUT::default();
+    let mut size = std::mem::size_of::<RAWINPUT>() as u32;
+    // SAFETY: reads one raw input record into a buffer of the size given; a record that
+    // does not fit (not a mouse) fails and is ignored.
+    let read = unsafe {
+        GetRawInputData(
+            HRAWINPUT(input.0 as *mut _),
+            RID_INPUT,
+            Some((&mut raw as *mut RAWINPUT).cast()),
+            &mut size,
+            std::mem::size_of::<RAWINPUTHEADER>() as u32,
+        )
+    };
+    if read == u32::MAX || read == 0 || raw.header.dwType != RIM_TYPEMOUSE.0 {
+        return;
+    }
+    // SAFETY: the record is a mouse record (checked above).
+    let (flags, data) = unsafe {
+        let buttons = raw.data.mouse.Anonymous.Anonymous;
+        (buttons.usButtonFlags as u32, buttons.usButtonData as i16)
+    };
+    let message = if flags & RI_MOUSE_WHEEL != 0 {
+        WM_MOUSEWHEEL
+    } else if flags & RI_MOUSE_HWHEEL != 0 {
+        WM_MOUSEHWHEEL
+    } else {
+        return;
+    };
+    if data == 0 {
+        return;
+    }
+    let mut cursor = POINT::default();
+    // SAFETY: queries the pointer and the window under it, then posts to a window of this
+    // thread.
+    unsafe {
+        if GetCursorPos(&mut cursor).is_err() {
+            return;
+        }
+        let mut window = WindowFromPoint(cursor);
+        let mut host = None;
+        for _ in 0..16 {
+            if window.is_invalid() {
+                break;
+            }
+            let found = WHEEL_ROUTES.with(|r| {
+                r.borrow()
+                    .iter()
+                    .find(|(c, _)| *c == window.0 as isize)
+                    .map(|(_, h)| *h)
+            });
+            if found.is_some() {
+                host = found;
+                break;
+            }
+            window = GetAncestor(window, GA_PARENT);
+        }
+        let Some(host) = host else {
+            return;
+        };
+        let position = LPARAM(
+            (((cursor.y as i16 as u16 as u32) << 16) | (cursor.x as i16 as u16 as u32)) as isize,
+        );
+        let wparam = WPARAM(((data as u16 as u32) << 16) as usize);
+        let _ = PostMessageW(Some(HWND(host as *mut _)), message, wparam, position);
+    }
+}
+
 // --- Environment -------------------------------------------------------------------------
 
 static USER_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -186,11 +317,21 @@ fn user_data_dir(autoplay: bool) -> PathBuf {
     base.join(if autoplay { "autoplay" } else { "strict" })
 }
 
-/// The command line of the browser process. No host name or IP literal resolves, WebRTC
-/// may not open UDP sockets, and the browser's own background requests are off.
+/// The command line of the browser process: nothing in it reaches the network.
+///
+/// - No host name resolves (`--host-resolver-rules`).
+/// - Every connection, also to an IP literal and to this computer, must go through a proxy
+///   at an address nothing can connect to (`0.0.0.0:1`, with the loopback bypass removed).
+///   Chromium never falls back to a direct connection for a proxy given this way.
+/// - WebRTC may not open UDP sockets outside that proxy, so with the dead proxy it has no
+///   transport at all (its TCP sockets use the proxy too). This is the engine-level stop
+///   for WebRTC, which the request filter does not see; the script that removes the
+///   constructors is only the first layer.
+/// - The browser's own background requests are off.
 fn browser_arguments(autoplay: bool) -> String {
     let mut args = String::from(
         "--host-resolver-rules=\"MAP * ~NOTFOUND\" \
+         --proxy-server=\"http://0.0.0.0:1\" --proxy-bypass-list=\"<-loopback>\" \
          --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
          --disable-background-networking --disable-domain-reliability --no-pings \
          --dns-prefetch-disable",
@@ -333,18 +474,47 @@ pub(crate) struct PageConfig {
 /// The virtual-key code of Esc.
 const VK_ESCAPE_CODE: u32 = 0x1b;
 
-/// Sent by the wheel script of a page whose scrolling goes to the host.
-const WHEEL_PREFIX: &[u8] = b"{\"__wheel\":";
+/// Runs in every frame of every document, before any page script: removes WebRTC and
+/// `print` from the window, and does the same for a child frame's window the moment the
+/// page reaches for it (a fresh `about:blank` frame has a window of its own).
+const FRAME_GUARD_SCRIPT: &str = r#"(function(){
+  var seen = new WeakSet();
+  var gone = ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription','RTCRtpSender','RTCRtpReceiver','RTCRtpTransceiver','RTCIceTransport','RTCDtlsTransport','RTCSctpTransport'];
+  function guard(w) {
+    try {
+      if (!w || seen.has(w)) return;
+      seen.add(w);
+      gone.forEach(function (k) {
+        try { delete w[k]; } catch (e) {}
+        try { Object.defineProperty(w, k, { value: undefined, configurable: false, writable: false }); } catch (e) {}
+      });
+      try { Object.defineProperty(w, 'print', { value: function () {}, configurable: false, writable: false }); } catch (e) {}
+      ['HTMLIFrameElement', 'HTMLFrameElement', 'HTMLObjectElement', 'HTMLEmbedElement'].forEach(function (name) {
+        var proto = w[name] && w[name].prototype;
+        if (!proto) return;
+        ['contentWindow', 'contentDocument'].forEach(function (prop) {
+          var d = Object.getOwnPropertyDescriptor(proto, prop);
+          if (!d || !d.get) return;
+          Object.defineProperty(proto, prop, { configurable: false, enumerable: d.enumerable, get: function () {
+            var v = d.get.call(this);
+            try { guard(prop === 'contentWindow' ? v : (v && v.defaultView)); } catch (e) {}
+            return v;
+          } });
+        });
+      });
+    } catch (e) {}
+  }
+  guard(window);
+})();"#;
 
+/// For a page whose wheel scrolling goes to the host: the page itself stays still. The
+/// host scrolls from the system's own wheel input ([`set_wheel_route`]), never from
+/// anything the page says.
 const WHEEL_TEMPLATE: &str = r#"(function(){
-  var c = window.chrome && window.chrome.webview;
-  if (!c) return;
   var on = __ON__;
   window.addEventListener('artifactpassscroll', function (e) { on = !!e.detail; });
   window.addEventListener('wheel', function (e) {
-    if (!on || e.ctrlKey) return;
-    e.preventDefault();
-    c.postMessage({ __wheel: [e.deltaX, e.deltaY, e.deltaMode] });
+    if (on && !e.ctrlKey) e.preventDefault();
   }, { capture: true, passive: false });
 })();"#;
 
@@ -374,8 +544,10 @@ pub(crate) struct Page {
     dark: Cell<Option<bool>>,
     focused: Cell<bool>,
     reloads: Cell<u32>,
-    /// The window that gets the page's wheel scrolling (0: the page keeps it).
-    scroll_target: Cell<isize>,
+    /// The host scrolls on the wheel, the page stays still.
+    pass_wheel: Cell<bool>,
+    /// This page's own InPrivate profile.
+    profile: RefCell<Option<ICoreWebView2Profile>>,
     /// Called when Tab leaves the page: the host takes the keyboard focus back.
     on_focus_out: RefCell<Option<Rc<dyn Fn()>>>,
 }
@@ -416,7 +588,8 @@ impl Page {
             dark: Cell::new(None),
             focused: Cell::new(false),
             reloads: Cell::new(0),
-            scroll_target: Cell::new(0),
+            pass_wheel: Cell::new(false),
+            profile: RefCell::new(None),
             on_focus_out: RefCell::new(None),
         });
         let weak = Rc::downgrade(&page);
@@ -468,6 +641,16 @@ impl Page {
         // SAFETY: plain COM calls on a live environment.
         let options = unsafe { env10.CreateCoreWebView2ControllerOptions()? };
         unsafe { options.SetIsInPrivateModeEnabled(true)? };
+        // A profile of its own per page, as WKWebView gets a fresh data store per view:
+        // storage of an origin never outlives the view that wrote it, and two views of
+        // one version do not share it.
+        static NEXT_PROFILE: AtomicU64 = AtomicU64::new(1);
+        let profile = format!(
+            "view-{}-{}",
+            std::process::id(),
+            NEXT_PROFILE.fetch_add(1, Ordering::Relaxed)
+        );
+        unsafe { options.SetProfileName(&HSTRING::from(profile))? };
         let weak = Rc::downgrade(self);
         let handler = CreateCoreWebView2ControllerCompletedHandler::create(Box::new(
             move |result, controller| {
@@ -564,13 +747,23 @@ impl Page {
 
             let mut token = 0i64;
 
-            // Every request of the web view: the origin's files, or 403.
+            // Every request of the web view: the origin's files, or 403. Nothing takes the
+            // default path: when the page is gone or the request cannot be read, it is 403
+            // too.
+            let environment = self
+                .environment
+                .borrow()
+                .clone()
+                .ok_or_else(|| windows::core::Error::from(E_POINTER))?;
             let weak = Rc::downgrade(self);
             let serve = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
-                if let (Some(page), Some(args)) = (weak.upgrade(), args) {
-                    let request = args.Request()?;
-                    let url = text_of!(request, Uri)?;
-                    let method = text_of!(request, Method)?;
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let served = weak.upgrade().and_then(|page| {
+                    let request = args.Request().ok()?;
+                    let url = text_of!(request, Uri).ok()?;
+                    let method = text_of!(request, Method).ok()?;
                     let range = request.Headers().ok().and_then(|headers| {
                         let mut value = PWSTR::null();
                         headers
@@ -578,10 +771,13 @@ impl Page {
                             .ok()
                             .map(|()| take_pwstr(value))
                     });
-                    let response = page.respond(&url, &method, range.as_deref())?;
-                    args.SetResponse(&response)?;
-                }
-                Ok(())
+                    page.respond(&url, &method, range.as_deref()).ok()
+                });
+                let response = match served {
+                    Some(response) => response,
+                    None => blocked_response(&environment)?,
+                };
+                args.SetResponse(&response)
             }));
             match webview.cast::<ICoreWebView2_22>() {
                 // Also the requests of workers (the CSP allows none).
@@ -619,14 +815,13 @@ impl Page {
             }));
             webview.add_NavigationStarting(&navigate, &mut token)?;
 
-            // Frames: the CSP allows none; a frame may still never leave the origin.
-            let weak = Rc::downgrade(self);
+            // Frames: the CSP allows none, so no frame navigation is ever allowed, not even
+            // inside the origin. A frame then only ever holds `about:blank` or `srcdoc`
+            // content, whose messages `on_message` drops by their source: the bridge
+            // answers the main frame only.
             let frames = NavigationStartingEventHandler::create(Box::new(move |_, args| {
-                if let (Some(page), Some(args)) = (weak.upgrade(), args) {
-                    let url = text_of!(args, Uri)?;
-                    if page::navigation(&page.state, &url, false, Instant::now()) != Nav::Allow {
-                        args.SetCancel(true)?;
-                    }
+                if let Some(args) = args {
+                    args.SetCancel(true)?;
                 }
                 Ok(())
             }));
@@ -785,6 +980,7 @@ impl Page {
             }));
             controller.add_AcceleratorKeyPressed(&keys, &mut token)?;
 
+            *self.profile.borrow_mut() = Some(webview.cast::<ICoreWebView2_13>()?.Profile()?);
             controller.SetBounds(self.bounds.get())?;
             controller.SetIsVisible(self.visible.get())?;
             *self.controller.borrow_mut() = Some(controller.clone());
@@ -828,15 +1024,7 @@ impl Page {
             }
         };
         let Some(response) = response else {
-            // SAFETY: creates a response object with no body.
-            return unsafe {
-                environment.CreateWebResourceResponse(
-                    None::<&IStream>,
-                    403,
-                    w!("Blocked"),
-                    w!("Content-Type: text/plain\r\nCache-Control: no-store"),
-                )
-            };
+            return blocked_response(&environment);
         };
         let mut headers = String::new();
         for (name, value) in &response.headers {
@@ -880,10 +1068,6 @@ impl Page {
                 return;
             }
         }
-        if raw.starts_with(WHEEL_PREFIX) {
-            self.forward_wheel(raw);
-            return;
-        }
         let now = Instant::now();
         let (outcome, version, user_action) = {
             let mut st = self.state.borrow_mut();
@@ -896,47 +1080,6 @@ impl Page {
         }
         if let Some(request) = outcome.request {
             self.emit(page::request_event(request, version, user_action));
-        }
-    }
-
-    /// Gives one wheel step of the page to the host window, as the wheel message the
-    /// mouse would have sent there.
-    fn forward_wheel(&self, raw: &[u8]) {
-        let target = self.scroll_target.get();
-        if target == 0 {
-            return;
-        }
-        let Ok(value) = serde_json::from_slice::<Value>(raw) else {
-            return;
-        };
-        let part = |i: usize| value["__wheel"][i].as_f64().unwrap_or(0.0);
-        // CSS px per unit of the delta mode: pixels, lines, pages.
-        let unit = match part(2) as i64 {
-            1 => 40.0,
-            2 => 800.0,
-            _ => 1.0,
-        };
-        // One wheel notch (120) scrolls a page 100 CSS px.
-        let notch = |css: f64| ((-css * unit * 1.2).round().clamp(-1200.0, 1200.0)) as i16;
-        let mut cursor = POINT::default();
-        // SAFETY: posts a wheel message to a window of this process.
-        unsafe {
-            let _ = GetCursorPos(&mut cursor);
-            let position = LPARAM(
-                (((cursor.y as i16 as u16 as u32) << 16) | (cursor.x as i16 as u16 as u32))
-                    as isize,
-            );
-            let target = HWND(target as *mut _);
-            for (message, delta) in [
-                (WM_MOUSEWHEEL, notch(part(1))),
-                // A positive horizontal delta scrolls right, the other way round.
-                (WM_MOUSEHWHEEL, -notch(part(0))),
-            ] {
-                if delta != 0 {
-                    let wparam = WPARAM(((delta as u16 as u32) << 16) as usize);
-                    let _ = PostMessageW(Some(target), message, wparam, position);
-                }
-            }
         }
     }
 
@@ -965,6 +1108,19 @@ impl Page {
         }
     }
 
+    /// Records the viewer's click when it is inside the web view. `position` is the
+    /// `lParam` of the parent's WM_PARENTNOTIFY: the pointer in the parent's client pixels.
+    /// A click in another child of the parent (the version picker) is not input to the
+    /// page.
+    pub(crate) fn note_click(&self, position: LPARAM) {
+        let x = (position.0 & 0xffff) as u16 as i16 as i32;
+        let y = ((position.0 >> 16) & 0xffff) as u16 as i16 as i32;
+        let b = self.bounds.get();
+        if self.visible.get() && x >= b.left && x < b.right && y >= b.top && y < b.bottom {
+            self.note_input();
+        }
+    }
+
     /// Records a click or key press of the viewer in this page (see [`gate`]).
     pub(crate) fn note_input(&self) {
         if let Ok(mut st) = self.state.try_borrow_mut()
@@ -987,9 +1143,9 @@ impl Page {
                 return;
             }
             let init = st.bridge.init(st.viewer.as_ref(), st.ref_menu.as_ref());
-            // WebView2 runs the script in every frame of every document: the WebRTC
-            // removal everywhere, the bridge only in the main frame of an artifact page.
-            let mut script = String::from(NO_NETWORK_SCRIPT);
+            // WebView2 runs the script in every frame of every document: the frame guard
+            // everywhere, the bridge only in the main frame of an artifact page.
+            let mut script = String::from(FRAME_GUARD_SCRIPT);
             script.push_str("\nif(window===window.top&&location.protocol==='");
             script.push_str(SCHEME);
             script.push_str(":'){\n");
@@ -1001,7 +1157,7 @@ impl Page {
                 script.push_str(&bridge::ref_listener_script(menu));
             }
             script.push('\n');
-            let passing = self.scroll_target.get() != 0;
+            let passing = self.pass_wheel.get();
             script.push_str(
                 &WHEEL_TEMPLATE.replace("__ON__", if passing { "true" } else { "false" }),
             );
@@ -1151,33 +1307,28 @@ impl Page {
         }
     }
 
-    /// `prefers-color-scheme` of the page. WebView2 keeps it per profile: every 产出 page
-    /// follows the last call, as the app has one theme.
+    /// `prefers-color-scheme` of the page (WebView2 keeps it per profile; every page has
+    /// its own).
     pub(crate) fn set_dark(&self, dark: bool) {
-        let Some(webview) = self.webview() else {
+        let Some(profile) = self.profile.borrow().clone() else {
             self.dark.set(Some(dark));
             return;
         };
-        // SAFETY: COM calls on this thread's web view.
+        // SAFETY: a COM call on this page's profile.
         unsafe {
-            if let Ok(profile) = webview.cast::<ICoreWebView2_13>().and_then(|w| w.Profile()) {
-                let _ = profile.SetPreferredColorScheme(if dark {
-                    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
-                } else {
-                    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
-                });
-            }
+            let _ = profile.SetPreferredColorScheme(if dark {
+                COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
+            } else {
+                COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
+            });
         }
     }
 
-    /// Gives the page's wheel scrolling to `target` (a window handle), or back to the page
-    /// (0).
-    pub(crate) fn set_scroll_target(&self, target: isize) {
-        let was = self.scroll_target.replace(target);
-        if (was != 0) != (target != 0) {
+    /// Keeps the page still on the wheel (true: the host scrolls) or lets it scroll.
+    pub(crate) fn set_pass_wheel(&self, pass: bool) {
+        if self.pass_wheel.replace(pass) != pass {
             self.evaluate(&format!(
-                "window.dispatchEvent(new CustomEvent('artifactpassscroll',{{detail:{}}}));void 0",
-                target != 0
+                "window.dispatchEvent(new CustomEvent('artifactpassscroll',{{detail:{pass}}}));void 0"
             ));
         }
     }
@@ -1308,19 +1459,39 @@ impl Page {
         }
         self.on_focus_out.borrow_mut().take();
         self.webview.borrow_mut().take();
-        if let Some(controller) = self.controller.borrow_mut().take() {
-            // SAFETY: closes this page's controller: the page, its media and its handlers
-            // end.
-            unsafe {
+        let controller = self.controller.borrow_mut().take();
+        let profile = self.profile.borrow_mut().take();
+        // SAFETY: closes this page's controller (the page, its media and its handlers
+        // end), then deletes its profile with everything the page stored.
+        unsafe {
+            if let Some(controller) = controller {
                 let _ = controller.Close();
+            }
+            if let Some(profile) = profile.and_then(|p| p.cast::<ICoreWebView2Profile8>().ok()) {
+                let _ = profile.Delete();
             }
         }
         self.emit(ArtifactEvent::Closed);
     }
 }
 
-/// True for the WM_PARENTNOTIFY of a mouse button or pointer going down in a child window
-/// (the web view): the viewer's click.
+/// The answer to every request that is not a file of the version shown.
+fn blocked_response(
+    environment: &ICoreWebView2Environment,
+) -> WinResult<ICoreWebView2WebResourceResponse> {
+    // SAFETY: creates a response object with no body.
+    unsafe {
+        environment.CreateWebResourceResponse(
+            None::<&IStream>,
+            403,
+            w!("Blocked"),
+            w!("Content-Type: text/plain\r\nCache-Control: no-store"),
+        )
+    }
+}
+
+/// True for the WM_PARENTNOTIFY of a mouse button or pointer going down in a child window:
+/// a click somewhere in the parent's children ([`Page::note_click`] tells where).
 pub(crate) fn is_child_click(wparam: WPARAM) -> bool {
     matches!(
         (wparam.0 & 0xffff) as u32,
@@ -1434,7 +1605,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM
             if is_child_click(w)
                 && let Some(page) = data.page()
             {
-                page.note_input();
+                page.note_click(l);
             }
             LRESULT(0)
         }

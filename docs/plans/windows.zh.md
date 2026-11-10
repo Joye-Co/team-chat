@@ -209,22 +209,36 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - origin：把 `artifact` 注册成带 authority 的自定义 scheme（`CoreWebView2CustomSchemeRegistration`），页面地址
   和 macOS 完全一样：`artifact://<id>-v<version>/`，每个版本一个 origin；内容由 `WebResourceRequested` 用同一个
   `resolve::serve_range` 提供，CSP 和其他响应头逐字相同（Windows 另加一条 `Permissions-Policy`）。
-- 断网三层：CSP；`WebResourceRequested` 过滤 `*`，当前版本 origin 之外的请求一律回 403；浏览器进程带
-  `--host-resolver-rules="MAP * ~NOTFOUND"` 启动，任何主机名和 IP 都解析不了（WebSocket、WebRTC 不经过请求
-  过滤，靠这一层和 CSP），并在每个 frame 里删掉 WebRTC 构造函数。
-- 跳转：`NavigationStarting` / `FrameNavigationStarting` 取消 origin 之外的一切；`NewWindowRequested` 一律不开窗；
+- 断网四层：CSP；`WebResourceRequested` 过滤 `*`，当前版本 origin 之外的请求一律回 403（页面已关或请求读
+  不出来时也回 403，没有走默认路径的情况）；浏览器进程带 `--host-resolver-rules="MAP * ~NOTFOUND"` 启动，
+  任何主机名都解析不了；所有连接（包括直连 IP 和本机）必须走一个连不上的代理（`--proxy-server` 指向
+  `0.0.0.0:1`，去掉回环豁免），Chromium 对这样给的代理不会退回直连。
+- WebRTC：macOS 在引擎里关掉；Windows 没有这个开关，靠上面的死代理加 `disable_non_proxied_udp`（UDP 不许
+  绕过代理，TCP 也走代理，于是没有任何传输通道），再在每个 frame 里删掉构造函数；页面通过
+  `contentWindow` / `contentDocument` 拿到的新 frame 窗口也当场清理。
+- 跳转：`NavigationStarting` 取消 origin 之外的一切，`FrameNavigationStarting` 取消所有 frame 跳转（CSP 本来
+  就不允许 frame，这样 frame 里只可能是 `about:blank` 或 `srcdoc`）；`NewWindowRequested` 一律不开窗；
   外部协议（`LaunchingExternalUriScheme`）取消。
 - 桥：`chrome.webview.postMessage`，只收主 frame、且来源是当前版本 origin 的消息，再交给同一个 `Bridge` 按
   `Capabilities` 检查。Host objects 关闭。
 - 关掉的浏览器功能：下载、权限弹窗、脚本对话框、右键菜单、开发者工具（调试构建除外）、浏览器快捷键、
   自动填充和保存密码、缩放、滑动导航、状态栏、内置错误页、SmartScreen。
-- 存储：每个页面都是 InPrivate；用户数据目录单独放在 `%LOCALAPPDATA%\team-chat\webview2`
+- 存储：每个页面都是 InPrivate，并且有自己的 profile（关闭页面时删除），和 macOS 每个视图一个全新存储
+  一致：同一 origin 的 localStorage 不会留到视图关闭之后，深浅色也按页面设置；用户数据目录单独放在 `%LOCALAPPDATA%\team-chat\webview2`
   （`ui::web_embed::prepare_process` 设置）。
 - 嵌入：GPUI 窗口的子 `HWND`（裁剪容器）里放 WebView2，每帧由宿主按布局摆放（物理像素 = 点 × 缩放）、裁剪、
   圆角（窗口 region）、隐藏。**GPUI 默认用置顶的 DirectComposition 树绘制，会盖住所有子窗口**，所以应用在
   Windows 上启动时设置 `GPUI_DISABLE_DIRECT_COMPOSITION=1`，让 GPUI 直接呈现到 `HWND`。
-- 「用户点过」的信号：页面里按下鼠标时父窗口收到 `WM_PARENTNOTIFY`；非文字按键走 `AcceleratorKeyPressed`。
+- 「用户点过」的信号：页面里按下鼠标时父窗口收到 `WM_PARENTNOTIFY`，只有落在网页区域内的才算（点版本
+  下拉框不算）；非文字按键走 `AcceleratorKeyPressed`。
+- 滚轮转交（话题里的内嵌页面）：宿主读系统的原始鼠标输入（Raw Input），指针在这种页面上时把滚轮消息发给
+  GPUI 窗口；页面发来的任何消息都不会让宿主滚动。
+- `window.print()`：WebView2 没有关打印的开关，在每个 frame 里把 `print` 换成空函数。还剩一种情况没有堵死：
+  页面如果能在脚本注入之前拿到一个新 frame 的窗口，可以调出打印预览；那只是一个需要用户自己确认的对话框，
+  不泄露数据，所以没有再加更重的手段。
 - 截图（图的 PNG、被遮住时的快照）走 DevTools 协议 `Page.captureScreenshot`，隐藏窗口固定 1 像素 = 1 CSS px。
+- 图渲染器起不来时（比如电脑上没有 WebView2 运行时）：等着的图立刻显示「没有画出来」，隔 2 秒、4 秒……最多
+  5 分钟再试一次，不会反复开关隐藏窗口；这些失败不写进磁盘缓存。
 - 桌面端接线：`ui/web_embed.rs`、`views/artifacts/window.rs`、`diagrams/mod.rs` 在 Windows 上走同一套代码；
   打开外部链接前的确认暂时用系统消息框。
 
@@ -233,12 +247,21 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - `tests/isolation.rs`：和 macOS 同一份页面、同一组断言（本 origin 文件能加载；http / https / ws / WebRTC /
   路径穿越 / 别的版本都拿不到；CSP 生效；跳转被拒；弹窗被拒；每个版本独立 origin；桥应答、拒绝未知方法、
   没有能力时拒绝 `emit` 和 `ask`）。
+- `tests/isolation.rs` 的「逃逸」页（两个平台同一份）：新建的 `about:blank` frame 里没有 WebRTC；对本机一个
+  TCP 监听端口用 TURN-over-TCP、fetch、图片、WebSocket、beacon、弹窗、跳转各试一遍，监听端口一个连接都没
+  收到；frame 自己发的桥消息被忽略；frame 加载本 origin 的页面被拒；地理位置、麦克风、通知、剪贴板都没有
+  被授权；blob 下载没有落盘；别的应用的 URL scheme 被拒；关掉窗口再开同 origin 的新窗口，localStorage 是空的。
 - `examples/win_embed_proto.rs`：普通窗口里嵌一个页面，对屏幕截图取像素验证位置、裁剪、圆角、隐藏和再显示、
-  关闭；`SendInput` 真实点击到达页面并算作用户输入；独立的产出窗口和版本下拉框。
+  关闭；`SendInput` 真实点击到达页面并算作用户输入，点版本下拉框不算；真实滚轮在开启转交时滚动宿主，页面
+  伪造的滚轮消息不起作用；独立的产出窗口和版本下拉框。
 - `apps/desktop/examples/win_embed_gpui.rs`：真的 GPUI 窗口里嵌一个页面。关掉 DirectComposition 时页面显示在
   GPUI 内容之上，点击、裁剪、隐藏都对；不关时页面被 GPUI 盖住（截图里看不到，但仍能收到点击），这是必须关掉
   它的证据。
 - `examples/diagram_selftest.rs`：8 个 Mermaid 样例在隐藏的 WebView2 里渲染并导出透明底的 2x PNG。
+
+测试顺带发现的 macOS 问题（不在这次范围内，没有改）：在 macOS 15 的 CI 上，页面点了一个 blob 下载链接之后
+脚本就不再运行（定时器不触发），应用本身不受影响，文件也没有保存；在 macOS 26 上页面照常运行。隔离测试
+两个平台都检查「文件没落盘、没有连接出去」，「页面还活着」只在 Windows 上要求，macOS 上只记录。
 
 只能在真机上确认的（CI 是 100% 缩放、软件渲染、没有人操作）：
 
@@ -246,7 +269,8 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - 焦点和 Tab 顺序：页面和 GPUI 输入框之间来回切换、Esc 和 Tab 交还焦点、中文输入法候选窗位置。
 - 页面有焦点时应用级快捷键（Ctrl+W 等）现在会被页面吃掉，要决定哪些转给应用。
 - 高 DPI 和多显示器不同缩放比：位置、清晰度、图的 PNG 尺寸。
-- 话题里内嵌页面的滚轮转交（页面脚本把滚轮转成宿主的 `WM_MOUSEWHEEL`）手感是否自然。
+- 话题里内嵌页面的滚轮转交（Raw Input）手感是否自然，触控板的精确滚动是否也走这条路。
+- 每个页面一个 profile 对打开速度和内存的影响；异常退出后留在用户数据目录里的 profile 文件夹要不要清理。
 - 只用键盘操作页面（不点击）时，文字按键不算「用户点过」，`emit` 可能被闸门挡住。
 - 关掉 DirectComposition 对整个应用的影响（缩放窗口时的流畅度；不再支持窗口透明，应用没用到）。
 - 版本下拉框是原生 COMBOBOX，外观要在 C4 里按设计规范重做；外部链接确认框同理。

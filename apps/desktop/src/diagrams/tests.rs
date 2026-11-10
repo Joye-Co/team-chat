@@ -364,6 +364,113 @@ fn page_failures_show_their_reason(cx: &mut gpui::TestAppContext) {
 }
 
 #[test]
+fn the_wait_after_a_failed_start_doubles_and_is_capped() {
+    let t = Instant::now();
+    let mut b = StartBackoff::default();
+    assert!(!b.blocked(t));
+    assert_eq!(b.failed(t), Duration::from_secs(2));
+    assert!(b.blocked(t) && b.blocked(t + Duration::from_millis(1999)));
+    assert!(!b.blocked(t + Duration::from_secs(2)));
+    assert_eq!(b.failed(t), Duration::from_secs(4));
+    assert_eq!(b.failed(t), Duration::from_secs(8));
+    for _ in 0..40 {
+        assert!(b.failed(t) <= StartBackoff::MAX);
+    }
+    assert_eq!(b.failed(t), StartBackoff::MAX);
+    b.ready();
+    assert!(!b.blocked(t));
+    assert_eq!(b.failed(t), Duration::from_secs(2));
+}
+
+/// A renderer that cannot start (no web view runtime on the computer) must not be opened
+/// again and again: its diagrams fail at once, new ones fail while the wait runs, and they
+/// are tried again afterwards.
+#[gpui::test]
+fn a_renderer_that_cannot_start_fails_its_diagrams_and_waits(cx: &mut gpui::TestAppContext) {
+    let _dir = service_setup(cx);
+    let first = normalize::normalize("flowchart LR\n  NoStartA-->NoStartB").unwrap();
+    let second = normalize::normalize("flowchart LR\n  NoStartC-->NoStartD").unwrap();
+    let third = normalize::normalize("flowchart LR\n  NoStartE-->NoStartF").unwrap();
+    cx.update(|cx| {
+        assert!(request(&first, INLINE_SCALE, true, cx).is_pending());
+        assert!(request(&second, INLINE_SCALE, false, cx).is_pending());
+        // The renderer ends before its page was ever ready.
+        assert!(!cx.global::<Service>().renderer_ready);
+        handle(
+            Msg::Renderer(renderer::RendererEvent::Crashed(
+                "webview2 environment: not installed".into(),
+            )),
+            cx,
+        );
+        for n in [&first, &second] {
+            assert!(
+                matches!(
+                    peek(n, INLINE_SCALE, cx),
+                    Some(State::Failed(ErrorKind::Failed, None))
+                ),
+                "a waiting diagram fails when the renderer cannot start"
+            );
+        }
+        let s = cx.global::<Service>();
+        assert!(s.queue.is_empty() && s.running.is_none() && idle(cx));
+        assert!(s.renderer.is_none());
+        assert_eq!(s.start_backoff.failures, 1);
+        assert!(s.start_backoff.blocked(Instant::now()));
+        // While the wait runs nothing opens: a new diagram fails at once, and the failed
+        // ones stay failed (no hidden window is created for them).
+        assert!(matches!(
+            request(&first, INLINE_SCALE, true, cx),
+            State::Failed(..)
+        ));
+        request(&third, INLINE_SCALE, true, cx);
+        assert!(matches!(
+            peek(&third, INLINE_SCALE, cx),
+            Some(State::Failed(..))
+        ));
+        assert!(cx.global::<Service>().renderer.is_none() && idle(cx));
+        // A second failed start waits longer.
+        handle(
+            Msg::Renderer(renderer::RendererEvent::Crashed("again".into())),
+            cx,
+        );
+        assert_eq!(cx.global::<Service>().start_backoff.failures, 2);
+        // The wait is over: asking again queues the diagram for a new try.
+        cx.global_mut::<Service>().start_backoff.retry_at = Some(Instant::now());
+        assert!(request(&first, INLINE_SCALE, true, cx).is_pending());
+        // Nothing of this is remembered on disk: the next launch starts clean.
+        let key = key_for(&second, current_theme(cx), INLINE_SCALE);
+        assert!(cx.global_mut::<Service>().disk.read_err(&key).is_none());
+    });
+}
+
+/// A renderer that was ready and then ended is replaced at once, as before: only the
+/// diagram it was drawing fails.
+#[gpui::test]
+fn a_renderer_that_ends_after_it_was_ready_is_not_a_failed_start(cx: &mut gpui::TestAppContext) {
+    let _dir = service_setup(cx);
+    let n = normalize::normalize("flowchart LR\n  CrashA-->CrashB").unwrap();
+    let waiting = normalize::normalize("flowchart LR\n  CrashC-->CrashD").unwrap();
+    cx.update(|cx| {
+        request(&n, INLINE_SCALE, true, cx);
+        request(&waiting, INLINE_SCALE, false, cx);
+        start_next_for_test(cx).expect("a queued job");
+        cx.global_mut::<Service>().renderer_ready = true;
+        handle(
+            Msg::Renderer(renderer::RendererEvent::Crashed("ended".into())),
+            cx,
+        );
+        assert!(matches!(
+            peek(&n, INLINE_SCALE, cx),
+            Some(State::Failed(..))
+        ));
+        assert!(peek(&waiting, INLINE_SCALE, cx).is_some_and(|s| s.is_pending()));
+        let s = cx.global::<Service>();
+        assert_eq!(s.start_backoff.failures, 0);
+        assert!(!s.start_backoff.blocked(Instant::now()));
+    });
+}
+
+#[test]
 fn hints_take_numbers_only() {
     assert_eq!(
         Hint::of(

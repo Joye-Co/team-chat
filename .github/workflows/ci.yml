@@ -207,8 +207,22 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: macos-test
+      # Unit tests, then tests/isolation.rs in a real WKWebView (hidden window, the same
+      # assertions the Windows job runs in WebView2).
+      - name: cargo test (artifact view, isolation in WKWebView)
+        env:
+          ARTIFACT_VIEW_ISOLATION_REPORT: ${{ runner.temp }}/artifact-view/isolation.json
+        run: cargo test --locked -p artifact-view --no-fail-fast
       - name: cargo test
+        if: always()
         run: cargo test --locked -p desktop
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: artifact-view-macos
+          path: ${{ runner.temp }}/artifact-view
+          if-no-files-found: warn
+          retention-days: 14
 
   desktop-windows:
     name: Desktop build and tests (Windows)

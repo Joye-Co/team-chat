@@ -355,6 +355,10 @@ impl<K: Eq + Hash + Clone, V> Lru<K, V> {
         }
     }
 
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.map.remove(key).map(|e| e.1)
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.map.len()
