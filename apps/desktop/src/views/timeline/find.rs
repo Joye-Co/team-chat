@@ -50,9 +50,9 @@ gpui::actions!(
 /// switcher's key context, deeper than this one.
 pub fn install(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-f", FindInTopic, None),
-        KeyBinding::new("secondary-g", FindNext, None),
-        KeyBinding::new("secondary-shift-g", FindPrevious, None),
+        KeyBinding::new(crate::secondary!("f"), FindInTopic, None),
+        KeyBinding::new(crate::secondary!("g"), FindNext, None),
+        KeyBinding::new(crate::secondary!("shift-g"), FindPrevious, None),
     ]);
     cx.on_action(|_: &FindInTopic, cx| {
         crate::views::nav::in_main_window(cx, |window, cx| {

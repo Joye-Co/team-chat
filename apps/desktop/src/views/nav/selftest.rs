@@ -111,7 +111,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         );
 
         // The keyboard path: Cmd+K, Down, then Enter picks the second entry.
-        key(handle, "secondary-k", cx);
+        key(handle, crate::secondary!("k"), cx);
         pause(cx).await;
         let open = handle
             .update(cx, |_, window, cx| window.has_active_dialog(cx))
@@ -182,7 +182,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         let _ = handle.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         pause(cx).await;
 
-        key(handle, "secondary-1", cx);
+        key(handle, crate::secondary!("1"), cx);
         pause(cx).await;
         let first = provider
             .groups()

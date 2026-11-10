@@ -37,7 +37,7 @@ const CONTEXT: &str = "NewTopicSheet";
 /// the multi-line message field.
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([gpui::KeyBinding::new(
-        "secondary-enter",
+        crate::secondary!("enter"),
         StartTopic,
         Some(CONTEXT),
     )]);

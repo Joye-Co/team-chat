@@ -615,8 +615,8 @@ mod tests {
         );
         assert_eq!(shortcut_caps("Ctrl++"), vec!["Ctrl", "+"]);
         assert_eq!(shortcut_caps("F11"), vec!["F11"]);
-        // "secondary" is Ctrl here, so the app's bindings read Ctrl.
-        let k = Keystroke::parse("secondary-shift-k").unwrap();
+        // `secondary!` is Ctrl here, so the app's bindings read Ctrl.
+        let k = Keystroke::parse(crate::secondary!("shift-k")).unwrap();
         assert_eq!(shortcut_text(&k.modifiers, &k.key), "Ctrl+Shift+K");
         assert_eq!(keystroke_source(&k), "ctrl-shift-k");
     }

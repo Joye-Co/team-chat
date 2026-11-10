@@ -1488,9 +1488,9 @@ pub fn bind_view_keys(cx: &mut App) {
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-q", Quit, None),
-        KeyBinding::new("secondary-,", OpenSettings, None),
-        KeyBinding::new("secondary-alt-i", ToggleSidePanel, None),
+        KeyBinding::new(crate::secondary!("q"), Quit, None),
+        KeyBinding::new(crate::secondary!(","), OpenSettings, None),
+        KeyBinding::new(crate::secondary!("alt-i"), ToggleSidePanel, None),
         // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
         // Windows has no second command key: Ctrl+Alt+S.
         KeyBinding::new(
@@ -1502,12 +1502,12 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
             ToggleSidebar,
             None,
         ),
-        KeyBinding::new("secondary-n", NewTopic, None),
-        KeyBinding::new("secondary-;", ToggleSideChat, None),
-        KeyBinding::new("secondary-alt-r", ToggleTopicRail, None),
-        KeyBinding::new("secondary-shift-h", OpenDesk, None),
-        KeyBinding::new("secondary-shift-m", OpenMembers, None),
-        KeyBinding::new("secondary-shift-o", OpenArtifacts, None),
+        KeyBinding::new(crate::secondary!("n"), NewTopic, None),
+        KeyBinding::new(crate::secondary!(";"), ToggleSideChat, None),
+        KeyBinding::new(crate::secondary!("alt-r"), ToggleTopicRail, None),
+        KeyBinding::new(crate::secondary!("shift-h"), OpenDesk, None),
+        KeyBinding::new(crate::secondary!("shift-m"), OpenMembers, None),
+        KeyBinding::new(crate::secondary!("shift-o"), OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     {

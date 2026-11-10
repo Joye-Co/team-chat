@@ -73,7 +73,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
         KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
         // Inside the switcher Cmd+F scopes it to the current 群.
-        KeyBinding::new("secondary-f", ScopeToGroup, Some(CONTEXT)),
+        KeyBinding::new(crate::secondary!("f"), ScopeToGroup, Some(CONTEXT)),
     ]);
 }
 

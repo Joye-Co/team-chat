@@ -23,7 +23,7 @@ gpui::actions!(search, [SearchInGroup, SearchEverywhere]);
 pub fn install(cx: &mut App) {
     // ⌘F finds in the open 话题 and falls back to SearchInGroup elsewhere
     // (`timeline::find`).
-    cx.bind_keys([KeyBinding::new("secondary-shift-f", SearchEverywhere, None)]);
+    cx.bind_keys([KeyBinding::new(crate::secondary!("shift-f"), SearchEverywhere, None)]);
     crate::views::timeline::find::install(cx);
     cx.on_action(|_: &SearchInGroup, cx| open_deferred(false, cx));
     cx.on_action(|_: &SearchEverywhere, cx| open_deferred(true, cx));
