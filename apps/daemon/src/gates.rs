@@ -36,7 +36,9 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(24 * 3600);
 /// under an approval policy that asks for (almost) every command, so its runs are not gated
 /// yet and the server keeps the rules in the prompt for them.
 pub fn enforced_by(kind: &str) -> bool {
-    kind == "claude"
+    // Not on Windows yet: the hook asks the daemon through the chat-run socket, which is not
+    // there. A machine that cannot stop a command must not say it can.
+    cfg!(unix) && kind == "claude"
 }
 
 /// The 设置 name of a kind, for the approval title (the server shows its own).

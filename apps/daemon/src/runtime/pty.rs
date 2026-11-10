@@ -6,8 +6,11 @@
 //! status; the result text is the end of the output.
 
 use super::*;
+#[cfg(unix)]
 use crate::proto::{RunEvent, truncate};
+#[cfg(unix)]
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
 pub struct PtyRuntime;
@@ -62,6 +65,7 @@ pub fn strip_ansi(s: &str) -> String {
     out
 }
 
+#[cfg(unix)]
 fn open_pty() -> std::io::Result<(OwnedFd, OwnedFd)> {
     let mut master = -1;
     let mut slave = -1;
@@ -89,8 +93,19 @@ fn open_pty() -> std::io::Result<(OwnedFd, OwnedFd)> {
     Ok(unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) })
 }
 
+#[cfg(unix)]
 const KEEP: usize = 256 * 1024;
 
+/// Windows has no PTY runtime yet (ConPTY will take the place of `openpty`).
+#[cfg(not(unix))]
+async fn run(spec: RunSpec, _emit: Emit, _control: mpsc::UnboundedReceiver<Control>) -> Outcome {
+    Outcome::failed(format!(
+        "runtime {}: the pty kind is not supported on Windows yet",
+        spec.runtime_name
+    ))
+}
+
+#[cfg(unix)]
 async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
     let has_placeholder = spec.cfg.args.iter().any(|a| a.contains("{prompt}"));

@@ -75,13 +75,47 @@ const BASE_ENV: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
 ];
 
+/// What a Windows program needs besides [`BASE_ENV`]: without `SystemRoot` sockets and
+/// crypto fail to load, and the CLIs find their logins and caches through the profile folders.
+#[cfg(windows)]
+const WINDOWS_ENV: &[&str] = &[
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    "USERDOMAIN",
+    "COMPUTERNAME",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "TEMP",
+    "TMP",
+    "OS",
+    "PROCESSOR_ARCHITECTURE",
+    "NUMBER_OF_PROCESSORS",
+];
+
 pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = vec![];
     let mut put = |k: &str, v: String| {
         env.retain(|(n, _)| n != k);
         env.push((k.to_string(), v));
     };
-    for k in BASE_ENV {
+    #[cfg(not(windows))]
+    let base = BASE_ENV.iter();
+    #[cfg(windows)]
+    let base = BASE_ENV.iter().chain(WINDOWS_ENV);
+    for k in base {
         if let Ok(v) = std::env::var(k) {
             put(k, v);
         }
@@ -204,7 +238,7 @@ fn start_chat_run(
         }
     };
     let path = match env.iter().find(|(k, _)| k == "PATH") {
-        Some((_, p)) if !p.is_empty() => format!("{}:{p}", bin.display()),
+        Some((_, p)) if !p.is_empty() => format!("{}{}{p}", bin.display(), crate::sys::PATH_SEP),
         _ => bin.display().to_string(),
     };
     env.retain(|(k, _)| {
@@ -285,7 +319,8 @@ pub async fn supervise(ctx: RunCtx) {
                 None
             } else {
                 // In a VM `chat-run` always goes through the relayed socket.
-                let files = rt.kind == "codex" && !exec.isolated();
+                // Windows has no socket transport yet: every run there uses the files.
+                let files = cfg!(windows) || (rt.kind == "codex" && !exec.isolated());
                 // Files and 产出 go up over HTTP as the run's member, from its working folder.
                 outputs.set_local(crate::chat_run_files::Local {
                     server_url: cfg.server_url.clone(),
@@ -307,7 +342,7 @@ pub async fn supervise(ctx: RunCtx) {
             ));
             outputs.set_gates(gates.clone());
             let gate_hook =
-                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::NAME));
+                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
             let notes: Vec<String> = [gate.note(), gates.note()].into_iter().flatten().collect();
             let spec = RunSpec {
                 run_id: run_id.clone(),

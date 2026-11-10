@@ -6,15 +6,11 @@ const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
     let argv0 = std::env::args_os().next().unwrap_or_default();
-    if std::path::Path::new(&argv0).file_name()
-        == Some(std::ffi::OsStr::new(daemon::chat_run::NAME))
-    {
+    if daemon::chat_run::started_as(&argv0, daemon::chat_run::NAME) {
         std::process::exit(daemon::chat_run::main(std::env::args().skip(1).collect()));
     }
     // PID 1 of a run's microVM (the tools disk names it vm-agent).
-    if std::path::Path::new(&argv0).file_name()
-        == Some(std::ffi::OsStr::new(daemon::vm_agent::NAME))
-    {
+    if daemon::chat_run::started_as(&argv0, daemon::vm_agent::NAME) {
         std::process::exit(daemon::vm_agent::main());
     }
     let mut args = std::env::args().skip(1);
@@ -41,12 +37,28 @@ fn main() {
             }
             let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| exit_with(&e.to_string()));
             let res = rt.block_on(daemon::daemon::run(cfg, async {
-                let mut term =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .expect("signal handler");
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = term.recv() => {}
+                #[cfg(unix)]
+                {
+                    let mut term =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("signal handler");
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = term.recv() => {}
+                    }
+                }
+                // Windows: Ctrl+C, Ctrl+Break (what a service manager sends a console
+                // program) and the console window closing.
+                #[cfg(windows)]
+                {
+                    use tokio::signal::windows::{ctrl_break, ctrl_close};
+                    let mut brk = ctrl_break().expect("signal handler");
+                    let mut close = ctrl_close().expect("signal handler");
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = brk.recv() => {}
+                        _ = close.recv() => {}
+                    }
                 }
             }));
             if let Err(e) = res {
@@ -59,6 +71,9 @@ fn main() {
             let (report, ok) = rt.block_on(daemon::doctor::report(&cfg));
             print!("{report}");
             std::process::exit(if ok { 0 } else { 1 });
+        }
+        "install-service" | "uninstall-service" if cfg!(windows) => {
+            exit_with(&daemon::service::windows_unsupported())
         }
         "install-service" => {
             let _ = load_cfg();

@@ -7,7 +7,8 @@
 //! `run.output.result`, and answers one JSON document `{ok, result?, error?}`.
 //!
 //! - Socket (`CHAT_RUN_SOCKET`): a unix socket of the run (mode 0600, only the daemon's own user
-//!   may connect), removed when the run ends. Runtimes without a sandbox use it.
+//!   may connect), removed when the run ends. Runtimes without a sandbox use it. Not on
+//!   Windows yet (a named pipe will take its place): every run there uses the files.
 //! - Files (`CHAT_RUN_DIR`): Codex runs. Codex's sandbox counts a unix socket connect as
 //!   network, so `chat-run` uses `<working folder>/.chat-run-<run id>` (a new folder that git
 //!   ignores, inside the writable workspace): it writes `<id>.req` atomically, the daemon
@@ -19,12 +20,14 @@
 use crate::proto::{RunEvent, RunOutputError, RunOutputResult, output_op};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::io::{BufRead, BufReader};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+#[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::oneshot;
 
@@ -259,14 +262,41 @@ pub fn socket_path(run_dir: &Path) -> PathBuf {
     std::env::temp_dir().join(format!("chat-run-{hex}.sock"))
 }
 
-/// `<run folder>/bin` with `chat-run` linked to the daemon binary.
+/// The file name of the client in `<run folder>/bin`: [`NAME`], with `.exe` on Windows.
+pub fn link_name() -> String {
+    format!("{NAME}{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// True when the program was started by the name `name` (`argv0`'s file name; on Windows
+/// without `.exe` and in any case).
+pub fn started_as(argv0: &std::ffi::OsStr, name: &str) -> bool {
+    let path = Path::new(argv0);
+    if cfg!(windows) {
+        path.file_stem()
+            .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(name))
+    } else {
+        path.file_name() == Some(std::ffi::OsStr::new(name))
+    }
+}
+
+/// `<run folder>/bin` with `chat-run` linked to the daemon binary: a symbolic link, or on
+/// Windows (where making one needs a privilege) a hard link, or a copy when the run folder is
+/// on another volume.
 pub fn install_link(run_dir: &Path) -> std::io::Result<PathBuf> {
     let bin = run_dir.join("bin");
     std::fs::create_dir_all(&bin)?;
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700))?;
-    let link = bin.join(NAME);
+    crate::sys::set_mode(&bin, 0o700)?;
+    let link = bin.join(link_name());
     let _ = std::fs::remove_file(&link);
+    #[cfg(unix)]
     std::os::unix::fs::symlink(exe()?, &link)?;
+    #[cfg(not(unix))]
+    {
+        let exe = exe()?;
+        if std::fs::hard_link(&exe, &link).is_err() {
+            std::fs::copy(&exe, &link)?;
+        }
+    }
     Ok(bin)
 }
 
@@ -276,6 +306,27 @@ pub struct Server {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// Windows has no socket transport yet: runs use the request folder ([`Spool`]).
+#[cfg(not(unix))]
+impl Server {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn start(
+        _path: PathBuf,
+        _outputs: Arc<Outputs>,
+        _emit: impl Fn(RunEvent) + Send + Sync + 'static,
+        _timeout: Duration,
+    ) -> std::io::Result<Server> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "the chat-run socket is not supported on Windows yet; runs use the request folder",
+        ))
+    }
+}
+
+#[cfg(unix)]
 impl Server {
     pub fn path(&self) -> &Path {
         &self.path
@@ -292,7 +343,7 @@ impl Server {
         let _ = std::fs::remove_file(&path);
         let listener = tokio::net::UnixListener::bind(&path)?;
         // Only the daemon's own user; peers are checked too (the chmod comes after the bind).
-        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+        if let Err(e) = crate::sys::set_mode(&path, 0o600) {
             let _ = std::fs::remove_file(&path);
             return Err(e);
         }
@@ -302,8 +353,7 @@ impl Server {
                 let Ok((stream, _)) = listener.accept().await else {
                     return;
                 };
-                // SAFETY: plain syscall without arguments.
-                let me = unsafe { libc::geteuid() };
+                let me = crate::sys::euid();
                 if stream.peer_cred().map(|c| c.uid()).ok() != Some(me) {
                     continue;
                 }
@@ -363,18 +413,17 @@ fn valid_id(s: &str) -> bool {
 
 /// Writes `path` atomically (a temp file renamed into place), mode 0600.
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     let _ = std::fs::remove_file(&tmp);
-    let res = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(data))
-        .and_then(|_| std::fs::rename(&tmp, path));
+    let res = crate::sys::mode(
+        std::fs::OpenOptions::new().write(true).create_new(true),
+        0o600,
+    )
+    .open(&tmp)
+    .and_then(|mut f| f.write_all(data))
+    .and_then(|_| std::fs::rename(&tmp, path));
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -402,7 +451,7 @@ impl Spool {
         timeout: Duration,
     ) -> std::io::Result<Spool> {
         std::fs::create_dir(&dir)?;
-        let made = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+        let made = crate::sys::set_mode(&dir, 0o700)
             .and_then(|_| write_atomic(&dir.join(".gitignore"), b"*\n"));
         if let Err(e) = made {
             remove_spool(&dir);
@@ -411,8 +460,7 @@ impl Spool {
         let emit: Arc<dyn Fn(RunEvent) + Send + Sync> = Arc::new(emit);
         let watched = dir.clone();
         let task = tokio::spawn(async move {
-            // SAFETY: plain syscall without arguments.
-            let me = unsafe { libc::geteuid() };
+            let me = crate::sys::euid();
             let mut tick = tokio::time::interval(POLL);
             loop {
                 tick.tick().await;
@@ -449,7 +497,6 @@ impl Drop for Spool {
 /// Takes (reads and removes) each `<id>.req` in `dir`: a regular file of the daemon's own user.
 /// `None` is a request over 1 MiB.
 fn take_requests(dir: &Path, me: u32) -> Vec<(String, Option<Vec<u8>>)> {
-    use std::os::unix::fs::MetadataExt;
     let Ok(entries) = std::fs::read_dir(dir) else {
         return vec![];
     };
@@ -467,7 +514,7 @@ fn take_requests(dir: &Path, me: u32) -> Vec<(String, Option<Vec<u8>>)> {
         let Ok(meta) = std::fs::symlink_metadata(&path) else {
             continue;
         };
-        if !meta.file_type().is_file() || meta.uid() != me {
+        if !meta.file_type().is_file() || crate::sys::owner(&meta) != me {
             let _ = std::fs::remove_file(&path);
             continue;
         }
@@ -492,6 +539,7 @@ fn error(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value 
     json!({ "ok": false, "error": e })
 }
 
+#[cfg(unix)]
 async fn serve(
     stream: tokio::net::UnixStream,
     outputs: Arc<Outputs>,
@@ -1166,7 +1214,17 @@ fn absolute_new(path: &str) -> Result<String, String> {
     Ok(format!("{}/{path}", cwd.display()))
 }
 
+/// Windows has no socket transport yet (see [`Server`]).
+#[cfg(not(unix))]
+pub fn call(socket: &Path, _op: &str, _body: Value, _wait: Duration) -> Result<Value, String> {
+    Err(format!(
+        "cannot reach the daemon at {}: the chat-run socket is not supported on Windows yet",
+        socket.display()
+    ))
+}
+
 /// Sends one request to the run's socket and reads the answer line.
+#[cfg(unix)]
 pub fn call(socket: &Path, op: &str, body: Value, read_timeout: Duration) -> Result<Value, String> {
     let mut s = match std::os::unix::net::UnixStream::connect(socket) {
         Ok(s) => s,
@@ -1262,6 +1320,8 @@ without chat-run",
                 return serde_json::from_slice(&answer).map_err(|e| format!("bad answer: {e}"));
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // Windows: the daemon is still moving the answer into place.
+            Err(e) if cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied => {}
             Err(e) => return Err(format!("cannot read the answer: {e}")),
         }
         if std::time::Instant::now() >= deadline {
@@ -1359,6 +1419,8 @@ pub fn main(args: Vec<String>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn args(s: &[&str]) -> Vec<String> {
         s.iter().map(|a| a.to_string()).collect()
@@ -1854,6 +1916,7 @@ mod tests {
         assert_eq!(keys[0], keys[1]);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_socket_is_0600_answers_with_the_result_and_goes_away() {
         let dir = tempfile::tempdir().unwrap();
@@ -1915,6 +1978,7 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_blocked_connect_names_the_sandbox() {
         let dir = tempfile::tempdir().unwrap();
@@ -1991,7 +2055,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_request_folder_answers_with_the_result_and_goes_away() {
-        use std::os::unix::fs::MetadataExt;
         let cwd = tempfile::tempdir().unwrap();
         let outputs = Arc::new(Outputs::default());
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2006,7 +2069,11 @@ mod tests {
         .unwrap();
         let dir = spool.path().to_path_buf();
         assert_eq!(dir, cwd.path().join(".chat-run-r1"));
-        assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         assert_eq!(
             std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
             "*\n"
@@ -2110,6 +2177,7 @@ mod tests {
         assert_eq!(v["error"]["reason"], "daemon.no_answer");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_folder_the_sandbox_will_not_write_names_the_sandbox() {
         let dir = tempfile::tempdir().unwrap();
@@ -2120,6 +2188,7 @@ mod tests {
         assert_eq!(v["error"]["reason"], "sandbox.blocked");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_long_run_folder_gets_a_short_socket_path() {
         let long = PathBuf::from(format!("/{}", "x".repeat(120)));

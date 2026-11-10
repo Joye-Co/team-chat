@@ -38,15 +38,16 @@ fn dir(cfg: &Config) -> PathBuf {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension("tmp");
     {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let mut f = crate::sys::mode(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true),
+            0o600,
+        )
+        .open(&tmp)?;
         std::io::Write::write_all(&mut f, bytes)?;
         f.sync_all()?;
     }
@@ -55,9 +56,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Group- or world-readable files are refused, like the token file.
 fn private_enough(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)
-        .map(|m| m.permissions().mode() & 0o077 == 0)
+        .map(|m| !crate::sys::open_to_others(&m))
         .unwrap_or(false)
 }
 
@@ -338,7 +338,7 @@ pub async fn run_login(
         let _ = send.send(fail(format!("{} is not installed", rt.command())));
         return;
     };
-    let mut child = match tokio::process::Command::new(&program)
+    let mut child = match crate::health::command(&program)
         .args(&args)
         .env_clear()
         .envs(login_env(&rt))
@@ -471,7 +471,7 @@ pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
         "claude" => {
             let out = tokio::time::timeout(
                 Duration::from_secs(20),
-                tokio::process::Command::new(program)
+                crate::health::command(&program)
                     .args(["auth", "status", "--json"])
                     .env_clear()
                     .envs(login_env(rt))
@@ -495,7 +495,7 @@ pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
         "codex" => {
             let out = tokio::time::timeout(
                 Duration::from_secs(20),
-                tokio::process::Command::new(program)
+                crate::health::command(&program)
                     .args(["login", "status"])
                     .env_clear()
                     .envs(login_env(rt))
@@ -574,11 +574,14 @@ mod tests {
         assert!(s.set("PATH", "x".repeat(20), vec![]).is_err());
         assert!(s.set("CHAT_RUN_ID", "x".repeat(20), vec![]).is_err());
         assert!(s.set("lower", "x".repeat(20), vec![]).is_err());
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
         let infos = s.infos();
         assert_eq!(infos.len(), 2);
         assert_eq!(infos[1].last4, "9xQz");

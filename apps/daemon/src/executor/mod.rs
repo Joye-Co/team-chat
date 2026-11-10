@@ -5,7 +5,13 @@
 //! this machine. A backend that runs each CLI in its own VM plugs in here, without changes to
 //! the runtimes, the run supervisor or the machine protocol.
 
+#[cfg(unix)]
 pub mod firecracker;
+#[cfg(unix)]
+pub mod local;
+// The same `Local`, with a Job Object in place of process groups.
+#[cfg(windows)]
+#[path = "local_windows.rs"]
 pub mod local;
 pub mod vmwire;
 
@@ -50,7 +56,8 @@ pub struct Spawned {
 
 /// The running CLI and everything it started.
 pub trait Process: Send {
-    /// Sends `sig` to the CLI's process group.
+    /// Sends `sig` to the CLI's process group. Windows has no signals: 9 ends the CLI and
+    /// its tools, any other number asks the CLI to stop.
     fn signal(&self, sig: i32);
     /// SIGTERM the CLI and its tools, SIGKILL after `grace`. Returns the exit code.
     fn kill(&mut self, grace: Duration) -> BoxFuture<'_, Option<i64>>;
@@ -73,11 +80,15 @@ pub fn local() -> Arc<dyn Executor> {
 
 /// A microVM per run when `[vm]` is configured, else the local executor.
 pub fn for_config(cfg: &crate::config::Config) -> Arc<dyn Executor> {
-    match &cfg.vm {
-        Some(vm) => Arc::new(firecracker::Firecracker::new(
+    #[cfg(unix)]
+    if let Some(vm) = &cfg.vm {
+        return Arc::new(firecracker::Firecracker::new(
             vm.clone(),
             cfg.max_parallel_runs,
-        )),
-        None => local(),
+        ));
     }
+    // Not on Windows: `Config::problems` refuses a `[vm]` section there.
+    #[cfg(not(unix))]
+    let _ = cfg;
+    local()
 }

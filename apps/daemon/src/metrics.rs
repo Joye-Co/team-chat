@@ -221,8 +221,14 @@ fn round2(x: f64) -> f64 {
 
 /// Bytes a (sparse) file really uses on disk.
 fn allocated_bytes(p: &Path) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(p).ok().map(|m| m.blocks() * 512)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(p).ok().map(|m| m.blocks() * 512)
+    }
+    // Only VM disks are measured, and VMs run on Linux: the file's length will do.
+    #[cfg(not(unix))]
+    std::fs::metadata(p).ok().map(|m| m.len())
 }
 
 /// Cumulative CPU time of the host in clock ticks.
