@@ -52,9 +52,11 @@ pub use store::{
     Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
     TopicRow,
 };
+#[cfg(target_os = "windows")]
+pub use token::CredentialTokenStore;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use token::KeychainTokenStore;
-pub use token::{FileTokenStore, TokenStore, TokenStoreError};
+pub use token::{FileTokenStore, TokenStore, TokenStoreError, credential_target};
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {

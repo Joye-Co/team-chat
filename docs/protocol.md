@@ -212,7 +212,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `POST /v1/auth/redeem` | anyone with an invite code | `{ inviteCode, deviceName }` | `{ token, member }` |
 | `GET /v1/me` | member | | `Member` |
 | `GET /v1/members` | member | | `Member[]` |
-| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member |
+| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId?, expiresInHours? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member; `expiresInHours` 1-168, default 168 (a week) |
 | `POST /v1/bots` | owner | `{ name, role?, character? }` | `{ member, token }` |
 | `POST /v1/tokens/revoke` | owner, or the token's member | `{ memberId?, all? }` | `{ revoked }` |
 | `GET /v1/groups` | member | | `GroupSummary[]` |
@@ -647,24 +647,46 @@ Module: `updates.ts` / `updates.rs`.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
-| `GET /v1/updates/latest` | member | | `UpdateInfo`; 404 when no release exists |
-| `GET /v1/updates/:version/download` | member | | the DMG (`Range` supported) |
+| `GET /v1/updates/latest?platform=` | member | | `UpdateInfo` of the newest release for that platform; 404 when there is none |
+| `GET /v1/updates/:version/download?platform=` | member | | the file of that platform (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
-| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }`; a withdrawn release is not `latest` and not downloadable |
+| `PUT /v1/admin/releases/:version/assets/:platform` | header `X-Admin-Secret` | the raw file of that platform; same headers | `UpdateInfo` |
+| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }` (`latest` is the newest DMG); a withdrawn release is not `latest` and not downloadable, on every platform |
 | `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
-| `POST /download` | anyone with a valid invite code | form `code=<invite code>` | the latest DMG |
+| `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
 | `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG (links made before the fragment form) |
 
 ```ts
-UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl }
+ReleasePlatform = "macos" | "windows"   // macos = the DMG; windows = the installer (-setup.exe, x64)
+UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl, platform?: ReleasePlatform }
   // version "MAJOR.MINOR.PATCH" without leading zeros; notes Markdown <= 20,000; downloadUrl absolute
+  // platform: sent by every server that knows platforms; missing = "macos"
 ```
 
-Rules: latest = the highest version by numeric comparison. A `PUT` of an existing version is
-`conflict`. The server checks the body's SHA-256 against `X-Sha256` (`invalid` otherwise) and
-the body is at most 100 MB. `GET /download` accepts an invite code that is not expired (used or
-not), is rate limited per IP, answers 404 with a plain-text body for a bad code, and sends
-`Content-Disposition: attachment; filename="<slug>-<version>.dmg"`. Invite links put the code in
+Rules: latest = the highest version by numeric comparison, per platform: each platform's file
+of a version is uploaded on its own, so the newest Windows release may be older than the
+newest DMG. A `PUT` of an existing version and platform is `conflict`. The server checks the
+body's SHA-256 against `X-Sha256` (`invalid` otherwise) and the body is at most 100 MB.
+
+Platforms (added for the Windows client; old clients and scripts are not affected):
+
+- A request without `platform` means `macos`, and the DMG's `downloadUrl` has no query. So a
+  Mac client from before platforms sends and receives what it always did, plus the
+  `platform: "macos"` field it ignores. An unknown `platform` is `invalid`.
+- `PUT /v1/admin/releases/:version/assets/macos` is the same upload as
+  `PUT /v1/admin/releases/:version`.
+- A client asks for its own platform and must drop an `UpdateInfo` whose `platform` (missing =
+  `macos`) is another one. A Windows client therefore never takes the DMG: a server without a
+  Windows release answers 404, and a server from before platforms ignores the parameter and
+  answers with an `UpdateInfo` that has no `platform`.
+- `/download`: the page posts `platform=windows` when the browser runs on Windows; any other
+  value, or none, serves the DMG.
+
+`GET /download` accepts an invite code that is not expired (used or
+not), is rate limited per IP, answers 404 with a plain-text body for a bad code or when the
+platform has no release, and sends
+`Content-Disposition: attachment; filename="<slug>-<version>.dmg"` (`<slug>-<version>-setup.exe`
+for Windows). Invite links put the code in
 the URL fragment, which browsers never send, so no request log (the app's or the Workers
 invocation log) records it. Logs must redact the `code` query parameter of old links. Every
 publish is audited.
@@ -1211,6 +1233,18 @@ transaction as the write, with a `kind` the page filters by:
 | `login` | `email.sign_in`, `machine.login.start` |
 | `machine` | `machine.create`, `machine.revoke` |
 
+The server also writes events it notices itself (`audit_id` 0, no actor but the AI member):
+
+| `kind` | Action | When |
+| --- | --- | --- |
+| `run` | `run.failed` | a run of an AI member ended failed; `actorId` the AI member, `target` the 话题, `details { runId, groupId, requestedBy, title? }` |
+| `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
+| `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
+| `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
+| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
+| `budget` | `budget.raised` | an owner chose 这周再加: `actorId` the owner, `target` the AI member, `details { extraCents, runId }` |
+| `budget` | `budget.stopped` | an owner chose 先停: the held run is cancelled; `details { runId, topicId, title? }` |
+
 ```ts
 ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
 ActivityResponse = { entries: ActivityEntry[] /* newest first */, hasMore }
@@ -1229,20 +1263,58 @@ days) reads every runner bot's BotDesk for runs that ended in `[from, to)` and i
 before it, and stores nothing.
 
 ```ts
-Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */ }
+Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */,
+              estimatedUsd? /* the part of costUsd estimated from tokens */,
+              unpricedTokens? /* tokens of models with no known price, not in costUsd */ }
 TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
-              bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
+              bots: (Spend & { memberId, budgetCents?, models?: string[] /* by cost */,
+                               heldRuns? /* runs waiting at the budget for an owner */ })[],
+              initiators: (Spend & { memberId })[],
+              models?: (Spend & { model, name, runtimes: string[] })[] /* by model the runs used */,
               machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
+              pairs?: (Spend & { initiatorId, memberId })[] /* who asked which AI member */,
               daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
 ```
 
-- Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
-  subscription); runs without it (Codex today) count tokens and 0 cost.
-- `initiators` is the person who asked for each run (`requestedBy`). `runtimes` is split by machine,
-  so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
+- Cost is priced per model. A daemon from 1.3 sends `run.done.usage.models` (machine-protocol.md
+  `ModelUsage`): the model each turn used, its input, output, cache read and cache write tokens,
+  and, from Claude Code, its own cost. A model's cost is the CLI's figure when it gives one, else
+  its tokens at that model's list price by kind; that part also counts in `estimatedUsd`. The
+  list comes from models.dev (`server/src/usage/prices.ts`): the daily cron stores the last good
+  copy in D1 (`model_prices`, migration 0014), and a small built-in list stands in only before the
+  first good sync. A model matches its own entry only (a date or `-latest` suffix and a provider
+  prefix are ignored); one with no price adds `unpricedTokens`, never another model's price.
+  Runs from older daemons keep their reported cost; with none, they are priced only by the model
+  the AI member is set to run (`bot_runners.model`), else unpriced.
+- `initiators` is the person who asked for each run (`requestedBy`); `pairs` splits that by AI
+  member, so a client can show whom each person works with most (optional: older servers omit it).
+- `runtimes` is split by machine, so a client can tell subscription from API-key spend by the
+  machine's CLI login (`MonitorCli.method`).
 - Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
 - A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
+
+## Budget pause
+
+到了预算先停下来问: before a run of an AI member starts (or leaves the queue), the server compares
+the member's spend this week with its `weeklyBudgetCents` plus what owners added for this week.
+The week starts Monday 00:00 in the team's time zone; spend is priced per model as in Team usage,
+estimates included. At or over the line the run does not start: it stays `waiting` with no
+machine, the topic waits on the team's owners in the group (`waiting_answer`, so 首页 and
+notifications show it), and the AI member posts a Card v1 to them:
+
+- title 「Forge 这周花了 $100，到了预算。继续吗？」
+- `budget-raise:<runId>` 「这周再加 $X」: X is half the weekly budget, rounded up to whole
+  dollars (at least $1), for this week only (D1 `budget_grants`, migration 0015). The held runs
+  go back in the queue and start.
+- `budget-edit:<runId>` 「改每周预算…」, `value { memberId }`: the app opens 团队管理 › 用量 with
+  that member's budget editor; the server ignores the press. A new `weeklyBudgetCents` that covers
+  the spend lets held runs go.
+- `budget-stop:<runId>` 「先停」: the held run is cancelled and the topic says so in plain words.
+
+Only an owner's press counts. A run already on a machine finishes. No `weeklyBudgetCents`, no
+limit. 活动记录 records `budget.paused`, `budget.raised` and `budget.stopped`; `GET /v1/usage` gives
+each budgeted member's `heldRuns`.
 
 ## Team roster
 

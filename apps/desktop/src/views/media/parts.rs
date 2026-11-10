@@ -164,10 +164,9 @@ pub fn copy_image(format: ImageFormat, bytes: Vec<u8>, cx: &mut App) {
 
 /// Copies files into ~/Downloads (keeping their names, adding ` 2` on a clash).
 pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(dir) = crate::paths::downloads() else {
         return;
     };
-    let dir = Path::new(&home).join("Downloads");
     for p in paths {
         let Some(name) = p.file_name() else { continue };
         let mut out = dir.join(name);

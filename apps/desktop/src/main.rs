@@ -31,9 +31,38 @@
 //!   desktop --selftest-settings --report <path> [--live <url> --token-file <path>]
 //!       drive the settings window and its forms (views/settings/selftest.rs).
 
+// A release build on Windows is a window program: no console opens behind it. Debug builds
+// keep the console for logs and the self-tests.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
 #[allow(dead_code)]
+/// A key with the platform's command modifier: `secondary!("k")` is `cmd-k`
+/// on the Mac and `ctrl-k` on Windows and Linux. GPUI's own `secondary-`
+/// prefix does not parse in a static binding (`KeyBinding::new`).
+#[macro_export]
+macro_rules! secondary {
+    ($key:literal) => {
+        if cfg!(target_os = "macos") {
+            concat!("cmd-", $key)
+        } else {
+            concat!("ctrl-", $key)
+        }
+    };
+}
+
+/// Whether the platform's command key is down: ⌘ on the Mac, Ctrl on
+/// Windows and Linux. Key and scroll handlers that read modifiers
+/// themselves use this, never `modifiers.platform` (the Windows key there).
+pub(crate) fn command_key(modifiers: &gpui::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.platform
+    } else {
+        modifiers.control
+    }
+}
+
 mod app;
 mod characters;
 #[allow(dead_code)]
@@ -48,6 +77,7 @@ mod drafts;
 mod fake;
 mod fake_extra;
 mod markdown;
+mod paths;
 mod provider;
 mod selftest;
 #[allow(dead_code)]
@@ -57,6 +87,8 @@ mod ui;
 mod updater;
 #[allow(dead_code)]
 mod views;
+#[cfg(target_os = "windows")]
+mod win32;
 
 use std::{
     path::PathBuf,
@@ -134,6 +166,10 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or("--hold-ms needs a number")?
             }
             "--help" | "-h" => return Err(String::new()),
+            // Windows starts the app with the link as its argument when the user opens a
+            // `<scheme>://` link (the installer registers the scheme). The app opens; it
+            // does not go to the link's target yet.
+            link if link.starts_with(concat!(env!("PRODUCT_URL_SCHEME"), ":")) => {}
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -153,6 +189,8 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() {
     let started = Instant::now();
+    // Before GPUI starts: on Windows, embedded 产出 pages need this (see the function).
+    ui::web_embed::prepare_process();
     // `--screenshot` and other self-tests in `selftest/` parse their own arguments.
     if let Some(code) = selftest::main_if_requested() {
         std::process::exit(code);

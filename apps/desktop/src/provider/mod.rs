@@ -31,6 +31,8 @@ mod files_live;
 pub mod macos;
 mod panes;
 pub mod persist;
+#[cfg(target_os = "windows")]
+pub mod windows;
 // Proof chips from done cards (1.1.0).
 mod proof;
 // pages track: the 群, 成员 and 产出 pages.
@@ -51,6 +53,7 @@ pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+mod system_events;
 mod this_mac;
 #[cfg(test)]
 mod wire_live;
@@ -2071,7 +2074,11 @@ impl ChatProvider for CoreProvider {
     }
 
     fn machine_login_code(&self, machine_id: &str, login_id: &str, code: &str) -> AdminReply<()> {
-        let (id, login, code) = (machine_id.to_string(), login_id.to_string(), code.to_string());
+        let (id, login, code) = (
+            machine_id.to_string(),
+            login_id.to_string(),
+            code.to_string(),
+        );
         self.request(move |client, _| async move {
             client
                 .http()
@@ -2114,7 +2121,11 @@ impl ChatProvider for CoreProvider {
         value: crate::data::SecretText,
         members: Vec<String>,
     ) -> AdminReply<()> {
-        let (id, key, name) = (machine_id.to_string(), public_key.to_string(), name.to_string());
+        let (id, key, name) = (
+            machine_id.to_string(),
+            public_key.to_string(),
+            name.to_string(),
+        );
         self.request(move |client, _| async move {
             client
                 .http()
@@ -2141,7 +2152,11 @@ impl ChatProvider for CoreProvider {
 
     fn team_roster(&self) -> AdminReply<chat_core::proto::TeamRoster> {
         self.request(move |client, _| async move {
-            client.http().team_roster().await.map_err(|e| settings::api_error(&e))
+            client
+                .http()
+                .team_roster()
+                .await
+                .map_err(|e| settings::api_error(&e))
         })
     }
 

@@ -1,0 +1,28 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.done",
+    "runId": "01JA0000000000000000000R04",
+    "seq": 7,
+    "at": 1793627400040,
+    "status": "succeeded",
+    "exitCode": 0,
+    "resultText": "Done.",
+    "summary": "Done.",
+    "usage": {
+      "inputTokens": 90000,
+      "outputTokens": 6000,
+      "models": [
+        {
+          "model": "gpt-5.1-codex",
+          "inputTokens": 30000,
+          "outputTokens": 6000,
+          "cacheReadTokens": 60000
+        }
+      ]
+    },
+    "durationMs": 45000
+  }
+}

@@ -1035,13 +1035,13 @@ impl RootView {
             .into_any_element()
     }
 
-    /// The 产出 pane's resize handle: an 8 pt strip centred on its leading edge with the
-    /// resize cursor. A drag to the left widens the pane (400–960 pt, rubber band past the
-    /// bounds); a double-click resets the width.
-    fn artifact_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The right pane's resize handle: an 8 pt strip centred on its leading edge with the
+    /// resize cursor. A drag to the left widens the pane (320–960 pt, rubber band past the
+    /// bounds); a double-click resets the width. Every pane kind shares the one width.
+    fn right_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::views::columns::Column;
         div()
-            .id("artifact-pane-resize")
+            .id("right-pane-resize")
             .absolute()
             .top_0()
             .bottom_0()
@@ -1053,9 +1053,9 @@ impl RootView {
                 cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     if e.click_count >= 2 {
-                        this.columns.reset(Column::ArtifactPane);
+                        this.columns.reset(Column::RightPane);
                     } else {
-                        this.columns.start_drag(Column::ArtifactPane, e.position.x);
+                        this.columns.start_drag(Column::RightPane, e.position.x);
                     }
                     cx.notify();
                 }),
@@ -1092,6 +1092,14 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+    }
+}
+
+impl RootView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
@@ -1106,6 +1114,11 @@ impl Render for RootView {
             .size_full()
             .bg(k.bg)
             .text_color(k.ink);
+        // Off the Mac the app ends with its last window and has no tray to
+        // come back from, so Ctrl+W does not close the main window: the
+        // action stops here. Other windows (设置, 团队管理) still close.
+        #[cfg(not(target_os = "macos"))]
+        let root = root.on_action(|_: &crate::views::nav::menus::CloseWindow, _, _| {});
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root =
             crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
@@ -1188,7 +1201,9 @@ impl Render for RootView {
         // flush with the window edge (traffic lights inside it), the page
         // column with its toolbar row, and the inspector edge to edge.
         use crate::views::columns::Column;
-        let fullscreen = window.is_fullscreen();
+        // Off the Mac there are no traffic lights either: the sidebar's top
+        // row takes the full-screen layout (the toggle at the leading edge).
+        let fullscreen = window.is_fullscreen() || crate::ui::native::window_chrome::drawn();
         self.services
             .nav
             .update(cx, |nav, cx| nav.set_fullscreen(fullscreen, cx));
@@ -1273,15 +1288,19 @@ impl Render for RootView {
         } else {
             px(0.)
         };
-        let artifact_pane = matches!(drawn_pane, RightPane::Artifact { .. });
-        let full_pane_w = if artifact_pane {
-            // The 产出 pane takes the width it was dragged to.
-            self.columns
-                .width(crate::views::columns::Column::ArtifactPane)
+        // Every pane kind takes the one width the pane was dragged to (D13).
+        let full_pane_w = if drawn_pane == RightPane::None {
+            px(0.)
         } else {
-            self.panes
-                .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx)
+            self.columns.width(Column::RightPane)
         };
+        if drawn_pane != RightPane::None
+            && cx
+                .try_global::<crate::views::columns::RightPaneWidth>()
+                .is_none_or(|w| w.0 != full_pane_w)
+        {
+            cx.set_global(crate::views::columns::RightPaneWidth(full_pane_w));
+        }
         let pane_w = full_pane_w * right;
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
@@ -1325,16 +1344,16 @@ impl Render for RootView {
                         .into_any_element()
                 })
         };
-        // The 产出 pane's leading edge resizes it (a page needs room for its own layout).
+        // The pane's leading edge resizes it.
         let pane_el = match pane_el {
-            Some(el) if artifact_pane && !floats && right >= 1. => Some(
+            Some(el) if !floats && right >= 1. => Some(
                 div()
                     .relative()
                     .flex_none()
                     .h_full()
                     .flex()
                     .child(el)
-                    .child(self.artifact_pane_handle(cx))
+                    .child(self.right_pane_handle(cx))
                     .into_any_element(),
             ),
             el => el,
@@ -1477,18 +1496,30 @@ pub fn bind_view_keys(cx: &mut App) {
 
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
+    // Windows quits with Alt+F4 and the close button; Ctrl+Q would end the
+    // app without a warning.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
+        KeyBinding::new(crate::secondary!(","), OpenSettings, None),
+        KeyBinding::new(crate::secondary!("alt-i"), ToggleSidePanel, None),
         // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
-        KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
-        KeyBinding::new("cmd-n", NewTopic, None),
-        KeyBinding::new("cmd-;", ToggleSideChat, None),
-        KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
-        KeyBinding::new("cmd-shift-h", OpenDesk, None),
-        KeyBinding::new("cmd-shift-m", OpenMembers, None),
-        KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
+        // Windows has no second command key: Ctrl+Alt+S.
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "ctrl-cmd-s"
+            } else {
+                "ctrl-alt-s"
+            },
+            ToggleSidebar,
+            None,
+        ),
+        KeyBinding::new(crate::secondary!("n"), NewTopic, None),
+        KeyBinding::new(crate::secondary!(";"), ToggleSideChat, None),
+        KeyBinding::new(crate::secondary!("alt-r"), ToggleTopicRail, None),
+        KeyBinding::new(crate::secondary!("shift-h"), OpenDesk, None),
+        KeyBinding::new(crate::secondary!("shift-m"), OpenMembers, None),
+        KeyBinding::new(crate::secondary!("shift-o"), OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     {

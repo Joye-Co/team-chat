@@ -200,12 +200,20 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", PickPrevious, Some(PICK_FILTER_CONTEXT)),
         KeyBinding::new("down", PickNext, Some(PICK_FILTER_CONTEXT)),
-        KeyBinding::new("cmd-enter", PickSubmit, Some(PICK_FILTER_CONTEXT)),
+        KeyBinding::new(
+            crate::secondary!("enter"),
+            PickSubmit,
+            Some(PICK_FILTER_CONTEXT),
+        ),
         KeyBinding::new("up", PickPrevious, Some(PICK_LIST_CONTEXT)),
         KeyBinding::new("down", PickNext, Some(PICK_LIST_CONTEXT)),
         KeyBinding::new("space", PickToggle, Some(PICK_LIST_CONTEXT)),
         KeyBinding::new("enter", PickSubmit, Some(PICK_LIST_CONTEXT)),
-        KeyBinding::new("cmd-enter", PickSubmit, Some(PICK_LIST_CONTEXT)),
+        KeyBinding::new(
+            crate::secondary!("enter"),
+            PickSubmit,
+            Some(PICK_LIST_CONTEXT),
+        ),
     ]);
 }
 

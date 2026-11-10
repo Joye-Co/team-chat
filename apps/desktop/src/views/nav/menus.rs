@@ -44,6 +44,16 @@ pub fn app_menus() -> Vec<Menu> {
 
 /// The menus of the menu bar, with the check marks of `state`.
 pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
+    let menus = mac_menus(state);
+    if cfg!(target_os = "macos") {
+        menus
+    } else {
+        without_mac_only(menus)
+    }
+}
+
+/// The menus as the macOS menu bar has them.
+fn mac_menus(state: MenuState) -> Vec<Menu> {
     vec![
         Menu::new(env!("PRODUCT_NAME")).items([
             MenuItem::action(product(nav::MENU_ABOUT), About),
@@ -134,6 +144,47 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
     ]
 }
 
+/// The menus for a system without a Mac menu bar (Windows shows them in the window, see
+/// [`window_menu_bar`]): without the commands only macOS has (服务, hiding apps, 前置全部
+/// 窗口, the character viewer), without menus that end up empty (帮助 is the system's
+/// menu search on macOS), and with the separators tidied.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn without_mac_only(menus: Vec<Menu>) -> Vec<Menu> {
+    use gpui::Action as _;
+    let mac_only = [
+        Hide.name(),
+        HideOthers.name(),
+        ShowAll.name(),
+        BringAllToFront.name(),
+        ShowCharacterPalette.name(),
+    ];
+    menus
+        .into_iter()
+        .filter_map(|mut menu| {
+            let mut items: Vec<MenuItem> = Vec::new();
+            for item in std::mem::take(&mut menu.items) {
+                let keep = match &item {
+                    MenuItem::SystemMenu(_) => false,
+                    MenuItem::Action { action, .. } => !mac_only.contains(&action.name()),
+                    // No separator first, and never two in a row.
+                    MenuItem::Separator => {
+                        !matches!(items.last(), None | Some(MenuItem::Separator))
+                    }
+                    MenuItem::Submenu(_) => true,
+                };
+                if keep {
+                    items.push(item);
+                }
+            }
+            if matches!(items.last(), Some(MenuItem::Separator)) {
+                items.pop();
+            }
+            menu.items = items;
+            (!menu.items.is_empty()).then_some(menu)
+        })
+        .collect()
+}
+
 /// The Dock icon's menu (right click on the icon).
 fn dock_menu() -> Vec<MenuItem> {
     vec![
@@ -151,6 +202,47 @@ fn dock_menu() -> Vec<MenuItem> {
 fn set_menus(menus: Vec<Menu>, cx: &mut App) {
     cx.set_menus(menus);
     register_system_menus();
+    #[cfg(not(target_os = "macos"))]
+    reload_window_menu_bar(cx);
+}
+
+/// The home of the app menus in a window on a system without a Mac menu bar:
+/// gpui-component's menu bar over the menus of [`set_menus`], one for the whole app. A
+/// window's title bar shows it as a child; it follows every later [`set_menus`] (check
+/// marks, the update item, shortcuts).
+#[cfg(not(target_os = "macos"))]
+pub fn window_menu_bar(cx: &mut App) -> gpui::Entity<gpui_component::menu::AppMenuBar> {
+    if let Some(bar) = cx.try_global::<WindowMenuBar>() {
+        return bar.0.clone();
+    }
+    publish_menus(cx);
+    let bar = gpui_component::menu::AppMenuBar::new(cx);
+    cx.set_global(WindowMenuBar(bar.clone()));
+    bar
+}
+
+#[cfg(not(target_os = "macos"))]
+struct WindowMenuBar(gpui::Entity<gpui_component::menu::AppMenuBar>);
+
+#[cfg(not(target_os = "macos"))]
+impl gpui::Global for WindowMenuBar {}
+
+/// Hands the menus GPUI holds to gpui-component, whose menu bar reads them from there.
+#[cfg(not(target_os = "macos"))]
+fn publish_menus(cx: &mut App) {
+    // Unit tests set menus without gpui-component's state.
+    if cx.has_global::<gpui_component::GlobalState>() {
+        let menus = cx.get_menus().unwrap_or_default();
+        gpui_component::GlobalState::global_mut(cx).set_app_menus(menus);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reload_window_menu_bar(cx: &mut App) {
+    publish_menus(cx);
+    if let Some(bar) = cx.try_global::<WindowMenuBar>().map(|bar| bar.0.clone()) {
+        bar.update(cx, |bar, cx| bar.reload(cx));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -191,6 +283,9 @@ fn show_character_palette(cx: &mut App) {
 
 /// Sets the menus and the bindings and handlers of the menu-only actions.
 pub fn install(cx: &mut App) {
+    // The Mac's own window and app keys. Windows has its own for these
+    // (Win+↓, Win+., Alt+F4), so there only closing and full screen are bound.
+    #[cfg(target_os = "macos")]
     cx.bind_keys([
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("cmd-alt-h", HideOthers, None),
@@ -199,14 +294,31 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, None),
     ]);
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-w", CloseWindow, None),
+        KeyBinding::new("f11", ToggleFullScreen, None),
+    ]);
     install_server_actions(cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
-    cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
-    cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+    // Only macOS hides apps (GPUI's Windows platform has no such call); the menus of the
+    // other systems do not have these commands.
+    #[cfg(target_os = "macos")]
+    {
+        cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+        cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+    }
     cx.on_action(|_: &Minimize, cx| with_key_window(cx, |window| window.minimize_window()));
     // Like the red traffic light: the app keeps running, and a click on the
     // Dock icon opens the main window again.
-    cx.on_action(|_: &CloseWindow, cx| with_key_window(cx, |window| window.remove_window()));
+    cx.on_action(|_: &CloseWindow, cx| {
+        // Off the Mac the app ends with its last window: Ctrl+W never closes
+        // that one (the close button and Alt+F4 do).
+        if cfg!(not(target_os = "macos")) && cx.windows().len() <= 1 {
+            return;
+        }
+        with_key_window(cx, |window| window.remove_window())
+    });
     cx.on_action(|_: &Zoom, cx| with_key_window(cx, |window| window.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| {
         with_key_window(cx, |window| window.toggle_fullscreen())
@@ -228,7 +340,8 @@ fn with_key_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window) + 'static) {
     }
 }
 
-/// The standard macOS about panel (name, version and icon from the bundle).
+/// The standard macOS about panel (name, version and icon from the bundle). Other systems
+/// have no such panel: 设置 › 通用 shows the version there.
 pub fn show_about(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]
@@ -236,6 +349,8 @@ pub fn show_about(cx: &mut App) {
         let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
         app.orderFrontStandardAboutPanel(None);
     }
+    #[cfg(not(target_os = "macos"))]
+    cx.dispatch_action(&OpenSettings);
 }
 
 // --- v12/behavior ---
@@ -529,6 +644,75 @@ mod tests {
         vcx.simulate_keystrokes("cmd-w");
         cx.run_until_parked();
         assert!(cx.update(|cx| cx.windows().is_empty()), "cmd-w closed it");
+    }
+
+    /// The menus a window shows on Windows: no command that only macOS has, no empty
+    /// menu, no stray separator; everything else stays.
+    #[test]
+    fn the_window_menus_drop_what_only_macos_has() {
+        use gpui::Action as _;
+        let mac = mac_menus(MenuState::default());
+        let win = without_mac_only(mac_menus(MenuState::default()));
+        let names =
+            |menus: &[Menu]| -> Vec<String> { menus.iter().map(|m| m.name.to_string()).collect() };
+        assert!(names(&mac).iter().any(|n| n == nav::MENU_HELP));
+        assert!(
+            !names(&win).iter().any(|n| n == nav::MENU_HELP),
+            "帮助 is empty"
+        );
+        assert_eq!(names(&win).len(), names(&mac).len() - 1);
+        let actions = |menus: &[Menu]| -> Vec<String> {
+            menus
+                .iter()
+                .flat_map(|m| &m.items)
+                .filter_map(|i| match i {
+                    MenuItem::Action { action, .. } => Some(action.name().to_string()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let gone = [
+            Hide.name(),
+            HideOthers.name(),
+            ShowAll.name(),
+            BringAllToFront.name(),
+            ShowCharacterPalette.name(),
+        ];
+        let (mac_actions, win_actions) = (actions(&mac), actions(&win));
+        for action in &mac_actions {
+            assert_eq!(
+                win_actions.contains(action),
+                !gone.contains(&action.as_str()),
+                "{action}"
+            );
+        }
+        for menu in &win {
+            assert!(!matches!(menu.items.first(), Some(MenuItem::Separator)));
+            assert!(!matches!(menu.items.last(), Some(MenuItem::Separator)));
+            assert!(
+                !menu
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MenuItem::SystemMenu(_)))
+            );
+            assert!(
+                !menu
+                    .items
+                    .windows(2)
+                    .any(|w| matches!(w, [MenuItem::Separator, MenuItem::Separator])),
+                "{}",
+                menu.name
+            );
+        }
+        // The app menu keeps 设置… and 退出, and the 服务器 submenu.
+        assert!(win_actions.contains(&OpenSettings.name().to_string()));
+        assert!(win_actions.contains(&Quit.name().to_string()));
+        assert!(
+            win[0]
+                .items
+                .iter()
+                .any(|i| matches!(i, MenuItem::Submenu(_)))
+        );
     }
 
     // --- v12/behavior ---

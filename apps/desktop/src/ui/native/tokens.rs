@@ -16,7 +16,7 @@
 
 use gpui::{App, BoxShadow, FontWeight, Hsla, Pixels, Styled, Window, point, px, rgba};
 
-use crate::theme::{self, FONT_FAMILY, MEDIUM_WEIGHT, tabular};
+use crate::theme::{self, MEDIUM_WEIGHT, tabular};
 
 fn c(hex: u32) -> Hsla {
     rgba(hex).into()
@@ -355,6 +355,21 @@ impl NativeColors {
 
     pub fn is_dark(&self) -> bool {
         self.dark
+    }
+
+    /// The 团队管理 window and its flat sidebar: `sidebar` in light, `background` in dark, so the
+    /// content panel on it reads lighter in dark mode as it does in the design.
+    pub fn admin_window(&self) -> Hsla {
+        if self.dark {
+            self.content
+        } else {
+            self.sidebar
+        }
+    }
+
+    /// The 团队管理 content panel and the tables on it: `background` in light, `card` in dark.
+    pub fn admin_panel(&self) -> Hsla {
+        if self.dark { self.sheet } else { self.content }
     }
 
     /// The float level (§1.7): shadow md and the 1 px border line.
@@ -830,8 +845,12 @@ pub mod layout {
     pub const TOPIC_LIST_WIDTH: Pixels = px(320.);
     pub const TOPIC_LIST_MIN_WIDTH: Pixels = px(280.);
     pub const TOPIC_LIST_MAX_WIDTH: Pixels = px(400.);
-    /// The right pane (D13).
-    pub const RIGHT_PANE: Pixels = px(320.);
+    /// The right pane (D13, owner decision 2026-11-10): every pane kind
+    /// opens 400 wide and shares the one width a drag on its leading edge
+    /// gives, between the two bounds.
+    pub const RIGHT_PANE: Pixels = px(400.);
+    pub const RIGHT_PANE_MIN: Pixels = px(320.);
+    pub const RIGHT_PANE_MAX: Pixels = px(960.);
     pub const SIDE_PANEL_WIDTH: Pixels = px(300.);
     pub const TOPIC_VIEW_MIN_WIDTH: Pixels = px(480.);
     pub const TOOLBAR_HEIGHT: Pixels = height::TOOLBAR;
@@ -847,9 +866,8 @@ pub mod layout {
     pub const LIVE_PANE_SHARE: f32 = 0.5;
     pub const LIVE_PANE_MIN_WIDTH: Pixels = px(460.);
     pub const LIVE_PANE_MAX_WIDTH: Pixels = px(760.);
-    /// The live and 产出 panes (owner decision, v14): 400.
-    pub const LIVE_PANE_WIDTH: Pixels = px(400.);
-    pub const ARTIFACT_PANE_WIDTH: Pixels = px(400.);
+    pub const LIVE_PANE_WIDTH: Pixels = RIGHT_PANE;
+    pub const ARTIFACT_PANE_WIDTH: Pixels = RIGHT_PANE;
     pub const ARTIFACT_RAIL_WIDTH: Pixels = RIGHT_PANE;
     pub const DESK_SIDE_WIDTH: Pixels = RIGHT_PANE;
     pub const MEMBERS_LIST_WIDTH: Pixels = px(480.);
@@ -877,7 +895,13 @@ pub mod layout {
     /// The red light's origin: the lights centre on the toolbar row's centre
     /// line (y 32), with the page title and the sidebar toggle.
     pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(25.));
-    pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
+    /// The room the traffic lights take at the leading edge; off the Mac
+    /// there are none, and only the sidebar toggle sits there.
+    pub const TRAFFIC_LIGHTS_INSET: Pixels = if cfg!(target_os = "macos") {
+        px(84.)
+    } else {
+        px(56.)
+    };
     /// The sidebar toggle (隐藏侧栏 / 显示侧栏) sits right after the traffic
     /// lights, on the toolbar row's center line, and stays there whether the
     /// sidebar is shown or hidden.
@@ -921,6 +945,9 @@ pub mod metrics {
     pub const FOCUS_RING: Pixels = px(3.);
 
     // Window (§2.1, §2.2)
+    /// The caption strip of a window off the Mac (`window_chrome`): the
+    /// height of a Windows title bar at 100 %.
+    pub const CAPTION: Pixels = height::DEFAULT;
     pub const TOOLBAR_ROW: Pixels = height::TOOLBAR;
     pub const TOOLBAR_GROUP: Pixels = height::DEFAULT;
     pub const TOOLBAR_ITEM: Pixels = height::DEFAULT;
@@ -945,8 +972,8 @@ pub mod metrics {
     pub const SIDEBAR_SECTION: Pixels = height::ROW;
     /// Every right pane (D13).
     pub const INSPECTOR_WIDTH: Pixels = super::layout::RIGHT_PANE;
-    /// The live and 产出 panes.
-    pub const WIDE_PANE_WIDTH: Pixels = px(400.);
+    /// The same width under its older name (the live and 产出 panes).
+    pub const WIDE_PANE_WIDTH: Pixels = super::layout::RIGHT_PANE;
     pub const PANE_TOP: Pixels = TOOLBAR_ROW;
 
     // Buttons (§1.8)
@@ -1189,6 +1216,25 @@ pub mod monitor {
     pub const MIN_HEIGHT: Pixels = px(640.);
     /// The sidebar's row column (the panel adds its insets).
     pub const SIDEBAR_WIDTH: Pixels = px(216.);
+    /// The content panel floats on the window this far from its top, right and bottom edges.
+    pub const PANEL_INSET: Pixels = space::S8;
+    pub const PANEL_RADIUS: Pixels = px(12.);
+    /// The panel's 1 px outline: `label` at this opacity.
+    pub const PANEL_OUTLINE_LIGHT: f32 = 0.06;
+    pub const PANEL_OUTLINE_DARK: f32 = 0.08;
+    /// The page header inside the panel: 24 above the title, 20 under the subtitle.
+    pub const HEADER_PAD_TOP: Pixels = space::S24;
+    pub const HEADER_PAD_BOTTOM: Pixels = px(20.);
+    /// Room under the last section of a page.
+    pub const BODY_PAD_BOTTOM: Pixels = px(28.);
+    /// A 要注意 tile: its tone's color at this opacity under the symbol.
+    pub const ATTENTION_TINT: f32 = 0.10;
+    pub const ATTENTION_TINT_DARK: f32 = 0.14;
+    /// A sidebar group label: this tall, this far below the rows above (Admin artboard: 18 + 16 + 6).
+    pub const NAV_GROUP_HEIGHT: Pixels = px(24.);
+    pub const NAV_GROUP_TOP: Pixels = space::S12;
+    /// Room under the sidebar's last row, above the account footer.
+    pub const NAV_END_PAD: Pixels = space::S8;
     /// The machine tile of the switcher.
     pub const MACHINE_TILE: Pixels = px(32.);
     /// A KPI card's sparkline.
@@ -1208,9 +1254,19 @@ pub mod monitor {
     pub const COL_TOKENS: Pixels = px(120.);
     pub const COL_DONE: Pixels = px(104.);
     pub const COL_SPEND: Pixels = px(152.);
+    /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the
+    /// inspector at the default width; cells pad 8 a side.
+    pub const TEAM_COL_LEVEL: Pixels = px(80.);
+    pub const TEAM_COL_TOPICS: Pixels = px(68.);
+    pub const TEAM_COL_SPEND: Pixels = px(136.);
+    pub const TEAM_COL_RECENT: Pixels = px(88.);
+    pub const TEAM_CELL_PAD: Pixels = space::S8;
     /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
     pub const FLEET_CARD_MIN: Pixels = px(320.);
     pub const FLEET_ADD_TEXT: Pixels = px(320.);
+    /// The member inspector beside the 成员 table (inside the page, not a
+    /// right pane of the main window).
+    pub const MEMBER_INSPECTOR: Pixels = px(320.);
     /// The 要注意 card's share of the row next to 容量.
     pub const ATTENTION_SHARE: f32 = 0.41;
 }
@@ -1222,7 +1278,7 @@ pub mod monitor {
 /// names. Weights are 400, 500 and 600 (700 only for the hero title).
 pub trait NativeType: Styled + Sized {
     fn n_style(self, role: (Pixels, Pixels)) -> Self {
-        self.font_family(FONT_FAMILY)
+        self.font_family(theme::ui_font_family())
             .text_size(role.0)
             .line_height(role.1)
     }
@@ -1497,10 +1553,10 @@ mod tests {
         assert_eq!(metrics::CONTENT_LEADING, metrics::CONTENT_GAP);
         assert_eq!(metrics::TOOLBAR_LEADING, metrics::CONTENT_LEADING);
         assert_eq!(metrics::PANE_TOP, metrics::TOOLBAR_ROW);
-        assert_eq!(metrics::INSPECTOR_WIDTH, px(320.));
-        // Owner decision (v14): 320 for inspector and side chat, 400 for the
-        // live and 产出 panes; one in-thread width of 640.
-        assert_eq!(layout::SIDE_CHAT_WIDTH, px(320.));
+        // Owner decision (2026-11-10): one right pane width, 400, for the
+        // inspector, side chat, live and 产出 panes; one in-thread width of 640.
+        assert_eq!(metrics::INSPECTOR_WIDTH, px(400.));
+        assert_eq!(layout::SIDE_CHAT_WIDTH, px(400.));
         assert_eq!(metrics::WIDE_PANE_WIDTH, px(400.));
         assert_eq!(layout::ARTIFACT_PANE_WIDTH, px(400.));
         assert_eq!(layout::IN_THREAD, px(640.));

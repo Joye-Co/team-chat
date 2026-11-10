@@ -97,6 +97,10 @@ pub fn validate_repo(cfg: &Config, repo: &RepoSpec) -> Result<(), String> {
 
 async fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     let mut c = tokio::process::Command::new("git");
+    // Windows: paths over 260 characters (deep trees under the run folder).
+    if cfg!(windows) {
+        c.args(["-c", "core.longpaths=true"]);
+    }
     if let Some(d) = dir {
         c.arg("-C").arg(d);
     }
@@ -125,6 +129,32 @@ const MIRROR_REFSPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
 
 static GIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Makes the run folder. Windows: `<work_root>/runs` and the run folder in it are made with
+/// their access list (the daemon's user, SYSTEM and Administrators, nothing inherited), so
+/// the working folder, the `chat-run` requests and the settings files, which hold secrets,
+/// are closed to every other user from the first moment, wherever `work_root` is. A folder of
+/// either name that is already there and that others can get into is refused, and so is a
+/// volume without access lists (FAT, exFAT, a network share). Unix: `create_dir_all`; each of
+/// those files has its own mode there.
+fn private_run_dir(cfg: &Config, dir: &Path) -> Result<(), String> {
+    let refuse = |what: &Path, e: std::io::Error| {
+        if cfg!(windows) {
+            format!(
+                "cannot create run folder: {} cannot be made private to this user ({e}); put \
+work_root on an NTFS volume of this machine, in a folder of your own",
+                what.display()
+            )
+        } else {
+            format!("cannot create run folder: {e}")
+        }
+    };
+    if cfg!(windows) {
+        let runs = runs_dir(cfg);
+        crate::sys::create_private_dir(&runs).map_err(|e| refuse(&runs, e))?;
+    }
+    crate::sys::create_private_dir(dir).map_err(|e| refuse(dir, e))
+}
+
 /// Makes `<run>/work`: a git worktree on a new branch `bot/<runId>`, or an empty folder.
 pub async fn prepare(
     cfg: &Config,
@@ -132,7 +162,7 @@ pub async fn prepare(
     repo: Option<&RepoSpec>,
 ) -> Result<(PathBuf, RunMeta), String> {
     let dir = run_dir(cfg, run_id);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create run folder: {e}"))?;
+    private_run_dir(cfg, &dir)?;
     let work = dir.join("work");
     let mut meta = RunMeta {
         run_id: run_id.into(),
@@ -250,9 +280,33 @@ async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
 /// Makes `dir` and everything below it read-only (`a-w`; a side chat run's checkout, so its CLI
 /// cannot write there whatever its own modes say), or gives the owner write access back
 /// (`u+w`). Symlinks are not followed. Errors are skipped: the walk does what it can.
+///
+/// Windows: one entry in the folder's access list that denies the user the write rights, and
+/// that everything in the folder inherits ([`crate::winacl::set_read_only`]); files cannot be
+/// changed, made or removed there.
 pub fn set_read_only(dir: &Path, read_only: bool) {
-    use std::os::unix::fs::PermissionsExt;
+    #[cfg(windows)]
+    {
+        if dir.is_dir()
+            && let Err(e) = crate::winacl::set_read_only(dir, read_only)
+        {
+            eprintln!(
+                "{} {} not made {}: {e}",
+                now_ms(),
+                dir.display(),
+                if read_only { "read-only" } else { "writable" }
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    set_mode_bits(dir, read_only);
+}
+
+#[cfg(not(windows))]
+fn set_mode_bits(dir: &Path, read_only: bool) {
+    #[cfg(unix)]
     let set = |p: &Path, m: &std::fs::Metadata| {
+        use std::os::unix::fs::PermissionsExt;
         let mode = m.permissions().mode();
         let next = if read_only {
             mode & !0o222
@@ -263,6 +317,8 @@ pub fn set_read_only(dir: &Path, read_only: bool) {
             let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(next));
         }
     };
+    #[cfg(not(unix))]
+    let set = |_: &Path, _: &std::fs::Metadata| {};
     let Ok(meta) = std::fs::symlink_metadata(dir) else {
         return;
     };
@@ -278,7 +334,7 @@ pub fn set_read_only(dir: &Path, read_only: bool) {
     }
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
-            set_read_only(&e.path(), read_only);
+            set_mode_bits(&e.path(), read_only);
         }
     }
     if read_only {
@@ -327,7 +383,30 @@ pub async fn remove_run(dir: &Path) {
         }
         let _ = git(Some(gd), &["worktree", "prune"]).await;
     }
-    let _ = tokio::fs::remove_dir_all(dir).await;
+    remove_dir(dir).await;
+}
+
+/// Removes the folder `dir`. Windows cannot remove a file that a program still has open (a
+/// tool that is just ending, an indexer or a virus scanner looking at it): tries again for a
+/// few seconds, and leaves what is still held to the next cleanup.
+async fn remove_dir(dir: &Path) {
+    let tries = if cfg!(windows) { 10 } else { 1 };
+    for n in 1..=tries {
+        match tokio::fs::remove_dir_all(dir).await {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if n == tries => {
+                if cfg!(windows) {
+                    eprintln!(
+                        "{} cleanup: {} not removed yet: {e}",
+                        now_ms(),
+                        dir.display()
+                    );
+                }
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(300)).await,
+        }
+    }
 }
 
 /// Removes the `chat-run` request folders (`work/.chat-run-<run id>`) that a daemon crash left
@@ -397,4 +476,89 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
 
 pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows: the run folder is private when its work root is a folder that everyone may
+    /// write to, and a run folder that somebody else made first is refused.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_run_folder_is_private_under_an_open_work_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let opened = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(opened.status.success(), "{opened:?}");
+        assert!(crate::sys::acl_problem(&root).is_some());
+        let cfg = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\nwork_root = '{}'\n",
+            dir.path().join("token").display(),
+            root.display()
+        ))
+        .unwrap();
+
+        let (work, _) = prepare(&cfg, "r1", None).await.unwrap();
+        for p in [runs_dir(&cfg), run_dir(&cfg, "r1"), work.clone()] {
+            assert_eq!(crate::sys::acl_problem(&p), None, "{}", p.display());
+        }
+        std::fs::write(work.join("secret"), "s").unwrap();
+        assert_eq!(crate::sys::acl_problem(&work.join("secret")), None);
+
+        // A run folder that was there before, with the access list of an open folder.
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(other.join("runs")).unwrap();
+        let _ = std::process::Command::new("icacls")
+            .arg(other.join("runs"))
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        let cfg2 = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\nwork_root = '{}'\n",
+            dir.path().join("token").display(),
+            other.display()
+        ))
+        .unwrap();
+        let e = prepare(&cfg2, "r1", None).await.unwrap_err();
+        assert!(e.contains("cannot be made private"), "{e}");
+        assert!(!run_dir(&cfg2, "r1").exists(), "nothing is put into it");
+    }
+
+    /// A side chat run's checkout: nothing in it can be changed, made or removed until it is
+    /// writable again (the cleanup makes it so before it removes the run).
+    #[test]
+    fn a_read_only_checkout_refuses_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(work.join("src")).unwrap();
+        std::fs::write(work.join("src").join("a.txt"), "old").unwrap();
+        set_read_only(&work, true);
+        // Root ignores mode bits (a container that runs the tests as root).
+        let root = cfg!(unix) && crate::sys::euid() == 0;
+        if !root {
+            assert!(std::fs::write(work.join("src").join("a.txt"), "new").is_err());
+            assert!(std::fs::write(work.join("new.txt"), "x").is_err());
+            assert!(std::fs::write(work.join("src").join("new.txt"), "x").is_err());
+            // Windows: not asserted. Deleting (and making a folder) is done with backup intent,
+            // which skips the access list for a process that holds the restore privilege, and
+            // the CI runner is elevated. So this test does not show that a delete is refused
+            // there; it is for a CLI of an ordinary user, which no test here runs as.
+            #[cfg(unix)]
+            assert!(std::fs::remove_file(work.join("src").join("a.txt")).is_err());
+        }
+        assert_eq!(
+            std::fs::read_to_string(work.join("src").join("a.txt")).unwrap(),
+            "old"
+        );
+        set_read_only(&work, false);
+        std::fs::write(work.join("src").join("a.txt"), "new").unwrap();
+        std::fs::write(work.join("new.txt"), "x").unwrap();
+        std::fs::remove_dir_all(&work).unwrap();
+    }
 }

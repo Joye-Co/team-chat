@@ -15,6 +15,10 @@ pub mod health;
 pub mod input;
 pub mod metrics;
 pub mod models;
+#[cfg(unix)]
+pub mod proctree;
+#[cfg(not(unix))]
+#[path = "proctree_windows.rs"]
 pub mod proctree;
 pub mod product;
 pub mod proto;
@@ -24,7 +28,14 @@ pub mod runtime;
 pub mod secrets;
 pub mod selfupdate;
 pub mod service;
+pub mod sys;
 pub mod upload;
 pub mod usage;
 pub mod vm_agent;
+#[cfg(windows)]
+pub mod winacl;
+#[cfg(windows)]
+pub mod winjob;
+#[cfg(windows)]
+pub mod winpty;
 pub mod workspace;

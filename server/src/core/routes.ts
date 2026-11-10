@@ -360,7 +360,7 @@ export function registerCoreRoutes(): void {
       }
       const code = newInviteCode();
       const now = Date.now();
-      const expiresAt = now + INVITE_TTL_MS;
+      const expiresAt = now + (req.expiresInHours ? req.expiresInHours * 3_600_000 : INVITE_TTL_MS);
       const id = ulid(now);
       await env.DB.batch([
         env.DB.prepare(

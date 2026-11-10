@@ -136,6 +136,22 @@ function event(v: Vm, ev: unknown) {
   send({ t: "run.event", runId: v.runId, seq: v.seq, at: Date.now(), event: ev });
 }
 
+/**
+ * A sample run's usage with its models, as a 1.3 daemon reports it: Claude Code with its own cost
+ * per model (mostly cache reads), Codex with tokens only (the server prices them).
+ */
+function sampleUsage(runtime: string, tokens: number) {
+  const input = Math.round(tokens * 0.85);
+  const output = Math.round(tokens * 0.15);
+  if (runtime === "claude") {
+    const cost = Math.round(tokens * 0.0009) / 100;
+    const main = { model: "claude-sonnet-4-5-20250929", inputTokens: Math.round(input * 0.1), outputTokens: output - 400, cacheReadTokens: Math.round(input * 0.8), cacheWriteTokens: input - Math.round(input * 0.1) - Math.round(input * 0.8), costUsd: Math.round(cost * 95) / 100 };
+    const small = { model: "claude-haiku-4-5-20251001", inputTokens: 0, outputTokens: 400, costUsd: Math.round(cost * 5) / 100 };
+    return { inputTokens: input, outputTokens: output, costUsd: cost, models: [main, small] };
+  }
+  return { inputTokens: input, outputTokens: output, models: [{ model: "gpt-5.1-codex", inputTokens: Math.round(input * 0.3), outputTokens: output, cacheReadTokens: input - Math.round(input * 0.3) }] };
+}
+
 function finish(v: Vm, ok: boolean, error?: string) {
   v.seq += 1;
   const tokens = Math.round(40_000 + Math.random() * 260_000);
@@ -146,7 +162,7 @@ function finish(v: Vm, ok: boolean, error?: string) {
     at: Date.now(),
     status: ok ? "succeeded" : "failed",
     ...(ok
-      ? { resultText: "（样例机器）做完了：这是沙盒里的演示结果。", summary: "（样例机器）做完了", usage: { inputTokens: Math.round(tokens * 0.85), outputTokens: Math.round(tokens * 0.15), ...(v.runtime === "claude" ? { costUsd: Math.round(tokens * 0.0009) / 100 } : {}) } }
+      ? { resultText: "（样例机器）做完了：这是沙盒里的演示结果。", summary: "（样例机器）做完了", usage: sampleUsage(v.runtime, tokens) }
       : { error: error ?? "failed" }),
     durationMs: Date.now() - v.startedAt,
   });

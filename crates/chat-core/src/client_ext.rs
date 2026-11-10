@@ -445,7 +445,20 @@ impl Client {
         self.spawn(async move { Ok(crate::updates::check(&http, &cur).await?) })
     }
 
-    /// Downloads a release DMG to `dest` and checks its SHA-256.
+    /// [`Client::check_update`] for a named release platform (tests).
+    pub fn check_update_for(
+        &self,
+        current_version: &str,
+        platform: &str,
+    ) -> JoinHandle<Result<Option<UpdateInfo>, ClientError>> {
+        let http = self.http();
+        let cur = current_version.to_string();
+        let platform = platform.to_string();
+        self.spawn(async move { Ok(crate::updates::check_for(&http, &cur, &platform).await?) })
+    }
+
+    /// Downloads a release file (the DMG, or the Windows installer) to `dest` and checks
+    /// its SHA-256.
     pub fn download_update(
         &self,
         info: UpdateInfo,

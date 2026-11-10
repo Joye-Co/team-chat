@@ -103,7 +103,11 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let (run_tx, mut run_rx) = mpsc::unbounded_channel();
     let keys = crate::accounts::SecretStore::load(&cfg);
     let key_values = keys.values();
-    let redactor = Arc::new(crate::redact::Redactor::for_daemon_with(&cfg, &token, &key_values));
+    let redactor = Arc::new(crate::redact::Redactor::for_daemon_with(
+        &cfg,
+        &token,
+        &key_values,
+    ));
     let machine_key = crate::accounts::MachineKey::load_or_create(&cfg).map(Arc::new);
     let (login_tx, mut login_rx) = mpsc::unbounded_channel();
     let exec = crate::executor::for_config(&cfg);
@@ -884,7 +888,13 @@ impl Daemon {
     }
 
     /// Feature "accounts": start, finish or cancel a sign-in.
-    fn on_account_login(&mut self, login_id: String, runtime: String, op: String, code: Option<String>) {
+    fn on_account_login(
+        &mut self,
+        login_id: String,
+        runtime: String,
+        op: String,
+        code: Option<String>,
+    ) {
         use crate::accounts::LoginCtl;
         if self.machine_key.is_none() || !crate::proto::valid_run_id(&login_id) {
             return;
@@ -899,7 +909,10 @@ impl Daemon {
                         url: None,
                         user_code: None,
                         account: None,
-                        error: Some(format!("no runtime {}", crate::chat_run::safe_word(&runtime))),
+                        error: Some(format!(
+                            "no runtime {}",
+                            crate::chat_run::safe_word(&runtime)
+                        )),
                     });
                     return;
                 };
@@ -908,8 +921,18 @@ impl Daemon {
                 if let Some(old) = self.logins.insert(login_id.clone(), tx) {
                     let _ = old.send(LoginCtl::Cancel);
                 }
-                log!("sign-in {} started ({})", login_id, crate::chat_run::safe_word(&runtime));
-                tokio::spawn(crate::accounts::run_login(login_id, runtime, rt, rx, self.login_tx.clone()));
+                log!(
+                    "sign-in {} started ({})",
+                    login_id,
+                    crate::chat_run::safe_word(&runtime)
+                );
+                tokio::spawn(crate::accounts::run_login(
+                    login_id,
+                    runtime,
+                    rt,
+                    rx,
+                    self.login_tx.clone(),
+                ));
             }
             "code" => {
                 if let (Some(tx), Some(code)) = (self.logins.get(&login_id), code) {

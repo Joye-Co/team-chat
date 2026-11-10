@@ -38,15 +38,24 @@ fn dir(cfg: &Config) -> PathBuf {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension("tmp");
     {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        // Windows: a new file whose access list is part of its creation; a leftover (or a
+        // file somebody put there) is removed first and never written to.
+        #[cfg(windows)]
+        let mut f = {
+            let _ = std::fs::remove_file(&tmp);
+            crate::sys::create_private_file(&tmp)?
+        };
+        #[cfg(not(windows))]
+        let mut f = crate::sys::mode(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true),
+            0o600,
+        )
+        .open(&tmp)?;
         std::io::Write::write_all(&mut f, bytes)?;
         f.sync_all()?;
     }
@@ -55,10 +64,10 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Group- or world-readable files are refused, like the token file.
 fn private_enough(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)
-        .map(|m| m.permissions().mode() & 0o077 == 0)
+        .map(|m| !crate::sys::open_to_others(&m))
         .unwrap_or(false)
+        && crate::sys::acl_problem(path).is_none()
 }
 
 /// The machine's X25519 key pair.
@@ -292,6 +301,7 @@ fn login_env(rt: &RuntimeConfig) -> Vec<(String, String)> {
         "CLAUDE_CONFIG_DIR",
     ]
     .iter()
+    .chain(crate::sys::OS_ENV)
     .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
     .collect();
     for (k, v) in &rt.env {
@@ -338,16 +348,20 @@ pub async fn run_login(
         let _ = send.send(fail(format!("{} is not installed", rt.command())));
         return;
     };
-    let mut child = match tokio::process::Command::new(&program)
-        .args(&args)
-        .env_clear()
-        .envs(login_env(&rt))
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-    {
+    // Windows: the sign-in is in a job that ends with it, and a browser the CLI starts on the
+    // machine would be in that job. That is meant: the link goes to the person through the
+    // app (BROWSER is set against a local browser, see `login_env`), and nothing of a sign-in
+    // that was given up may stay behind on the machine.
+    let mut child = match crate::health::spawn(
+        crate::health::command(&program)
+            .args(&args)
+            .env_clear()
+            .envs(login_env(&rt))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true),
+    ) {
         Ok(c) => c,
         Err(e) => {
             let _ = send.send(fail(format!("cannot start {}: {e}", rt.command())));
@@ -471,13 +485,16 @@ pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
         "claude" => {
             let out = tokio::time::timeout(
                 Duration::from_secs(20),
-                tokio::process::Command::new(program)
-                    .args(["auth", "status", "--json"])
-                    .env_clear()
-                    .envs(login_env(rt))
-                    .stdin(std::process::Stdio::null())
-                    .kill_on_drop(true)
-                    .output(),
+                crate::health::output(
+                    crate::health::command(&program)
+                        .args(["auth", "status", "--json"])
+                        .env_clear()
+                        .envs(login_env(rt))
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .kill_on_drop(true),
+                ),
             )
             .await
             .ok()?
@@ -495,13 +512,16 @@ pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
         "codex" => {
             let out = tokio::time::timeout(
                 Duration::from_secs(20),
-                tokio::process::Command::new(program)
-                    .args(["login", "status"])
-                    .env_clear()
-                    .envs(login_env(rt))
-                    .stdin(std::process::Stdio::null())
-                    .kill_on_drop(true)
-                    .output(),
+                crate::health::output(
+                    crate::health::command(&program)
+                        .args(["login", "status"])
+                        .env_clear()
+                        .envs(login_env(rt))
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .kill_on_drop(true),
+                ),
             )
             .await
             .ok()?
@@ -574,11 +594,14 @@ mod tests {
         assert!(s.set("PATH", "x".repeat(20), vec![]).is_err());
         assert!(s.set("CHAT_RUN_ID", "x".repeat(20), vec![]).is_err());
         assert!(s.set("lower", "x".repeat(20), vec![]).is_err());
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
         let infos = s.infos();
         assert_eq!(infos.len(), 2);
         assert_eq!(infos[1].last4, "9xQz");

@@ -360,9 +360,7 @@ pub fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 pub fn save_as(target: &FileRef, cx: &mut App) {
     let name = target.name();
     target.with_local(cx, move |local, cx| {
-        let dir = std::env::var_os("HOME")
-            .map(|h| Path::new(&h).join("Downloads"))
-            .unwrap_or_else(std::env::temp_dir);
+        let dir = crate::paths::downloads().unwrap_or_else(std::env::temp_dir);
         let rx = cx.prompt_for_new_path(&dir, Some(&name));
         cx.spawn(async move |cx: &mut AsyncApp| {
             let Ok(Ok(Some(dest))) = rx.await else {

@@ -9,7 +9,8 @@
       "inputTokens": 1080000,
       "outputTokens": 108000,
       "runs": 12,
-      "topics": 11
+      "topics": 11,
+      "unpricedTokens": 198000
     },
     "previous": {
       "costUsd": 180.25,
@@ -24,7 +25,12 @@
         "outputTokens": 45000,
         "runs": 5,
         "topics": 4,
-        "budgetCents": 10000
+        "budgetCents": 10000,
+        "heldRuns": 1,
+        "models": [
+          "claude-opus-5-5",
+          "claude-haiku-4-5"
+        ]
       }
     ],
     "initiators": [
@@ -47,6 +53,44 @@
         "topics": 11
       }
     ],
+    "pairs": [
+      {
+        "initiatorId": "01JBX0OWNER0000000000000AA",
+        "memberId": "01JBX0BOT000000000000000AC",
+        "costUsd": 52.5,
+        "inputTokens": 270000,
+        "outputTokens": 27000,
+        "runs": 3,
+        "topics": 2
+      }
+    ],
+    "models": [
+      {
+        "model": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "runtimes": [
+          "claude"
+        ],
+        "costUsd": 190.5,
+        "inputTokens": 810000,
+        "outputTokens": 81000,
+        "runs": 9,
+        "topics": 8
+      },
+      {
+        "model": "gpt-5.1-codex",
+        "name": "GPT-5.1 Codex",
+        "runtimes": [
+          "codex"
+        ],
+        "costUsd": 12.5,
+        "inputTokens": 180000,
+        "outputTokens": 18000,
+        "runs": 2,
+        "topics": 1,
+        "estimatedUsd": 12.5
+      }
+    ],
     "runtimes": [
       {
         "runtime": "claude",
@@ -63,7 +107,8 @@
         "inputTokens": 180000,
         "outputTokens": 18000,
         "runs": 2,
-        "topics": 1
+        "topics": 1,
+        "estimatedUsd": 12.5
       }
     ],
     "daily": [

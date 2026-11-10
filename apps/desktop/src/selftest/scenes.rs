@@ -901,6 +901,7 @@ pub fn all() -> Vec<&'static Scene> {
         crate::views::members_page::scenes::SCENES,
         crate::views::memory::scenes::SCENES,
         crate::views::artifact_page::scenes::SCENES,
+        crate::views::admin::scenes::SCENES,
         V2_SHARED,
         // --- provider track ---
         CORE_SCENES,

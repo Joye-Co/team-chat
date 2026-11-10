@@ -30,7 +30,7 @@ crate::copy! {
     IMG_COUNT = "{n} 张",
     IMG_SAVE_ALL = "全部存到本机",
     IMG_POSITION = "{i} / {n}",
-    IMG_HINT = "← → 切换 · Esc 关闭 · ⌘C 复制",
+    IMG_HINT = crate::copy::per_system("← → 切换 · Esc 关闭 · ⌘C 复制", "← → 切换 · Esc 关闭 · Ctrl+C 复制"),
     IMG_PREV = "上一张",
     IMG_NEXT = "下一张",
     COPY = "复制",

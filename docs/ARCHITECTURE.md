@@ -17,6 +17,8 @@ work needs. The wire contract is [protocol.md](protocol.md).
 | `crates/chat-core` | Rust client core without UI: local SQLite cache, sync engine, WebSocket connection |
 | `apps/desktop` | Rust GPUI macOS app |
 | `apps/daemon` | Rust machine daemon that runs coding CLIs for bot members |
+| `apps/update-helper` | Small Windows program that replaces the installed app after it quits, restarts it, and rolls back when the new version does not start (`docs/plans/windows.zh.md`, R1) |
+| `apps/website` | The product homepage: static HTML, CSS and JS built with bun; see its README |
 | `tools/e2e` | Headless clients for end-to-end and load tests (Rust, built on chat-core) |
 | `crates/artifact-view` | WKWebView window for HTML artifacts (objc2) |
 | `packages/search` | CJK bigram tokenizing for SQLite FTS5 |

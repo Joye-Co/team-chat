@@ -14,6 +14,10 @@ const Spend = {
   outputTokens: z.int().nonnegative(),
   runs: z.int().nonnegative(),
   topics: z.int().nonnegative(),
+  /** The part of `costUsd` estimated from tokens at list price (runs whose CLI reports no cost). */
+  estimatedUsd: z.number().nonnegative().optional(),
+  /** Tokens of models with no known price: not in `costUsd` ("价格未知"). */
+  unpricedTokens: z.int().nonnegative().optional(),
 };
 
 export const TeamUsage = z.object({
@@ -24,10 +28,29 @@ export const TeamUsage = z.object({
   previous: z.object({ costUsd: z.number().nonnegative(), topics: z.int().nonnegative() }),
   /** Sum of the AI members' weekly budgets (`weeklyBudgetCents`); absent when none has one. */
   teamBudgetCents: z.int().nonnegative().optional(),
-  bots: z.array(z.object({ memberId: Id, ...Spend, budgetCents: z.int().nonnegative().optional() })).max(500),
+  bots: z
+    .array(
+      z.object({
+        memberId: Id,
+        ...Spend,
+        budgetCents: z.int().nonnegative().optional(),
+        /** Runs held at its weekly budget, waiting for an owner (到了预算先停下来问). */
+        heldRuns: z.int().nonnegative().optional(),
+        /** The models this AI member used, by cost (ids as in `models`). */
+        models: z.array(z.string().min(1).max(200)).max(10).optional(),
+      }),
+    )
+    .max(500),
   /** Who asked for the runs (the person behind each run). */
   initiators: z.array(z.object({ memberId: Id, ...Spend })).max(500),
   machines: z.array(z.object({ machineId: Id, ...Spend })).max(200),
+  /** By model: its id, its name from the price list, and the CLIs it ran in. */
+  models: z
+    .array(z.object({ model: z.string().min(1).max(200), name: z.string().min(1).max(200), runtimes: z.array(z.string().min(1).max(64)).max(8), ...Spend }))
+    .max(200)
+    .optional(),
+  /** Who asked which AI member: one entry per (person, AI member), by cost. */
+  pairs: z.array(z.object({ initiatorId: Id, memberId: Id, ...Spend })).max(2000).optional(),
   /** Per runtime and machine, so a client can tell subscription from API key by the machine's login. */
   runtimes: z.array(z.object({ runtime: z.string().min(1).max(64), machineId: Id.optional(), ...Spend })).max(500),
   /** One bucket per 24 hours from `from`, each with the cost per AI member. */

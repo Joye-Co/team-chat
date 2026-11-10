@@ -47,12 +47,12 @@ pub mod cards_v2;
 // --- inc-cards21 ---
 pub mod cards21;
 // --- end inc-cards21 ---
+pub mod admin;
 pub mod desk;
 pub mod group_page;
 pub mod live;
 pub mod members_page;
 pub mod memory;
-pub mod admin;
 pub mod rail;
 pub mod side_chat;
 pub mod topic_rail;
@@ -65,6 +65,18 @@ pub mod overlays;
 // --- r1-kit ---
 pub mod kit;
 // --- end r1-kit ---
+
+/// A catalog text that differs by system: `mac` on macOS, `other` on
+/// Windows and Linux. The Mac app names the Mac, the Finder, the menu bar and
+/// the keychain; elsewhere the text says 电脑 and names what that system has.
+/// A device that really is a Mac (a name from the server) is never rewritten.
+pub const fn per_system(mac: &'static str, other: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        mac
+    } else {
+        other
+    }
+}
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
@@ -351,6 +363,111 @@ mod tests {
         let line = ltr(format!("{}：好", isolate("نور")));
         assert!(line.starts_with('\u{200E}'));
         assert_eq!(ltr("中文".into()), "中文");
+    }
+
+    /// Both texts of every `per_system(mac, other)` entry, read from the
+    /// catalog's source: only one of the two is compiled in.
+    fn per_system_texts() -> Vec<(String, String, String)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/copy");
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("the catalog folder") {
+            let path = entry.expect("a catalog file").path();
+            if path.file_name().is_some_and(|n| n == "mod.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a catalog file");
+            let file = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut rest = source.as_str();
+            while let Some(at) = rest.find("per_system(") {
+                rest = &rest[at + "per_system(".len()..];
+                let (mac, after) = string_literal(rest).expect("per_system takes two literals");
+                let (other, after) = string_literal(after).expect("per_system takes two literals");
+                out.push((file.clone(), mac, other));
+                rest = after;
+            }
+        }
+        out
+    }
+
+    /// The next Rust string literal of `source` (escapes resolved) and what
+    /// follows it.
+    fn string_literal(source: &str) -> Option<(String, &str)> {
+        let start = source.find('"')? + 1;
+        let mut text = String::new();
+        let mut chars = source[start..].char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '"' => return Some((text, &source[start + i + 1..])),
+                '\\' => match chars.next()?.1 {
+                    'n' => text.push('\n'),
+                    other => text.push(other),
+                },
+                c => text.push(c),
+            }
+        }
+        None
+    }
+
+    fn is_han(c: char) -> bool {
+        matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}')
+    }
+
+    /// Where `text` breaks the spacing rule of mixed Chinese and Latin text:
+    /// a space between two Chinese characters, or a Chinese character right
+    /// next to a Latin letter or a digit.
+    fn spacing_faults(text: &str) -> Vec<String> {
+        let chars: Vec<char> = text.chars().collect();
+        let around = |i: usize| -> String {
+            chars[i.saturating_sub(3)..(i + 4).min(chars.len())]
+                .iter()
+                .collect()
+        };
+        let mut faults = Vec::new();
+        for i in 0..chars.len().saturating_sub(1) {
+            let (a, b) = (chars[i], chars[i + 1]);
+            let latin = |c: char| c.is_ascii_alphanumeric();
+            if (is_han(a) && latin(b)) || (latin(a) && is_han(b)) {
+                faults.push(format!("no space in 「{}」", around(i)));
+            }
+            if a == ' ' && i > 0 && is_han(chars[i - 1]) && is_han(b) {
+                faults.push(format!(
+                    "a space between Chinese characters in 「{}」",
+                    around(i)
+                ));
+            }
+        }
+        faults
+    }
+
+    /// A Windows text made by swapping one word of the Mac text must still
+    /// read as a sentence: 「这台 Mac 上」 becomes 「这台电脑上」, never
+    /// 「这台电脑 上」, and 「钥匙串」 becomes 「 Windows 凭据管理器」 with its spaces.
+    #[test]
+    fn per_system_texts_keep_the_spacing_of_chinese_and_latin() {
+        let texts = per_system_texts();
+        assert!(
+            texts.len() >= 20,
+            "found only {} per_system entries",
+            texts.len()
+        );
+        let mut faults = Vec::new();
+        for (file, mac, other) in &texts {
+            for (system, text) in [("mac", mac), ("other", other)] {
+                for fault in spacing_faults(text) {
+                    faults.push(format!("{file} ({system}) 「{text}」: {fault}"));
+                }
+            }
+        }
+        assert!(faults.is_empty(), "{}", faults.join("\n"));
+    }
+
+    #[test]
+    fn the_spacing_rule_finds_both_faults() {
+        assert!(spacing_faults("值会在这台电脑上加密").is_empty());
+        assert!(spacing_faults("值会在这台 Mac 上加密，按 4 次").is_empty());
+        assert_eq!(spacing_faults("值会在这台电脑 上加密").len(), 1);
+        assert_eq!(spacing_faults("保存在Windows 凭据管理器里").len(), 1);
+        assert_eq!(spacing_faults("后4 位").len(), 1);
     }
 
     /// Developer words from docs/PRODUCT.md: the bullet that starts with

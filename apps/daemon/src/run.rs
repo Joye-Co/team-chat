@@ -81,7 +81,7 @@ pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String
         env.retain(|(n, _)| n != k);
         env.push((k.to_string(), v));
     };
-    for k in BASE_ENV {
+    for k in BASE_ENV.iter().chain(crate::sys::OS_ENV) {
         if let Ok(v) = std::env::var(k) {
             put(k, v);
         }
@@ -204,7 +204,7 @@ fn start_chat_run(
         }
     };
     let path = match env.iter().find(|(k, _)| k == "PATH") {
-        Some((_, p)) if !p.is_empty() => format!("{}:{p}", bin.display()),
+        Some((_, p)) if !p.is_empty() => format!("{}{}{p}", bin.display(), crate::sys::PATH_SEP),
         _ => bin.display().to_string(),
     };
     env.retain(|(k, _)| {
@@ -307,7 +307,7 @@ pub async fn supervise(ctx: RunCtx) {
             ));
             outputs.set_gates(gates.clone());
             let gate_hook =
-                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::NAME));
+                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
             let notes: Vec<String> = [gate.note(), gates.note()].into_iter().flatten().collect();
             let spec = RunSpec {
                 run_id: run_id.clone(),

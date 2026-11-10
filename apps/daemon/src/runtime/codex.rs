@@ -18,6 +18,8 @@ pub struct CodexNormalizer {
     pub last_turn_status: Option<String>,
     pub last_error: Option<String>,
     pub usage: Option<Usage>,
+    /// The model the thread runs, from `thread/start` (or the one asked for).
+    pub model: Option<String>,
     plan: PlanTracker,
 }
 
@@ -75,10 +77,32 @@ impl CodexNormalizer {
             "item/completed" => self.item_completed(&p["item"], turn_id),
             "thread/tokenUsage/updated" => {
                 let t = &p["tokenUsage"]["total"];
+                let input = t["inputTokens"].as_u64().unwrap_or(0);
+                let output = t["outputTokens"].as_u64().unwrap_or(0);
+                // Cached input (read and written) is part of `inputTokens`; it is priced apart.
+                let cached = t["cachedInputTokens"].as_u64().unwrap_or(0).min(input);
+                let written = t["cacheWriteInputTokens"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .min(input - cached);
                 self.usage = Some(Usage {
-                    input_tokens: t["inputTokens"].as_u64().unwrap_or(0),
-                    output_tokens: t["outputTokens"].as_u64().unwrap_or(0),
+                    input_tokens: input,
+                    output_tokens: output,
                     cost_usd: None,
+                    models: self
+                        .model
+                        .clone()
+                        .map(|model| {
+                            vec![crate::proto::ModelUsage {
+                                model,
+                                input_tokens: input - cached - written,
+                                output_tokens: output,
+                                cache_read_tokens: (cached > 0).then_some(cached),
+                                cache_write_tokens: (written > 0).then_some(written),
+                                cost_usd: None,
+                            }]
+                        })
+                        .unwrap_or_default(),
                 });
                 vec![]
             }
@@ -435,6 +459,10 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             Pending::ThreadStart | Pending::ThreadResume { .. } => {
                                 let tid = r["thread"]["id"].as_str().unwrap_or_default().to_string();
                                 session_file = r["thread"]["path"].as_str().map(PathBuf::from);
+                                norm.model = r["model"]
+                                    .as_str()
+                                    .map(str::to_string)
+                                    .or_else(|| spec.model.clone().or(spec.cfg.model.clone()));
                                 let _ = emit.send(RunEvent::Session {
                                     session_id: tid.clone(),
                                     runtime: spec.runtime_name.clone(),
@@ -603,7 +631,7 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String>
     let home = spec
         .env_var("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".codex"));
+        .unwrap_or_else(|| spec.home().join(".codex"));
     let files = std::iter::once(home.join("config.toml"))
         .chain(spec.cwd.ancestors().map(|d| d.join(".codex/config.toml")));
     let mut names: Vec<(String, bool)> = vec![];

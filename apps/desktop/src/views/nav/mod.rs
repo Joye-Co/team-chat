@@ -14,7 +14,11 @@ pub mod rename;
 pub mod selftest;
 #[cfg(target_os = "macos")]
 mod status_item;
+#[cfg(target_os = "windows")]
+#[path = "status_item_win.rs"]
+mod status_item;
 pub mod switcher;
+mod tray_icon;
 // --- v12/overlays ---
 pub mod new_topic;
 // --- end v12/overlays ---
@@ -87,19 +91,19 @@ pub fn bind_sheet_keys(cx: &mut App) {
 /// item. Call once after `gpui_kit::init`. `status_item` is false for self-tests.
 pub fn install(services: Services, status_item: bool, cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-k", QuickSwitch, None),
-        KeyBinding::new("cmd-shift-n", NewGroup, None),
+        KeyBinding::new(crate::secondary!("k"), QuickSwitch, None),
+        KeyBinding::new(crate::secondary!("shift-n"), NewGroup, None),
         KeyBinding::new("alt-down", NextUnreadTopic, None),
         KeyBinding::new("alt-up", PreviousUnreadTopic, None),
-        KeyBinding::new("cmd-1", OpenGroup1, None),
-        KeyBinding::new("cmd-2", OpenGroup2, None),
-        KeyBinding::new("cmd-3", OpenGroup3, None),
-        KeyBinding::new("cmd-4", OpenGroup4, None),
-        KeyBinding::new("cmd-5", OpenGroup5, None),
-        KeyBinding::new("cmd-6", OpenGroup6, None),
-        KeyBinding::new("cmd-7", OpenGroup7, None),
-        KeyBinding::new("cmd-8", OpenGroup8, None),
-        KeyBinding::new("cmd-9", OpenGroup9, None),
+        KeyBinding::new(crate::secondary!("1"), OpenGroup1, None),
+        KeyBinding::new(crate::secondary!("2"), OpenGroup2, None),
+        KeyBinding::new(crate::secondary!("3"), OpenGroup3, None),
+        KeyBinding::new(crate::secondary!("4"), OpenGroup4, None),
+        KeyBinding::new(crate::secondary!("5"), OpenGroup5, None),
+        KeyBinding::new(crate::secondary!("6"), OpenGroup6, None),
+        KeyBinding::new(crate::secondary!("7"), OpenGroup7, None),
+        KeyBinding::new(crate::secondary!("8"), OpenGroup8, None),
+        KeyBinding::new(crate::secondary!("9"), OpenGroup9, None),
     ]);
     bind_sheet_keys(cx);
     cx.set_global(NavGlobal {
@@ -167,28 +171,31 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     })
     .detach();
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     if status_item {
         status_item::install(services, cx);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = status_item;
 }
 
 /// 设置 › 通用 › 菜单栏里显示: hides or shows the menu bar item.
 pub fn show_status_item(shown: bool, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     status_item::set_visible(shown, cx);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (shown, cx);
 }
 
 /// For the self-test: the menu bar item is installed and up to date.
 pub fn status_item_ok(services: &Services, cx: &App) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     return status_item::check(services, cx);
-    #[cfg(not(target_os = "macos"))]
-    return true;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (services, cx);
+        true
+    }
 }
 
 /// Registers the main window, where the navigation dialogs open.

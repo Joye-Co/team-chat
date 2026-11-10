@@ -14,6 +14,28 @@ use std::collections::{HashMap, VecDeque};
 
 pub struct ClaudeRuntime;
 
+/// Claude Code's `modelUsage` of a result: per model its tokens (input apart from cache reads and
+/// writes) and its own cost. None when the result has none.
+pub fn model_usage(v: &Value) -> Option<Vec<crate::proto::ModelUsage>> {
+    let map = v.as_object()?;
+    let n = |m: &Value, k: &str| m[k].as_u64().unwrap_or(0);
+    let mut out: Vec<crate::proto::ModelUsage> = map
+        .iter()
+        .filter(|(k, _)| !k.is_empty())
+        .map(|(model, m)| crate::proto::ModelUsage {
+            model: model.chars().take(200).collect(),
+            input_tokens: n(m, "inputTokens"),
+            output_tokens: n(m, "outputTokens"),
+            cache_read_tokens: Some(n(m, "cacheReadInputTokens")).filter(|x| *x > 0),
+            cache_write_tokens: Some(n(m, "cacheCreationInputTokens")).filter(|x| *x > 0),
+            cost_usd: m["costUSD"].as_f64().filter(|c| c.is_finite() && *c >= 0.),
+        })
+        .collect();
+    out.sort_by(|a, b| a.model.cmp(&b.model));
+    out.truncate(32);
+    (!out.is_empty()).then_some(out)
+}
+
 #[derive(Default)]
 pub struct ClaudeNormalizer {
     pub session_id: Option<String>,
@@ -199,6 +221,8 @@ impl ClaudeNormalizer {
                         + u["cache_creation_input_tokens"].as_u64().unwrap_or(0),
                     output_tokens: prev.output_tokens + u["output_tokens"].as_u64().unwrap_or(0),
                     cost_usd: v["total_cost_usd"].as_f64().or(prev.cost_usd),
+                    // `modelUsage` covers the session so far, like `total_cost_usd`.
+                    models: model_usage(&v["modelUsage"]).unwrap_or(prev.models),
                 });
                 let mut out = vec![];
                 let done = self.turns.pop_front().unwrap_or_else(|| "t0".into());
@@ -310,8 +334,18 @@ fn tool_title(name: &str, input: &Value) -> String {
 /// `~/.claude/projects` folder name for a working directory.
 pub fn project_dir_name(cwd: &Path) -> String {
     let real = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    real.to_string_lossy()
-        .chars()
+    project_dir_name_of(&real.to_string_lossy())
+}
+
+/// [`project_dir_name`] of a path as the CLI sees it. Windows: `canonicalize` gives the
+/// `\\?\` form (`\\?\C:\Users\me\work`), which the CLI never sees; without that prefix
+/// `C:\Users\me\work` is `C--Users-me-work`.
+pub fn project_dir_name_of(path: &str) -> String {
+    let path = match path.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}"),
+        None => path.strip_prefix(r"\\?\").unwrap_or(path).to_string(),
+    };
+    path.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
@@ -364,7 +398,7 @@ pub const ASIDE_SETTINGS: &str = ".aside-settings.json";
 pub fn config_dir(spec: &RunSpec) -> PathBuf {
     spec.env_var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".claude"))
+        .unwrap_or_else(|| spec.home().join(".claude"))
 }
 
 /// The settings a side chat run keeps from the user's `settings.json`: only `env`,
@@ -397,15 +431,11 @@ pub fn aside_settings(config_dir: &Path) -> Option<Value> {
 /// hold auth values, which must not go on the command line) and returns its path.
 fn write_aside_settings(spec: &RunSpec) -> Option<PathBuf> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     let settings = aside_settings(&config_dir(spec))?;
     let path = spec.run_dir.join(ASIDE_SETTINGS);
     let _ = std::fs::remove_file(&path);
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
+    // Private from its creation (Windows: the access list is set as the file is made).
+    let written = crate::sys::create_private_file(&path)
         .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
     match written {
         Ok(()) => Some(path),
