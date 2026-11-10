@@ -299,7 +299,8 @@ macOS 的代码没动：
 - 音频播放：`Windows.Media.Playback.MediaPlayer`（播放、暂停、跳转、位置、倍速），不进系统的媒体控制条。
 - PDF：`Windows.Data.Pdf` 把每页渲染成 PNG 流再解成位图；页数和页面大小也从它来。
 - 线程：进程用 `CoIncrementMTAUsage` 加入多线程套间一次；每次解码在自己的线程里跑，调用方带超时等结果，
-  解码器卡住也只占一个线程；播放器在后台线程里打开，界面线程只发短命令。
+  超时后通知那个线程停下（它每解一个采样、每画一页检查一次），解码器卡住也只占一个线程；播放器在后台
+  线程里打开，界面线程只发短命令。
 - Media Foundation 按名字动态加载（`mfplat.dll`、`mfreadwrite.dll`），不静态链接：Windows N 版和 Windows
   Server 默认没有它，应用照样能启动，媒体预览退回文件行。
 - 系统没有解码器的格式（比如没装 HEVC 扩展时的 HEVC）和坏文件一样返回「没有预览」，界面显示原来的文件行。
@@ -313,7 +314,7 @@ MP4，HEVC，WAV、MP3、M4A 的峰值，PDF 的页数和渲染结果，每种�
 Media Foundation 对每个样本的描述（只打日志）。样本在 `apps/desktop/src/views/media/fixtures/`（ffmpeg 用纯色
 和正弦波生成，每个几 KB）。CI 的 `desktop-windows` 任务先装 `Server-Media-Foundation`（Windows Server 才
 需要，不用重启），单独跑一步 `cargo test -p desktop views::media::native -- --nocapture`，截图自测默认多跑
-`media-audio`、`media-pdf` 两个场景；`media-video` 用 `windows_scenes=media-video` 手动跑过，也正常。
+`media-video`、`media-audio`、`media-pdf` 三个场景。
 `scripts/windows-screenshots.sh` 在自测以错误码退出时打印 Windows 的崩溃记录（出错的模块）。Git Bash 把以
 NTSTATUS 错误结束的进程报成退出码 127。
 
