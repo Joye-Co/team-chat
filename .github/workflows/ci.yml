@@ -275,18 +275,14 @@ jobs:
           retention-days: 14
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
-      # The Windows system integration (docs/plans/windows.zh.md, C1) must pass: the Run key,
-      # the notification-area icon's images, the network adapters, the window menus.
-      - name: cargo test (desktop, Windows system integration)
+      # Required, every desktop test (this replaces the Windows system integration subset and
+      # the report-only full run). The skipped test fails on Windows and belongs to work in
+      # progress; whoever lands that work removes its line here (docs/plans/windows.zh.md):
+      # - provider::this_mac (one test): the launchd PATH builder joins with `\` on Windows (M3).
+      - name: cargo test (desktop)
         run: >-
           cargo test --locked -p desktop --
-          settings::login_item:: provider::windows:: provider::system_events::
-          nav::status_item:: nav::tray_icon:: settings::window_fit::
-          files::native:: files::tests:: the_window_menus_drop
-      # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
-      - name: cargo test (desktop, report only)
-        continue-on-error: true
-        run: cargo test --locked -p desktop
+          --skip provider::this_mac::tests::the_service_path_keeps_the_shell_path_first_and_adds_usual_folders
       # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
       # to the HWND, as the app runs, the page must show. The DirectComposition run is the
       # record of why the app turns it off (the page stays under GPUI's content).
