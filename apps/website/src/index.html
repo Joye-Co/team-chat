@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{PRODUCT_NAME}}</title>
+<meta name="description" content="工作聊天和 Coding Agent 合成一个 Mac 应用：在群里 @ AI 成员派活，它在你的电脑上做，做完把结果发回群里。">
+<meta property="og:title" content="{{PRODUCT_NAME}}">
+<meta property="og:description" content="聊天软件和 Coding Agent，合成一个 App。">
+<meta property="og:image" content="img/ui/desk-light.webp">
+<link rel="icon" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
+    <div class="links"><a href="#features">功能</a><a href="#genui">卡片</a><a href="#machines">运行在哪</a><a href="#arch">技术架构</a></div>
+    <span class="plat">macOS</span>
+  </div>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="wrap hero">
+    <a class="pill" href="#memory"><b>1.2.6</b>AI 成员会记住团队的做法了 →</a>
+    <h1>聊天软件和 Coding Agent，<br><span class="soft">合成</span>一个 App。</h1>
+    <p class="sub">以前要开飞书或 Slack 聊工作，再开好几个终端跑 Claude Code、Codex。现在都在 {{PRODUCT_NAME}} 里：在群里 @ AI 成员派活，它在你的电脑上做，做完把结果发回群里。</p>
+<div class="fine">目前支持 macOS，Windows 版和手机版正在开发</div>
+    <div class="shot demo" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="demo-bar" data-for="desk"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+  </div>
+
+  <section class="wrap">
+    <div class="center">
+      <div class="eyebrow">Chat + Agent</div>
+      <h2>上班要开的窗口，<br>从 7 个变成 1 个。</h2>
+      <p class="lead">聊工作在聊天软件里，干活在终端和各种 Agent 工具里，结果再复制回群里。{{PRODUCT_NAME}} 把这两类软件合在一起。</p>
+    </div>
+    <div class="windows" aria-label="以前要开的窗口合成 {{PRODUCT_NAME}}">
+      <div class="before"><span class="cap">以前</span><div class="many">
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></i>飞书 / Slack</span>
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i>终端 · claude</span>
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i>终端 · codex</span>
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i>终端 · codex 2</span>
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i>Claude Code 桌面版</span>
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i>Codex 应用</span>
+        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></i>Agent 管理工具</span>
+      </div></div>
+      <svg class="arrow" width="40" height="16" viewBox="0 0 40 16" aria-hidden="true"><path d="M1 8h36M31 2l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="one"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt=""><div><b>{{PRODUCT_NAME}}</b><small>现在</small></div></div>
+    </div>
+    <div class="trio">
+      <div><h3>工作聊天</h3><p>群、私聊、话题、@、引用、已读和搜索都有。原生 Mac 应用，一万条消息的话题也能马上打开。</p></div>
+      <div><h3>Coding Agent</h3><p>Claude Code 和 Codex 作为成员加进群里，在你的机器上执行，计划和终端就显示在话题旁边。</p></div>
+      <div><h3>不用来回切</h3><p>派活、看进度、做决定、收结果，一件事从开始到结束都在同一个话题里。</p></div>
+    </div>
+  </section>
+
+  <section class="wrap chap" id="features">
+    <div class="chap-head">
+      <div><div class="eyebrow">AI members</div><h2>AI 成员和同事，<br>在同一个群里。</h2></div>
+      <div class="r">
+        <p>每个 AI 成员都有名字、岗位和在线状态。@ 它派活，它回一个表情就开始做，做完把改动、测试结果和录屏一起发回来。</p>
+        <ul class="ticks">
+          <li>做的过程不刷屏，都在计划和实时查看里</li>
+          <li>需要你审、需要你选的事，固定在输入框上方</li>
+          <li>一个 AI 可以把活转给另一个，或者拆一部分出去</li>
+        </ul>
+      </div>
+    </div>
+    <div class="shot demo" data-start="topic-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：话题"><div class="stack"><img class="l" src="img/ui/topic-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/topic-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="demo-bar" data-for="topic-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+  </section>
+
+  <section class="wrap chap" id="genui">
+    <div class="chap-head">
+      <div><div class="eyebrow">Generative UI</div><h2>需要你决定时，<br>AI 发一张能点的卡片。</h2></div>
+      <div class="r">
+        <p>问卷、方案对比、图表、审批，都由 AI 按当时的情况生成。你选了哪个、填了什么，直接回到 AI 那里，它接着往下做。</p>
+        <p class="hint">下面是 {{PRODUCT_NAME}} 里的真实卡片，点上面的类型切换。</p>
+      </div>
+    </div>
+    <div class="gal">
+      <div class="tabs" role="tablist" aria-label="卡片类型">
+        <button type="button" class="tab" role="tab" aria-selected="true" data-k="compare" data-d="两个可以点开的原型并排，各写清好处和代价，选一个就行。" data-w="1294" data-h="992">方案对比</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="diff" data-d="只展开最关键的一段改动，看完直接通过或要求修改。" data-w="1294" data-h="1022">代码改动</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="chart" data-d="三个关键数字和近 4 周的趋势，和上个月对比。" data-w="1294" data-h="816">指标和图表</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="approve" data-d="发布到生产前先问你，写清楚包含什么、影响多大、怎么回滚。" data-w="1294" data-h="498">审批</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="draft" data-d="要发出去的内容先给你看，可以改了再确认。" data-w="1294" data-h="552">确认草稿</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="time" data-d="AI 先看了每个人的日历，标出谁来不了、哪个时间都能来。" data-w="1294" data-h="814">时间段</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="poll" data-d="群里每人一票，谁投了什么都看得到，截止前能改。" data-w="1294" data-h="610">投票</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-k="image" data-d="选项是图片，下面写着名字和推荐理由。" data-w="1294" data-h="806">图片选择</button>
+      </div>
+      <figure class="view" role="tabpanel" aria-live="polite">
+        <div class="card"><img class="l" id="v-l" src="img/card-compare-light.webp" alt="方案对比卡片" width="1294" height="992"><img class="d" id="v-d" src="img/card-compare-dark.webp" alt="方案对比卡片" width="1294" height="992"></div>
+        <figcaption id="v-c"><b>方案对比</b>：两个可以点开的原型并排，各写清好处和代价，选一个就行。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="wrap chap">
+    <div class="chap-head">
+      <div><div class="eyebrow">Live view</div><h2>AI 在电脑上做什么，<br>都能实时看到。</h2></div>
+      <div class="r">
+        <p>话题旁边能看到它的终端、计划和验收标准。需要时可以接管，你改完交还，它从当前这一步继续。</p>
+        <ul class="ticks">
+          <li>验收标准逐条显示达标没有</li>
+          <li>每一步都留着记录，可以拖动回放</li>
+          <li>不想让它继续，随时停止</li>
+        </ul>
+      </div>
+    </div>
+    <div class="shot"><img class="l" src="img/live-light.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"><img class="d" src="img/live-dark.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"></div>
+  </section>
+
+  <section class="wrap chap">
+    <div class="chap-head">
+      <div><div class="eyebrow">Artifacts</div><h2>交付的报表和网页，<br>直接在 App 里打开。</h2></div>
+      <div class="r">
+        <p>AI 做的网页、文档、视频都放在产出里。每个版本都留着，也能看到它来自哪个话题、是谁要的。网页里的按钮点了，会发给做它的 AI。</p>
+      </div>
+    </div>
+    <div class="shot demo" data-start="artifact-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：产出"><div class="stack"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
+    <div class="demo-bar" data-for="artifact-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+  </section>
+
+  <section class="wrap chap" id="memory">
+    <div class="chap-head">
+      <div><div class="eyebrow">Memory</div><h2>AI 会记住<br>你们团队的做法。</h2></div>
+      <div class="r">
+        <p>每天早上，AI 成员会整理前一天学到的经验，告诉你新增、改了、停用了哪几条，每一条都能撤回。几个成员都记下的做法，会变成全队的约定。</p>
+      </div>
+    </div>
+    <div class="cycle" aria-label="一件事的流程：派活、执行、确认、交付、记录经验，下次接活前先读记录">
+      <div class="steps">
+        <div class="st"><span class="n">1</span><b>派活</b><span>在群里 @ 它，或按 ⌘K</span></div>
+        <div class="st"><span class="n">2</span><b>执行</b><span>在你的机器上做</span></div>
+        <div class="st"><span class="n">3</span><b>确认</b><span>需要决定时发卡片问你</span></div>
+        <div class="st"><span class="n">4</span><b>交付</b><span>带着改动和测试结果</span></div>
+        <div class="st"><span class="n">5</span><b>记录经验</b><span>写进它记得的事</span></div>
+      </div>
+      <div class="back"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M100 0 V24 Q100 36 88 36 H12 Q0 36 0 24 V0"/></svg><em>下次接活前，先读这些记录</em></div>
+    </div>
+    <div class="mem"><img class="l" src="img/memory-light.webp" alt="Forge 记得的事：今天新增、改了、停用的经验，每条都能撤回" width="1650" height="920" loading="lazy"><img class="d" src="img/memory-dark.webp" alt="Forge 记得的事：今天新增、改了、停用的经验，每条都能撤回" width="1650" height="920" loading="lazy"></div>
+  </section>
+
+  <section class="wrap" id="machines">
+    <div class="split">
+      <div class="shot"><img class="l" src="img/settings-machines-light.webp" alt="设置里的机器：团队的电脑和在线状态" width="2880" height="1800" loading="lazy"><img class="d" src="img/settings-machines-dark.webp" alt="设置里的机器：团队的电脑和在线状态" width="2880" height="1800" loading="lazy"></div>
+      <div class="txt">
+        <div class="eyebrow">Your machines</div>
+        <h2>AI 在你自己的<br>机器上运行。</h2>
+        <p class="lead">在机器上装一个守护进程，它就能给 AI 成员用。守护进程主动连接服务器，不需要开放端口，代码和密钥都留在这台机器上。</p>
+        <div class="envs">
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span><div><h3>你的 Mac</h3><p>用你装好的工具和登录过的账号。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><div><h3>Linux 服务器</h3><p>每个任务在单独的虚拟机里运行，做完就删，多个任务互不影响。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.6-1.5A4.5 4.5 0 0 1 17 18z"/></svg></span><div><h3>云主机</h3><p>阿里云、AWS 等都可以，装好后会出现在设置的机器列表里。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><div><h3>托管虚拟机 <span class="soon">开发中</span></h3><p>不想自己维护机器，可以用我们提供的虚拟机，按需开启，用完回收。</p></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="center"><div class="eyebrow">More</div><h2>还有这些常用功能。</h2></div>
+    <div class="grid4">
+      <div class="tile">
+        <div><h3>交代或搜索 <kbd>⌘K</kbd></h3><p>输入一句话，交给指定的成员，或交给主助手安排。话题、产出和成员也在这里搜。</p></div>
+        <div class="shot"><img class="l" src="img/ask-light.webp" alt="⌘K 交代或搜索" width="2880" height="1800" loading="lazy"><img class="d" src="img/ask-dark.webp" alt="⌘K 交代或搜索" width="2880" height="1800" loading="lazy"></div>
+      </div>
+      <div class="tile">
+        <div><h3>单独问 <kbd>⌘;</kbd></h3><p>在话题旁边私下问 AI。它看过整个话题，只有你能看到，觉得有用再放回话题。</p></div>
+        <div class="shot"><img class="l" src="img/side-chat-light.webp" alt="单独问：在话题旁边私下问 Jojo" width="2880" height="1800" loading="lazy"><img class="d" src="img/side-chat-dark.webp" alt="单独问：在话题旁边私下问 Jojo" width="2880" height="1800" loading="lazy"></div>
+      </div>
+      <div class="tile">
+        <div><h3>引用提问 <kbd>⌥ 点击</kbd></h3><p>表格的一格、图表的一个点、一行代码改动，选中就能提问，AI 知道你问的是哪个值。</p></div>
+        <div class="shot"><img class="l" src="img/refs-hover-light.webp" alt="引用提问：选中渠道表里的一行" width="2880" height="1800" loading="lazy"><img class="d" src="img/refs-hover-dark.webp" alt="引用提问：选中渠道表里的一行" width="2880" height="1800" loading="lazy"></div>
+      </div>
+      <div class="tile">
+        <div><h3>图表直接显示</h3><p>流程图、时序图、甘特图在消息里直接显示，跟着深浅色变，点开能缩放。</p></div>
+        <div class="shot"><img class="l" src="img/diagram-inline-light.webp" alt="话题里的时序图、流程图和甘特图" width="2880" height="1800" loading="lazy"><img class="d" src="img/diagram-inline-dark.webp" alt="话题里的时序图、流程图和甘特图" width="2880" height="1800" loading="lazy"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="arch">
+    <div class="center">
+      <div class="eyebrow">Architecture</div>
+      <h2>技术架构</h2>
+      <p class="lead">Rust 写的原生客户端，Cloudflare 上的实时服务，AI 在你的机器上执行。</p>
+    </div>
+    <div class="arch">
+      <div class="blk">
+        <span class="k">Client · Rust</span>
+        <div><h3>Mac 客户端</h3><p>Rust 和 GPUI 写的原生应用，界面读本地缓存，不用等网络。</p></div>
+        <ul><li><span>一万条消息的话题打开</span><span>&lt;100ms</span></li><li><span>冷启动到可用</span><span>&lt;1s</span></li><li><span>离线一天后补齐</span><span>&lt;2s</span></li></ul>
+      </div>
+      <div class="conn"><svg viewBox="0 0 72 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 6H68M4 6l5-4M4 6l5 4M68 6l-5-4M68 6l-5 4" stroke="currentColor" stroke-width="1.3" fill="none" vector-effect="non-scaling-stroke"/></svg>WebSocket</div>
+      <div class="blk">
+        <span class="k">Edge · Cloudflare</span>
+        <div><h3>实时服务</h3><p>每个群、每个成员、每台机器各用一个 Durable Object，消息按顺序保存，断线重连不丢也不重复。</p></div>
+        <ul><li><span>消息送达 p95</span><span>&lt;300ms</span></li><li><span>数据库和文件</span><span>D1 · R2</span></li><li><span>全部记录</span><span>每天归档</span></li></ul>
+      </div>
+      <div class="conn"><svg viewBox="0 0 72 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 6H68M4 6l5-4M4 6l5 4M68 6l-5-4M68 6l-5 4" stroke="currentColor" stroke-width="1.3" fill="none" vector-effect="non-scaling-stroke"/></svg>出站连接</div>
+      <div class="blk">
+        <span class="k">Runner · Rust</span>
+        <div><h3>你的机器</h3><p>守护进程运行 Claude Code、Codex。在 Linux 上，每个任务用一台 Firecracker 虚拟机。</p></div>
+        <ul><li><span>Agent</span><span>Claude Code · Codex</span></li><li><span>隔离</span><span>microVM</span></li><li><span>过程</span><span>逐步回放</span></li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap cta">
+    <img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">
+    <h2>聊天和 AI，<br>在同一个 App 里。</h2>
+    <p class="lead">目前支持 macOS，Windows 版和手机版正在开发。</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>{{PRODUCT_NAME}}</span><span>macOS · Windows 和手机版开发中</span></div>
+</footer>
+<script src="main.js"></script>
+</body>
+</html>

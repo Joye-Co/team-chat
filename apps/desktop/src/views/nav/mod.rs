@@ -91,19 +91,19 @@ pub fn bind_sheet_keys(cx: &mut App) {
 /// item. Call once after `gpui_kit::init`. `status_item` is false for self-tests.
 pub fn install(services: Services, status_item: bool, cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-k", QuickSwitch, None),
-        KeyBinding::new("cmd-shift-n", NewGroup, None),
+        KeyBinding::new(crate::secondary!("k"), QuickSwitch, None),
+        KeyBinding::new(crate::secondary!("shift-n"), NewGroup, None),
         KeyBinding::new("alt-down", NextUnreadTopic, None),
         KeyBinding::new("alt-up", PreviousUnreadTopic, None),
-        KeyBinding::new("cmd-1", OpenGroup1, None),
-        KeyBinding::new("cmd-2", OpenGroup2, None),
-        KeyBinding::new("cmd-3", OpenGroup3, None),
-        KeyBinding::new("cmd-4", OpenGroup4, None),
-        KeyBinding::new("cmd-5", OpenGroup5, None),
-        KeyBinding::new("cmd-6", OpenGroup6, None),
-        KeyBinding::new("cmd-7", OpenGroup7, None),
-        KeyBinding::new("cmd-8", OpenGroup8, None),
-        KeyBinding::new("cmd-9", OpenGroup9, None),
+        KeyBinding::new(crate::secondary!("1"), OpenGroup1, None),
+        KeyBinding::new(crate::secondary!("2"), OpenGroup2, None),
+        KeyBinding::new(crate::secondary!("3"), OpenGroup3, None),
+        KeyBinding::new(crate::secondary!("4"), OpenGroup4, None),
+        KeyBinding::new(crate::secondary!("5"), OpenGroup5, None),
+        KeyBinding::new(crate::secondary!("6"), OpenGroup6, None),
+        KeyBinding::new(crate::secondary!("7"), OpenGroup7, None),
+        KeyBinding::new(crate::secondary!("8"), OpenGroup8, None),
+        KeyBinding::new(crate::secondary!("9"), OpenGroup9, None),
     ]);
     bind_sheet_keys(cx);
     cx.set_global(NavGlobal {

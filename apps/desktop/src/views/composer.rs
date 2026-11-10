@@ -1378,7 +1378,14 @@ impl ComposerView {
         cx: &mut Context<Self>,
     ) {
         let k = &event.keystroke;
-        if !k.modifiers.platform || k.modifiers.control || k.modifiers.alt {
+        // ⌘B on the Mac, Ctrl+B elsewhere: the command key alone (with ⇧ for
+        // strikethrough), never together with the other one or with ⌥.
+        let (command, other) = if cfg!(target_os = "macos") {
+            (k.modifiers.platform, k.modifiers.control)
+        } else {
+            (k.modifiers.control, k.modifiers.platform)
+        };
+        if !command || other || k.modifiers.alt {
             return;
         }
         let format = match (k.key.as_str(), k.modifiers.shift) {
@@ -1883,7 +1890,7 @@ impl Render for ComposerView {
                                 .t_mono()
                                 .text_size(crate::ui::native::tokens::text::META.0)
                                 .line_height(px(18.))
-                                .child("⌘;"),
+                                .child(crate::copy::topic_rail::SIDE_CHAT_KEY),
                         )
                         .child(crate::copy::topic_rail::TITLE_SIDE_CHAT)
                         .on_click(cx.listener(|this, _, _, cx| {
