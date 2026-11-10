@@ -848,6 +848,22 @@ found on PATH.
   KeepAlive, the current PATH, logs in `~/Library/Logs/<slug>-daemon/`) and loads it with
   `launchctl bootstrap gui/<uid>`; `--no-load` only writes the file.
   `daemon uninstall-service` unloads and removes it.
+- Windows: `daemon install-service` registers a scheduled task of the current user named
+  `<bundleId>.daemon` (`schtasks /Create /XML`; the definition is kept in
+  `%LOCALAPPDATA%\<slug>-daemon\task.xml`) and starts it. The task starts at this user's logon and
+  runs only in this user's logon session, so the CLIs see the user's logins; one instance only; a
+  second trigger asks for a start every minute, which starts the daemon again within a minute
+  after it ended for any reason; no time limit; not stopped on battery. Its program is
+  `conhost.exe --headless <daemon> run --config <file> --log-file <file>`: the daemon gets a
+  console without a window, and writes its own log to `%LOCALAPPDATA%\<slug>-daemon\daemon.log`
+  (moved to `daemon.log.1` above 10 MB at a start). `--no-load` only writes the definition file.
+  `daemon uninstall-service` ends and deletes the task.
+- Windows, replacing the program file (every updater follows this; the daemon is never stopped
+  for an update): write the new program completely as `<name>.exe.new` in the same folder and
+  check its SHA-256; rename the running `<name>.exe` to `<name>.exe.old-<anything unique>`;
+  rename `<name>.exe.new` to `<name>.exe` (if that fails, rename the old file back). The daemon
+  sees the new file, exits once no run is active, and the task starts the new one within a
+  minute; a starting daemon deletes the `<name>.exe.old-*` files next to it.
 
 ## Tests
 
