@@ -5,9 +5,11 @@
 //! change and the picker's menu loop call back into GPUI, which must not be borrowed then.
 //!
 //! Windows has neither. Quick Look becomes "open with the default app" (the closest thing
-//! a stock Windows has to a preview), and 分享 shows the file selected in Explorer, where
-//! the system's own 共享 command and drag and drop are. On other systems every call does
-//! nothing.
+//! a stock Windows has to a preview), behind the same guard as 打开 ([`super::open_kind`]):
+//! a file that Windows would run, install or mount, and any page a browser would run, is
+//! shown selected in Explorer instead, so Space on a teammate's file never runs it. 分享
+//! shows the file selected in Explorer, where the system's own 共享 command and drag and
+//! drop are. On other systems every call does nothing.
 
 use std::path::PathBuf;
 
@@ -19,9 +21,24 @@ pub fn toggle_quick_look(path: PathBuf) {
     #[cfg(target_os = "macos")]
     dispatch2::DispatchQueue::main().exec_async(move || mac::toggle_quick_look(&path));
     #[cfg(target_os = "windows")]
-    win::shell_open(&path);
+    if preview_opens(&path, true) {
+        win::shell_open(&path);
+    } else {
+        win::reveal(&path);
+    }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = path;
+}
+
+/// Whether previewing `path` may hand it to its default app: only what 打开 would hand to
+/// the system too. Anything risky, a page (a browser would run it outside the 产出
+/// window), and a path without a file name are shown in the file manager instead.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn preview_opens(path: &std::path::Path, windows: bool) -> bool {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return false;
+    };
+    super::open_kind_on(&name, path, windows) == super::OpenKind::System
 }
 
 /// Opens the share picker for `paths` at `at` (window points from the top left of the
@@ -68,7 +85,8 @@ mod win {
 
     use crate::win32::wide;
 
-    /// Opens `path` with the app Windows has for its type.
+    /// Opens `path` with the app Windows has for its type. Only for a path that
+    /// [`super::preview_opens`] allowed.
     pub fn shell_open(path: &Path) {
         let file = wide(&path.display().to_string());
         // SAFETY: both strings are NUL-terminated and outlive the call.
@@ -320,6 +338,41 @@ mod mac {
 #[cfg(test)]
 mod tests {
     use super::view_point;
+
+    /// Space on a file a teammate posted must never run it or send a page to the browser.
+    #[test]
+    fn a_preview_never_opens_what_windows_would_run() {
+        let p = |n: &str| std::path::PathBuf::from(format!("/cache/abc/{n}"));
+        for name in [
+            "report.bat",
+            "report.BAT",
+            "report.bat.",
+            "report.bat ",
+            "report.exe",
+            "a.cmd",
+            "a.lnk",
+            "a.ps1",
+            "a.vbs",
+            "a.scr",
+            "a.msi",
+            "a.hta",
+            "a.js",
+            "a.url",
+            "a.iso",
+            "page.html",
+            "page.HTM",
+            "page.html.",
+            "page.svg",
+            "noext",
+            "a.pdf.exe . ",
+        ] {
+            assert!(!super::preview_opens(&p(name), true), "{name:?}");
+        }
+        for name in ["notes.txt", "a.pdf", "photo.PNG", "clip.mp4", "deck.pptx"] {
+            assert!(super::preview_opens(&p(name), true), "{name:?}");
+        }
+        assert!(!super::preview_opens(std::path::Path::new("/"), true));
+    }
 
     #[test]
     fn explorer_selects_a_quoted_path() {

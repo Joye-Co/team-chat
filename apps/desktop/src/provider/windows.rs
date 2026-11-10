@@ -76,19 +76,33 @@ pub fn install_notifications(cx: &mut App) -> NotifyMode {
     NotifyMode::Toast
 }
 
-/// True when a window of this app is the foreground window.
+/// True when the foreground window is a visible, not minimized window of this app. The
+/// hidden events window does not count: it becomes the foreground window while the
+/// notification-area menu is up and stays so after the menu closes, with nothing of the
+/// app on screen.
 pub fn app_is_active() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    };
     let mut pid = 0u32;
-    // SAFETY: both calls only read; a null foreground window leaves `pid` at 0.
-    unsafe {
+    // SAFETY: every call only reads; a null foreground window is checked first.
+    let (visible, minimized) = unsafe {
         let foreground = GetForegroundWindow();
         if foreground.is_invalid() {
             return false;
         }
         GetWindowThreadProcessId(foreground, Some(&mut pid));
-    }
-    pid == std::process::id()
+        (
+            IsWindowVisible(foreground).as_bool(),
+            IsIconic(foreground).as_bool(),
+        )
+    };
+    counts_as_active(pid == std::process::id(), visible, minimized)
+}
+
+/// The app is in front only with one of its windows on screen.
+fn counts_as_active(ours: bool, visible: bool, minimized: bool) -> bool {
+    ours && visible && !minimized
 }
 
 /// The tags of the toasts posted by this run, per group, so they can be taken back out
@@ -313,5 +327,25 @@ mod tests {
     fn this_process_is_not_the_foreground_app_or_is() {
         // Never panics, with or without a desktop session.
         let _ = app_is_active();
+    }
+
+    #[test]
+    fn a_hidden_or_minimized_foreground_window_is_not_active() {
+        assert!(counts_as_active(true, true, false));
+        assert!(
+            !counts_as_active(true, false, false),
+            "the hidden events window"
+        );
+        assert!(!counts_as_active(true, true, true), "minimized");
+        assert!(!counts_as_active(false, true, false), "another app");
+    }
+
+    /// The events window is never visible, so it can never make the app count as active.
+    #[test]
+    fn the_events_window_is_hidden() {
+        use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+        let hwnd = crate::win32::events_window().expect("an events window");
+        // SAFETY: a live window of this thread.
+        assert!(!unsafe { IsWindowVisible(hwnd) }.as_bool());
     }
 }

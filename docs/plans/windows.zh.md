@@ -143,7 +143,7 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 | 托盘图标 | `Shell_NotifyIconW`，挂在一个隐藏的顶层窗口上。图标用菜单栏的模板图按任务栏深浅色染成白或黑，有未读时带点；左键打开主窗口，右键菜单是 Mac 上 Dock 菜单的几项加「设置…」和「退出」 | `views/nav/status_item_win.rs`、`tray_icon.rs`、`src/win32.rs` |
 | 应用菜单 | GPUI 在 Windows 上的 `set_menus` 只把菜单存起来，不画。菜单列表去掉了只有 macOS 才有的项（服务、隐藏、前置全部窗口、表情与符号、空的帮助）；`menus::window_menu_bar` 返回 gpui-component 的 `AppMenuBar`，由窗口标题栏放进去 | `views/nav/menus.rs` |
 | 减弱动画、高对比度 | `SPI_GETCLIENTAREAANIMATION`、`SPI_GETHIGHCONTRAST`，设置变化靠隐藏窗口收到的 `WM_SETTINGCHANGE` | `ui/motion.rs` |
-| 文件操作 | 打开和定位本来就走 GPUI（Windows 上可用）。Quick Look 改为用默认程序打开；分享改为在资源管理器里选中文件 | `views/files/native.rs` |
+| 文件操作 | 打开和定位本来就走 GPUI（Windows 上可用）。Quick Look 改为用默认程序打开，和「打开」走同一道检查：Windows 会运行、安装、挂载的类型（`exe`、`bat`、`scr`、`msi`、`hta`、`js`、带宏的 Office 文件等）和网页只在资源管理器里选中，文件名按 Windows 的读法判断（忽略末尾的点和空格）；分享改为在资源管理器里选中文件 | `views/files/native.rs` |
 | 设置窗口高度 | `SetWindowPos`，顶边不动、不超出显示器工作区；首次定高前用 DWM cloak 隐藏；去掉最小化和最大化按钮 | `views/settings/window_fit.rs` |
 
 过程中发现的：
