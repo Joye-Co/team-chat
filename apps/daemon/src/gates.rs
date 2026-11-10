@@ -36,7 +36,12 @@ pub const HOOK_WAIT: Duration = Duration::from_secs(24 * 3600);
 /// under an approval policy that asks for (almost) every command, so its runs are not gated
 /// yet and the server keeps the rules in the prompt for them.
 pub fn enforced_by(kind: &str) -> bool {
-    kind == "claude"
+    // Not on Windows yet. The hook there refuses a command when it cannot ask the daemon
+    // ([`hook_failure`]), but whether Claude Code starts the hook command at all on Windows
+    // (which shell it uses, how it quotes the path) has not been seen on a real machine, and a
+    // hook that never starts lets every command through. A machine must not say it stops
+    // commands until that is known.
+    cfg!(unix) && kind == "claude"
 }
 
 /// The 设置 name of a kind, for the approval title (the server shows its own).
@@ -295,42 +300,85 @@ pub fn hook_output(answer: &Value) -> Option<Value> {
     })
 }
 
-/// `chat-run gate`: Claude Code's PreToolUse hook. Reads the hook input on standard input, asks
-/// the daemon, prints the deny decision when a person declined, and exits 0. When the daemon
-/// cannot be asked, the tool runs (the run would have no way to go on otherwise) and the
-/// reason goes to standard error.
-pub fn hook_main() -> i32 {
-    let mut buf = Vec::new();
-    if let Err(e) = std::io::stdin().take(MAX_HOOK_INPUT).read_to_end(&mut buf) {
-        eprintln!("chat-run gate: cannot read the hook input: {e}");
-        return 0;
-    }
-    let input: Value = match serde_json::from_slice(&buf) {
+/// What the hook prints when it could not ask the daemon (`why`). Open (Unix): nothing, so
+/// the tool runs; the run would have no way to go on otherwise. Closed (Windows): the deny
+/// decision, so a command nobody could be asked about does not run.
+pub fn hook_failure(why: &str, closed: bool) -> Option<Value> {
+    closed.then(|| {
+        json!({ "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason":
+                format!("this command needs an approval and the daemon could not be asked: {why}"),
+        } })
+    })
+}
+
+/// Whether the hook refuses a command when it cannot ask the daemon. Windows: yes. The pipe
+/// and the way the hook is started are new there; a failure must not let a gated command
+/// through. Unix keeps what it has always done.
+fn fails_closed() -> bool {
+    cfg!(windows)
+}
+
+/// The hook's answer to one hook input, as (standard output, standard error): asks the daemon
+/// through `ask` (None: not inside a run).
+fn hook_answer(
+    input: &[u8],
+    closed: bool,
+    ask: Option<&dyn Fn(Value) -> Result<Value, String>>,
+) -> (Option<Value>, Option<String>) {
+    let failed = |why: String| (hook_failure(&why, closed), Some(why));
+    let input: Value = match serde_json::from_slice(input) {
         Ok(v) => v,
-        Err(e) => {
-            eprintln!("chat-run gate: the hook input is not JSON: {e}");
-            return 0;
-        }
+        Err(e) => return failed(format!("the hook input is not JSON: {e}")),
     };
     let Some(command) = hook_command(&input) else {
-        return 0;
+        return (None, None);
     };
-    let Some(socket) = std::env::var_os(crate::chat_run::ENV_SOCKET).filter(|s| !s.is_empty())
-    else {
-        eprintln!("chat-run gate: not inside a run");
-        return 0;
+    let Some(ask) = ask else {
+        return failed("not inside a run".into());
     };
     let tool = input["tool_name"].as_str().unwrap_or_default();
-    let body = json!({ "tool": tool, "command": command });
-    match crate::chat_run::call(std::path::Path::new(&socket), OP, body, HOOK_WAIT) {
-        Ok(answer) => {
-            if let Some(out) = hook_output(&answer) {
-                println!("{out}");
-            } else if answer["ok"] != json!(true) {
-                eprintln!("chat-run gate: {}", answer["error"]);
-            }
+    match ask(json!({ "tool": tool, "command": command })) {
+        Ok(answer) => match hook_output(&answer) {
+            Some(out) => (Some(out), None),
+            None if answer["ok"] != json!(true) => failed(answer["error"].to_string()),
+            None => (None, None),
+        },
+        Err(e) => failed(e),
+    }
+}
+
+/// `chat-run gate`: Claude Code's PreToolUse hook. Reads the hook input on standard input, asks
+/// the daemon, prints the deny decision when a person declined, and exits 0. When the daemon
+/// cannot be asked, the reason goes to standard error and, on Unix, the tool runs (the run
+/// would have no way to go on otherwise); on Windows the command is refused
+/// ([`hook_failure`]).
+pub fn hook_main() -> i32 {
+    let closed = fails_closed();
+    let mut buf = Vec::new();
+    if let Err(e) = std::io::stdin().take(MAX_HOOK_INPUT).read_to_end(&mut buf) {
+        let why = format!("cannot read the hook input: {e}");
+        if let Some(out) = hook_failure(&why, closed) {
+            println!("{out}");
         }
-        Err(e) => eprintln!("chat-run gate: {e}"),
+        eprintln!("chat-run gate: {why}");
+        return 0;
+    }
+    let socket = std::env::var_os(crate::chat_run::ENV_SOCKET).filter(|s| !s.is_empty());
+    let call = |body: Value| {
+        let socket = socket.as_deref().unwrap_or_default();
+        crate::chat_run::call(std::path::Path::new(socket), OP, body, HOOK_WAIT)
+    };
+    let ask: Option<&dyn Fn(Value) -> Result<Value, String>> =
+        if socket.is_some() { Some(&call) } else { None };
+    let (out, err) = hook_answer(&buf, closed, ask);
+    if let Some(out) = out {
+        println!("{out}");
+    }
+    if let Some(err) = err {
+        eprintln!("chat-run gate: {err}");
     }
     0
 }
@@ -539,6 +587,55 @@ mod tests {
         };
         assert_eq!(h["hooks"][0]["command"], line);
         assert_eq!(h["hooks"][0]["timeout"], HOOK_WAIT.as_secs());
+    }
+
+    /// The hook when the daemon cannot be asked: open (Unix) prints nothing and the tool runs;
+    /// closed (Windows) prints the deny decision. Either way the reason goes to standard error.
+    #[test]
+    fn the_hook_fails_open_on_unix_and_closed_on_windows() {
+        let bash = br#"{"tool_name":"Bash","tool_input":{"command":"gh pr merge 12"}}"#;
+        let down = |_: Value| Err::<Value, String>("cannot reach the daemon".into());
+        let refused = |_: Value| {
+            Ok::<Value, String>(json!({ "ok": false, "error": { "code": "unavailable" } }))
+        };
+        let allow = |_: Value| {
+            Ok::<Value, String>(json!({ "ok": true, "result": { "decision": "allow" } }))
+        };
+        let deny = |_: Value| {
+            Ok::<Value, String>(
+                json!({ "ok": true, "result": { "decision": "deny", "reason": "no" } }),
+            )
+        };
+        let denied = |out: &Option<Value>| {
+            out.as_ref()
+                .is_some_and(|o| o["hookSpecificOutput"]["permissionDecision"] == "deny")
+        };
+        for closed in [false, true] {
+            // The daemon answered: the same on both.
+            assert_eq!(hook_answer(bash, closed, Some(&allow)), (None, None));
+            let (out, err) = hook_answer(bash, closed, Some(&deny));
+            assert!(denied(&out) && err.is_none());
+            // Not a command tool: nothing to ask.
+            let read = br#"{"tool_name":"Read","tool_input":{"file_path":"a"}}"#;
+            assert_eq!(hook_answer(read, closed, None), (None, None));
+            // Every way of not getting an answer.
+            let failures = [
+                hook_answer(bash, closed, None),
+                hook_answer(bash, closed, Some(&down)),
+                hook_answer(bash, closed, Some(&refused)),
+                hook_answer(b"not json", closed, Some(&allow)),
+            ];
+            for (out, err) in failures {
+                assert!(err.is_some(), "the reason is reported");
+                assert_eq!(denied(&out), closed, "{out:?}");
+                if !closed {
+                    assert_eq!(out, None, "Unix prints nothing: the tool runs");
+                }
+            }
+        }
+        assert_eq!(fails_closed(), cfg!(windows));
+        // A Windows machine does not say it stops commands.
+        assert_eq!(enforced_by("claude"), cfg!(unix));
     }
 
     fn emitted() -> (Arc<Mutex<Vec<RunEvent>>>, impl Fn(RunEvent) + Send + Sync) {

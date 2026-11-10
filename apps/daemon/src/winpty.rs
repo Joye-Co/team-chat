@@ -109,15 +109,18 @@ fn pipe() -> std::io::Result<(Owned, Owned)> {
     Ok((Owned(read), Owned(write)))
 }
 
-/// The process handle of a [`Pty`], for a thread that waits for its end.
-#[derive(Clone, Copy)]
-pub struct Waiter(usize);
+/// A process handle of its own for a thread that waits for the program's end: a duplicate, so
+/// it stays valid when the [`Pty`] is dropped while the thread still waits.
+pub struct Waiter(Owned);
+
+// SAFETY: a process handle may be used from any thread.
+unsafe impl Send for Waiter {}
 
 impl Waiter {
     /// Blocks until the program ends; returns its exit code.
     pub fn wait(self) -> Option<i64> {
-        let h = self.0 as HANDLE;
-        // SAFETY: the handle stays open while the Pty lives; the caller keeps it alive.
+        let h = self.0.0;
+        // SAFETY: the handle is this value's own and open.
         if unsafe { WaitForSingleObject(h, INFINITE) } != WAIT_OBJECT_0 {
             return None;
         }
@@ -140,8 +143,27 @@ pub struct Pty {
 unsafe impl Send for Pty {}
 
 impl Pty {
-    pub fn waiter(&self) -> Waiter {
-        Waiter(self.process.0 as usize)
+    /// A handle to wait on, independent of this value's lifetime.
+    pub fn waiter(&self) -> std::io::Result<Waiter> {
+        use windows_sys::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle};
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        let mut dup: HANDLE = std::ptr::null_mut();
+        // SAFETY: the source handle is open; `dup` receives a new handle of this process.
+        let ok = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.process.0,
+                GetCurrentProcess(),
+                &mut dup,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if ok == 0 {
+            return Err(os_error());
+        }
+        Ok(Waiter(Owned(dup)))
     }
 
     /// Closes the pseudoconsole: the program loses its console (one that still runs ends), and

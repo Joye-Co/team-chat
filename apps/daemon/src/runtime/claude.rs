@@ -434,14 +434,9 @@ fn write_aside_settings(spec: &RunSpec) -> Option<PathBuf> {
     let settings = aside_settings(&config_dir(spec))?;
     let path = spec.run_dir.join(ASIDE_SETTINGS);
     let _ = std::fs::remove_file(&path);
-    let written = crate::sys::mode(
-        std::fs::OpenOptions::new().write(true).create_new(true),
-        0o600,
-    )
-    .open(&path)
-    // Windows: closed to other users before the auth values are in it.
-    .and_then(|f| crate::sys::protect(&path).map(|_| f))
-    .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
+    // Private from its creation (Windows: the access list is set as the file is made).
+    let written = crate::sys::create_private_file(&path)
+        .and_then(|mut f| f.write_all(settings.to_string().as_bytes()));
     match written {
         Ok(()) => Some(path),
         Err(e) => {

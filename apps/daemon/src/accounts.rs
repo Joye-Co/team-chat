@@ -40,6 +40,14 @@ fn dir(cfg: &Config) -> PathBuf {
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     {
+        // Windows: a new file whose access list is part of its creation; a leftover (or a
+        // file somebody put there) is removed first and never written to.
+        #[cfg(windows)]
+        let mut f = {
+            let _ = std::fs::remove_file(&tmp);
+            crate::sys::create_private_file(&tmp)?
+        };
+        #[cfg(not(windows))]
         let mut f = crate::sys::mode(
             std::fs::OpenOptions::new()
                 .write(true)
@@ -48,8 +56,6 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             0o600,
         )
         .open(&tmp)?;
-        // Windows: closed to other users before the secret is in it.
-        crate::sys::protect(&tmp)?;
         std::io::Write::write_all(&mut f, bytes)?;
         f.sync_all()?;
     }
@@ -342,6 +348,10 @@ pub async fn run_login(
         let _ = send.send(fail(format!("{} is not installed", rt.command())));
         return;
     };
+    // Windows: the sign-in is in a job that ends with it, and a browser the CLI starts on the
+    // machine would be in that job. That is meant: the link goes to the person through the
+    // app (BROWSER is set against a local browser, see `login_env`), and nothing of a sign-in
+    // that was given up may stay behind on the machine.
     let mut child = match crate::health::spawn(
         crate::health::command(&program)
             .args(&args)

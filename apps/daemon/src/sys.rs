@@ -89,6 +89,42 @@ pub fn protect(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Makes the folder `path` and the folders above it. Windows: the folders above are made the
+/// ordinary way; `path` itself is made with its access list (the daemon's user, SYSTEM and
+/// Administrators, nothing inherited), so nobody else is ever in it, and a folder of that name
+/// that is already there is used only when it is private ([`acl_problem`]). Unix:
+/// `create_dir_all`.
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::winacl::create_dir(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+/// Makes the new file `path` for writing, for the daemon's user alone: mode 0600 on Unix, on
+/// Windows an access list that is part of the creation. Fails when the file is already there.
+pub fn create_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(windows)]
+    {
+        crate::winacl::create_file(path)
+    }
+    #[cfg(not(windows))]
+    {
+        mode(
+            std::fs::OpenOptions::new().write(true).create_new(true),
+            0o600,
+        )
+        .open(path)
+    }
+}
+
 /// Windows: why somebody other than the daemon's user (and SYSTEM and Administrators) can get
 /// at `path`: its owner or an entry of its access list. None when it is private. Unix: always
 /// None; the mode bits ([`open_to_others`]) and the owner ([`owner`]) are checked there.

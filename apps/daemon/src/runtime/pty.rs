@@ -169,7 +169,10 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let _ = emit.send(RunEvent::TurnStarted {
         turn_id: "t1".into(),
     });
-    let waiter = pty.waiter();
+    let waiter = match pty.waiter() {
+        Ok(w) => w,
+        Err(e) => return Outcome::failed(format!("cannot watch {command}: {e}")),
+    };
     let mut exited = tokio::task::spawn_blocking(move || waiter.wait());
     let mut out = String::new();
     let mut pending = Vec::<u8>::new();

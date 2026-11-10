@@ -129,23 +129,30 @@ const MIRROR_REFSPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
 
 static GIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Windows: closes the run folder (and with it the working folder, the `chat-run` requests and
-/// the settings files, which hold secrets) to every other user of the machine, wherever
-/// `work_root` is. A volume that cannot do that (FAT, exFAT, a network share) gets no run.
-/// Unix: nothing; each of those files has its own mode there.
-fn private_run_dir(dir: &Path) -> Result<(), String> {
-    let refuse = |why: String| {
-        format!(
-            "run folder {} cannot be made private to this user ({why}); put work_root on an \
-NTFS volume of this machine",
-            dir.display()
-        )
+/// Makes the run folder. Windows: `<work_root>/runs` and the run folder in it are made with
+/// their access list (the daemon's user, SYSTEM and Administrators, nothing inherited), so
+/// the working folder, the `chat-run` requests and the settings files, which hold secrets,
+/// are closed to every other user from the first moment, wherever `work_root` is. A folder of
+/// either name that is already there and that others can get into is refused, and so is a
+/// volume without access lists (FAT, exFAT, a network share). Unix: `create_dir_all`; each of
+/// those files has its own mode there.
+fn private_run_dir(cfg: &Config, dir: &Path) -> Result<(), String> {
+    let refuse = |what: &Path, e: std::io::Error| {
+        if cfg!(windows) {
+            format!(
+                "cannot create run folder: {} cannot be made private to this user ({e}); put \
+work_root on an NTFS volume of this machine, in a folder of your own",
+                what.display()
+            )
+        } else {
+            format!("cannot create run folder: {e}")
+        }
     };
-    crate::sys::protect(dir).map_err(|e| refuse(e.to_string()))?;
-    match crate::sys::acl_problem(dir) {
-        Some(why) => Err(refuse(why)),
-        None => Ok(()),
+    if cfg!(windows) {
+        let runs = runs_dir(cfg);
+        crate::sys::create_private_dir(&runs).map_err(|e| refuse(&runs, e))?;
     }
+    crate::sys::create_private_dir(dir).map_err(|e| refuse(dir, e))
 }
 
 /// Makes `<run>/work`: a git worktree on a new branch `bot/<runId>`, or an empty folder.
@@ -155,8 +162,7 @@ pub async fn prepare(
     repo: Option<&RepoSpec>,
 ) -> Result<(PathBuf, RunMeta), String> {
     let dir = run_dir(cfg, run_id);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create run folder: {e}"))?;
-    private_run_dir(&dir)?;
+    private_run_dir(cfg, &dir)?;
     let work = dir.join("work");
     let mut meta = RunMeta {
         run_id: run_id.into(),
@@ -476,6 +482,54 @@ pub fn hex(b: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    /// Windows: the run folder is private when its work root is a folder that everyone may
+    /// write to, and a run folder that somebody else made first is refused.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_run_folder_is_private_under_an_open_work_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let opened = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(opened.status.success(), "{opened:?}");
+        assert!(crate::sys::acl_problem(&root).is_some());
+        let cfg = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\nwork_root = '{}'\n",
+            dir.path().join("token").display(),
+            root.display()
+        ))
+        .unwrap();
+
+        let (work, _) = prepare(&cfg, "r1", None).await.unwrap();
+        for p in [runs_dir(&cfg), run_dir(&cfg, "r1"), work.clone()] {
+            assert_eq!(crate::sys::acl_problem(&p), None, "{}", p.display());
+        }
+        std::fs::write(work.join("secret"), "s").unwrap();
+        assert_eq!(crate::sys::acl_problem(&work.join("secret")), None);
+
+        // A run folder that was there before, with the access list of an open folder.
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(other.join("runs")).unwrap();
+        let _ = std::process::Command::new("icacls")
+            .arg(other.join("runs"))
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        let cfg2 = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\nwork_root = '{}'\n",
+            dir.path().join("token").display(),
+            other.display()
+        ))
+        .unwrap();
+        let e = prepare(&cfg2, "r1", None).await.unwrap_err();
+        assert!(e.contains("cannot be made private"), "{e}");
+        assert!(!run_dir(&cfg2, "r1").exists(), "nothing is put into it");
+    }
+
     /// A side chat run's checkout: nothing in it can be changed, made or removed until it is
     /// writable again (the cleanup makes it so before it removes the run).
     #[test]
@@ -491,7 +545,10 @@ mod tests {
             assert!(std::fs::write(work.join("src").join("a.txt"), "new").is_err());
             assert!(std::fs::write(work.join("new.txt"), "x").is_err());
             assert!(std::fs::write(work.join("src").join("new.txt"), "x").is_err());
-            // Windows: a process with the restore privilege (the CI runner) may still delete.
+            // Windows: not asserted. Deleting (and making a folder) is done with backup intent,
+            // which skips the access list for a process that holds the restore privilege, and
+            // the CI runner is elevated. So this test does not show that a delete is refused
+            // there; it is for a CLI of an ordinary user, which no test here runs as.
             #[cfg(unix)]
             assert!(std::fs::remove_file(work.join("src").join("a.txt")).is_err());
         }

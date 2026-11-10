@@ -270,6 +270,97 @@ pub fn protect(path: &Path) -> std::io::Result<()> {
     set_dacl(path, &format!("D:P{}", full_access(&t.user_text, is_dir)))
 }
 
+/// Security attributes that make a new file or folder private from its first moment: owned
+/// by the daemon's user, open to that user, SYSTEM and Administrators, nothing inherited.
+struct Private {
+    _sd: Descriptor,
+    attrs: SECURITY_ATTRIBUTES,
+}
+
+impl Private {
+    fn new(is_dir: bool) -> std::io::Result<Private> {
+        let t = trusted()?;
+        let sd = Descriptor::parse(&format!(
+            "O:{}D:P{}",
+            t.user_text,
+            full_access(&t.user_text, is_dir)
+        ))?;
+        let attrs = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd.0,
+            bInheritHandle: 0,
+        };
+        Ok(Private { _sd: sd, attrs })
+    }
+}
+
+fn not_private(path: &Path, why: String) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("{} is not private to this user: {why}", path.display()),
+    )
+}
+
+/// Makes the folder `path` (its parent must exist) private from the start: the access list is
+/// part of the creation, so there is no moment in which another user could get in, put
+/// something there or keep a handle. A folder that is already there is used only when it
+/// passes [`check`] (another user's folder of that name is refused).
+pub fn create_dir(path: &Path) -> std::io::Result<()> {
+    let private = Private::new(true)?;
+    // SAFETY: the path is NUL-terminated; the attributes outlive the call.
+    let ok = unsafe {
+        windows_sys::Win32::Storage::FileSystem::CreateDirectoryW(
+            wide(path).as_ptr(),
+            &private.attrs,
+        )
+    };
+    if ok == 0 {
+        let e = os_error();
+        if e.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(e);
+        }
+        if !std::fs::symlink_metadata(path)?.is_dir() {
+            return Err(not_private(path, "it is not a folder".into()));
+        }
+    }
+    // Also for a folder made just now: a volume without access lists makes one that is open.
+    check(path).map_err(|why| not_private(path, why))
+}
+
+/// Makes the new file `path` for writing, private from the start (see [`create_dir`]). Fails
+/// when something of that name is already there: a file another user put there, or holds
+/// open, is never written to.
+pub fn create_file(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL};
+    let private = Private::new(false)?;
+    // SAFETY: the path is NUL-terminated; the attributes outlive the call. No sharing: nobody
+    // else opens the file while the secret is being written.
+    let handle = unsafe {
+        CreateFileW(
+            wide(path).as_ptr(),
+            GENERIC_WRITE,
+            0,
+            &private.attrs,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(os_error());
+    }
+    // SAFETY: a new handle that this File now owns.
+    let file = unsafe { std::fs::File::from_raw_handle(handle.cast()) };
+    if let Err(why) = check(path) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(not_private(path, why));
+    }
+    Ok(file)
+}
+
 /// Makes the folder `dir` and everything in it read-only for the daemon's user (an entry that
 /// denies the write rights, inherited by all that is in it and all that would be made there),
 /// or gives the write access back. Like the Unix mode bits, the user could undo it by hand;
@@ -428,6 +519,49 @@ mod tests {
         check(&run.join("work").join("a")).unwrap();
         // Still usable by this user.
         assert_eq!(std::fs::read_to_string(run.join("new.req")).unwrap(), "x");
+    }
+
+    /// A folder under one that everyone may write to (a work root on `D:\`) is private from
+    /// its creation, and a folder or file that was already there and is open is refused.
+    #[test]
+    fn folders_and_files_are_created_private_and_an_open_one_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        open_to_everyone(&root);
+
+        let run = root.join("run");
+        create_dir(&run).unwrap();
+        check(&run).unwrap();
+        // Again: it is there and private.
+        create_dir(&run).unwrap();
+        std::fs::write(run.join("inside"), "x").unwrap();
+        check(&run.join("inside")).unwrap();
+
+        // One that somebody made first inherits the open list: refused, and not taken over.
+        let planted = root.join("planted");
+        std::fs::create_dir(&planted).unwrap();
+        let e = create_dir(&planted).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+        assert!(check(&planted).is_err(), "left as it was");
+
+        // A file: private from the start, and never an existing one.
+        let secret = root.join("secret.json");
+        let mut f = create_file(&secret).unwrap();
+        std::io::Write::write_all(&mut f, b"s").unwrap();
+        drop(f);
+        check(&secret).unwrap();
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "s");
+        let e = create_file(&secret).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists, "{e}");
+        std::fs::write(root.join("theirs.json"), "").unwrap();
+        assert!(create_file(&root.join("theirs.json")).is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.join("theirs.json")).unwrap(),
+            ""
+        );
+        // A file where a folder is wanted.
+        assert!(create_dir(&secret).is_err());
     }
 
     #[test]
