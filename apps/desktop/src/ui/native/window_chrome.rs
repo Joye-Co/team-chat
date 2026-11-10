@@ -30,7 +30,18 @@ pub fn framed(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    frame(title.into(), true, content, window, cx)
+    frame(title.into(), Kind::Plain, content, window, cx)
+}
+
+/// [`framed`] for the main window: the app's menus sit in the caption strip,
+/// before the title (Windows has no menu bar outside the window).
+pub fn framed_main(
+    title: impl Into<SharedString>,
+    content: impl IntoElement,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    frame(title.into(), Kind::Main, content, window, cx)
 }
 
 /// [`framed`] for a window that cannot be resized (login, 设置): its maximize
@@ -41,12 +52,23 @@ pub fn framed_fixed(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    frame(title.into(), false, content, window, cx)
+    frame(title.into(), Kind::Fixed, content, window, cx)
+}
+
+/// What a window's caption strip holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// The title and the three window buttons.
+    Plain,
+    /// The app's menus too.
+    Main,
+    /// A window that cannot be resized: the maximize button is dimmed.
+    Fixed,
 }
 
 fn frame(
     title: SharedString,
-    resizable: bool,
+    kind: Kind,
     content: impl IntoElement,
     window: &mut Window,
     cx: &mut App,
@@ -60,19 +82,14 @@ fn frame(
         .flex()
         .flex_col()
         .bg(k.content)
-        .child(caption(title, resizable, window, cx))
+        .child(caption(title, kind, window, cx))
         .child(div().flex_1().min_h_0().w_full().relative().child(content))
         .into_any_element()
 }
 
 /// The caption strip: the window's title at the leading edge, the window
 /// buttons at the trailing edge.
-fn caption(
-    title: SharedString,
-    resizable: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> impl IntoElement {
+fn caption(title: SharedString, kind: Kind, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = native_colors(cx);
     // Like every title in the app, the title dims in an inactive window.
     let ink = if emphasized(window) {
@@ -80,19 +97,35 @@ fn caption(
     } else {
         k.tertiary
     };
+    // gpui-component's menu bar over the app's menus (`views::nav::menus`).
+    #[cfg(not(target_os = "macos"))]
+    let menus = (kind == Kind::Main).then(|| {
+        div()
+            .flex_none()
+            .h_full()
+            .child(crate::views::nav::menus::window_menu_bar(cx))
+    });
+    #[cfg(target_os = "macos")]
+    let menus: Option<gpui::Div> = None;
     TitleBar::new()
-        .maximizable(resizable)
+        .maximizable(kind != Kind::Fixed)
         .h(metrics::CAPTION)
         .pl(space::S12)
         .bg(k.sidebar)
         .border_color(k.separator)
-        // The app's menus go here once they exist off the Mac
-        // (`views::nav::menus`), before the title.
         .child(
             div()
-                .n_footnote()
-                .text_color(ink)
-                .whitespace_nowrap()
-                .child(title),
+                .h_full()
+                .flex()
+                .items_center()
+                .gap(space::S12)
+                .children(menus)
+                .child(
+                    div()
+                        .n_footnote()
+                        .text_color(ink)
+                        .whitespace_nowrap()
+                        .child(title),
+                ),
         )
 }

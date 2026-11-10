@@ -271,6 +271,10 @@ fn run(options: Options) -> i32 {
             // Off the Mac GPUI quits when the last window closes, which
             // every scene's window does before the next one opens.
             cx.set_quit_mode(gpui::QuitMode::Explicit);
+            // Off the Mac the menus draw inside the main window's caption
+            // strip, so the scenes show them as the app does.
+            #[cfg(not(target_os = "macos"))]
+            crate::views::nav::menus::install(cx);
             capture::keep_frames();
             // The key scenes press the app's real keys: Tab through the tab
             // stops and the arrows of the lists and sheets (the member

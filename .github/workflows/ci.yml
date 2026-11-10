@@ -250,7 +250,8 @@ jobs:
           retention-days: 14
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
-      # Required. The skipped tests fail on Windows and belong to work in progress; whoever
+      # Required, every desktop test (this replaces the Windows system integration subset and
+      # the report-only full run). The skipped tests fail on Windows and belong to work in progress; whoever
       # lands that work removes its line here (docs/plans/windows.zh.md):
       # - diagrams::tests (two tests): the Mermaid renderer has no Windows backend yet (C2, WebView2).
       # - provider::this_mac (one test): the launchd PATH builder joins with `\` on Windows (M3).
