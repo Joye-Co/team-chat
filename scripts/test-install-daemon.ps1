@@ -57,7 +57,6 @@ New-Item -ItemType Directory -Path $work | Out-Null
 $asset = Join-Path $work "$slug-daemon-0.0.0-x86_64-pc-windows-msvc.exe"
 Copy-Item -LiteralPath $Daemon -Destination $asset
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLower()
-[IO.File]::WriteAllText("$asset.sha256", "$hash  $(Split-Path -Leaf $asset)`n")
 $token = 'tm_test_' + [guid]::NewGuid().ToString('N')
 $tokenFile = Join-Path $work 'token'
 [IO.File]::WriteAllText($tokenFile, "$token`n")
@@ -78,8 +77,19 @@ try {
     Assert (-not (Test-Path -LiteralPath $exe)) 'and nothing was installed'
     Assert (-not (Test-Path -LiteralPath $configDir)) 'and no token was written'
 
-    # The install: the SHA-256 comes from the .sha256 file next to the daemon.
-    & $install @common
+    # A download must be https and must come with the hash to check it against (nothing is
+    # downloaded for these: both are refused first).
+    $download = @{ ServerUrl = $common.ServerUrl; MachineId = $common.MachineId; TokenFile = $tokenFile }
+    $refused = $false
+    try { & $install @download -DaemonUrl "http://example.invalid/$slug-daemon-0.0.0.exe" -Sha256 $hash } catch { $refused = $true }
+    Assert $refused 'a download that is not https is refused'
+    $refused = $false
+    try { & $install @download -DaemonUrl "https://example.invalid/$slug-daemon-0.0.0.exe" } catch { $refused = $true }
+    Assert $refused 'a download without -Sha256 is refused'
+    Assert (-not (Test-Path -LiteralPath $exe)) 'and nothing was installed'
+
+    # The install.
+    & $install @common -Sha256 $hash
     Assert (Test-Path -LiteralPath $exe) 'the daemon is installed'
     $config = Get-Content -Raw -LiteralPath (Join-Path $configDir 'daemon.toml')
     Assert ($config.Contains('machine_id = "01TESTMACHINE"')) 'the config names the machine'
@@ -92,7 +102,7 @@ try {
     foreach ($path in @($configDir, (Join-Path $configDir 'machine-token'), (Join-Path $configDir 'daemon.toml'))) {
         $acl = Get-Acl -LiteralPath $path
         $who = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
-        Assert ($who.Count -eq 1 -and $who[0] -eq $me) "only this user is on the access list of $(Split-Path -Leaf $path)"
+        Assert ($who.Count -eq 1 -and $who[0] -eq $me) "only this user ($me) is on the access list of $(Split-Path -Leaf $path): $($who -join ', ')"
     }
     Assert ((Get-Acl -LiteralPath $configDir).AreAccessRulesProtected) 'the config folder inherits no access from its parent'
 
@@ -109,7 +119,7 @@ try {
     # An update by the replace protocol, while the daemon runs: it restarts itself on the new
     # file (it looks every minute and wants the file unchanged between two looks), and the
     # task starts it again within a minute.
-    & $install -Update -DaemonFile $asset
+    & $install -Update -DaemonFile $asset -Sha256 $hash
     Assert (@(Get-ChildItem -LiteralPath $binDir -Filter '*.old-*').Count -eq 1) 'the running program was renamed aside'
     Wait-For 300 'the daemon saw the new version and stopped' {
         (Get-Content -Raw -LiteralPath $script:log) -match 'a new version of the daemon is installed'

@@ -454,15 +454,19 @@ set it up once per machine:
    command above, or 设置 › 机器 in the app), then on the Windows computer:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl <server url> -MachineId <machine id> -DaemonUrl <url of team-chat-daemon-<version>-x86_64-pc-windows-msvc.exe>
+   powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl <server url> -MachineId <machine id> -DaemonUrl <https url of team-chat-daemon-<version>-x86_64-pc-windows-msvc.exe> -Sha256 <hex>
    ```
 
-   [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) downloads the daemon and checks
-   its SHA-256 (the `.sha256` file next to it, or `-Sha256 <hex>`), asks for the machine token
+   [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) downloads the daemon (https
+   only) and checks it against `-Sha256`, which is required for a download: take the hash from
+   where you trust the release (the release page, your operator), never from the download
+   location itself; the script does not fetch it. It asks for the machine token
    without showing it (or reads `-TokenFile`), writes `%USERPROFILE%\.config\team-chat\daemon.toml`
    and the token into a folder only your user can open, runs `doctor`, and registers the
    scheduled task with `install-service`. `-DaemonFile <path>` takes a daemon that is already on
-   the computer. The log is `%LOCALAPPDATA%\team-chat-daemon\daemon.log`.
+   the computer. `install-service` refuses a daemon in a folder that other users of the computer
+   can change (the task would run whatever they put there as you). The log is
+   `%LOCALAPPDATA%\team-chat-daemon\daemon.log`.
 4. Make the bot runner-backed:
    `bun server/scripts/admin.ts runner --env <env> --bot <botId> --runtime <claude|codex> --labels <label>`
    (add `--repo-url <git url>` or `--repo-path <path>` for a repository), and check
@@ -471,7 +475,7 @@ set it up once per machine:
 
 To update a hand-installed daemon, wait until the machine has no running work (stopping the
 daemon cancels its runs), replace the binary, and run `doctor` and `install-service` again.
-On Windows run `install-daemon.ps1 -Update -DaemonUrl <url>` instead, at any time: it renames
+On Windows run `install-daemon.ps1 -Update -DaemonUrl <url> -Sha256 <hex>` instead, at any time: it renames
 the running program aside and puts the new one in its place, and the daemon restarts on the new
 version by itself once it has no running work.
 
@@ -635,14 +639,15 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
    先登记电脑(上面的 `admin.ts machine`,或 App 的「设置 › 机器」),再在那台 Windows 电脑上运行:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl <服务器地址> -MachineId <机器 id> -DaemonUrl <team-chat-daemon-<版本>-x86_64-pc-windows-msvc.exe 的地址>
+   powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl <服务器地址> -MachineId <机器 id> -DaemonUrl <team-chat-daemon-<版本>-x86_64-pc-windows-msvc.exe 的 https 地址> -Sha256 <hex>
    ```
 
-   [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) 下载 daemon 并校验 SHA-256(用旁边的
-   `.sha256` 文件,或 `-Sha256 <hex>`),不回显地问机器令牌(或用 `-TokenFile` 读文件),把
+   [`scripts/install-daemon.ps1`](../scripts/install-daemon.ps1) 下载 daemon(只接受 https)并用 `-Sha256`
+   校验。下载时 `-Sha256` 必填:哈希要从你信任的地方拿(发布页、运营方),不能从下载地址旁边拿,脚本也
+   不会去取。daemon 所在的文件夹如果别的用户能改,`install-service` 会拒绝。脚本不回显地问机器令牌(或用 `-TokenFile` 读文件),把
    `%USERPROFILE%\.config\team-chat\daemon.toml` 和令牌写进只有当前用户能打开的文件夹,运行 `doctor`,
    再用 `install-service` 注册计划任务。`-DaemonFile <路径>` 用电脑上已有的 daemon。日志在
-   `%LOCALAPPDATA%\team-chat-daemon\daemon.log`。以后更新运行 `install-daemon.ps1 -Update -DaemonUrl <地址>`:
+   `%LOCALAPPDATA%\team-chat-daemon\daemon.log`。以后更新运行 `install-daemon.ps1 -Update -DaemonUrl <地址> -Sha256 <hex>`:
    随时可以运行,daemon 等手上没有活的时候自己换到新版本。
 4. 打开机器人的 runner:
    `bun server/scripts/admin.ts runner --env <env> --bot <botId> --runtime <claude|codex> --labels <标签>`,

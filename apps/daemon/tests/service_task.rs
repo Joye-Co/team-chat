@@ -18,10 +18,12 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("run") {
         windows::stand_in(&args[2..]);
     }
-    println!("\nrunning 1 test");
+    println!("\nrunning 2 tests");
+    windows::a_program_others_can_replace_is_refused();
+    println!("test a_program_others_can_replace_is_refused ... ok");
     windows::the_task_keeps_the_daemon_running();
     println!("test the_task_keeps_the_daemon_running ... ok");
-    println!("\ntest result: ok. 1 passed; 0 failed");
+    println!("\ntest result: ok. 2 passed; 0 failed");
 }
 
 #[cfg(windows)]
@@ -150,6 +152,29 @@ mod windows {
         }
     }
 
+    /// A program that other users of the computer can replace is not registered: the task
+    /// would run whatever they put there as this user.
+    pub fn a_program_others_can_replace_is_refused() {
+        let public = std::env::var_os("PUBLIC")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\Public"));
+        let dir = public.join(format!("service-task-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("stand-in.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+        let config = dir.join("daemon.toml");
+        std::fs::write(&config, "").unwrap();
+        let name = format!("{}.refused-{}", service::task_name(), std::process::id());
+        let res = service::install_task(&name, &exe, &config, &dir, true);
+        let registered = service::task_exists(&name);
+        let _ = service::uninstall_task(&name, &dir, true);
+        let _ = std::fs::remove_dir_all(&dir);
+        let err = res.expect_err("a program in the public folder must be refused");
+        println!("  refused: {err}");
+        assert!(err.contains("not a safe place"), "{err}");
+        assert!(!registered);
+    }
+
     pub fn the_task_keeps_the_daemon_running() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("with space & more");
@@ -168,6 +193,13 @@ mod windows {
         let file = service::install_task(&name, &exe, &config, &dir, true).expect("install");
         assert!(file.is_file());
         assert!(service::task_exists(&name));
+        // Registered as written, with the logon trigger for this user's security id (not the
+        // fallback without it).
+        let definition: Vec<u16> = std::fs::read(&file).unwrap()[2..]
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        assert!(String::from_utf16_lossy(&definition).contains("<LogonTrigger>"));
         let first = wait_running(&config, None, Duration::from_secs(60), "started");
         assert!(first.console, "the daemon has a console (a headless one)");
 
@@ -212,6 +244,24 @@ mod windows {
             Duration::from_secs(60),
             "started again on request",
         );
+
+        // An update interrupted between its two renames (a power loss): no program file, only
+        // the renamed-aside one. The task's first action puts it back, then the daemon starts.
+        let aside = dir.join(format!("stand-in.exe{}9", selfupdate::STALE_MARK));
+        std::fs::rename(&exe, &aside).unwrap();
+        assert!(
+            Command::new("taskkill")
+                .args(["/F", "/PID", &third.pid.to_string()])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        );
+        let third = wait_running(
+            &config,
+            Some(third.pid),
+            NEXT_START,
+            "started after an interrupted update",
+        );
+        assert!(exe.is_file() && !aside.exists(), "the program file is back");
 
         // Uninstalled: no task, no process.
         service::uninstall_task(&name, &dir, true).expect("uninstall");

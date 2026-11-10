@@ -34,4 +34,5 @@ pub mod usage;
 pub mod vm_agent;
 #[cfg(windows)]
 pub mod winjob;
+pub mod wintrust;
 pub mod workspace;

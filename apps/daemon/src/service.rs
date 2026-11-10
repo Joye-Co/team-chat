@@ -266,6 +266,10 @@ pub fn uninstall_systemd(dir: &Path, unload: bool) -> Result<PathBuf, String> {
 //   and started directly it would show a console window for as long as it runs. A headless
 //   console host gives it a real console without a window, which the CLIs of the runs inherit
 //   (no windows for them either) and which `CTRL_BREAK_EVENT`, the polite cancel, needs;
+// - before the daemon, a first action repairs an update that was interrupted between its two
+//   renames (a power loss): when the program file is missing and a renamed-aside one is there
+//   (`<name>.exe.old-*`), `cmd` renames it back. Only the task can do this: with no program
+//   file there is no daemon to do it;
 // - the daemon writes its own log (`--log-file`): nobody reads the output of a headless
 //   console. `PATH` is not captured as on Unix: the task gets the user's current environment.
 // ---------------------------------------------------------------------------------------
@@ -303,10 +307,12 @@ fn system32(program: &str) -> PathBuf {
 
 /// What a task definition is made of.
 pub struct Task<'a> {
-    /// `DOMAIN\user`: who the task belongs to and runs as.
+    /// The security id (`S-1-5-21-…`) of the user the task belongs to and runs as.
     pub user: &'a str,
     /// The console host that hides the daemon's console.
     pub conhost: &'a Path,
+    /// `cmd.exe`, for the action that repairs an interrupted update.
+    pub cmd: &'a Path,
     pub exe: &'a Path,
     pub config: &'a Path,
     pub log: &'a Path,
@@ -318,6 +324,12 @@ pub struct Task<'a> {
 pub fn task_xml(t: &Task) -> String {
     let e = |p: &Path| xml_escape(&p.to_string_lossy());
     let user = xml_escape(t.user);
+    let exe_name = xml_escape(
+        &t.exe
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
     let logon = if t.at_logon {
         format!(
             "    <LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>{user}</UserId>\n    </LogonTrigger>\n"
@@ -374,6 +386,10 @@ pub fn task_xml(t: &Task) -> String {
   <Actions Context="Author">
     <Exec>
       <Command>{conhost}</Command>
+      <Arguments>--headless &quot;{cmd}&quot; /d /c if not exist &quot;{exe}&quot; for %f in (&quot;{exe}{stale}*&quot;) do ren &quot;%~ff&quot; &quot;{exe_name}&quot;</Arguments>
+    </Exec>
+    <Exec>
+      <Command>{conhost}</Command>
       <Arguments>--headless &quot;{exe}&quot; run --config &quot;{config}&quot; --log-file &quot;{log}&quot;</Arguments>
     </Exec>
   </Actions>
@@ -381,6 +397,8 @@ pub fn task_xml(t: &Task) -> String {
 "#,
         name = xml_escape(crate::product::name()),
         conhost = e(t.conhost),
+        cmd = e(t.cmd),
+        stale = crate::selfupdate::STALE_MARK,
         exe = e(t.exe),
         config = e(t.config),
         log = e(t.log),
@@ -427,26 +445,18 @@ fn schtasks(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// `DOMAIN\user` of the user this process runs as.
+/// The security id of the user this process runs as: who the task belongs to. An id, not a
+/// name: a name would have to come from `whoami` (printed in the console's code page, so some
+/// Chinese names arrive as other, valid text) or from the environment.
 fn current_user() -> Result<String, String> {
-    let from_env = || {
-        let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty())?;
-        Some(match std::env::var("USERDOMAIN") {
-            Ok(d) if !d.is_empty() => format!("{d}\\{user}"),
-            _ => user,
-        })
-    };
-    let who = system_command("whoami.exe")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    // whoami prints in the console code page: a name it could not print as UTF-8 comes from
-    // the environment instead.
-    who.or_else(from_env)
-        .ok_or_else(|| "cannot tell which user this is (USERNAME is not set)".into())
+    #[cfg(windows)]
+    {
+        crate::wintrust::current_user_sid()
+    }
+    #[cfg(not(windows))]
+    {
+        Err("scheduled tasks are a Windows thing".into())
+    }
 }
 
 /// True when the task is registered.
@@ -478,14 +488,23 @@ pub fn install_task(
             return Err(format!("{} must not contain a quote", p.display()));
         }
     }
+    // The repair action is a `cmd` line, where a percent sign starts a variable.
+    if exe.to_string_lossy().contains('%') {
+        return Err(format!("{} must not contain a percent sign", exe.display()));
+    }
+    // The task runs this file as the user again and again: nobody else may be able to swap it.
+    #[cfg(windows)]
+    crate::wintrust::check_program(&exe)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
     let user = current_user()?;
     let conhost = system32("conhost.exe");
+    let cmd = system32("cmd.exe");
     let log = task_log(dir);
     let file = task_file(dir);
     let mut task = Task {
         user: &user,
         conhost: &conhost,
+        cmd: &cmd,
         exe: &exe,
         config: &config,
         log: &log,
@@ -519,11 +538,12 @@ pub fn install_task(
 /// disk is what runs.
 pub fn restart_task(name: &str, dir: &Path) -> Result<(), String> {
     let _ = schtasks(&["/End", "/TN", name]);
-    stop_daemon(dir);
+    stop_daemon(dir)?;
     schtasks(&["/Run", "/TN", name])
 }
 
 /// Ends and removes the task `name`, stops its daemon and removes the definition file in `dir`.
+/// An error when the daemon could not be stopped: it would go on taking runs.
 pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, String> {
     let file = task_file(dir);
     if unload {
@@ -531,7 +551,7 @@ pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, S
             let _ = schtasks(&["/End", "/TN", name]);
             schtasks(&["/Delete", "/TN", name, "/F"])?;
         }
-        stop_daemon(dir);
+        stop_daemon(dir)?;
     }
     match std::fs::remove_file(&file) {
         Ok(()) => Ok(file),
@@ -549,10 +569,12 @@ pub fn task_pid_file(dir: &Path) -> PathBuf {
 }
 
 // Ending the task ends only the console host: the daemon behind it keeps running. So the
-// daemon of a task makes a named event (`Local\<slug>-daemon-stop-<pid>`, this logon session
-// only) and writes its pid next to its log; whoever stops it sets the event, the daemon shuts
-// down the way it does on Ctrl+C (its runs are cancelled and reported), and only a daemon
-// that does not end in time is killed. The event also tells that the pid still is a daemon.
+// daemon of a task writes its pid and the time its process was made next to its log, and
+// makes a named event (`Local\<slug>-daemon-stop-<pid>`). Whoever stops it finds the process
+// by pid and checks the time (a pid alone can be another program's by now), sets the event,
+// and the daemon shuts down the way it does on Ctrl+C (its runs are cancelled and reported).
+// The event exists only in the daemon's own logon session: from another session of the same
+// user (SSH, WinRM), or when the daemon does not end in time, the process is terminated.
 
 #[cfg(windows)]
 static STOP_EVENT: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
@@ -601,8 +623,11 @@ pub fn log_to(path: &Path) -> Result<(), String> {
         ));
     }
     STOP_EVENT.store(event as isize, std::sync::atomic::Ordering::SeqCst);
+    // SAFETY: the pseudo handle of this process is always valid.
+    let made = process_made(unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() })
+        .ok_or("cannot read this process's start time")?;
     let pid_file = task_pid_file(dir);
-    std::fs::write(&pid_file, std::process::id().to_string())
+    std::fs::write(&pid_file, format!("{} {made}", std::process::id()))
         .map_err(|e| format!("cannot write {}: {e}", pid_file.display()))
 }
 
@@ -632,52 +657,115 @@ pub fn wait_stop() {
     }
 }
 
+/// When a process was made (a FILETIME as one number): with the pid, what tells one process
+/// from every other.
+#[cfg(windows)]
+fn process_made(process: windows_sys::Win32::Foundation::HANDLE) -> Option<u64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut made, mut exit, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: the handle may query the process; the four out values are valid.
+    let ok = unsafe { GetProcessTimes(process, &mut made, &mut exit, &mut kernel, &mut user) };
+    (ok != 0).then(|| (u64::from(made.dwHighDateTime) << 32) | u64::from(made.dwLowDateTime))
+}
+
+/// What the task's daemon wrote into its pid file: the pid and when the process was made.
+fn pid_and_made(text: &str) -> Option<(u32, u64)> {
+    let mut parts = text.split_whitespace();
+    let pid = parts.next()?.parse().ok()?;
+    let made = parts.next()?.parse().ok()?;
+    Some((pid, made))
+}
+
 /// How long a daemon that was asked to stop may take (it gives its runs ten seconds).
 #[cfg(windows)]
-const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+const STOP_WAIT_MS: u32 = 20_000;
 
-/// Stops the daemon that wrote its pid into `dir`: asks, waits, then kills. True when one was
-/// running. Its runs end with it: each is a Job Object that closes with the daemon.
+/// Stops the daemon that wrote its pid into `dir`: asks (in its own logon session), waits,
+/// then terminates. `Ok(true)` when one was running and is gone now, `Ok(false)` when none
+/// was running, an error when it is still running. Its runs end with it: each is a Job Object
+/// that closes with the daemon.
 #[cfg(windows)]
-pub fn stop_daemon(dir: &Path) -> bool {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{EVENT_MODIFY_STATE, OpenEventW, SetEvent};
-    let pid_file = task_pid_file(dir);
-    let pid = std::fs::read_to_string(&pid_file)
-        .ok()
-        .and_then(|t| t.trim().parse::<u32>().ok());
-    let _ = std::fs::remove_file(&pid_file);
-    let Some(pid) = pid else {
-        return false;
+pub fn stop_daemon(dir: &Path) -> Result<bool, String> {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, WAIT_OBJECT_0,
     };
-    let name = stop_event_name(pid);
-    // SAFETY: the name is a NUL-terminated UTF-16 string.
-    let event = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) };
-    if event.is_null() {
-        // No such event: that process is gone, or the pid is another program's now.
-        return false;
-    }
-    // SAFETY: the handle is an open event, closed here.
-    unsafe {
-        SetEvent(event);
-        CloseHandle(event);
-    }
-    let start = std::time::Instant::now();
-    while crate::winjob::pid_alive(pid) {
-        if start.elapsed() > STOP_WAIT {
-            let _ = system_command("taskkill.exe")
-                .args(["/F", "/PID", &pid.to_string()])
-                .output();
-            break;
+    use windows_sys::Win32::System::Threading::{
+        EVENT_MODIFY_STATE, OpenEventW, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, SetEvent, TerminateProcess, WaitForSingleObject,
+    };
+    let pid_file = task_pid_file(dir);
+    let Some((pid, made)) = std::fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|t| pid_and_made(&t))
+    else {
+        let _ = std::fs::remove_file(&pid_file);
+        return Ok(false);
+    };
+    let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
+    // SAFETY: plain call; a null handle is an error.
+    let process = unsafe { OpenProcess(access, 0, pid) };
+    if process.is_null() {
+        // SAFETY: plain call, right after the failed one.
+        let code = unsafe { GetLastError() };
+        if code == ERROR_INVALID_PARAMETER {
+            // No process has this pid: the daemon ended by itself.
+            let _ = std::fs::remove_file(&pid_file);
+            return Ok(false);
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        return Err(format!(
+            "cannot stop the daemon (process {pid}): {}",
+            std::io::Error::from_raw_os_error(code as i32)
+        ));
     }
-    true
+    let stop = || -> Result<bool, String> {
+        if process_made(process) != Some(made) {
+            // Another program has the pid now.
+            return Ok(false);
+        }
+        let name = stop_event_name(pid);
+        // SAFETY: the name is a NUL-terminated UTF-16 string.
+        let event = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) };
+        let mut ended = false;
+        if !event.is_null() {
+            // SAFETY: the handles are open; the event is closed here.
+            unsafe {
+                SetEvent(event);
+                CloseHandle(event);
+                ended = WaitForSingleObject(process, STOP_WAIT_MS) == WAIT_OBJECT_0;
+            }
+        }
+        if !ended {
+            // SAFETY: the handle may terminate the process and wait for it.
+            let gone = unsafe {
+                TerminateProcess(process, 1) != 0
+                    && WaitForSingleObject(process, 5_000) == WAIT_OBJECT_0
+            };
+            if !gone {
+                return Err(format!(
+                    "the daemon (process {pid}) is still running: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+        }
+        Ok(true)
+    };
+    let res = stop();
+    // SAFETY: the handle is ours.
+    unsafe { CloseHandle(process) };
+    if res.is_ok() {
+        let _ = std::fs::remove_file(&pid_file);
+    }
+    res
 }
 
 #[cfg(not(windows))]
-pub fn stop_daemon(_dir: &Path) -> bool {
-    false
+pub fn stop_daemon(_dir: &Path) -> Result<bool, String> {
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -685,10 +773,13 @@ mod tests {
     use super::systemd_quote as q;
     use super::*;
 
+    const ME: &str = "S-1-5-21-1004336348-1177238915-682003330-1001";
+
     fn sample(at_logon: bool) -> String {
         task_xml(&Task {
-            user: r"PC\li & co",
+            user: ME,
             conhost: Path::new(r"C:\Windows\System32\conhost.exe"),
+            cmd: Path::new(r"C:\Windows\System32\cmd.exe"),
             exe: Path::new(r"C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe"),
             config: Path::new(r"C:\Users\li & co\.config\x\daemon.toml"),
             log: Path::new(r"C:\Users\li & co\AppData\Local\x-daemon\daemon.log"),
@@ -714,8 +805,8 @@ mod tests {
             node.text().unwrap_or_default().to_string()
         };
         // At logon of this user, in this user's own logon session, without more rights.
-        assert_eq!(get(&["Triggers", "LogonTrigger", "UserId"]), r"PC\li & co");
-        assert_eq!(get(&["Principals", "Principal", "UserId"]), r"PC\li & co");
+        assert_eq!(get(&["Triggers", "LogonTrigger", "UserId"]), ME);
+        assert_eq!(get(&["Principals", "Principal", "UserId"]), ME);
         assert_eq!(
             get(&["Principals", "Principal", "LogonType"]),
             "InteractiveToken"
@@ -744,15 +835,72 @@ mod tests {
         assert_eq!(get(&["Settings", "RunOnlyIfIdle"]), "false");
         assert_eq!(get(&["Settings", "RunOnlyIfNetworkAvailable"]), "false");
         assert_eq!(get(&["Settings", "Enabled"]), "true");
-        // No console window: a headless console host starts the daemon, which logs to a file.
-        assert_eq!(
-            get(&["Actions", "Exec", "Command"]),
-            r"C:\Windows\System32\conhost.exe"
+        // Two actions, both behind a headless console host (no window): the repair of an
+        // interrupted update, then the daemon, which logs to a file.
+        let actions: Vec<(String, String)> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name((ns, "Exec")))
+            .map(|n| {
+                let child = |name: &str| {
+                    n.children()
+                        .find(|c| c.has_tag_name((ns, name)))
+                        .and_then(|c| c.text())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                (child("Command"), child("Arguments"))
+            })
+            .collect();
+        assert_eq!(actions.len(), 2);
+        assert!(
+            actions
+                .iter()
+                .all(|(c, _)| c == r"C:\Windows\System32\conhost.exe")
         );
         assert_eq!(
-            get(&["Actions", "Exec", "Arguments"]),
+            actions[0].1,
+            r#"--headless "C:\Windows\System32\cmd.exe" /d /c if not exist "C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe" for %f in ("C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe.old-*") do ren "%~ff" "x-daemon.exe""#
+        );
+        assert_eq!(
+            actions[1].1,
             r#"--headless "C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe" run --config "C:\Users\li & co\.config\x\daemon.toml" --log-file "C:\Users\li & co\AppData\Local\x-daemon\daemon.log""#
         );
+    }
+
+    #[test]
+    fn a_chinese_user_name_is_only_in_paths_and_survives_the_file() {
+        let xml = task_xml(&Task {
+            user: ME,
+            conhost: Path::new(r"C:\Windows\System32\conhost.exe"),
+            cmd: Path::new(r"C:\Windows\System32\cmd.exe"),
+            exe: Path::new(r"C:\Users\李雷\AppData\Local\Programs\x\x-daemon.exe"),
+            config: Path::new(r"C:\Users\李雷\.config\x\daemon.toml"),
+            log: Path::new(r"C:\Users\李雷\AppData\Local\x-daemon\daemon.log"),
+            at_logon: true,
+        });
+        // The user is named by security id: no name has to be read in a console code page.
+        assert!(xml.contains(&format!("<UserId>{ME}</UserId>")));
+        assert_eq!(xml.matches("<UserId>").count(), 2);
+        // The file schtasks reads is UTF-16: the paths arrive as they are.
+        let bytes = utf16_file(&xml);
+        let units: Vec<u16> = bytes[2..]
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let back = String::from_utf16(&units).unwrap();
+        assert!(back.contains(r"&quot;C:\Users\李雷\.config\x\daemon.toml&quot;"));
+        roxmltree::Document::parse(&back).expect("well-formed XML");
+    }
+
+    #[test]
+    fn the_pid_file_names_the_process_and_when_it_was_made() {
+        assert_eq!(
+            pid_and_made("4242 133754321098765432"),
+            Some((4242, 133754321098765432))
+        );
+        assert_eq!(pid_and_made("4242"), None, "a pid alone can be anyone's");
+        assert_eq!(pid_and_made(""), None);
+        assert_eq!(pid_and_made("x 1"), None);
     }
 
     #[test]

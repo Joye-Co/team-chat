@@ -106,6 +106,11 @@ pub(super) fn bundled_daemon() -> Option<PathBuf> {
 
 /// The installed daemon is `<slug>-daemon.exe` next to the app's exe. A build from a worktree
 /// is a debug build, or sits in cargo's `target` folder, where the daemon is not named so.
+///
+/// Whether other users of the computer could replace that file is checked by the daemon's
+/// `install-service` (`daemon::wintrust`), which refuses such a folder before it registers
+/// anything. Not here: this app's own exe is in the same folder, so a folder others can write
+/// has already decided what runs when the user starts the app.
 #[cfg(any(windows, test))]
 fn daemon_next_to(app_exe: &Path, debug_build: bool) -> Option<PathBuf> {
     if debug_build {

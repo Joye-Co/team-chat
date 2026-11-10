@@ -3,7 +3,7 @@
 Makes this Windows computer one of the team's machines without the desktop app.
 
 .DESCRIPTION
-Downloads the machine daemon, checks its SHA-256, writes the daemon config and the machine
+Downloads the machine daemon over HTTPS, checks it against the SHA-256 you give, writes the daemon config and the machine
 token into a folder only you can open, and registers the daemon as a scheduled task of your
 user (it starts when you log on and is started again when it ends). Run it as the user whose
 CLI logins (Claude Code, Codex) the bots should use, in Windows PowerShell 5.1 or later. It
@@ -30,13 +30,16 @@ The machine's labels. Default: windows.
 
 .PARAMETER DaemonUrl
 Where to download the daemon from: the `<slug>-daemon-<version>-x86_64-pc-windows-msvc.exe`
-asset of a release. Its `.sha256` file is read from the same place unless -Sha256 is given.
+asset of a release. Must be https, and needs -Sha256.
 
 .PARAMETER DaemonFile
 A daemon that is already on this computer, instead of -DaemonUrl.
 
 .PARAMETER Sha256
-The SHA-256 the daemon must have (hex).
+The SHA-256 the daemon must have (hex). Required with -DaemonUrl. Take it from where you trust
+the release (the release page, your operator), never from the place the daemon is downloaded
+from: whoever can change the download can change a hash next to it too. The script does not
+fetch it.
 
 .PARAMETER TokenFile
 A file with the machine token, instead of typing it.
@@ -51,7 +54,7 @@ Only install the files: do not register or start the scheduled task.
 Only replace the daemon program of an installed machine (no -ServerUrl, -MachineId or token).
 
 .EXAMPLE
-powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl https://chat.example.com -MachineId 01ABC -DaemonUrl https://example.com/releases/x-daemon-1.3.0-x86_64-pc-windows-msvc.exe
+powershell -ExecutionPolicy Bypass -File install-daemon.ps1 -ServerUrl https://chat.example.com -MachineId 01ABC -DaemonUrl https://example.com/releases/x-daemon-1.3.0-x86_64-pc-windows-msvc.exe -Sha256 <hex>
 #>
 [CmdletBinding()]
 param(
@@ -101,6 +104,11 @@ if (-not $Update -and (-not $ServerUrl -or -not $MachineId)) {
 if ([bool]$DaemonUrl -eq [bool]$DaemonFile) {
     throw 'Give either -DaemonUrl or -DaemonFile.'
 }
+if ($DaemonUrl) {
+    if (([Uri]$DaemonUrl).Scheme -ne 'https') { throw '-DaemonUrl must be an https:// address.' }
+    if (-not $Sha256) { throw '-DaemonUrl needs -Sha256: the hash the daemon must have, from a source you trust (not from the download location).' }
+}
+if ($Sha256 -and $Sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw '-Sha256 must be 64 hex digits.' }
 if ($DaemonUrl) { $sourceName = ([Uri]$DaemonUrl).Segments[-1] } else { $sourceName = Split-Path -Leaf $DaemonFile }
 if (-not $Slug) {
     if ($sourceName -match '^(.+?)-daemon') { $Slug = $Matches[1] }
@@ -121,31 +129,23 @@ if (Test-Path -LiteralPath $new) { Remove-Item -LiteralPath $new -Force }
 if ($DaemonUrl) {
     Write-Host "Downloading $sourceName"
     Invoke-WebRequest -UseBasicParsing -Uri $DaemonUrl -OutFile $new
-    if (-not $Sha256) {
-        $sum = Invoke-WebRequest -UseBasicParsing -Uri "$DaemonUrl.sha256"
-        $content = $sum.Content
-        if ($content -is [byte[]]) { $content = [Text.Encoding]::ASCII.GetString($content) }
-        $Sha256 = Get-FirstWord $content
-    }
 }
 else {
     Copy-Item -LiteralPath $DaemonFile -Destination $new
-    if (-not $Sha256 -and (Test-Path -LiteralPath "$DaemonFile.sha256")) {
-        $Sha256 = Get-FirstWord (Get-Content -Raw -LiteralPath "$DaemonFile.sha256")
+}
+# A daemon file you brought yourself is checked when you give its hash.
+if ($Sha256) {
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $new).Hash
+    if ($actual -ne $Sha256) {
+        Remove-Item -LiteralPath $new -Force
+        throw "The daemon's SHA-256 is $($actual.ToLower()), expected $($Sha256.ToLower()). Nothing was installed."
     }
-}
-if ($Sha256 -notmatch '^[0-9a-fA-F]{64}$') {
-    Remove-Item -LiteralPath $new -Force
-    throw 'No SHA-256 to check the daemon against: give -Sha256.'
-}
-$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $new).Hash
-if ($actual -ne $Sha256) {
-    Remove-Item -LiteralPath $new -Force
-    throw "The daemon's SHA-256 is $($actual.ToLower()), expected $($Sha256.ToLower()). Nothing was installed."
 }
 
 # 2. In place. A running daemon cannot be overwritten, but it can be renamed: it deletes the
 #    renamed file itself the next time it starts (the replace protocol of daemon::selfupdate).
+#    If the computer loses power between the two renames, the scheduled task renames the old
+#    file back before it starts the daemon.
 if (Test-Path -LiteralPath $exe) {
     $aside = "$exe.old-$([DateTime]::UtcNow.Ticks)"
     Move-Item -LiteralPath $exe -Destination $aside
