@@ -23,7 +23,7 @@ use crate::{
         native::{
             Alert, AlertTone, Badge, NativeType as _, PushSize, PushStyle, SearchField, Segment,
             Segmented, StatusBadge, TruncText, card_surface, native_colors, progress, push_button,
-            tokens::{avatar, height, metrics, monitor as t, radius, space},
+            tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
     },
@@ -349,7 +349,7 @@ impl AdminView {
                     .child(div().flex_1().min_w(gpui::Pixels::ZERO).child(table))
                     .child(
                         div()
-                            .w(metrics::INSPECTOR_WIDTH)
+                            .w(t::MEMBER_INSPECTOR)
                             .flex_none()
                             .child(self.member_inspector(window, cx)),
                     ),
@@ -367,30 +367,34 @@ impl AdminView {
             (
                 TeamSortKey::Level,
                 m::TEAM_COL_LEVEL,
-                Some(t::COL_COUNT),
+                Some(t::TEAM_COL_LEVEL),
                 false,
             ),
             (
                 TeamSortKey::Topics,
                 m::TEAM_COL_TOPICS,
-                Some(t::COL_COUNT),
+                Some(t::TEAM_COL_TOPICS),
                 true,
             ),
             (
                 TeamSortKey::Spend,
                 m::TEAM_COL_SPEND,
-                Some(t::COL_SPEND),
+                Some(t::TEAM_COL_SPEND),
                 false,
             ),
             (
                 TeamSortKey::Recent,
                 m::TEAM_COL_RECENT,
-                Some(t::COL_DONE),
+                Some(t::TEAM_COL_RECENT),
                 false,
             ),
         ];
         let cell = |w: Option<gpui::Pixels>, right: bool| {
-            let c = div().px(space::S12).flex().items_center().overflow_hidden();
+            let c = div()
+                .px(t::TEAM_CELL_PAD)
+                .flex()
+                .items_center()
+                .overflow_hidden();
             let c = match w {
                 Some(w) => c.w(w).flex_none(),
                 None => c.flex_1().min_w(gpui::Pixels::ZERO),
@@ -541,10 +545,10 @@ impl AdminView {
                                     }),
                             ),
                     )
-                    .child(cell(Some(t::COL_COUNT), false).child(Badge::new(level)))
-                    .child(cell(Some(t::COL_COUNT), true).child(r.topics.to_string()))
+                    .child(cell(Some(t::TEAM_COL_LEVEL), false).child(Badge::new(level)))
+                    .child(cell(Some(t::TEAM_COL_TOPICS), true).child(r.topics.to_string()))
                     .child(
-                        cell(Some(t::COL_SPEND), false).child(
+                        cell(Some(t::TEAM_COL_SPEND), false).child(
                             div()
                                 .w_full()
                                 .flex()
@@ -555,7 +559,7 @@ impl AdminView {
                         ),
                     )
                     .child(
-                        cell(Some(t::COL_DONE), false)
+                        cell(Some(t::TEAM_COL_RECENT), false)
                             .text_color(recent.1)
                             .child(recent.0),
                     )

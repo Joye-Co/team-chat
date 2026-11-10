@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-/// The wider trailing panes (单独问, 产出, 实时查看) are all 400 pt; the inspector is 280.
+/// The one right pane width (D13).
 const PANE_WIDTH: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
 
 pub struct ArtifactPane {

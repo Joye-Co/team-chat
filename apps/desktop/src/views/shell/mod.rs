@@ -52,8 +52,7 @@ pub trait PageView: Render {
 }
 
 /// A pane at the right of a page. The shell gives each pane kind one
-/// width (`panes::pane_width`: the inspector 280 pt, the wide panes
-/// 400 pt) and starts the inspector panes below the 52 pt toolbar row; a
+/// width (`panes::pane_width`: 400 pt, D13) and starts the inspector panes below the 52 pt toolbar row; a
 /// pane with a header draws it in a 52 pt row at its top.
 pub trait PaneView: Render {
     /// The width the pane would like; the shell uses `panes::pane_width`.
