@@ -252,6 +252,14 @@ jobs:
           retention-days: 14
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
+      # The Windows system integration (docs/plans/windows.zh.md, C1) must pass: the Run key,
+      # the notification-area icon's images, the network adapters, the window menus.
+      - name: cargo test (desktop, Windows system integration)
+        run: >-
+          cargo test --locked -p desktop --
+          settings::login_item:: provider::windows:: provider::system_events::
+          nav::status_item:: nav::tray_icon:: settings::window_fit::
+          files::native:: files::tests:: the_window_menus_drop
       # Report only until the Windows port passes them (docs/plans/windows.zh.md, W1).
       - name: cargo test (desktop, report only)
         continue-on-error: true
@@ -312,13 +320,11 @@ jobs:
         run: cargo check --locked -p e2e --all-targets
 
   rust-lint:
-    name: Rust fmt and clippy (report only)
+    name: Rust fmt and clippy
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Report only until main is clean: fmt and clippy fail on main today. Remove this line then.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml

@@ -6,7 +6,7 @@ import { type MemberRow, getMember, toMember } from "../core/db";
 import { gatewayStub } from "../core/env";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
-import { afterDeactivate, notifyMembersChanged, revokeTokens } from "../core/routes";
+import { afterDeactivate, membersChanged, notifyMembersChanged, revokeTokens } from "../core/routes";
 
 registerRoute({
   method: "PATCH",
@@ -88,6 +88,8 @@ registerRoute({
     }
     const row = (await getMember(env.DB, target.id)) as MemberRow;
     await notifyMembersChanged(env, (p) => ctx.waitUntil(p), [row]);
+    // A new weekly budget may let an AI member's held runs go (budget/index.ts).
+    if (details.weeklyBudgetCents) await membersChanged(env, [target.id]);
     return toMember(row);
   },
 });

@@ -70,7 +70,11 @@ CliInfo   = { runtime: string, kind: "codex" | "claude" | "acp" | "pty", command
               // runtime = the name configured on the machine; run.assign.runtime names one
 Health    = { diskFreeBytes, diskTotalBytes, load1, load5, load15, cpuCount, activeRuns }
 RunCursor = { runId, lastSeq: number /* highest seq produced */, done: boolean }
-Usage     = { inputTokens: number, outputTokens: number, costUsd?: number }
+Usage     = { inputTokens: number, outputTokens: number, costUsd?: number,
+              models?: ModelUsage[] /* per model the run used; older daemons omit it */ }
+ModelUsage = { model: string /* the id the CLI reported */, inputTokens /* not cached */,
+              outputTokens, cacheReadTokens?, cacheWriteTokens?,
+              costUsd? /* the CLI's own figure for this model (Claude Code), else none */ }
 ```
 
 ## Server to daemon

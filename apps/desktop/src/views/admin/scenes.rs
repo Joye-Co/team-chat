@@ -85,6 +85,20 @@ fn open_nav_end(
     Ok(handle)
 }
 
+/// 改每周预算… from a budget card: 用量 with Scout's budget editor open.
+fn open_budget_edit(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(
+        services,
+        AdminPage::Usage,
+        |v| v.usage.budget_for = Some("m-reviewer".into()),
+        cx,
+    )
+}
+
 fn open_member_person(
     services: Services,
     _content: Size<Pixels>,
@@ -169,6 +183,11 @@ pub const SCENES: &[Scene] = &[
         "admin-nav-end",
         "团队管理 › 用量 with the sidebar scrolled to its end (try --size 1216x640)",
         open_nav_end
+    ),
+    scene!(
+        "admin-budget-edit",
+        "改每周预算… from a budget card: 用量 with Scout's budget editor open (Scout is paused at its budget)",
+        open_budget_edit
     ),
     scene!(
         "admin-home-month",

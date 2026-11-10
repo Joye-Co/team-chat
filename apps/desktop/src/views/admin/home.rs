@@ -108,6 +108,28 @@ impl AdminView {
                 let Some(cents) = b.budget_cents.filter(|c| *c > 0) else {
                     continue;
                 };
+                // 到了预算先停下来问: runs wait for an owner.
+                if let Some(n) = b.held_runs.filter(|n| *n > 0) {
+                    out.push(Attention {
+                        kind: AttentionKind::Budget,
+                        title: fill(
+                            m::ATT_BUDGET_PAUSED,
+                            &[
+                                ("name", &self.member_name(&b.member_id)),
+                                ("n", &n.to_string()),
+                            ],
+                        ),
+                        meta: fill(
+                            m::ATT_BUDGET_PAUSED_META,
+                            &[
+                                ("spent", &usd(b.spend.cost_usd)),
+                                ("budget", &usd(cents as f64 / 100.)),
+                            ],
+                        ),
+                        tone: Tone::Bad,
+                    });
+                    continue;
+                }
                 let share = b.spend.cost_usd / (cents as f64 / 100.);
                 if share >= BUDGET_WARN {
                     out.push(Attention {
