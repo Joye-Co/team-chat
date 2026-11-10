@@ -12,6 +12,9 @@ pub struct Spend {
     pub output_tokens: u64,
     pub runs: u32,
     pub topics: u32,
+    /// The part of `cost_usd` estimated from tokens at list price (absent: all reported).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -34,6 +37,16 @@ pub struct BotSpend {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberSpend {
+    pub member_id: String,
+    #[serde(flatten)]
+    pub spend: Spend,
+}
+
+/// What one person asked of one AI member.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairSpend {
+    pub initiator_id: String,
     pub member_id: String,
     #[serde(flatten)]
     pub spend: Spend,
@@ -84,6 +97,9 @@ pub struct TeamUsage {
     pub bots: Vec<BotSpend>,
     pub initiators: Vec<MemberSpend>,
     pub machines: Vec<MachineSpend>,
+    /// Who asked which AI member (absent from older servers).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pairs: Vec<PairSpend>,
     pub runtimes: Vec<RuntimeSpend>,
     pub daily: Vec<UsageDay>,
 }

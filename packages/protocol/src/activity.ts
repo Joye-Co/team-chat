@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Id, Millis } from "./common.ts";
 
 /** What an entry is about; the page filters by it. */
-export const ACTIVITY_KINDS = ["member", "level", "invite", "key", "approval", "budget", "login", "machine"] as const;
+export const ACTIVITY_KINDS = ["member", "level", "invite", "key", "approval", "budget", "login", "machine", "run"] as const;
 export const ActivityKind = z.enum(ACTIVITY_KINDS);
 export type ActivityKind = z.infer<typeof ActivityKind>;
 

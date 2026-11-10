@@ -3,20 +3,85 @@
 
 use gpui::{AnyWindowHandle, App, Pixels, Size};
 
-use super::AdminPage;
+use super::{AdminPage, AdminView, usage::UsageRange};
 use crate::{
     app::Services,
     selftest::scenes::{Scene, Start},
 };
 
 fn open(services: Services, page: AdminPage, cx: &mut App) -> Result<AnyWindowHandle, String> {
+    open_with(services, page, |_| {}, cx)
+}
+
+/// Opens 团队管理 at `page` after `before` set the view up (a range, a selection).
+fn open_with(
+    services: Services,
+    page: AdminPage,
+    before: impl FnOnce(&mut AdminView),
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     let (handle, view) = super::open_window(services, false, cx)?;
     handle
         .update(cx, |_, window, cx| {
-            view.update(cx, |v, cx| v.open_page(page, window, cx))
+            view.update(cx, |v, cx| {
+                before(v);
+                v.open_page(page, window, cx)
+            })
         })
         .map_err(|e| e.to_string())?;
     Ok(handle)
+}
+
+fn open_home_month(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(
+        services,
+        AdminPage::Home,
+        |v| v.usage.range = UsageRange::Month,
+        cx,
+    )
+}
+
+fn open_usage_last_month(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(
+        services,
+        AdminPage::Usage,
+        |v| v.usage.range = UsageRange::LastMonth,
+        cx,
+    )
+}
+
+fn open_member_person(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(
+        services,
+        AdminPage::Members,
+        |v| v.team.selected = Some("m-xiaowang".into()),
+        cx,
+    )
+}
+
+fn open_member_ai(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(
+        services,
+        AdminPage::Members,
+        |v| v.team.selected = Some("m-coder".into()),
+        cx,
+    )
 }
 
 macro_rules! opener {
@@ -62,6 +127,26 @@ pub const SCENES: &[Scene] = &[
         "admin-members",
         "团队管理 › 成员: the roster table with its tabs",
         open_members
+    ),
+    scene!(
+        "admin-member-person",
+        "团队管理 › 成员 with 小王 selected: 常找的 AI 成员 and devices",
+        open_member_person
+    ),
+    scene!(
+        "admin-member-ai",
+        "团队管理 › 成员 with Forge selected: 最常找它的人",
+        open_member_ai
+    ),
+    scene!(
+        "admin-home-month",
+        "团队管理 › 总览 switched to 本月",
+        open_home_month
+    ),
+    scene!(
+        "admin-usage-last-month",
+        "团队管理 › 用量 switched to 上个月",
+        open_usage_last_month
     ),
     scene!(
         "admin-usage",

@@ -50,6 +50,7 @@ pub fn kind_label(k: &str) -> &'static str {
         kind::BUDGET => m::KIND_BUDGET,
         kind::LOGIN => m::KIND_LOGIN,
         kind::MACHINE => m::KIND_MACHINE,
+        kind::RUN => m::KIND_RUN,
         _ => m::KIND_MEMBER,
     }
 }
@@ -63,6 +64,7 @@ fn kind_icon(k: &str) -> Sym {
         kind::BUDGET => Sym::BarChart,
         kind::LOGIN => Sym::Account,
         kind::MACHINE => Sym::Server,
+        kind::RUN => Sym::Failed,
         _ => Sym::Info,
     }
 }
@@ -201,6 +203,49 @@ pub fn sentence(
                 r => r.to_string(),
             };
             (f(m::ACT_CLI_LOGIN, &[("cli", &cli)]), None)
+        }
+        "run.failed" => {
+            let who = detail_str(e, "requestedBy").map(name).unwrap_or_default();
+            let meta = match detail_str(e, "title") {
+                Some(t) if !t.is_empty() => {
+                    fill(m::ACT_RUN_FAILED_META, &[("title", t), ("who", &who)])
+                }
+                _ => fill(m::ACT_RUN_FAILED_WHO, &[("who", &who)]),
+            };
+            (f(m::ACT_RUN_FAILED, &[]), Some(meta))
+        }
+        "machine.offline" => (
+            f(m::ACT_MACHINE_OFFLINE, &[]),
+            Some(m::ACT_MACHINE_OFFLINE_META.to_string()),
+        ),
+        "machine.online" => {
+            let meta = e
+                .details
+                .as_ref()
+                .and_then(|d| d.get("offlineMs"))
+                .and_then(|v| v.as_u64())
+                .map(|ms| {
+                    fill(
+                        m::ACT_MACHINE_ONLINE_META,
+                        &[("d", &super::model::duration(ms))],
+                    )
+                });
+            (f(m::ACT_MACHINE_ONLINE, &[]), meta)
+        }
+        "budget.reached" => {
+            let d = e.details.as_ref();
+            let budget = d
+                .and_then(|d| d.get("budgetCents"))
+                .map(money)
+                .unwrap_or_default();
+            let spent = d
+                .and_then(|d| d.get("spentCents"))
+                .map(money)
+                .unwrap_or_default();
+            (
+                f(m::ACT_BUDGET_REACHED, &[("budget", &budget)]),
+                Some(fill(m::ACT_BUDGET_REACHED_META, &[("spent", &spent)])),
+            )
         }
         "machine.create" => (f(m::ACT_MACHINE_CREATE, &[]), None),
         "machine.revoke" => (f(m::ACT_MACHINE_REVOKE, &[]), None),
@@ -626,5 +671,43 @@ mod tests {
             "Joye 在 vm-runner-1 上登录 Claude Code"
         );
         assert_eq!(kind_label("whatever"), "成员");
+    }
+
+    #[test]
+    fn server_events_read_as_sentences() {
+        let machine = |_: &str| "vm-runner-1".to_string();
+        let mut e = entry(
+            "run.failed",
+            "run",
+            serde_json::json!({"title": "对一下账单", "requestedBy": "joye"}),
+        );
+        e.actor_id = Some("forge".into());
+        assert_eq!(
+            sentence(&e, &name, &machine),
+            (
+                "Forge 的任务没跑成".into(),
+                Some("对一下账单 · Joye 发起".into())
+            )
+        );
+        let mut off = entry("machine.offline", "machine", serde_json::json!({}));
+        off.actor_id = None;
+        assert_eq!(sentence(&off, &name, &machine).0, "vm-runner-1 离线了");
+        let on = entry(
+            "machine.online",
+            "machine",
+            serde_json::json!({"offlineMs": 2 * 3_600_000}),
+        );
+        assert_eq!(sentence(&on, &name, &machine).0, "vm-runner-1 重新上线");
+        let mut b = entry(
+            "budget.reached",
+            "budget",
+            serde_json::json!({"budgetCents": 10000, "spentCents": 10230}),
+        );
+        b.actor_id = Some("forge".into());
+        assert_eq!(
+            sentence(&b, &name, &machine).0,
+            "Forge 本周花费到了预算 $100"
+        );
+        assert_eq!(kind_label("run"), m::KIND_RUN);
     }
 }
