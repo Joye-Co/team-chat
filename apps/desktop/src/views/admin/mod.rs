@@ -461,6 +461,7 @@ fn error_text(e: AdminError) -> String {
 
 impl Render for AdminView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_budget_field(window, cx);
         let k = native_colors(cx);
         div()
             .id("admin-root")
