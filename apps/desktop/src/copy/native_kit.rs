@@ -49,11 +49,7 @@ crate::copy! {
     SEC_STATES = "按钮状态",
     STATE_HOVER = "悬停",
     STATE_LOADING = "加载",
-    KEY_CMD = if cfg!(target_os = "macos") {
-        "⌘"
-    } else {
-        "Ctrl"
-    },
+    KEY_CMD = crate::copy::per_system("⌘", "Ctrl"),
     KEY_K = "K",
     CARD_TITLE = "这周",
     CARD_DESCRIPTION = "完成的话题和产出",
@@ -170,16 +166,8 @@ crate::copy! {
     MENU_COPY_LINK = "拷贝链接",
     MENU_OPEN_WINDOW = "在新窗口中打开",
     MENU_LEAVE = "离开群…",
-    SHORTCUT_OPEN = if cfg!(target_os = "macos") {
-        "⌘O"
-    } else {
-        "Ctrl+O"
-    },
-    SHORTCUT_COPY = if cfg!(target_os = "macos") {
-        "⇧⌘C"
-    } else {
-        "Ctrl+Shift+C"
-    },
+    SHORTCUT_OPEN = crate::copy::per_system("⌘O", "Ctrl+O"),
+    SHORTCUT_COPY = crate::copy::per_system("⇧⌘C", "Ctrl+Shift+C"),
     // Inspector
     INS_OWNER = "负责",
     INS_PLAN = "计划",
@@ -196,7 +184,7 @@ crate::copy! {
     SHEET_TITLE = "编辑资料",
     SHEET_EXPLANATION = "团队里的人会看到你的名字和岗位。",
     ALERT_TITLE = "退出登录？",
-    ALERT_MESSAGE = crate::copy::per_system("退出后，这台 Mac 不再收到团队的消息。", "退出后，这台电脑 不再收到团队的消息。"),
+    ALERT_MESSAGE = crate::copy::per_system("退出后，这台 Mac 不再收到团队的消息。", "退出后，这台电脑不再收到团队的消息。"),
     ALERT_CONFIRM = "退出登录",
     // Progress
     PROGRESS_LABEL = "上传 3 个文件",

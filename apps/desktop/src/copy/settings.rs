@@ -32,11 +32,11 @@ crate::copy! {
     SIGN_OUT = "退出登录",
     SIGN_OUT_WIPE = "退出并删除本机记录",
     SIGN_OUT_WIPE_BUTTON = "删除并退出",
-    SIGN_OUT_WIPE_HINT = crate::copy::per_system("删除这台 Mac 上的聊天记录和下载的产出，服务器上的内容不受影响", "删除这台电脑 上的聊天记录和下载的产出，服务器上的内容不受影响"),
+    SIGN_OUT_WIPE_HINT = crate::copy::per_system("删除这台 Mac 上的聊天记录和下载的产出，服务器上的内容不受影响", "删除这台电脑上的聊天记录和下载的产出，服务器上的内容不受影响"),
     PROFILE_SAVE_HINT = "离开输入框或按回车即保存",
-    SIGN_OUT_HINT = crate::copy::per_system("退出登录会保留这台 Mac 上的聊天记录，下次登录更快", "退出登录会保留这台电脑 上的聊天记录，下次登录更快"),
+    SIGN_OUT_HINT = crate::copy::per_system("退出登录会保留这台 Mac 上的聊天记录，下次登录更快", "退出登录会保留这台电脑上的聊天记录，下次登录更快"),
     SIGN_OUT_WIPE_TITLE = "退出并删除本机记录？",
-    SIGN_OUT_WIPE_BODY = crate::copy::per_system("这台 Mac 上的聊天记录和下载的产出会被删除。服务器上的内容不受影响，重新登录后会再同步。", "这台电脑 上的聊天记录和下载的产出会被删除。服务器上的内容不受影响，重新登录后会再同步。"),
+    SIGN_OUT_WIPE_BODY = crate::copy::per_system("这台 Mac 上的聊天记录和下载的产出会被删除。服务器上的内容不受影响，重新登录后会再同步。", "这台电脑上的聊天记录和下载的产出会被删除。服务器上的内容不受影响，重新登录后会再同步。"),
 
     // 成员
     MEMBERS = "成员",
@@ -219,7 +219,7 @@ crate::copy! {
     NO_ROLE = "未填写岗位",
     DEVICES = "登录的设备",
     EMAIL = "登录邮箱",
-    EMAIL_HINT = crate::copy::per_system("添加后，可以在任何一台 Mac 上用邮箱验证码登录。", "添加后，可以在任何一台电脑 上用邮箱验证码登录。"),
+    EMAIL_HINT = crate::copy::per_system("添加后，可以在任何一台 Mac 上用邮箱验证码登录。", "添加后，可以在任何一台电脑上用邮箱验证码登录。"),
     EMAIL_NONE = "还没有添加",
     EMAIL_ADD = "添加",
     EMAIL_CHANGE = "更改",
@@ -250,7 +250,7 @@ crate::copy! {
     DEVICE_REMOVE_CONFIRM = "退出登录",
     SIGN_OUT_OPEN = "退出登录",
     SIGN_OUT_TITLE = "退出登录？",
-    SIGN_OUT_BODY = crate::copy::per_system("退出后，这台 Mac 不再收到团队的消息。", "退出后，这台电脑 不再收到团队的消息。"),
+    SIGN_OUT_BODY = crate::copy::per_system("退出后，这台 Mac 不再收到团队的消息。", "退出后，这台电脑不再收到团队的消息。"),
     SIGN_OUT_DELETE_LOCAL = "同时删除本机数据",
     // 通知
     REMIND_ME = "提醒我",
@@ -309,11 +309,7 @@ crate::copy! {
     SHORTCUT_RESET = "恢复默认",
     SHORTCUT_RESET_ALL = "全部恢复默认",
     SHORTCUT_TAKEN = "已被「{name}」使用",
-    SHORTCUT_NEEDS_MODIFIER = if cfg!(target_os = "macos") {
-        "要带上 ⌘、⌃ 或 ⌥"
-    } else {
-        "要带上 Ctrl 或 Alt"
-    },
+    SHORTCUT_NEEDS_MODIFIER = crate::copy::per_system("要带上 ⌘、⌃ 或 ⌥", "要带上 Ctrl 或 Alt"),
     // --- end v12/settings track ---
     // --- v14/t4 lists ---
     DEVICES_HINT = "你的账号在这些设备上登录着。",
