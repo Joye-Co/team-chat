@@ -314,6 +314,8 @@ crate::copy! {
 
     USAGE_PAGE_TITLE = "用量",
     USAGE_PAGE_SUB = "AI 成员干活的花费，按 API 价格算；订阅里包含的部分也算上，方便比较",
+    USAGE_ESTIMATED = "≈{cost}",
+    USAGE_ESTIMATE_NOTE = "≈ 是按 token 数和公开价格估的：这个 CLI 不报花费",
     USAGE_RANGE_WEEK = "本周",
     USAGE_RANGE_MONTH = "本月",
     USAGE_RANGE_LAST_MONTH = "上个月",

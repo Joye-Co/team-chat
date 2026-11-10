@@ -12,6 +12,9 @@ pub struct Spend {
     pub output_tokens: u64,
     pub runs: u32,
     pub topics: u32,
+    /// The part of `cost_usd` estimated from tokens at list price (absent: all reported).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

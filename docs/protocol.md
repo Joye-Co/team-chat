@@ -1229,7 +1229,8 @@ days) reads every runner bot's BotDesk for runs that ended in `[from, to)` and i
 before it, and stores nothing.
 
 ```ts
-Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */ }
+Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */,
+              estimatedUsd? /* the part of costUsd estimated from tokens */ }
 TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
               bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
@@ -1239,7 +1240,9 @@ TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
 ```
 
 - Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
-  subscription); runs without it (Codex today) count tokens and 0 cost.
+  subscription). A run without it (Codex today) is priced from its tokens at list price for its
+  runtime and the AI member's model (`server/src/usage/prices.ts`, one table to update); that part
+  is also counted in `estimatedUsd`, so a client can mark it as an estimate.
 - `initiators` is the person who asked for each run (`requestedBy`); `pairs` splits that by AI
   member, so a client can show whom each person works with most (optional: older servers omit it).
 - `runtimes` is split by machine, so a client can tell subscription from API-key spend by the

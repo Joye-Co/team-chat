@@ -14,6 +14,8 @@ const Spend = {
   outputTokens: z.int().nonnegative(),
   runs: z.int().nonnegative(),
   topics: z.int().nonnegative(),
+  /** The part of `costUsd` estimated from tokens at list price (runs whose CLI reports no cost). */
+  estimatedUsd: z.number().nonnegative().optional(),
 };
 
 export const TeamUsage = z.object({
