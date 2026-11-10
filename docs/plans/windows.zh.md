@@ -1,137 +1,182 @@
-# Windows 客户端计划
+# Windows 端计划
 
-状态：W0 已完成（代码能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。待定的决定见文末。
+状态：W0 已完成（客户端能为 Windows 编译并链接出 exe，还没在 Windows 上运行过）。其余未开始。
 
 ## 目标
 
-在 Windows 10/11（x64，之后加 ARM64）上发一个和 Mac 版功能一致、视觉达到同一验收标准的桌面客户端。
-服务器、协议和 `chat-core` 不变；工作全部在 `apps/desktop`、`crates/artifact-view`、`crates/chat-core`
-的平台层、发布脚本和 CI 里。
+Windows 电脑能做 Mac 电脑现在能做的每一件事。不是只做一个聊天客户端，是三样东西一起：
+
+1. **客户端**：和 Mac 版功能一致，视觉达到同一验收标准（聊天、话题、产出窗口、图、媒体预览、通知、
+   托盘、设置、更新）。
+2. **机器**：Windows 电脑能当团队的机器跑 bot。`apps/daemon` 在 Windows 上原生运行，能启动
+   Claude Code、Codex 等 CLI，支持 `chat-run`、取消、审批、受控的密钥、工作区、开机自启和自己更新。
+3. **安装和发布**：一个安装包同时装好客户端和 daemon；设置里的「用这台电脑」在 Windows 上一键可用；
+   没装客户端的机器有一条 PowerShell 安装命令；发版流程同时出 Mac 和 Windows 的产物。
+
+范围以外（要做再另说）：在 Windows 上开发本项目（`bun run dev:desktop`、发版脚本仍然在 Mac 或 Linux
+上跑，Windows 的编译和测试靠 CI）；ARM64 的 Windows；Firecracker runner（那是 Linux 主机上的另一种
+执行方式，和 Windows 无关）。
+
+不变的部分：服务器、`docs/protocol.md`、`docs/machine-protocol.md`、`crates/chat-protocol`、
+`packages/bot-sdk`（跑在 Bun 和 Node 上，Windows 本来就能用）。
 
 ## 现状
 
-可以直接复用的部分：
+### 客户端（`apps/desktop`、`crates/artifact-view`、`crates/chat-core`）
 
-- 服务器（Cloudflare Workers）、`docs/protocol.md`、`crates/chat-protocol`：与平台无关。
-- `crates/chat-core`：只有 Token 存储（`token.rs`，`security-framework`）和少量文件路径代码按 macOS 分了支。
-- 界面：GPUI 0.3（`gpui-pre`）和 gpui-component 0.8 都支持 Windows（DirectX 渲染）；列表、消息、
-  Markdown、输入框、弹层是纯 GPUI，预期能直接编译。
-- 原生代码已经用 `cfg(target_os = "macos")` 隔开，很多模块在非 macOS 上本来就是空实现。
-
-只在 macOS 上能跑、需要 Windows 实现的部分（按依赖 macOS 的程度排序）：
+GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修掉了 11 处 Unix 专用代码。
+下面这些在 Windows 上现在是空实现，要写 Windows 版：
 
 | 模块 | 现在用的 macOS 接口 | Windows 方案 |
 | --- | --- | --- |
-| `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2：自定义 scheme（`AddWebResourceRequestedFilter`）、请求拦截做网络封锁、子 HWND 嵌入 |
-| `src/diagrams`（Mermaid 图） | `artifact_view::diagram::DiagramRenderer`，隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例 |
-| `src/views/media/native.rs`（音视频、PDF 预览） | AVFoundation、AVFAudio、PDFKit | Media Foundation 加 `Windows.Data.Pdf`（WinRT）；或者两端共用的 ffmpeg 加 pdfium，见决定 D2 |
+| `crates/artifact-view`（产出窗口、内嵌页面） | WKWebView、`WKURLSchemeHandler`、`WKContentRuleList`、子视图嵌入 | WebView2：虚拟主机或 `WebResourceRequested` 提供内容，请求拦截做网络封锁，子 HWND 嵌入 |
+| `src/diagrams`（Mermaid 图） | 隐藏的 WKWebView | 同一个 WebView2 后端的隐藏实例 |
+| `src/views/media/native.rs`（音视频、PDF 预览） | AVFoundation、AVFAudio、PDFKit | Media Foundation 加 `Windows.Data.Pdf` |
 | `src/provider/macos.rs`（通知、睡眠唤醒、网络变化） | `UNUserNotificationCenter`、`NSWorkspace` | WinRT Toast（需要 AUMID）、`WM_POWERBROADCAST`、`NotifyIpInterfaceChange` |
-| `crates/chat-core/src/token.rs` | Keychain | Windows Credential Manager（`keyring` crate 或直接用 `windows` crate） |
-| `src/views/settings/login_item.rs`（开机启动） | `SMAppService` | `HKCU\...\Run`，MSIX 用 `StartupTask` |
+| `crates/chat-core/src/token.rs` | Keychain | Windows Credential Manager |
+| `src/views/settings/login_item.rs`（开机启动） | `SMAppService` | `HKCU\...\Run` |
 | `src/views/nav/menus.rs`、`status_item.rs` | 菜单栏、状态栏图标、关于面板 | 窗口内菜单加系统托盘图标 |
 | `src/views/files/native.rs` | Quick Look、分享面板 | 用默认程序打开、资源管理器里定位、`DataTransferManager` 分享 |
-| `src/ui/sf_symbols` | SF Symbols 栅格化 | 自带一套 SVG 图标，见决定 D3 |
-| `src/theme.rs`、`src/ui/motion.rs` | 系统外观、强调色、减弱动画 | 注册表里的 `AppsUseLightTheme`、`UISettings`、`SPI_GETCLIENTAREAANIMATION` |
+| `src/ui/sf_symbols` | SF Symbols 栅格化 | 自带一套 SVG 图标 |
+| `src/theme.rs`、`src/ui/motion.rs` | 系统外观、减弱动画 | `UISettings`、`SPI_GETCLIENTAREAANIMATION` |
 | `src/views/settings/window_fit.rs` | NSWindow 尺寸和位置 | `GetMonitorInfo` 和工作区 |
-| `src/updater`（DMG 下载、`hdiutil`、替换 `.app`） | DMG、`hdiutil` | 安装包加单独的更新程序，见决定 D1 |
+| `src/provider/this_mac.rs`（用这台电脑） | 应用包里的 daemon 加 launchd | 安装目录里的 daemon 加计划任务，见 M3 |
+| `src/updater` | DMG、`hdiutil`、替换 `.app` | 安装包加单独的更新程序 |
 | `src/selftest/capture.rs`（截图自测） | NSWindow 编号、`screencapture` | `PrintWindow` 或 `Windows.Graphics.Capture` |
+
+### 机器（`apps/daemon`，约 1.15 万行）
+
+现在为 Windows 编译有 57 处错误，集中在 6 个地方。协议、运行时对各 CLI 的解析、脱敏、模型列表、
+配置这些大头和平台无关。
+
+| 模块 | 现在的 Unix 做法 | Windows 方案 |
+| --- | --- | --- |
+| `executor/local.rs`、`proctree.rs`（启动 CLI、杀掉整棵进程树） | 进程组、`kill(-pgid)`、用 `ps` 找逃出进程组的子孙 | Job Object：CLI 和它启动的所有进程都在一个 job 里，`TerminateJobObject` 一次杀干净，比现在的 `ps` 查找更可靠 |
+| 取消、暂停、继续 | `SIGTERM` 后 `SIGKILL`；`SIGSTOP`/`SIGCONT` | 先发 `CTRL_BREAK_EVENT`（CLI 用 `CREATE_NEW_PROCESS_GROUP` 启动），超时后结束 job；暂停用挂起 job 里各进程的线程 |
+| `chat_run.rs`（CLI 向群里说话） | Unix socket（0600，只许本用户连）；`bin/chat-run` 是指向 daemon 的符号链接 | 命名管道，ACL 只给当前用户；`chat-run.exe` 用硬链接（不行就复制）。Codex 用的文件传输方式不用改 |
+| `runtime/pty.rs`（没有结构化协议的 CLI） | `openpty`、`setsid` | ConPTY |
+| `service.rs`、`selfupdate.rs` | launchd、systemd；程序文件被替换后退出，由服务管理器重启 | 当前用户的计划任务（登录时启动，失败后重启）。不能用 Windows 服务：服务跑在别的会话里，读不到用户的 CLI 登录状态。更新时先把运行中的 exe 改名再放新文件 |
+| `health.rs`、`doctor.rs`（找 CLI） | 查 `PATH`、可执行位 | 按 `PATHEXT` 找，npm 装的 CLI 是 `.cmd` 文件，启动时要正确转义参数 |
+| 文件权限（配置、token、运行目录） | 0600 / 0700 | 放在用户目录下靠默认 ACL；机器 token 存 Credential Manager |
+| `workspace.rs`（git worktree、运行目录） | — | 打开长路径支持并用短的工作目录；删除运行目录时处理文件被占用 |
+| `runtime/claude.rs`（找原始会话文件） | 按 Unix 路径算目录名 | 按 Windows 路径（盘符、反斜杠）算 |
+
+要在 Windows 上核实的外部条件：Claude Code 和 Codex 的 Windows 原生版本各自的要求（Claude Code 需要
+Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows 上的沙箱方式是否影响 `chat-run`。
+
+不用 WSL 的理由：在 WSL 里跑现有的 Linux daemon 不用改代码，但 bot 就只能动 Linux 文件系统，碰不到
+这台 Windows 电脑上的项目和工具，而且要求每个成员先装 WSL。所以做原生的。
 
 ## 阶段
 
-每个阶段单独提 PR，按 AGENTS.md 的规则：每个 worktree 用自己的 `CARGO_TARGET_DIR`，测试跑过才算完成。
+三条线。客户端（C）和机器（M）互相不依赖，可以两个人或两个会话同时做；发布（R）在两条线都能用之后。
+每个阶段单独提 PR，测试跑过才算完成。
 
-### W0 能编译（已完成）
+### W0 客户端能编译（已完成）
 
-实际情况比预计简单：GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译，原生模块在非 macOS
-上本来就有空实现，所以没有做 `platform` 模块的大重构（等 W1 写第一个 Windows 实现时再按需要整理）。
+- 客户端的 11 处 Unix 专用代码按平台分开；新增 `apps/desktop/src/paths.rs`（Windows 上数据在
+  `%APPDATA%\<app id>`，缓存在 `%LOCALAPPDATA%`，下载在 `%USERPROFILE%\Downloads`）。
+- CI 增加 `desktop-windows` 任务（`windows-2025`）：编译客户端，跑 `chat-protocol` 和 `chat-core` 的测试；
+  客户端自己的测试先只报告不拦截。
+- 在 Mac 上检查 Windows 编译：`brew install mingw-w64`，`rustup target add x86_64-pc-windows-gnu`，
+  `cargo check --target x86_64-pc-windows-gnu -p desktop --all-targets`。正式目标是
+  `x86_64-pc-windows-msvc`，以 Windows CI 为准。
 
-- 桌面端只有 11 处编译错误，都是 Unix 专用的文件权限、`libc` 调用和进程组，已经按平台分开。
-- 新增 `apps/desktop/src/paths.rs`：数据目录在 Windows 上是 `%APPDATA%\<app id>`，缓存在
-  `%LOCALAPPDATA%`，下载目录在 `%USERPROFILE%\Downloads`。macOS 的路径不变。
-- Windows 上暂时没有的功能：通知、产出窗口、Mermaid 图、媒体预览、自动更新、托盘、开机启动、
-  「用这台电脑」。Token 暂时存在数据目录下的文件里（W1 换成 Credential Manager）。
-- CI 增加 `desktop-windows` 任务（`windows-2025`）：编译桌面端，跑 `chat-protocol` 和 `chat-core` 的测试；
-  桌面端自己的测试先只报告不拦截，W1 修到全过后去掉 `continue-on-error`。
-- DMG 安装器的测试（要用 `hdiutil`）只在 macOS 上编译。
+### 客户端
 
-在 Mac 上检查 Windows 编译：`brew install mingw-w64`，`rustup target add x86_64-pc-windows-gnu`，然后
-`cargo check --target x86_64-pc-windows-gnu -p desktop --all-targets`。正式的目标是
-`x86_64-pc-windows-msvc`，以 Windows CI 为准。
+**C1 能用（约 2 周）**
 
-不在这份计划里：`apps/daemon`（在成员的电脑上跑 bot，用了 pty、Unix socket 和进程组）和 `tools/e2e`
-都不能为 Windows 编译。Windows 客户端不需要它们；「用这台电脑」要等 daemon 另外移植。
+- Token 存到 Credential Manager。
+- 窗口：自绘标题栏和窗口按钮、拖动区、Snap 布局、高 DPI 和不同缩放比的显示器。
+- 输入：中文输入法（候选窗位置、组合中的文字）；快捷键从 Cmd 映射到 Ctrl。
+- 通知（点击打开话题）、睡眠唤醒和网络变化后立即重连、托盘图标、开机启动。
+- 客户端测试在 Windows 上全过，去掉 CI 里的 `continue-on-error`。
 
-### W1 能用（约 2 周）
+完成标准：在 Windows 上登录，收发消息、看话题、收通知、断线重连都正常。
 
-- Token 存到 Credential Manager；配置和缓存放到 `%APPDATA%` / `%LOCALAPPDATA%` 下的产品目录。
-- 窗口：自绘标题栏、最小化/最大化/关闭按钮、拖动区、Snap 布局、高 DPI 缩放和不同缩放比的显示器。
-- 输入：中文输入法（微软拼音、搜狗），包括候选窗的位置和组合中的文字；快捷键从 Cmd 映射到 Ctrl。
-- 通知（Toast、点击打开话题），睡眠唤醒和网络变化后立即重连。
-- 托盘图标、开机启动。
-- `bun run dev:desktop` 支持 Windows，或者写一份 Windows 版的启动说明。
+**C2 产出和图（约 3 周，客户端里风险最大）**
 
-完成标准：在 Windows 上登录 sandbox，收发消息、看话题、收到通知、重连都正常；中文输入法没有问题。
+- `artifact-view` 增加 WebView2 后端，对外接口不变：每个版本一个 origin、同样严格的 CSP、拦截所有
+  外部请求和跨 origin 跳转、`window.artifact` 桥按 `Capabilities` 检查、嵌入宿主窗口。
+- 第一周先做只嵌一个页面的原型，确认子 HWND 和 GPUI 的渲染叠在一起没有闪烁和焦点问题。
+- Mermaid 渲染器用同一个后端。安装包带 WebView2 的 Evergreen bootstrapper。
 
-### W2 产出和图（约 3 周，风险最大）
+完成标准：两个平台通过同一套隔离测试，Mermaid 图能显示。
 
-- `artifact-view` 增加 WebView2 后端，接口和现在的 WKWebView 后端一样：
-  - 每个版本一个 origin：`artifact://` 换成 WebView2 认的 `https://<id>-v<n>.artifact.invalid` 虚拟主机，
-    用 `SetVirtualHostNameToFolderMapping` 或 `WebResourceRequested` 提供内容。
-  - 同样严格的 CSP；拦截所有 http/https/ws/file 请求和跨 origin 跳转。
-  - `window.artifact.getData()` / `emitEvent` 改走 `chrome.webview.postMessage`，按 `Capabilities` 检查。
-  - 嵌入宿主窗口：子 HWND 每帧按 GPUI 布局定位，处理焦点和 Tab 键切换。
-- 没装 WebView2 Runtime 的机器（老的 Windows 10）：安装包带 Evergreen bootstrapper。
-- Mermaid 渲染器用同一个后端。
-- 把现有的隔离测试移植过来（不能联网、不能跳转、没有授权的调用被拒绝）。
+**C3 媒体和文件（约 2 周）**：视频首帧和时长、音频波形和播放、PDF 预览；打开、定位、分享文件。
 
-完成标准：产出窗口和内嵌页面在两个平台上通过同一套隔离测试，Mermaid 图能显示。
+**C4 设计验收（约 2 周，可以和 C2、C3 同时做）**
 
-### W3 媒体和文件（约 2 周）
+- 写 `docs/design/WINDOWS.md`（NATIVE.md 的 Windows 版）；COMPLETENESS.md 的黑白 token 和尺寸规范照用。
+- 一套 SVG 图标替换 SF Symbols。
+- 截图自测移植到 Windows，浅色深色都截；每个页面过 COMPLETENESS.md §4 清单。
 
-- 视频首帧和时长、音频波形和播放、PDF 页面预览。
-- 文件操作：用默认程序打开、在资源管理器里显示、分享。
+### 机器
 
-完成标准：sandbox 里的样例产出在 Windows 上都能预览。
+**M1 能编译、能跑一个 run（约 2 周）**
 
-### W4 打包、签名、更新（约 2 周）
+- `executor/local.rs` 和 `proctree.rs` 抽出平台层；Windows 实现用 Job Object 启动和结束进程树。
+- 取消：`CTRL_BREAK_EVENT`，超时后结束 job。
+- 找 CLI（`PATHEXT`、`.cmd`）、主机名、文件权限、工作区路径。
+- CI 的 Windows 任务加上 `cargo test -p daemon`。
 
-- 安装包（按 D1 选 MSIX 或 NSIS），带 WebView2 bootstrapper。
+完成标准：Windows 上 `daemon run` 连上服务器，一个 Claude Code run 从开始跑到结束，取消能杀干净整棵进程树。
+
+**M2 功能齐全（约 2 周）**
+
+- `chat-run` 的命名管道传输和 `chat-run.exe`；受控密钥（`chat-run secret`）。
+- Codex 和 ACP 运行时在 Windows 上验证；ConPTY 版的 `pty` 运行时。
+- 暂停和继续；原始会话文件的路径；`daemon doctor`。
+
+完成标准：`tools/e2e` 的机器用例对着一台 Windows 机器全过（`tools/e2e` 本身也要能在 Windows 上编译）。
+
+**M3 服务和「用这台电脑」（约 1.5 周）**
+
+- `daemon install-service` / `uninstall-service` 的 Windows 版（计划任务）；自己更新（改名再替换）。
+- 客户端的「用这台电脑」：写配置和机器 token，注册并启动计划任务，显示状态，重启。
+- PowerShell 安装命令，给不装客户端的机器用。
+
+完成标准：在设置里点一下，这台 Windows 电脑出现在团队的机器列表里，重启电脑后自己上线。
+
+### 发布
+
+**R1 安装包、签名、更新（约 2 周）**
+
+- 安装包（NSIS）：客户端、daemon、WebView2 bootstrapper。
 - 代码签名（证书由运营方提供，放在 CI secret 里，不进仓库）。
-- 更新器：下载、校验 SHA-256（沿用现有逻辑），由一个小的更新程序在主程序退出后替换文件再重启。
-- `release.yml` 增加 Windows 任务，发版产物和 Mac 的 DMG 放在一起。
+- 客户端更新器：下载、校验 SHA-256，由单独的更新程序在主程序退出后替换文件再重启；daemon 跟着更新。
+- `release.yml` 增加 Windows 任务；服务器的版本接口按平台返回产物（只加字段，不改已有字段的含义）；
+  `docs/INSTALL.md` 加 Windows 一节。
 
-完成标准：从上一个版本自动更新到新版本，SmartScreen 不拦截（或者有说明怎么放行）。
+完成标准：从上一个版本自动更新到新版本，客户端和 daemon 都换成新的。
 
-### W5 设计验收（约 2 周，可以和 W2–W4 同时做）
+### 工期
 
-- 写 `docs/design/WINDOWS.md`：标题栏、窗口按钮、菜单、托盘、字体（微软雅黑 / Segoe UI Variable）、
-  圆角、滚动条、对话框，作用相当于 NATIVE.md 的 Windows 版。COMPLETENESS.md 的黑白 token 和尺寸规范照用。
-- 准备图标：一套 SVG 图标，覆盖现在用到的 SF Symbols（约 40 个文件）。
-- 截图自测移植到 Windows，浅色和深色都截。
-- 每个页面过一遍 COMPLETENESS.md §4 清单，再用 `docs/design/skills/emilkowalski/` 里的四个技能检查。
+一个人顺序做约 16–17 周（客户端 9，机器 5.5，发布 2）。客户端和机器两条线同时做约 10–11 周。
 
-完成标准：每个页面在 Windows 上通过 §4 清单。
-
-总计约 10–12 周（一个人全职），W5 和 W2–W4 同时做能缩短到 8–9 周左右。
+建议的顺序：C1 和 M1 先做（最早知道 Windows 上哪里有坑），然后 C2 和 M2，再 C3/C4 和 M3，最后 R1。
 
 ## 风险
 
-- **GPUI 是预发布版本**（`gpui-pre =0.3.10`）：Windows 上的输入法、DPI、透明效果问题可能需要给上游打补丁，
-  或者先在本仓库 vendor。W0 时先在真机上跑 gpui-component 的示例确认。
-- **WebView2 嵌入**：子 HWND 和 GPUI 的 DirectX 交换链叠在一起，可能出现闪烁、Z 顺序或焦点问题。
-  W2 第一周先做一个只嵌入一个页面的原型，确认可行再往下做。
-- **代码签名**：没有 EV 证书时，SmartScreen 需要积累一段时间的信誉才放行，影响首批用户。
-- **没有 Windows 开发机**：CI 能编译和跑测试，但界面要真机看。需要一台 Windows 机器或者虚拟机（Mac 上 ARM 版 Windows 可以先用）。
+- **GPUI 是预发布版本**（`gpui-pre =0.3.10`）：Windows 上的输入法、DPI 问题可能要给上游打补丁或先 vendor。
+- **WebView2 嵌入**：子 HWND 和 GPUI 的渲染叠在一起可能闪烁或抢焦点，C2 先做原型。
+- **CLI 在 Windows 上的行为**：Claude Code 和 Codex 的 Windows 版比 Mac 版新，工具调用、沙箱、
+  会话文件位置可能不一样；M1 第一周先手动在 Windows 上各跑一遍确认。
+- **进程逃出 job**：极少数程序会主动脱离 job。Job 设成不允许脱离，再加一个测试覆盖。
+- **代码签名**：新证书在 SmartScreen 里要积累信誉；没签名的 daemon 还可能被杀毒软件拦。
+- **需要真机**：界面、输入法、计划任务、CLI 登录都要在真的 Windows 上看，CI 只能管编译和单元测试。
 
-## 待定的决定
+## 默认的决定
 
-- **D1 安装包格式**：MSIX（系统管更新和卸载，开机启动用 `StartupTask`，但沙箱限制多）还是
-  NSIS/WiX（灵活，自己写更新程序）。倾向 NSIS 加自己写的更新程序，和 Mac 的 DMG 流程一样。
-- **D2 媒体预览**：用 Windows 原生接口（安装包小，两套代码），还是 ffmpeg 加 pdfium 两个平台共用
-  （一套代码，安装包大约多 30–60 MB，Mac 端也要换）。倾向原生，保持 Mac 端不动。
-- **D3 图标**：Windows 上用 Fluent UI System Icons（MIT 协议，和 Windows 风格一致），还是两个平台
-  统一用一套（比如 Lucide），连 Mac 端也换掉。
-- **D4 设计方向**：Windows 版看起来像 Windows 应用（Fluent 风格的标题栏和控件），还是和 Mac 版一模一样。
-  影响 W5 的工作量和 COMPLETENESS.md 要不要分平台写。
-- **D5 最低系统版本**：只支持 Windows 11，还是也支持 Windows 10 22H2（需要处理 WebView2 Runtime 的安装和
-  没有 Mica 效果的情况）。
+没有反对就按这些做：
+
+- 安装包用 NSIS 加自己写的更新程序，和 Mac 的 DMG 流程对应。
+- 媒体预览用 Windows 原生接口，Mac 端不动。
+- 最低支持 Windows 10 22H2（WebView2 和 ConPTY 都有）。
+- daemon 原生移植，不走 WSL；用计划任务，不用 Windows 服务。
+
+需要你定的只有一件：
+
+- **外观**：Windows 版长得和 Mac 版一样（同一套黑白规范，只换标题栏和窗口按钮的位置），还是改成
+  Windows 应用的样子（Fluent 风格的控件和图标）。前者工作量小、两端一致；后者 C4 要多 2 周左右，
+  COMPLETENESS.md 也要分平台写。倾向前者，图标用一套两端通用的 SVG。
