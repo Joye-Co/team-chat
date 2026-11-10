@@ -11,8 +11,8 @@
 //! knows which system it is on. To sit where the symbol sits and weigh what
 //! it weighs:
 //! - **Optical size**: the icon is as large as fits in the symbol's ink box at
-//!   that point size, so it is never larger than the symbol in either
-//!   direction (the `@` numbers of the table: the width and height of the
+//!   that point size ([`fit_box`]: a squarer icon may cover the same area),
+//!   so it is never longer than the symbol's long side (the `@` numbers of the table: the width and height of the
 //!   symbol's ink per em, measured on macOS 26; `TC_SVG_TABLE=1` with the
 //!   test `the_table_matches_sf_symbols` measures them again).
 //! - **Weight**: the stroke is as thick as the symbol's at that point size
@@ -75,7 +75,7 @@ macro_rules! svg_set {
 svg_set! {
     lucide {
         Home = Inbox @ 1.16, 0.80;
-        Outputs = SquareStack @ 0.86, 1.12;
+        Outputs = GalleryVerticalEnd @ 0.86, 1.12;
         Members = Users @ 1.37, 0.91;
         Topic = Hash @ 0.88, 0.95;
         Compose = SquarePen @ 0.97, 0.97;
@@ -384,6 +384,17 @@ fn concept(name: &str) -> Option<Sym> {
     NAMES.get(name).copied()
 }
 
+/// The box an icon is fitted in for a symbol whose ink is `w` × `h`: the
+/// ink box, with its shorter side raised to the square of the same area. A
+/// squarer icon than its symbol (a square panel icon for the wide
+/// `sidebar.leading`, two people for the wide `person.2`) would be held to
+/// the symbol's short side and look small next to it; this lets it cover
+/// about the same area, and never be longer than the symbol's long side.
+fn fit_box(w: f32, h: f32) -> (f32, f32) {
+    let side = (w * h).sqrt();
+    (w.max(side), h.max(side))
+}
+
 /// The SVG of the symbol `name` drawn at `point` and `weight`, centered in a
 /// `slot` pt square (the SVG's 24-unit viewBox is the slot). With `ink` the
 /// larger side of the ink box is `ink` points ([`super::SymSize::fill`]).
@@ -407,7 +418,7 @@ pub fn svg(name: &str, point: f32, weight: Weight, slot: f32, ink: Option<f32>) 
     // The box to fit in: the symbol's ink box, or a square of `ink`.
     let (tw, th) = match ink {
         Some(_) => (em * point, em * point),
-        None => (ew * point, eh * point),
+        None => fit_box(ew * point, eh * point),
     };
     let stroke = stroke_em(weight) * point;
     // Points per grid unit: a side is `k·a + b·stroke`.
@@ -476,7 +487,7 @@ mod tests {
                 let point = ink.map_or(point, |i| i / em).min(size.slot / em);
                 let (tw, th) = match ink {
                     Some(_) => (em * point, em * point),
-                    None => (ew * point, eh * point),
+                    None => fit_box(ew * point, eh * point),
                 };
                 let (w, h) = (x1 - x0, y1 - y0);
                 // A line is never thinner than the weight's stroke.
