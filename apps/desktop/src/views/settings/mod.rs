@@ -351,6 +351,14 @@ impl SettingsView {
 
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed_fixed(self.page.title(), body, window, cx)
+    }
+}
+
+impl SettingsView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         let active = emphasized(window);
         // The self-test walks the panes without the window: keep the title.

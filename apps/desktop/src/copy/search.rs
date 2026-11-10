@@ -15,7 +15,11 @@ crate::copy! {
     KEY_UP = "↑",
     KEY_DOWN = "↓",
     KEY_RETURN = "↩",
-    KEY_COMMAND = "⌘",
+    KEY_COMMAND = if cfg!(target_os = "macos") {
+        "⌘"
+    } else {
+        "Ctrl"
+    },
     KEY_ESCAPE = "esc",
     HINT_SELECT = "选择",
     HINT_OPEN = "打开",

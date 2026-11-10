@@ -126,7 +126,21 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 
 - Token 存到 Credential Manager。
 - 窗口：自绘标题栏和窗口按钮、拖动区、Snap 布局、高 DPI 和不同缩放比的显示器。
+  已做（`apps/desktop/src/ui/native/window_chrome.rs`）：主窗口、登录、设置、团队管理窗口顶部有一条 32 高的
+  标题条（gpui-component 的 `TitleBar`），左边是窗口标题，右边是最小化、最大化、关闭。标题条和三个按钮都是
+  GPUI 的 `WindowControlArea`，拖动、双击最大化、拖到屏幕边缘贴靠、Windows 11 悬停最大化按钮出 Snap 布局
+  都由系统处理；最大化时的边距由 GPUI 自己加。没有红绿灯，侧栏顶行用 Mac 全屏时的排法。Mac 上不画这条。
+  不可调整大小的窗口（登录、设置）的最大化按钮画成灰的，点了没反应。
+  还没做：产出窗口和文件预览窗口的标题条；应用菜单挂到标题条里。
+  只在 CI 截图（100% 缩放）里看过，下面这些要真机确认：拖动和双击、Snap 布局、最大化时的边距、150% 和 200%
+  缩放、多显示器之间拖动。
 - 输入：中文输入法（候选窗位置、组合中的文字）；快捷键从 Cmd 映射到 Ctrl。
+  快捷键已做：应用自己的绑定用 `crate::secondary!("k")`（Mac 是 `cmd-k`，Windows 是 `ctrl-k`；GPUI 的
+  `secondary-` 前缀在 `KeyBinding::new` 里不能用，会 panic）。Windows 上不绑隐藏、最小化、表情与符号，也不绑 Ctrl+Q
+  （退出用 Alt+F4 和关闭按钮）；Ctrl+W 关设置、团队管理这类窗口，不关主窗口和最后一个窗口（应用会跟着退出，
+  等托盘做好后再改成收进托盘）；全屏是 F11，显示侧栏是 Ctrl+Alt+S，全局搜索是 Ctrl+Alt+F（Ctrl+Shift+F 是
+  微软拼音的简繁切换）。自己读修饰键的地方用 `crate::command_key(&modifiers)`，不要直接读 `modifiers.platform`。设置 › 快捷键和界面文案里的快捷键写成 `Ctrl+Shift+K` 的样子。
+  输入法还没看，要真机。
 - 通知（点击打开话题）、睡眠唤醒和网络变化后立即重连、托盘图标、开机启动。
 - 客户端测试在 Windows 上全过，去掉 CI 里的 `continue-on-error`。
 
