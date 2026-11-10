@@ -304,6 +304,7 @@ mod isolation {
         denied_events: u32,
         frame_events: u32,
         closed: u32,
+        late_seen: bool,
     }
 
     impl Report {
@@ -338,10 +339,32 @@ mod isolation {
         }
     }
 
+    thread_local! {
+        /// Work for the main thread that waits for its time ([`platform::later`]).
+        static LATER: RefCell<Vec<Box<dyn FnOnce()>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Runs what [`platform::later`] queued. Main thread only.
+    fn run_later() {
+        let jobs: Vec<_> = LATER.with(|l| l.borrow_mut().drain(..).collect());
+        for job in jobs {
+            job();
+        }
+    }
+
     #[cfg(target_os = "macos")]
     mod platform {
         use artifact_view::MainThread;
         use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+        /// Runs `job` on the main thread after `wait`, whatever the page does meanwhile.
+        pub fn later(wait: std::time::Duration, job: impl FnOnce() + 'static) {
+            super::LATER.with(|l| l.borrow_mut().push(Box::new(job)));
+            std::thread::spawn(move || {
+                std::thread::sleep(wait);
+                dispatch2::DispatchQueue::main().exec_async(super::run_later);
+            });
+        }
 
         pub fn start(_data_dir: &std::path::Path) -> MainThread {
             let mtm = MainThread::new().expect("main thread");
@@ -358,7 +381,20 @@ mod isolation {
 
     #[cfg(windows)]
     mod platform {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
         use artifact_view::MainThread;
+
+        static DUE: AtomicBool = AtomicBool::new(false);
+
+        /// Runs `job` on the main thread after `wait`, whatever the page does meanwhile.
+        pub fn later(wait: std::time::Duration, job: impl FnOnce() + 'static) {
+            super::LATER.with(|l| l.borrow_mut().push(Box::new(job)));
+            std::thread::spawn(move || {
+                std::thread::sleep(wait);
+                DUE.store(true, Ordering::SeqCst);
+            });
+        }
 
         pub fn start(data_dir: &std::path::Path) -> MainThread {
             artifact_view::win_support::set_dpi_aware();
@@ -368,7 +404,10 @@ mod isolation {
 
         pub fn run(_main: MainThread) {
             loop {
-                artifact_view::win_support::pump(std::time::Duration::from_secs(3600), || false);
+                artifact_view::win_support::pump(std::time::Duration::from_millis(50), || false);
+                if DUE.swap(false, Ordering::SeqCst) {
+                    super::run_later();
+                }
             }
         }
     }
@@ -396,6 +435,7 @@ mod isolation {
             denied_events: 0,
             frame_events: 0,
             closed: 0,
+            late_seen: false,
         }));
 
         // Counts every TCP connection a page manages to make to this computer.
@@ -622,31 +662,43 @@ mod isolation {
                                         && payload["framePrintNative"] == json!(false),
                                 );
                             }
-                        }
-                        "v4-late" => {
-                            r.check(
-                                "pageStaysAfterDownload",
-                                payload["href"].as_str().is_some_and(|h| {
-                                    h.starts_with(&format!("artifact://{v4_host}/"))
-                                }),
-                            );
-                            let saved = download_path.as_ref().is_some_and(|p| p.exists());
-                            if saved && let Some(p) = &download_path {
-                                let _ = std::fs::remove_file(p);
-                            }
-                            r.check("downloadNotSaved", !saved);
-                            let reached = connections.load(Ordering::SeqCst);
-                            r.details
-                                .insert("listenerConnections".into(), json!(reached));
-                            r.check("noConnectionReachedTheListener", reached == 0);
-                            let from_frame = r.frame_events;
-                            r.check("frameMessageIgnored", from_frame == 0);
                             drop(r);
-                            // Close; the Closed event opens the second window.
-                            if let Some(w) = slot2.borrow().as_ref() {
-                                w.close();
-                            }
+                            // The page now starts a download. The host looks at the outcome
+                            // itself, on its own clock: the page may not live to tell.
+                            let report = report2.clone();
+                            let slot = slot2.clone();
+                            let download_path = download_path.clone();
+                            let connections = connections.clone();
+                            platform::later(Duration::from_millis(3000), move || {
+                                let mut r = report.lock().unwrap();
+                                let saved = download_path.as_ref().is_some_and(|p| p.exists());
+                                if saved && let Some(p) = &download_path {
+                                    let _ = std::fs::remove_file(p);
+                                }
+                                r.check("downloadNotSaved", !saved);
+                                let reached = connections.load(Ordering::SeqCst);
+                                r.details
+                                    .insert("listenerConnections".into(), json!(reached));
+                                r.check("noConnectionReachedTheListener", reached == 0);
+                                let from_frame = r.frame_events;
+                                r.check("frameMessageIgnored", from_frame == 0);
+                                // The page reports once more 1.5 s after the click. WebView2
+                                // must still run it; for WKWebView it is recorded (see the
+                                // Windows plan: on macOS 15 the page stops after the click).
+                                let alive = r.late_seen;
+                                r.details
+                                    .insert("pageAliveAfterDownload".into(), json!(alive));
+                                if cfg!(windows) {
+                                    r.check("pageStaysAfterDownload", alive);
+                                }
+                                drop(r);
+                                // Close; the Closed event opens the second window.
+                                if let Some(w) = slot.borrow().as_ref() {
+                                    w.close();
+                                }
+                            });
                         }
+                        "v4-late" => r.late_seen = true,
                         "store-results" => {
                             r.check("storageGoneWithTheView", payload["value"].is_null());
                             drop(r);
