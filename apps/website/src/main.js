@@ -38,15 +38,18 @@
     el._go=go;el._n=steps.length;
     go(0);
   });
-  /* scroll moves the steps: a tour's section sticks while you scroll through it, one stretch of scroll per step (only when it fits the window) */
-  var scs=[].slice.call(document.querySelectorAll("section.chap")).filter(function(sec){return sec.querySelector(".stick>.player");});
-  function fits(){scs.forEach(function(sec){var st=sec.querySelector(".stick"),pl=st.querySelector(".player");
-    var ok=!reduce&&innerWidth>760&&(st.scrollHeight<=innerHeight-60||sec.classList.contains("scrolly")&&st.offsetHeight<=innerHeight-60);
-    sec.classList.toggle("scrolly",ok);sec.style.setProperty("--n",pl._n);sec._last=-1;});scrolled();}
-  function scrolled(){scs.forEach(function(sec){if(!sec.classList.contains("scrolly"))return;var r=sec.getBoundingClientRect(),total=sec.offsetHeight-innerHeight;if(total<=0)return;
-    var pr=Math.min(Math.max(-r.top/total,0),.999),pl=sec.querySelector(".player"),i=Math.floor(pr*pl._n),vis=r.top<innerHeight&&r.bottom>0;if(vis&&(i!==sec._last||!sec._in))pl._go(i);sec._last=i;sec._in=vis;});}
-  if(scs.length){var sTick=false;addEventListener("scroll",function(){if(!sTick){sTick=true;requestAnimationFrame(function(){sTick=false;scrolled();});}},{passive:true});
-    addEventListener("resize",fits);addEventListener("load",fits);fits();}
+  /* scroll moves the steps: a tour sticks while you scroll through it, one stretch of scroll per step (only on a wide window that fits it).
+     A tour section sticks whole, below the nav; the hero's tour sticks alone, centered in the window. */
+  var NAV=60,tours=[].slice.call(document.querySelectorAll("section.chap,.hero-tour")).filter(function(c){return c.querySelector(".stick>.player");});
+  function stickTop(c){var st=c.querySelector(".stick");return c.classList.contains("hero-tour")?Math.max(NAV+8,(innerHeight+NAV-st.offsetHeight)/2):NAV;}
+  function fits(){tours.forEach(function(c){var st=c.querySelector(".stick"),pl=st.querySelector(".player"),was=c.classList.contains("scrolly");c.classList.remove("scrolly");
+    var ok=!reduce&&innerWidth>760&&st.offsetHeight<=innerHeight-NAV;
+    if(ok){c.style.setProperty("--n",pl._n);c.style.setProperty("--ph",st.offsetHeight+"px");c.style.setProperty("--st",stickTop(c)+"px");}
+    c.classList.toggle("scrolly",ok);if(ok!==was)c._last=-1;});scrolled();}
+  function scrolled(){tours.forEach(function(c){if(!c.classList.contains("scrolly"))return;var st=c.querySelector(".stick"),r=c.getBoundingClientRect(),top=stickTop(c),total=c.offsetHeight-st.offsetHeight;if(total<=0)return;
+    var pr=Math.min(Math.max((top-r.top)/total,0),.999),pl=st.querySelector(".player"),i=Math.floor(pr*pl._n),vis=r.top<innerHeight&&r.bottom>0;if(vis&&(i!==c._last||!c._in))pl._go(i);c._last=i;c._in=vis;});}
+  if(tours.length){var sTick=false;addEventListener("scroll",function(){if(!sTick){sTick=true;requestAnimationFrame(function(){sTick=false;scrolled();});}},{passive:true});
+    addEventListener("resize",fits);addEventListener("load",fits);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fits);fits();}
   /* comparison: pick which alternative's panel shows */
   var cmp=document.querySelector(".cmp");
   if(cmp){cmp.classList.add("js");var ct=[].slice.call(cmp.querySelectorAll(".ctab")),vs=[].slice.call(cmp.querySelectorAll(".vs")),cPlace=slider(cmp.querySelector(".tabs"));
@@ -60,7 +63,7 @@
   if(reduce||!io2)return;
   root.classList.add("motion");
   /* scroll reveal */
-  var groups=[[".center",0],[".chap-head>div",.12],[".trio>div",.1],[".player:not(.hero .player)",0],[".cmp .tabs",0],[".team",0],[".mem2 .txt>*",.06],[".mk",0],[".more3>div",.1],[".more4>div",.08],[".env",.08],[".split .shot",0],[".split .txt>*",.06],[".cta>*",.1]];
+  var groups=[[".center",0],[".chap-head>div",.12],[".trio>div",.1],[".chap .player",0],[".cmp .tabs",0],[".team",0],[".mem2 .txt>*",.06],[".mk",0],[".more3>div",.1],[".more4>div",.08],[".env",.08],[".split .shot",0],[".split .txt>*",.06],[".cta>*",.1]];
   var els=[];
   groups.forEach(function(g){var list=[].slice.call(document.querySelectorAll(g[0]));list.forEach(function(el,i){if(el.classList.contains("rv"))return;el.classList.add("rv");var sib=el.parentElement?[].indexOf.call(el.parentElement.children,el):i;el.style.setProperty("--dl",(Math.min(sib,6)*g[1])+"s");els.push(el);});});
   var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}});},{rootMargin:"0px 0px -12% 0px",threshold:.08});

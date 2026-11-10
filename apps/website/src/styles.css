@@ -115,7 +115,7 @@ h2{margin:14px 0 0;font-size:clamp(30px,4vw,48px);line-height:1.18;letter-spacin
 .motion .rv{opacity:0;transform:translateY(28px);transition:opacity .9s cubic-bezier(.2,.7,.2,1) var(--dl,0s),transform .9s cubic-bezier(.2,.7,.2,1) var(--dl,0s)}
 .motion .rv.in{opacity:1;transform:none}
 .motion .hero>*{animation:up .9s cubic-bezier(.2,.7,.2,1) both}
-.motion .hero>:nth-child(2){animation-delay:.06s}.motion .hero>:nth-child(3){animation-delay:.12s}.motion .hero>:nth-child(4){animation-delay:.18s}.motion .hero>.player{animation-delay:.3s}
+.motion .hero>:nth-child(2){animation-delay:.06s}.motion .hero>:nth-child(3){animation-delay:.12s}.motion .hero>:nth-child(4){animation-delay:.18s}.motion .hero>.hero-tour{animation-delay:.3s}
 @keyframes up{from{opacity:0;transform:translateY(18px)}}
 /* 7 -> 1: the old windows open one by one, get struck out in red and fade to grey; then ours appears in green */
 .motion .windows .app{opacity:0}
@@ -309,7 +309,8 @@ footer a:hover{color:var(--ink)}
 
 /* player: a screenshot tour. Steps on the left, the app on the right; each step zooms toward its part of the screen and rings it, and the next one starts when the bar fills */
 .player{margin-top:44px;display:grid;grid-template-columns:300px minmax(0,1fr);gap:40px;align-items:center;--dim:rgba(10,10,12,.2)}
-.hero .player{margin-top:clamp(40px,5vw,64px);text-align:left}
+.hero .player{margin-top:0;text-align:left}
+.hero-tour{margin-top:clamp(40px,5vw,64px)}
 .pl{list-style:none;margin:0;padding:0;display:grid;gap:2px}
 .ps button{font:inherit;display:flex;align-items:center;gap:12px;width:100%;padding:9px 12px;border:0;border-radius:12px;background:transparent;font-size:15.5px;font-weight:600;letter-spacing:-.01em;color:var(--ink-3);text-align:left;cursor:pointer;transition:color .2s ease,background .2s ease}
 .ps button:hover{color:var(--ink);background:var(--soft)}
@@ -368,5 +369,7 @@ footer a:hover{color:var(--ink)}
 @media (max-width:640px){.more4{grid-template-columns:1fr}.src li{grid-template-columns:96px minmax(0,1fr)}}
 
 /* scroll-driven tours: JS adds .scrolly when the section fits the window; the section grows by one step of scroll per step, its content sticks, and scrolling moves the steps */
-.scrolly{padding-top:0;height:calc(100vh + var(--n,5) * 26vh)}
-.scrolly>.stick{position:sticky;top:60px;min-height:calc(100vh - 60px);display:flex;flex-direction:column;justify-content:center;padding-block:24px}
+section.scrolly{padding-top:0;height:calc(100vh + var(--n,5) * 26vh)}
+section.scrolly>.stick{position:sticky;top:60px;min-height:calc(100vh - 60px);display:flex;flex-direction:column;justify-content:center;padding-block:24px}
+.hero-tour.scrolly{height:calc(var(--ph) + var(--n,5) * 26vh)}
+.hero-tour.scrolly>.stick{position:sticky;top:var(--st,68px)}
