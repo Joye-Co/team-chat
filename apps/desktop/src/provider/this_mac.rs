@@ -6,6 +6,7 @@
 //! (`daemon::selfupdate`).
 
 use std::io::Write as _;
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -34,8 +35,14 @@ fn plist_path() -> PathBuf {
         .join(format!("{}.daemon.plist", env!("PRODUCT_BUNDLE_ID")))
 }
 
+#[cfg(unix)]
 fn executable(p: &Path) -> bool {
     std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn executable(p: &Path) -> bool {
+    p.is_file()
 }
 
 /// The daemon inside this app bundle; `None` for a build that is not an app bundle (a debug
@@ -239,6 +246,13 @@ pub(super) fn machine_id_in(config: &str) -> Option<String> {
 /// Restarts the daemon service now (`launchctl kickstart -k`): it starts again from the
 /// daemon file on disk, so a daemon from before 1.2.1 (which does not restart itself after
 /// an app update) runs the app's current one.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn restart() -> Result<(), String> {
+    Err("the daemon service is only managed on macOS".into())
+}
+
+/// See the macOS-less twin above: only launchd runs the daemon today.
+#[cfg(target_os = "macos")]
 pub(super) fn restart() -> Result<(), String> {
     // SAFETY: getuid has no preconditions.
     let uid = unsafe { libc::getuid() };
@@ -269,15 +283,17 @@ pub(super) struct NewMachine {
 fn write_config(new: &NewMachine) -> Result<(), String> {
     let dir = config_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    #[cfg(unix)]
     let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
     let token_file = dir.join("machine-token");
     let write = |path: &Path, text: &str| -> Result<(), String> {
         let tmp = path.with_extension("new");
         let _ = std::fs::remove_file(&tmp);
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut f = options
             .open(&tmp)
             .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
         f.write_all(text.as_bytes())

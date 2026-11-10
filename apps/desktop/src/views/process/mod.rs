@@ -376,9 +376,7 @@ impl ProcessView {
         let Some(id) = self.selected.clone() else {
             return;
         };
-        let dir = std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join("Downloads"))
-            .unwrap_or_else(std::env::temp_dir);
+        let dir = crate::paths::downloads().unwrap_or_else(std::env::temp_dir);
         let reply = if context {
             self.services.provider.download_run_context(&id, dir)
         } else {

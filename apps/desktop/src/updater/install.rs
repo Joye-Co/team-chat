@@ -512,6 +512,14 @@ pub enum Launch {
 
 /// Starts a detached shell that waits (at most 60 s) for `pid` to exit, then launches.
 /// The caller quits right after.
+#[cfg(not(unix))]
+pub fn relaunch(_pid: u32, _launch: &Launch) -> std::io::Result<()> {
+    // The Windows updater (docs/plans/windows.zh.md, W4) is not written yet.
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
+/// See the twin above.
+#[cfg(unix)]
 pub fn relaunch(pid: u32, launch: &Launch) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt as _;
     let argv: Vec<OsString> = match launch {
@@ -534,5 +542,6 @@ pub fn relaunch(pid: u32, launch: &Launch) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-#[cfg(test)]
+// The tests build DMGs with hdiutil.
+#[cfg(all(test, target_os = "macos"))]
 mod tests;

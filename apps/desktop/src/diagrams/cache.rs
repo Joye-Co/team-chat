@@ -149,10 +149,9 @@ impl DiskCache {
 
     /// `<cache_dir>/team-chat/diagrams` (`~/Library/Caches/team-chat/diagrams` on macOS).
     pub fn default_dir() -> PathBuf {
-        let base = std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join("Library").join("Caches"))
-            .unwrap_or_else(std::env::temp_dir);
-        base.join("team-chat").join("diagrams")
+        crate::paths::cache_base()
+            .join("team-chat")
+            .join("diagrams")
     }
 
     pub fn open(dir: PathBuf, limit: u64) -> Self {
