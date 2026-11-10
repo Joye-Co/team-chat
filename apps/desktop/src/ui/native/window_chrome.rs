@@ -40,14 +40,7 @@ pub fn framed(
         .flex_col()
         .bg(k.content)
         .child(caption(title.into(), window, cx))
-        .child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .w_full()
-                .relative()
-                .child(content),
-        )
+        .child(div().flex_1().min_h_0().w_full().relative().child(content))
         .into_any_element()
 }
 
