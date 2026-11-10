@@ -1,0 +1,96 @@
+//! Screenshot scenes of 团队管理 (`desktop --screenshot <dir> --scenes admin-…`), on the v1
+//! sample team with the 团队管理 samples of `fake/admin.rs`. The window opens without focus.
+
+use gpui::{AnyWindowHandle, App, Pixels, Size};
+
+use super::AdminPage;
+use crate::{
+    app::Services,
+    selftest::scenes::{Scene, Start},
+};
+
+fn open(services: Services, page: AdminPage, cx: &mut App) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(page, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+macro_rules! opener {
+    ($name:ident, $page:expr) => {
+        fn $name(
+            services: Services,
+            _content: Size<Pixels>,
+            cx: &mut App,
+        ) -> Result<AnyWindowHandle, String> {
+            open(services, $page, cx)
+        }
+    };
+}
+
+opener!(open_home, AdminPage::Home);
+opener!(open_members, AdminPage::Members);
+opener!(open_usage, AdminPage::Usage);
+opener!(open_activity, AdminPage::Activity);
+opener!(open_machines, AdminPage::Machines);
+opener!(open_overview, AdminPage::Overview);
+opener!(open_accounts, AdminPage::Accounts);
+opener!(open_keys, AdminPage::Keys);
+
+macro_rules! scene {
+    ($name:literal, $about:literal, $open:ident) => {
+        Scene {
+            name: $name,
+            about: $about,
+            start: Start::SignedIn,
+            setup: |_, _| {},
+            open: $open,
+        }
+    };
+}
+
+pub const SCENES: &[Scene] = &[
+    scene!(
+        "admin-home",
+        "团队管理 › 总览: KPIs, 谁在用, 要注意 and the machine cards",
+        open_home
+    ),
+    scene!(
+        "admin-members",
+        "团队管理 › 成员: the roster table with its tabs",
+        open_members
+    ),
+    scene!(
+        "admin-usage",
+        "团队管理 › 用量: spend against the budget, by day and by member",
+        open_usage
+    ),
+    scene!(
+        "admin-activity",
+        "团队管理 › 活动记录: the events grouped by day",
+        open_activity
+    ),
+    scene!(
+        "admin-machines",
+        "团队管理 › 机器: a card per computer and 添加电脑",
+        open_machines
+    ),
+    scene!(
+        "admin-overview",
+        "团队管理 › 机器 › 办公室 Mac mini › 概览: the monitor",
+        open_overview
+    ),
+    scene!(
+        "admin-accounts",
+        "团队管理 › 订阅账号 of the Mac mini",
+        open_accounts
+    ),
+    scene!(
+        "admin-keys",
+        "团队管理 › API 密钥 of the Mac mini",
+        open_keys
+    ),
+];

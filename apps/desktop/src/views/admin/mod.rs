@@ -11,6 +11,7 @@ mod accounts;
 mod activity;
 mod fleet;
 mod home;
+pub mod scenes;
 mod model;
 mod overview;
 mod spark;
