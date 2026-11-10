@@ -17,28 +17,49 @@ final class AppModel: ObservableObject {
     init() {
         // Development sign-in: the sandbox passes the server and a token through the
         // environment (`simctl launch` with SIMCTL_CHILD_*). The real sign-in screens
-        // (email code, password, scanning the computer's code) come after this slice.
+        // (email code, password, scanning the computer's code) come later.
         let env = ProcessInfo.processInfo.environment
         if let url = env["TC_SERVER_URL"], let token = env["TC_TOKEN"], !url.isEmpty, !token.isEmpty {
             signIn(server: url, token: token)
+        } else if let saved = Session.saved() {
+            open(server: saved.server, token: saved.token)
         }
     }
 
+    /// Signs in and remembers it for the next launch.
     func signIn(server: String, token: String) {
+        guard open(server: server, token: token) else { return }
         do {
-            let dir = try FileManager.default
-                .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                .appendingPathComponent("core", isDirectory: true)
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let client = try ChatClient(baseUrl: server, token: token, dataDir: dir.path)
+            try Session.save(server: server, token: token)
+        } catch {
+            signInError = error.localizedDescription
+        }
+    }
+
+    func signOut() {
+        client?.stop()
+        client = nil
+        Session.clear()
+        signedIn = false
+        groups = []
+        myName = ""
+        connection = "stopped"
+    }
+
+    @discardableResult
+    private func open(server: String, token: String) -> Bool {
+        do {
+            let client = try ChatClient(baseUrl: server, token: token, dataDir: Session.dataDir().path)
             client.listen(listener: Listener(model: self))
             client.start()
             self.client = client
             signedIn = true
             signInError = nil
             reload()
+            return true
         } catch {
             signInError = error.localizedDescription
+            return false
         }
     }
 

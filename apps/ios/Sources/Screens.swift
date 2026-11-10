@@ -7,12 +7,12 @@ struct SignInScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("登录").font(.largeTitle.bold())
-            Text("这一版只有开发用的登录：填服务器地址和登录凭证。").font(.subheadline).foregroundStyle(.secondary)
-            TextField("服务器地址", text: $server)
+            Text(Copy.signInTitle).font(.largeTitle.bold())
+            Text(Copy.signInDevHint).font(.subheadline).foregroundStyle(.secondary)
+            TextField(Copy.signInServer, text: $server)
                 .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 .padding(14).background(Theme.fill, in: RoundedRectangle(cornerRadius: 16))
-            SecureField("登录凭证", text: $token)
+            SecureField(Copy.signInCredential, text: $token)
                 .padding(14).background(Theme.fill, in: RoundedRectangle(cornerRadius: 16))
             if let error = model.signInError {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote)
@@ -20,7 +20,7 @@ struct SignInScreen: View {
             Button {
                 model.signIn(server: server, token: token)
             } label: {
-                Text("继续").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+                Text(Copy.signInContinue).font(.headline).frame(maxWidth: .infinity, minHeight: 50)
             }
             .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
             .disabled(server.isEmpty || token.isEmpty)
@@ -36,13 +36,22 @@ struct GroupsScreen: View {
     var body: some View {
         NavigationStack {
             List {
-                section("群", model.groups.filter { !$0.isDm })
-                section("私聊", model.groups.filter { $0.isDm })
+                section(Copy.groupsSection, model.groups.filter { !$0.isDm })
+                section(Copy.directSection, model.groups.filter { $0.isDm })
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("群")
+            .navigationTitle(Copy.groupsTitle)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { ConnectionBadge(state: model.connection) }
+                ToolbarItem(placement: .topBarLeading) { ConnectionBadge(state: model.connection) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(Copy.signOut, systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                            model.signOut()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
             }
             .navigationDestination(for: GroupItem.self) { TopicsScreen(group: $0) }
         }
@@ -78,20 +87,20 @@ struct TopicsScreen: View {
         List(topics, id: \.id) { topic in
             NavigationLink(value: topic) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(topic.title.isEmpty ? "群聊" : topic.title)
+                    Text(topic.title.isEmpty ? Copy.groupChat : topic.title)
                         .fontWeight(topic.unread > 0 ? .semibold : .regular).lineLimit(1)
                     HStack(spacing: 6) {
                         if let word = statusWord(topic.status) {
                             Text(word).foregroundStyle(topic.status.hasPrefix("waiting") ? Theme.waiting : .secondary)
                         }
-                        Text("\(topic.messageCount) 条消息").foregroundStyle(.secondary)
+                        Text(Copy.messageCount(topic.messageCount)).foregroundStyle(.secondary)
                     }
                     .font(.footnote)
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .overlay { if topics.isEmpty { ContentUnavailableView("还没有话题", systemImage: "bubble.left") } }
+        .overlay { if topics.isEmpty { ContentUnavailableView(Copy.topicsEmpty, systemImage: "bubble.left") } }
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: TopicItem.self) { MessagesScreen(topic: $0) }
@@ -100,11 +109,11 @@ struct TopicsScreen: View {
 
     private func statusWord(_ status: String) -> String? {
         switch status {
-        case "in_progress": "进行中"
-        case "waiting_answer": "等回答"
-        case "waiting_review": "等审"
-        case "blocked": "卡住了"
-        case "done": "完成"
+        case "in_progress": Copy.statusInProgress
+        case "waiting_answer": Copy.statusWaitingAnswer
+        case "waiting_review": Copy.statusWaitingReview
+        case "blocked": Copy.statusBlocked
+        case "done": Copy.statusDone
         default: nil
         }
     }
@@ -142,13 +151,13 @@ struct MessagesScreen: View {
             .onAppear { if let last = messages.last?.id { proxy.scrollTo(last, anchor: .bottom) } }
         }
         .safeAreaInset(edge: .bottom) { composer }
-        .navigationTitle(topic.title.isEmpty ? "群聊" : topic.title)
+        .navigationTitle(topic.title.isEmpty ? Copy.groupChat : topic.title)
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField("回复，或 @ 成员交代", text: $draft, axis: .vertical).lineLimit(1...5)
+            TextField(Copy.composerPlaceholder, text: $draft, axis: .vertical).lineLimit(1...5)
             Button {
                 let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !body.isEmpty else { return }
@@ -158,7 +167,7 @@ struct MessagesScreen: View {
                 Image(systemName: "arrow.up").font(.headline).frame(width: 36, height: 36)
                     .background(Theme.accent, in: Circle()).foregroundStyle(.white)
             }
-            .accessibilityLabel("发送")
+            .accessibilityLabel(Copy.send)
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.leading, 18).padding(.trailing, 6).padding(.vertical, 6)
@@ -186,18 +195,22 @@ struct Avatar: View {
     }
 }
 
+/// The connection state, shown only when it is not normal.
 struct ConnectionBadge: View {
     let state: String
 
     var body: some View {
-        let (word, symbol): (String, String) =
+        let shown: (word: String, symbol: String)? =
             switch state {
-            case "connected": ("在线", "checkmark.circle")
-            case "connecting": ("正在连接", "arrow.triangle.2.circlepath")
-            case "unauthorized": ("要重新登录", "exclamationmark.circle")
-            case "unsupported": ("要更新应用", "exclamationmark.circle")
-            default: ("离线", "wifi.slash")
+            case "connected", "stopped": nil
+            case "connecting": (Copy.connecting, "arrow.triangle.2.circlepath")
+            case "unauthorized": (Copy.signInAgain, "exclamationmark.circle")
+            case "unsupported": (Copy.updateApp, "exclamationmark.circle")
+            default: (Copy.offline, "wifi.slash")
             }
-        Label(word, systemImage: symbol).labelStyle(.titleAndIcon).font(.footnote).foregroundStyle(.secondary)
+        if let shown {
+            Label(shown.word, systemImage: shown.symbol)
+                .labelStyle(.titleAndIcon).font(.footnote).foregroundStyle(.secondary)
+        }
     }
 }
