@@ -1,7 +1,12 @@
-//! Finds the NSWindow number of a GPUI window and captures only that window
-//! with `screencapture -l`. Never the full screen.
+//! Captures only the app's own window, never the full screen. On macOS it
+//! finds the NSWindow number of a GPUI window and runs `screencapture -l`; on
+//! Windows it asks the compositor for the window's pixels (`PrintWindow` with
+//! `PW_RENDERFULLCONTENT`, which includes a DirectX swap chain) and writes
+//! the client area as a PNG.
 
-use std::{path::Path, process::Command};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 use gpui::Window;
 
@@ -37,9 +42,48 @@ pub fn order_front(window: &Window) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Shows the window above the others without activating it: the compositor
+/// keeps no pixels of a hidden window.
+#[cfg(target_os = "windows")]
+pub fn order_front(window: &Window) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_TOP, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        ShowWindow,
+    };
+
+    let hwnd = hwnd(window)?;
+    // SAFETY: a live HWND of this process, on its own thread.
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+        .map_err(|e| format!("SetWindowPos failed: {e}"))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn order_front(_window: &Window) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn hwnd(window: &Window) -> Result<windows::Win32::Foundation::HWND, String> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = HasWindowHandle::window_handle(window).map_err(|e| e.to_string())?;
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return Err("not a Win32 window".into());
+    };
+    Ok(windows::Win32::Foundation::HWND(
+        win32.hwnd.get() as *mut core::ffi::c_void
+    ))
 }
 
 /// Gives a window that opened at the requested `width` exactly `height`, with
@@ -209,12 +253,143 @@ pub fn window_number(window: &Window) -> Result<isize, String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// The window's HWND, as the number [`capture`] takes.
+#[cfg(target_os = "windows")]
+pub fn window_number(window: &Window) -> Result<isize, String> {
+    Ok(hwnd(window)?.0 as isize)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn window_number(_window: &Window) -> Result<isize, String> {
-    Err("the screenshot self-test needs macOS".into())
+    Err("the screenshot self-test needs macOS or Windows".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn capture(_number: isize, _png: &Path) -> Result<(), String> {
+    Err("the screenshot self-test needs macOS or Windows".into())
+}
+
+/// Writes the client area of the window `number` (an HWND) to `png`.
+///
+/// `PrintWindow` with `PW_RENDERFULLCONTENT` copies what the compositor holds
+/// for the window, so it works for GPUI's DirectX swap chain, for a window
+/// that other windows cover and for one that is larger than the screen. Plain
+/// GDI (`BitBlt`, `PrintWindow` without the flag) returns black for it.
+#[cfg(target_os = "windows")]
+pub fn capture(number: isize, png: &Path) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::{HWND, POINT, RECT},
+        Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, ClientToScreen, CreateCompatibleDC,
+            CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GdiFlush, GetDC, ReleaseDC,
+            SelectObject,
+        },
+        Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
+        UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
+    };
+
+    const PW_RENDERFULLCONTENT: PRINT_WINDOW_FLAGS = PRINT_WINDOW_FLAGS(2);
+
+    let hwnd = HWND(number as *mut core::ffi::c_void);
+    // SAFETY: plain Win32 calls on a live HWND of this process. The DIB
+    // section's memory (`bits`, `width * height * 4` bytes) lives until
+    // `DeleteObject`, after the copy.
+    let (frame, client, pixels) = unsafe {
+        let mut frame = RECT::default();
+        GetWindowRect(hwnd, &mut frame).map_err(|e| format!("GetWindowRect failed: {e}"))?;
+        let mut client = RECT::default();
+        GetClientRect(hwnd, &mut client).map_err(|e| format!("GetClientRect failed: {e}"))?;
+        let mut origin = POINT::default();
+        let _ = ClientToScreen(hwnd, &mut origin);
+        let (width, height) = (frame.right - frame.left, frame.bottom - frame.top);
+        if width <= 0 || height <= 0 {
+            return Err(format!("the window is {width} x {height} px"));
+        }
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                // Negative: rows from the top.
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let screen = GetDC(None);
+        let memory = CreateCompatibleDC(Some(screen));
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0);
+        let result = match bitmap {
+            Ok(bitmap) if !bits.is_null() => {
+                let old = SelectObject(memory, bitmap.into());
+                let printed = PrintWindow(hwnd, memory, PW_RENDERFULLCONTENT).as_bool();
+                let _ = GdiFlush();
+                let pixels = std::slice::from_raw_parts(
+                    bits.cast::<u8>(),
+                    width as usize * height as usize * 4,
+                )
+                .to_vec();
+                SelectObject(memory, old);
+                let _ = DeleteObject(bitmap.into());
+                if printed {
+                    Ok(pixels)
+                } else {
+                    Err("PrintWindow failed".to_string())
+                }
+            }
+            Ok(bitmap) => {
+                let _ = DeleteObject(bitmap.into());
+                Err("CreateDIBSection gave no memory".to_string())
+            }
+            Err(e) => Err(format!("CreateDIBSection failed: {e}")),
+        };
+        let _ = DeleteDC(memory);
+        ReleaseDC(None, screen);
+        (
+            (width as u32, height as u32),
+            (
+                (origin.x - frame.left).max(0) as u32,
+                (origin.y - frame.top).max(0) as u32,
+                (client.right - client.left).max(0) as u32,
+                (client.bottom - client.top).max(0) as u32,
+            ),
+            result?,
+        )
+    };
+    let mut image = image::RgbaImage::from_raw(frame.0, frame.1, pixels)
+        .ok_or("the capture has the wrong size")?;
+    // BGRA with an undefined alpha to opaque RGBA.
+    for pixel in image.pixels_mut() {
+        pixel.0 = [pixel.0[2], pixel.0[1], pixel.0[0], 255];
+    }
+    // The window rectangle includes the invisible resize border; keep the
+    // client area, which is all GPUI draws.
+    let (x, y, w, h) = client;
+    let (w, h) = (
+        w.min(frame.0.saturating_sub(x)),
+        h.min(frame.1.saturating_sub(y)),
+    );
+    if w == 0 || h == 0 {
+        return Err("the window has no client area".into());
+    }
+    let image = image::imageops::crop_imm(&image, x, y, w, h).to_image();
+    let first = *image.get_pixel(0, 0);
+    if image.pixels().all(|p| *p == first) {
+        return Err(format!(
+            "the capture is one flat colour ({:?}): the compositor has no frame of the window",
+            &first.0[..3]
+        ));
+    }
+    image
+        .save(png)
+        .map_err(|e| format!("cannot write {}: {e}", png.display()))
 }
 
 /// Runs `screencapture -l <number> -o -x <png>`: one window, no shadow, no sound.
+#[cfg(target_os = "macos")]
 pub fn capture(number: isize, png: &Path) -> Result<(), String> {
     let output = Command::new("/usr/sbin/screencapture")
         .arg(format!("-l{number}"))
@@ -242,6 +417,7 @@ pub fn capture(number: isize, png: &Path) -> Result<(), String> {
 /// Converts a capture from the display's profile (Display P3 on a Mac
 /// screen) to sRGB, the space of the theme tokens and the mockups, so pixel
 /// values read from the PNG are the token values (`#2F6FEB` stays `#2F6FEB`).
+#[cfg(target_os = "macos")]
 fn to_srgb(png: &Path) -> Result<(), String> {
     const SRGB: &str = "/System/Library/ColorSync/Profiles/sRGB Profile.icc";
     let output = Command::new("/usr/bin/sips")
