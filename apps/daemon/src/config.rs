@@ -81,6 +81,11 @@ pub struct VmConfig {
     /// Folders shared with every VM at their host paths (the CLIs' sessions and logins).
     #[serde(default = "default_vm_shares")]
     pub shares: Vec<PathBuf>,
+    /// One folder per bot here is that bot's home folder in every VM it runs in, so what it
+    /// installs, clones and signs in to is still there in its next run. Empty: the home folder
+    /// is part of the run's scratch disk and goes with the VM.
+    #[serde(default = "default_vm_homes")]
+    pub homes: PathBuf,
 }
 
 fn default_vm_dir() -> PathBuf {
@@ -100,6 +105,9 @@ fn default_vm_firecracker() -> String {
 }
 fn default_vm_helper() -> String {
     "/usr/local/sbin/runner-vm".into()
+}
+fn default_vm_homes() -> PathBuf {
+    PathBuf::from("/srv/runner/homes")
 }
 fn default_vm_shares() -> Vec<PathBuf> {
     ["~/.claude", "~/.codex", "~/.pi"]
@@ -256,6 +264,7 @@ impl Config {
             vm.rootfs = expand(&vm.rootfs);
             vm.dir = expand(&vm.dir);
             vm.shares = vm.shares.iter().map(|p| expand(p)).collect();
+            vm.homes = expand(&vm.homes);
         }
         if c.runtimes.is_empty() {
             for kind in ["codex", "claude"] {
@@ -420,6 +429,7 @@ kind = "claude"
 # vcpus = 2
 # mem_mib = 4096                     # a cap; the host gives only what the VM touches
 # shares = ["~/.claude", "~/.codex", "~/.pi"]
+# homes = "/srv/runner/homes"         # one home folder per bot, kept between runs ("" = not kept)
 "#;
 
 #[cfg(test)]
