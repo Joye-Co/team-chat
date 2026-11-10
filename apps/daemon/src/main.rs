@@ -15,6 +15,14 @@ fn main() {
     }
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_default();
+    // The scheduled task's first action on Windows: put the program file back after an update
+    // that was interrupted (daemon::selfupdate). Never an error: the daemon starts next.
+    if cmd == "repair-program" {
+        if let Some(exe) = args.next() {
+            daemon::selfupdate::repair(std::path::Path::new(&exe));
+        }
+        return;
+    }
     let mut config_path = config::default_config_path();
     let mut load = true;
     let mut log_file: Option<PathBuf> = None;

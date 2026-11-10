@@ -877,7 +877,9 @@ found on PATH.
   sees the new file, exits once no run is active, and the task starts the new one within a
   minute; a starting daemon deletes the `<name>.exe.old-*` files next to it. An update
   interrupted between the two renames (power loss) leaves no `<name>.exe`: the task's first
-  action renames a `<name>.exe.old-*` back before the daemon is started.
+  action (`repair.exe repair-program <daemon>`, a copy of the daemon that `install-service`
+  keeps next to the log and updates never touch) renames the newest `<name>.exe.old-*` back
+  before the daemon is started.
 
 ## Tests
 

@@ -15,6 +15,11 @@ fn main() {
 #[cfg(windows)]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // The task's first action, as the daemon does it.
+    if args.get(1).map(String::as_str) == Some("repair-program") {
+        daemon::selfupdate::repair(std::path::Path::new(&args[2]));
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("run") {
         windows::stand_in(&args[2..]);
     }

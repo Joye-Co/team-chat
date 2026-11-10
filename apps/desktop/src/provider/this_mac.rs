@@ -16,6 +16,7 @@ use std::io::Write as _;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(not(windows))]
 use std::time::{Duration, Instant};
 
 use crate::data::ThisMac;
@@ -239,6 +240,7 @@ pub(super) fn computer_name() -> String {
 }
 
 /// Runs `cmd` and waits at most `limit`; the output when it exited with 0.
+#[cfg(not(windows))]
 fn output_within(mut cmd: Command, limit: Duration) -> Option<Vec<u8>> {
     let mut child = cmd
         .stdin(Stdio::null())
@@ -266,6 +268,7 @@ fn output_within(mut cmd: Command, limit: Duration) -> Option<Vec<u8>> {
 }
 
 /// Folders where coding CLIs are often installed, added after the shell's PATH.
+#[cfg(not(windows))]
 const USUAL_BIN: &[&str] = &[
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -283,7 +286,7 @@ const USUAL_BIN: &[&str] = &[
 /// The PATH the daemon service gets: an app started from the Dock has launchd's minimal PATH,
 /// so the user's login shell is asked for its PATH (where `claude` and `codex` are), then the
 /// usual install folders that exist are added.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(not(windows))]
 pub(super) fn service_path() -> String {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let mut cmd = Command::new(&shell);
@@ -299,6 +302,7 @@ pub(super) fn service_path() -> String {
     merge_path(&from_shell, &home(), |p| p.is_dir())
 }
 
+#[cfg(not(windows))]
 pub(super) fn merge_path(from_shell: &str, home: &Path, exists: impl Fn(&Path) -> bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut add = |p: String| {

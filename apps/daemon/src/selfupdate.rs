@@ -155,9 +155,43 @@ pub fn clean_stale(exe: &Path) -> usize {
         .count()
 }
 
+/// Puts the program file back after an update that was interrupted between its two renames
+/// (a power loss): when `exe` is missing and files moved aside are there, the newest of them
+/// is renamed to `exe`. Returns the file it renamed. The scheduled task runs this before it
+/// starts the daemon ([`crate::service`]), from a copy of the program that updates never touch.
+pub fn repair(exe: &Path) -> Option<PathBuf> {
+    if exe.exists() {
+        return None;
+    }
+    let newest = stale_files(exe).into_iter().max_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+    })?;
+    std::fs::rename(&newest, exe).ok().map(|()| newest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_program_comes_back_from_the_file_moved_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("x-daemon.exe");
+        let aside = dir.path().join("x-daemon.exe.old-7");
+        // Nothing to repair: the program is there, or nothing was moved aside.
+        assert_eq!(repair(&exe), None);
+        std::fs::write(&exe, "v2").unwrap();
+        std::fs::write(&aside, "v1").unwrap();
+        assert_eq!(repair(&exe), None);
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v2");
+        // The update stopped after its first rename.
+        std::fs::remove_file(&exe).unwrap();
+        assert_eq!(repair(&exe), Some(aside.clone()));
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v1");
+        assert!(!aside.exists());
+    }
 
     #[test]
     fn only_the_files_an_update_moved_aside_are_stale() {

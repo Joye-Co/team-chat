@@ -268,8 +268,9 @@ pub fn uninstall_systemd(dir: &Path, unload: bool) -> Result<PathBuf, String> {
 //   (no windows for them either) and which `CTRL_BREAK_EVENT`, the polite cancel, needs;
 // - before the daemon, a first action repairs an update that was interrupted between its two
 //   renames (a power loss): when the program file is missing and a renamed-aside one is there
-//   (`<name>.exe.old-*`), `cmd` renames it back. Only the task can do this: with no program
-//   file there is no daemon to do it;
+//   (`<name>.exe.old-*`), it is renamed back. With no program file there is no daemon to do
+//   it, so the action runs a copy of the daemon that `install-service` keeps next to the log
+//   and that updates never touch (`repair.exe repair-program <daemon>`);
 // - the daemon writes its own log (`--log-file`): nobody reads the output of a headless
 //   console. `PATH` is not captured as on Unix: the task gets the user's current environment.
 // ---------------------------------------------------------------------------------------
@@ -292,6 +293,11 @@ pub fn task_file(dir: &Path) -> PathBuf {
     dir.join("task.xml")
 }
 
+/// A copy of the daemon program that only ever runs `repair-program` (see [`task_xml`]).
+pub fn task_repair_program(dir: &Path) -> PathBuf {
+    dir.join("repair.exe")
+}
+
 pub fn task_log(dir: &Path) -> PathBuf {
     dir.join("daemon.log")
 }
@@ -311,8 +317,8 @@ pub struct Task<'a> {
     pub user: &'a str,
     /// The console host that hides the daemon's console.
     pub conhost: &'a Path,
-    /// `cmd.exe`, for the action that repairs an interrupted update.
-    pub cmd: &'a Path,
+    /// The copy of the daemon that repairs an interrupted update ([`task_repair_program`]).
+    pub repair: &'a Path,
     pub exe: &'a Path,
     pub config: &'a Path,
     pub log: &'a Path,
@@ -324,9 +330,6 @@ pub struct Task<'a> {
 pub fn task_xml(t: &Task) -> String {
     let e = |p: &Path| xml_escape(&p.to_string_lossy());
     let user = xml_escape(t.user);
-    // The file name of a Windows path, also when this runs on another system (the tests).
-    let exe_path = t.exe.to_string_lossy();
-    let exe_name = xml_escape(exe_path.rsplit(['\\', '/']).next().unwrap_or_default());
     let logon = if t.at_logon {
         format!(
             "    <LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>{user}</UserId>\n    </LogonTrigger>\n"
@@ -383,7 +386,7 @@ pub fn task_xml(t: &Task) -> String {
   <Actions Context="Author">
     <Exec>
       <Command>{conhost}</Command>
-      <Arguments>--headless &quot;{cmd}&quot; /d /c if not exist &quot;{exe}&quot; for %f in (&quot;{exe}{stale}*&quot;) do ren &quot;%~ff&quot; &quot;{exe_name}&quot;</Arguments>
+      <Arguments>--headless &quot;{repair}&quot; repair-program &quot;{exe}&quot;</Arguments>
     </Exec>
     <Exec>
       <Command>{conhost}</Command>
@@ -394,8 +397,7 @@ pub fn task_xml(t: &Task) -> String {
 "#,
         name = xml_escape(crate::product::name()),
         conhost = e(t.conhost),
-        cmd = e(t.cmd),
-        stale = crate::selfupdate::STALE_MARK,
+        repair = e(t.repair),
         exe = e(t.exe),
         config = e(t.config),
         log = e(t.log),
@@ -485,23 +487,19 @@ pub fn install_task(
             return Err(format!("{} must not contain a quote", p.display()));
         }
     }
-    // The repair action is a `cmd` line, where a percent sign starts a variable.
-    if exe.to_string_lossy().contains('%') {
-        return Err(format!("{} must not contain a percent sign", exe.display()));
-    }
     // The task runs this file as the user again and again: nobody else may be able to swap it.
     #[cfg(windows)]
     crate::wintrust::check_program(&exe)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
     let user = current_user()?;
     let conhost = system32("conhost.exe");
-    let cmd = system32("cmd.exe");
+    let repair = task_repair_program(dir);
     let log = task_log(dir);
     let file = task_file(dir);
     let mut task = Task {
         user: &user,
         conhost: &conhost,
-        cmd: &cmd,
+        repair: &repair,
         exe: &exe,
         config: &config,
         log: &log,
@@ -514,6 +512,12 @@ pub fn install_task(
     if !load {
         write(&task)?;
         return Ok(file);
+    }
+    // The copy that repairs an interrupted update. One that is in use right now stays.
+    if let Err(e) = std::fs::copy(&exe, &repair)
+        && !repair.is_file()
+    {
+        return Err(format!("cannot write {}: {e}", repair.display()));
     }
     let register = |task: &Task| -> Result<(), String> {
         write(task)?;
@@ -549,6 +553,7 @@ pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, S
             schtasks(&["/Delete", "/TN", name, "/F"])?;
         }
         stop_daemon(dir)?;
+        let _ = std::fs::remove_file(task_repair_program(dir));
     }
     match std::fs::remove_file(&file) {
         Ok(()) => Ok(file),
@@ -777,7 +782,7 @@ mod tests {
         task_xml(&Task {
             user: ME,
             conhost: Path::new(r"C:\Windows\System32\conhost.exe"),
-            cmd: Path::new(r"C:\Windows\System32\cmd.exe"),
+            repair: Path::new(r"C:\Users\li & co\AppData\Local\x-daemon\repair.exe"),
             exe: Path::new(r"C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe"),
             config: Path::new(r"C:\Users\li & co\.config\x\daemon.toml"),
             log: Path::new(r"C:\Users\li & co\AppData\Local\x-daemon\daemon.log"),
@@ -857,7 +862,7 @@ mod tests {
         );
         assert_eq!(
             actions[0].1,
-            r#"--headless "C:\Windows\System32\cmd.exe" /d /c if not exist "C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe" for %f in ("C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe.old-*") do ren "%~ff" "x-daemon.exe""#
+            r#"--headless "C:\Users\li & co\AppData\Local\x-daemon\repair.exe" repair-program "C:\Users\li & co\AppData\Local\Programs\x\x-daemon.exe""#
         );
         assert_eq!(
             actions[1].1,
@@ -870,7 +875,7 @@ mod tests {
         let xml = task_xml(&Task {
             user: ME,
             conhost: Path::new(r"C:\Windows\System32\conhost.exe"),
-            cmd: Path::new(r"C:\Windows\System32\cmd.exe"),
+            repair: Path::new(r"C:\Users\li & co\AppData\Local\x-daemon\repair.exe"),
             exe: Path::new(r"C:\Users\李雷\AppData\Local\Programs\x\x-daemon.exe"),
             config: Path::new(r"C:\Users\李雷\.config\x\daemon.toml"),
             log: Path::new(r"C:\Users\李雷\AppData\Local\x-daemon\daemon.log"),
