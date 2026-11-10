@@ -175,8 +175,7 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 - 最低支持 Windows 10 22H2（WebView2 和 ConPTY 都有）。
 - daemon 原生移植，不走 WSL；用计划任务，不用 Windows 服务。
 
-需要你定的只有一件：
+已定：
 
-- **外观**：Windows 版长得和 Mac 版一样（同一套黑白规范，只换标题栏和窗口按钮的位置），还是改成
-  Windows 应用的样子（Fluent 风格的控件和图标）。前者工作量小、两端一致；后者 C4 要多 2 周左右，
-  COMPLETENESS.md 也要分平台写。倾向前者，图标用一套两端通用的 SVG。
+- **外观**：Windows 版和 Mac 版一样，同一套黑白规范（COMPLETENESS.md），只换标题栏和窗口按钮；图标用
+  一套两端通用的 SVG。
