@@ -4,6 +4,12 @@
 //! does, then runs `<daemon> install-service`, so launchd runs the daemon from the app bundle.
 //! An app update replaces that file, and the daemon restarts itself on the new version
 //! (`daemon::selfupdate`).
+//!
+//! Windows: the same module is 「用这台电脑」 there. The daemon is `<slug>-daemon.exe` next to
+//! the app's exe in the install folder; `install-service` registers a scheduled task of this
+//! user (`daemon::service`), whose definition the daemon keeps in
+//! `%LOCALAPPDATA%\<slug>-daemon\task.xml`, read here the way the launchd plist is on a Mac.
+//! The config folder gets an access list with this user alone before the token is written.
 
 use std::io::Write as _;
 #[cfg(unix)]
@@ -14,9 +20,12 @@ use std::time::{Duration, Instant};
 
 use crate::data::ThisMac;
 
+/// The user's folder, as the daemon finds it (`daemon::config::home`).
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    #[cfg(windows)]
+    let home = home.or_else(|| std::env::var_os("USERPROFILE").filter(|h| !h.is_empty()));
+    home.map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
@@ -29,10 +38,38 @@ pub(super) fn config_path() -> PathBuf {
     config_dir().join("daemon.toml")
 }
 
-fn plist_path() -> PathBuf {
+/// Where the service manager's definition of the daemon is: the launchd agent.
+#[cfg(not(windows))]
+fn service_file() -> PathBuf {
     home()
         .join("Library/LaunchAgents")
         .join(format!("{}.daemon.plist", env!("PRODUCT_BUNDLE_ID")))
+}
+
+/// Where the service manager's definition of the daemon is: the scheduled task's XML, which
+/// `install-service` keeps (`daemon::service::task_file`).
+#[cfg(windows)]
+fn service_file() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join("AppData").join("Local"))
+        .join(format!("{}-daemon", env!("PRODUCT_SLUG")))
+        .join("task.xml")
+}
+
+/// The definition's text: the plist is UTF-8, the task XML is UTF-16 with a byte order mark.
+fn service_text(bytes: &[u8]) -> String {
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => {
+            let units: Vec<u16> = rest
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+        }
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
 }
 
 #[cfg(unix)]
@@ -47,6 +84,7 @@ fn executable(p: &Path) -> bool {
 
 /// The daemon inside this app bundle; `None` for a build that is not an app bundle (a debug
 /// build from a worktree must never take over the installed app's daemon).
+#[cfg(not(windows))]
 pub(super) fn bundled_daemon() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
@@ -58,19 +96,39 @@ pub(super) fn bundled_daemon() -> Option<PathBuf> {
     executable(&d).then_some(d)
 }
 
-/// Whether launchd runs the daemon, and from where. `plist` is the launchd agent's text.
-pub(super) fn state_of(bundled: Option<&Path>, plist: Option<&str>) -> ThisMac {
+/// The daemon the installer put next to this app's exe; `None` for a build that was not
+/// installed (a build from a worktree must never take over the installed app's daemon).
+#[cfg(windows)]
+pub(super) fn bundled_daemon() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    daemon_next_to(&exe, cfg!(debug_assertions))
+}
+
+/// The installed daemon is `<slug>-daemon.exe` next to the app's exe. A build from a worktree
+/// is a debug build, or sits in cargo's `target` folder, where the daemon is not named so.
+#[cfg(any(windows, test))]
+fn daemon_next_to(app_exe: &Path, debug_build: bool) -> Option<PathBuf> {
+    if debug_build {
+        return None;
+    }
+    let dir = app_exe.parent()?;
+    if dir.components().any(|c| c.as_os_str() == "target") {
+        return None;
+    }
+    let d = dir.join(format!("{}-daemon.exe", env!("PRODUCT_SLUG")));
+    executable(&d).then_some(d)
+}
+
+/// Whether the service manager runs the daemon, and from where. `definition` is the launchd
+/// agent's text, or on Windows the scheduled task's.
+pub(super) fn state_of(bundled: Option<&Path>, definition: Option<&str>) -> ThisMac {
     let Some(bundled) = bundled else {
         return ThisMac::Unavailable;
     };
-    match plist {
+    match definition {
         None => ThisMac::NotSetUp,
         Some(text) => {
-            let ours = format!(
-                "<string>{}</string>",
-                xml_escape(&bundled.to_string_lossy())
-            );
-            if text.contains(&ours) {
+            if runs(text, bundled, cfg!(windows)) {
                 ThisMac::Working
             } else {
                 ThisMac::Elsewhere
@@ -79,9 +137,23 @@ pub(super) fn state_of(bundled: Option<&Path>, plist: Option<&str>) -> ThisMac {
     }
 }
 
+/// True when the definition starts the daemon at `daemon`. A plist names it as one
+/// `<string>`; a task has it in quotes in the arguments of the console host
+/// (`--headless "<daemon>" run …`), and Windows paths compare without case.
+fn runs(definition: &str, daemon: &Path, task: bool) -> bool {
+    let path = xml_escape(&daemon.to_string_lossy());
+    if task {
+        definition
+            .to_lowercase()
+            .contains(&format!("&quot;{path}&quot; run ").to_lowercase())
+    } else {
+        definition.contains(&format!("<string>{path}</string>"))
+    }
+}
+
 pub(super) fn state() -> ThisMac {
-    let plist = std::fs::read_to_string(plist_path()).ok();
-    state_of(bundled_daemon().as_deref(), plist.as_deref())
+    let definition = std::fs::read(service_file()).ok().map(|b| service_text(&b));
+    state_of(bundled_daemon().as_deref(), definition.as_deref())
 }
 
 fn xml_escape(s: &str) -> String {
@@ -128,7 +200,23 @@ pub(super) fn config_text(
     )
 }
 
+/// The label a machine registered from this computer gets: its system.
+pub(super) fn default_labels() -> Vec<String> {
+    vec![if cfg!(windows) { "windows" } else { "mac" }.to_string()]
+}
+
+/// This computer's name (系统 › 关于 › 设备名称).
+#[cfg(windows)]
+pub(super) fn computer_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .map(|n| n.trim().chars().take(64).collect::<String>())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Windows".into())
+}
+
 /// This Mac's name as people see it (系统设置 › 通用 › 关于本机), else the host name.
+#[cfg(not(windows))]
 pub(super) fn computer_name() -> String {
     let out = Command::new("/usr/sbin/scutil")
         .args(["--get", "ComputerName"])
@@ -190,6 +278,7 @@ const USUAL_BIN: &[&str] = &[
 /// The PATH the daemon service gets: an app started from the Dock has launchd's minimal PATH,
 /// so the user's login shell is asked for its PATH (where `claude` and `codex` are), then the
 /// usual install folders that exist are added.
+#[cfg_attr(windows, allow(dead_code))]
 pub(super) fn service_path() -> String {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let mut cmd = Command::new(&shell);
@@ -243,12 +332,94 @@ pub(super) fn machine_id_in(config: &str) -> Option<String> {
     })
 }
 
+/// A program of Windows itself (`System32`), started without a console window: the app has
+/// no console, and a console program would open one.
+#[cfg(windows)]
+fn system_command(program: &str) -> Command {
+    use std::os::windows::process::CommandExt as _;
+    let root = std::env::var_os("SystemRoot")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let mut cmd = Command::new(root.join("System32").join(program));
+    cmd.stdin(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// `CREATE_NO_WINDOW`: a console program gets a console without a window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Runs a command to its end; its error output when it failed.
+#[cfg(windows)]
+fn run_quiet(mut cmd: Command, what: &str) -> Result<Vec<u8>, String> {
+    let out = cmd.output().map_err(|e| format!("{what}: {e}"))?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(format!(
+            "{what} failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
+}
+
+/// Restarts the daemon's scheduled task now: ends it and starts it again from the daemon
+/// file on disk.
+#[cfg(windows)]
+pub(super) fn restart() -> Result<(), String> {
+    let name = format!("{}.daemon", env!("PRODUCT_BUNDLE_ID"));
+    let mut end = system_command("schtasks.exe");
+    end.args(["/End", "/TN", &name]);
+    // Not running is fine: starting it is what was asked for.
+    let _ = run_quiet(end, "schtasks /End");
+    let mut run = system_command("schtasks.exe");
+    run.args(["/Run", "/TN", &name]);
+    run_quiet(run, "schtasks /Run").map(|_| ())
+}
+
+/// The security id (`S-1-5-…`) of the user this app runs as, from `whoami /user`.
+#[cfg(windows)]
+fn user_sid() -> Result<String, String> {
+    let mut cmd = system_command("whoami.exe");
+    cmd.args(["/user", "/fo", "csv", "/nh"]);
+    let out = run_quiet(cmd, "whoami")?;
+    sid_in(&String::from_utf8_lossy(&out)).ok_or_else(|| "whoami printed no user id".to_string())
+}
+
+/// The id in `"domain\user","S-1-5-21-…"`. The name may be in any code page; the id is ASCII.
+#[cfg(any(windows, test))]
+fn sid_in(csv: &str) -> Option<String> {
+    let last = csv.trim().rsplit(',').next()?.trim().trim_matches('"');
+    let ok = last.starts_with("S-1-")
+        && last.len() > 6
+        && last.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    ok.then(|| last.to_string())
+}
+
+/// Makes `dir` a folder only this user can open: inherited entries (SYSTEM, administrators,
+/// whatever the parent folder gives) are dropped and one entry is set, full control for this
+/// user, inherited by the files made in it afterwards. `icacls` does it because the app has no
+/// access-list code; when the daemon's own helpers exist (`apps/daemon/src/sys.rs`), the daemon
+/// should do this in `install-service` and this call goes away.
+#[cfg(windows)]
+fn only_this_user(dir: &Path) -> Result<(), String> {
+    let sid = user_sid()?;
+    let mut cmd = system_command("icacls.exe");
+    cmd.arg(dir)
+        .arg("/inheritance:r")
+        .arg("/grant:r")
+        .arg(format!("*{sid}:(OI)(CI)F"));
+    run_quiet(cmd, "icacls").map(|_| ())
+}
+
 /// Restarts the daemon service now (`launchctl kickstart -k`): it starts again from the
 /// daemon file on disk, so a daemon from before 1.2.1 (which does not restart itself after
 /// an app update) runs the app's current one.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(super) fn restart() -> Result<(), String> {
-    Err("the daemon service is only managed on macOS".into())
+    Err("the daemon service is only managed on macOS and Windows".into())
 }
 
 /// See the macOS-less twin above: only launchd runs the daemon today.
@@ -278,13 +449,16 @@ pub(super) struct NewMachine {
     pub token: String,
 }
 
-/// Writes the config and token of a new machine (folder 700, files 600). An existing config
-/// is kept as it is: it already names a machine and its token.
+/// Writes the config and token of a new machine (folder 700, files 600; on Windows a folder
+/// only this user can open, set before the token is written into it). An existing config is
+/// kept as it is: it already names a machine and its token.
 fn write_config(new: &NewMachine) -> Result<(), String> {
     let dir = config_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
     #[cfg(unix)]
     let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    #[cfg(windows)]
+    only_this_user(&dir)?;
     let token_file = dir.join("machine-token");
     let write = |path: &Path, text: &str| -> Result<(), String> {
         let tmp = path.with_extension("new");
@@ -314,8 +488,9 @@ fn write_config(new: &NewMachine) -> Result<(), String> {
 }
 
 /// Sets this Mac up: writes the config of `new` (when the Mac has none yet), then installs
-/// the launchd service from the app's own daemon. Errors are for the log, never shown with
-/// secrets in them (the token is written to a file, never passed on a command line).
+/// the launchd service (on Windows the scheduled task) from the app's own daemon. Errors are
+/// for the log, never shown with secrets in them (the token is written to a file, never passed
+/// on a command line).
 pub(super) fn install(daemon: &Path, new: Option<&NewMachine>) -> Result<(), String> {
     if let Some(new) = new {
         write_config(new)?;
@@ -324,12 +499,21 @@ pub(super) fn install(daemon: &Path, new: Option<&NewMachine>) -> Result<(), Str
     if !config.is_file() {
         return Err(format!("no daemon config at {}", config.display()));
     }
-    let out = Command::new(daemon)
-        .arg("install-service")
+    let mut cmd = Command::new(daemon);
+    cmd.arg("install-service")
         .arg("--config")
         .arg(&config)
-        .env("PATH", service_path())
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    // launchd starts agents with a minimal PATH, so the service keeps the one found here. A
+    // scheduled task gets the user's own environment at every start: nothing to keep.
+    #[cfg(not(windows))]
+    cmd.env("PATH", service_path());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd
         .output()
         .map_err(|e| format!("cannot start the daemon: {e}"))?;
     if out.status.success() {
@@ -359,6 +543,58 @@ mod tests {
         assert_eq!(state_of(Some(bundled), Some(mine)), ThisMac::Working);
         let other = "<array>\n<string>/Users/a/bin/x-daemon</string>";
         assert_eq!(state_of(Some(bundled), Some(other)), ThisMac::Elsewhere);
+    }
+
+    #[test]
+    fn the_state_says_where_the_scheduled_task_runs_the_daemon() {
+        let mine = Path::new(r"C:\Users\li & co\AppData\Local\Programs\X\x-daemon.exe");
+        let task = "<Command>C:\\Windows\\System32\\conhost.exe</Command>\n<Arguments>--headless &quot;c:\\users\\li &amp; co\\AppData\\Local\\Programs\\X\\x-daemon.exe&quot; run --config &quot;C:\\c.toml&quot;</Arguments>";
+        assert!(runs(task, mine, true), "paths compare without case");
+        let other = Path::new(r"C:\tools\x-daemon.exe");
+        assert!(!runs(task, other, true));
+        // The file the daemon keeps is UTF-16 with a byte order mark.
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in task.encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        assert_eq!(service_text(&bytes), task);
+        assert_eq!(service_text(b"<plist/>"), "<plist/>");
+    }
+
+    #[test]
+    fn only_an_installed_build_has_a_daemon_next_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("Programs").join("X");
+        let worktree = dir.path().join("repo").join("target").join("release");
+        let name = format!("{}-daemon.exe", env!("PRODUCT_SLUG"));
+        for d in [&install, &worktree] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join(&name), "x").unwrap();
+            #[cfg(unix)]
+            std::fs::set_permissions(d.join(&name), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let app = install.join("app.exe");
+        assert_eq!(daemon_next_to(&app, false), Some(install.join(&name)));
+        assert_eq!(daemon_next_to(&app, true), None, "a debug build");
+        assert_eq!(
+            daemon_next_to(&worktree.join("app.exe"), false),
+            None,
+            "a build in cargo's target folder"
+        );
+        std::fs::remove_file(install.join(&name)).unwrap();
+        assert_eq!(daemon_next_to(&app, false), None, "no daemon installed");
+    }
+
+    #[test]
+    fn the_user_id_is_the_last_field_of_whoami() {
+        let csv = "\"pc\\李\",\"S-1-5-21-1004336348-1177238915-682003330-1001\"\r\n";
+        assert_eq!(
+            sid_in(csv).as_deref(),
+            Some("S-1-5-21-1004336348-1177238915-682003330-1001")
+        );
+        assert_eq!(sid_in("ERROR: something"), None);
+        assert_eq!(sid_in(""), None);
     }
 
     #[test]
