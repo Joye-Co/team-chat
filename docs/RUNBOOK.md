@@ -172,6 +172,41 @@ belong to the certificate; a non-prerelease release and `upload-only` also refus
 `ADMIN_SECRET_PRODUCTION`. A dry run only warns and signs ad hoc. After rotating `ADMIN_SECRET`
 (below), set `ADMIN_SECRET_PRODUCTION` again.
 
+### Windows installer
+
+The same workflow builds the Windows installer on a Windows runner (job **Windows installer**:
+`scripts/build-windows-installer.sh`, then `scripts/test-windows-installer.sh`, which installs,
+checks, starts and uninstalls it there) in the modes `dry-run` and `release`, and keeps it as
+the artifact `windows-installer-<v>`. In `release` the job **Publish the Windows installer**
+adds `<name>-<v>-setup.exe` and its `.sha256` to the GitHub Release and uploads it with
+`scripts/release.sh <v> --env production --upload-only --platform windows`
+(`PUT /v1/admin/releases/<v>/assets/windows`); `upload-only` uploads the installer of the GitHub
+Release again. A prerelease has no Windows installer.
+
+- Deploy the server before the first release with a Windows installer: an older server answers
+  404 to the upload (the script says so and the release still succeeds), and Windows apps are
+  then offered nothing until the upload is repeated with `mode=upload-only`.
+- The Windows build failed but the Mac release went out: fix it on `main`, then use
+  **Re-run failed jobs** on that run. The Windows job sets the version in its own working tree,
+  so it builds the same version again.
+- Code signing is optional. Without it the installer is unsigned and Windows shows the
+  SmartScreen warning ([INSTALL.md](INSTALL.md#windows)). To sign, add two secrets; the workflow
+  imports the certificate into the runner user's store for the run and signs the programs, the
+  uninstaller and the installer with `signtool` and a time stamp:
+
+  | Secret | Value |
+  | --- | --- |
+  | `WINDOWS_SIGN_PFX_BASE64` | the code-signing certificate with its private key as a PFX file, base64 on one line |
+  | `WINDOWS_SIGN_PASSWORD` | the password of the PFX |
+
+  A certificate whose key lives in a cloud key store or on a hardware token has no PFX: set
+  `WINDOWS_SIGN_CMD` for the build step instead (`scripts/windows/sign.sh`).
+- Once a release is signed, the app's update helper only installs an update signed by the same
+  publisher (the certificate's subject). So keep signing every later release, with a certificate
+  of the same subject; an unsigned or differently signed installer is refused and the installed
+  version stays. Users of an unsigned version take a signed update without any step.
+- Withdrawing a version (`withdraw-release`) withdraws its Windows installer too.
+
 ## Bad app release
 
 A release that breaks the app (crash at launch, lost sign-in) must stop being offered at once:
