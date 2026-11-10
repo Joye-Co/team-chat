@@ -1,4 +1,9 @@
 //! Runtime drivers against fake CLIs that follow each CLI's documented protocol.
+//!
+//! Unix only: the fake CLIs are Python scripts started by their `#!` line, and the cases use
+//! `/bin/sh`, signals and file modes. Windows has `tests/process_tree.rs`.
+
+#![cfg(unix)]
 
 use daemon::config::RuntimeConfig;
 use daemon::proto::RunEvent;

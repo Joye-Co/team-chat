@@ -497,6 +497,7 @@ mod tests {
         assert!(safe_name(&"长".repeat(200), "F1").len() <= 255);
     }
 
+    #[cfg(unix)]
     #[test]
     fn out_paths_must_stay_in_the_working_folder() {
         let root = tempfile::tempdir().unwrap();
@@ -535,6 +536,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_default_folder_is_ignored_by_git_and_stays_inside() {
         let root = tempfile::tempdir().unwrap();

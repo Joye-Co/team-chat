@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    App, BoxShadow, FontFeatures, FontWeight, Hsla, Pixels, Styled, Subscription, Window, point,
-    px, rgba,
+    App, BoxShadow, FontFeatures, FontWeight, Hsla, Pixels, SharedString, Styled, Subscription,
+    Window, point, px, rgba,
 };
 use gpui_component::{ActiveTheme, Theme, ThemeMode, scroll::ScrollbarMode};
 use gpui_kit::base::Easing;
@@ -216,6 +216,7 @@ pub fn set_mode(mode: ThemeMode, cx: &mut App) {
     Theme::change(mode, None, cx);
     crate::ui::motion::sync_accessibility(cx);
     let dark = mode.is_dark();
+    resolve_fonts(cx);
     Theme::update(cx, |theme| apply(theme, dark));
     apply_menu_style(cx);
 }
@@ -455,9 +456,9 @@ fn apply(t: &mut Theme, dark: bool) {
     t.chart_grid = k.border;
 
     // Type and shape (D1, D5): rem 16, controls radius 8, large 10.
-    t.font_family = FONT_FAMILY.into();
+    t.font_family = ui_font_family();
     t.font_size = px(16.);
-    t.mono_font_family = MONO_FONT_FAMILY.into();
+    t.mono_font_family = mono_font_family();
     t.mono_font_size = text::MONO.0;
     t.radius = r::CONTROL;
     t.radius_lg = r::CONTAINER;
@@ -486,15 +487,91 @@ pub const ROOT_TEXT: Pixels = crate::ui::native::tokens::text::UI.0;
 // ---------------------------------------------------------------------------
 // Typography (§3)
 
-/// System font (SF Pro); Core Text falls back to PingFang SC for Han and to
-/// Apple Color Emoji for emoji.
-pub const FONT_FAMILY: &str = ".SystemUIFont";
+/// The UI font families of this system, best first; the last one is on
+/// every supported version, so it is also [`FONT_FAMILY`].
+///
+/// macOS: the system font (SF Pro); Core Text falls back to PingFang SC for
+/// Han and to Apple Color Emoji for emoji.
+#[cfg(not(target_os = "windows"))]
+const UI_FONT_STACK: &[&str] = &[".SystemUIFont"];
+/// Windows (docs/design/WINDOWS.md §4): Segoe UI Variable at its text
+/// optical size (Windows 11), then Segoe UI (Windows 10).
+#[cfg(target_os = "windows")]
+const UI_FONT_STACK: &[&str] = &["Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI"];
+
+/// The families for glyphs the UI font lacks, before the system's own
+/// fallback. Windows picks a Han font by the system language (a Japanese or
+/// Traditional Chinese one on such a system): the interface is Simplified
+/// Chinese, so it names Microsoft YaHei UI. macOS needs none.
+#[cfg(not(target_os = "windows"))]
+const UI_FONT_FALLBACKS: &[&str] = &[];
+#[cfg(target_os = "windows")]
+const UI_FONT_FALLBACKS: &[&str] = &["Microsoft YaHei UI"];
+
+/// The monospace families of this system, best first; the last one is on
+/// every supported version, so it is also [`MONO_FONT_FAMILY`]. Windows:
+/// Cascadia Mono (Windows 11, or with Windows Terminal), then Consolas.
+#[cfg(not(target_os = "windows"))]
+const MONO_FONT_STACK: &[&str] = &["Menlo"];
+#[cfg(target_os = "windows")]
+const MONO_FONT_STACK: &[&str] = &["Cascadia Mono", "Consolas"];
+
+/// The UI font every version of this system has. Prefer
+/// [`ui_font_family`]: the best installed one.
+pub const FONT_FAMILY: &str = UI_FONT_STACK[UI_FONT_STACK.len() - 1];
 /// Weight 500 as drawn: font-kit reads SF Medium's Core Text weight (0.23)
 /// as about 530, and its CSS matching sends an exact 500 down to Regular
 /// when no face is exactly 500. Just above 500 picks the closest heavier
 /// face, Medium.
 pub const MEDIUM_WEIGHT: FontWeight = FontWeight(501.);
-pub const MONO_FONT_FAMILY: &str = "Menlo";
+/// The monospace font every version of this system has. Prefer
+/// [`mono_font_family`]: the best installed one.
+pub const MONO_FONT_FAMILY: &str = MONO_FONT_STACK[MONO_FONT_STACK.len() - 1];
+
+static UI_FONT: OnceLock<SharedString> = OnceLock::new();
+static MONO_FONT: OnceLock<SharedString> = OnceLock::new();
+
+/// The UI font family: the first of the system's stack that is installed.
+pub fn ui_font_family() -> SharedString {
+    UI_FONT.get().cloned().unwrap_or(FONT_FAMILY.into())
+}
+
+/// The monospace font family: the first of the system's stack that is
+/// installed.
+pub fn mono_font_family() -> SharedString {
+    MONO_FONT.get().cloned().unwrap_or(MONO_FONT_FAMILY.into())
+}
+
+/// The first family of `stack` that is installed, else its last one.
+fn first_installed(stack: &[&'static str], installed: &[String]) -> &'static str {
+    stack
+        .iter()
+        .copied()
+        .find(|family| installed.iter().any(|name| name == family))
+        .unwrap_or(stack[stack.len() - 1])
+}
+
+/// Picks the installed fonts of the stacks, once, before the first theme is
+/// applied. A stack of one (macOS) is used as it is: listing the fonts
+/// costs about 100 ms there.
+fn resolve_fonts(cx: &mut App) {
+    if UI_FONT.get().is_some() {
+        return;
+    }
+    let installed = if UI_FONT_STACK.len() > 1 || MONO_FONT_STACK.len() > 1 {
+        cx.text_system().all_font_names()
+    } else {
+        Vec::new()
+    };
+    let _ = UI_FONT.set(first_installed(UI_FONT_STACK, &installed).into());
+    let _ = MONO_FONT.set(first_installed(MONO_FONT_STACK, &installed).into());
+    if !UI_FONT_FALLBACKS.is_empty() {
+        let families = UI_FONT_FALLBACKS.iter().map(|f| f.to_string()).collect();
+        cx.set_global(gpui_component::UiFontFallbacks(
+            gpui::FontFallbacks::from_fonts(families),
+        ));
+    }
+}
 
 /// The type scale (§1.4 of docs/design/COMPLETENESS.md) under the older
 /// role names; the values live in ui/native/tokens.rs.
@@ -556,10 +633,10 @@ pub trait Type: Styled + Sized {
     fn t_section(self) -> Self {
         self.type_role(type_scale::META).font_weight(MEDIUM_WEIGHT)
     }
-    /// 13 / 20 Menlo.
+    /// 13 / 20 monospace.
     fn t_code(self) -> Self {
         self.type_role(type_scale::CODE)
-            .font_family(MONO_FONT_FAMILY)
+            .font_family(mono_font_family())
     }
     /// 18 / 28, 500, tabular figures: invite code boxes.
     fn t_code_entry(self) -> Self {
@@ -597,12 +674,13 @@ pub trait Type: Styled + Sized {
     /// The system font with tabular figures (`tnum`), set explicitly so a
     /// figure inside a code run still reads as a number.
     fn figures(self) -> Self {
-        self.font_family(FONT_FAMILY).font_features(tabular())
+        self.font_family(ui_font_family()).font_features(tabular())
     }
     /// Real monospace at the inherited size: code, diffs, terminal lines,
     /// ids and hashes, host names (§3).
     fn code_font(self) -> Self {
-        self.font_family(MONO_FONT_FAMILY).font_features(tabular())
+        self.font_family(mono_font_family())
+            .font_features(tabular())
     }
     /// Older name of [`Type::t_heading`].
     fn t_topic_title(self) -> Self {
@@ -1600,6 +1678,32 @@ pub fn watch_system_accent(_cx: &mut App) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The best installed family of a stack wins; a machine with none of the
+    /// better ones (Windows 10: no Segoe UI Variable, no Cascadia Mono) gets
+    /// the last one, which every version has.
+    #[test]
+    fn a_font_stack_picks_its_first_installed_family() {
+        let stack = &["Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI"];
+        let names = |list: &[&str]| list.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let windows_11 = names(&["Arial", "Segoe UI", "Segoe UI Variable Text"]);
+        assert_eq!(
+            first_installed(stack, &windows_11),
+            "Segoe UI Variable Text"
+        );
+        let windows_10 = names(&["Arial", "Segoe UI", "Consolas"]);
+        assert_eq!(first_installed(stack, &windows_10), "Segoe UI");
+        assert_eq!(
+            first_installed(&["Cascadia Mono", "Consolas"], &windows_10),
+            "Consolas"
+        );
+        assert_eq!(first_installed(stack, &[]), "Segoe UI");
+        // The constants are the family every version of the system has.
+        assert_eq!(FONT_FAMILY, *UI_FONT_STACK.last().unwrap());
+        assert_eq!(MONO_FONT_FAMILY, *MONO_FONT_STACK.last().unwrap());
+        #[cfg(target_os = "macos")]
+        assert_eq!((FONT_FAMILY, MONO_FONT_FAMILY), (".SystemUIFont", "Menlo"));
+    }
 
     // --- v12/shell ---
     #[test]

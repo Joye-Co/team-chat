@@ -398,6 +398,7 @@ pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn paths_outside_the_working_folder_are_refused() {
         let root = tempfile::tempdir().unwrap();

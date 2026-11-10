@@ -16,7 +16,7 @@
 
 use gpui::{App, BoxShadow, FontWeight, Hsla, Pixels, Styled, Window, point, px, rgba};
 
-use crate::theme::{self, FONT_FAMILY, MEDIUM_WEIGHT, tabular};
+use crate::theme::{self, MEDIUM_WEIGHT, tabular};
 
 fn c(hex: u32) -> Hsla {
     rgba(hex).into()
@@ -1278,7 +1278,7 @@ pub mod monitor {
 /// names. Weights are 400, 500 and 600 (700 only for the hero title).
 pub trait NativeType: Styled + Sized {
     fn n_style(self, role: (Pixels, Pixels)) -> Self {
-        self.font_family(FONT_FAMILY)
+        self.font_family(theme::ui_font_family())
             .text_size(role.0)
             .line_height(role.1)
     }

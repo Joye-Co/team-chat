@@ -1,5 +1,10 @@
 //! The whole daemon against an in-process mock server and a fake Claude CLI:
 //! hello, assign, events, follow-up input, reject, cancel, reconnect with replay, session upload.
+//!
+//! Unix only: the fake CLIs are Python scripts started by their `#!` line, and the cases use
+//! `/bin/sh`, signals and file modes. Windows has `tests/process_tree.rs`.
+
+#![cfg(unix)]
 
 use daemon::config::Config;
 use daemon::proto::*;
