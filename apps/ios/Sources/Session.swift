@@ -6,15 +6,24 @@ import Foundation
 enum Session {
     private static let serverKey = "server"
 
-    static var appGroup: String? {
-        let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String
-        return group?.isEmpty == false ? group : nil
+    static var appGroup: String? { info("AppGroup") }
+
+    /// The server this build signs in to: the sandbox passes one through the environment, a
+    /// release build carries the operator's (Info.plist key `DefaultServer`). `nil` asks the
+    /// user for it.
+    static var defaultServer: String? {
+        let env = ProcessInfo.processInfo.environment["TC_SERVER_URL"]
+        return env?.isEmpty == false ? env : info("DefaultServer")
+    }
+
+    private static func info(_ key: String) -> String? {
+        let value = Bundle.main.object(forInfoDictionaryKey: key) as? String
+        return value?.isEmpty == false ? value : nil
     }
 
     /// The Keychain service: the app's bundle id, also inside an extension.
     private static var service: String {
-        (Bundle.main.object(forInfoDictionaryKey: "AppBundleId") as? String)
-            ?? Bundle.main.bundleIdentifier ?? ""
+        info("AppBundleId") ?? Bundle.main.bundleIdentifier ?? ""
     }
 
     private static var defaults: UserDefaults {
