@@ -33,10 +33,20 @@
     if(!reduce){el.classList.add("auto");
       el.addEventListener("mouseenter",function(){el.classList.add("held");});el.addEventListener("mouseleave",function(){el.classList.remove("held");});
       el.addEventListener("focusin",function(){el.classList.add("held");});el.addEventListener("focusout",function(){el.classList.remove("held");});
-      if(io2){el.classList.add("away");new IntersectionObserver(function(es){es.forEach(function(e){el.classList.toggle("away",!e.isIntersecting);});},{threshold:.45}).observe(el);}}
+      if(io2){el.classList.add("away");new IntersectionObserver(function(es){es.forEach(function(e){el.classList.toggle("away",!e.isIntersecting);});},{threshold:.2}).observe(el);}}
     addEventListener("resize",function(){if(cur>=0&&!fit)apply(layers[steps[cur].dataset.img],geo(steps[cur].dataset.f));});
+    el._go=go;el._n=steps.length;
     go(0);
   });
+  /* scroll moves the steps: a tour's section sticks while you scroll through it, one stretch of scroll per step (only when it fits the window) */
+  var scs=[].slice.call(document.querySelectorAll("section.chap")).filter(function(sec){return sec.querySelector(".stick>.player");});
+  function fits(){scs.forEach(function(sec){var st=sec.querySelector(".stick"),pl=st.querySelector(".player");
+    var ok=!reduce&&innerWidth>760&&(st.scrollHeight<=innerHeight-60||sec.classList.contains("scrolly")&&st.offsetHeight<=innerHeight-60);
+    sec.classList.toggle("scrolly",ok);sec.style.setProperty("--n",pl._n);sec._last=-1;});scrolled();}
+  function scrolled(){scs.forEach(function(sec){if(!sec.classList.contains("scrolly"))return;var r=sec.getBoundingClientRect(),total=sec.offsetHeight-innerHeight;if(total<=0)return;
+    var pr=Math.min(Math.max(-r.top/total,0),.999),pl=sec.querySelector(".player"),i=Math.floor(pr*pl._n),vis=r.top<innerHeight&&r.bottom>0;if(vis&&(i!==sec._last||!sec._in))pl._go(i);sec._last=i;sec._in=vis;});}
+  if(scs.length){var sTick=false;addEventListener("scroll",function(){if(!sTick){sTick=true;requestAnimationFrame(function(){sTick=false;scrolled();});}},{passive:true});
+    addEventListener("resize",fits);addEventListener("load",fits);fits();}
   /* comparison: pick which alternative's panel shows */
   var cmp=document.querySelector(".cmp");
   if(cmp){cmp.classList.add("js");var ct=[].slice.call(cmp.querySelectorAll(".ctab")),vs=[].slice.call(cmp.querySelectorAll(".vs")),cPlace=slider(cmp.querySelector(".tabs"));

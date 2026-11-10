@@ -51,7 +51,9 @@ count shows from 10 bookings on.
 A `<div class="player">` is a tour of the app: an `<ol class="pl">` of steps and a `.pf` frame. Each
 step `<li class="ps">` names its screen in `data-img` (the path without `-light.webp`/`-dark.webp`)
 and the part to point at in `data-f` (left, top, width, height in percent of the screenshot). The
-frame zooms toward that part and rings it; when the step's bar fills, the next step starts. Pointing
-at the tour, or scrolling it out of view, holds it; with reduced motion nothing plays on its own. A
+frame zooms toward that part and rings it; when the step's bar fills, the next step starts (3 s a step). On
+a wide window the section of a tour sticks while you scroll through it, and each stretch of scroll
+moves one step (only when the section fits the window). Pointing at the tour, or scrolling it out
+of view, holds it; with reduced motion nothing plays on its own. A
 tour with the class `fit` shows whole images (the cards) without zoom. Screens come from the app at
 1440x900, so the percentages line up.

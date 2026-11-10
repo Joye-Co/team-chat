@@ -322,7 +322,7 @@ footer a:hover{color:var(--ink)}
 .ps .bar{display:none;height:2px;margin:0 12px 8px 48px;border-radius:2px;background:var(--line);overflow:hidden}
 .player.auto .ps.on .bar{display:block}
 .ps .bar::after{content:"";display:block;height:100%;background:var(--ink);transform:scaleX(0);transform-origin:left}
-.player.auto .ps.on .bar::after{animation:fill var(--ms,4.6s) linear forwards}
+.player.auto .ps.on .bar::after{animation:fill var(--ms,3s) linear forwards}
 .player.held .ps.on .bar::after,.player.away .ps.on .bar::after{animation-play-state:paused}
 @keyframes fill{to{transform:none}}
 .pf{position:relative;aspect-ratio:16/10;border-radius:12px;overflow:hidden;background:var(--bg);box-shadow:0 0 0 1px var(--shot-edge),var(--shot-shadow)}
@@ -366,3 +366,7 @@ footer a:hover{color:var(--ink)}
 .more4 p{margin:6px 0 0;font-size:14px;line-height:1.65;color:var(--ink-2)}
 @media (max-width:980px){.mem2{grid-template-columns:1fr}.more4{grid-template-columns:1fr 1fr}.more4>div,.more4>div+div{padding:18px 16px 16px 0;border-left:0;border-bottom:1px solid var(--line)}}
 @media (max-width:640px){.more4{grid-template-columns:1fr}.src li{grid-template-columns:96px minmax(0,1fr)}}
+
+/* scroll-driven tours: JS adds .scrolly when the section fits the window; the section grows by one step of scroll per step, its content sticks, and scrolling moves the steps */
+.scrolly{padding-top:0;height:calc(100vh + var(--n,5) * 26vh)}
+.scrolly>.stick{position:sticky;top:60px;min-height:calc(100vh - 60px);display:flex;flex-direction:column;justify-content:center;padding-block:24px}
