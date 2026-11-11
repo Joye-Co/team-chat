@@ -77,12 +77,14 @@ export abstract class DeskInput extends DeskDelegate {
     if (isMainTopicId(m.topicId) || m.dm) return false;
     const since = Date.now() - FOLLOW_UP_WINDOW_MS;
     const last = this.sql
-      .exec<{ requested_by: string; ended_at: number | null }>(
-        "SELECT requested_by, ended_at FROM runs WHERE topic_id = ? AND (kind IS NULL OR kind != ?) ORDER BY created_at DESC LIMIT 1",
+      .exec<{ requested_by: string; ended_at: number | null; status: string }>(
+        "SELECT requested_by, ended_at, status FROM runs WHERE topic_id = ? AND (kind IS NULL OR kind != ?) ORDER BY created_at DESC LIMIT 1",
         m.topicId,
         RUN_KIND_ASIDE,
       )
       .toArray()[0];
+    // A run a person stopped (停, the stop button) invites no follow-up: "好的我自己来" starts nothing.
+    if (last?.status === "cancelled") return false;
     if (last && last.ended_at !== null && last.ended_at >= since && last.requested_by === m.authorId) return true;
     return (
       this.sql

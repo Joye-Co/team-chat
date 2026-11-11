@@ -7,8 +7,8 @@ import { ACK_EMOJI } from "@chat/protocol";
 import { roomMigrations } from "../src/core/registry";
 import { runMigrations } from "../src/core/migrations";
 import type { BotsEnv } from "../src/bots/env";
-import { rollUp, type TopicBotRow } from "../src/bots/participants";
-import { cardOwner, messageTargets } from "../src/bots/room";
+import { addressedParticipants, rollUp, type TopicBotRow } from "../src/bots/participants";
+import { cardOwner, handOffEach, messageTargets } from "../src/bots/room";
 import { isStopRequest } from "../src/agent/supervise";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
 import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations, waitUntil } from "./helpers";
@@ -82,6 +82,31 @@ describe("routing and roll-up rules", () => {
     expect(messageTargets({ authorId: "h", mentions: ["h2"] }, "botC", undefined, usable)).toEqual([]);
     expect(messageTargets({ authorId: "h", mentions: [] }, null, "botD", usable)).toEqual([{ id: "botD", mentioned: true }]);
     expect(messageTargets({ authorId: "h", mentions: [] }, "botX", undefined, () => false)).toEqual([]);
+    // Without an @, a message that quotes or answers a participant goes to it, not the owner.
+    expect(messageTargets({ authorId: "h", mentions: [] }, "botC", undefined, usable, ["botA"])).toEqual([{ id: "botA", mentioned: false }]);
+    expect(messageTargets({ authorId: "h", mentions: [] }, "botC", undefined, usable, ["h2"])).toEqual([{ id: "botC", mentioned: false }]);
+    // An @ still wins.
+    expect(messageTargets({ authorId: "h", mentions: ["botB"] }, "botC", undefined, usable, ["botA"])).toEqual([{ id: "botB", mentioned: true }]);
+  });
+
+  it("hand a message to every member even when one of them fails, and retry only the failed one", async () => {
+    const targets = [{ id: "botA" }, { id: "botB" }];
+    const sent: string[] = [];
+    let recorded: string[] = [];
+    let failA = true;
+    const send = async (t: { id: string }) => {
+      if (t.id === "botA" && failA) {
+        failA = false;
+        throw new Error("desk down");
+      }
+      sent.push(t.id);
+    };
+    await expect(handOffEach(targets, [], send, (d) => (recorded = d))).rejects.toThrow("desk down");
+    expect(sent).toEqual(["botB"]);
+    expect(recorded).toEqual(["botB"]);
+    await handOffEach(targets, recorded, send, (d) => (recorded = d));
+    expect(sent).toEqual(["botB", "botA"]);
+    expect(recorded.sort()).toEqual(["botA", "botB"]);
   });
 
   it("roll the topic status up from the members working and the ones that ended after the newest start", () => {
@@ -93,6 +118,8 @@ describe("routing and roll-up rules", () => {
     expect(rollUp([row("a", { report: "blocked", started_at: 1, ended_at: 5 }), row("b", { report: "done", started_at: 2, ended_at: 9 })])).toEqual({ status: "blocked", waitingOn: [] });
     expect(rollUp([row("a", { report: "waiting_review", waiting_on: '["h"]', started_at: 1, ended_at: 5 }), row("b", { report: "done", started_at: 2, ended_at: 9 })])).toEqual({ status: "waiting_review", waitingOn: ["h"] });
     expect(rollUp([row("a", { started_at: 1, ended_at: 1 })])).toBeNull();
+    // A stalled run that has not ended keeps the topic stuck after B finished.
+    expect(rollUp([row("a", { working: 1, report: "blocked", started_at: 1 }), row("b", { report: "done", started_at: 3, ended_at: 4 })])).toEqual({ status: "blocked", waitingOn: [] });
   });
 
   it("read a plain stop word, and nothing longer", () => {
@@ -191,8 +218,10 @@ describe("several AI members in one topic", () => {
     expect(d.frames.filter((f) => f.t === "run.input").map((f) => f.text)).toEqual(["周五前就行", "@dev 顺便看下日志"]);
     await waitUntil(async () => (await rows(w.gid, topicId))[0]?.working === 0, 5000, "not working");
 
-    // After it ended, other people's talk without an @ starts nothing; only the requester's does.
+    // After it ended, other people's talk without an @ starts nothing, and after a stop neither
+    // does the requester's own reply.
     await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "辛苦" });
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "好的我自己来" });
     await new Promise((r) => setTimeout(r, 300));
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     c.close();
@@ -238,8 +267,61 @@ describe("several AI members in one topic", () => {
     expect(await rows(w.gid, topicId)).toEqual([{ bot_id: w.bot.id, working: 0, run_id: run.id }]);
     await room(w.gid).rpc(w.gid, "bots.release", null, { botId: w.bot.id });
     expect(await rows(w.gid, topicId)).toEqual([]);
+    // Clients learn the member left the topic's participants.
+    await c.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && Array.isArray(e.data.participants) && e.data.participants.length === 0);
     c.close();
     cb.close();
+  });
+
+  it("send a quote of a member that is not the routing owner to that member's run", async () => {
+    const w = await world();
+    const ops = await addBot(w, "ops");
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev @ops 各看一下", mentions: [w.bot.id, ops.id] });
+    const topicId = sent.message.topicId as string;
+    const a = await d.next((f) => f.t === "run.assign" && f.botMemberId === w.bot.id);
+    const b = await d.next((f) => f.t === "run.assign" && f.botMemberId === ops.id);
+    d.send({ t: "run.accept", runId: a.runId });
+    d.send({ t: "run.accept", runId: b.runId });
+    await waitUntil(async () => (await rows(w.gid, topicId)).filter((r) => r.working === 1).length === 2, 5000, "both working");
+    const owner = (await topicRow(w.gid, topicId)).owner_id;
+    const other = owner === ops.id ? w.bot : ops;
+    const otherRun = owner === ops.id ? a.runId : b.runId;
+    // The member that is not the routing owner says something; the requester quotes it without an @.
+    const { c: cb } = await Client.connect(other.token);
+    const said = await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "用方案一还是二？" });
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "方案二", replyTo: { messageId: said.message.id } });
+    const input = await d.next((f) => f.t === "run.input" && String(f.text).includes("方案二"));
+    expect(input.runId).toBe(otherRun);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(d.frames.filter((f) => f.t === "run.input").map((f) => f.runId)).toEqual([otherRun]);
+    cb.close();
+    c.close();
+    d.close();
+  });
+
+  it("address a typed approval answer to the member that waits for it", async () => {
+    const w = await world();
+    const { c } = await Client.connect(w.human.token);
+    const sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "a topic" });
+    const topicId = sent.message.topicId as string;
+    const got = await runInDurableObject(room(w.gid), (_o, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      const put = (bot: string, report: string, waitingOn: string[]) =>
+        sql.exec("INSERT INTO topic_bots (topic_id, bot_id, working, report, waiting_on, started_at) VALUES (?, ?, 1, ?, ?, 1)", topicId, bot, report, JSON.stringify(waitingOn));
+      put("botA", "waiting_answer", [w.human.id]);
+      put("botB", "in_progress", []);
+      return [
+        addressedParticipants(sql, topicId, w.human.id, "同意"),
+        addressedParticipants(sql, topicId, w.human.id, "周五前就行"),
+        addressedParticipants(sql, topicId, w.owner.id, "同意"),
+        addressedParticipants(sql, topicId, w.human.id, "周五前就行", "botB"),
+        addressedParticipants(sql, topicId, w.human.id, "周五前就行", "botZ"),
+      ];
+    });
+    expect(got).toEqual([["botA"], [], [], ["botB"], []]);
+    c.close();
   });
 
   it("migrate an older room: its claims become participants and topics list them", async () => {

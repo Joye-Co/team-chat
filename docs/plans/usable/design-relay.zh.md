@@ -177,7 +177,7 @@ AddArtifactVersionRequest += { parentVersion?: number }
   1. 有 `working=1` 的行 → `in_progress`；但在做的行报了 `waiting_answer`（等审批）、`waiting_review` 或 `blocked`（盯活判卡住）时取其中最急的，`waitingOn` 取这些行的并集（R1 实现时更正：不然审批和卡住在有人在做时看不见）。卡片提问仍由 cards2 的过滤器叠上去；
   2. 否则只看 `ended_at >= 话题里最近一次 started_at` 的行，按 `waiting_answer > waiting_review > blocked > failed(按 blocked) > open(被人停下) > done` 取最高，`waitingOn` 取并集；
   3. 有 `running` 的接力且不在最后一步 → `in_progress`；`paused` → `blocked`，`waitingOn=[发起人]`。
-  这样「A 卡住，人再 @B，B 做完」时 A 那一行不再算（B 开始得更晚），话题是完成；接力第 1 步「带 PR 等审」不会在第 2 步时让话题变成「等你审」。人手动改的状态保持到下一个 run 开始或结束。
+  这样「A 卡住，人再 @B，B 做完」时：A 的 run 已经结束（以卡住结束）的，A 那一行不再算（B 开始得更晚），话题是完成；A 被盯活判卡住、run 还没结束的，A 仍是在做的行，话题保持卡住，直到 A 的 run 结束（被停或做完）后才只看 B；接力第 1 步「带 PR 等审」不会在第 2 步时让话题变成「等你审」。人手动改的状态保持到下一个 run 开始或结束。
 - `cardOwner`（`room.ts:58`）：卡片作者在 `topic_bots` 里就送给作者，否则送给 `ownerId`。
 - `bots.transfer` 删掉，归属的改动并进 `bots.chainStepResult`（下面）。
 - `bots.release`（`room.ts:316`）同时删这个 bot 的 `topic_bots` 行；它在接力里还没轮到的步，到那一步时按「接不了」处理。

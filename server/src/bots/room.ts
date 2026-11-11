@@ -24,7 +24,7 @@ import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
-import { PARTICIPANTS_MIGRATION, type WorkState, claimTopic, isParticipant, onRunUpdated, routingOwner, workState } from "./participants";
+import { PARTICIPANTS_MIGRATION, type WorkState, addressedParticipants, claimTopic, isParticipant, onRunUpdated, publishWorkState, routingOwner, topicBots, workState } from "./participants";
 
 registerRoomMigration({
   name: "bots-1",
@@ -327,8 +327,18 @@ registerRoomRpc("bots.transfer", (room, actor, args) => {
 registerRoomRpc("bots.release", (room, actor, args) => {
   const { botId } = args as { botId: string };
   if (actor) throw new ApiError("forbidden", "internal only");
+  const topics = room.sql.exec<{ topic_id: string }>("SELECT topic_id FROM topic_bots WHERE bot_id = ?", botId).toArray().map((x) => x.topic_id);
   room.sql.exec("DELETE FROM topic_bots WHERE bot_id = ?", botId);
   const r = room.sql.exec("DELETE FROM bot_topics WHERE bot_id = ?", botId);
+  // Clients drop the member from the topic's participants and see the status of the rest.
+  if (topics.length > 0) {
+    room.commit((tx) => {
+      for (const t of topics) {
+        if (topicBots(room.sql, t).length > 0) publishWorkState(room, tx, botId, t);
+        else room.updateTopic(tx, botId, t, { extra: { participants: [] } });
+      }
+    });
+  }
   return { released: r.rowsWritten };
 });
 
@@ -535,15 +545,26 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
   // The routing owner now (a run may have started in the topic since the message was written).
   const owner = routingOwner(c.sql, m.topicId);
   const peer = dmPeer(c.sql, m.authorId);
-  if (m.mentions.length === 0 && !owner && !peer) return;
-  const byId = await memberInfo(c.env.DB, [m.authorId, ...m.mentions, ...(owner ? [owner] : []), ...(peer ? [peer] : [])]);
+  const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
+  const parsed = parseExt(ext);
+  const quoted = parsed.replyTo?.authorId;
+  // A message without an @ that quotes a participant or answers its approval goes to that member.
+  const addressed = m.mentions.length === 0 && !peer ? addressedParticipants(c.sql, m.topicId, m.authorId, m.body, quoted) : [];
+  if (m.mentions.length === 0 && !owner && !peer && addressed.length === 0) return;
+  const byId = await memberInfo(c.env.DB, [m.authorId, ...m.mentions, ...addressed, ...(owner ? [owner] : []), ...(peer ? [peer] : [])]);
   // A bot's messages never reach another bot: no loops.
   const author = byId.get(m.authorId);
   if (!author || author.kind !== "human" || author.deactivated) return;
-  const targets = messageTargets(m, owner, peer, (id) => {
-    const x = byId.get(id);
-    return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
-  });
+  const targets = messageTargets(
+    m,
+    owner,
+    peer,
+    (id) => {
+      const x = byId.get(id);
+      return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
+    },
+    addressed,
+  );
   if (targets.length === 0) return;
   const base: TopicMessage = {
     groupId: c.groupId,
@@ -558,38 +579,60 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     base.body = stripRefPrefix(m.body, m.blockRefs);
     base.refs = resolveRefs(c.sql, m.blockRefs);
   }
-  const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
-  const parsed = parseExt(ext);
-  const quoted = parsed.replyTo?.authorId;
   if (quoted) base.replyToAuthorId = quoted;
   const carried = requestExt(parsed);
   if (carried) base.ext = carried;
   if (peer) base.dm = true;
-  // Each member gets its own hand-off; one that took it is not handed it again on a retry.
-  const done = new Set(m.done ?? []);
+  await handOffEach(targets, m.done ?? [], (t) => deskStub(c.env, t.id).onMessage(t.id, { ...base, mentioned: t.mentioned }), (done) => {
+    if (targets.length > 1) c.sql.exec("UPDATE bot_outbox SET payload = ? WHERE id = ?", JSON.stringify({ ...m, done }), row.id);
+  });
+}
+
+/**
+ * Each member gets its own hand-off: every target not yet done is tried, one that took it is
+ * not handed it again on a retry, and one member's failure does not hold back the others (the
+ * row is retried for the failed ones only).
+ */
+export async function handOffEach<T extends { id: string }>(
+  targets: T[],
+  alreadyDone: string[],
+  send: (t: T) => Promise<unknown>,
+  record: (done: string[]) => void,
+): Promise<void> {
+  const done = new Set(alreadyDone);
+  let failure: unknown = null;
   for (const t of targets) {
     if (done.has(t.id)) continue;
-    await deskStub(c.env, t.id).onMessage(t.id, { ...base, mentioned: t.mentioned });
+    try {
+      await send(t);
+    } catch (err) {
+      failure ??= err;
+      continue;
+    }
     done.add(t.id);
-    if (targets.length > 1) c.sql.exec("UPDATE bot_outbox SET payload = ? WHERE id = ?", JSON.stringify({ ...m, done: [...done] }), row.id);
+    record([...done]);
   }
+  if (failure !== null) throw failure;
 }
 
 /**
  * Who a person's message goes to (接 1.1, 1.2): in a DM the other member; otherwise each AI
- * member it mentions, each on its own (`mentioned`); a message without any @ to the topic's
- * routing owner (`mentioned: false`: the desk decides whether it is a follow-up). Only usable
- * runner bots.
+ * member it mentions, each on its own (`mentioned`); a message without any @ to the participants
+ * it quotes or answers (`addressed`), else to the topic's routing owner (`mentioned: false`: the
+ * desk decides whether it is a follow-up). Only usable runner bots.
  */
 export function messageTargets(
   m: { authorId: string; mentions: string[] },
   owner: string | null,
   peer: string | undefined,
   usable: (id: string) => boolean,
+  addressed: string[] = [],
 ): { id: string; mentioned: boolean }[] {
   if (peer) return usable(peer) ? [{ id: peer, mentioned: true }] : [];
   const named = [...new Set(m.mentions)].filter((id) => id !== m.authorId && usable(id));
   if (named.length > 0) return named.map((id) => ({ id, mentioned: true }));
+  const to = m.mentions.length === 0 ? [...new Set(addressed)].filter((id) => id !== m.authorId && usable(id)) : [];
+  if (to.length > 0) return to.map((id) => ({ id, mentioned: false }));
   if (m.mentions.length === 0 && owner && owner !== m.authorId && usable(owner)) return [{ id: owner, mentioned: false }];
   return [];
 }

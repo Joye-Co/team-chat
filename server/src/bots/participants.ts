@@ -5,6 +5,7 @@
 // keep only the routing owner: the AI member that most recently started a run in the topic, which
 // gets a follow-up without an @.
 import { type ArchivedEvent, type RoomContext, type RoomTx, registerTopicFields } from "../core/registry";
+import { approvalDecision, approvesWholeWork } from "./dispatch";
 import { type BotRun, isMainTopicId, MAX_TOPIC_PARTICIPANTS, RUN_KIND_ASIDE, type TopicParticipant, type TopicStatus } from "@chat/protocol";
 
 /** Room migration `participants-1` (registered after `bots-1` in room.ts, which it reads). */
@@ -49,6 +50,20 @@ export function isParticipant(sql: SqlStorage, topicId: string, botId: string): 
 /** The routing owner: the AI member that most recently started a run in the topic. */
 export function routingOwner(sql: SqlStorage, topicId: string): string | null {
   return sql.exec<{ bot_id: string }>("SELECT bot_id FROM bot_topics WHERE topic_id = ?", topicId).toArray()[0]?.bot_id ?? null;
+}
+
+/**
+ * 接 1.6 with several members: the participants a message without an @ is addressed to. A quote
+ * of a participant's message goes to that participant; a typed approval answer goes to the
+ * working participants that wait for this person's answer. Empty: the routing owner gets it.
+ */
+export function addressedParticipants(sql: SqlStorage, topicId: string, authorId: string, body: string, replyToAuthorId?: string): string[] {
+  if (isMainTopicId(topicId)) return [];
+  if (replyToAuthorId && replyToAuthorId !== authorId && isParticipant(sql, topicId, replyToAuthorId)) return [replyToAuthorId];
+  if (approvalDecision(body) === null && !approvesWholeWork(body)) return [];
+  return topicBots(sql, topicId)
+    .filter((r) => r.working === 1 && r.report === "waiting_answer" && (JSON.parse(r.waiting_on || "[]") as string[]).includes(authorId))
+    .map((r) => r.bot_id);
 }
 
 /** `Topic.participants`: the newest `MAX_TOPIC_PARTICIPANTS` rows, oldest first. */
