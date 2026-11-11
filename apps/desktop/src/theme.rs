@@ -1652,9 +1652,40 @@ fn read_system_accent() -> Option<Hsla> {
     )
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Reads the system accent now (设置 › 个性化 › 颜色 › 主题色). Windows always has one, so
+/// the two blues it ships with count as "not chosen" ([`chosen_accent`]): the app is
+/// graphite until the person picks a color, as on a Mac where none was picked.
+#[cfg(target_os = "windows")]
+fn read_system_accent() -> Option<Hsla> {
+    use windows::UI::ViewManagement::{UIColorType, UISettings};
+    let color = UISettings::new()
+        .and_then(|settings| settings.GetColorValue(UIColorType::Accent))
+        .ok()?;
+    chosen_accent(color.R, color.G, color.B)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn read_system_accent() -> Option<Hsla> {
     None
+}
+
+/// The Windows accent as the app's accent: `None` for the colors a fresh Windows has
+/// (`#0078D4` on Windows 11, `#0078D7` on Windows 10), which nobody chose.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn chosen_accent(r: u8, g: u8, b: u8) -> Option<Hsla> {
+    const STOCK: [(u8, u8, u8); 2] = [(0x00, 0x78, 0xD4), (0x00, 0x78, 0xD7)];
+    if STOCK.contains(&(r, g, b)) {
+        return None;
+    }
+    Some(
+        gpui::Rgba {
+            r: f32::from(r) / 255.,
+            g: f32::from(g) / 255.,
+            b: f32::from(b) / 255.,
+            a: 1.,
+        }
+        .into(),
+    )
 }
 
 /// Reads the system accent and repaints when it changed.
@@ -1717,13 +1748,68 @@ pub fn watch_system_accent(cx: &mut App) {
     .detach();
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Follows the accent color of Windows' settings while the app runs: read at start and
+/// again when Windows says its colors or settings changed (the hidden events window gets
+/// both broadcasts). Call once on the main thread (the app only).
+#[cfg(target_os = "windows")]
+pub fn watch_system_accent(cx: &mut App) {
+    use futures::StreamExt as _;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WM_DWMCOLORIZATIONCOLORCHANGED, WM_SETTINGCHANGE,
+    };
+
+    sync_system_accent(cx);
+    if crate::win32::events_window().is_none() {
+        return;
+    }
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+    crate::win32::on_message(move |_, msg, _, _| {
+        if msg == WM_DWMCOLORIZATIONCOLORCHANGED || msg == WM_SETTINGCHANGE {
+            let _ = tx.unbounded_send(());
+        }
+    });
+    cx.spawn(async move |cx| {
+        while rx.next().await.is_some() {
+            cx.update(sync_system_accent);
+        }
+    })
+    .detach();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn watch_system_accent(_cx: &mut App) {}
 // --- end v12/shell ---
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A color the person chose in Windows becomes the accent; the blue Windows ships
+    /// with does not (the app stays graphite, as on a Mac with no accent chosen).
+    #[test]
+    fn a_stock_windows_accent_is_not_a_choice() {
+        assert!(chosen_accent(0x00, 0x78, 0xD4).is_none());
+        assert!(chosen_accent(0x00, 0x78, 0xD7).is_none());
+        let red = gpui::Rgba::from(chosen_accent(0xE8, 0x11, 0x23).expect("a chosen color"));
+        assert!((red.r - 232. / 255.).abs() < 0.01 && red.g < 0.1 && red.a == 1.);
+    }
+
+    /// Windows answers with a color (the runner's is the stock one or a chosen one).
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_reports_its_accent() {
+        use windows::UI::ViewManagement::{UIColorType, UISettings};
+        let color = UISettings::new()
+            .and_then(|settings| settings.GetColorValue(UIColorType::Accent))
+            .expect("an accent color");
+        println!(
+            "system accent: #{:02X}{:02X}{:02X}, used: {}",
+            color.R,
+            color.G,
+            color.B,
+            read_system_accent().is_some()
+        );
+    }
 
     /// The best installed family of a stack wins; a machine with none of the
     /// better ones (Windows 10: no Segoe UI Variable, no Cascadia Mono) gets
