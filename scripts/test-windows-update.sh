@@ -211,8 +211,11 @@ if [ "$CHAIN" = 1 ]; then
   jq -j .token "$SECRETS/machine.json" >"$MACHINE_CONFIG/machine-token"
   rm -f "$SECRETS/machine.json"
   # TOML literal strings: a Windows path needs no escaping in them.
-  printf "server_url = '%s'\ntoken_file = '%s'\nmachine_id = '%s'\nname = 'ci-runner'\nlabels = ['windows']\n" \
-    "$URL" "$WIN_CONFIG\\machine-token" "$MACHINE_ID" >"$MACHINE_CONFIG/daemon.toml"
+  # The runner has no Claude Code or Codex, and a daemon without a runtime is refused; a
+  # program that exists stands in for one (no run is started here), as in
+  # scripts/test-install-daemon.ps1.
+  printf "server_url = '%s'\ntoken_file = '%s'\nmachine_id = '%s'\nname = 'ci-runner'\nlabels = ['windows']\n\n[runtimes.ci]\nkind = \"claude\"\ncommand = '%s'\n" \
+    "$URL" "$WIN_CONFIG\\machine-token" "$MACHINE_ID" "$(cygpath -w "$SYS32/whoami.exe")" >"$MACHINE_CONFIG/daemon.toml"
   "$DIR/$SLUG-daemon.exe" install-service --config "$WIN_CONFIG\\daemon.toml" >"$WORK/install-service.log" 2>&1 ||
     { sed 's/^/      /' "$WORK/install-service.log" >&2; fail "install-service"; }
   task_exists || fail "the daemon's task is not registered"
