@@ -857,6 +857,73 @@ async fn codex_on_windows_reaches_the_daemon_through_the_request_folder() {
     assert_eq!(left, [std::ffi::OsString::from(".gitignore")]);
 }
 
+/// A session id is random on every system. (It was read from `/dev/urandom`: on Windows every
+/// Claude Code session had the same id, and a follow-up run could resume another topic's.)
+#[test]
+fn session_ids_are_random_on_every_system() {
+    let ids: std::collections::BTreeSet<String> = (0..64).map(|_| runtime::uuid_v4()).collect();
+    assert_eq!(ids.len(), 64, "{ids:?}");
+    for id in &ids {
+        assert!(runtime::valid_session_id(id), "{id}");
+        assert_eq!(id.len(), 36);
+        assert_eq!(&id[14..15], "4", "version 4: {id}");
+    }
+}
+
+/// The folder Claude Code keeps a session in is named after the working directory. Unix: the
+/// canonical path. Windows: the path as given (the CLI keeps 8.3 short names), then the
+/// canonical one; a resume puts the session where the CLI looks under either name.
+#[test]
+fn the_session_folder_has_the_names_the_cli_can_use() {
+    use runtime::claude::{
+        find_session_file, prepare_resume, project_dir_name_of, project_dir_names,
+    };
+    assert_eq!(project_dir_name_of(r"C:\Users\me\work"), "C--Users-me-work");
+    assert_eq!(
+        project_dir_name_of(r"\\?\C:\Users\RUNNER~1\work"),
+        "C--Users-RUNNER-1-work"
+    );
+    assert_eq!(project_dir_name_of("/Users/张三/a b"), "-Users----a-b");
+    // One UTF-16 unit, one `-`: a character outside the basic plane gives two.
+    assert_eq!(project_dir_name_of("/x/😀"), "-x---");
+
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("work");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let names = project_dir_names(&cwd);
+    assert!(!names.is_empty() && names.len() <= 2, "{names:?}");
+    if cfg!(windows) {
+        assert_eq!(names[0], project_dir_name_of(&cwd.to_string_lossy()));
+    } else {
+        assert_eq!(names.len(), 1);
+    }
+    // A session of an earlier run, in another project's folder.
+    let config = dir.path().join("claude");
+    let old = config.join("projects").join("-some-earlier-run");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("s1.jsonl"), "{}").unwrap();
+    assert_eq!(
+        find_session_file(&config, &cwd, "s1"),
+        Some(old.join("s1.jsonl"))
+    );
+    assert!(prepare_resume(&config, &cwd, "s1"));
+    for name in &names {
+        assert!(
+            config
+                .join("projects")
+                .join(name)
+                .join("s1.jsonl")
+                .is_file(),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        find_session_file(&config, &cwd, "s1"),
+        Some(config.join("projects").join(&names[0]).join("s1.jsonl"))
+    );
+    assert!(!prepare_resume(&config, &cwd, "gone"));
+}
+
 /// A Codex run always has full access, whatever `daemon.toml` says, so `chat-run` always works
 /// and the daemon adds no sandbox overrides. A user's own args stay as written.
 #[test]
