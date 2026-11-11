@@ -104,7 +104,7 @@ impl ShortcutsPage {
         let function_key = keystroke.key.len() > 1
             && keystroke.key.starts_with('f')
             && keystroke.key[1..].chars().all(|c| c.is_ascii_digit());
-        if !(m.platform || m.control || m.alt || function_key) {
+        if !accepts(m, function_key, cfg!(target_os = "windows")) {
             self.refused = Some(s::SHORTCUT_NEEDS_MODIFIER.into());
             return cx.notify();
         }
@@ -431,6 +431,17 @@ fn reset(action: Option<&str>, cx: &mut App) {
     rebind(&prefs::get().shortcuts, cx);
 }
 
+/// Whether a key press can be a shortcut: it needs ⌘, ⌃ or ⌥, or is a function key. On
+/// Windows the Windows key never counts and is never part of one: the system keeps its
+/// combinations for itself, and the hint there asks for Ctrl or Alt.
+pub fn accepts(m: gpui::Modifiers, function_key: bool, windows: bool) -> bool {
+    if windows {
+        !m.platform && (m.control || m.alt || function_key)
+    } else {
+        m.platform || m.control || m.alt || function_key
+    }
+}
+
 /// The source form of a key press ("ctrl-alt-shift-cmd-k").
 pub fn keystroke_source(k: &Keystroke) -> String {
     let m = k.modifiers;
@@ -536,6 +547,32 @@ impl Render for ShortcutsPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shortcut_needs_a_modifier_and_never_the_windows_key() {
+        let m = |control, alt, platform| gpui::Modifiers {
+            control,
+            alt,
+            platform,
+            ..Default::default()
+        };
+        for windows in [false, true] {
+            assert!(accepts(m(true, false, false), false, windows));
+            assert!(accepts(m(false, true, false), false, windows));
+            assert!(accepts(m(false, false, false), true, windows), "F5");
+            assert!(
+                !accepts(m(false, false, false), false, windows),
+                "a bare key"
+            );
+        }
+        assert!(
+            accepts(m(false, false, true), false, false),
+            "⌘K on the Mac"
+        );
+        assert!(!accepts(m(false, false, true), false, true), "Win+K");
+        assert!(!accepts(m(true, false, true), false, true), "Ctrl+Win+K");
+        assert!(!accepts(m(false, false, true), true, true), "Win+F5");
+    }
 
     /// Recording: a click arms the row, the next key press with ⌘ becomes
     /// the command's shortcut (the old one is gone), a key another command
