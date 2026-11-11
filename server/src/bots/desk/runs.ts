@@ -18,6 +18,7 @@ import { refsText } from "../refs";
 import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { type FailureNote, failureNote } from "./failure";
 
 /** The prompts of a run (Run context): the full one, and the one for a resumed session. */
 interface Prompts {
@@ -145,6 +146,11 @@ export abstract class DeskRuns extends DeskCore {
         const none = machine ? null : this.whyNone(r, runner, machines);
         const waits = none !== null && (none.why === "busy" || (none.why === "offline" && !kind));
         if (!machine && !waits) {
+          // 模 3.1: the computers' CLI is not signed in: the topic says which, and who signs in.
+          if (!kind && none?.why === "signed_out") {
+            const note = await this.signedOutNote(r, runner.runtime, none.machines);
+            return this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+          }
           const why = kind ? TEXT.noAsideMachine : this.noMachineText(none);
           return this.end(r, "failed", why, "blocked", why);
         }
@@ -252,6 +258,20 @@ export abstract class DeskRuns extends DeskCore {
     if (reason === "runtime_unavailable") return TEXT.noRuntime;
     if (reason === "disk_low") return TEXT.noDisk;
     return TEXT.failed("");
+  }
+
+  /**
+   * 模 3.1, 3.5: no run starts because every computer with the runtime has its CLI signed out.
+   * The run keeps the failure; the note names the computers and who signs them in.
+   */
+  protected async signedOutNote(r: RunRow, runtime: string, machines: MachineView[]): Promise<FailureNote> {
+    r.failure = JSON.stringify({ kind: "signed_out" });
+    this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
+    const on = machines.map((m) => {
+      const kind = m.clis?.find((c) => c.runtime === runtime)?.kind;
+      return { id: m.id, name: m.name, ...(m.ownerId ? { ownerId: m.ownerId } : {}), ...(kind ? { kind } : {}) };
+    });
+    return failureNote(this.env, { kind: "signed_out", machines: on, runtime, requesterId: r.requested_by, groupId: r.group_id, started: false });
   }
 
   protected noMachineText(none: NoMachine | null): string {
@@ -534,6 +554,10 @@ export abstract class DeskRuns extends DeskCore {
       if (!runner || !machine || prompt === null) {
         // 机 2.10: the true reason, from the machines left or else from the daemon's answer.
         const none = runner ? this.whyNone(r, runner, machines.filter((x) => !excluded.includes(x.id))) : null;
+        if (runner && r.kind !== RUN_KIND_ASIDE && none?.why === "signed_out") {
+          const note = await this.signedOutNote(r, runner.runtime, none.machines);
+          return this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+        }
         const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : this.rejectText(none, reason);
         return this.end(r, "failed", why, "blocked", why);
       }

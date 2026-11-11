@@ -16,6 +16,7 @@ import {
   MAX_PLAN_ITEMS,
   MAX_PLAN_TEXT_CHARS,
   type RunPlan,
+  RunFailure,
   RunPlanItem,
   RUN_KIND_ASIDE,
   type RunStatus,
@@ -122,6 +123,12 @@ export type RunRow = {
   stall_step: number;
   /** A nudge was really sent for this piece of work (盯 1.12: the note names only real tries). Carried over. */
   nudge_sent: number;
+  // desk-failure-model (模 2.2, 2.3, 2.10)
+  /** JSON of `RunFailure` of a failed run, or null. */
+  failure: string | null;
+  /** The model and 思考强度 the CLI really ran with (the session event), or null. */
+  model: string | null;
+  effort: string | null;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -419,6 +426,16 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "desk-nudge-sent",
           up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
         },
+        {
+          // 模 2.2, 2.3, 2.10: why a run failed (run.done.failure, JSON) and the model and
+          // 思考强度 it really ran with (the session event). Old rows: NULL.
+          name: "desk-failure-model",
+          up: `
+            ALTER TABLE runs ADD COLUMN failure TEXT;
+            ALTER TABLE runs ADD COLUMN model TEXT;
+            ALTER TABLE runs ADD COLUMN effort TEXT;
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -486,6 +503,10 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.paused_by) run.pausedBy = r.paused_by;
     if (r.kind) run.kind = r.kind;
     if (r.retry_of) run.retryOf = r.retry_of;
+    if (r.model) run.model = r.model;
+    if (r.effort) run.effort = r.effort;
+    const failure = r.failure ? RunFailure.safeParse(JSON.parse(r.failure)) : null;
+    if (failure?.success) run.failure = failure.data;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
@@ -763,7 +784,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   }
 
   // Implemented by the feature modules that extend this class.
-  protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
+  protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean, mentions?: string[]): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
   protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[], retryOf?: string, brief?: Brief): Promise<void>;

@@ -2,7 +2,8 @@
 // cards), and the end of a run (result, status, follow-up runs).
 import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
-import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, readableError, stripAcceptance } from "../dispatch";
+import { MAX_RESULT_CHARS, Progress, TEXT, cut, failureKind, firstLine, readableError, stripAcceptance } from "../dispatch";
+import { type FailureNote, failedOn, failureNote } from "./failure";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
@@ -130,6 +131,7 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "session":
           this.storeSession(r, ev.sessionId);
+          this.storeModel(r, ev.model, ev.effort);
           break;
         case "approval.resolved":
           if (r.approval_id === ev.approvalId) {
@@ -407,6 +409,39 @@ export abstract class DeskEvents extends DeskRuns {
     this.sql.exec("UPDATE runs SET session_id = ? WHERE id = ?", sid, r.id);
   }
 
+  /** 模 2.3, 2.10: the model and 思考强度 the CLI really ran with (the session event). */
+  protected storeModel(r: RunRow, model: unknown, effort: unknown): void {
+    const m = typeof model === "string" && model.trim() !== "" ? cut(model.trim(), 200) : null;
+    const e = typeof effort === "string" && effort.trim() !== "" ? cut(effort.trim(), 32) : null;
+    if (m === null && e === null) return;
+    r.model = m ?? r.model;
+    r.effort = e ?? r.effort;
+    this.sql.exec("UPDATE runs SET model = ?, effort = ? WHERE id = ?", r.model, r.effort, r.id);
+  }
+
+  /**
+   * 模 2.2: a failed run says why in one sentence and one next step; the CLI's own words stay in
+   * the run log. Keeps the failure with the run.
+   */
+  protected async failedNote(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<FailureNote> {
+    const raw = f.error ?? f.summary ?? "";
+    const kind = failureKind(f.failure, raw);
+    const resetsAt = kind === "limit" && Number.isInteger(f.failure?.resetsAt) ? f.failure?.resetsAt : undefined;
+    const stored = { kind: f.failure ? cut(f.failure.kind, 32) : kind, ...(resetsAt ? { resetsAt } : {}) };
+    r.failure = JSON.stringify(stored);
+    this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
+    const on = r.machine_id ? await failedOn(this.env, r.machine_id, r.runtime) : null;
+    return failureNote(this.env, {
+      kind,
+      machines: on ? [on] : [],
+      runtime: r.runtime ?? "",
+      requesterId: r.requested_by,
+      groupId: r.group_id,
+      ...(resetsAt ? { resetsAt } : {}),
+      started: true,
+    });
+  }
+
   protected async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
     this.storeUsage(r, f);
     this.storeSession(r, f.sessionId);
@@ -420,6 +455,9 @@ export abstract class DeskEvents extends DeskRuns {
       if (await this.continuePromise(r, raw)) return;
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
+    } else if (f.status === "failed") {
+      const note = await this.failedNote(r, f);
+      await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
     } else {
       const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));
@@ -489,7 +527,15 @@ export abstract class DeskEvents extends DeskRuns {
    * with intent "done" and its proof), keeps it as `resultMessageId`, sets the run and topic
    * status.
    */
-  protected async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false): Promise<void> {
+  protected async end(
+    r: RunRow,
+    status: RunStatus,
+    body: string,
+    topicStatus: TopicStatus,
+    summary: string,
+    success = false,
+    mentions: string[] = [],
+  ): Promise<void> {
     const now = Date.now();
     await this.closeProgress(r);
     await this.closeApprovalCard(r, "expired");
@@ -497,7 +543,7 @@ export abstract class DeskEvents extends DeskRuns {
     r.approval_id = null;
     r.paused_by = null;
     r.paused_at = null;
-    const id = await this.postResult(r, body, success);
+    const id = await this.postResult(r, body, success, mentions);
     if (id) {
       this.sql.exec("UPDATE runs SET result_message_id = ? WHERE id = ?", id, r.id);
       r.result_message_id = id;
@@ -552,7 +598,7 @@ export abstract class DeskEvents extends DeskRuns {
   }
 
   /** Posts the result once (idempotent by client message id); returns its message id. */
-  protected async postResult(r: RunRow, body: string, success: boolean): Promise<string | null> {
+  protected async postResult(r: RunRow, body: string, success: boolean, mentions: string[] = []): Promise<string | null> {
     const cmid = `run:${r.id}:result`;
     // A side chat answers as a plain message in the asker's DM.
     if (success && r.kind !== RUN_KIND_ASIDE) {
@@ -575,7 +621,7 @@ export abstract class DeskEvents extends DeskRuns {
       }
     }
     try {
-      return await this.post(r, cmid, body);
+      return await this.post(r, cmid, body, mentions.length > 0 ? { mentions } : {});
     } catch (err) {
       this.log.warn("result post failed", { runId: r.id, err });
       return null;

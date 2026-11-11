@@ -1115,7 +1115,7 @@ describe("runner-backed bots: review fixes", () => {
     await d.acked(runId, seq);
     const ended = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "failed");
     const msgs = botMessages(c, topicId, w.bot.id);
-    expect(msgs.map((m) => m.body)).toEqual([TEXT.failed("cargo test failed")]);
+    expect(msgs.map((m) => m.body)).toEqual([TEXT.failedWith(TEXT.failure.other, TEXT.next.other)]);
     expect(msgs[0].cardV2).toBeUndefined();
     expect(ended.data.run).toMatchObject({ resultMessageId: msgs[0].id, usage: { inputTokens: 5, outputTokens: 6 }, durationMs: 1000 });
     c.close();
