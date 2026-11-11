@@ -1426,6 +1426,7 @@ async fn interaction_envelope_and_chat_run() {
 
     // 1. chat-run card patch: the output event goes up redacted, the CLI gets the result.
     send(&mut ws, &assign("c1", "fake", "chatrun", None)).await;
+    #[cfg(unix)]
     let run_dir = tmp.path().join("work/runs/c1");
     let mut frames = collect(&mut ws, "c1", true, |f| {
         matches!(

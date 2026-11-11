@@ -121,8 +121,17 @@ export function contextRows(sql: SqlStorage, viewerId: string, topicId: string, 
         const seen = viewMessage({ id: row.id, cardState: row.ext.cardState } as unknown as Message, viewerId, sql);
         row.ext = { ...row.ext, cardState: seen.cardState as ContextRow["ext"]["cardState"] };
       }
+      if (row.ext.artifactRefs?.length) row.ext = { ...row.ext, artifactRefs: withArtifactTitles(sql, row.ext.artifactRefs) };
       return row;
     });
+}
+
+/** 产出 references with the 产出's current title, so a run's lines name what they point at. */
+function withArtifactTitles(sql: SqlStorage, refs: NonNullable<ContextRow["ext"]["artifactRefs"]>): NonNullable<ContextRow["ext"]["artifactRefs"]> {
+  return refs.map((a) => {
+    const title = sql.exec<{ title: string }>("SELECT title FROM artifacts WHERE id = ?", a.artifactId).toArray()[0]?.title;
+    return title ? { ...a, title } : a;
+  });
 }
 
 function topicCount(sql: SqlStorage, topicId: string, where = "", params: unknown[] = []): number {

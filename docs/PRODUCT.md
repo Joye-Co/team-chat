@@ -43,6 +43,10 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   实时查看 (watch a member's computer while it works), 接管 and 交还 (pause the member and take over,
   then hand back), 交代 (hand work to a member), 来龙去脉 (where a 产出 came from), 群里的决定 (the
   decisions recorded in a 群), 验收标准 (the checks a result must pass), 回放 (replay a run by step).
+- Words for memory (沉淀, docs/design/agent-harness.zh.md §7.7 and §13.5): 记得的事 (an AI member's),
+  团队约定, 群里的约定, 我的偏好, and 我的约定 (团队约定 and 我的偏好 on one board when one person uses
+  the server); the kinds 约定, 事实, 决定, 偏好, 经验, 做法; 记忆更新, 记一条, 明天生效, 停用, 恢复, 撤回,
+  可能过时; and AI 服务 (the server's own model, set in 团队管理).
 - Words for cards, the interaction loop and 产出 pages (1.1.0 part 2; DESIGN.md §7.13, §7.14): the
   card band words 等你, 等{name}, 处理中, 完成, 失败, 已作废, 已过期; the choice forms 单选, 多选, 排序,
   评分 (打分), 量表, 是或否, 图片选择, 矩阵, 时间段, 投票, 问卷, 对比; and 等 {name} 回应, {name} 还在处理,

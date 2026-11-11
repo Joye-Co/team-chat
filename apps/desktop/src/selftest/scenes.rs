@@ -75,6 +75,12 @@ pub enum Start {
     Memory(crate::fake::memory::MemoryShape),
     /// The sample data seen as a 所有者, 管理员, 普通成员 or alone (身份 scenes).
     Roles(crate::fake::RoleView),
+    /// The v2 sample team in one memory shape on a server as the second part says: only
+    /// me with the AI members, or no AI 服务 (memory scenes).
+    V2MemoryTeam(
+        crate::fake::memory::MemoryShape,
+        crate::fake::memory::MemoryTeam,
+    ),
 }
 
 pub struct Scene {

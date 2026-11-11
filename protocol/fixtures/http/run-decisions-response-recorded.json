@@ -1,0 +1,20 @@
+{
+  "kind": "RunDecisionsResponse",
+  "valid": true,
+  "description": "decisions recorded by hand",
+  "value": {
+    "decisions": [],
+    "hasMore": false,
+    "recorded": [
+      {
+        "id": "01JBX0DEC000000000000000AJ",
+        "seq": 60,
+        "topicId": null,
+        "text": "周五不发版",
+        "recordedBy": "01JBX0OWNER0000000000000AA",
+        "recordedAt": 1762128000000,
+        "recordedByName": "张三"
+      }
+    ]
+  }
+}
