@@ -250,7 +250,7 @@ HOST="$WORK/host"
 rm -rf "$HOST" && mkdir -p "$HOST/bin"
 HOST_DAEMON="$HOST/bin/$(product slug)-daemon"
 install_daemon() {
-  GITHUB_API="http://127.0.0.1:$PORT" DAEMON_REPO=o/r DAEMON_ARCH=x86_64 \
+  GITHUB_API="http://127.0.0.1:$PORT" DAEMON_REPO=o/r DAEMON_ARCH=x86_64 DAEMON_UNIT_DIR="$HOST/units" \
     "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON" "$@"
 }
 gh_stub
@@ -264,11 +264,38 @@ printf 'an older daemon' >"$HOST_DAEMON"
 gh_stub "sha256:$(printf '0%.0s' $(seq 1 64))"
 expect fail "a download that does not match the digest stops" install_daemon
 expect ok "and leaves the installed daemon alone" is "$(cat "$HOST_DAEMON")" "an older daemon"
-expect ok "and no half file" test ! -e "$HOST_DAEMON.new"
+expect ok "and no half file" bash -c "! ls '$HOST/bin' | grep -qE 'new|install'"
 gh_stub
 expect ok "a matching download replaces the older daemon" install_daemon
 expect ok "with the release's file" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
 expect fail "a version that is not a release is refused" install_daemon --version 9.9
+# The service: none yet, one that starts a hand-built daemon elsewhere, one that starts this file.
+UNIT="$HOST/units/$(product slug)-daemon.service"
+expect ok "without a service" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it says how to install one" grep -q "no daemon service yet.*install-service" "$WORK/said.log"
+mkdir -p "$HOST/units"
+printf '[Service]\nExecStart="%s" run --config "/x/daemon.toml"\nRestart=always\n' "$HOST/elsewhere/daemon" >"$UNIT"
+expect ok "with a service that starts another file" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it says the service does not take the new file" grep -q "service starts $HOST/elsewhere/daemon, not $HOST_DAEMON.*install-service" "$WORK/said.log"
+printf '[Service]\nExecStart=%s run --config /x/daemon.toml\n' "$HOST/elsewhere/daemon" >"$UNIT"
+expect ok "with an unquoted ExecStart" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it reads the file too" grep -q "service starts $HOST/elsewhere/daemon, not" "$WORK/said.log"
+printf '[Service]\nExecStart="%s" run --config "/x/daemon.toml"\n' "$HOST_DAEMON" >"$UNIT"
+expect ok "with a service that starts this file" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it has nothing to say about the service" bash -c "! grep -q 'service' '$WORK/said.log'"
+# The daemon's own waiting download ($dest.new) is not the script's to touch.
+printf 'a download waiting for idle' >"$HOST_DAEMON.new"
+expect ok "a run next to a waiting download" install_daemon
+expect ok "leaves the download alone" is "$(cat "$HOST_DAEMON.new")" "a download waiting for idle"
+printf 'an older daemon' >"$HOST_DAEMON"
+expect ok "an install next to a waiting download" install_daemon
+expect ok "leaves it alone too" is "$(cat "$HOST_DAEMON.new")" "a download waiting for idle"
+expect ok "and leaves no file of its own" bash -c "! ls '$HOST/bin' | grep -q install"
+rm -f "$HOST_DAEMON.new"
 # Without a released Linux daemon it builds one, which needs cargo: a PATH without it fails.
 NO_CARGO="$WORK/no-cargo"
 rm -rf "$NO_CARGO" && mkdir -p "$NO_CARGO"

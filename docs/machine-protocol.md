@@ -919,7 +919,10 @@ found on PATH.
   daemon renames it over its program (on Windows it would follow the replace steps above) and
   exits; systemd's `Restart=always` starts the new version. If somebody else replaced the
   program file meanwhile, theirs wins and the download is dropped. Every step is logged; a
-  failed check is tried again an hour later. `scripts/runner/install-daemon.sh` (run by
+  failed check is tried again an hour later. A download that waits for the daemon to be idle is
+  put in place even if the release was withdrawn on the server meanwhile: withdraw a bad release
+  before hosts download it, or replace the program by hand (which wins over the download).
+  `scripts/runner/install-daemon.sh` (run by
   `scripts/runner/host-setup.sh`) installs the released daemon of a host the first time.
 
 ## Tests

@@ -691,8 +691,9 @@ Platforms (added for the Windows client; old clients and scripts are not affecte
   `macos`) is another one. A Windows client therefore never takes the DMG: a server without a
   Windows release answers 404, and a server from before platforms ignores the parameter and
   answers with an `UpdateInfo` that has no `platform`.
-- `/download`: the page posts `platform=windows` when the browser runs on Windows; any other
-  value, or none, serves the DMG.
+- `/download`: the page posts `platform=windows` when the browser runs on Windows;
+  `platform=linux-x86_64` serves the Linux daemon (the page never posts it); any other value, or
+  none, serves the DMG.
 - `linux-x86_64` (added for Linux hosts): the release flow uploads the daemon binary with
   `PUT /v1/admin/releases/:version/assets/linux-x86_64`. A daemon installed on its own asks
   `GET /v1/machine/updates/latest?platform=linux-x86_64` with its machine token, downloads the

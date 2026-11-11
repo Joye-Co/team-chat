@@ -6,7 +6,9 @@
 #
 # The new file is written next to the old one and renamed over it, so a running daemon keeps
 # its runs: it sees the new file and restarts on it once no run is active. Afterwards the
-# daemon keeps itself up to date from the server (self_update in daemon.toml).
+# daemon keeps itself up to date from the server (self_update in daemon.toml). When the
+# owner's systemd unit starts another file (a daemon built by hand) or there is none yet, the
+# script says the one command that moves the service onto this file.
 #
 # Usage: scripts/runner/install-daemon.sh [--version latest|<x.y.z>] [--dest <file>] [--owner <user>]
 #   --version  the release to install (default latest, the newest that is not a prerelease)
@@ -14,7 +16,8 @@
 #              must stay writable by the owner, or the daemon cannot update itself
 #   --owner    the user that runs the daemon (default the current user); root chowns to it
 # Env: DAEMON_REPO (owner/name; default: the GitHub repository of this checkout's origin),
-#      GITHUB_API (default https://api.github.com), DAEMON_ARCH (default uname -m; for tests).
+#      GITHUB_API (default https://api.github.com), DAEMON_ARCH (default uname -m; for tests),
+#      DAEMON_UNIT_DIR (the owner's systemd user units; default ~<owner>/.config/systemd/user).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -30,7 +33,7 @@ while [ $# -gt 0 ]; do
     --version) version="${2:-}"; shift 2 ;;
     --dest) dest="${2:-}"; shift 2 ;;
     --owner) owner="${2:-}"; shift 2 ;;
-    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -63,7 +66,8 @@ put() {
     if [ "$(id -u)" = 0 ]; then chown "$owner:" "$d"; fi
   done
   mkdir -p "$dir"
-  new="$dest.new"
+  # Not $dest.new: that is where the running daemon puts its own download.
+  new="$dest.install.$$"
   cp "$1" "$new"
   chmod 755 "$new"
   if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then chown "$owner:" "$new"; fi
@@ -74,7 +78,38 @@ put() {
 }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"; rm -f "$dest.new"' EXIT
+trap 'rm -rf "$tmp"; rm -f "$dest.install.$$"' EXIT
+
+# service_hint: when the owner's systemd unit does not start $dest, the daemon that runs never
+# loads the new file and never updates itself, so say the one command that fixes it.
+service_hint() {
+  local units unit exec_start
+  units="${DAEMON_UNIT_DIR:-}"
+  if [ -z "$units" ]; then
+    local h
+    h="$(getent passwd "$owner" 2>/dev/null | cut -d: -f6 || true)"
+    [ -n "$h" ] || return 0
+    units="$h/.config/systemd/user"
+  fi
+  unit="$units/$slug-daemon.service"
+  local fix="as $owner run: $dest doctor && $dest install-service"
+  if [ ! -f "$unit" ]; then
+    log "no daemon service yet; once daemon.toml is in place, $fix"
+    return 0
+  fi
+  # ExecStart="<file>" run --config ... (install-service quotes it; a hand-written unit may not).
+  exec_start="$(sed -nE 's/^ExecStart=//p' "$unit" | head -n 1)"
+  if [[ "$exec_start" == \"* ]]; then
+    exec_start="${exec_start#\"}"
+    exec_start="${exec_start%%\"*}"
+    exec_start="$(sed -e 's/%%/%/g' -e 's/\$\$/$/g' <<<"$exec_start")"
+  else
+    exec_start="${exec_start%% *}"
+  fi
+  if [ "$exec_start" != "$dest" ]; then
+    log "warning: the daemon service starts $exec_start, not $dest, so it does not take this file or update itself; $fix"
+  fi
+}
 
 url="" digest=""
 if [ "${DAEMON_ARCH:-$(uname -m)}" = x86_64 ] && [ -n "$repo" ]; then
@@ -94,6 +129,7 @@ if [ -n "$url" ]; then
   want="${digest#sha256:}"
   if [ -f "$dest" ] && [ "$(sha256sum "$dest" | cut -d' ' -f1)" = "$want" ]; then
     log "the daemon of $tag is installed already at $dest"
+    service_hint
     exit 0
   fi
   case "$url" in https://* | http://127.0.0.1:* | http://localhost:*) ;; *) die "refusing a download that is not https: $url" ;; esac
@@ -103,6 +139,7 @@ if [ -n "$url" ]; then
   [ "$have" = "$want" ] || die "the download does not match the digest of release $tag"
   put "$tmp/daemon"
   log "installed the daemon of $tag at $dest"
+  service_hint
   exit 0
 fi
 
@@ -114,3 +151,4 @@ built="$(DIST="$tmp/dist" "$root/scripts/build-daemon.sh" | tail -n 1)"
 (cd "$(dirname "$built")" && shasum -a 256 -c "$(basename "$built").sha256" >/dev/null) || die "the built daemon does not match its .sha256"
 put "$built"
 log "installed the daemon built from this checkout at $dest"
+service_hint

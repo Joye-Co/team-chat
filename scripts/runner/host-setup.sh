@@ -72,8 +72,10 @@ fi
 
 echo "== daemon"
 # The released Linux daemon for the runner user, in a folder it owns so the daemon can update
-# itself; built from this checkout only when the release has none. A daemon already running
-# restarts on the new file once it has no run. Registering the machine, daemon.toml and
+# itself; built from this checkout only when the release has none. A daemon whose service
+# already starts that file restarts on it once it has no run; a service that starts another
+# file (a daemon built by hand) keeps running that one, and install-daemon.sh prints the
+# `install-service` command that moves it over. Registering the machine, daemon.toml and
 # `install-service` stay steps of their own (docs/bots.md).
 if ! "$here/install-daemon.sh" --owner "$RUNNER_USER" --version "${DAEMON_VERSION:-latest}"; then
   echo "warning: the daemon is not installed; see the message above" >&2

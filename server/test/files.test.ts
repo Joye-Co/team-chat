@@ -1,6 +1,7 @@
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import { ArtifactResponse, ArtifactVersionResponse, FileMeta, UpdateInfo } from "@chat/protocol";
+import { downloadPlatform } from "../src/files/ops";
 import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
 
 afterAll(() => {
@@ -515,6 +516,14 @@ async function publish(version: string, bytes: Uint8Array, opts: { secret?: stri
 }
 
 describe("releases and updates", () => {
+  it("the invite download picks its platform from the form, then the browser", () => {
+    expect(downloadPlatform(null, "Mozilla/5.0 (Windows NT 10.0)")).toBe("windows");
+    expect(downloadPlatform("windows", null)).toBe("windows");
+    expect(downloadPlatform("linux-x86_64", null)).toBe("linux-x86_64");
+    expect(downloadPlatform("nope", null)).toBe("macos");
+    expect(downloadPlatform(null, null)).toBe("macos");
+  });
+
   it("publishes releases, picks the highest version and serves downloads", async () => {
     const { owner, member } = await setup();
     const dmg9 = enc.encode("dmg 0.9.0 bytes");
