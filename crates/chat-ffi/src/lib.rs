@@ -16,9 +16,11 @@ use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
 mod files;
+mod pages;
 mod token;
 
 pub use auth::{SignedIn, email_sign_in, request_email_code};
+pub use pages::*;
 pub use token::{clear_token, load_token, save_token};
 
 uniffi::setup_scaffolding!();
