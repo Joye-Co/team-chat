@@ -12,6 +12,13 @@
 //! comes: approve lets the command run, deny blocks it and the CLI reads why. `scope: "run"`
 //! (这件事里都同意) lets later matches of the same kind in the run pass without asking.
 //! Everything else passes at once; nothing else is ever stopped.
+//!
+//! The runtime's own gate sees only the command line as written. A run with gates also gets
+//! shims ([`crate::shim`]) first on its `PATH` for the programs the kinds are about: they send
+//! `gate.check {via: "shim"}` with the parsed facts of each invocation (for `git push` the remote
+//! branches it would really update), so a command inside a script, or a spelling the patterns
+//! do not know, still stops. One decision per action: a kind a person approved for the
+//! runtime's current command passes its shims without asking again ([`Gates::check`]).
 
 use crate::proto::{RunEvent, RunGate, truncate};
 use regex::{Regex, RegexBuilder};
@@ -29,6 +36,8 @@ pub const ALIVE_OP: &str = "gate.alive";
 /// How long a gated run waits for the CLI's start-up hook before it gives up
 /// ([`claude_settings`]). The real CLI runs it within a few seconds of starting.
 pub const HOOKS_START: Duration = Duration::from_secs(45);
+/// `gate.check` body `via` of a shim ([`crate::shim`]); a check without it is the runtime's own.
+pub const VIA_SHIM: &str = "shim";
 /// Approval ids of this module start with this.
 const PREFIX: &str = "daemon-gate-";
 /// Longest command in `approval.request` (the protocol's limit of `command`).
@@ -193,7 +202,7 @@ fn is_script_flag(flag: &str) -> bool {
 
 /// POSIX shell words: `'…'` literal, `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and a
 /// bare `\` that escapes the next character. None when a quote is not closed.
-fn shell_words(line: &str) -> Option<Vec<String>> {
+pub(crate) fn shell_words(line: &str) -> Option<Vec<String>> {
     let mut words = vec![];
     let mut cur = String::new();
     let mut in_word = false;
@@ -260,6 +269,12 @@ struct State {
     pending: Option<(String, String, oneshot::Sender<bool>)>,
     /// Kinds a person approved for the whole run (这件事里都同意).
     approved: HashSet<String>,
+    /// Kinds a person approved for the runtime's current command: its shims pass them without
+    /// asking again. Cleared when the runtime starts its next command.
+    granted: HashSet<String>,
+    /// Counts the runtime's commands: an approval that comes after the next command started
+    /// grants nothing.
+    command: u64,
     next: u64,
 }
 
@@ -354,6 +369,17 @@ impl Gates {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The runtime's own gate saw its next command (a hook call, a Codex or ACP approval
+    /// request, matched or not): what was approved for the command before no longer holds for
+    /// shims. Returns [`matches`](Self::matches) of `line`.
+    pub fn next_command(&self, line: &str) -> Option<&str> {
+        let mut st = self.lock();
+        st.granted.clear();
+        st.command += 1;
+        drop(st);
+        self.matches(line)
+    }
+
     /// The first kind whose pattern matches one of the line's commands, as written or as its
     /// plain words ([`plain_command`]).
     pub fn matches(&self, line: &str) -> Option<&str> {
@@ -383,20 +409,30 @@ impl Gates {
         approval_id.starts_with(PREFIX)
     }
 
-    /// Answers the hook's `gate.check` (`{tool, command}`): `{ok, result: {decision, kind?}}`.
-    /// A match waits for `run.approval`; `emit` sends the `approval.request`.
+    /// Answers `gate.check` (`{tool, command, via?}`): `{ok, result: {decision, kind?}}`. A
+    /// match waits for `run.approval`; `emit` sends the `approval.request`. Without `via` the
+    /// check is the runtime's own (the hook, a Codex or ACP request): it starts a new command
+    /// ([`next_command`](Self::next_command)), and an approval holds for that command's shims.
+    /// With `via: "shim"` a kind approved for the current command (or the run) passes at once.
     pub async fn check(&self, body: &Value, emit: &(dyn Fn(RunEvent) + Send + Sync)) -> Value {
         let Some(command) = body["command"].as_str() else {
             return json!({ "ok": false, "error": { "code": "invalid", "message": "command is required" } });
         };
-        let Some(kind) = self.matches(command).map(str::to_string) else {
+        let shim = body["via"] == VIA_SHIM;
+        let kind = if shim {
+            self.matches(command)
+        } else {
+            self.next_command(command)
+        };
+        let Some(kind) = kind.map(str::to_string) else {
             return allow(None);
         };
+        let command_n = self.lock().command;
         // One question at a time; a 这件事里都同意 given meanwhile lets this one pass.
         let _turn = self.asking.lock().await;
         let rx = {
             let mut st = self.lock();
-            if st.approved.contains(&kind) {
+            if st.approved.contains(&kind) || (shim && st.granted.contains(&kind)) {
                 return allow(Some(&kind));
             }
             st.next += 1;
@@ -416,7 +452,14 @@ impl Gates {
             rx
         };
         match rx.await {
-            Ok(true) => allow(Some(&kind)),
+            Ok(true) => {
+                let mut st = self.lock();
+                if st.command == command_n {
+                    st.granted.insert(kind.clone());
+                }
+                drop(st);
+                allow(Some(&kind))
+            }
             Ok(false) => deny(&kind, "a person declined it"),
             Err(_) => deny(&kind, "the run ended before a person answered"),
         }
@@ -425,7 +468,7 @@ impl Gates {
     /// Whether the CLI may run `command` (a runtime's own approval request): true at once when
     /// no kind matches; else as [`check`](Self::check), which asks a person and waits.
     pub async fn allows(&self, command: &str, emit: &(dyn Fn(RunEvent) + Send + Sync)) -> bool {
-        if self.matches(command).is_none() {
+        if self.next_command(command).is_none() {
             return true;
         }
         self.check(&json!({ "command": command }), emit).await["result"]["decision"] == "allow"
@@ -765,6 +808,38 @@ mod tests {
             ("cargo publish -p chat-protocol", "externalPublish"),
             ("gh release create v1.2.3", "externalPublish"),
             ("GH  PR   MERGE 3", "mergeMain"),
+            // 盯 2.2: git's own options first, the GitHub API, MCP merge tools.
+            ("git -C . push origin main", "mergeMain"),
+            (
+                "git -C ../repo -c push.default=current push -u origin HEAD:main",
+                "mergeMain",
+            ),
+            ("git --no-pager push origin master", "mergeMain"),
+            ("gh api -X PUT repos/o/r/pulls/5/merge", "mergeMain"),
+            (
+                "gh api repos/{owner}/{repo}/pulls/5/merge --method PUT -f merge_method=squash",
+                "mergeMain",
+            ),
+            (
+                "curl -sS -XPUT -H 'Authorization: Bearer $T' https://api.github.com/repos/o/r/pulls/5/merge",
+                "mergeMain",
+            ),
+            (
+                "curl --request PUT https://api.github.com/repos/o/r/pulls/5/merge",
+                "mergeMain",
+            ),
+            (
+                "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
+                "mergeMain",
+            ),
+            (
+                r#"mcp__github__merge_pull_request {"owner":"o","pullNumber":5,"repo":"r"}"#,
+                "mergeMain",
+            ),
+            (
+                r#"mcp__gh__push_files {"branch":"main","files":[],"message":"m"}"#,
+                "mergeMain",
+            ),
         ];
         for (cmd, want) in hits {
             assert_eq!(gates.matches(cmd), Some(want), "{cmd}");
@@ -788,6 +863,14 @@ mod tests {
             "cargo build --release",
             "git log --oneline main",
             "git push origin main:backup-main",
+            "git -C . push origin claude/m4",
+            "git -C . log main",
+            "gh api repos/o/r/pulls/5/merge",
+            "gh api repos/o/r/pulls/5",
+            "curl https://api.github.com/repos/o/r/pulls/5/merge",
+            r#"mcp__github__get_pull_request {"owner":"o","pullNumber":5}"#,
+            r#"mcp__github__push_files {"branch":"claude/m4","files":[]}"#,
+            "echo mcp__github__merge_pull_request",
         ];
         for cmd in misses {
             assert_eq!(gates.matches(cmd), None, "{cmd}");
@@ -1281,6 +1364,79 @@ mod tests {
         // The 这件事里都同意 covers the one that waited.
         assert_eq!(second.await.unwrap()["result"]["decision"], "allow");
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// One decision per action: a kind approved at the runtime's gate passes the shims of that
+    /// command without a second card; the runtime's next command (matched or not) ends that,
+    /// and a shim asks itself for what the runtime's gate did not see.
+    #[tokio::test]
+    async fn shims_do_not_ask_again_for_what_the_runtime_gate_asked() {
+        let gates = Arc::new(Gates::new(&defaults()));
+        let (seen, emit) = emitted();
+        let emit = Arc::new(emit);
+        let shim = |c: &str| json!({ "tool": "shim", "via": VIA_SHIM, "command": c });
+        let push = "git push\ngit push origin HEAD:refs/heads/main";
+
+        // The hook asks for `git -C . push origin main`; a person approves once.
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(async move {
+            g.check(
+                &json!({ "command": "git -C . push origin main" }),
+                e.as_ref(),
+            )
+            .await
+        });
+        let id = requested(&seen, 0).await;
+        gates.answer(&id, true, false).unwrap();
+        assert_eq!(t.await.unwrap()["result"]["decision"], "allow");
+        // Its git shim passes at once, more than once (a script that pushes twice).
+        for _ in 0..2 {
+            let a = gates.check(&shim(push), emit.as_ref()).await;
+            assert_eq!(a["result"]["decision"], "allow");
+        }
+        // Another kind in the same command still asks.
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(async move { g.check(&shim("npm publish"), e.as_ref()).await });
+        let id = requested(&seen, 1).await;
+        gates.answer(&id, false, false).unwrap();
+        assert_eq!(t.await.unwrap()["result"]["decision"], "deny");
+
+        // The next command (`git push` on main: the hook sees nothing) asks at its shim.
+        let a = gates
+            .check(&json!({ "command": "git push" }), emit.as_ref())
+            .await;
+        assert_eq!(a["result"]["decision"], "allow");
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(async move { g.check(&shim(push), e.as_ref()).await });
+        let id = requested(&seen, 2).await;
+        match &seen.lock().unwrap()[2] {
+            RunEvent::ApprovalRequest { kind, command, .. } => {
+                assert_eq!(kind.as_deref(), Some("mergeMain"));
+                assert!(command.as_deref().unwrap().contains("HEAD:refs/heads/main"));
+            }
+            e => panic!("{e:?}"),
+        }
+        gates.answer(&id, false, false).unwrap();
+        assert_eq!(t.await.unwrap()["result"]["decision"], "deny");
+        assert_eq!(seen.lock().unwrap().len(), 3);
+
+        // Codex and ACP requests are the runtime's commands too: an approval there holds for
+        // that command's shims, and a later request (even one that matches nothing) ends it.
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(
+            async move { g.allows("bash ship.sh && gh pr merge 5", e.as_ref()).await },
+        );
+        let id = requested(&seen, 3).await;
+        gates.answer(&id, true, false).unwrap();
+        assert!(t.await.unwrap());
+        let a = gates.check(&shim("gh pr merge 5"), emit.as_ref()).await;
+        assert_eq!(a["result"]["decision"], "allow");
+        assert_eq!(gates.next_command("ls"), None);
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(async move { g.check(&shim("gh pr merge 5"), e.as_ref()).await });
+        let id = requested(&seen, 4).await;
+        gates.answer(&id, false, false).unwrap();
+        assert_eq!(t.await.unwrap()["result"]["decision"], "deny");
     }
 
     #[tokio::test]

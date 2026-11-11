@@ -491,27 +491,15 @@ pub fn credential_main(args: &[String]) -> i32 {
 /// The real `gh` on `PATH`: not in a folder of the run's tools (where `chat-run` is, or the
 /// VM's tools folder) and not this program.
 pub fn real_gh(path: &std::ffi::OsStr) -> Option<PathBuf> {
-    let me = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::canonicalize(p).ok());
-    let name = format!("{GH}{}", std::env::consts::EXE_SUFFIX);
-    std::env::split_paths(path).find_map(|dir| {
-        if dir.as_os_str().is_empty()
-            || dir == Path::new(GUEST_BIN)
-            || dir.join(crate::chat_run::link_name()).exists()
-        {
-            return None;
-        }
-        let c = dir.join(&name);
-        if !c.is_file() || (me.is_some() && std::fs::canonicalize(&c).ok() == me) {
-            return None;
-        }
-        Some(c)
-    })
+    crate::shim::real_program(GH, path)
 }
 
 /// `gh <args>` in a run: the real `gh` with the person's token for this one command.
 pub fn gh_main(args: Vec<String>) -> i32 {
+    // A run with gated actions: `gh` is one of its shims too (crate::shim).
+    if let Err(code) = crate::shim::gate(GH, &args) {
+        return code;
+    }
     let as_person = std::env::var(ENV_AS).ok().filter(|s| !s.is_empty());
     if let Some(name) = &as_person
         && args.first().map(String::as_str) == Some("auth")
@@ -855,6 +843,7 @@ mod tests {
         let exe = |d: &Path, n: &str| {
             let p = d.join(format!("{n}{}", std::env::consts::EXE_SUFFIX));
             std::fs::write(&p, b"x").unwrap();
+            crate::sys::set_mode(&p, 0o755).unwrap();
             p
         };
         exe(&tools, "chat-run");

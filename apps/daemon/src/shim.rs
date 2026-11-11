@@ -1,0 +1,890 @@
+//! Shims for gated actions (docs/machine-protocol.md "Gated actions", "Shims"; audit rows 盯
+//! 2.1 and 2.2 of docs/plans/usable/harness-supervise.zh.md).
+//!
+//! The runtime's own gate (Claude Code's hook, Codex's and ACP's approval requests) sees the
+//! command line as the CLI wrote it. A line the patterns do not know (`git -C . push origin
+//! main`, a plain `git push` while `main` is checked out, `B=main; git push origin HEAD:$B`, a
+//! deploy inside `bash deploy.sh` or a package script) would get through. So a run with gates
+//! gets a folder of shims first on its `PATH`: links to this binary named like the programs the
+//! kinds are about ([`NAMES`]). A shim asks the daemon (`gate.check {via: "shim"}`) about this
+//! one invocation and then starts the real program, or refuses. What it sends is decided on the
+//! parsed program and arguments and on the facts, not on the text of a shell line: the
+//! arguments as the program got them (the shell already put in variables), plus for `git push`
+//! the remote branches it would really update, and for `npm`/`pnpm`/`yarn`/`bun run` the
+//! package script it runs ([`check_text`]). The same patterns then decide.
+//!
+//! This guards against mistakes, not against a member set on getting around it: a program
+//! started by its full path, or a login shell that puts its own folders before the shims, is
+//! not seen. The floor is the repository's branch protection and the production
+//! environment's own approval.
+
+use serde_json::{Value, json};
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+/// The programs that get a shim: the ones the default kinds name.
+pub const NAMES: &[&str] = &[
+    "git", "gh", "wrangler", "npm", "npx", "pnpm", "yarn", "bun", "bunx", "cargo", "vercel",
+    "netlify", "fly", "flyctl", "twine", "psql", "mysql", "sqlite3",
+];
+
+/// Set to `1` in a run that has gates: only then does a shim ask the daemon. In a VM the shims
+/// are always on the tools disk; a run without gates has nothing to ask.
+pub const ENV_GATES: &str = "CHAT_RUN_GATES";
+
+/// Claude Code reads this file before each Bash command (`CLAUDE_ENV_FILE`).
+pub const CLAUDE_ENV_FILE: &str = "CLAUDE_ENV_FILE";
+
+/// The shim `argv0` names, if any.
+pub fn started_as(argv0: &OsStr) -> Option<&'static str> {
+    NAMES
+        .iter()
+        .copied()
+        .find(|n| crate::chat_run::started_as(argv0, n))
+}
+
+/// True for a folder of a run's tools (where `chat-run` is, or the VM's tools folder).
+fn tools_dir(dir: &Path) -> bool {
+    dir.as_os_str().is_empty()
+        || dir == Path::new(crate::github::GUEST_BIN)
+        || dir.join(crate::chat_run::link_name()).exists()
+}
+
+/// The real `name` on `path`: not in a folder of the run's tools and not this program. On
+/// Windows a name gets the extensions of `PATHEXT`.
+pub fn real_program(name: &str, path: &OsStr) -> Option<PathBuf> {
+    let me = std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::canonicalize(p).ok());
+    let names = if cfg!(windows) {
+        crate::health::windows_names(name, &std::env::var("PATHEXT").unwrap_or_default())
+    } else {
+        vec![name.to_string()]
+    };
+    std::env::split_paths(path)
+        .filter(|d| !tools_dir(d))
+        .flat_map(|d| names.iter().map(move |n| d.join(n)).collect::<Vec<_>>())
+        .find(|c| {
+            crate::sys::is_executable(c) && (me.is_none() || std::fs::canonicalize(c).ok() != me)
+        })
+}
+
+/// Links `bin/<name>` to this binary (a hard link or a copy on Windows).
+pub fn link(bin: &Path, name: &str) -> std::io::Result<()> {
+    let link = bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    let _ = std::fs::remove_file(&link);
+    let exe = crate::chat_run::exe()?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(exe, &link)?;
+    #[cfg(not(unix))]
+    if std::fs::hard_link(&exe, &link).is_err() {
+        std::fs::copy(&exe, &link)?;
+    }
+    Ok(())
+}
+
+/// Puts a shim into the run's tools folder `bin` for each of [`NAMES`] that is on `path` (a
+/// program the machine does not have stays missing, so `command -v vercel` still says so).
+/// Returns the names linked.
+pub fn install(bin: &Path, path: &OsStr) -> std::io::Result<Vec<&'static str>> {
+    let mut done = vec![];
+    for name in NAMES {
+        if real_program(name, path).is_some() {
+            link(bin, name)?;
+            done.push(*name);
+        }
+    }
+    Ok(done)
+}
+
+/// Writes `<run folder>/.claude-env.sh`, which puts `bin` first on `PATH` again: Claude Code
+/// runs a Bash command with the `PATH` of the user's shell, whose profile may put other
+/// folders first. Returns the file for [`CLAUDE_ENV_FILE`].
+pub fn claude_env_file(run_dir: &Path, bin: &str) -> std::io::Result<PathBuf> {
+    let file = run_dir.join(".claude-env.sh");
+    let quoted = format!("'{}'", bin.replace('\'', r"'\''"));
+    std::fs::write(&file, format!("export PATH={quoted}:\"$PATH\"\n"))?;
+    Ok(file)
+}
+
+// --- What a shim asks about. ------------------------------------------------------------------
+
+/// One argument as a word of the line the patterns match: the separators that split a shell
+/// line into commands become spaces, so one invocation stays one command.
+fn word(a: &str) -> String {
+    a.chars()
+        .map(|c| {
+            if matches!(c, '\n' | '\r' | ';' | '|' | '&') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+fn line(program: &str, args: &[String]) -> String {
+    std::iter::once(program.to_string())
+        .chain(args.iter().map(|a| word(a)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What a shim sends as `command` for `name args` run in `cwd`: the invocation as plain words,
+/// then the facts, one line each. `git` is the real git (for the facts of `git push`).
+pub fn check_text(name: &str, args: &[String], cwd: &Path, git: Option<&Path>) -> String {
+    let mut lines = vec![line(name, args)];
+    match name {
+        "git" => {
+            if let Some(bin) = git {
+                lines.extend(git_lines(bin, cwd, args));
+            }
+        }
+        "npm" | "pnpm" | "yarn" | "bun" => lines.extend(script_lines(name, args, cwd)),
+        _ => {}
+    }
+    let mut seen = std::collections::HashSet::new();
+    lines.retain(|l| seen.insert(l.clone()));
+    lines.join("\n")
+}
+
+/// Git's options before the subcommand that take the next argument as their value.
+const GIT_VALUE_OPTS: &[&str] = &[
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--config-env",
+];
+
+/// Git's own commands: an alias cannot have their names, so these are never looked up.
+const GIT_BUILTINS: &[&str] = &[
+    "add",
+    "am",
+    "apply",
+    "bisect",
+    "blame",
+    "branch",
+    "cat-file",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "clone",
+    "commit",
+    "config",
+    "describe",
+    "diff",
+    "fetch",
+    "for-each-ref",
+    "format-patch",
+    "fsck",
+    "gc",
+    "grep",
+    "hash-object",
+    "help",
+    "init",
+    "log",
+    "ls-files",
+    "ls-remote",
+    "ls-tree",
+    "merge",
+    "merge-base",
+    "mv",
+    "notes",
+    "pull",
+    "push",
+    "rebase",
+    "reflog",
+    "remote",
+    "reset",
+    "restore",
+    "rev-list",
+    "rev-parse",
+    "revert",
+    "rm",
+    "send-pack",
+    "shortlog",
+    "show",
+    "stash",
+    "status",
+    "submodule",
+    "switch",
+    "symbolic-ref",
+    "tag",
+    "update-index",
+    "update-ref",
+    "version",
+    "worktree",
+];
+
+/// The real git with the invocation's own options before the subcommand (`-C`, `-c`,
+/// `--git-dir`), so it reads the same repository and config.
+struct Git<'a> {
+    bin: &'a Path,
+    cwd: &'a Path,
+    globals: Vec<String>,
+}
+
+impl Git<'_> {
+    fn out(&self, args: &[&str]) -> Option<String> {
+        let out = Command::new(self.bin)
+            .current_dir(self.cwd)
+            .args(&self.globals)
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    fn config(&self, key: &str) -> Option<String> {
+        self.out(&["config", "--get", key])
+            .filter(|v| !v.is_empty())
+    }
+
+    fn config_all(&self, key: &str) -> Vec<String> {
+        self.out(&["config", "--get-all", key])
+            .map(|v| v.lines().map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    /// The checked-out branch, None when HEAD is detached.
+    fn branch(&self) -> Option<String> {
+        self.out(&["symbolic-ref", "-q", "HEAD"])?
+            .strip_prefix("refs/heads/")
+            .map(str::to_string)
+    }
+
+    fn branches(&self) -> Vec<String> {
+        self.out(&["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+            .map(|v| v.lines().map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+}
+
+/// Splits git's arguments into the options before the subcommand, the subcommand and the rest.
+fn split_git(args: &[String]) -> (Vec<String>, Option<String>, Vec<String>) {
+    let mut globals = vec![];
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        if !a.starts_with('-') || a == "--" {
+            break;
+        }
+        globals.push(a.clone());
+        if GIT_VALUE_OPTS.contains(&a.as_str())
+            && let Some(v) = args.get(i + 1)
+        {
+            globals.push(v.clone());
+            i += 1;
+        }
+        i += 1;
+    }
+    (
+        globals,
+        args.get(i).cloned(),
+        args.get(i + 1..).unwrap_or_default().to_vec(),
+    )
+}
+
+/// The facts lines of a git invocation: the command without its options before the
+/// subcommand and with aliases put in (`git push …`), and for a push one line per remote
+/// branch it updates, `git push <remote> <source>:refs/heads/<branch>` (a deletion has no
+/// source).
+fn git_lines(bin: &Path, cwd: &Path, args: &[String]) -> Vec<String> {
+    let (globals, sub, mut rest) = split_git(args);
+    let Some(mut sub) = sub else {
+        return vec![];
+    };
+    let git = Git { bin, cwd, globals };
+    // Aliases (`git p` with `alias.p = push`); one that runs a shell (`!…`) starts git again,
+    // and that git is a shim too.
+    for _ in 0..8 {
+        if GIT_BUILTINS.contains(&sub.as_str()) {
+            break;
+        }
+        let Some(words) = git
+            .config(&format!("alias.{sub}"))
+            .filter(|v| !v.starts_with('!'))
+            .and_then(|v| crate::gates::shell_words(&v))
+            .filter(|w| !w.is_empty())
+        else {
+            break;
+        };
+        sub = words[0].clone();
+        rest = words[1..].iter().cloned().chain(rest).collect();
+    }
+    let mut out = vec![line(
+        "git",
+        &std::iter::once(sub.clone())
+            .chain(rest.clone())
+            .collect::<Vec<_>>(),
+    )];
+    if sub == "push" {
+        out.extend(push_lines(&git, &rest));
+    }
+    out
+}
+
+/// `git push`'s options that take the next argument as their value (when not given with `=`).
+const PUSH_VALUE_OPTS: &[&str] = &["-o", "--push-option", "--repo", "--receive-pack", "--exec"];
+
+/// The remote branches `git push <args>` would update, as facts lines.
+fn push_lines(git: &Git, args: &[String]) -> Vec<String> {
+    let (mut all, mut delete, mut tags) = (false, false, false);
+    let mut repo: Option<String> = None;
+    let mut positional = vec![];
+    let mut i = 0;
+    let mut options = true;
+    while let Some(a) = args.get(i) {
+        i += 1;
+        if !options || !a.starts_with('-') || a == "-" {
+            positional.push(a.clone());
+            continue;
+        }
+        if a == "--" {
+            options = false;
+            continue;
+        }
+        match a.as_str() {
+            "--all" | "--branches" | "--mirror" => all = true,
+            "--delete" => delete = true,
+            "--tags" => tags = true,
+            _ if a.starts_with("--repo=") => repo = Some(a["--repo=".len()..].to_string()),
+            _ if PUSH_VALUE_OPTS.contains(&a.as_str()) => {
+                if a == "--repo" {
+                    repo = args.get(i).cloned();
+                }
+                i += 1;
+            }
+            // Short flags together (`-fu`, `-d`); `-o` takes the rest of the word.
+            _ if !a.starts_with("--") => {
+                let flags = &a[1..];
+                let flags = flags.split('o').next().unwrap_or_default();
+                if flags.contains('d') {
+                    delete = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut positional = positional.into_iter();
+    let branch = git.branch();
+    let remote = positional
+        .next()
+        .or(repo)
+        .or_else(|| {
+            let b = branch.as_deref()?;
+            git.config(&format!("branch.{b}.pushRemote"))
+                .or_else(|| git.config("remote.pushDefault"))
+                .or_else(|| git.config(&format!("branch.{b}.remote")))
+        })
+        .unwrap_or_else(|| "origin".into());
+    let mut specs: Vec<String> = positional.collect();
+    // (source, remote ref) pairs; an empty source deletes.
+    let mut targets: Vec<(String, String)> = vec![];
+    let every_branch = |targets: &mut Vec<(String, String)>| {
+        for b in git.branches() {
+            targets.push((b.clone(), qualify(&b)));
+        }
+    };
+    if all {
+        every_branch(&mut targets);
+    } else if specs.is_empty() && !tags {
+        // No refspec: the remote's configured ones, else `push.default`.
+        let configured = if remote.contains('/') || remote.contains(':') {
+            vec![]
+        } else {
+            git.config_all(&format!("remote.{remote}.push"))
+        };
+        if !configured.is_empty() {
+            specs = configured;
+        } else if let Some(b) = branch.as_deref() {
+            match git.config("push.default").as_deref().unwrap_or("simple") {
+                "nothing" => {}
+                "matching" => every_branch(&mut targets),
+                "upstream" | "tracking" => {
+                    let up = git
+                        .config(&format!("branch.{b}.merge"))
+                        .unwrap_or_else(|| b.to_string());
+                    targets.push(("HEAD".into(), qualify(&up)));
+                }
+                _ => targets.push(("HEAD".into(), qualify(b))),
+            }
+        }
+    }
+    for spec in specs {
+        let spec = spec.strip_prefix('+').unwrap_or(&spec).to_string();
+        if spec.contains('*') {
+            every_branch(&mut targets);
+            continue;
+        }
+        if delete {
+            targets.push((String::new(), qualify(&spec)));
+            continue;
+        }
+        match spec.split_once(':') {
+            Some((src, "")) => {
+                // `src:` pushes to the same name.
+                targets.push((src.to_string(), same_name(src, branch.as_deref())));
+            }
+            Some((src, dst)) => targets.push((src.to_string(), qualify(dst))),
+            None => targets.push((spec.clone(), same_name(&spec, branch.as_deref()))),
+        }
+    }
+    targets
+        .into_iter()
+        .filter(|(_, dst)| !dst.is_empty())
+        .map(|(src, dst)| format!("git push {} {}:{dst}", word(&remote), word(&src)))
+        .collect()
+}
+
+/// The remote ref a refspec without a destination updates: `HEAD` is the checked-out branch.
+fn same_name(src: &str, branch: Option<&str>) -> String {
+    match src {
+        "HEAD" | "@" => branch.map(qualify).unwrap_or_default(),
+        _ => qualify(src),
+    }
+}
+
+/// A destination as a full ref: `main` and `heads/main` are `refs/heads/main`.
+fn qualify(dst: &str) -> String {
+    if dst.starts_with("refs/") {
+        dst.to_string()
+    } else if let Some(rest) = dst.strip_prefix("heads/") {
+        format!("refs/heads/{rest}")
+    } else if dst.is_empty() {
+        String::new()
+    } else {
+        format!("refs/heads/{dst}")
+    }
+}
+
+/// The package scripts `npm run x` (`pnpm x`, `yarn x`, `bun run x`) runs, from the
+/// `package.json` of the folder it runs in: a script's program usually comes from
+/// `node_modules/.bin`, where no shim is.
+fn script_lines(name: &str, args: &[String], cwd: &Path) -> Vec<String> {
+    let dir_opts: &[&str] = match name {
+        "npm" => &["--prefix"],
+        "pnpm" => &["-C", "--dir"],
+        _ => &["--cwd"],
+    };
+    let mut dir = cwd.to_path_buf();
+    let mut positional = vec![];
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        i += 1;
+        if a == "--" {
+            break;
+        }
+        if let Some((k, v)) = a.split_once('=')
+            && dir_opts.contains(&k)
+        {
+            dir = cwd.join(v);
+        } else if dir_opts.contains(&a.as_str()) {
+            if let Some(v) = args.get(i) {
+                dir = cwd.join(v);
+            }
+            i += 1;
+        } else if !a.starts_with('-') {
+            positional.push(a.as_str());
+        }
+    }
+    let script = match positional
+        .iter()
+        .position(|p| matches!(*p, "run" | "run-script"))
+    {
+        Some(at) => positional.get(at + 1).copied(),
+        None if name == "npm" => positional
+            .first()
+            .copied()
+            .filter(|p| matches!(*p, "start" | "stop" | "restart" | "test")),
+        None => positional.first().copied(),
+    };
+    let Some(script) = script else {
+        return vec![];
+    };
+    let Ok(text) = std::fs::read_to_string(dir.join("package.json")) else {
+        return vec![];
+    };
+    let Ok(pkg) = serde_json::from_str::<Value>(&text) else {
+        return vec![];
+    };
+    [
+        format!("pre{script}"),
+        script.to_string(),
+        format!("post{script}"),
+    ]
+    .iter()
+    .filter_map(|s| pkg["scripts"][s].as_str())
+    .map(str::to_string)
+    .collect()
+}
+
+// --- Running a shim. --------------------------------------------------------------------------
+
+/// Asks the daemon whether `name args` may run. Ok: run it. Err: the exit code, after the
+/// reason went to standard error. Outside a gated run nothing is asked.
+pub fn gate(name: &str, args: &[String]) -> Result<(), i32> {
+    if std::env::var(ENV_GATES).ok().as_deref() != Some("1") {
+        return Ok(());
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let git = (name == "git")
+        .then(|| real_program("git", &path))
+        .flatten();
+    let command = check_text(name, args, &cwd, git.as_deref());
+    let answer = ask(json!({ "tool": "shim", "via": crate::gates::VIA_SHIM, "command": command }));
+    match decision(answer) {
+        Ok(()) => Ok(()),
+        Err(why) => {
+            eprintln!("{name}: {why}");
+            Err(1)
+        }
+    }
+}
+
+fn ask(body: Value) -> Result<Value, String> {
+    use crate::chat_run::{ENV_DIR, ENV_SOCKET, call, call_files};
+    let var = |k: &str| std::env::var_os(k).filter(|s| !s.is_empty());
+    let (op, wait) = (crate::gates::OP, crate::gates::HOOK_WAIT);
+    match (var(ENV_SOCKET), var(ENV_DIR)) {
+        (Some(s), _) => call(Path::new(&s), op, body, wait),
+        (None, Some(d)) => call_files(Path::new(&d), op, body, wait),
+        (None, None) => Err(format!("{ENV_SOCKET} is not set")),
+    }
+}
+
+/// The daemon's answer as run (Ok) or refused with the reason the CLI reads. When the daemon
+/// could not be asked the command is refused too, as the hook does
+/// ([`crate::gates::hook_failure`]).
+fn decision(answer: Result<Value, String>) -> Result<(), String> {
+    let why = match answer {
+        Ok(v) if v["ok"] == json!(true) && v["result"]["decision"] == "allow" => return Ok(()),
+        Ok(v) if v["ok"] == json!(true) => {
+            return Err(v["result"]["reason"]
+                .as_str()
+                .unwrap_or("a person declined this command")
+                .to_string());
+        }
+        Ok(v) => v["error"]["message"]
+            .as_str()
+            .unwrap_or("the daemon refused")
+            .to_string(),
+        Err(e) => e,
+    };
+    Err(format!(
+        "this command did not run: the machine could not check whether it needs a person's \
+approval ({why}). Wait a few seconds, then run the same command again."
+    ))
+}
+
+/// A shim's `main`: asks ([`gate`]), then runs the real `name` with `args` (on Unix in place of
+/// this process). Exits like the real program.
+pub fn main(name: &str, args: Vec<String>) -> i32 {
+    if let Err(code) = gate(name, &args) {
+        return code;
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let Some(real) = real_program(name, &path) else {
+        eprintln!("{name}: command not found");
+        return 127;
+    };
+    run(&real, &args)
+}
+
+/// Runs `program args` and returns its exit code (on Unix it replaces this process).
+pub fn run(program: &Path, args: &[String]) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let e = Command::new(program).args(args).exec();
+        eprintln!("{}: {e}", program.display());
+        126
+    }
+    #[cfg(not(unix))]
+    {
+        let launch = crate::health::launch(program);
+        match Command::new(&launch.program)
+            .args(&launch.args)
+            .args(args)
+            .status()
+        {
+            Ok(s) => s.code().unwrap_or(1),
+            Err(e) => {
+                eprintln!("{}: {e}", program.display());
+                126
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gates::Gates;
+    use crate::proto::RunGate;
+
+    fn s(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    fn git_bin() -> PathBuf {
+        crate::health::which("git").expect("git on PATH for the tests")
+    }
+
+    /// A throwaway repository with no remote, on branch `branch`, with one commit.
+    fn repo(branch: &str) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = |args: &[&str]| {
+            let ok = Command::new(git_bin())
+                .current_dir(tmp.path())
+                .args(args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        g(&["init", "-q", "-b", branch]);
+        // The machine's own push.default does not decide the tests.
+        g(&["config", "push.default", "simple"]);
+        g(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ]);
+        tmp
+    }
+
+    fn gates() -> Gates {
+        Gates::new(&[
+            RunGate {
+                kind: "mergeMain".into(),
+                patterns: s(&[
+                    "\\bgh pr merge\\b",
+                    "\\bgit push\\b.*[\\s:](refs/heads/)?(main|master)(\\s|$)",
+                ]),
+            },
+            RunGate {
+                kind: "deployProd".into(),
+                patterns: s(&[
+                    "\\bwrangler (deploy|publish)\\b.*(--env|-e)[ =](prod|production)\\b",
+                ]),
+            },
+        ])
+    }
+
+    fn kind(name: &str, args: &[&str], cwd: &Path) -> Option<String> {
+        let text = check_text(name, &s(args), cwd, Some(&git_bin()));
+        gates().matches(&text).map(str::to_string)
+    }
+
+    /// The bypasses of 盯 2.2 with real git in a repository with no remote: each one is seen
+    /// as the push to main it is.
+    #[test]
+    fn git_push_is_decided_on_the_branch_it_updates() {
+        let on_main = repo("main");
+        let d = on_main.path();
+        // Verification log problem 3, and the spellings the line patterns miss.
+        for args in [
+            &["-C", ".", "push", "origin", "main"][..],
+            &["push"],
+            &["push", "origin"],
+            &["push", "-u", "origin", "HEAD"],
+            &["push", "origin", "HEAD"],
+            &["push", "--force", "origin", "@"],
+            &["-c", "push.default=current", "push"],
+            &["push", "origin", "HEAD:main"],
+            &["push", "origin", "feature:heads/main"],
+            &["push", "origin", "--delete", "main"],
+            &["push", "origin", ":main"],
+            &["push", "--all", "origin"],
+            &["--git-dir=.git", "push"],
+        ] {
+            assert_eq!(
+                kind("git", args, d).as_deref(),
+                Some("mergeMain"),
+                "{args:?}"
+            );
+        }
+        // `B=main; git push origin HEAD:$B`: the shell gives the shim the value.
+        let b = "main";
+        assert_eq!(
+            kind("git", &["push", "origin", &format!("HEAD:{b}")], d).as_deref(),
+            Some("mergeMain")
+        );
+        // An alias for push.
+        Command::new(git_bin())
+            .current_dir(d)
+            .args(["config", "alias.p", "push"])
+            .status()
+            .unwrap();
+        assert_eq!(kind("git", &["p"], d).as_deref(), Some("mergeMain"));
+        // Pushes that leave main alone.
+        for args in [
+            &["push", "origin", "HEAD:claude/x"][..],
+            &["push", "origin", "main:backup-main"],
+            &["push", "--tags"],
+            &["status"],
+            &["log", "--oneline", "main"],
+            &["-c", "push.default=nothing", "push"],
+        ] {
+            assert_eq!(kind("git", args, d), None, "{args:?}");
+        }
+
+        // On a work branch a plain push goes to that branch; naming main still counts.
+        let on_work = repo("claude/m4");
+        let w = on_work.path();
+        assert_eq!(kind("git", &["push"], w), None);
+        assert_eq!(kind("git", &["push", "-u", "origin", "HEAD"], w), None);
+        assert_eq!(
+            kind("git", &["push", "origin", "HEAD:main"], w).as_deref(),
+            Some("mergeMain")
+        );
+        // `git -C <main checkout> push` from anywhere.
+        let main_dir = d.display().to_string();
+        assert_eq!(
+            kind("git", &["-C", &main_dir, "push"], w).as_deref(),
+            Some("mergeMain")
+        );
+        // `branch.<b>.merge` with push.default upstream.
+        Command::new(git_bin())
+            .current_dir(w)
+            .args(["config", "branch.claude/m4.merge", "refs/heads/main"])
+            .status()
+            .unwrap();
+        assert_eq!(
+            kind("git", &["-c", "push.default=upstream", "push"], w).as_deref(),
+            Some("mergeMain")
+        );
+        // A configured remote push refspec.
+        Command::new(git_bin())
+            .current_dir(w)
+            .args(["config", "remote.origin.push", "HEAD:refs/heads/master"])
+            .status()
+            .unwrap();
+        assert_eq!(kind("git", &["push"], w).as_deref(), Some("mergeMain"));
+    }
+
+    #[test]
+    fn package_scripts_and_wrapped_programs_are_seen() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"scripts":{"ship":"bun run build && wrangler deploy --env production","build":"tsc"}}"#,
+        )
+        .unwrap();
+        let d = tmp.path();
+        assert_eq!(
+            kind("npm", &["run", "ship"], d).as_deref(),
+            Some("deployProd")
+        );
+        assert_eq!(
+            kind("bun", &["run", "ship"], d).as_deref(),
+            Some("deployProd")
+        );
+        assert_eq!(kind("pnpm", &["ship"], d).as_deref(), Some("deployProd"));
+        assert_eq!(
+            kind("yarn", &["--silent", "ship"], d).as_deref(),
+            Some("deployProd")
+        );
+        let parent = d.parent().unwrap();
+        let name = d.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            kind("npm", &["--prefix", name, "run", "ship"], parent).as_deref(),
+            Some("deployProd")
+        );
+        assert_eq!(kind("npm", &["run", "build"], d), None);
+        assert_eq!(kind("npm", &["install"], d), None);
+        // `npx wrangler …` and `bunx wrangler …`: the plain line has it.
+        assert_eq!(
+            kind("bunx", &["wrangler", "deploy", "--env", "prod"], d).as_deref(),
+            Some("deployProd")
+        );
+        assert_eq!(
+            kind("gh", &["pr", "merge", "5"], d).as_deref(),
+            Some("mergeMain")
+        );
+        // A separator inside an argument does not make a second command.
+        assert_eq!(
+            check_text("gh", &s(&["issue", "comment", "-b", "a; b\nc"]), d, None),
+            "gh issue comment -b a  b c"
+        );
+    }
+
+    #[test]
+    fn the_answer_decides_and_no_answer_refuses() {
+        assert!(decision(Ok(json!({ "ok": true, "result": { "decision": "allow" } }))).is_ok());
+        let no = decision(Ok(
+            json!({ "ok": true, "result": { "decision": "deny", "reason": "a person declined it" } }),
+        ));
+        assert_eq!(no.unwrap_err(), "a person declined it");
+        for failed in [
+            Err("cannot reach the daemon".to_string()),
+            Ok(json!({ "ok": false, "error": { "message": "x" } })),
+        ] {
+            assert!(
+                decision(failed)
+                    .unwrap_err()
+                    .contains("run the same command again")
+            );
+        }
+    }
+
+    #[test]
+    fn shims_go_only_where_the_program_is_and_skip_the_tools_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tools = tmp.path().join("bin");
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        crate::chat_run::install_link(tmp.path()).unwrap();
+        let exe = format!("wrangler{}", std::env::consts::EXE_SUFFIX);
+        std::fs::write(real.join(&exe), "#!/bin/sh\n").unwrap();
+        crate::sys::set_mode(&real.join(&exe), 0o755).unwrap();
+        let path = std::env::join_paths([tools.clone(), real.clone()]).unwrap();
+        let linked = install(&tools, &path).unwrap();
+        assert_eq!(linked, ["wrangler"]);
+        assert!(tools.join(&exe).exists());
+        assert!(
+            !tools
+                .join(format!("vercel{}", std::env::consts::EXE_SUFFIX))
+                .exists()
+        );
+        // The shim is never its own real program.
+        assert_eq!(real_program("wrangler", &path), Some(real.join(&exe)));
+        assert_eq!(started_as(OsStr::new("/x/bin/wrangler")), Some("wrangler"));
+        assert_eq!(started_as(OsStr::new("/x/bin/chat-run")), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_claude_env_file_puts_the_shims_first_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = claude_env_file(tmp.path(), "/r/it's/bin").unwrap();
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(format!(". '{}'; printf %s \"$PATH\"", f.display()))
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "/r/it's/bin:/usr/bin:/bin"
+        );
+    }
+}

@@ -13,6 +13,10 @@ fn main() {
     if daemon::chat_run::started_as(&argv0, daemon::github::GH) {
         std::process::exit(daemon::github::gh_main(std::env::args().skip(1).collect()));
     }
+    // A shim of a run with gated actions (git, wrangler, …): asks, then runs the real one.
+    if let Some(name) = daemon::shim::started_as(&argv0) {
+        std::process::exit(daemon::shim::main(name, std::env::args().skip(1).collect()));
+    }
     // PID 1 of a run's microVM (the tools disk names it vm-agent).
     if daemon::chat_run::started_as(&argv0, daemon::vm_agent::NAME) {
         std::process::exit(daemon::vm_agent::main());

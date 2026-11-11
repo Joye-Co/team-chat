@@ -652,7 +652,9 @@ pub enum GateAnswer {
 /// like Claude Code's; no match is accepted at once. File changes and requested permissions are
 /// granted at once: an AI member has every permission.
 pub fn gate_answer(method: &str, params: &Value, gates: &crate::gates::Gates) -> GateAnswer {
-    let ask = |line: String, yes: Value, no: Value| match gates.matches(&line) {
+    // Each request is the runtime's next command: shims no longer pass what was approved for
+    // the one before (crate::gates "One decision per action").
+    let ask = |line: String, yes: Value, no: Value| match gates.next_command(&line) {
         Some(_) => GateAnswer::Ask { line, yes, no },
         None => GateAnswer::Now(yes),
     };
