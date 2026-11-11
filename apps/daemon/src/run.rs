@@ -890,6 +890,7 @@ mod tests {
             kind: kind.map(str::to_string),
             resume_session_id: None,
             gates: None,
+            github: None,
         };
         let (w1, g1, n1) = prepare_work(&cfg, &a("r1", None)).await.unwrap();
         assert!(g1.is_some() && n1.is_none());
