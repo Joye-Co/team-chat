@@ -1210,7 +1210,16 @@ impl FontWeight {
     /// Normal (400).
     pub const NORMAL: FontWeight = FontWeight(400.0);
     /// Medium weight (500, higher than normal).
+    ///
+    /// Windows: 499. DirectWrite sends 500 and above up to the next heavier face, and
+    /// Segoe UI and Microsoft YaHei UI have none between Regular and Semibold or Bold, so
+    /// every medium label drew Bold. Just under 500 draws Regular there (and Medium in
+    /// Segoe UI Variable, which has the weight).
+    #[cfg(not(target_os = "windows"))]
     pub const MEDIUM: FontWeight = FontWeight(500.0);
+    /// Medium weight (see the note on the other systems' constant).
+    #[cfg(target_os = "windows")]
+    pub const MEDIUM: FontWeight = FontWeight(499.0);
     /// Semibold weight (600).
     pub const SEMIBOLD: FontWeight = FontWeight(600.0);
     /// Bold weight (700).

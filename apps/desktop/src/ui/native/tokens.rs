@@ -279,6 +279,11 @@ pub const DESTRUCTIVE_FILL: u32 = 0xDC2626FF;
 /// it is now `primary` of the light palette (#171717).
 pub const GRAPHITE: u32 = 0x171717FF;
 
+/// A QR image's modules and its quiet zone: pure black on white in both modes,
+/// since phone cameras read dark-on-light codes (账号 › 在手机上登录).
+pub const QR_INK: u32 = 0x000000FF;
+pub const QR_PAPER: u32 = 0xFFFFFFFF;
+
 impl NativeColors {
     pub fn from_palette(p: &Palette) -> Self {
         Self {

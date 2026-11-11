@@ -701,10 +701,16 @@ impl AdminView {
             .bg(k.admin_window())
             .child(
                 // The traffic lights' row; dragging it moves the window.
+                // Off the Mac the caption strip above holds the window
+                // buttons: only the header's top margin is left here.
                 div()
                     .id("admin-lights")
                     .flex_none()
-                    .h(height::TOOLBAR)
+                    .h(if crate::ui::native::window_chrome::drawn() {
+                        crate::ui::native::tokens::space::S12
+                    } else {
+                        height::TOOLBAR
+                    })
                     .w_full()
                     .on_mouse_down(MouseButton::Left, |e, window, _| {
                         if e.click_count >= 2 {
@@ -872,7 +878,7 @@ impl AdminView {
 
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
-        let active = window.is_window_active();
+        let active = crate::ui::native::emphasized(window);
         let machine_name = self
             .machine()
             .map(|x| x.name.clone())

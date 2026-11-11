@@ -583,6 +583,10 @@ jobs:
         run: cargo clippy --locked -p chat-ffi --all-targets -- -D warnings
         env:
           CARGO_TARGET_DIR: .tmp/target-ios
+      - name: Bridge tests
+        run: cargo test --locked -p chat-ffi
+        env:
+          CARGO_TARGET_DIR: .tmp/target-ios
       - name: Build the bridge, the app and its extensions
         run: apps/ios/build-sim.sh
       - name: chat-core tests in the simulator

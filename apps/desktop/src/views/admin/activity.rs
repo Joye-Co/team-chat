@@ -195,6 +195,8 @@ pub fn sentence(
         }
         "settings.approvals" => (f(m::ACT_RULES, &[]), None),
         "email.sign_in" => (f(m::ACT_EMAIL_SIGN_IN, &[]), None),
+        "password.sign_in" => (f(m::ACT_PASSWORD_SIGN_IN, &[]), None),
+        "qr.sign_in" => (f(m::ACT_QR_SIGN_IN, &[]), None),
         "machine.login.start" => {
             let rt = detail_str(e, "runtime").unwrap_or_default();
             let cli = match rt {
