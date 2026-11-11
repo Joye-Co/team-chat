@@ -87,6 +87,8 @@ if [ -n "$SAME_AS" ]; then
 fi
 if [ "${DAEMON:-1}" = 1 ]; then check "machine daemon installed" test -f "$DIR/$SLUG-daemon.exe"; fi
 printf 'install log:\n'; sed 's/^/      /' "$DIR/install.log" 2>/dev/null || true
+# The installer refuses a Windows older than the one the docs promise (10 version 22H2).
+check "the installer asks for Windows 10 22H2" grep -q '^!define MIN_BUILD 19045$' "$ROOT/scripts/windows/installer.nsi"
 check "install log: version" grep -qx "version $VERSION" <(tr -d '\r' <"$DIR/install.log")
 # The runtime is there already (found) or the bootstrapper put it there (exit 0).
 check "install log: WebView2 runtime" grep -Eq '^webview2 (found [0-9.]+|bootstrapper exit 0)$' <(tr -d '\r' <"$DIR/install.log")
@@ -107,7 +109,9 @@ check "icon resource" is "$(ARG1="$(cygpath -w "$EXE")" \
   ARG2='[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint ExtractIconExW(string file, int index, IntPtr[] large, IntPtr[] small, uint count);' \
   ps_out 'Add-Type -Namespace W -Name Shell -MemberDefinition $env:ARG2; [W.Shell]::ExtractIconExW($env:ARG1, -1, $null, $null, 0) -ge 1')" True
 if [ "${EXPECT_SIGNED:-0}" = 1 ]; then
-  for f in "$EXE" "$DIR/$SLUG-update.exe" "$DIR/uninstall.exe"; do
+  signed=("$EXE" "$DIR/$SLUG-update.exe" "$DIR/uninstall.exe")
+  if [ "${DAEMON:-1}" = 1 ]; then signed+=("$DIR/$SLUG-daemon.exe"); fi
+  for f in "${signed[@]}"; do
     check "signature of $(basename "$f")" is "$(signature_status "$f")" Valid
   done
 fi

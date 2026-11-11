@@ -13,9 +13,10 @@
 #      reports its version; check the files, the registry and that no backup is left;
 #   5. rollback: run the helper with an installer whose app does not finish the update;
 #      the folder must hold B again, byte for byte;
-#      interruption: kill the helper while the install folder is empty (the old files are
-#      in the backup, the installer has not run), check that the recovery is registered
-#      for the next sign-in, run it, and find B again, byte for byte;
+#      interruption: kill the helper at each of the six points an update goes through,
+#      check each time that the recovery is registered for the next sign-in, run that
+#      registered command as the sign-in would, and find B again, byte for byte; once with
+#      the dead helper's process id belonging to another live program;
 #   6. with EXPECT_SIGNED=1 (installers signed by one certificate): the helper must refuse a
 #      changed installer and a program of another publisher;
 #   7. uninstall and check that nothing is left.
@@ -347,54 +348,100 @@ if compgen -G "$BACKUPS*" >/dev/null; then fail "a backup folder is left after t
 [ "$(jq -r .version "$WORK/after-rollback.json")" = "$B" ] || fail "the app after the rollback is not $B"
 log "ok: a version that does not start is rolled back to $B"
 
-# Interruption: the helper is killed while the install folder holds no app (the old files
-# are in the backup and the installer has not run), as a sign-out or a power cut would
-# leave it. The helper is held at that step for the kill (UPDATE_HELPER_TEST_PAUSE_AT), which
-# only a helper built with the test-pause feature obeys: the installed one has no such switch.
-log "interrupted update"
+# Interruption: the helper is killed at every point of an update where a sign-out or a power
+# cut can catch it, and each time what Windows would do at the next sign-in puts version B
+# back. The helper is held at the step for the kill (UPDATE_HELPER_TEST_PAUSE_AT), which only
+# a helper built with the test-pause feature obeys: the installed one has no such switch.
+#
+#   journaled   the journal is written, no file has moved
+#   moved-one   one old file is in the backup, the rest in the install folder
+#   moved       the install folder holds no app, the installer has not run
+#   installed   the installer has written the new version, nothing started it
+#   marker      the journal says "started", the new version was not started yet
+#   started     the new version runs and has not confirmed the update
+#
+# The sign-in is stood in for, a runner cannot sign out and in again: the test reads the
+# command Windows keeps under RunOnce, removes the entry as Windows does before it runs it,
+# and runs exactly that command line.
 if grep -qa UPDATE_HELPER_TEST_PAUSE_AT "$HELPER"; then fail "the installed update helper holds the test's pause switch"; fi
 PAUSE="$WORK/helper-pause.exe"
 cp "$PAUSE_HELPER" "$PAUSE"
-mkdir -p "$WORK/kill"
-JOURNAL="$WORK/kill/update-journal.json"
 KEEP=()
 if [ "${DAEMON:-1}" = 1 ]; then KEEP=(--keep "$SLUG-daemon.exe"); fi
-UPDATE_HELPER_TEST_PAUSE_AT=moved "$PAUSE" --installer "$(m "$A_SETUP")" --sha256 "$(sha "$A_SETUP")" \
-  --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
-  --app-exe "$NAME.exe" --version "$A" --marker "$(m "$WORK/kill/pending.json")" \
-  --result "$(m "$WORK/kill/result.json")" --log "$(m "$WORK/kill/update.log")" \
-  --uninstall-key "$KEY" ${KEEP[@]+"${KEEP[@]}"} --launch-arg --selftest-installed &
-HELPER_PID=$!
-for _ in $(seq 1 240); do
-  [ "$(jq -r .stage "$JOURNAL" 2>/dev/null)" = installing ] && break
-  sleep 0.5
+# reached <stage> <dir>: whether the paused helper is at that step.
+reached() {
+  local journal="$2/update-journal.json" stage
+  stage="$(jq -r .stage "$journal" 2>/dev/null || true)"
+  case "$1" in
+    journaled) [ "$stage" = moving ] ;;
+    moved-one) [ "$stage" = moving ] && [ -n "$(ls -A "${BACKUPS}test" 2>/dev/null)" ] ;;
+    moved) [ "$stage" = installing ] && grep -q "old files moved to the backup" "$2/update.log" 2>/dev/null ;;
+    installed) grep -q "installer finished" "$2/update.log" 2>/dev/null ;;
+    marker) [ "$stage" = started ] && [ -f "$2/pending.json" ] ;;
+    started) grep -q "new version started" "$2/update.log" 2>/dev/null ;;
+  esac
+}
+for STAGE in journaled moved-one moved installed marker started; do
+  log "interrupted update: the helper is killed at '$STAGE'"
+  K="$WORK/kill-$STAGE"
+  mkdir -p "$K"
+  JOURNAL="$K/update-journal.json"
+  UPDATE_HELPER_TEST_PAUSE_AT="$STAGE" "$PAUSE" --installer "$(m "$A_SETUP")" --sha256 "$(sha "$A_SETUP")" \
+    --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
+    --app-exe "$NAME.exe" --version "$A" --marker "$(m "$K/pending.json")" \
+    --result "$(m "$K/result.json")" --log "$(m "$K/update.log")" \
+    --uninstall-key "$KEY" ${KEEP[@]+"${KEEP[@]}"} --launch-arg --selftest-installed &
+  HELPER_PID=$!
+  for _ in $(seq 1 360); do
+    reached "$STAGE" "$K" && break
+    sleep 0.5
+  done
+  reached "$STAGE" "$K" || { show_log "$K/update.log"; fail "the helper did not reach '$STAGE'"; }
+  sleep 1
+  HELPER_WINPID="$(cat "/proc/$HELPER_PID/winpid")"
+  run_native taskkill /F /PID "$HELPER_WINPID" >/dev/null
+  wait "$HELPER_PID" 2>/dev/null || true
+  [ -f "$JOURNAL" ] || fail "the kill at '$STAGE' left no journal"
+  case "$STAGE" in
+    moved)
+      # What the user would find: no app, the old files hidden next to the install folder.
+      [ ! -e "$EXE" ] || fail "the app is still in the install folder at the kill"
+      [ -f "${BACKUPS}test/$NAME.exe" ] || fail "the old app is not in the backup" ;;
+    installed | marker | started)
+      [ "$(product_version "$EXE")" = "$A" ] || fail "at '$STAGE' the install folder does not hold the new version" ;;
+  esac
+  # Windows runs this at the next sign-in.
+  REGISTERED="$(reg_value "$RUN_ONCE" "$RECOVERY")"
+  case "$REGISTERED" in
+    *"$(cygpath -w "$PAUSE")"*"--recover"*"update-journal.json"*) ;;
+    *) fail "at '$STAGE' the recovery is not registered for the next sign-in: '$REGISTERED'" ;;
+  esac
+  if [ "$STAGE" = moved ]; then
+    # After a restart of the computer the dead helper's process id may be any program's.
+    # The journal then names a live process that is not the helper (here: the local
+    # server's), and the recovery must still go ahead.
+    OTHER="$(cat "/proc/$WRANGLER_PID/winpid")"
+    jq --argjson pid "$OTHER" '.helper_pid = $pid' "$JOURNAL" >"$JOURNAL.edit" && mv "$JOURNAL.edit" "$JOURNAL"
+    log "the journal now names process $OTHER, which lives and is not the helper"
+  fi
+  # The sign-in: Windows removes the entry, then runs its command line.
+  ARG1="HKCU:\\$RUN_ONCE" ARG2="$RECOVERY" ps_out 'Remove-ItemProperty -LiteralPath $env:ARG1 -Name $env:ARG2'
+  ARG1="$REGISTERED" ps_out '$p = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /s /c `"$($env:ARG1)`"" -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode' ||
+    { show_log "$K/update.log"; fail "the recovery at '$STAGE' failed"; }
+  show_log "$K/update.log"
+  [ "$(snapshot)" = "$BEFORE" ] || { ls -la "$DIR" >&2; fail "after the kill at '$STAGE' the install folder is not what it was before the update"; }
+  [ "$(reg_value "$KEY" DisplayVersion)" = "$B" ] || fail "Windows shows $(reg_value "$KEY" DisplayVersion) after the recovery at '$STAGE'"
+  [ ! -e "$JOURNAL" ] || fail "the journal is left after the recovery at '$STAGE'"
+  [ ! -e "$K/pending.json" ] || fail "the marker is left after the recovery at '$STAGE'"
+  [ -z "$(reg_value "$RUN_ONCE" "$RECOVERY")" ] || fail "the recovery is still registered after it ended ('$STAGE')"
+  if compgen -G "$BACKUPS*" >/dev/null; then fail "a backup folder is left after the recovery at '$STAGE'"; fi
+  "$EXE" --selftest-installed --report "$(m "$K/after-recovery.json")" || fail "the app does not start after the recovery at '$STAGE'"
+  [ "$(jq -r .version "$K/after-recovery.json")" = "$B" ] || fail "the app after the recovery at '$STAGE' is not $B"
+  # A second run finds nothing to do.
+  "$PAUSE" --recover "$(cygpath -w "$JOURNAL")" || fail "a second recovery failed"
+  [ "$(snapshot)" = "$BEFORE" ] || fail "a second recovery changed the install folder"
+  log "ok: an update killed at '$STAGE' is undone by the recovery"
 done
-[ "$(jq -r .stage "$JOURNAL" 2>/dev/null)" = installing ] || { show_log "$WORK/kill/update.log"; fail "the helper did not reach the installer step"; }
-run_native taskkill /F /PID "$(cat "/proc/$HELPER_PID/winpid")" >/dev/null
-wait "$HELPER_PID" 2>/dev/null || true
-# What the user would find: no app, the old files hidden next to the install folder.
-[ ! -e "$EXE" ] || fail "the app is still in the install folder at the kill"
-[ -f "${BACKUPS}test/$NAME.exe" ] || fail "the old app is not in the backup"
-[ -f "$JOURNAL" ] || fail "the kill left no journal"
-# Windows runs this at the next sign-in.
-REGISTERED="$(reg_value "$RUN_ONCE" "$RECOVERY")"
-case "$REGISTERED" in
-  *"$(cygpath -w "$PAUSE")"*"--recover"*"update-journal.json"*) ;;
-  *) fail "the recovery is not registered for the next sign-in: '$REGISTERED'" ;;
-esac
-"$PAUSE" --recover "$(cygpath -w "$JOURNAL")" || fail "the recovery failed"
-show_log "$WORK/kill/update.log"
-[ "$(snapshot)" = "$BEFORE" ] || { ls -la "$DIR" >&2; fail "the install folder is not what it was before the interrupted update"; }
-[ "$(reg_value "$KEY" DisplayVersion)" = "$B" ] || fail "Windows shows $(reg_value "$KEY" DisplayVersion) after the recovery"
-[ ! -e "$JOURNAL" ] || fail "the journal is left after the recovery"
-[ -z "$(reg_value "$RUN_ONCE" "$RECOVERY")" ] || fail "the recovery is still registered"
-if compgen -G "$BACKUPS*" >/dev/null; then fail "a backup folder is left after the recovery"; fi
-"$EXE" --selftest-installed --report "$(m "$WORK/after-recovery.json")" || fail "the app does not start after the recovery"
-[ "$(jq -r .version "$WORK/after-recovery.json")" = "$B" ] || fail "the app after the recovery is not $B"
-# A second run finds nothing to do.
-"$PAUSE" --recover "$(cygpath -w "$JOURNAL")" || fail "a second recovery failed"
-[ "$(snapshot)" = "$BEFORE" ] || fail "a second recovery changed the install folder"
-log "ok: an update killed with an empty install folder is undone by the recovery"
 
 # A changed installer is refused before anything moves.
 RC="$("$HELPER" --installer "$(m "$A_SETUP")" --sha256 "$(printf '0%.0s' $(seq 1 64))" \

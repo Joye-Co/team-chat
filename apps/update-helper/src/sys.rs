@@ -116,6 +116,29 @@ impl Sys for Os {
         }
     }
 
+    #[cfg(windows)]
+    fn started(&self, pid: u32) -> Option<u64> {
+        use windows::Win32::{
+            Foundation::{CloseHandle, FILETIME},
+            System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        };
+        // SAFETY: the handle is used only here and closed before returning; the four
+        // FILETIMEs are plain out values.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+            let (mut made, mut exit, mut kernel, mut user) = (
+                FILETIME::default(),
+                FILETIME::default(),
+                FILETIME::default(),
+                FILETIME::default(),
+            );
+            let read = GetProcessTimes(handle, &mut made, &mut exit, &mut kernel, &mut user);
+            let _ = CloseHandle(handle);
+            read.ok()?;
+            Some((u64::from(made.dwHighDateTime) << 32) | u64::from(made.dwLowDateTime))
+        }
+    }
+
     #[cfg(not(windows))]
     fn wait_exit(&self, pid: u32, timeout: Duration) -> bool {
         let deadline = std::time::Instant::now() + timeout;
