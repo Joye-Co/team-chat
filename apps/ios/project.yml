@@ -67,7 +67,7 @@ targets:
         DefaultServer: $(DEFAULT_SERVER)
         # 扫电脑上的码 (sign-in by QR code) and 打开时用面容解锁.
         NSCameraUsageDescription: 用来扫电脑上的二维码登录。
-        NSFaceIDUsageDescription: 用面容确认是你本人。
+        NSFaceIDUsageDescription: 解锁应用和批准不能撤回的事情时，用面容确认是你本人。
     entitlements:
       path: Generated/Mobile.entitlements
       properties:

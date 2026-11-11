@@ -15,6 +15,7 @@ use chat_core::{
 use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
+mod cards;
 mod devices;
 mod files;
 mod pages;
@@ -26,6 +27,7 @@ pub use auth::{
     password_sign_in, qr_claim, qr_poll, qr_request, redeem_invite, request_email_code,
     sign_in_qr_text,
 };
+pub use cards::{CardRecord, HandOffPlace, HomeData, HomeItem};
 pub use devices::{DeviceItem, OfferState, PasswordState, SignInOffer, device_kind};
 pub use pages::*;
 pub use push::{
