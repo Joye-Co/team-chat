@@ -227,6 +227,8 @@ impl SettingsView {
                 cx,
             )
         });
+        // The board follows the signed-in person itself: this window outlives an account
+        // change, and before sign-in it reads nothing.
         let mine = cx.new(|cx| {
             crate::views::memory::MemoryBoard::new(
                 services.clone(),

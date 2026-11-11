@@ -74,6 +74,8 @@ pub struct MemoryBoard {
     folded: bool,
     /// An owner learned that the server has no AI 服务.
     ai_off: bool,
+    /// A person's board while nobody is signed in: it reads and shows nothing.
+    signed_out: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -89,9 +91,11 @@ impl MemoryBoard {
             &services.hub,
             |this: &mut Self, _, changes: &Changes, cx| {
                 // Who may write follows my level; 我的约定 follows who uses the server.
+                // 我的偏好 is the signed-in person's, also after a change of account.
                 if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                    let rescoped = this.rescope();
                     let folded = this.single_user();
-                    if folded != this.folded {
+                    if rescoped || folded != this.folded {
                         this.folded = folded;
                         this.load(cx);
                     }
@@ -113,8 +117,10 @@ impl MemoryBoard {
             show_retired: false,
             folded: false,
             ai_off: false,
+            signed_out: false,
             _subscriptions: subscriptions,
         };
+        this.rescope();
         this.folded = this.single_user();
         this.load(cx);
         this
@@ -122,6 +128,27 @@ impl MemoryBoard {
 
     pub fn scope(&self) -> &MemoryScope {
         &self.scope
+    }
+
+    /// Points a person's board at whoever is signed in now ([`model::scope_for`]); true
+    /// when what it reads changed, and then what it showed is dropped.
+    fn rescope(&mut self) -> bool {
+        let me = self.services.me();
+        let (scope, signed_out) = match model::scope_for(&self.scope, me.as_deref()) {
+            Some(s) => (s, false),
+            None => (self.scope.clone(), true),
+        };
+        if scope == self.scope && signed_out == self.signed_out {
+            return false;
+        }
+        self.scope = scope;
+        self.signed_out = signed_out;
+        self.memories = None;
+        self.day = None;
+        self.busy.clear();
+        self.failure = None;
+        self.ai_off = false;
+        true
     }
 
     /// True when one person uses the server. Before the first sync the cache holds only
@@ -185,6 +212,11 @@ impl MemoryBoard {
     pub fn load(&mut self, cx: &mut Context<Self>) {
         self.generation += 1;
         let generation = self.generation;
+        if self.signed_out {
+            self.loading = false;
+            cx.notify();
+            return;
+        }
         self.loading = true;
         let p = &self.services.provider;
         let reads: Vec<_> = self
@@ -250,7 +282,9 @@ impl MemoryBoard {
 
     /// 记一条 shows: I write the board, and a group's board is not folded away.
     fn adds(&self) -> bool {
-        self.writer() && !(self.folded && matches!(self.scope, MemoryScope::Group(_)))
+        !self.signed_out
+            && self.writer()
+            && !(self.folded && matches!(self.scope, MemoryScope::Group(_)))
     }
 
     fn name_of(&self, id: &str) -> String {
@@ -878,6 +912,9 @@ impl MemoryBoard {
     /// the loading, failed or empty state.
     fn body(&self, writer: bool, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut out: Vec<AnyElement> = Vec::new();
+        if self.signed_out {
+            return out;
+        }
         out.extend(self.failure_alert(cx));
         out.extend(self.ai_off_notice(cx));
         let memories = match &self.memories {

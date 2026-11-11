@@ -41,6 +41,18 @@ pub fn single_user(members: &[Member]) -> bool {
         == 1
 }
 
+/// The scope a board reads once the signed-in person is `me`: a person's board (我的偏好,
+/// 我的约定) is always the signed-in person's, so it follows a change of account; every
+/// other scope stays. `None` while nobody is signed in: the board reads nothing.
+pub fn scope_for(scope: &MemoryScope, me: Option<&str>) -> Option<MemoryScope> {
+    match scope {
+        MemoryScope::Person(_) => me
+            .filter(|id| !id.is_empty())
+            .map(|id| MemoryScope::Person(id.to_string())),
+        other => Some(other.clone()),
+    }
+}
+
 /// Where 记一条 in 我的约定 keeps a memory: 偏好 is mine; 约定 and 事实 are the team's while
 /// I may write the team, else mine as well.
 pub fn folded_scope(kind: MemoryKind, me: &str, team_writer: bool) -> MemoryScope {
@@ -297,6 +309,31 @@ mod tests {
             deactivated: false,
             online: true,
             character: None,
+        }
+    }
+
+    #[test]
+    fn a_person_board_follows_the_signed_in_person() {
+        let mine = MemoryScope::Person("old".into());
+        assert_eq!(
+            scope_for(&mine, Some("new")),
+            Some(MemoryScope::Person("new".into()))
+        );
+        assert_eq!(scope_for(&mine, Some("old")), Some(mine.clone()));
+        // Signed out, or opened before sign-in: nothing to read, never `person:`.
+        assert_eq!(scope_for(&mine, None), None);
+        assert_eq!(
+            scope_for(&MemoryScope::Person(String::new()), Some("")),
+            None
+        );
+        // Other boards keep their scope across an account change.
+        for s in [
+            MemoryScope::Team,
+            MemoryScope::Member("b1".into()),
+            MemoryScope::Group("g1".into()),
+        ] {
+            assert_eq!(scope_for(&s, Some("new")), Some(s.clone()));
+            assert_eq!(scope_for(&s, None), Some(s));
         }
     }
 
