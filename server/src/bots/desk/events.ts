@@ -10,6 +10,7 @@ import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
+import { TOOL_STALL_MS } from "../../agent/supervise";
 import { retroAfterRun } from "../../memory/retro";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
@@ -59,6 +60,13 @@ export abstract class DeskEvents extends DeskRuns {
     });
   }
 
+  private openTools(r: RunRow, n: number): void {
+    const next = Math.max(0, n);
+    if (next === r.open_tools) return;
+    this.sql.exec("UPDATE runs SET open_tools = ? WHERE id = ?", next, r.id);
+    r.open_tools = next;
+  }
+
   protected async apply(r: RunRow, frames: SeqFrame[]): Promise<void> {
     const progress = new Progress(r.progress_text, JSON.parse(r.items) as Record<string, string>, r.progress_full === 1);
     const now = Date.now();
@@ -68,7 +76,8 @@ export abstract class DeskEvents extends DeskRuns {
     const progressed = frames.some((f) => f.t !== "run.event" || !isStallStatus(f.event));
     const stallReported = frames.some((f) => f.t === "run.event" && isStallStatus(f.event) && (f.event as { state?: unknown }).state === "stalled");
     if (!progressed) {
-      if (stallReported) await this.markStalled(r);
+      // A daemon that reports a stall while the CLI waits for a long step (a test run): not yet.
+      if (stallReported && !(r.open_tools > 0 && now - r.last_event_at < TOOL_STALL_MS)) await this.markStalled(r);
       return;
     }
     this.sql.exec("UPDATE runs SET last_event_at = ?, nudged = 0 WHERE id = ?", now, r.id);
@@ -99,6 +108,10 @@ export abstract class DeskEvents extends DeskRuns {
         case "tool.call":
           progress.tool(String(ev.title || ev.tool || ""));
           await this.watchTool(r, String(ev.title || ev.tool || ""));
+          this.openTools(r, r.open_tools + 1);
+          break;
+        case "tool.result":
+          this.openTools(r, r.open_tools - 1);
           break;
         case "approval.request": {
           await this.flush(r, progress);
@@ -129,6 +142,7 @@ export abstract class DeskEvents extends DeskRuns {
             this.sql.exec("UPDATE runs SET in_turn = ? WHERE id = ?", inTurn, r.id);
             r.in_turn = inTurn;
           }
+          if (inTurn === 0) this.openTools(r, 0);
           break;
         }
         case "output":

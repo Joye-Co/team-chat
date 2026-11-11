@@ -69,6 +69,37 @@ describe("supervise", () => {
     c.close();
   });
 
+  it("leaves a run alone while it waits for a long step, and nudges it only when it is silent between steps", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.event(a.runId, { type: "tool.call", itemId: "t1", tool: "bash", title: "bun run test" }));
+
+    // A 12 minute test run: no nudge, no restart, and the daemon's own stall report does not count.
+    await silence(w.bot.id, a.runId, STALL_MS + 2 * 60_000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await d.acked(a.runId, d.event(a.runId, { type: "status", state: "stalled", message: "no output for 5 minutes" }));
+    expect(d.frames.filter((f) => (f.t === "run.input" || f.t === "run.cancel") && f.runId === a.runId)).toHaveLength(0);
+    const row = () =>
+      runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) =>
+        state.storage.sql.exec<{ status: string; stalled: number; open_tools: number }>("SELECT status, stalled, open_tools FROM runs WHERE id = ?", a.runId).one(),
+      );
+    expect(await row()).toEqual({ status: "running", stalled: 0, open_tools: 1 });
+
+    // The step is over and the CLI says nothing more: now it is silent.
+    await d.acked(a.runId, d.event(a.runId, { type: "tool.result", itemId: "t1", ok: true }));
+    expect((await row()).open_tools).toBe(0);
+    await silence(w.bot.id, a.runId, NUDGE_MS + 1000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await d.next((f) => f.t === "run.input" && f.runId === a.runId && String(f.inputId).startsWith("desk-nudge-"));
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
+    d.close();
+    c.close();
+  });
+
   it("reminds a run that repeats a step, continues a promise without work, and answers progress itself", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken, {});

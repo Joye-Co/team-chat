@@ -5,6 +5,8 @@ import { cut } from "../bots/dispatch";
 
 /** A run silent this long gets one nudge (run.input). */
 export const NUDGE_MS = 5 * 60_000;
+/** A run whose CLI waits for a step it started (a build, a test run) is working, not silent: no nudge, and it counts as stuck only after this long. */
+export const TOOL_STALL_MS = 30 * 60_000;
 /** The same tool call this many times in a row is a loop: one reminder. */
 export const LOOP_LIMIT = 4;
 /** The desk fixes a run by itself at most this often (nudge, loop reminder, restart, continue); then it tells people once. */
@@ -16,7 +18,7 @@ export const MAX_AUTO_CONTINUE = 3;
 
 /** What the CLI reads when the desk nudges it (developer words are fine: the CLI reads them). */
 export const NUDGE_TEXT =
-  "[team-chat] No progress for 5 minutes. Say in one line what you are doing or where you are stuck, then go on. If the current approach does not work, try another one.";
+  "[team-chat] No progress for 5 minutes. This is an automatic check, not a message from a person: do not answer it in your reply to people. If you are stuck, try another approach; if you are done, give your final answer now.";
 export const LOOP_TEXT = (title: string) =>
   `[team-chat] You ran the same step ${LOOP_LIMIT} times in a row (${cut(title, 120)}). It is not getting anywhere: stop repeating it, find out why, and try a different approach.`;
 export const CONTINUE_TEXT =

@@ -59,6 +59,26 @@ pub fn aside_capable(kind: &str) -> bool {
     matches!(kind, "codex" | "claude")
 }
 
+/// What a CLI must know about a run in a microVM: what is kept and what goes with the VM.
+pub fn vm_note(vm: &crate::config::VmConfig) -> String {
+    let kept = if vm.homes.as_os_str().is_empty() {
+        "Nothing outside your working folder is kept for your next run."
+    } else {
+        "Only your home folder ($HOME) is kept for your next run: clone repositories, install \
+tools and sign in there, and look there first for what an earlier run left. /tmp and \
+everything else outside it are gone after this run."
+    };
+    format!(
+        "You run in a virtual machine that was started for this run and is deleted when you end \
+your turn. {kept} Every process still running when your turn ends is killed: when you start \
+something you need the result of (a sign-in that waits for a person, a build, a test run), wait \
+for it in the foreground before you finish, never in the background."
+    )
+}
+
+/// A run that waits for a tool call it started counts as stalled only after this long.
+const TOOL_STALL: Duration = Duration::from_secs(30 * 60);
+
 const BASE_ENV: &[&str] = &[
     "PATH",
     "HOME",
@@ -317,7 +337,10 @@ pub async fn supervise(ctx: RunCtx) {
             // the tested version, or one whose version changed since `hello`): its hook could
             // let a command through, so the run does not start.
             let ungated = !gates.is_empty() && !gated;
-            let notes: Vec<String> = [gate.note(), gates.note()].into_iter().flatten().collect();
+            let notes: Vec<String> = [gate.note(), gates.note(), cfg.vm.as_ref().map(vm_note)]
+                .into_iter()
+                .flatten()
+                .collect();
             let spec = RunSpec {
                 run_id: run_id.clone(),
                 runtime_name: assign.runtime.clone(),
@@ -510,6 +533,9 @@ async fn run_runtime(
     let fut = rt.start(spec, emit_tx, rt_rx);
     tokio::pin!(fut);
     let stall = Duration::from_secs(cfg.stall_minutes.max(1) * 60);
+    // Tool calls without a result: the CLI waits for a step it started (a build, a test run),
+    // so its silence is not a stall until much later.
+    let mut open_tools: std::collections::HashSet<String> = Default::default();
     let mut last = Instant::now();
     let mut stalled = false;
     let mut timed_out = false;
@@ -537,6 +563,12 @@ async fn run_runtime(
             Some(ev) = emit_rx.recv() => {
                 last = Instant::now();
                 stalled = false;
+                match &ev {
+                    RunEvent::ToolCall { item_id, .. } => { open_tools.insert(item_id.clone()); }
+                    RunEvent::ToolResult { item_id, .. } => { open_tools.remove(item_id); }
+                    RunEvent::TurnCompleted { .. } => open_tools.clear(),
+                    _ => {}
+                }
                 let extra = acceptance.on_event(&ev);
                 for ev in gate.push(ev).into_iter().chain(extra) {
                     event(ev);
@@ -628,10 +660,11 @@ async fn run_runtime(
                 if own.gates.waiting() {
                     last = Instant::now();
                 }
-                if !stalled && last.elapsed() >= stall {
+                let limit = if open_tools.is_empty() { stall } else { stall.max(TOOL_STALL) };
+                if !stalled && last.elapsed() >= limit {
                     stalled = true;
                     event(RunEvent::Status { state: "stalled".into(),
-                        message: Some(format!("no output for {} minutes", stall.as_secs() / 60)) });
+                        message: Some(format!("no output for {} minutes", limit.as_secs() / 60)) });
                 }
                 if let Some(d) = deadline
                     && !timed_out && tokio::time::Instant::now() >= d {

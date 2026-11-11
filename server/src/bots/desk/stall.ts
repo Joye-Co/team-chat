@@ -2,7 +2,7 @@
 // never reached a machine. Paused runs (接管) have no stall deadline until they resume.
 import { RUN_KIND_ASIDE } from "@chat/protocol";
 import { HEARTBEAT_STALE_MS, STALL_MS, TEXT } from "../dispatch";
-import { CONTINUE_TEXT, LOOP_LIMIT, LOOP_TEXT, MACHINE_GONE_MS, MAX_AUTO_CONTINUE, MAX_INTERVENTIONS, NUDGE_MS, NUDGE_TEXT, isPromiseOnly, loopKey } from "../../agent/supervise";
+import { CONTINUE_TEXT, LOOP_LIMIT, LOOP_TEXT, MACHINE_GONE_MS, MAX_AUTO_CONTINUE, MAX_INTERVENTIONS, NUDGE_MS, NUDGE_TEXT, TOOL_STALL_MS, isPromiseOnly, loopKey } from "../../agent/supervise";
 import { ulid } from "../../core/ids";
 import { linkStub } from "../env";
 import { loadMachines } from "../store";
@@ -34,7 +34,7 @@ export abstract class DeskStall extends DeskEvents {
     const watch = running > 0 ? Date.now() + 60_000 : null;
     const nudge = this.sql
       .exec<{ at: number | null }>(
-        `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND nudged = 0 AND approval_id IS NULL AND paused_by IS NULL`,
+        `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND nudged = 0 AND open_tools = 0 AND interventions < ${MAX_INTERVENTIONS} AND approval_id IS NULL AND paused_by IS NULL`,
       )
       .one().at;
     const times = [stall === null ? null : stall + STALL_MS, stuck === null ? null : stuck + START_STUCK_MS, retry, nudge === null ? null : nudge + NUDGE_MS, watch].filter(
@@ -50,14 +50,15 @@ export abstract class DeskStall extends DeskEvents {
     const now = Date.now();
     const due = this.sql
       .exec<{ id: string }>(
-        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND paused_by IS NULL AND last_event_at <= ?`,
+        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND paused_by IS NULL AND last_event_at <= CASE WHEN open_tools > 0 THEN ? ELSE ? END`,
+        now - TOOL_STALL_MS,
         now - STALL_MS,
       )
       .toArray();
     for (const { id } of due) {
       await this.serial(id, async () => {
         const r = this.run(id);
-        if (!r || r.external || r.ended_at !== null || r.stalled || r.paused_by || r.status !== "running" || r.last_event_at > now - STALL_MS) return;
+        if (!r || r.external || r.ended_at !== null || r.stalled || r.paused_by || r.status !== "running" || r.last_event_at > now - (r.open_tools > 0 ? TOOL_STALL_MS : STALL_MS)) return;
         await this.markStalled(r);
       });
     }
@@ -97,14 +98,14 @@ export abstract class DeskStall extends DeskEvents {
   protected async superviseRunning(now: number): Promise<void> {
     const silent = this.sql
       .exec<{ id: string }>(
-        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND nudged = 0 AND approval_id IS NULL AND paused_by IS NULL AND last_event_at <= ?`,
+        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND nudged = 0 AND open_tools = 0 AND interventions < ${MAX_INTERVENTIONS} AND approval_id IS NULL AND paused_by IS NULL AND last_event_at <= ?`,
         now - NUDGE_MS,
       )
       .toArray();
     for (const { id } of silent) {
       await this.serial(id, async () => {
         const r = this.run(id);
-        if (!r || r.ended_at !== null || r.nudged || r.stalled || r.approval_id || r.paused_by || !r.machine_id) return;
+        if (!r || r.ended_at !== null || r.nudged || r.stalled || r.open_tools > 0 || r.interventions >= MAX_INTERVENTIONS || r.approval_id || r.paused_by || !r.machine_id) return;
         this.sql.exec("UPDATE runs SET nudged = 1, interventions = interventions + 1 WHERE id = ?", r.id);
         r.nudged = 1;
         r.interventions += 1;

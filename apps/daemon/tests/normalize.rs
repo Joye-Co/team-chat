@@ -234,6 +234,47 @@ fn claude_follow_up_turns() {
     assert_eq!(n.open_turns(), 0);
 }
 
+/// A follow-up the CLI reads while the turn runs joins that turn: one result ends the run
+/// (it used to leave a second turn open for ever).
+#[test]
+fn claude_follow_up_folded_into_the_running_turn() {
+    let mut n = ClaudeNormalizer::default();
+    let echo = serde_json::json!({ "type": "user", "isReplay": true, "message": { "role": "user", "content": [{ "type": "text", "text": "x" }] } });
+    let result = serde_json::json!({ "type": "result", "subtype": "success", "is_error": false, "result": "a", "session_id": "s" });
+    let mut evs = n.queue_turn();
+    evs.extend(n.on_line(&echo));
+    evs.extend(n.queue_turn()); // written while turn 1 runs
+    evs.extend(n.on_line(&echo)); // and read before it ends
+    evs.extend(n.on_line(&result));
+    assert_eq!(types(&evs), ["turn.started", "turn.completed"]);
+    assert_eq!(n.open_turns(), 0);
+}
+
+/// A follow-up the CLI has not read when the turn ends gets the next turn.
+#[test]
+fn claude_follow_up_after_the_turn_gets_its_own() {
+    let mut n = ClaudeNormalizer::default();
+    let echo = serde_json::json!({ "type": "user", "isReplay": true, "message": { "role": "user", "content": [{ "type": "text", "text": "x" }] } });
+    let result = serde_json::json!({ "type": "result", "subtype": "success", "is_error": false, "result": "a", "session_id": "s" });
+    let mut evs = n.queue_turn();
+    evs.extend(n.on_line(&echo));
+    evs.extend(n.queue_turn());
+    evs.extend(n.on_line(&result));
+    assert_eq!(n.open_turns(), 1);
+    evs.extend(n.on_line(&echo));
+    evs.extend(n.on_line(&result));
+    assert_eq!(
+        types(&evs),
+        [
+            "turn.started",
+            "turn.completed",
+            "turn.started",
+            "turn.completed"
+        ]
+    );
+    assert_eq!(n.open_turns(), 0);
+}
+
 #[test]
 fn claude_real_auth_failure_sample() {
     let mut n = ClaudeNormalizer::default();
