@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 /// The `chat-run` op of the hook.
 pub const OP: &str = "gate.check";
@@ -47,6 +47,13 @@ const MAX_HOOK_INPUT: u64 = 1 << 20;
 /// How long the hook waits for a person (the run's own deadline ends it sooner). Claude Code
 /// kills a hook after its `timeout`, which the settings set to the same.
 pub const HOOK_WAIT: Duration = Duration::from_secs(24 * 3600);
+/// How long a shim's `gate.check` waits for a person. A shim waits inside the CLI's own command,
+/// which the CLI kills after its command timeout (Claude Code's Bash tool: two minutes by
+/// default), so it stops sooner and tells the model to run the command again after the person
+/// answered; the card stays open and its answer is kept for that retry ([`Gates::check`]).
+pub const SHIM_WAIT: Duration = Duration::from_secs(90);
+/// How long a shim waits for the daemon's answer: a little more than [`SHIM_WAIT`].
+pub const SHIM_CALL_WAIT: Duration = Duration::from_secs(100);
 
 /// Runtime kinds whose runs stop at gated commands. Claude Code: a PreToolUse hook. Codex: the
 /// app-server runs with approval policy `untrusted` when the run has gates, so every command
@@ -263,10 +270,24 @@ struct Kind {
     patterns: Vec<Regex>,
 }
 
+/// The approval that waits for a person.
+struct Pending {
+    id: String,
+    kind: String,
+    /// The command as checked: a shim's retry of it waits for this card again.
+    command: String,
+    /// A shim asked: it may stop waiting before the answer comes.
+    shim: bool,
+    /// The answer, for every check that waits for this card.
+    tx: watch::Sender<Option<bool>>,
+}
+
 #[derive(Default)]
 struct State {
-    /// The approval that waits: (approval id, kind, the hook's answer).
-    pending: Option<(String, String, oneshot::Sender<bool>)>,
+    pending: Option<Pending>,
+    /// Answers that came after the shim that asked had stopped waiting: (kind, command,
+    /// approve). The shim's retry of that command takes it instead of asking again.
+    answered: Vec<(String, String, bool)>,
     /// Kinds a person approved for the whole run (这件事里都同意).
     approved: HashSet<String>,
     /// Kinds a person approved for the runtime's current command: its shims pass them without
@@ -282,6 +303,8 @@ struct State {
 pub struct Gates {
     kinds: Vec<Kind>,
     state: Mutex<State>,
+    /// How long a shim's check waits ([`SHIM_WAIT`]).
+    shim_wait: Duration,
     /// One approval at a time (the server keeps one open approval per run): a second gated
     /// command waits here until the first one is answered.
     asking: tokio::sync::Mutex<()>,
@@ -341,9 +364,17 @@ impl Gates {
         Gates {
             kinds,
             state: Mutex::default(),
+            shim_wait: SHIM_WAIT,
             asking: tokio::sync::Mutex::new(()),
             alive: tokio::sync::watch::channel(false).0,
         }
+    }
+
+    /// With shim checks waiting `wait` instead of [`SHIM_WAIT`].
+    #[cfg(test)]
+    pub(crate) fn with_shim_wait(mut self, wait: Duration) -> Gates {
+        self.shim_wait = wait;
+        self
     }
 
     /// The CLI ran the run's start-up hook ([`ALIVE_OP`]).
@@ -428,31 +459,96 @@ impl Gates {
             return allow(None);
         };
         let command_n = self.lock().command;
-        // One question at a time; a 这件事里都同意 given meanwhile lets this one pass.
-        let _turn = self.asking.lock().await;
-        let rx = {
-            let mut st = self.lock();
-            if st.approved.contains(&kind) || (shim && st.granted.contains(&kind)) {
-                return allow(Some(&kind));
+        // A shim waits inside the CLI's command: it stops before the CLI's timeout, and the
+        // card stays open for its retry.
+        let deadline = shim.then(|| tokio::time::Instant::now() + self.shim_wait);
+        let until = |d: Option<tokio::time::Instant>| async move {
+            match d {
+                Some(d) => tokio::time::sleep_until(d).await,
+                None => std::future::pending().await,
             }
-            st.next += 1;
-            let id = format!("{PREFIX}{}", st.next);
-            let (tx, rx) = oneshot::channel();
-            st.pending = Some((id.clone(), kind.clone(), tx));
-            drop(st);
-            let cmd = truncate(command, MAX_COMMAND - 100);
-            emit(RunEvent::ApprovalRequest {
-                approval_id: id,
-                item_id: None,
-                title: label(&kind),
-                detail: Some(cmd.clone()),
-                kind: Some(kind.clone()),
-                command: Some(cmd),
-            });
-            rx
         };
-        match rx.await {
-            Ok(true) => {
+        // One question at a time; a 这件事里都同意 given meanwhile lets this one pass.
+        let _turn = tokio::select! {
+            t = self.asking.lock() => t,
+            _ = until(deadline) => return waiting(&kind),
+        };
+        let mut rx = loop {
+            // The card to wait for (Ok), or another command's card that comes first (Err).
+            let next = {
+                let mut st = self.lock();
+                if st.approved.contains(&kind) || (shim && st.granted.contains(&kind)) {
+                    return allow(Some(&kind));
+                }
+                if shim
+                    && let Some(i) = st
+                        .answered
+                        .iter()
+                        .position(|(k, c, _)| *k == kind && c == command)
+                {
+                    let (.., yes) = st.answered.remove(i);
+                    return if yes {
+                        allow(Some(&kind))
+                    } else {
+                        deny(&kind, "a person declined it")
+                    };
+                }
+                match &st.pending {
+                    // The card of a shim that stopped waiting: its retry waits for it again.
+                    Some(p) if shim && p.kind == kind && p.command == command => {
+                        Ok(p.tx.subscribe())
+                    }
+                    // Another command's card is still open: its answer comes first.
+                    Some(p) => Err(p.tx.subscribe()),
+                    None => {
+                        st.next += 1;
+                        let id = format!("{PREFIX}{}", st.next);
+                        let (tx, rx) = watch::channel(None);
+                        st.pending = Some(Pending {
+                            id: id.clone(),
+                            kind: kind.clone(),
+                            command: command.to_string(),
+                            shim,
+                            tx,
+                        });
+                        drop(st);
+                        let cmd = truncate(command, MAX_COMMAND - 100);
+                        emit(RunEvent::ApprovalRequest {
+                            approval_id: id,
+                            item_id: None,
+                            title: label(&kind),
+                            detail: Some(cmd.clone()),
+                            kind: Some(kind.clone()),
+                            command: Some(cmd),
+                        });
+                        Ok(rx)
+                    }
+                }
+            };
+            match next {
+                Ok(rx) => break rx,
+                Err(mut other) => tokio::select! {
+                    _ = other.wait_for(Option::is_some) => {}
+                    _ = until(deadline) => return waiting(&kind),
+                },
+            }
+        };
+        let answer = tokio::select! {
+            a = rx.wait_for(Option::is_some) => a.ok().and_then(|a| *a),
+            _ = until(deadline) => return waiting(&kind),
+        };
+        if shim && answer.is_some() {
+            let mut st = self.lock();
+            if let Some(i) = st
+                .answered
+                .iter()
+                .position(|(k, c, _)| *k == kind && c == command)
+            {
+                st.answered.remove(i);
+            }
+        }
+        match answer {
+            Some(true) => {
                 let mut st = self.lock();
                 if st.command == command_n {
                     st.granted.insert(kind.clone());
@@ -460,8 +556,8 @@ impl Gates {
                 drop(st);
                 allow(Some(&kind))
             }
-            Ok(false) => deny(&kind, "a person declined it"),
-            Err(_) => deny(&kind, "the run ended before a person answered"),
+            Some(false) => deny(&kind, "a person declined it"),
+            None => deny(&kind, "the run ended before a person answered"),
         }
     }
 
@@ -482,15 +578,23 @@ impl Gates {
             return None;
         }
         let mut st = self.lock();
-        if st.pending.as_ref().map(|p| p.0.as_str()) != Some(approval_id) {
+        if st.pending.as_ref().map(|p| p.id.as_str()) != Some(approval_id) {
             return None;
         }
-        let (_, kind, tx) = st.pending.take()?;
+        let p = st.pending.take()?;
+        // A shim asked, and may have stopped waiting: keep the answer for its retry of the
+        // same command (a shim that still waits takes it back, [`check`](Self::check)).
+        if p.shim {
+            st.answered
+                .retain(|(k, c, _)| !(*k == p.kind && *c == p.command));
+            st.answered
+                .push((p.kind.clone(), p.command.clone(), approve));
+        }
         if approve && all {
-            st.approved.insert(kind);
+            st.approved.insert(p.kind.clone());
         }
         drop(st);
-        let _ = tx.send(approve);
+        let _ = p.tx.send(Some(approve));
         Some(RunEvent::ApprovalResolved {
             approval_id: approval_id.to_string(),
             decision: if approve { "approve" } else { "deny" }.into(),
@@ -518,6 +622,17 @@ fn allow(kind: Option<&str>) -> Value {
         r["kind"] = json!(k);
     }
     json!({ "ok": true, "result": r })
+}
+
+/// A shim's check that stopped waiting before a person answered: the command does not run now,
+/// and the model runs it again later (the answer is kept for that retry).
+fn waiting(kind: &str) -> Value {
+    json!({ "ok": true, "result": { "decision": "deny", "kind": kind, "waiting": true, "reason": format!(
+        "This command needs a person's approval ({}) and is waiting for their answer in the \
+topic, so it did not run yet. Do not work around it: go on with other work, then run the same \
+command again after a while; it runs once they approve, without asking them again.",
+        action(kind)
+    ) } })
 }
 
 fn deny(kind: &str, why: &str) -> Value {
@@ -1437,6 +1552,83 @@ mod tests {
         let id = requested(&seen, 4).await;
         gates.answer(&id, false, false).unwrap();
         assert_eq!(t.await.unwrap()["result"]["decision"], "deny");
+    }
+
+    /// A shim waits inside the CLI's command, which the CLI kills after its timeout: the shim
+    /// stops waiting first and tells the model to run it again; the card stays open, the
+    /// one-question turn is free again, and the answer that comes later is kept for the retry.
+    #[tokio::test]
+    async fn an_answer_after_the_shim_stopped_waiting_is_kept_for_its_retry() {
+        let gates = Arc::new(Gates::new(&defaults()).with_shim_wait(Duration::from_millis(50)));
+        let (seen, emit) = emitted();
+        let shim = |c: &str| json!({ "tool": "shim", "via": VIA_SHIM, "command": c });
+        let push = "git push\ngit push origin HEAD:refs/heads/main";
+
+        // Nobody answers in time: the shim is told to run it again later, the card stays.
+        let a = gates.check(&shim(push), &emit).await;
+        assert_eq!(a["result"]["decision"], "deny");
+        assert_eq!(a["result"]["waiting"], true);
+        assert!(
+            a["result"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("run the same")
+        );
+        let id = requested(&seen, 0).await;
+        assert!(gates.waiting());
+        // A retry before the answer waits for the same card (no second one).
+        let a = gates.check(&shim(push), &emit).await;
+        assert_eq!(a["result"]["waiting"], true);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        // The turn is free: commands that need no approval run meanwhile.
+        let a = gates.check(&json!({ "command": "ls" }), &emit).await;
+        assert_eq!(a["result"]["decision"], "allow");
+
+        // The person approves after the shim went away; the retry runs without a second card,
+        // once.
+        assert!(gates.answer(&id, true, false).is_some());
+        let a = gates.check(&shim(push), &emit).await;
+        assert_eq!(a["result"]["decision"], "allow");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        let a = gates.check(&shim(push), &emit).await;
+        assert_eq!(a["result"]["waiting"], true);
+        let id = requested(&seen, 1).await;
+
+        // A retry that is waiting when the answer comes gets it directly, and nothing is kept.
+        let (g, e) = (gates.clone(), Arc::new(emit));
+        let e2 = e.clone();
+        let t = tokio::spawn(async move { g.check(&shim(push), e2.as_ref()).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        gates.answer(&id, false, false).unwrap();
+        assert_eq!(t.await.unwrap()["result"]["decision"], "deny");
+        assert!(gates.lock().answered.is_empty());
+
+        // A decline after the shim went away is kept as well: the retry is refused, no card.
+        let a = gates.check(&shim("npm publish"), e.as_ref()).await;
+        assert_eq!(a["result"]["waiting"], true);
+        let id = requested(&seen, 2).await;
+        gates.answer(&id, false, false).unwrap();
+        let a = gates.check(&shim("npm publish"), e.as_ref()).await;
+        assert_eq!(a["result"]["decision"], "deny");
+        assert!(a["result"]["reason"].as_str().unwrap().contains("declined"));
+        assert_eq!(seen.lock().unwrap().len(), 3);
+
+        // While a card a shim left open waits, the runtime's own gate asks only after it is
+        // answered (one open approval per run).
+        let a = gates.check(&shim("cargo publish"), e.as_ref()).await;
+        assert_eq!(a["result"]["waiting"], true);
+        let open = requested(&seen, 3).await;
+        let (g, e2) = (gates.clone(), e.clone());
+        let t = tokio::spawn(async move {
+            g.check(&json!({ "command": "gh pr merge 5" }), e2.as_ref())
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(seen.lock().unwrap().len(), 4);
+        gates.answer(&open, true, false).unwrap();
+        let id = requested(&seen, 4).await;
+        gates.answer(&id, true, false).unwrap();
+        assert_eq!(t.await.unwrap()["result"]["decision"], "allow");
     }
 
     #[tokio::test]

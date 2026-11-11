@@ -139,7 +139,7 @@
 | 做什么 | 编号 |
 | --- | --- |
 | Codex 改成每条非只读命令先问，daemon 用同一套规则判断：不命中的立刻同意，命中的发卡。ACP 的权限请求走同一套 | 盯 2.1、2.10 |
-| 在任务的 PATH 最前面放一组垫片（git、gh、wrangler、npm 等），先问 daemon 再执行；覆盖脚本里套的命令和所有运行方式 | 盯 2.1、2.2 |
+| 在任务的 PATH 最前面放一组垫片（git、gh、wrangler、npm 等），先问 daemon 再执行；覆盖脚本里套的命令和所有运行方式（登录 zsh 里也放回最前；bash 登录 shell、VM 里的登录 shell、Windows 的 Git Bash 不覆盖，见 machine-protocol.md「Gated actions」） | 盯 2.1、2.2 |
 | 默认规则补上：当前分支就是 main 时的 `git push`、`git -C`、`gh api …/merge`、合并类的 MCP 工具 | 盯 2.2 |
 | 问不到 daemon 时一律拒绝，全平台一致 | 盯 2.3 |
 | 文字批准只认「同意」「拒绝」，或回复那张卡 | 盯 2.6；接 6.4 |

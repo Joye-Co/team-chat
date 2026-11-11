@@ -14,8 +14,8 @@
 //! package script it runs ([`check_text`]). The same patterns then decide.
 //!
 //! This guards against mistakes, not against a member set on getting around it: a program
-//! started by its full path, or a login shell that puts its own folders before the shims, is
-//! not seen. The floor is the repository's branch protection and the production
+//! started by its full path, or a login shell other than zsh that resets `PATH` (bash, Git
+//! Bash; a login zsh gets [`zsh_dotdir`]), is not seen. The floor is the repository's branch protection and the production
 //! environment's own approval.
 
 use serde_json::{Value, json};
@@ -106,6 +106,45 @@ pub fn claude_env_file(run_dir: &Path, bin: &str) -> std::io::Result<PathBuf> {
     let quoted = format!("'{}'", bin.replace('\'', r"'\''"));
     std::fs::write(&file, format!("export PATH={quoted}:\"$PATH\"\n"))?;
     Ok(file)
+}
+
+/// `ZDOTDIR` of a run whose CLI runs commands in the user's login zsh (Codex: `zsh -lc`).
+pub const ZDOTDIR: &str = "ZDOTDIR";
+/// The user's own `ZDOTDIR` (empty: `$HOME`), which the run's zsh files read from.
+pub const ENV_USER_ZDOTDIR: &str = "CHAT_RUN_USER_ZDOTDIR";
+
+/// Writes the zsh start-up files of `<run folder>/zsh`, for [`ZDOTDIR`]: each reads the user's
+/// own file of that name, then puts `bin` first on `PATH` again. A login zsh would otherwise
+/// leave the shims last: on macOS `/etc/zprofile` runs `path_helper`, which puts the system
+/// folders before the inherited `PATH`, and a profile may put its own folders first. Returns
+/// the folder.
+pub fn zsh_dotdir(run_dir: &Path, bin: &str) -> std::io::Result<PathBuf> {
+    let dir = run_dir.join("zsh");
+    std::fs::create_dir_all(&dir)?;
+    let quoted = format!("'{}'", bin.replace('\'', r"'\''"));
+    for name in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
+        // The user's .zshenv may move ZDOTDIR: the later files are read from there.
+        let keep = if name == ".zshenv" {
+            format!("export {ENV_USER_ZDOTDIR}=\"$ZDOTDIR\"\n")
+        } else {
+            String::new()
+        };
+        std::fs::write(
+            dir.join(name),
+            format!(
+                "# Written for a run: reads your own {name}, then puts the run's tools first on PATH.\n\
+__chat_run_zd=\"$ZDOTDIR\"\n\
+ZDOTDIR=\"${{{ENV_USER_ZDOTDIR}:-$HOME}}\"\n\
+[[ -r \"$ZDOTDIR/{name}\" ]] && source \"$ZDOTDIR/{name}\"\n\
+{keep}\
+ZDOTDIR=\"$__chat_run_zd\"\n\
+unset __chat_run_zd\n\
+path=({quoted} ${{path:#{quoted}}})\n\
+export PATH\n"
+            ),
+        )?;
+    }
+    Ok(dir)
 }
 
 // --- What a shim asks about. ------------------------------------------------------------------
@@ -553,7 +592,7 @@ pub fn gate(name: &str, args: &[String]) -> Result<(), i32> {
 fn ask(body: Value) -> Result<Value, String> {
     use crate::chat_run::{ENV_DIR, ENV_SOCKET, call, call_files};
     let var = |k: &str| std::env::var_os(k).filter(|s| !s.is_empty());
-    let (op, wait) = (crate::gates::OP, crate::gates::HOOK_WAIT);
+    let (op, wait) = (crate::gates::OP, crate::gates::SHIM_CALL_WAIT);
     match (var(ENV_SOCKET), var(ENV_DIR)) {
         (Some(s), _) => call(Path::new(&s), op, body, wait),
         (None, Some(d)) => call_files(Path::new(&d), op, body, wait),
@@ -869,6 +908,59 @@ mod tests {
         assert_eq!(real_program("wrangler", &path), Some(real.join(&exe)));
         assert_eq!(started_as(OsStr::new("/x/bin/wrangler")), Some("wrangler"));
         assert_eq!(started_as(OsStr::new("/x/bin/chat-run")), None);
+    }
+
+    /// Codex runs each command as `zsh -lc`. On macOS `/etc/zprofile` (path_helper) and many
+    /// profiles put their folders first; the run's zsh files put the shims first again, after
+    /// reading the user's own files.
+    #[cfg(unix)]
+    #[test]
+    fn a_login_zsh_keeps_the_shims_first() {
+        if Command::new("zsh").arg("-c").arg("true").status().is_err() {
+            eprintln!("no zsh here: skipped");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let own = tmp.path().join("own zdot");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        // The user's .zshenv moves ZDOTDIR; their .zprofile puts a folder first.
+        std::fs::write(
+            home.join(".zshenv"),
+            format!("export ZDOTDIR='{}'\nSEEN=env\n", own.display()),
+        )
+        .unwrap();
+        std::fs::write(
+            own.join(".zprofile"),
+            "export PATH=/opt/first:$PATH\nSEEN=$SEEN,profile\n",
+        )
+        .unwrap();
+        let bin = tmp.path().join("run").join("bin");
+        let zdot = zsh_dotdir(&tmp.path().join("run"), &bin.display().to_string()).unwrap();
+        let run = |login: bool| {
+            let out = Command::new("zsh")
+                .arg(if login { "-lc" } else { "-c" })
+                .arg(r#"printf '%s|%s|%s' "$PATH" "$SEEN" "$ZDOTDIR""#)
+                .env_clear()
+                .env("HOME", &home)
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env(ZDOTDIR, &zdot)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        let out = run(true);
+        let parts: Vec<&str> = out.split('|').collect();
+        let path: Vec<&str> = parts[0].split(':').collect();
+        assert_eq!(path[0], bin.display().to_string(), "{out}");
+        assert_eq!(path.iter().filter(|p| **p == path[0]).count(), 1, "{out}");
+        assert!(path.contains(&"/opt/first"), "{out}");
+        assert_eq!(parts[1], "env,profile", "{out}");
+        assert_eq!(parts[2], zdot.display().to_string(), "{out}");
+        // A plain `zsh -c` reads only .zshenv: the shims stay first too.
+        let out = run(false);
+        assert!(out.starts_with(&format!("{}:", bin.display())), "{out}");
     }
 
     #[cfg(unix)]
