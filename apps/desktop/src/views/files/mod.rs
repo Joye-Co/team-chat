@@ -8,6 +8,8 @@
 
 pub mod export;
 pub mod extra;
+pub mod gallery;
+pub mod lightbox;
 pub mod native;
 pub mod preview;
 pub mod quick_look;
@@ -24,16 +26,6 @@ use crate::{
     data::{ChatProvider, FileAttachment, FileError, RejectedFile},
 };
 
-/// Inline image previews (§2.4, R2-10): one image takes the one in-thread
-/// width (640); two or more sit in 2 columns of 312, gap 16. Heights follow
-/// the aspect ratio between these bounds; the picture covers its box.
-pub const PREVIEW_MAX_W: Pixels = crate::views::timeline::v2::TEXT_MAX;
-pub const PREVIEW_HALF_W: Pixels = px(312.);
-pub const PREVIEW_MAX_H: Pixels = px(360.);
-/// The gap between 2 image columns.
-pub const PREVIEW_GAP: Pixels = px(16.);
-/// Smallest preview side, so a thin image stays clickable.
-pub const PREVIEW_MIN: Pixels = px(48.);
 /// Width of a file row in the timeline: the one in-thread width (§2.4).
 pub const FILE_ROW_W: Pixels = crate::views::timeline::v2::TEXT_MAX;
 /// Height of a file item (§2.6 ListRow): 12 + two lines + the 4 pt bar room + 12 (fixed, so
@@ -410,29 +402,6 @@ pub fn notify(note: Notification, cx: &mut App) {
     }
 }
 
-/// The inline preview box of an image (§2.4): the full in-thread width for
-/// one image, a 312 column when the message has more; the height from the
-/// aspect ratio (4:3 when unknown), between [`PREVIEW_MIN`] x 2 and
-/// [`PREVIEW_MAX_H`] (a half column at most 3:4 tall).
-pub fn preview_size(width: Option<u32>, height: Option<u32>, images: usize) -> (Pixels, Pixels) {
-    let w = if images > 1 {
-        PREVIEW_HALF_W
-    } else {
-        PREVIEW_MAX_W
-    };
-    let ratio = match (width, height) {
-        (Some(w), Some(h)) if w > 0 && h > 0 => h as f32 / w as f32,
-        _ => 0.75,
-    };
-    let max_h = if images > 1 {
-        f32::from(PREVIEW_HALF_W) * 4. / 3.
-    } else {
-        f32::from(PREVIEW_MAX_H)
-    };
-    let h = (f32::from(w) * ratio).clamp(f32::from(PREVIEW_MIN) * 2., max_h);
-    (w, px(h.round()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,17 +569,5 @@ mod tests {
             assert!(is_html(name), "{name}");
         }
         assert!(!is_html("photo.png"));
-    }
-
-    #[test]
-    fn previews_take_the_column_or_its_halves() {
-        let (w, h) = preview_size(Some(4000), Some(3000), 1);
-        assert_eq!((f32::from(w), f32::from(h)), (640., 360.));
-        let (w, h) = preview_size(Some(2000), Some(10), 1);
-        assert_eq!((f32::from(w), f32::from(h)), (640., 96.));
-        let (w, h) = preview_size(Some(400), Some(300), 2);
-        assert_eq!((f32::from(w), f32::from(h)), (312., 234.));
-        let (w, h) = preview_size(None, None, 3);
-        assert_eq!((f32::from(w), f32::from(h)), (312., 234.));
     }
 }

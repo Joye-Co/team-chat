@@ -485,6 +485,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open_menu,
     },
     Scene {
+        name: "files-lightbox",
+        about: "The files scene with the image viewer open on a poster: bar, side buttons, filmstrip",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_lightbox,
+    },
+    Scene {
         name: "files-quick-look",
         about: "Space on a file off the Mac: the app's viewer as a sheet (the Mac shows Quick Look)",
         start: Start::SignedIn,
