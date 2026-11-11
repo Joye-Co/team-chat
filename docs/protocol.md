@@ -1002,8 +1002,13 @@ contract, but its shape is fixed here so the developer view and the daemon notes
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
-  `#42` is the message's seq. A system message (`kind: "system"`) is one line in brackets.
-- **Budget, not a count.** The topic's first message is always there. Then the newest messages,
+  `#42` is the message's seq. The time is on the team's clock (`TEAM_TIME_ZONE`, default
+  Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets.
+- **The request whole.** The request and every follow-up carry the same indented lines for the
+  message they quote, their files and their 产出, so a file is an id the run fetches with
+  `chat-run file get`; a message with only an image is its file line. The front desk reads the
+  request the same way.
+- **Budget, not a count.** The topic's first message is always there, cut at 4,000 characters. Then the newest messages,
   newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
   between them, one line says how many and, for a machine with feature `context`, how to read them
   (`chat-run topic history --before <seq>`).

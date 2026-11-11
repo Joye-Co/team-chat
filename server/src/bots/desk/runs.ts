@@ -9,7 +9,8 @@ import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
 import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine } from "../dispatch";
-import { type ContextRow, type Selection, selectLines, withSummary } from "../../context/render";
+import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
+import { teamZone } from "../../memory/consolidate";
 import { type Brief, briefText } from "../../agent/frontdesk";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
@@ -293,17 +294,18 @@ export abstract class DeskRuns extends DeskCore {
     }
     const refIds = (m.refs ?? []).map((x) => x.fromId).filter((x): x is string => Boolean(x));
     const authors = [first, ...newest, ...(since?.newest ?? [])].flatMap((x) => (x ? [x.authorId, x.ext.replyTo?.authorId ?? x.authorId, ...(x.ext.cardState?.answers ?? []).map((a) => a.actorId)] : []));
-    const names = await this.names([...new Set([...authors, m.authorId, botId, ...refIds])]);
+    const names = await this.names([...new Set([...authors, m.authorId, botId, ...refIds, ...requestAuthors(m.ext)])]);
     const name = (id: string) => names.get(id) ?? id;
     const lines = {
       more: (x: ContextRow) => (contextTools ? `rest: chat-run topic message --id ${x.id}` : ""),
       gap: (n: number, before: number) =>
         contextTools ? `[… ${n} messages left out; read them with chat-run topic history --before ${before}]` : `[… ${n} messages left out …]`,
+      zone: teamZone(this.env),
     };
     const sel = selectLines(first, newest, total, name, CONTEXT_CHARS, lines);
     const seen = new Set(sel.rows.map((x) => x.id));
     const refs = m.refs && m.refs.length > 0 ? refsText(name(m.authorId), m.refs, names, seen) : undefined;
-    const request = { authorId: m.authorId, body: m.body };
+    const request = { authorId: m.authorId, body: requestText(m.body, m.ext, name) };
     const prompt = buildPrompt({
       botName: name(botId),
       title: claim.title,
@@ -385,13 +387,13 @@ export abstract class DeskRuns extends DeskCore {
       }),
     ) as SourceContext;
     const chat = claim.messages.filter((x) => x.body !== "" && x.id !== m.messageId);
-    const names = await this.names([...source.messages.map((x) => x.authorId), ...chat.map((x) => x.authorId), m.authorId, botId]);
+    const names = await this.names([...source.messages.map((x) => x.authorId), ...chat.map((x) => x.authorId), m.authorId, botId, ...requestAuthors(m.ext)]);
     return buildAsidePrompt({
       botName: names.get(botId) ?? "bot",
       source: { title: source.title, messages: source.messages.filter((x) => x.body !== "") },
       chat,
       names,
-      request: { authorId: m.authorId, body: m.body },
+      request: { authorId: m.authorId, body: requestText(m.body, m.ext, (id) => names.get(id) ?? id) },
       followUps,
     });
   }

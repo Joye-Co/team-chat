@@ -5,7 +5,8 @@
 import { isMainTopicId } from "@chat/protocol";
 import { loadModelConfig } from "../../aiservice";
 import { type Decision, FRONT_DESK_CHARS, decide } from "../../agent/frontdesk";
-import { selectLines, withSummary } from "../../context/render";
+import { requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
+import { teamZone } from "../../memory/consolidate";
 import { FRONT_DESK_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
@@ -53,11 +54,11 @@ export abstract class DeskFront extends DeskStall {
       const notRequest = (x: { id: string }) => x.id !== m.messageId;
       const newest = (peek.newest ?? []).filter(notRequest);
       const first = peek.first && notRequest(peek.first) ? peek.first : undefined;
-      const ids = [first, ...newest].flatMap((x) => (x ? [x.authorId, ...(x.ext.cardState?.answers ?? []).map((a) => a.actorId)] : []));
-      const names = await this.names([...new Set([...ids, m.authorId, botId])]);
+      const ids = [first, ...newest].flatMap((x) => (x ? [x.authorId, x.ext.replyTo?.authorId ?? x.authorId, ...(x.ext.cardState?.answers ?? []).map((a) => a.actorId)] : []));
+      const names = await this.names([...new Set([...ids, m.authorId, botId, ...requestAuthors(m.ext)])]);
       const name = (id: string) => names.get(id) ?? id;
       const total = Math.max(0, (peek.total ?? 0) - (peek.newest ?? []).length + newest.length);
-      const sel = selectLines(first, newest, total, name, FRONT_DESK_CHARS);
+      const sel = selectLines(first, newest, total, name, FRONT_DESK_CHARS, { zone: teamZone(this.env) });
       const member = await this.env.DB.prepare("SELECT role FROM members WHERE id = ?").bind(botId).first<{ role: string | null }>();
       const res = await decide(cfg, {
         botName: name(botId),
@@ -65,8 +66,8 @@ export abstract class DeskFront extends DeskStall {
         title: peek.title,
         context: withSummary(sel, peek.summary),
         requester: name(m.authorId),
-        request: m.body,
-        dm: false,
+        request: requestText(m.body, m.ext, name),
+        dm: m.dm === true,
         memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: FRONT_DESK_MEMORY_BYTES }),
       });
       this.sql.exec(
