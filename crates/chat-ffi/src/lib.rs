@@ -16,11 +16,17 @@ use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
 mod cards;
+mod devices;
 mod pages;
 mod token;
 
-pub use auth::{SignedIn, email_sign_in, request_email_code};
+pub use auth::{
+    SignInCode, SignInPoll, SignInRequest, SignedIn, email_sign_in, parse_sign_in_code,
+    password_sign_in, qr_claim, qr_poll, qr_request, redeem_invite, request_email_code,
+    sign_in_qr_text,
+};
 pub use cards::{CardRecord, HandOffPlace, HomeData, HomeItem};
+pub use devices::{DeviceItem, OfferState, PasswordState, SignInOffer, device_kind};
 pub use pages::*;
 pub use token::{clear_token, load_token, save_token};
 
@@ -41,6 +47,9 @@ pub enum CoreError {
     /// The input is not acceptable (a malformed email, an empty body).
     #[error("invalid")]
     Invalid,
+    /// The thing asked for is not there (a wrong or used sign-in code).
+    #[error("not found")]
+    NotFound,
     #[error("{message}")]
     Failed { message: String },
 }
@@ -53,11 +62,12 @@ impl From<ApiError> for CoreError {
                 ErrorCode::Unauthorized => CoreError::Unauthorized,
                 ErrorCode::RateLimited => CoreError::RateLimited,
                 ErrorCode::Invalid => CoreError::Invalid,
+                ErrorCode::NotFound => CoreError::NotFound,
                 _ => CoreError::Failed {
                     message: e.to_string(),
                 },
             },
-            ApiError::BadUrl => CoreError::Invalid,
+            ApiError::BadUrl | ApiError::Invalid(_) => CoreError::Invalid,
             _ => CoreError::Failed {
                 message: e.to_string(),
             },
