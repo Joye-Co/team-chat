@@ -249,7 +249,8 @@ mod tests {
         let clip = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/views/artifacts/preview/clip.mp4");
         let (info, poster) = describe(&clip, "clip.mp4", "video/mp4");
-        if cfg!(target_os = "macos") {
+        // Both systems decode H.264 themselves (AVFoundation, Media Foundation).
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
             assert!(info.duration.is_some());
             let poster = poster.expect("a poster");
             assert!(std::fs::metadata(poster).unwrap().len() > 0);
