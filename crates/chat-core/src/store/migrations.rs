@@ -196,6 +196,12 @@ ALTER TABLE members ADD COLUMN weekly_budget_cents INTEGER;
         name: "topic-mute-1",
         sql: "ALTER TABLE read_cursors ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;",
     },
+    // usable: the 所有者 mark (`teamOwner`). Old rows read as 0: an admin shows as 管理员
+    // until the next directory refresh brings the mark.
+    Migration {
+        name: "roles-1",
+        sql: "ALTER TABLE members ADD COLUMN team_owner INTEGER NOT NULL DEFAULT 0;",
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

@@ -9,7 +9,7 @@ use gpui_component::{Sizable as _, button::Button, clipboard::Clipboard};
 
 use crate::{
     copy::{fill, settings as s},
-    data::{AdminError, AdminReply, MemberLevel, Millis},
+    data::{AdminError, AdminReply, Millis},
     theme::{self, Type as _, space},
     ui::Sym,
 };
@@ -32,13 +32,6 @@ pub fn error_text(e: AdminError) -> &'static str {
         AdminError::RateLimited => s::ERROR_RATE_LIMITED,
         AdminError::Conflict => s::ERROR_CONFLICT,
         AdminError::Other => s::ERROR_OTHER,
-    }
-}
-
-pub fn level_text(level: MemberLevel) -> &'static str {
-    match level {
-        MemberLevel::Owner => s::LEVEL_OWNER,
-        MemberLevel::Member => s::LEVEL_MEMBER,
     }
 }
 

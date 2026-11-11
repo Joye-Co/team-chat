@@ -10,6 +10,7 @@ use super::{CoreProvider, ProviderConfig, session};
 use crate::data::{ChatProvider as _, Credential, LoginRequest, SessionState};
 
 pub struct Sandbox {
+    /// The app's data root: `<dir>/app` (`app-admin`, `app-member` for the other 身份).
     dir: PathBuf,
     server_url: String,
     token: String,
@@ -28,17 +29,26 @@ impl Sandbox {
                     )
                 })
         };
-        let sandbox = Sandbox {
-            dir: dir.to_path_buf(),
-            server_url: read("server-url")?,
-            token: read("owner-token")?,
+        // `TC_SANDBOX_AS=admin` or `member`: the seeded 管理员 or 普通成员, in a data root of its
+        // own, to try the 身份 (design-roles).
+        let who = std::env::var("TC_SANDBOX_AS")
+            .ok()
+            .filter(|w| matches!(w.as_str(), "admin" | "member"));
+        let (token, app) = match &who {
+            Some(w) => (format!("{w}-token"), format!("app-{w}")),
+            None => ("owner-token".to_string(), "app".to_string()),
         };
-        session::use_data_root(sandbox.dir.join("app"));
+        let sandbox = Sandbox {
+            dir: dir.join(app),
+            server_url: read("server-url")?,
+            token: read(&token)?,
+        };
+        session::use_data_root(sandbox.dir.clone());
         Ok(sandbox)
     }
 
     pub fn config(&self) -> ProviderConfig {
-        let root = self.dir.join("app");
+        let root = self.dir.clone();
         ProviderConfig {
             tokens: session::TokenStorage::Files(root.join("tokens")),
             data_root: root,
@@ -55,5 +65,30 @@ impl Sandbox {
                 device_name: "sandbox".into(),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `up.ts --reset` and the restart after a half-finished seed must remove every data root
+    /// this file opens, or a role restores a stale token and another server's cache.
+    #[test]
+    fn up_script_removes_every_data_root() {
+        let up = include_str!("../../../../scripts/sandbox/up.ts");
+        let line = up
+            .lines()
+            .find(|l| l.starts_with("const APP_ROOTS = "))
+            .expect("up.ts lists APP_ROOTS");
+        for root in ["app", "app-admin", "app-member"] {
+            assert!(
+                line.contains(&format!("\"{root}\"")),
+                "{root} missing from APP_ROOTS"
+            );
+        }
+        assert_eq!(
+            up.matches("APP_ROOTS").count(),
+            3,
+            "both reset paths use APP_ROOTS"
+        );
     }
 }

@@ -4,13 +4,14 @@
 // sandbox (scripts/sandbox/up.ts) runs it once; CI runs it against `wrangler dev` so a wire
 // change that breaks it fails the PR.
 //
-// The team: Joye (owner), four interns, eight AI members with their characters, the 群 开发 /
+// The team: Joye (所有者), four interns (陈晨 is a 管理员), eight AI members with their characters, the 群 开发 /
 // 运维 / 夹夹增长 / 全员, 话题 in every state (working with a plan, waiting on me for an
 // approval, a choice or a draft, waiting on someone else, done with proof), 产出, decisions,
 // reactions and two 私聊. Add a sample here when you add a screen that needs one.
 //
 // Usage: bun scripts/sandbox/seed.ts --url http://127.0.0.1:8850 --admin-secret-file <file> --out <dir>
-// Writes <dir>/owner-token (mode 600) and <dir>/seed.json (ids, no secrets). Prints no secret.
+// Writes <dir>/owner-token, admin-token (陈晨) and member-token (小王) (mode 600) and
+// <dir>/seed.json (ids, no secrets). Prints no secret.
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -191,6 +192,12 @@ export async function seed(o: SeedOptions): Promise<Json> {
     tokens[b.key] = r.token;
   }
   log(`members: ${Object.keys(ids).length}`);
+
+  // 身份 (design-roles): Joye is the 所有者 (bootstrap), 陈晨 a 管理员, the others 普通成员. The
+  // tokens let the app be tried as each of them.
+  await call(url, "PATCH", `/v1/members/${ids.chenchen}`, { token: owner, body: { level: "owner" } });
+  writeSecret(join(o.out, "admin-token"), tokens.chenchen);
+  writeSecret(join(o.out, "member-token"), tokens.xiaowang);
 
   // 团队管理 samples: weekly budgets (Scout's is low, so its sample runs pass 80% and reach it:
   // 要注意 and 活动记录 show it), and an invite nobody accepted that ends in 36 hours.
