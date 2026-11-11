@@ -235,7 +235,7 @@ impl RenderOnce for MemberAvatar {
             .photo
             .as_deref()
             .map(|p| p.strip_prefix("file://").unwrap_or(p))
-            .filter(|p| p.starts_with('/'))
+            .filter(|p| is_local_file(p))
             .map(str::to_string);
         let face = match local {
             Some(path) => Avatar::new()
@@ -464,6 +464,12 @@ pub fn name_beside_avatar(name: &str) -> &str {
 /// (the second of a two-character name that starts with 小, 老 or 阿); two
 /// letters for a Latin name at 32 pt and above, one at 24 pt and below; a
 /// leading emoji is skipped.
+/// Whether a member's photo is a file on this computer (the provider hands the
+/// downloaded file's path): `/Users/…` on the Mac, `C:\Users\…` on Windows.
+pub fn is_local_file(photo: &str) -> bool {
+    std::path::Path::new(photo).is_absolute()
+}
+
 pub fn monogram(name: &str, size: Pixels) -> String {
     // Skip leading symbols (emoji, ZWJ, variation selectors) and spaces.
     let trimmed: &str = name.trim_start_matches(|c: char| !c.is_alphanumeric());
@@ -505,6 +511,18 @@ pub fn monogram(name: &str, size: Pixels) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_photo_on_this_computer_is_an_absolute_path() {
+        #[cfg(windows)]
+        assert!(super::is_local_file(
+            r"C:\Users\me\AppData\Roaming\app\avatars\a.png"
+        ));
+        #[cfg(not(windows))]
+        assert!(super::is_local_file("/Users/me/Library/app/avatars/a.png"));
+        assert!(!super::is_local_file("https://example.com/a.png"));
+        assert!(!super::is_local_file("avatars/a.png"));
+    }
+
     #[test]
     fn avatar_sizes_snap_to_the_scale() {
         use gpui::px;

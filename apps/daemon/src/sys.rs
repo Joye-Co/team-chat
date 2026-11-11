@@ -253,7 +253,8 @@ pub fn disk(path: &Path) -> (u64, u64) {
     }
 }
 
-/// The 1, 5 and 15 minute load averages. Windows has none: zeroes.
+/// The 1, 5 and 15 minute load averages. Windows keeps none, so the daemon keeps its own
+/// ([`windows_load`]): zeroes until its first sample, five seconds after the first call.
 pub fn load_avg() -> [f64; 3] {
     #[cfg(unix)]
     {
@@ -262,6 +263,125 @@ pub fn load_avg() -> [f64; 3] {
         let n = unsafe { libc::getloadavg(l.as_mut_ptr(), 3) };
         if n < 3 { [0.0; 3] } else { l }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows_load::get()
+    }
+    #[cfg(not(any(unix, windows)))]
     [0.0; 3]
+}
+
+/// Windows: the processor time of the whole machine so far as (total, idle), in 100 ns units
+/// summed over all processors.
+#[cfg(windows)]
+pub fn cpu_times() -> Option<(u64, u64)> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetSystemTimes;
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut idle, mut kernel, mut user) = (zero, zero, zero);
+    // SAFETY: the three out pointers are valid FILETIMEs.
+    if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
+        return None;
+    }
+    let n = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    // The kernel time includes the idle time.
+    Some((n(kernel) + n(user), n(idle)))
+}
+
+/// One step of a load average: `prev` decays over `window` seconds and takes in `now`, the
+/// load of the last `step` seconds. The same exponential average Unix kernels keep.
+#[cfg(any(windows, test))]
+fn load_step(prev: f64, now: f64, step: f64, window: f64) -> f64 {
+    let keep = (-step / window).exp();
+    prev * keep + now * (1.0 - keep)
+}
+
+/// The load averages Windows does not keep. Unix counts the processes that run or wait for a
+/// processor; the nearest thing Windows gives without a performance counter session is how
+/// many processors were busy: the busy share of the last five seconds times the number of
+/// processors. Below full load the two say the same (2.0 is two busy processors); above it
+/// this one stops at the processor count where Unix keeps counting the queue. The server uses
+/// the number only to prefer the less busy of two machines.
+#[cfg(windows)]
+mod windows_load {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    const STEP: Duration = Duration::from_secs(5);
+    static LOAD: OnceLock<&'static Mutex<[f64; 3]>> = OnceLock::new();
+
+    pub fn get() -> [f64; 3] {
+        let load = LOAD.get_or_init(|| {
+            let load: &'static Mutex<[f64; 3]> = Box::leak(Box::new(Mutex::new([0.0; 3])));
+            let _ = std::thread::Builder::new()
+                .name("load".into())
+                .spawn(move || sample(load));
+            load
+        });
+        *load.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn sample(load: &'static Mutex<[f64; 3]>) {
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get() as f64)
+            .unwrap_or(1.0);
+        let mut prev = super::cpu_times();
+        loop {
+            std::thread::sleep(STEP);
+            let now = super::cpu_times();
+            if let (Some((t0, i0)), Some((t1, i1))) = (prev, now)
+                && t1 > t0
+                && i1 >= i0
+            {
+                let busy = 1.0 - ((i1 - i0) as f64 / (t1 - t0) as f64).clamp(0.0, 1.0);
+                let mut l = load.lock().unwrap_or_else(|e| e.into_inner());
+                for (v, window) in l.iter_mut().zip([60.0, 300.0, 900.0]) {
+                    *v = super::load_step(*v, busy * cpus, STEP.as_secs_f64(), window);
+                }
+            }
+            prev = now;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A steady load of two busy processors is 2.0 after a few windows, on each average at
+    /// its own pace, and falls back to nothing when the machine goes idle.
+    #[test]
+    fn the_windows_load_average_follows_the_busy_processors() {
+        let mut l = [0.0f64; 3];
+        for _ in 0..(3600 / 5) {
+            for (v, w) in l.iter_mut().zip([60.0, 300.0, 900.0]) {
+                *v = load_step(*v, 2.0, 5.0, w);
+            }
+        }
+        assert!(
+            (l[0] - 2.0).abs() < 0.01 && (l[2] - 2.0).abs() < 0.05,
+            "{l:?}"
+        );
+        let one_minute = load_step(0.0, 2.0, 5.0, 60.0);
+        let fifteen = load_step(0.0, 2.0, 5.0, 900.0);
+        assert!(one_minute > fifteen && fifteen > 0.0);
+        for _ in 0..(3600 / 5) {
+            l[0] = load_step(l[0], 0.0, 5.0, 60.0);
+        }
+        assert!(l[0] < 0.01);
+    }
+
+    /// Windows: the machine's processor time moves forward and the idle part is within it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_cpu_times_move_forward() {
+        let (t0, i0) = cpu_times().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let (t1, i1) = cpu_times().unwrap();
+        assert!(t1 > t0 && i1 >= i0 && i1 - i0 <= t1 - t0);
+        assert!(load_avg().iter().all(|v| *v >= 0.0));
+    }
 }

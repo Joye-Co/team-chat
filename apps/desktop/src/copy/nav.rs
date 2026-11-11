@@ -101,6 +101,7 @@ crate::copy! {
     WEEKDAY_SUN = "周日",
     // app menu
     MENU_ABOUT = "关于 {product}",
+    ABOUT_VERSION = "版本 {version}",
     MENU_HIDE = "隐藏 {product}",
     MENU_HIDE_OTHERS = "隐藏其他",
     MENU_SHOW_ALL = "全部显示",
@@ -122,7 +123,7 @@ crate::copy! {
     MENU_MINIMIZE = "最小化",
     MENU_SHOW_MAIN = "显示主窗口",
     MENU_CLOSE_WINDOW = "关闭窗口",
-    MENU_ZOOM = "缩放",
+    MENU_ZOOM = crate::copy::per_system("缩放", "最大化或还原"),
     MENU_BRING_ALL_TO_FRONT = "前置全部窗口",
     MENU_VIEW = "显示",
     MENU_SIDE_PANEL = "话题详情",

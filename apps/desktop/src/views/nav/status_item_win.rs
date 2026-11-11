@@ -11,6 +11,11 @@
 //! again and its menu quits. With the icon hidden or not added, closing the last window
 //! quits, so the app never runs with no way to reach it.
 //!
+//! The same totals put the unread count on the app's taskbar buttons
+//! (`ITaskbarList3::SetOverlayIcon`), as the Dock icon's badge on macOS: a red disc with the
+//! count, drawn here ([`super::tray_icon::badge_bgra`]) because Windows takes an icon, not
+//! a number. It is set again when a window opens ([`window_attached`]).
+//!
 //! The icon belongs to the hidden events window ([`crate::win32`]). Its procedure only
 //! sends on a channel that a GPUI task drains. The menu is the system's own popup menu; its
 //! loop runs in that task between two app updates, as gpui-component's native menu does,
@@ -25,10 +30,11 @@ use windows::{
     Win32::{
         Foundation::{HWND, POINT},
         Graphics::Gdi::{CreateBitmap, DeleteObject},
+        System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
         UI::{
             Shell::{
-                NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-                Shell_NotifyIconW,
+                ITaskbarList3, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+                NOTIFYICONDATAW, Shell_NotifyIconW, TaskbarList,
             },
             WindowsAndMessaging::{
                 AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu,
@@ -42,7 +48,7 @@ use windows::{
     core::{PCWSTR, w},
 };
 
-use super::tray_icon::{and_mask_len, tinted_bgra};
+use super::tray_icon::{BADGE_SIDE, and_mask_len, badge_bgra, badge_text, tinted_bgra};
 use crate::{
     app::{Changes, NewTopic, OpenSettings, Quit, Services},
     copy::{fill, nav, settings},
@@ -124,6 +130,11 @@ fn taskbar_is_light() -> bool {
 /// An icon of the template `png` in the taskbar's foreground color.
 fn make_icon(png: &[u8], light_taskbar: bool) -> Option<HICON> {
     let (width, height, bgra) = tinted_bgra(png, !light_taskbar)?;
+    icon_from_bgra(width, height, &bgra)
+}
+
+/// An icon from straight-alpha BGRA rows.
+fn icon_from_bgra(width: u32, height: u32, bgra: &[u8]) -> Option<HICON> {
     let mask = vec![0u8; and_mask_len(width, height)];
     // SAFETY: both buffers hold the bytes the bitmaps' sizes ask for; CreateIconIndirect
     // copies the bitmaps, which are deleted right after.
@@ -154,6 +165,82 @@ fn make_icon(png: &[u8], light_taskbar: bool) -> Option<HICON> {
         let _ = DeleteObject(mask.into());
         icon
     }
+}
+
+/// The theme's red as B, G, R: the fill of the taskbar badge.
+fn badge_fill(cx: &App) -> [u8; 3] {
+    let red = gpui::Rgba::from(crate::ui::native::native_colors(cx).red);
+    let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+    [byte(red.b), byte(red.g), byte(red.r)]
+}
+
+/// The shell's taskbar object, made on first use. `None` when the shell has no taskbar
+/// (no Explorer in this session).
+fn taskbar() -> Option<ITaskbarList3> {
+    thread_local! {
+        static TASKBAR: std::cell::OnceCell<Option<ITaskbarList3>> =
+            const { std::cell::OnceCell::new() };
+    }
+    TASKBAR.with(|t| {
+        t.get_or_init(|| {
+            // SAFETY: GPUI initialized COM on this (the main) thread; the object is used
+            // on this thread only.
+            unsafe {
+                let list: ITaskbarList3 =
+                    CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER).ok()?;
+                list.HrInit().ok()?;
+                Some(list)
+            }
+        })
+        .clone()
+    })
+}
+
+/// Puts the unread badge on `hwnd`'s taskbar button, or takes it off when nothing is
+/// unread. False when the taskbar refused (the window has no button yet).
+fn set_overlay(hwnd: HWND, unread: u32, fill: [u8; 3]) -> bool {
+    let Some(taskbar) = taskbar() else {
+        return false;
+    };
+    let icon =
+        badge_bgra(unread, fill).and_then(|bgra| icon_from_bgra(BADGE_SIDE, BADGE_SIDE, &bgra));
+    // What a screen reader says for the badge.
+    let label = wide(&badge_text(unread).unwrap_or_default());
+    // SAFETY: `hwnd` is a window of this thread; the taskbar copies the icon, which is
+    // destroyed right after; a null icon clears the overlay.
+    unsafe {
+        let done = taskbar
+            .SetOverlayIcon(hwnd, icon.unwrap_or_default(), PCWSTR(label.as_ptr()))
+            .is_ok();
+        if let Some(icon) = icon {
+            let _ = DestroyIcon(icon);
+        }
+        done
+    }
+}
+
+/// Puts the current unread badge on the taskbar button of every window of the app.
+fn sync_overlays(unread: u32, cx: &mut App) {
+    let fill = badge_fill(cx);
+    for handle in cx.windows() {
+        if let Ok(Some(hwnd)) = handle.update(cx, |_, window, _| crate::win32::hwnd(window)) {
+            set_overlay(hwnd, unread, fill);
+        }
+    }
+}
+
+/// A window opened: its taskbar button gets the badge too. The button exists only after
+/// the window is shown, so this runs on a later turn.
+pub fn window_attached(cx: &mut App) {
+    cx.defer(|cx| {
+        if let Some(unread) = cx
+            .try_global::<StatusItem>()
+            .and_then(|s| s.shown)
+            .map(|(unread, _)| unread)
+        {
+            sync_overlays(unread, cx);
+        }
+    });
 }
 
 fn icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -419,6 +506,7 @@ fn update(services: &Services, cx: &mut App) {
     // The dot says that something waits; the tooltip says what.
     state.sync(unread > 0 || mentions > 0);
     sync_quit_mode(cx);
+    sync_overlays(unread, cx);
 }
 
 /// For the self-test: the icon's state matches the totals, and it is in the notification
@@ -452,6 +540,68 @@ mod tests {
                 // SAFETY: the icon was made just above and is not shown.
                 unsafe { DestroyIcon(icon).unwrap() };
             }
+        }
+    }
+
+    /// Windows makes an icon from the badge of every size of count, and the taskbar takes
+    /// it for a window that has a taskbar button (and takes it off again).
+    #[test]
+    fn the_taskbar_takes_the_unread_badge() {
+        use windows::Win32::{
+            System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
+            UI::WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
+                WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            },
+        };
+        let fill = [0x30, 0x3b, 0xff];
+        for unread in [1, 42, 250] {
+            let bgra = badge_bgra(unread, fill).unwrap();
+            let icon = icon_from_bgra(BADGE_SIDE, BADGE_SIDE, &bgra).expect("a badge icon");
+            // SAFETY: the icon was made just above and is not shown.
+            unsafe { DestroyIcon(icon).unwrap() };
+        }
+        // SAFETY: a plain visible window of this thread, destroyed below; the message
+        // loop runs long enough for the shell to give it a taskbar button.
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!("badge test"),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                40,
+                40,
+                320,
+                200,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("a window");
+            let pump = || {
+                let until = std::time::Instant::now() + std::time::Duration::from_millis(500);
+                let mut msg = MSG::default();
+                while std::time::Instant::now() < until {
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        DispatchMessageW(&msg);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            };
+            pump();
+            // A session without Explorer has no taskbar: nothing to check there.
+            if taskbar().is_some() {
+                let set = set_overlay(hwnd, 7, fill);
+                pump();
+                let cleared = set_overlay(hwnd, 0, fill);
+                println!("taskbar overlay: set {set}, cleared {cleared}");
+                assert!(set && cleared, "the taskbar took and cleared the badge");
+            } else {
+                println!("taskbar overlay: no taskbar in this session");
+            }
+            let _ = DestroyWindow(hwnd);
         }
     }
 
