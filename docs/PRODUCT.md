@@ -109,6 +109,11 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - **成员**: every member with filters (全部, 在做事, 等人); a member's page shows 现在, 这周 (topics,
   产出, cost), 最近交付, 需要批准的事, 能用的工具, 电脑 and 最近的问题. Changing a member opens the settings
   forms.
+- **常用设置**: an owner changes what changes most about an AI member, which computer it works on
+  (one of the team's or any free one), without opening settings: from the menu of its messages
+  (also a right-click on its avatar), from 在哪干活 › 更换电脑… on its page and from ⋯ in 团队管理
+  (which also has 编辑…). A pick saves at once; 更多设置… opens the full edit sheet. Models and
+  思考强度 are set once for the team, not here.
 - **产出 viewer**: a 产出 in the main window with its 来龙去脉 (the topic, who made it, who asked,
   versions, choices made in the page, decisions used, where it is cited). HTML pages stay isolated
   (one origin per 产出, strict CSP, no network); they also open in their own native window.

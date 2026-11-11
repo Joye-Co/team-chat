@@ -112,6 +112,17 @@ describe("dispatch rules", () => {
     expect(approvalDecision("@dev 同意。")).toBe("approve");
     expect(approvalDecision("拒绝")).toBe("deny");
     expect(approvalDecision("同意，但是先改 README")).toBe(null);
+    // A plain 好 / 行 / 可以 / ok may be said to someone else: only in a reply to the card.
+    for (const short of ["好", "好的", "行", "可以", "ok", "OK", "yes"]) {
+      expect(approvalDecision(short)).toBe(null);
+      expect(approvalDecision(short, true)).toBe("approve");
+    }
+    for (const no of ["不行", "no"]) {
+      expect(approvalDecision(no)).toBe(null);
+      expect(approvalDecision(no, true)).toBe("deny");
+    }
+    expect(approvalDecision("同意", true)).toBe("approve");
+    expect(approvalDecision("拒绝", true)).toBe("deny");
   });
 
   it("stream progress without repeating the final text of an item", () => {

@@ -266,7 +266,8 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         _ => None,
     };
     let can_run = crate::models::discover(rt, found.as_deref()).await;
-    let gates = crate::gates::reported_for(&rt.kind, version.as_deref()).then_some(true);
+    let gates = crate::gates::reported_for(&rt.kind, version.as_deref(), rt.asks_permission)
+        .then_some(true);
     CliInfo {
         runtime: name.to_string(),
         kind: rt.kind.clone(),
@@ -275,7 +276,7 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         available: found.is_some(),
         models: can_run.models,
         efforts: can_run.efforts,
-        // Only Claude Code runs stop at gated commands (a PreToolUse hook); Codex cannot yet.
+        // Claude Code (a PreToolUse hook), Codex and ACP agents (their own approval requests).
         gates,
     }
 }
