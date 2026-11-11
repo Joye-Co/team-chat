@@ -1006,9 +1006,23 @@ async fn codex_read_only_sandbox_writes_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_on_windows_reaches_the_daemon_through_the_request_folder() {
     let Some(codex) = real_codex() else { return };
+    // Also for a user whose own Codex config turns Codex's Windows sandbox on: a run has full
+    // access whatever the config says, so the sandbox is not used for it.
+    for user_config in ["", "[windows]\nsandbox = \"unelevated\"\n"] {
+        codex_reaches_the_daemon_through_the_request_folder(&codex, user_config).await;
+    }
+}
+
+#[cfg(windows)]
+async fn codex_reaches_the_daemon_through_the_request_folder(
+    codex: &daemon::health::Launch,
+    user_config: &str,
+) {
+    let codex = codex.clone();
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("config.toml"), user_config).unwrap();
     let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
     s.note = Some(daemon::chat_run::note());
     assert!(runtime::codex::chat_run_works(&s));
@@ -1151,6 +1165,11 @@ fn the_session_folder_has_the_names_the_cli_can_use() {
 /// in effect at all. What happened is written to `codex-windows-sandbox.json` in the test
 /// folder (CI prints it), and checked: whatever the sandbox does, `chat-run` either answers
 /// or says that the sandbox blocks it; it never hangs and never answers with something else.
+///
+/// Seen with Codex 0.167.1: the unelevated sandbox refuses to start any command under
+/// `workspace-write` ("cannot enforce split writable root sets directly; refusing to run
+/// unsandboxed"), so there is nothing for `chat-run` to be blocked in: no command of such a
+/// session runs at all. Its other sandbox ("elevated") needs an administrator to set it up.
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_windows_sandbox_and_chat_run() {

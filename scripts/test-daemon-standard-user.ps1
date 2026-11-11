@@ -47,19 +47,43 @@ try {
         Write-Host "=== $test as $user ($($exe.Name))"
         $out = Join-Path $work "$test.out"
         $err = Join-Path $work "$test.err"
+        # A process started with other credentials gets this session's environment, not the
+        # new user's: the profile folders in it are the runner's own, which the standard
+        # user may not open. A small batch file gives the test the environment the user has
+        # after a logon (the profile is loaded, so its folders exist).
+        $more = ''
+        # The test harness prints each test's own output only when it fails.
+        if ($test -eq 'integration') { $more = ' --test-threads=4' }
+        $wrapper = Join-Path $work "$test.cmd"
+        $lines = @(
+            '@echo off'
+            "set `"USERNAME=$user`""
+            "set `"USERPROFILE=C:\Users\$user`""
+            'set "HOMEDRIVE=C:"'
+            "set `"HOMEPATH=\Users\$user`""
+            'set "APPDATA=%USERPROFILE%\AppData\Roaming"'
+            'set "LOCALAPPDATA=%USERPROFILE%\AppData\Local"'
+            'set "TEMP=%LOCALAPPDATA%\Temp"'
+            'set "TMP=%LOCALAPPDATA%\Temp"'
+            'set "HOME="'
+            'if not exist "%TEMP%" mkdir "%TEMP%"'
+            'echo running as %USERNAME% with profile %USERPROFILE%'
+            'whoami /groups | findstr /c:"S-1-16-"'
+            "`"$($exe.FullName)`"$more"
+            'exit /b %ERRORLEVEL%'
+        )
+        Set-Content -LiteralPath $wrapper -Value $lines -Encoding Ascii
         $start = @{
-            FilePath               = $exe.FullName
+            FilePath               = Join-Path $env:SystemRoot 'System32\cmd.exe'
+            ArgumentList           = @('/d', '/c', "`"$wrapper`"")
             Credential             = $cred
             LoadUserProfile        = $true
-            UseNewEnvironment      = $true
             WorkingDirectory       = $work
             Wait                   = $true
             PassThru               = $true
             RedirectStandardOutput = $out
             RedirectStandardError  = $err
         }
-        # The test harness prints each test's own output only when it fails.
-        if ($test -eq 'integration') { $start.ArgumentList = @('--test-threads=4') }
         $p = Start-Process @start
         Get-Content -LiteralPath $out -ErrorAction SilentlyContinue | Select-Object -Last 200
         if ($p.ExitCode -ne 0) {
