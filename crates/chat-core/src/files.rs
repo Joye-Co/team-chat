@@ -638,8 +638,11 @@ impl FileCache {
     }
 }
 
-/// Sets `com.apple.quarantine` on a downloaded file, so macOS treats it like a file from a
-/// browser. Errors are ignored (the file system may not support extended attributes).
+/// Marks a downloaded file as coming from the internet, so the system treats it like a
+/// file from a browser: `com.apple.quarantine` on macOS (Gatekeeper checks it when it
+/// opens), the Mark of the Web on Windows (the `Zone.Identifier` stream with the internet
+/// zone: SmartScreen checks a program, Office opens a document in Protected View). Errors
+/// are ignored (the file system may not support extended attributes or streams).
 fn quarantine(path: &Path) {
     #[cfg(target_os = "macos")]
     {
@@ -665,9 +668,19 @@ fn quarantine(path: &Path) {
             );
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let mut stream = path.as_os_str().to_os_string();
+        stream.push(":Zone.Identifier");
+        let _ = std::fs::write(stream, MARK_OF_THE_WEB);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = path;
 }
+
+/// The `Zone.Identifier` stream of a file from the internet zone (3), as browsers write it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const MARK_OF_THE_WEB: &str = "[ZoneTransfer]\r\nZoneId=3\r\n";
 
 /// A partial download that is removed on drop unless kept.
 struct PartFile(Option<PathBuf>);
@@ -712,5 +725,26 @@ mod tests {
         PartFile(Some(kept.clone())).keep();
         assert!(!gone.exists());
         assert!(kept.exists());
+    }
+
+    /// A downloaded file carries the Mark of the Web, and keeps it when it is renamed
+    /// into place and when it is copied (存储为…).
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_downloaded_file_is_marked_as_from_the_internet() {
+        let dir = tempfile::tempdir().unwrap();
+        let (part, dest) = (dir.path().join(".part-a"), dir.path().join("报告 v2.docx"));
+        std::fs::write(&part, b"content").unwrap();
+        super::quarantine(&part);
+        std::fs::rename(&part, &dest).unwrap();
+        let copy = dir.path().join("copy.docx");
+        std::fs::copy(&dest, &copy).unwrap();
+        for file in [&dest, &copy] {
+            let mut stream = file.as_os_str().to_os_string();
+            stream.push(":Zone.Identifier");
+            let mark = std::fs::read_to_string(stream).expect("the Zone.Identifier stream");
+            assert!(mark.contains("ZoneId=3"), "{mark:?}");
+            assert_eq!(std::fs::read(file).unwrap(), b"content");
+        }
     }
 }

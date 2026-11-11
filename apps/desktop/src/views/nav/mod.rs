@@ -6,6 +6,7 @@
 //! is. Dialogs open in the main window, which `RootView::new` registers with
 //! [`attach_window`].
 
+pub mod about;
 pub mod ask_scenes;
 pub mod dialogs;
 pub mod menus;
@@ -203,6 +204,9 @@ pub fn attach_window(window: &Window, cx: &mut App) {
     if cx.has_global::<NavGlobal>() {
         cx.global_mut::<NavGlobal>().window = Some(window.window_handle());
     }
+    // The unread badge of the taskbar button (the Dock badge on macOS needs no window).
+    #[cfg(target_os = "windows")]
+    status_item::window_attached(cx);
 }
 
 pub(crate) fn services_of(cx: &App) -> Services {
