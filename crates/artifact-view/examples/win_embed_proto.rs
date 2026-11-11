@@ -21,8 +21,8 @@ mod proto {
 
     use artifact_view::win_support::{
         capture_screen_png, click_at_screen, client_rect_on_screen, create_host_window,
-        find_window, host_wheel, png_pixel, press_key, pump, scale_of, screen_size, set_dpi_aware,
-        wheel_at_screen,
+        find_window, host_wheel, png_pixel, press_chord, press_key, pump, scale_of, screen_size,
+        set_dpi_aware, wheel_at_screen,
     };
     use artifact_view::{
         ArtifactEvent, ArtifactWindow, Capabilities, Content, EmbedOptions, EmbeddedArtifact,
@@ -231,6 +231,39 @@ mod proto {
             "evaluateText",
             text.borrow().clone().flatten().as_deref() == Some("clicked"),
         );
+
+        // A shortcut of the host (here Ctrl+K), pressed while the page has the keyboard:
+        // the page does not get the key, the host window gets the keyboard back, and
+        // what is typed next (the query of whatever the shortcut opened) stays out of
+        // the page too.
+        embed.evaluate_script(
+            "window.__seen = ''; addEventListener('keydown', function (e) { \
+             if (e.key.length === 1) window.__seen += e.key.toLowerCase(); }, true);",
+        );
+        pump(Duration::from_millis(200), || false);
+        press_key(0x42); // "b": the page hears ordinary typing
+        pump(Duration::from_millis(300), || false);
+        artifact_view::set_host_keys(vec![artifact_view::HostKey {
+            ctrl: true,
+            alt: false,
+            shift: false,
+            key: 0x4B,
+        }]);
+        press_chord(0x11, 0x4B);
+        pump(Duration::from_millis(400), || false);
+        check("hostKeyGivesTheHostTheKeyboard", !embed.is_focused());
+        press_key(0x41);
+        pump(Duration::from_millis(400), || false);
+        let heard: Rc<RefCell<Option<Option<String>>>> = Rc::new(RefCell::new(None));
+        let heard2 = heard.clone();
+        embed.evaluate_text("window.__seen", move |t| *heard2.borrow_mut() = Some(t));
+        pump(Duration::from_secs(10), || heard.borrow().is_some());
+        details.insert("keysThePageHeard".into(), json!(heard.borrow().clone()));
+        check(
+            "pageHearsNeitherTheHostKeyNorWhatFollows",
+            heard.borrow().clone().flatten().as_deref() == Some("b"),
+        );
+        artifact_view::set_host_keys(Vec::new());
 
         // Wheel scrolling that goes to the host: from the system's input only.
         let (ox0, oy0, _, _) = client_rect_on_screen(host);

@@ -76,6 +76,25 @@ pub fn framed_main(
     frame(title.into(), Kind::Main, content, window, cx)
 }
 
+/// [`framed_main`] drawn as in a window that is not the active one, whatever the
+/// window's real state (the `window-inactive` screenshot scene).
+pub fn framed_main_inactive(
+    title: impl Into<SharedString>,
+    content: impl IntoElement,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    SHOW_INACTIVE.with(|s| s.set(true));
+    let framed = frame(title.into(), Kind::Main, content, window, cx);
+    SHOW_INACTIVE.with(|s| s.set(false));
+    framed
+}
+
+thread_local! {
+    /// Set while [`framed_main_inactive`] builds its caption.
+    static SHOW_INACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// [`framed`] for a window that cannot be resized (login, 设置): its maximize
 /// button is drawn dimmed and does nothing, as the Mac dims the zoom button.
 pub fn framed_fixed(
@@ -86,10 +105,6 @@ pub fn framed_fixed(
 ) -> AnyElement {
     frame(title.into(), Kind::Fixed, content, window, cx)
 }
-
-/// How much of the menus' ink an inactive window keeps (`label` to `tertiary`).
-#[cfg(not(target_os = "macos"))]
-const INACTIVE_MENUS: f32 = 0.5;
 
 /// What a window's caption strip holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -129,11 +144,8 @@ fn frame(
 fn caption(title: SharedString, kind: Kind, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = native_colors(cx);
     // Like every title in the app, the title dims in an inactive window.
-    let ink = if emphasized(window) {
-        k.secondary
-    } else {
-        k.tertiary
-    };
+    let active = emphasized(window) && !SHOW_INACTIVE.with(std::cell::Cell::get);
+    let ink = if active { k.secondary } else { k.tertiary };
     // gpui-component's menu bar over the app's menus (`views::nav::menus`).
     #[cfg(not(target_os = "macos"))]
     let menus = (kind == Kind::Main).then(|| {
@@ -141,13 +153,19 @@ fn caption(title: SharedString, kind: Kind, window: &mut Window, cx: &mut App) -
             .flex_none()
             .h_full()
             // The menus dim with the rest of an inactive window's title.
-            .when(!emphasized(window), |d| d.opacity(INACTIVE_MENUS))
+            .when(!active, |d| d.opacity(metrics::CAPTION_INACTIVE))
             .child(crate::views::nav::menus::window_menu_bar(cx))
     });
     #[cfg(target_os = "macos")]
     let menus: Option<gpui::Div> = None;
-    TitleBar::new()
-        .maximizable(kind != Kind::Fixed)
+    let bar = TitleBar::new();
+    // The window buttons dim with the menus (WINDOWS.md §1).
+    let bar = if active {
+        bar
+    } else {
+        bar.controls_opacity(metrics::CAPTION_INACTIVE)
+    };
+    bar.maximizable(kind != Kind::Fixed)
         .h(metrics::CAPTION)
         .pl(space::S12)
         .bg(k.sidebar)

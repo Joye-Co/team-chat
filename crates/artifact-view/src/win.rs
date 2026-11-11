@@ -55,8 +55,9 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, IStream};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::Controls::{
-    SetWindowTheme, TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION,
-    TDF_POSITION_RELATIVE_TO_WINDOW,
+    SetWindowTheme, TASKDIALOG_BUTTON, TASKDIALOG_NOTIFICATIONS, TASKDIALOGCONFIG,
+    TDF_ALLOW_DIALOG_CANCELLATION, TDF_CALLBACK_TIMER, TDF_POSITION_RELATIVE_TO_WINDOW,
+    TDM_ENABLE_BUTTON, TDN_CREATED, TDN_TIMER,
 };
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -1056,8 +1057,13 @@ impl Page {
             // leaves the page (back, reload, save, print, share, search) is taken out.
             if !config.inspectable {
                 let menus = ContextMenuRequestedEventHandler::create(Box::new(|_, args| {
-                    if let Some(args) = args {
-                        trim_context_menu(&args)?;
+                    // A menu that cannot be trimmed is not shown at all: WebView2's full
+                    // menu has the ways out of the page (print, save as, back).
+                    if let Some(args) = args
+                        && trim_context_menu(&args).is_err()
+                    {
+                        // SAFETY: a COM call on the event's own arguments.
+                        unsafe { args.SetHandled(true)? };
                     }
                     Ok(())
                 }));
@@ -1130,6 +1136,12 @@ impl Page {
                             } else {
                                 WM_KEYDOWN
                             };
+                            // The host's command usually opens something to type into
+                            // (the switcher): the keyboard goes back to the host first,
+                            // so what is typed next never reaches the page.
+                            if let Some(take) = page.focus_taker() {
+                                take();
+                            }
                             let host = GetAncestor(page.parent, GA_ROOT);
                             let _ = PostMessageW(
                                 Some(host),
@@ -2527,8 +2539,7 @@ pub struct Confirm {
     /// The question, in the dialog's large text.
     pub title: String,
     pub detail: String,
-    /// The button that agrees (the default, as in the Mac's alert) and the one that
-    /// cancels.
+    /// The button that agrees and the one that cancels.
     pub agree: String,
     pub cancel: String,
 }
@@ -2536,9 +2547,17 @@ pub struct Confirm {
 /// Asks the user to confirm, on a later turn of the message loop so it never runs inside
 /// the caller's own work. `done` gets true only for the agreeing button.
 ///
+/// This dialog is a page's only way out of its sandbox (a link to the web), and a page
+/// decides when it appears: it can ask in the middle of the viewer's typing. So the
+/// dialog never agrees by a key that was already on its way:
+///
+/// - cancelling is the default button, so Enter, Space and Esc all cancel;
+/// - the agreeing button cannot be used for [`AGREE_DELAY_MS`] after the dialog shows,
+///   which also covers a click that was aimed at the page.
+///
 /// The dialog is a task dialog with the app's own two buttons. Task dialogs need version
 /// 6 of the common controls (the app's manifest asks for it); a program without it (a
-/// test) gets a plain message box with the system's 确定 and 取消.
+/// test) gets a plain message box with the system's 确定 and 取消, cancel the default.
 pub fn confirm_later(ask: Confirm, done: impl FnOnce(bool) + 'static) {
     post(move || {
         // SAFETY: a modal dialog owned by this thread's active window.
@@ -2550,13 +2569,60 @@ pub fn confirm_later(ask: Confirm, done: impl FnOnce(bool) + 'static) {
                     Some(owner),
                     &HSTRING::from(ask.detail.as_str()),
                     &HSTRING::from(ask.title.as_str()),
-                    MB_OKCANCEL | MB_ICONWARNING,
+                    FALLBACK_STYLE,
                 )
             };
             answer == IDOK
         });
         done(agreed);
     });
+}
+
+/// The message box of a program without task dialogs: cancel is the default button.
+const FALLBACK_STYLE: MESSAGEBOX_STYLE =
+    MESSAGEBOX_STYLE(MB_OKCANCEL.0 | MB_ICONWARNING.0 | MB_DEFBUTTON2.0);
+
+/// The id of the agreeing button of the task dialog.
+const AGREE: i32 = 100;
+/// The default button of the task dialog: cancel.
+const DEFAULT_BUTTON: i32 = IDCANCEL.0;
+/// How long after the dialog shows its agreeing button stays off, in milliseconds: longer
+/// than a key press or a click that was already under way takes to arrive.
+pub const AGREE_DELAY_MS: usize = 700;
+
+/// Whether the agreeing button may be used `elapsed_ms` after the dialog showed.
+fn agree_enabled(elapsed_ms: usize) -> bool {
+    elapsed_ms >= AGREE_DELAY_MS
+}
+
+/// The task dialog's callback: the agreeing button is off when the dialog is created and
+/// comes on once [`AGREE_DELAY_MS`] passed (the dialog's own timer, every 200 ms).
+unsafe extern "system" fn confirm_callback(
+    hwnd: HWND,
+    msg: TASKDIALOG_NOTIFICATIONS,
+    wparam: WPARAM,
+    _lparam: LPARAM,
+    _data: isize,
+) -> HRESULT {
+    let enable = if msg == TDN_CREATED {
+        Some(false)
+    } else if msg == TDN_TIMER && agree_enabled(wparam.0) {
+        Some(true)
+    } else {
+        None
+    };
+    if let Some(enable) = enable {
+        // SAFETY: a message to the dialog that called back, on its own thread.
+        unsafe {
+            SendMessageW(
+                hwnd,
+                TDM_ENABLE_BUTTON.0 as u32,
+                Some(WPARAM(AGREE as usize)),
+                Some(LPARAM(enable as isize)),
+            );
+        }
+    }
+    HRESULT(0)
 }
 
 /// Shows `ask` as a task dialog. `None` when this process has no task dialogs.
@@ -2567,7 +2633,6 @@ fn task_dialog(owner: HWND, ask: &Confirm) -> Option<bool> {
         *mut i32,
         *mut BOOL,
     ) -> HRESULT;
-    const AGREE: i32 = 100;
     let (app, title, detail) = (
         HSTRING::from(ask.app.as_str()),
         HSTRING::from(ask.title.as_str()),
@@ -2590,13 +2655,16 @@ fn task_dialog(owner: HWND, ask: &Confirm) -> Option<bool> {
     let mut config = TASKDIALOGCONFIG {
         cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
         hwndParent: owner,
-        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION
+            | TDF_POSITION_RELATIVE_TO_WINDOW
+            | TDF_CALLBACK_TIMER,
         pszWindowTitle: PCWSTR(app.as_ptr()),
         pszMainInstruction: PCWSTR(title.as_ptr()),
         pszContent: PCWSTR(detail.as_ptr()),
         cButtons: buttons.len() as u32,
         pButtons: buttons.as_ptr(),
-        nDefaultButton: AGREE,
+        nDefaultButton: DEFAULT_BUTTON,
+        pfCallback: Some(confirm_callback),
         ..Default::default()
     };
     // The warning sign (`TD_WARNING_ICON`, a resource id, not a string).
@@ -2618,5 +2686,24 @@ fn task_dialog(owner: HWND, ask: &Confirm) -> Option<bool> {
         .ok()
         .ok()?;
         Some(pressed == AGREE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The link dialog is a page's way out: nothing that was typed or clicked before it
+    /// showed may agree to it.
+    #[test]
+    fn the_link_dialog_cancels_by_default_and_holds_its_agree_button() {
+        assert_eq!(DEFAULT_BUTTON, IDCANCEL.0);
+        assert_ne!(DEFAULT_BUTTON, AGREE);
+        assert_ne!(FALLBACK_STYLE.0 & MB_DEFBUTTON2.0, 0);
+        assert!(!agree_enabled(0));
+        assert!(!agree_enabled(AGREE_DELAY_MS - 1));
+        assert!(agree_enabled(AGREE_DELAY_MS));
+        // A held key repeats within half a second; the delay is longer.
+        const { assert!(AGREE_DELAY_MS >= 500) };
     }
 }

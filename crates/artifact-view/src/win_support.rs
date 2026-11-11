@@ -168,6 +168,28 @@ pub fn press_key(virtual_key: u16) -> bool {
     send(&[key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)])
 }
 
+/// Presses `virtual_key` while `modifier` (a virtual-key code such as Ctrl's 0x11) is held.
+pub fn press_chord(modifier: u16, virtual_key: u16) -> bool {
+    let key = |vk, flags| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(vk),
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    send(&[
+        key(modifier, KEYBD_EVENT_FLAGS(0)),
+        key(virtual_key, KEYBD_EVENT_FLAGS(0)),
+        key(virtual_key, KEYEVENTF_KEYUP),
+        key(modifier, KEYEVENTF_KEYUP),
+    ])
+}
+
 /// The top-level window of this thread with exactly this title (0 when there is none).
 pub fn find_window(title: &str) -> isize {
     // SAFETY: a lookup by title.

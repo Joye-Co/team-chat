@@ -26,6 +26,16 @@ set +e
 code="${PIPESTATUS[0]}"
 set -e
 echo "screenshot self-test exit code: $code"
+# The 产出 window is not a GPUI window: its own mode captures it from the screen (title
+# bar in the theme's colors, the app's icon, the version picker), light and dark.
+set +e
+"$exe" --artifact-window "$dir" 2>&1 | tee -a "$dir/selftest.log"
+window_code="${PIPESTATUS[0]}"
+set -e
+echo "artifact window exit code: $window_code"
+if [ "$code" = 0 ]; then
+  code="$window_code"
+fi
 if [ "$code" != 0 ]; then
   # A crash leaves no line in the log; Windows records the faulting module.
   powershell -NoProfile -Command "Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error','Windows Error Reporting'} -MaxEvents 4 -ErrorAction SilentlyContinue | Format-List TimeCreated, ProviderName, Message" \

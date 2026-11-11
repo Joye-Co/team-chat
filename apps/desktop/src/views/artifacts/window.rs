@@ -284,6 +284,12 @@ fn open_window_with(
     windows(cx).open.insert(artifact_id.clone(), win);
     cx.spawn(async move |cx: &mut AsyncApp| {
         while let Some(event) = rx.next().await {
+            #[cfg(windows)]
+            if artifact_id == SAMPLE_ID
+                && matches!(event, artifact_view::ArtifactEvent::Loaded { .. })
+            {
+                SAMPLE_LOADED.store(true, Ordering::SeqCst);
+            }
             let closed = matches!(event, artifact_view::ArtifactEvent::Closed);
             cx.update(|cx| on_event(provider.as_ref(), &artifact_id, event, cx));
             if closed {
@@ -456,6 +462,56 @@ fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u
 }
 
 // --- end inc-host track ---
+
+/// The id of the sample window of the Windows screenshot mode
+/// (`selftest::artifact_window`).
+#[cfg(windows)]
+const SAMPLE_ID: &str = "selftest-window";
+
+/// Opens a sample 产出 window as the app opens a real one: a page with a version list.
+#[cfg(windows)]
+pub(crate) fn open_sample(title: &str, cx: &mut App) {
+    use artifact_view::{Content, VersionItem, VersionSpec};
+    const PAGE: &str = "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">\
+<style>:root{color-scheme:light dark}body{margin:24px;font:14px/22px -apple-system,\"PingFang SC\",sans-serif}\
+code{font-family:Menlo,monospace}</style>\
+<h2>新增群涨了 12%，回复也更快了</h2><p>微博带来的新增最多，而且每周都在涨。</p>\
+<p><code>2026.10.01 – 10.31</code></p>";
+    let spec = VersionSpec::new(3, Content::single("index.html", PAGE.as_bytes().to_vec()));
+    let items = [(3, "v3 · 最新"), (2, "v2"), (1, "v1")]
+        .into_iter()
+        .map(|(version, label)| VersionItem {
+            version,
+            label: label.into(),
+        })
+        .collect();
+    SAMPLE_LOADED.store(false, Ordering::SeqCst);
+    open_window_with(
+        None,
+        SAMPLE_ID.into(),
+        title.into(),
+        spec,
+        items,
+        artifact_view::Capabilities::NONE,
+        cx,
+    );
+}
+
+/// Set when the sample window's page has loaded.
+#[cfg(windows)]
+static SAMPLE_LOADED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+pub(crate) fn sample_loaded(_cx: &mut App) -> bool {
+    SAMPLE_LOADED.load(Ordering::SeqCst)
+}
+
+#[cfg(windows)]
+pub(crate) fn close_sample(cx: &mut App) {
+    if let Some(window) = windows(cx).open.remove(SAMPLE_ID) {
+        window.close();
+    }
+}
 
 /// The 产出 window's frame in the app's theme. The Mac's window takes the
 /// app's appearance by itself; on Windows the title bar is the system's, so

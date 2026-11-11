@@ -45,6 +45,7 @@ pub struct TitleBar {
     children: SmallVec<[AnyElement; 1]>,
     on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
     maximizable: bool,
+    controls_opacity: Option<f32>,
 }
 
 impl TitleBar {
@@ -55,7 +56,15 @@ impl TitleBar {
             children: SmallVec::new(),
             on_close_window: None,
             maximizable: true,
+            controls_opacity: None,
         }
+    }
+
+    /// Draws the window buttons at this opacity: the host dims them in a window that is
+    /// not the active one, as Windows' own title bars do.
+    pub fn controls_opacity(mut self, opacity: f32) -> Self {
+        self.controls_opacity = Some(opacity);
+        self
     }
 
     /// Whether the window can be maximized (default true). With `false`, for a window that
@@ -210,7 +219,7 @@ impl ControlIcon {
 }
 
 impl RenderOnce for ControlIcon {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
         let hover_fg = self.hover_fg(cx);
@@ -234,12 +243,7 @@ impl RenderOnce for ControlIcon {
             .justify_center()
             .content_center()
             .items_center()
-            // An inactive window dims its buttons, as Windows' own title bars do.
-            .text_color(if window.is_window_active() {
-                cx.theme().foreground
-            } else {
-                cx.theme().muted_foreground
-            })
+            .text_color(cx.theme().foreground)
             .when(disabled, |this| {
                 this.text_color(cx.theme().muted_foreground).opacity(0.5)
             })
@@ -279,6 +283,7 @@ impl RenderOnce for ControlIcon {
 struct WindowControls {
     on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
     maximizable: bool,
+    opacity: Option<f32>,
 }
 
 impl RenderOnce for WindowControls {
@@ -312,6 +317,7 @@ impl RenderOnce for WindowControls {
             .items_center()
             .flex_shrink_0()
             .h_full()
+            .when_some(self.opacity, |this, opacity| this.opacity(opacity))
             .when(supported.minimize, |this| {
                 this.child(ControlIcon::minimize())
             })
@@ -437,6 +443,7 @@ impl RenderOnce for TitleBar {
                 .child(WindowControls {
                     on_close_window: self.on_close_window,
                     maximizable: self.maximizable,
+                    opacity: self.controls_opacity,
                 }),
         )
     }
