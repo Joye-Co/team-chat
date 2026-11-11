@@ -10,6 +10,9 @@ enum Route: Hashable {
     case member(id: String)
     case artifact(id: String)
     case me
+    case groupInfo(group: String)
+    case topicInfo(group: String, topic: String)
+    case run(id: String)
 }
 
 /// The screen of a route, for every navigation stack. Each feature owns its screen file.
@@ -24,6 +27,9 @@ struct RouteView: View {
         case .member(let id): MemberScreen(memberId: id)
         case .artifact(let id): ArtifactScreen(artifactId: id)
         case .me: MeScreen()
+        case .groupInfo(let group): GroupInfoScreen(groupId: group)
+        case .topicInfo(let group, let topic): TopicInfoScreen(groupId: group, topicId: topic)
+        case .run(let id): RunScreen(runId: id)
         }
     }
 }

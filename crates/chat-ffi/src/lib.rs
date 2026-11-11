@@ -16,6 +16,7 @@ use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
 mod devices;
+mod pages;
 mod token;
 
 pub use auth::{
@@ -24,6 +25,7 @@ pub use auth::{
     sign_in_qr_text,
 };
 pub use devices::{DeviceItem, OfferState, PasswordState, SignInOffer, device_kind};
+pub use pages::*;
 pub use token::{clear_token, load_token, save_token};
 
 uniffi::setup_scaffolding!();
