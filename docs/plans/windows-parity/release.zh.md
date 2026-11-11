@@ -41,7 +41,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 项 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
 | 安装 | 打开 DMG，拖到「应用程序」 | 双击安装包；只装给当前用户，不要管理员；`/S` 静默 | 相同。CI 实测 |
-| 系统要求 | Apple 芯片，macOS 13+（`Info.plist` 的最低版本） | 64 位 Windows 10 22H2+；安装包在更低的系统上直接退出并说明 | 相同 |
+| 系统要求 | Apple 芯片，macOS 13+（`Info.plist` 的最低版本） | 64 位 Windows 10 22H2（内部版本 19045）或 Windows 11；安装包在更低的系统上直接退出并说明 | 相同。**已补**（#174）：原来只查「Windows 10」，现在查内部版本号，和文档写的一致；只能编译验证（CI 的 runner 是新系统） |
 | 程序的架构 | 只有 arm64；`test-dmg.sh` 检查 | 只有 x64；原来测试不检查 | **已补**（PR 1）：`test-windows-installer.sh` 读每个 exe 的 PE 头，必须是 x64 |
 | 另一种芯片 | Intel Mac 装不了 | ARM 的 Windows，见下面「Windows on ARM」 | 相同（都只出一种架构） |
 | 带的东西 | 客户端、daemon（在 `.app` 里）、图标、URL scheme（`Info.plist`） | 客户端、更新程序、daemon、卸载程序、图标和版本资源、URL scheme（注册表）、开始菜单快捷方式（带 AppUserModelID）、WebView2 bootstrapper | 相同。CI 实测 |
@@ -71,7 +71,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 安装 | 客户端自己做：挂载 DMG，检查 bundle id、版本、designated requirement，`ditto` 到旁边，改名换掉旧的 | 运行中的 exe 不能覆盖，所以交给更新程序（`apps/update-helper`）：等客户端退出，把旧文件挪到备份目录，静默跑安装包 | 无对应的部分已有替代。CI 实测 |
 | 重新打开 | 一个 shell 等旧进程退出后 `open` 新的 | 更新程序启动新版本 | 相同。CI 实测 |
 | 新版本起不来 | 换文件这一步失败会放回旧的；新版本启动后崩溃没有回滚 | 新版本 90 秒内没有确认，更新程序把旧版本放回去并重新打开 | 相同（Windows 多一层）。CI 实测 |
-| 更新被打断（断电、注销） | 旧 bundle 留在旁边，下次启动清理 | 日志（journal）加 `RunOnce`：下次登录、下次启动、下次更新前恢复 | 相同。CI 实测（真的杀掉更新程序再恢复） |
+| 更新被打断（断电、注销） | 旧 bundle 留在旁边，下次启动清理 | 日志（journal）加 `RunOnce`：下次登录、下次启动、下次更新前恢复 | 相同。**已补**（#174）：原来恢复只认更新程序的进程号，重启电脑后这个进程号可能是别的程序的，恢复会一直以为「更新还在进行」；`RunOnce` 用掉后也没人再试。现在 journal 里记进程号加进程启动时间，恢复没完成（要等、或失败）就把 `RunOnce` 再登记一次。CI 实测：在更新的六个阶段各杀一次更新程序，每次读出 `RunOnce` 里登记的命令、像系统那样先删登记再原样执行，检查安装目录逐字节回到原样；其中一次把 journal 里的进程号改成另一个活着的进程。runner 不能真的注销再登录，这是替身，真机步骤见第三节 |
 | 不能自动装的时候（装在不可写的位置、开发构建） | 在访达里打开 DMG，文字教人拖到「应用程序」 | 在资源管理器里选中安装包；但文字还是访达和「应用程序」那一套 | **已补**（PR 1）：这几句文案按系统分开（`copy/update.rs` 的 `per_system`），Windows 上说「安装包已在文件资源管理器中选中，退出后双击安装」 |
 | daemon 跟着客户端换 | daemon 在 `.app` 里，文件被换掉后空闲时自己退出，launchd 拉起新的 | 安装包按「改名替换」协议换文件，不停进程；daemon 空闲时退出，计划任务一分钟内拉起新的 | **已补**（PR 2）：原来 CI 只验证了文件被换掉。现在 `test-windows-update.sh` 在 runner 上跑整条链路，见下面「整条链路」 |
 | 几个账号 | 更新只看当前账号的服务器；装的是同一个客户端 | 同上 | 相同 |
@@ -161,21 +161,21 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
 | --- | --- | --- | --- |
 | 预发布版本（`1.3.0-rc.1`） | 出 DMG，只放 GitHub，不上传服务器（客户端只更新到正式版本） | 原来什么都不出：workflow 跳过 Windows 任务，构建脚本也拒绝这种版本号 | **已补**（PR 1）：Windows 任务照样构建、测试安装包，`windows-publish` 只把它加进 GitHub Release、不上传服务器；安装包的四段数字版本取 `-` 前面的部分。本机用 `1.3.0-rc.1` 编过 NSIS 脚本；整条 workflow 要等下一次预发布才真的跑到 |
 | 服务器地址不进日志 | 原来 `release.yml` 把仓库变量放进 `env` 和 `GITHUB_ENV`，每一步的日志开头都会把地址印出来（仓库是公开的，日志也是） | 我在 PR 1 第一版里给 CI 的安装包任务也这么传了，同样印了出来 | **已补**（PR 1）：用到地址的任务都挪进被调用的 workflow（`release-jobs.yml`、`windows-installer.yml`），地址作为它的 secret 传进去，日志里是 `***`；每个任务第一步再把每个地址和主机名登记成要遮掉的字符串；不再写进 `GITHUB_ENV`；最后一个任务 `No server address in the logs` 读本次运行每个已完成任务的日志，出现主机名就失败（`scripts/check-logs-for-servers.sh`，有测试）。**以前的运行日志里还有这些地址**，只有运营方能删，见第三节 |
-| 发版入口 | `scripts/release.sh <版本>`（本机或 `release.yml` 的 macOS 任务）：检查、改版本号、构建、测试、提交、打 tag、建 GitHub Release、上传服务器 | `release.yml` 的 `windows` 任务构建、签名、测试；`windows-publish` 把安装包加进同一个 GitHub Release 并上传服务器 | 相同。Windows 的构建只能在 Windows 上跑，所以没有「本机发版」；`release.sh` 对 `--platform windows` 只做上传 |
-| `release.sh` 的模式 | `--dry-run [--build]`、正式、`--upload-only`、`--same-as` | workflow 的 `dry-run`（构建、签名、测试，不发）、`release`、`upload-only`（从 GitHub Release 取回安装包再上传） | 相同 |
+| 发版入口 | `scripts/release.sh <版本>`（本机或 `release.yml` 的 macOS 任务）：检查、改版本号、构建、测试、提交、打 tag、建 GitHub Release、上传服务器 | 原来 Mac 任务不等 Windows 任务：DMG 先发出去，Windows 构建失败时这个版本就只有 Mac，文档写的补救（Re-run failed jobs）也行不通 | **已补**（#175）：一次发版对两个系统是一件事。Windows 任务先构建、签名、测试；它绿了 Mac 任务才发布，GitHub Release 一次建好（DMG、安装包、两边的 daemon），再把两个文件传到服务器。`release.sh` 本机运行也一样：不带 `--windows-installer` 就在动任何东西之前停下。给已有版本补安装包：`mode=windows-only`（`release.sh --add-windows`），从那个版本的 tag 构建。只发 Mac 要显式选择（`release_mac_without_windows` / `--without-windows`），运行里有醒目的警告。发到一半停下的每种情况怎么补，RUNBOOK 有一张表。测试：`test-release-scripts.sh` 在沙盒仓库里跑真的 `release.sh`（假的构建、假的 `gh`、假的服务器），覆盖整条发布路径和每种补救 |
+| `release.sh` 的模式 | `--dry-run [--build]`、正式、`--upload-only`、`--same-as`、`--resume`、`--reupload` | workflow 的 `dry-run`、`release`、`upload-only`（= `--reupload`，两个系统的文件都重新上传）、`windows-only`（= `--add-windows`） | 相同。**已补**（#175）：原来 Windows 的 `upload-only` 下载失败只是一条提示、任务照样绿，Mac 的会失败；现在两边一样，缺文件就失败。服务器已经有同一个文件算完成（服务器对同样内容的重复上传回 200），所以「DMG 传上去了、安装包没传上去」能用 `upload-only` 补；内容不同仍然是 409。服务器回 404 不再当成跳过 |
 | 版本号 | `release.sh` 改 `Cargo.toml`、`Cargo.lock`、CHANGELOG 日期并提交 | Windows 任务在自己的工作区里设同一个版本号，不提交 | 相同 |
 | 说明 | `docs/releases/<版本>.md` 上传给服务器，也编进客户端 | 同一个文件 | 相同 |
 | 嵌进去的服务器地址 | `release_ops`：只嵌 `servers.json` | 见上「服务器地址」 | 已补（PR 1） |
-| 签名 | `SIGNING_KEY_PEM`、`SIGNING_CERT_PEM`；正式发版没有就拒绝 | `WINDOWS_SIGN_PFX_BASE64`、`WINDOWS_SIGN_PASSWORD`，或 `WINDOWS_SIGN_CMD`；没有就不签，照样发 | 相同（Windows 允许不签：没有证书时也要能发，这是本次的前提） |
-| 和上一个版本是同一个发布者 | `test-dmg.sh --same-as <上一版 DMG>`：designated requirement 不变，钥匙串才继续信任 | 原来没有：换了证书或忘了签，已安装的客户端会拒绝更新，发出去才知道 | **已补**（PR 1）：`scripts/previous-windows-installer.sh` 取「不是本次版本、且带安装包的最新一个 Release」的安装包（Mac 任务先建好本次的 Release 也不会拿错；列表、读取、下载任何一步失败都让任务失败，只有「以前没有任何安装包」才跳过），`test-windows-installer.sh --same-as` 再让**装好的更新程序自己**回答「上一版的客户端收不收这个安装包」（`<slug>-update.exe --accepts`，就是更新时用的 `signer_allows`，所以发版检查和真实更新不会判得不一样）。测试：`test-release-scripts.sh` 用假的 `gh` 测选哪个版本和各种失败；CI 用本次运行的四个安装包、一个别家签名的程序、以及把测试证书从受信任的根里拿掉之后的情况测这条规则 |
+| 签名 | `SIGNING_KEY_PEM`、`SIGNING_CERT_PEM`；正式发版没有就拒绝 | `WINDOWS_SIGN_PFX_BASE64` 加 `WINDOWS_SIGN_PASSWORD`，或 `WINDOWS_SIGN_CMD` 加 `WINDOWS_SIGN_ENV`（证书在云端密钥库、没有 PFX 的情况）；都没有时正式发版同样拒绝，除非启动时显式加 `windows_unsigned=true` | 相同。**已补**（#175）：原来没有签名就悄悄发没签名的安装包，`WINDOWS_SIGN_CMD` 也没接进 workflow、用它签名时不检查签名。现在不签名是运营方每次发版时的显式选择（现在还没有证书，所以发版要带 `-f windows_unsigned=true`）；两种签名方式都会逐个检查客户端、更新程序、daemon、卸载程序和安装包的签名 |
+| 和上一个版本是同一个发布者 | `test-dmg.sh --same-as <上一版 DMG>`：designated requirement 不变，钥匙串才继续信任 | 原来没有：换了证书或忘了签，已安装的客户端会拒绝更新，发出去才知道 | **已补**（#175）：发版的 Windows 任务把**上一个版本的安装包真的装上**，让它自己更新到新构建（`test-windows-update.sh <上一版> <新版>`）：收不收新安装包由上一版自己的更新程序决定，和用户电脑上发生的是同一件事；不收，发版在发布之前失败。「上一个版本」是比正在构建的版本低的最新一个（`previous-windows-installer.sh`，下载失败算失败，只有以前没有任何安装包才跳过）。先前用新版更新程序回答这个问题的 `--same-as` / `--accepts` 已经删掉。在分支上的 dry-run 里实测过从 1.2.7 更新 |
 | 构建产物的检查 | `test-dmg.sh`：校验和、镜像完整、bundle id、名字、版本、最低系统、URL scheme、图标、带了 daemon、arm64、签名 | `test-windows-installer.sh`：校验和、真的安装、文件和版本资源、注册表、快捷方式和 AppUserModelID、x64、图标、带了 daemon、签名、启动并画一屏、覆盖安装、卸载后没有残留、数据还在 | 相同（Windows 的更重：真的装） |
-| 上传 | `PUT /v1/admin/releases/<版本>` | `PUT /v1/admin/releases/<版本>/assets/windows` | 相同 |
+| 上传 | `PUT /v1/admin/releases/<版本>` | `PUT /v1/admin/releases/<版本>/assets/windows` | 相同。同样内容再传一次回 200（#175），内容不同回 409 |
 | 撤回 | `withdraw-release`：这个版本不再被提供、不能下载 | 同一个命令，两个平台的文件一起撤回 | 相同。不能只撤一个平台：RUNBOOK 已写明做法（撤回后两边一起发更高的版本） |
 | 退回上一个版本 | 让人下载上一版 DMG 拖进去 | 原来没写 | **已补**（PR 1）：RUNBOOK 写了「退出客户端，运行上一版的 `-setup.exe` 覆盖安装」 |
 | `release-check.sh` | 检查版本号、`Cargo.lock`、CHANGELOG、说明、tag、服务器健康 | 同一个脚本，和平台无关 | 相同 |
 | `test-release-scripts.sh` | 测 `deploy-server.sh` 和 `release-check.sh` 的防呆；原来不测 `release.sh` | 同左；`release.sh --upload-only --platform windows` 原来没有测试 | **已补**（PR 2）：对着本地的假服务器测上传。DMG 和安装包各走各的路由、类型、校验和、说明都对；`--platform windows` 不带 `--upload-only`、未知平台、预发布版本、文件不存在都被拒绝且没有请求发出去；密钥不对算失败且不出现在输出里；服务器没有这个接口（404）算跳过；`ci.yml` 里改 `release.sh` 也会触发这个测试 |
 | staging 冒烟（`staging-smoke.ts`） | 不查更新和下载接口 | 同左 | 相同 |
-| CI | DMG 的构建和测试只在手动触发时跑 | 安装包的构建、安装、更新、回滚、恢复、卸载在每个碰到相关文件的 PR 上跑 | 相同（Windows 的更多） |
+| CI | DMG 的构建和测试只在手动触发时跑 | 安装包的构建、安装、更新、回滚、恢复、卸载在每个会进安装包的改动上跑（客户端、daemon、它们用到的 crate、安装脚本；#174 把路径范围放宽到这些）；发版 workflow 里再跑一遍安装测试和「从上一个版本更新」的测试（#175） | 相同（Windows 的更多） |
 
 ## 三、要运营方或真机做的
 
@@ -191,19 +191,20 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
    里设 `WINDOWS_SIGN_CMD`，值是一条「给最后一个参数指的文件签名」的命令（`scripts/windows/sign.sh` 开头有
    说明），凭据放 secret。
 4. 跑一次 `mode=dry-run` 的 Release workflow：「Test the installer」里每个程序的签名都应该是 `Valid`。
-5. 从签名的第一个版本起，以后每个版本都要用同一个主体（Subject）的证书签；`--same-as` 那一步会在发版前
-   拦住不一致的情况。
+5. 从签名的第一个版本起，以后每个版本都要用同一个主体（Subject）的证书签。发版的 Windows 任务会把上一个
+   版本真的装上、让它更新到新构建，证书对不上时在发布之前就失败。
+6. 没有证书的这段时间，每次发版加 `-f windows_unsigned=true`，否则发版拒绝运行。
 
 ### 2. 发版（1.2.7 已经带着 Windows 安装包发过一次）
 
 1. 服务器要先部署到有 `release_assets` 表和 Windows 上传接口的版本（1.2.7 时已经是）。
 2. 仓库变量 `SERVERS_JSON` 是 `{"staging": "<地址>", "production": "<地址>"}`，不用动。
-3. Actions › Release：`version` 填新版本号，先 `mode=dry-run`，看 `Windows installer` 任务全绿；想先在
+3. Actions › Release：`version` 填新版本号（没有证书时每次加 `-f windows_unsigned=true`），先 `mode=dry-run`，看 `Windows installer` 任务全绿；想先在
    Windows 电脑上装一次，从产物 `windows-installer-<版本>` 里拿安装包。
 4. 再跑 `mode=release`。完成后检查：GitHub Release 的 Assets 里有 `-setup.exe` 和 Windows 的 daemon；
    `curl -H "Authorization: Bearer <token>" "<服务器>/v1/updates/latest?platform=windows"` 返回这个版本；
    最后一个任务 `No server address in the logs` 是绿的。
-5. Windows 任务失败而 Mac 已经发出去：在 `main` 上修好，在那次运行上点 **Re-run failed jobs**。
+5. 发到一半停下：按 `docs/RUNBOOK.md`「When a release stops half way」那张表补。Windows 任务失败时什么都还没发出去，修好后重新 `mode=release`；GitHub Release 建好之后上传失败用 `mode=upload-only`；tag 推上去了但 Release 没建成，重新 `mode=release` 会自动从 tag 续上。
 6. 官网（`apps/website/src/index.html`）还写着「Windows 版正在开发」，改成已支持并加上下载说明。
 7. 写 `docs/releases/<版本>.md` 时，只和一个系统有关的条目标明「Mac：」或「Windows：」，因为两边的
    「更新记录」显示的是同一份说明。
