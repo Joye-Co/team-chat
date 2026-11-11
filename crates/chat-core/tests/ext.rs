@@ -82,6 +82,7 @@ fn version(id: &str, v: u32) -> ArtifactVersion {
         run_id: None,
         media: None,
         data_rev: None,
+        parent_version: None,
         artifact_id: id.into(),
         version: v,
         entry: "index.html".into(),
@@ -1174,6 +1175,15 @@ fn bot_run(id: &str, topic: &str, status: RunStatus, updated: u64) -> BotRun {
         summary: None,
         plan: None,
         retry_of: None,
+        requested_for: None,
+        chain_id: None,
+        code: None,
+        phase: None,
+        waiting_for: None,
+        hold_kind: None,
+        held_at: None,
+        takeover: None,
+        last_handback: None,
     }
 }
 

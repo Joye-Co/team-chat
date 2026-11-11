@@ -4,12 +4,10 @@
 //! Both run on a later main-queue turn, outside any GPUI update: the panel's key-window
 //! change and the picker's menu loop call back into GPUI, which must not be borrowed then.
 //!
-//! Windows has no Quick Look panel: Space shows the file in the app's own viewer
-//! ([`super::quick_look`]). Only a file no viewer shows comes here, to
-//! [`system_preview`]: "open with the default app", behind the same guard as 打开
-//! ([`super::open_kind`]): a file that Windows would run, install or mount, and any page a
-//! browser would run, is shown selected in Explorer instead, so Space on a teammate's file
-//! never runs it. 共享… opens the Windows share UI for the window ([`win_share`]).
+//! Windows has no Quick Look panel: Space shows the file in the app's own sheet
+//! ([`super::quick_look`]). Only a file that Windows would run, install or mount comes
+//! here, to [`reveal`]: it is shown selected in Explorer, so Space on a teammate's file
+//! never runs it and never starts another program. 共享… opens the Windows share UI for the window ([`win_share`]).
 
 use std::path::PathBuf;
 
@@ -22,26 +20,11 @@ pub fn toggle_quick_look(path: PathBuf) {
     dispatch2::DispatchQueue::main().exec_async(move || mac::toggle_quick_look(&path));
 }
 
-/// Hands a file that no viewer of the app shows to Windows: its default app, or Explorer
-/// with the file selected when opening it is not safe.
+/// Shows `path` selected in an Explorer window: what Space does for a file Windows would
+/// run. Nothing here opens a file with a program.
 #[cfg(target_os = "windows")]
-pub fn system_preview(path: &std::path::Path) {
-    if preview_opens(path, true) {
-        win::shell_open(path);
-    } else {
-        win::reveal(path);
-    }
-}
-
-/// Whether previewing `path` may hand it to its default app: only what 打开 would hand to
-/// the system too. Anything risky, a page (a browser would run it outside the 产出
-/// window), and a path without a file name are shown in the file manager instead.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub fn preview_opens(path: &std::path::Path, windows: bool) -> bool {
-    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-        return false;
-    };
-    super::open_kind_on(&name, path, windows) == super::OpenKind::System
+pub fn reveal(path: &std::path::Path) {
+    win::reveal(path);
 }
 
 /// Opens the share picker for `paths` at `at` (window points from the top left of the
@@ -204,27 +187,10 @@ mod win {
 
     use crate::win32::wide;
 
-    /// Opens `path` with the app Windows has for its type. Only for a path that
-    /// [`super::preview_opens`] allowed.
-    pub fn shell_open(path: &Path) {
-        let file = wide(&path.display().to_string());
-        // SAFETY: both strings are NUL-terminated and outlive the call.
-        unsafe {
-            ShellExecuteW(
-                None,
-                w!("open"),
-                PCWSTR(file.as_ptr()),
-                PCWSTR::null(),
-                PCWSTR::null(),
-                SW_SHOWNORMAL,
-            );
-        }
-    }
-
     /// Shows `path` selected in an Explorer window.
     pub fn reveal(path: &Path) {
         let args = wide(&super::explorer_select_arg(path));
-        // SAFETY: as in `shell_open`.
+        // SAFETY: both strings are NUL-terminated and outlive the call.
         unsafe {
             ShellExecuteW(
                 None,
@@ -457,41 +423,6 @@ mod mac {
 #[cfg(test)]
 mod tests {
     use super::view_point;
-
-    /// Space on a file a teammate posted must never run it or send a page to the browser.
-    #[test]
-    fn a_preview_never_opens_what_windows_would_run() {
-        let p = |n: &str| std::path::PathBuf::from(format!("/cache/abc/{n}"));
-        for name in [
-            "report.bat",
-            "report.BAT",
-            "report.bat.",
-            "report.bat ",
-            "report.exe",
-            "a.cmd",
-            "a.lnk",
-            "a.ps1",
-            "a.vbs",
-            "a.scr",
-            "a.msi",
-            "a.hta",
-            "a.js",
-            "a.url",
-            "a.iso",
-            "page.html",
-            "page.HTM",
-            "page.html.",
-            "page.svg",
-            "noext",
-            "a.pdf.exe . ",
-        ] {
-            assert!(!super::preview_opens(&p(name), true), "{name:?}");
-        }
-        for name in ["notes.txt", "a.pdf", "photo.PNG", "clip.mp4", "deck.pptx"] {
-            assert!(super::preview_opens(&p(name), true), "{name:?}");
-        }
-        assert!(!super::preview_opens(std::path::Path::new("/"), true));
-    }
 
     /// The share UI gets real storage items for a file and for a page's folder (names
     /// with spaces and Chinese), and the window's share manager takes the request handler.

@@ -1,5 +1,6 @@
 //! Exports product.json fields as compile-time constants so the product name lives in one place:
-//! PRODUCT_NAME, PRODUCT_SLUG, PRODUCT_BUNDLE_ID and PRODUCT_URL_SCHEME.
+//! PRODUCT_NAME, PRODUCT_SLUG, PRODUCT_BUNDLE_ID, PRODUCT_URL_SCHEME and PRODUCT_FORMER_NAMES
+//! (the earlier names, separated by `|`).
 //!
 //! Private deployment data comes from an optional ops checkout: `$TC_OPS_DIR`, else
 //! `$HOME/.config/team-chat/ops` when that directory exists. Open-source builds have neither and
@@ -42,6 +43,13 @@ fn main() {
             .unwrap_or_else(|| panic!("product.json is missing {key}"));
         println!("cargo:rustc-env={var}={value}");
     }
+    // The names the product had before, one per line: an install made under one of them
+    // stays in its folder (`%LOCALAPPDATA%\\Programs\\<old name>` on Windows).
+    let former: Vec<&str> = json["formerNames"]
+        .as_array()
+        .map(|names| names.iter().filter_map(|n| n.as_str()).collect())
+        .unwrap_or_default();
+    println!("cargo:rustc-env=PRODUCT_FORMER_NAMES={}", former.join("|"));
     let ops = ops_dir();
     let servers = ops
         .as_deref()

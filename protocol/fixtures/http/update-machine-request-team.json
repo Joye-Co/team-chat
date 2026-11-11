@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": true,
+  "description": "my own machine -> the team",
+  "value": {
+    "owner": null
+  }
+}

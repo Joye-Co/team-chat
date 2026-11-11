@@ -883,6 +883,12 @@ impl ProcessView {
             RunEvent::InputAccepted { .. }
             | RunEvent::Plan { .. }
             | RunEvent::Output { .. }
+            // usable: GitHub use and a person's take-over commands (shown by later work)
+            | RunEvent::Github { .. }
+            | RunEvent::HandCommand { .. }
+            | RunEvent::HandOutput { .. }
+            | RunEvent::HandResult { .. }
+            | RunEvent::HandSummary(_)
             | RunEvent::Unknown => {}
         }
     }

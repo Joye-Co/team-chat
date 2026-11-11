@@ -1,0 +1,6 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": false,
+  "description": "name or owner is required",
+  "value": {}
+}

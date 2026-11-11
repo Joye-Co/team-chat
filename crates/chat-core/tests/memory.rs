@@ -30,6 +30,7 @@ fn item(id: &str, scope: &str, kind: MemoryKind, status: MemoryStatus) -> Memory
         version: 1,
         created_at: 1,
         updated_at: 2,
+        from_group: None,
     }
 }
 

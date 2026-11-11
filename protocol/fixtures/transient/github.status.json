@@ -1,0 +1,14 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "description": "only to the person's connections with feature github/1",
+  "value": {
+    "type": "github.status",
+    "account": {
+      "login": "alice-dev",
+      "name": "Alice",
+      "status": "ok",
+      "connectedAt": 1762128000000
+    }
+  }
+}

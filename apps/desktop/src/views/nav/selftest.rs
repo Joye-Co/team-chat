@@ -136,6 +136,63 @@ async fn dialog_opens(handle: AnyWindowHandle, action: Box<dyn Action>, cx: &mut
     open
 }
 
+/// Windows, through the real handlers in the running app: the 通知区域里显示 switch takes the
+/// icon out of the notification area and puts it back, and Ctrl+W on the main window does
+/// nothing without the icon (closing it would quit) and closes it with the icon, after
+/// which the app is still there and opens the window again. Last: it closes the window
+/// the other checks use.
+#[cfg(target_os = "windows")]
+async fn windows_checks(
+    services: &Services,
+    cx: &mut AsyncApp,
+    check: &mut impl FnMut(&str, bool),
+) {
+    let main = |cx: &mut AsyncApp| cx.update(|cx| cx.global::<NavGlobal>().window);
+    let alive =
+        |handle: AnyWindowHandle, cx: &mut AsyncApp| handle.update(cx, |_, _, _| ()).is_ok();
+    let ctrl_w = async |handle: AnyWindowHandle, cx: &mut AsyncApp| {
+        let _ = handle.update(cx, |_, window, _| window.activate_window());
+        pause(cx).await;
+        key(handle, "ctrl-w", cx);
+        pause(cx).await;
+    };
+    let Some(handle) = main(cx) else {
+        return check("windows_main_window", false);
+    };
+    // The switch below must not write this run's choice into the person's settings.
+    crate::views::settings::prefs::stop_saving();
+    // The switch off: no icon, and the app would end with its last window.
+    cx.update(|cx| crate::views::settings::general::set_menu_bar(false, cx));
+    pause(cx).await;
+    check(
+        "windows_tray_switch_off_removes_the_icon",
+        cx.update(|cx| super::status_item_ok(services, cx) && !super::app_outlives_windows(cx)),
+    );
+    ctrl_w(handle, cx).await;
+    check(
+        "windows_ctrl_w_keeps_the_main_window_without_the_icon",
+        alive(handle, cx),
+    );
+    // The switch on: the icon is back, and the app outlives its windows.
+    cx.update(|cx| crate::views::settings::general::set_menu_bar(true, cx));
+    pause(cx).await;
+    check(
+        "windows_tray_switch_on_adds_the_icon",
+        cx.update(|cx| super::status_item_ok(services, cx) && super::app_outlives_windows(cx)),
+    );
+    ctrl_w(handle, cx).await;
+    check(
+        "windows_ctrl_w_closes_the_main_window_with_the_icon",
+        !alive(handle, cx),
+    );
+    // Still running: the icon's click opens the window again.
+    cx.update(super::show_main_window);
+    pause(cx).await;
+    pause(cx).await;
+    let reopened = main(cx).is_some_and(|handle| alive(handle, cx));
+    check("windows_the_app_stays_and_reopens_its_window", reopened);
+}
+
 pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
     cx.set_activation_policy(ActivationPolicy::Accessory);
     super::restore(&services, cx);
@@ -415,6 +472,9 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
 
         let status = cx.update(|cx| super::status_item_ok(&services, cx));
         check("menu_bar_item_shows_unread_state", status);
+
+        #[cfg(target_os = "windows")]
+        windows_checks(&services, cx, &mut check).await;
 
         let ok = checks.values().all(|v| v.as_bool() == Some(true));
         let json = serde_json::json!({ "ok": ok, "checks": checks });

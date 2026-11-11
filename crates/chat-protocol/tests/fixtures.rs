@@ -90,7 +90,12 @@ check!(
     PasswordSignInRequest,
     QrClaimRequest,
     QrRequestRequest,
-    QrCodeRequest
+    QrCodeRequest,
+    UpdateMachineRequest,
+    SetMachineBotRequest,
+    MachineGithubWaitRequest,
+    RunCommandRequest,
+    RunCommandResponse
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -331,6 +336,24 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("BadgeResponse", plain::<BadgeResponse>),
     ("PushData", validated::<PushData>),
     ("AnswerCardRequest", validated::<AnswerCardRequest>),
+    // usable: roles, GitHub sign-in, relays, take-over
+    ("UpdateMachineRequest", validated::<UpdateMachineRequest>),
+    ("SetMachineBotRequest", validated::<SetMachineBotRequest>),
+    ("TopicRelay", plain::<TopicRelay>),
+    ("ChainStopResponse", plain::<ChainStopResponse>),
+    ("GithubStatusResponse", plain::<GithubStatusResponse>),
+    ("GithubDeviceResponse", plain::<GithubDeviceResponse>),
+    ("GithubPollResponse", plain::<GithubPollResponse>),
+    (
+        "MachineGithubTokenResponse",
+        plain::<MachineGithubTokenResponse>,
+    ),
+    (
+        "MachineGithubWaitRequest",
+        validated::<MachineGithubWaitRequest>,
+    ),
+    ("RunCommandRequest", validated::<RunCommandRequest>),
+    ("RunCommandResponse", validated::<RunCommandResponse>),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -485,7 +508,8 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
         ]
     );
     assert_eq!(valid("Event", "type").len(), 19);
-    assert_eq!(valid("TransientEvent", "type").len(), 9);
+    // 9 + usable "github.status".
+    assert_eq!(valid("TransientEvent", "type").len(), 10);
 }
 
 #[test]

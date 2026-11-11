@@ -1233,19 +1233,6 @@ impl RootView {
             .size_full()
             .bg(k.bg)
             .text_color(k.ink);
-        // Off the Mac, Ctrl+W closes the main window only while the app stays reachable
-        // without it (the notification-area icon is shown, as the Dock icon always is on
-        // the Mac); otherwise closing it would quit, and the command does nothing.
-        #[cfg(not(target_os = "macos"))]
-        let root = root.on_action(|_: &crate::views::nav::menus::CloseWindow, window, cx| {
-            if crate::views::nav::close_command_closes(
-                crate::views::nav::app_outlives_windows(cx),
-                cx.windows().len(),
-                true,
-            ) {
-                window.remove_window();
-            }
-        });
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root =
             crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)

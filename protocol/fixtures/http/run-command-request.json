@@ -1,0 +1,7 @@
+{
+  "kind": "RunCommandRequest",
+  "valid": true,
+  "value": {
+    "command": "git status --short && npm test"
+  }
+}

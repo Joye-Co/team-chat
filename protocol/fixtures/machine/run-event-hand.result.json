@@ -1,0 +1,11 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "hand.result",
+    "commandId": "c1",
+    "ok": true,
+    "exitCode": 0,
+    "ms": 4200
+  }
+}

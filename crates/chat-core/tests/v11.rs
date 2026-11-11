@@ -95,6 +95,15 @@ fn run(id: &str, status: RunStatus, created: u64) -> BotRun {
         paused_by: None,
         kind: None,
         retry_of: None,
+        requested_for: None,
+        chain_id: None,
+        code: None,
+        phase: None,
+        waiting_for: None,
+        hold_kind: None,
+        held_at: None,
+        takeover: None,
+        last_handback: None,
     }
 }
 
@@ -718,6 +727,7 @@ fn card_state_cause_refs_retracts_and_previews_reach_the_cache() {
         events: None,
         media: None,
         data_rev: None,
+        parent_version: None,
     };
     let artifact = Artifact {
         id: "A1".into(),
@@ -991,6 +1001,7 @@ async fn card_events_page_events_and_interact_transients() {
                         events: None,
                         media: None,
                         data_rev: None,
+                        parent_version: None,
                     },
                 }),
             )],

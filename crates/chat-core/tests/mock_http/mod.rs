@@ -314,6 +314,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 run_id: None,
                 media: None,
                 data_rev: None,
+                parent_version: None,
                 artifact_id: id.clone(),
                 version: 1,
                 entry: r.entry,
@@ -347,6 +348,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 run_id: None,
                 media: None,
                 data_rev: None,
+                parent_version: None,
                 artifact_id: a.id.clone(),
                 version: a.current_version,
                 entry: r.entry,
@@ -680,6 +682,7 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 version: 1,
                 created_at: 1,
                 updated_at: 1,
+                from_group: None,
             };
             s.memories.push(item.clone());
             ok(item)

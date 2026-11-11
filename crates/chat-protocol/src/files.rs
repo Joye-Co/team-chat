@@ -294,9 +294,22 @@ pub struct ArtifactVersion {
         skip_serializing_if = "Option::is_none"
     )]
     pub preview: Option<ArtifactPreview>,
+    /// Usable: the version this one was made from; `None` = `version - 1` (none for version 1).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_version: Option<u32>,
 }
 
 impl ArtifactVersion {
+    /// Usable: the version this one was made from, with the default for older versions.
+    pub fn parent(&self) -> Option<u32> {
+        self.parent_version
+            .or_else(|| self.version.checked_sub(1).filter(|v| *v > 0))
+    }
+
     /// The declared event `name`, if any.
     pub fn event(&self, name: &str) -> Option<&ArtifactEventDecl> {
         self.events.iter().flatten().find(|e| e.name == name)
@@ -645,6 +658,13 @@ pub struct AddArtifactVersionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub preview: Option<ArtifactPreview>,
+    /// Usable: an existing version this one was made from; `None` = the current version.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_version: Option<u32>,
 }
 
 impl AddArtifactVersionRequest {
@@ -655,6 +675,12 @@ impl AddArtifactVersionRequest {
         check_preview(self.preview.as_ref())?;
         if let Some(r) = &self.run_id {
             check_id("runId", r)?;
+        }
+        if self.parent_version == Some(0) {
+            return Err(ValidationError {
+                field: "parentVersion",
+                message: "a version number is 1 or more".into(),
+            });
         }
         self.title.as_deref().map_or(Ok(()), check_title)
     }

@@ -1,0 +1,8 @@
+{
+  "kind": "GithubPollResponse",
+  "valid": true,
+  "description": "unknown states are read as open strings",
+  "value": {
+    "state": "a_future_state"
+  }
+}

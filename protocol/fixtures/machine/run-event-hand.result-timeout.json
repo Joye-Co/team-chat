@@ -1,0 +1,12 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "hand.result",
+    "commandId": "c3",
+    "ok": false,
+    "exitCode": -1,
+    "ms": 600000,
+    "timedOut": true
+  }
+}

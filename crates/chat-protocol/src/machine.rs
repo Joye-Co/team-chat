@@ -37,6 +37,13 @@ pub mod feature {
     /// `machine.publicKey`, `account.login`, `secret.set` / `secret.delete` and the
     /// `secrets` / `usage` metrics: sign in and API keys from the app.
     pub const ACCOUNTS: &str = "accounts";
+    /// Usable: `hello.machine.runsIn`, `run.assign.github`, the `github` run event and the
+    /// GitHub ops of `chat-run`.
+    pub const GITHUB: &str = "github";
+    /// Usable: `run.pause.hold`, `run.command`, `run.command.cancel` and the `hand.*` run events.
+    pub const TAKEOVER: &str = "takeover";
+    /// Usable: with `takeover`, a person's commands run as another user than the run (VM runs).
+    pub const TAKEOVER_ISOLATED: &str = "takeover-isolated";
 }
 
 /// `run.approval.scope = "run"` (这件事里都同意): later matches of the same kind in the run pass.
@@ -81,12 +88,17 @@ pub struct MachineInfo {
     /// 1.1: see [`feature`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features: Option<Vec<String>>,
-    /// 1.1: screen sharing address (e.g. `vnc://mac-mini.tailnet`) for 接管.
+    /// 1.1: screen sharing address (e.g. `vnc://<host>`); not the usable take-over (feature
+    /// "takeover").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub takeover_url: Option<String>,
     /// Feature "accounts": the machine's X25519 public key (base64, 32 bytes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_key: Option<String>,
+    /// Usable (required with feature "github"): where runs execute, "host" | "vm"
+    /// ([`crate::github::MACHINE_RUNS_IN`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_in: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -372,6 +384,9 @@ pub struct RunAssign {
     /// Feature "gates": the action kinds the run stops at for a person's approval.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gates: Option<Vec<RunGate>>,
+    /// Usable, feature "github": whose GitHub the run uses and how.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<crate::github::RunGithub>,
 }
 
 /// A Card v2 answer given to a run (`run.input.answer`).
@@ -712,6 +727,41 @@ pub enum RunEvent {
         op: String,
         body: Value,
     },
+    /// Usable (feature "github"): git or gh used the person's GitHub ("used"), or could not
+    /// ("missing", "invalid"; [`crate::github::RUN_GITHUB_STATES`]).
+    #[serde(rename = "github", rename_all = "camelCase")]
+    Github {
+        state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        login: Option<String>,
+    },
+    /// Usable (feature "takeover"): a command of the person holding the run started.
+    #[serde(rename = "hand.command", rename_all = "camelCase")]
+    HandCommand {
+        command_id: String,
+        command: String,
+        by: String,
+    },
+    /// Usable (feature "takeover"): output of a person's command (<= 16 KiB per event).
+    #[serde(rename = "hand.output", rename_all = "camelCase")]
+    HandOutput { command_id: String, text: String },
+    /// Usable (feature "takeover"): a person's command ended, or was refused (`error`).
+    #[serde(rename = "hand.result", rename_all = "camelCase")]
+    HandResult {
+        command_id: String,
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i64>,
+        ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timed_out: Option<bool>,
+        /// "not_held" | "busy" | "unsupported" ([`crate::takeover::HAND_ERRORS`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// Usable (feature "takeover"): what the person did while holding the run, at hand-back.
+    #[serde(rename = "hand.summary")]
+    HandSummary(crate::takeover::RunHandback),
     /// A type this reader does not know (a newer daemon). Readers skip it; never written.
     #[serde(other)]
     Unknown,
@@ -738,6 +788,9 @@ pub struct RunDone {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
     pub duration_ms: u64,
+    /// Usable: the run's branch, its head and whether it is pushed; `None` = not known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<crate::relay::RunCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -882,6 +935,10 @@ pub enum Down {
         run_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<String>,
+        /// Usable, feature "takeover": "takeover" = a person takes over
+        /// ([`crate::takeover::HOLD_TAKEOVER`]); `None` = a pause.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hold: Option<String>,
     },
     /// 1.1 (feature "pause"): go on; `note`, when set, is the CLI's next input.
     #[serde(rename = "run.resume", rename_all = "camelCase")]
@@ -924,6 +981,18 @@ pub enum Down {
     /// Feature "accounts": forget an API key.
     #[serde(rename = "secret.delete", rename_all = "camelCase")]
     SecretDelete { name: String },
+    /// Usable, feature "takeover": run one command of the person holding the run in its work
+    /// folder. Sent only while the link is up; never queued.
+    #[serde(rename = "run.command", rename_all = "camelCase")]
+    RunCommand {
+        run_id: String,
+        command_id: String,
+        command: String,
+        by: String,
+    },
+    /// Usable, feature "takeover": stop that command.
+    #[serde(rename = "run.command.cancel", rename_all = "camelCase")]
+    RunCommandCancel { run_id: String, command_id: String },
 }
 
 impl Up {

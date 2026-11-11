@@ -2,6 +2,10 @@
 
 English version: [INSTALL.md](INSTALL.md)。Windows 电脑看下面的[在 Windows 上安装](#在-windows-上安装)。
 
+应用登录的是团队的服务器。还没有服务器的话（一个人用，或者你是搭团队的人），先自己部署一个：
+[SELF-HOSTING.zh.md](SELF-HOSTING.zh.md)。它最后会给你一个登录码：第 4 步登录时先选「使用其他服务器…」填你的服务器地址，
+再填这个登录码。
+
 需要一台 Apple 芯片(M1 或更新)的 Mac,系统 macOS 13 或更新。这个 App 没有经过 Apple 公证,
 所以第一次打开时 macOS 会要你手动允许一次(第 3 步)。
 

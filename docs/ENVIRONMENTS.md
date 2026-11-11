@@ -1,6 +1,7 @@
 # Environments
 
 How to set up and deploy your own server environments, and where their config and secrets live.
+A first server, step by step from a fresh Ubuntu machine: [SELF-HOSTING.md](SELF-HOSTING.md).
 The procedures for incidents, rollback, rotation and restore are in [RUNBOOK.md](RUNBOOK.md).
 
 This repository holds no deployment. Every operator keeps their own server URLs, Worker config
@@ -100,22 +101,20 @@ Never print these files; pipe them into commands.
 ## First setup of an env
 
 ```sh
-cd server
-bunx wrangler d1 create chat-<env> --location oc
-# put the id into env.<env> of deploy/server.wrangler.jsonc in your ops checkout,
-# and the env's base URL into deploy/servers.json
-cd .. && scripts/deploy-server.sh <env> && cd server   # D1 migrations, deploy, writes wrangler.deploy.jsonc
-d=~/.config/team-chat/<env>; mkdir -p -m 700 $d
-for f in admin-secret hook-secret-key; do
-  (umask 077; openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' > $d/$f)
-done
-bunx wrangler -c wrangler.deploy.jsonc secret put ADMIN_SECRET --env <env> < $d/admin-secret
-bunx wrangler -c wrangler.deploy.jsonc secret put HOOK_SECRET_KEY --env <env> < $d/hook-secret-key
-cd .. && bun server/scripts/admin.ts bootstrap --env <env> --name <owner name>
+scripts/setup-server.sh <env> --owner-name <owner name>
 ```
 
+It makes the ops folder when it is missing, the D1 database (location `oc`) and the R2 bucket,
+an `env.<env>` block in `deploy/server.wrangler.jsonc`, the secret files `admin-secret` and
+`hook-secret-key`, then deploys (`scripts/deploy-server.sh`, which writes the base URL into
+`deploy/servers.json` on a first deploy), puts the Worker secrets `ADMIN_SECRET` and
+`HOOK_SECRET_KEY` that the Worker lacks, bootstraps the first owner and makes a sign-in code for
+the app. It checks every step first, so it is safe to run again. The walk-through, with what to
+check after each step, is [SELF-HOSTING.md](SELF-HOSTING.md).
+
 Bootstrap works only while the env has no member. It writes the owner token to
-`~/.config/team-chat/<env>/owner-token`.
+`~/.config/team-chat/<env>/owner-token`. `bun server/scripts/admin.ts invite --env <env> --self`
+makes another sign-in code for the owner.
 
 Leave no test data in production: no test groups, topics, members or bots. Check a production
 deploy with `/v1/health`, the read-only WebSocket check below and the monitor, never with

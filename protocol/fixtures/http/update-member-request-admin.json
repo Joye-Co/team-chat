@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "make an admin who is not a 所有者",
+  "value": {
+    "level": "owner",
+    "teamOwner": false
+  }
+}

@@ -282,7 +282,7 @@ Rules:
 - Any group member may send `topic.update`. Every id in `waitingOn` and `ownerId` must be a
   current member of the group (`invalid` otherwise). Duplicates in `waitingOn` are removed.
 - The server sets `ownerId` to the creator when it creates a topic. A bot that takes the work
-  sets itself as owner with `topic.update`.
+  sets itself as owner with `topic.update`. Usable: see "Participants, chains and relays".
 - The server does not emit `topic.updated` per message. Clients set `lastMessageAt` from each
   `message.created` (its `createdAt`). When the newest message is deleted the server emits
   `topic.updated` with the recomputed `lastMessageAt` (omitted when no message is left).
@@ -944,6 +944,7 @@ who took what.
 - **Limits**: hand-overs chain at most 3 deep (`delegation.too_deep`). One piece of work gives out
   at most 8 parts (`delegation.too_many`). A member that is already working in the topic refuses
   (`delegation.refused`).
+- Usable: limits count per chain, with new reasons; see "Participants, chains and relays".
 
 ### Front desk
 
@@ -1002,8 +1003,13 @@ contract, but its shape is fixed here so the developer view and the daemon notes
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
-  `#42` is the message's seq. A system message (`kind: "system"`) is one line in brackets.
-- **Budget, not a count.** The topic's first message is always there. Then the newest messages,
+  `#42` is the message's seq. The time is on the team's clock (`TEAM_TIME_ZONE`, default
+  Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets.
+- **The request whole.** The request and every follow-up carry the same indented lines for the
+  message they quote, their files and their 产出, so a file is an id the run fetches with
+  `chat-run file get`; a message with only an image is its file line. The front desk reads the
+  request the same way.
+- **Budget, not a count.** The topic's first message is always there, cut at 4,000 characters. Then the newest messages,
   newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
   between them, one line says how many and, for a machine with feature `context`, how to read them
   (`chat-run topic history --before <seq>`).
@@ -1068,7 +1074,8 @@ MemoryItem = { id, scope: MemoryScope, kind: MemoryKind, text /* 1..500 */, when
                note? /* <= 500: evidence, what a merge or promotion came from, why it was retired */,
                authorId, human: boolean /* a person wrote or last edited it */,
                status: "active" | "retired" | "pending", confidence /* 0..1 */, uses, lastUsedAt: number | null,
-               version /* >= 1 */, createdAt, updatedAt }
+               version /* >= 1 */, createdAt, updatedAt,
+               fromGroup? /* an AI member's memory: the group it was learned in, or "unknown" */ }
 CreateMemoryRequest = { scope, kind, text, when?, source? /* default { kind: "manual", ids: [] } */ }
 UpdateMemoryRequest = { kind?, text?, when?: string | null, status?: "active" | "retired" }
 MemoriesResponse = { memories: MemoryItem[] }                      // newest change first, <= 500
@@ -1079,7 +1086,7 @@ MemoryUpdate = { id, day /* YYYY-MM-DD, the team's local day */, scope, memoryId
                  change: "added" | "changed" | "retired" | "flagged", before: MemoryItem | null,
                  after: MemoryItem | null, note?, undoneAt: number | null, at }
 MemoryUpdatesResponse = { day: string | null, updates: MemoryUpdate[] }   // oldest first
-MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind, text, when? }
+MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind, text, when?, sourceMessageId? }
 ```
 
 Kinds, statuses, source kinds and changes may grow: Rust reads an unknown value as `Unknown`.
@@ -1091,6 +1098,7 @@ Kinds, statuses, source kinds and changes may grow: Rust reads an unknown value 
 | `GET /v1/memories/:id` | readers | | `MemoryItem` |
 | `PATCH /v1/memories/:id` | writers | `UpdateMemoryRequest` | `MemoryItem`, a new version (none when nothing changes). A person's edit of the text, kind or `when` makes it `human`; `status: "active"` on a pending memory makes it active at once; `retired` 停用 |
 | `GET /v1/memories/:id/versions` | readers | | `MemoryVersionsResponse` |
+| `POST /v1/memories/:id/release` | writers who are people and read it | | `MemoryItem`, a new version without `fromGroup`: every reader of the scope reads it, and every run of the member carries it |
 | `POST /v1/memories/:id/versions/:version/restore` | writers | | `MemoryItem`: a new version with that version's kind, text, `when` and status (a pending one keeps the current status) |
 | `GET /v1/memories/updates?scope=&day=` | readers | | `MemoryUpdatesResponse`: that day's 记忆更新 of the scope, or the newest day with any |
 | `POST /v1/memories/updates/:id/undo` | writers of the line's scope | | `MemoryUpdate` with `undoneAt`: `added` retires the memory, `changed` puts back `before`, `retired` makes it active again (each a new version); `flagged` cannot be undone (`invalid`); twice is `conflict` |
@@ -1104,8 +1112,17 @@ Who reads and writes:
 | `member:<botId>` | every member | owners and that AI member |
 | `person:<id>` | only that person | only that person |
 
-Another member's person scope, a group the caller is not in, or a scope whose group or member does
-not exist is `not_found`; a reader without write access gets `forbidden`. A version clash (two
+**Source group** (`fromGroup`): what an AI member learns in a group or a direct conversation is
+read only there. A memory with `fromGroup` is read (listed, fetched, its versions and its 记忆更新
+lines) only by members of that group, and goes into a prompt only in a group whose members are all
+in that group (so a direct conversation's lessons stay with that person and that member). Runs set
+it on their `member` notes and on the review's lessons; people's memories have none.
+`"unknown"` marks AI-written member memories from before the field (D1 migration
+`0017_memory_audience`): only owners read them and no prompt carries them until a person releases
+them. A person releases one with `POST /v1/memories/:id/release`.
+
+Another member's person scope, a group the caller is not in, a memory of a group the caller is not
+in, or a scope whose group or member does not exist is `not_found`; a reader without write access gets `forbidden`. A version clash (two
 writes of the same version) is `conflict`.
 
 Rules:
@@ -1113,20 +1130,27 @@ Rules:
 - Text, `when` and notes go through the server's redaction (the daemon's token formats) before
   they are stored: memory never keeps credentials.
 - **Runs** write with `POST /v1/machine/runs/:id/memories` (docs/machine-protocol.md, "Memory
-  notes"): `member` is the run's AI member, `person` the requester, `group` the run's group (not in
-  a direct conversation: `forbidden`). Always `pending`, source `{ kind: "run", ids: [runId] }`.
+  notes"): `member` is the run's AI member (with `fromGroup` the run's group), `person` the
+  requester, `group` the run's group (not in a direct conversation: `forbidden`). A `group` note
+  needs `sourceMessageId`, a person's message in the group; without one, or when it is not a
+  person's, the note goes to the member with `fromGroup` instead. Always `pending`, source
+  `{ kind: "run", ids: [runId, sourceMessageId?] }`.
 - **Review after a run** (复盘): with an AI service, when a run of a person's request ends on a
   machine (done, failed or stopped), one forced tool call reads the request, the work order, the
   progress and the result and writes at most 3 `lesson`s with their evidence (`note`) and `when`,
-  as `pending` in the member's scope. Requests of bots and integrations and side chats get no
+  as `pending` in the member's scope with the run's group as `fromGroup`. Requests of bots and integrations and side chats get no
   review. A review never fails or delays the run.
-- **Daily consolidation** (每天整理): once a day, at the first cron after 03:00 in the team's time
-  zone (`TEAM_TIME_ZONE`, default `Asia/Shanghai`), every scope with pending memories from before
-  that day's 03:00 is consolidated once (idempotent per scope and day). With an AI service, one
+- **Daily consolidation** (每天整理): once a day, at the first (hourly) cron after 03:00 in the
+  team's time zone (`TEAM_TIME_ZONE`, default `Asia/Shanghai`), every scope with pending memories
+  from before that day's 03:00 is consolidated once (idempotent per scope and day); a scope whose
+  model call failed is tried again at the next hourly cron. With an AI service, one
   forced tool call gets the scope's active and pending memories (and, for an AI member, the other
   members' lessons) and returns operations: add a pending one (maybe reworded), merge it into an
   active one, retire one with a reason, keep, or promote a lesson found on two or more members to
-  a team `convention` (its `note` names the sources). A pending memory no operation names becomes
+  a team `convention` (its `note` names the sources). A memory with `fromGroup` never widens its
+  audience by itself: it merges only into a memory of the same group, the other members' lessons
+  the model sees are only those without `fromGroup`, and a promotion with such a source writes no
+  team memory but a `flagged` line on that source for a person to decide. That line is read like its source, so only members of the source group (the owners among them) decide; when the sources come from more than one group the line names only the source ids, not the proposed text. A pending memory no operation names becomes
   active as it is. Memories with `human: true` are never changed: an operation on one becomes a
   `flagged` line. Without an AI service the pending memories become active as they are. AI-written
   active memories unused for 60 days are retired. Every change is a `MemoryUpdate` line of that
@@ -1616,7 +1640,8 @@ Rules:
   bot) and is stored in `run.updated` like the plan. `kind` and the
   closed `RunStatus` are separate: a paused run keeps its status (`running`) and has `pausedBy`.
 - Pause stops the CLI's process group on the machine (machine-protocol.md `run.pause`); the
-  stall detection and `maxDurationMs` stop until resume. `Machine.takeoverUrl` (owners and run
+  stall detection and `maxDurationMs` stop until resume. Usable: who may pause, resume and take
+  over, and the run phase, see "Run phase and take-over". `Machine.takeoverUrl` (owners and run
   requesters only) is a screen sharing address the client may open while paused.
 - `Machine.features` (owners only) lists what the daemon supports; see machine-protocol.md.
 - Clients compute the desk, active runs across groups, the live terminal (from the run log's
@@ -2349,3 +2374,230 @@ Rules:
   the showing app knows its server, so a phone that has none yet signs in to the right one. A
   scanner also accepts a bare code.
 - The activity log (`login` kind) also records `password.sign_in` and `qr.sign_in`.
+
+# Usable extensions
+
+Additive, as in 1.1: the protocol stays version 1, every new field is optional, no released
+closed enum gains a value and no released field changes meaning. Every new state, kind and
+reason below is an open string (Zod `z.string()`, Rust `String`) with its known values exported
+(`RUN_PHASES`, `RELAY_STATES`, ...), so a newer server never fails an older reader. Modules:
+`relay.ts`, `github.ts`, `takeover.ts` / `relay.rs`, `github.rs`, `takeover.rs`, plus fields in
+`bots`, `members`, `roster`, `files` and `machine`. Designs: `docs/plans/usable/design-*.zh.md`.
+
+The routes and fields here arrive with the usable milestone, one feature at a time. A server
+that does not serve a route yet answers `not_found`; clients then hide what needs it, as they do
+for a missing 1.1 feature. Fields a server does not fill yet are absent, and readers apply the
+defaults written next to them.
+
+## Who a run works for (交代人)
+
+`requestedBy` keeps its meaning: the author of the message that started the run. The person a
+run works for is a separate field, and every usable rule that says "the requester" means it:
+
+```ts
+BotRun += { requestedFor?: string }   // absent = no person (a hook), a private card answer, or a run from before
+```
+
+| How the run started | `requestedFor` |
+| --- | --- |
+| A person's message, a follow-up of it | that person |
+| A retry (`POST /v1/runs/:id/retry`) | the retried run's |
+| A private card answer (`requestedBy` is `anonymous`) | the answerer, kept on the server only: the wire field is absent, so the answerer stays anonymous |
+| 转交 or 分出去 from another run | the giving run's |
+| A step of a relay (按顺序做) | the person who started the relay (`TopicRelay.startedBy`) |
+| A follow-up that a GitHub connection resumed | the waiting run's |
+| A hook | none |
+
+Messages of AI members never start runs (unchanged), so no run works for an AI member. Readers
+of runs from before the field use `requestedBy` as before.
+
+## Roles: 所有者 and personal machines
+
+Modules: `members.ts`, `roster.ts`, `bots.ts` / `members.rs`, `roster.rs`, `entities.rs`,
+`bots.rs`. `level` keeps its two values: `"owner"` still means "may manage the team" (管理员).
+A 所有者 is an admin with `teamOwner`:
+
+```ts
+Member += { teamOwner?: true }                 // a 所有者; sent only when true; implies level "owner"; never on an AI member
+RosterMember += { teamOwner?: true }
+UpdateMemberRequest += { teamOwner?: boolean } // 所有者 only; true also sets level "owner"; level "member" clears it
+Machine += {
+  ownerId?: string                             // a personal machine (个人的电脑) of this person; absent = a team machine
+  personalBots?: { botId, repoPath?: string /* 1..1024 */ }[]   // the owner's checked AI members; to the owner only, <= 200
+}
+CreateMachineRequest += { personal?: boolean } // true = my own machine
+UpdateMachineRequest = { name?: Name, owner?: "me" | null }    // at least one field
+SetMachineBotRequest = { repoPath?: string | null }            // absent keeps, null clears
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/machines` | usable: any person; a member always makes a personal machine | `CreateMachineRequest` | `CreateMachineResponse`; `personal: false` from a member is `forbidden` (`machine.team_admin_only`); an admin without `personal` makes a team machine (as before) |
+| `PATCH /v1/machines/:id` | team machine: an admin; personal machine: its owner | `UpdateMachineRequest` | `Machine`; `owner: null` (give it to the team) only by an owner who is an admin; `owner: "me"` only by an admin, on a team machine; audited as `machine.update` |
+| `PUT /v1/machines/:id/bots/:botId` | the machine's owner | `SetMachineBotRequest` | `Machine`; my work for that AI member runs here; audited as `machine.bots.set` |
+| `DELETE /v1/machines/:id/bots/:botId` | the machine's owner | | `Machine`; audited as `machine.bots.delete` |
+
+Rules:
+
+- Every route that was `owner` is now "an admin (管理员, `level: "owner"`)". Only a 所有者 changes
+  a member's `level` or `teamOwner` (`forbidden`, reason `role.owner_only`), makes an invite with
+  `level: "owner"` (not a sign-in code), and deactivates, revokes or edits an admin or a 所有者.
+  The team keeps at least one active human 所有者 (`conflict`, `role.last_owner`). `teamOwner:
+  true` for an AI member is `invalid`.
+- `DELETE /v1/machines/:id`, `…/logins*`, `…/secrets*` and `…/monitor` need an admin on a team
+  machine and the owner on a personal machine (`forbidden`, `machine.not_yours`). `PUT
+  /v1/bots/:id/runner` that changes `machineId` to a personal machine needs its owner
+  (`machine.not_yours`); sending the stored `machineId` back is always allowed.
+- `GET /v1/machines`: team machines as before (full for admins, cut down for members); my own
+  personal machines in full; other people's personal machines as `id`, `name`, `createdBy`,
+  `createdAt`, `ownerId`, `connected` and `healthy` (`labels` and `runningRuns` empty).
+- A personal machine takes only work for its owner: a run goes there when its `requestedFor` is
+  the owner (and the AI member is placed there, checked there, or placed nowhere and the labels
+  match), when it was handed over or relayed from a run on that machine for the same person, or
+  when a hook's run uses an AI member its owner placed there himself. A run that no machine may
+  ever take for its requester ends at once with reason `machine.personal_requester` (`failed`,
+  one note in the topic); `POST /v1/runs/:id/retry` refuses it with `conflict` and that reason.
+  A run that waits for its requester's personal machine is `phase: "waiting_computer"` with
+  `waitingFor: "offline"`.
+- Deactivating a person revokes their personal machines (as `DELETE /v1/machines/:id`).
+- Old clients ignore `teamOwner`, `ownerId` and `personalBots` and show a 所有者 as an admin.
+
+## Participants, chains and relays
+
+Module: `relay.ts` / `relay.rs`. Several AI members may work in one topic, at once or one after
+the other. A piece of work (chain) is one request of a person and every hand-over and relay step
+that came out of it.
+
+```ts
+Topic += {
+  participants?: { memberId, working: boolean, lastRunAt: number }[]  // AI members that ran here; at most 50
+  relay?: TopicRelay                                                  // the topic's latest relay; absent = none
+}
+topic.updated data += { participants?, relay?: TopicRelay | null }   // present = now this; null = none any more
+TopicRelay = {
+  id, startedBy, goal /* 1..1000 */, current /* 0-based step */,
+  state: "running" | "paused" | "done" | "stopped",                  // open: an unknown value reads as stopped
+  reason?: string,  // member_unavailable | step_failed | step_blocked | step_cancelled | limit | undelivered | not_pushed | requester_left; open
+  stoppedBy?, updatedAt,
+  steps: { memberId, note? /* 1..100 */, runId?,
+           state: "pending" | "queued" | "working" | "done" | "failed" | "stopped" }[]  // 2..6; open state
+}
+BotRun += {
+  chainId?: string                                   // the chain; every run of it, the root too
+  code?: { branch, head /* hex */, pushed: boolean } // where the run left its code (run.done.code)
+}
+ArtifactVersion += { parentVersion?: number }        // absent = version - 1 (version 1 has none)
+AddArtifactVersionRequest += { parentVersion?: number }  // an existing version below the new one; absent = currentVersion
+ErrorBody += { memberIds?: string[] }                // at most 20: the members a reason is about
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `POST /v1/groups/:id/relays/:relayId/stop` | a person in the group | `TopicRelay`; `conflict` when it has ended |
+| `POST /v1/groups/:id/relays/:relayId/retry` | a person in the group | `TopicRelay`; `conflict` unless it is `paused` |
+| `POST /v1/groups/:id/chains/:chainId/stop` | a person in the group | `ChainStopResponse { stoppedRuns }` |
+
+Rules:
+
+- `Topic.ownerId` keeps its values. Since usable the server sets it to the AI member that most
+  recently started a run in the topic, and a follow-up without an @ goes to it. Clients show who
+  works from `participants` and no longer show one responsible member.
+- A relay starts from a person's message in a topic (not a 群聊) whose first line is `@A note →
+  @B note → @C note` (`→`, `->` or `=>`): 2 to 6 steps, the goal on the second line or after the
+  last @. The message does not go to each mentioned member; the room wakes one step after the
+  other. `send` (and `POST /v1/groups/:id/messages`) refuses such a message with `invalid` and
+  reason `relay.bad_steps` (a broken arrow line) or `relay.member_unavailable` (with `memberIds`:
+  who cannot take it), or with `conflict` and `relay.running` (the topic already has a running or
+  paused relay).
+- Any person in the group may stop a relay or a chain, as anyone may stop a run. Stopping a chain
+  stops every run of it that has not ended and refuses every later hand-over in it.
+- `parentVersion` that is not an existing version below the new one is `invalid` with reason
+  `artifact.bad_parent`. A server stores the current version when it is absent, so new versions
+  always carry their parent.
+- Hand-over limits count per chain: 3 deep (`delegation.too_deep`) and 8 hand-overs by AI members
+  (`delegation.too_many`). New reasons: `delegation.cycle` (back to a member already on the
+  chain's path), `delegation.stopped` (the chain was stopped) and `delegation.not_for_requester`
+  (the other member may not work for the chain's requester, e.g. it is placed on another
+  person's personal machine). `delegation.refused` keeps its meaning: the other member's desk
+  refused (it already works in that topic, or takes no work now).
+
+## GitHub sign-in
+
+Module: `github.ts` / `github.rs`. Each person connects their own GitHub once; runs done for them
+push as them (machine side: machine-protocol.md, "GitHub (feature `github`)").
+
+```ts
+GithubAccount = { login, name?, status: "ok" | "invalid", connectedAt }   // open status: unknown reads as invalid
+GithubWait = { runId, groupId, topicId, botId, reason: "not_connected" | "invalid" }
+GithubStatusResponse = { available: boolean, unavailableReason?: "no_client_id" | "no_secret_key",
+                         account?: GithubAccount, waits: GithubWait[] /* <= 100 */ }
+GithubDeviceResponse = { deviceId, userCode, verificationUri, interval /* s */, expiresAt }
+GithubPollResponse = { state: "pending" | "slow_down" | "done" | "expired" | "denied" | "taken", account? }
+TransientEvent += { type: "github.status", account?: GithubAccount }      // no account = disconnected
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `GET /v1/me/github` | person | `GithubStatusResponse`: my connection and the runs that wait for it |
+| `POST /v1/me/github/device` | person | `GithubDeviceResponse`: a GitHub device code sign-in (15 minutes) |
+| `POST /v1/me/github/device/:id/poll` | the person who started it | `GithubPollResponse`; `taken` = that GitHub account is connected to another member |
+| `DELETE /v1/me/github` | person | `{ ok: true }` |
+
+Rules:
+
+- The server keeps the token, encrypted; clients never get it. `done` resumes every run that
+  waited for this person (one follow-up run each). Connecting and disconnecting push
+  `github.status` to the person's own connections whose `hello.features` has `github/1`; other
+  connections read `GET /v1/me/github` (on open, on focus, in settings). An older client never
+  gets the transient: a Rust reader fails on an unknown transient type.
+- `available` is false when the server lacks the OAuth client id (`no_client_id`) or the key it
+  encrypts tokens with (`no_secret_key`); then nobody can connect and machines run as before.
+- A run that needs the GitHub of a person who has not connected, or whose token GitHub refused,
+  ends waiting for them: the AI member @-mentions them once in the topic, and `waits` lists it.
+- Whose GitHub a run uses: its `requestedFor`; for a hook's run, the person who made the hook;
+  with neither, the person who added the AI member. A person who left the team is replaced by the
+  earliest active human admin.
+
+## Run phase and take-over
+
+Module: `takeover.ts` / `takeover.rs`. One state per run that people see, computed by the server.
+`status` and `pausedBy` keep their meaning, and a paused or held run keeps its `status`.
+
+```ts
+BotRun += {
+  phase?: "working" | "waiting_person" | "needs_reply" | "waiting_approval" | "waiting_computer"
+        | "paused" | "taken_over" | "done" | "failed" | "stopped"   // open; unknown or absent: work it out from status and pausedBy
+  waitingFor?: "question" | "stuck" | "report" | "queue" | "offline" | "booting"   // open
+  holdKind?: "pause" | "takeover"     // only with pausedBy (pausedBy is also set while taken over)
+  heldAt?: number                     // only with pausedBy
+  takeover?: "commands" | "isolated" | "none"   // how the run's machine can be taken over
+  lastHandback?: RunHandback
+}
+RunHandback = { by, heldMs, commands, files: string[] /* <= 20 */, headFrom?, headTo? }
+RunCommandRequest = { command: string /* 1..4000 */ }
+RunCommandResponse = { commandId /* [A-Za-z0-9_-]{1,64} */ }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/runs/:id/takeover` | see the rules | | `BotRun` with `holdKind: "takeover"`; from `paused` it upgrades the hold; `conflict` when the run ended, waits for a machine, or its machine cannot be taken over; audited as `run.takeover` |
+| `POST /v1/runs/:id/commands` | the person holding the run | `RunCommandRequest` | `RunCommandResponse`; `conflict` when the run is not taken over by them, a command runs, or the machine is offline (never queued); audited as `run.command` (redacted text) |
+| `POST /v1/runs/:id/commands/:commandId/cancel` | the person holding the run | | `{ ok: true }` |
+
+Rules:
+
+- Pause (`POST /v1/runs/:id/pause`): the requester (`requestedFor`, else `requestedBy`); on a team
+  machine also an admin; on a personal machine also its owner, and no admin. Resume (`…/resume`,
+  the hand-back): the person holding it or the requester, by the same machine rule; on a team
+  machine an admin may hand back for someone. Stop (`…/cancel`) stays "a person in the run's
+  group".
+- Take over: on a personal machine only its owner; on a team machine only the requester, and only
+  when the machine reports `takeover-isolated` (`takeover: "isolated"`); never on a machine
+  without feature `takeover` (`takeover: "none"`: pause only). Admins do not take over the runs
+  of others.
+- A held run (`paused`, `taken_over`) is never moved or ended because its machine is away; it
+  keeps its phase, with `waitingFor: "offline"`. Commands run one at a time, at most 10 minutes
+  each, in the run's work folder.
+- `GET /v1/runs/:id/events` carries the run events `hand.command`, `hand.result` and
+  `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
+  it and admins. They are not the AI member's progress.

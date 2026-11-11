@@ -74,7 +74,7 @@ CREATE TABLE work_chains (
   topic_id TEXT NOT NULL,
   root_kind TEXT NOT NULL,             -- run | message（接力从一条消息开始）
   root_id TEXT NOT NULL,
-  requester_id TEXT NOT NULL,          -- 根 run 的 requested_by，或发消息的人
+  requester_id TEXT NOT NULL,          -- 根 run 的 requested_for（design-roles 3.3），或发消息的人
   handoffs INTEGER NOT NULL DEFAULT 0, -- 成员发起的转交和分出去的次数（不含接力的步、不含重试）
   created_at INTEGER NOT NULL, stopped_at INTEGER, stopped_by TEXT);
 CREATE TABLE chain_steps (
@@ -156,7 +156,9 @@ AddArtifactVersionRequest += { parentVersion?: number }
 - `ownerId` 的说明改成「不带 @ 的跟进给谁：最近在这个话题开始 run 的 AI 成员」，取值不变。
 - `parentVersion` 必须是已有版本且小于新版本，否则 `invalid`，reason `artifact.bad_parent`；不传时服务端存当时的 `currentVersion`，所以新数据都显式带父版本。
 - machine-protocol：`run.done` 加可选 `code`；`artifact.version` 的 body 加可选 `parentVersion`；`member.handoff`、`member.assign` 不变，新错误 reason：`delegation.cycle`、`delegation.stopped`、`delegation.not_for_requester`。
-- 发消息被拒的新 reason：`relay.member_unavailable`（带 `names`）、`relay.running`、`relay.bad_steps`。
+- 发消息被拒的新 reason：`relay.member_unavailable`（`invalid`，带 `ErrorBody.memberIds`：接不了的成员 id，客户端换成名字）、`relay.running`（`conflict`）、`relay.bad_steps`（`invalid`）。
+- 停止、重试接力的两个路由直接回 `TopicRelay`。状态、原因都是开放字符串（Zod `z.string()`、Rust `String`），上面写成联合只是列出已知值。
+- 每个 run 另有 `BotRun.requestedFor`（design-roles 3.3 的 `requested_for`）：链上所有 run 都替根请求的那个人做，接力的每一步替发起接力的人做。
 
 ### 3.4 服务端
 
@@ -195,7 +197,7 @@ AddArtifactVersionRequest += { parentVersion?: number }
 
 **转交、分出去**（改 `server/src/bots/desk/delegate.ts`）：
 
-- 交给谁：`findMember` 之外再查对方肯不肯接这个请求人的活：对方跑在别人的个人电脑上、请求人又不是主人时，回 `delegation.not_for_requester`（线 13：个人电脑默认只接主人的事；线 13 合并前跳过这一条）。链上所有 run 的 `requested_by` 都是最初那个人，审批、密钥、GitHub 身份都按他走。
+- 交给谁：`findMember` 之外再查对方肯不肯接这个请求人的活：对方跑在别人的个人电脑上、请求人又不是主人时，回 `delegation.not_for_requester`（线 13：个人电脑默认只接主人的事；线 13 合并前跳过这一条）。链上所有 run 的 `requested_for`（design-roles 3.3）都是最初那个人，审批、密钥、GitHub 身份都按他走；`requested_by` 仍是触发消息的作者。
 - 顺序：`chainStep` 预留 → （分出去：先建新话题）→ `takeDelegation` → `chainStepResult` → 发交接卡。分出去的对方忙不了（新话题里没有它的 run），不可用在建话题前已由 `findMember` 查过；极少数竞争下被拒，新话题里只留那条「@B 目标」。
 - 对方收到什么（交代单 `Brief` 之外，代码拼的交接摘要，不调模型，标成 `Work order from {A}, an AI member, on behalf of {requester}`）：
   - 原始请求：根请求消息的 id，desk 用线 1 的请求渲染带上它的正文、附件、引用和提到的产出（接 2.1）；
@@ -210,10 +212,10 @@ AddArtifactVersionRequest += { parentVersion?: number }
 
   | 情况 | 处理 | 交出方 | 话题里 |
   | --- | --- | --- | --- |
-  | 对方在这个话题里正在做 | 拒绝 `delegation.busy` | 错误：等它做完或自己做 | 不发卡 |
+  | 对方在这个话题里正在做 | 拒绝 `delegation.refused`（已发布的 reason，含义不变；对方 desk 内部仍用 `delegation.busy`，消息原文带过来） | 错误：等它做完或自己做 | 不发卡 |
   | 对方在别处忙、名额满 | 接下，排队 | 成功 | 卡片照发，B 的 run 显示排队 |
   | 对方的电脑离线 | 接下，按线 3 等电脑上线 | 成功 | B 的 run 显示等电脑 |
-  | 对方停用、不在群、没有运行方式 | 拒绝 `delegation.unavailable` | 错误 | 不发卡 |
+  | 对方停用、不在群、没有运行方式 | 拒绝 `delegation.refused`（同上，内部是 `delegation.unavailable`） | 错误 | 不发卡 |
   | 对方做了但做不了 | 对方以「卡住」结束（线 3 的结构化汇报） | 分出去：结果「没做完：原因」交回 | 卡住了，等请求人 |
   | 链已停、超上限、回环 | 拒绝，对应 reason | 错误 | 不发卡 |
 
@@ -293,7 +295,7 @@ AddArtifactVersionRequest += { parentVersion?: number }
 
 | PR | 做什么 | 主要文件 | 依赖 | 怎么测 |
 | --- | --- | --- | --- | --- |
-| R0 协议 | 3.3 的所有字段、路由、reason；`run.done.code`、`artifact.version.parentVersion` | `docs/protocol.md`（Topic、Runs、Delegation、新「Relay」节、Artifacts）、`docs/machine-protocol.md`、`packages/protocol/src/{topic,bots,files}.ts`、`crates/chat-protocol/src/{topic,bots,files}.rs`、`protocol/fixtures` | 无 | 两份 fixture 测试；旧 fixture 照样能读 |
+| R0 协议（并进四份设计共用的协议 PR，新模块 `relay.ts` / `relay.rs`） | 3.3 的所有字段、路由、reason；`run.done.code`、`artifact.version.parentVersion` | `docs/protocol.md`（Topic、Runs、Delegation、新「Relay」节、Artifacts）、`docs/machine-protocol.md`、`packages/protocol/src/{topic,bots,files}.ts`、`crates/chat-protocol/src/{topic,bots,files}.rs`、`protocol/fixtures` | 无 | 两份 fixture 测试；旧 fixture 照样能读 |
 | R1 参与成员和话题状态 | 核心钩子 `updateTopic`、`registerTopicFields`；`participants-1`；claim upsert 并写 `owner_id`；`workState` 和汇总；写入器兜底；`cardOwner`；`release`、importer；去掉 `runs.ts:74`、`front.ts:51` 的挡；desk `topic()` 改调；PRODUCT.md:171 | `server/src/core/registry.ts`、`server/src/core/room.ts`、`server/src/bots/room.ts`（claim、cardOwner、release、importer、写入器）、新 `server/src/bots/participants.ts`、`server/src/bots/desk/{core,runs,front}.ts`、`docs/PRODUCT.md` | R0；线 1 的路由 PR | vitest：A 跑完再 B 跑，`Topic.ownerId` 和不带 @ 的投递都是 B；A 卡住后人 @B、B 做完 → 完成；A、B 同时、一个卡住 → 卡住了；B 的卡片按钮送 B；release 后行没了；desk 不调 workState 时行也不卡在在做；旧房间迁移后能读 |
 | R2 链、转交、分出去、停止 | `chains-1`；`chainStep` 两段式、`chainStepResult`、`chainStop`、`requesterLeft`；出件箱 `part`、`cancel` 和 `onGiveUp`；`delegate.ts` 重写（计数、回环、继承 parent、请求人检查、交接摘要含根请求和代码位置、交接卡、`partsIn`、转交后关 A）；`events.ts`（被停也回报、转交后不发结果卡）；`chains/:id/stop` 路由；daemon 提示词；状态卡「交接」段 | 新 `server/src/bots/chains.ts`、`server/src/bots/desk/delegate.ts`、新 `server/src/bots/desk/delegate_card.ts`、`server/src/bots/desk/events.ts`、`server/src/bots/room.ts`（只动出件箱的 kind、`deliver()`、give-up）、`server/src/bots/routes.ts`、`server/src/bots/index.ts`、`apps/daemon/src/chat_run.rs` | R1 | vitest：深度、8 次、A→B→A 回环、链停后被拒；对方拒绝时次数和归属不变；被转交的那份结果交回原交出方；被停的那份会回报；交出方排队时结果不丢；交出方空闲时只续跑一次；人停 A 时 A 分出去的也停；`part` 放弃时话题卡住；请求人离开时链停；`cargo test` 提示词和 USAGE |
 | R3 接力 | `relay-1`；解析（消息写入钩子）；引擎；出件箱 `relay`；desk `takeRelay`；`queued` 的恢复；接力里的转交和分出去；`Topic.relay` 字段；两个路由；投递跳过；状态卡接力行；tools/e2e 用假 CLI 跑三步 | 新 `server/src/bots/relay/{parse,engine}.ts`、新 `server/src/bots/desk/relay.ts`、`server/src/bots/room.ts`（`deliver()` 跳过、写入器里的恢复）、`server/src/bots/routes.ts`、`tools/e2e` | R2 | vitest：分隔符、2–6 步、A→B→A、正文顺序和 `mentions` 顺序不同、单行和两行写法、bot 消息不解析、群聊不解析、有人接不了时拒发、已有接力时拒发；推进、停住、重试（不占交出次数，第 4 次被拒）；B 正在被人 @ 的 run 结束后排队的步开始；步里转交后等 B；步里分出去的未交回时不推进；`not_pushed`；`relay` 放弃时停住；e2e 三步走完、一步失败停住、重试 |

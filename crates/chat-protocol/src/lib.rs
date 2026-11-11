@@ -82,6 +82,14 @@ pub use topic::*;
 pub use updates::*;
 pub use usage::TeamUsage;
 
+// Usable: GitHub sign-in, relays and chains, run phase and take-over.
+pub mod github;
+pub mod relay;
+pub mod takeover;
+pub use github::*;
+pub use relay::*;
+pub use takeover::*;
+
 pub const PROTOCOL_VERSION: u32 = 1;
 /// `hello.features` of a 1.1 client: the interaction loop and refs to parts.
 pub const CLIENT_FEATURES: [&str; 2] = ["interact/1", "refs/1"];
