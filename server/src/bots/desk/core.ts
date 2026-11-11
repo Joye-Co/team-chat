@@ -110,6 +110,8 @@ export type RunRow = {
   nudged: number;
   loop_key: string | null;
   loop_count: number;
+  /** Tool calls without a result yet: while it is above 0 the CLI is waiting for a step, not silent. */
+  open_tools: number;
   /** Runs in a row the desk continued because the CLI only promised work. */
   auto_continues: number;
 };
@@ -382,6 +384,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN loop_count INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE runs ADD COLUMN auto_continues INTEGER NOT NULL DEFAULT 0;
           `,
+        },
+        {
+          // 盯活: a run that waits for a step it started is not silent. Old rows: 0.
+          name: "desk-12-open-tools",
+          up: `ALTER TABLE runs ADD COLUMN open_tools INTEGER NOT NULL DEFAULT 0;`,
         },
         {
           // M6 replay: what the front desk read, so a decision can be replayed on another model.

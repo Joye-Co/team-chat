@@ -24,7 +24,7 @@ pub(crate) fn open_gallery(
         let view = cx.new(|cx| CardsGallery::new(services, start, cx));
         let focus = view.read(cx).focus.clone();
         window.focus(&focus, cx);
-        view
+        cx.new(|_| crate::ui::native::window_chrome::Framed::new(env!("PRODUCT_NAME"), view))
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())

@@ -120,19 +120,6 @@ if [ "$WITH_DAEMON" = 1 ]; then
   defines+=("-DHAS_DAEMON=1")
 fi
 
-# The notification activator, when the app has one (see toast_activator_clsid).
-TOAST_CLSID="$(toast_activator_clsid)"
-if [ -n "$TOAST_CLSID" ]; then
-  defines+=("-DTOAST_CLSID=$TOAST_CLSID")
-else
-  # The constant is found by its spelling. An app that already takes the activator's argument
-  # but whose constant was not found would ship with nothing registered: stop instead.
-  if grep -rqF -- '-ToastActivated' "$ROOT/apps/desktop/src"; then
-    die "the app handles -ToastActivated but no 'TOAST_ACTIVATOR_CLSID: &str = \"<guid>\"' was found under apps/desktop/src (scripts/lib.sh, toast_activator_clsid)"
-  fi
-  log "the app defines no notification activator: a notification clicked after the app exited does nothing"
-fi
-
 # The WebView2 Evergreen bootstrapper: a small Microsoft program that downloads and installs
 # the runtime. It is fetched at build time, not kept in the repository, and must carry a
 # valid Microsoft signature.

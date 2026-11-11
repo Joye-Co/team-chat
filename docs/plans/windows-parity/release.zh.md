@@ -49,9 +49,9 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 服务器地址 | 发版的构建从 `deploy/servers.json`（或 `TC_SERVERS_JSON`）嵌进去，登录页默认连正式服务器（`release.sh` 的 `release_ops`、`apps/desktop/build.rs`） | 发版 workflow 的 Windows 任务原来自己拼了一个 ops 目录；CI 的安装包没有地址，登录时要手填 | **已补**（PR 1）：`build-windows-installer.sh` 自己做和 `release_ops` 一样的事（只嵌 `servers.json`，不嵌 ops 目录里别的东西）；发版时 `REQUIRE_SERVERS=1`，没有地址就停；CI 从仓库变量 `SERVERS_JSON` 拿，仓库里不放地址。`--selftest-installed` 报告嵌进去的地址的 SHA-256（日志里不出现地址），`test-windows-installer.sh` 核对它和给构建的一致；没给地址时核对确实没有 |
 | 登录 | 邀请码或邮箱验证码；凭证进钥匙串（service = bundle id，account = 服务器地址） | 同一个登录页；凭证进凭据管理器（`<bundle id>:<服务器地址>`） | 相同（只编译和单元测试；真机见第三节） |
 | 登录窗口里换服务器 | 系统菜单栏里有「正式服务器 / 测试服务器」 | 菜单只挂在主窗口标题栏里，登录窗口没有；可以点「使用其他服务器…」手填 | 待补，属界面会话（已写进交接笔记） |
-| `<scheme>://` 链接打开客户端 | `Info.plist` 登记了 scheme，系统会启动或激活客户端；客户端没有注册 `on_open_urls`，不跳到链接指的地方 | 安装包登记 `HKCU\Software\Classes\<scheme>`，链接作为参数启动客户端；参数被忽略，不跳转 | 相同（两边都只打开客户端）。跳转属系统集成会话 |
-| 点一条通知时客户端已经退出 | 系统启动客户端（`UNUserNotificationCenter`） | 没有登记 COM 激活器，点了没反应 | 待补，两半：安装包这一半**已补**（PR 2）：客户端源码里一旦有常量 `TOAST_ACTIVATOR_CLSID`，安装包就登记 `HKCU\Software\Classes\CLSID\{…}\LocalServer32`（`"<客户端>" -ToastActivated`）、应用 ID 下的 `CustomActivator`、快捷方式上的 `System.AppUserModel.ToastActivatorCLSID`，卸载时删掉，测试逐项核对；没有这个常量就什么都不登记（否则 Windows 会去启动一个客户端并不提供的类）。客户端这一半（实现激活器、定这个常量）属系统集成会话，约定已写进交接笔记 |
-| 客户端已在运行时再点链接或再启动一次 | 系统只激活已有的那一个 | 会启动第二个完整的进程（没有单实例） | 待补，属系统集成会话（已写进交接笔记） |
+| `<scheme>://` 链接打开客户端 | `Info.plist` 登记了 scheme，系统启动或激活客户端 | 安装包登记 `HKCU\Software\Classes\<scheme>`，链接作为参数启动客户端；客户端按链接打开自己账号里的群或话题 | 相同。安装包这一半 CI 实测（PR 2：打开一条链接，装好的客户端被启动）；跳转由系统集成会话补上，见 `system.zh.md` 第 4 节 |
+| 点一条通知时客户端已经退出 | 系统启动客户端（`UNUserNotificationCenter`） | 原来点了没反应。系统集成会话把通知做成了协议激活（通知带的是 `<scheme>://group/…/topic/…` 链接），所以不需要 COM 激活器，只需要安装包登记 URL scheme、快捷方式带 AppUserModelID | **已补**（PR 2）：这两样安装包本来就登记、测试逐项核对；新增一步在 runner 上像 Windows 那样打开一条 `<scheme>://` 链接，检查装好的客户端被启动。我先前给 COM 激活器写的那一支（安装包、更新程序、测试）已经删掉。真的在通知中心里点一条旧通知要真机看 |
+| 客户端已在运行时再点链接或再启动一次 | 系统只激活已有的那一个 | 原来会启动第二个完整的进程 | 已由系统集成会话补上（单实例，见 `system.zh.md` 第 4 节）；不在本清单的改动里 |
 
 ### 4. 更新
 
@@ -250,4 +250,4 @@ Azure Trusted Signing 一开始就有信誉。这段时间 INSTALL 文档里「�
 
 - PR 1：本清单；服务器地址、邀请链接、测试开关、卸载、ARM、同一发布者检查、文案、文档。
 - PR 2：整条链路在 runner 上跑（安装 → 邀请码登录本地服务器 → daemon 的计划任务 → 更新 → daemon 换到
-  新版本 → 回滚和恢复 → 卸载）；通知的 COM 激活器在安装包这一半；`release.sh` 上传的测试。
+  新版本 → 回滚和恢复 → 卸载）；通知点击（协议激活）要的登记和「链接能启动客户端」的测试；`release.sh` 上传的测试。

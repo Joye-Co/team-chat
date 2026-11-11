@@ -573,14 +573,17 @@ pub fn set_host_keys(keys: Vec<HostKey>) {
 }
 
 /// The system's part of how a page looks, which WebKit gives a page on macOS by itself:
-/// thin scrollbars without arrow buttons, and the fonts behind the Apple family names
+/// thin scrollbars without arrow buttons that show only while the pointer is over the page
+/// (WebKit's show only while the page scrolls; a page at rest, and a picture taken of it,
+/// has none), and the fonts behind the Apple family names
 /// that pages written for both systems use (`-apple-system`, `PingFang SC`, `Menlo`).
 /// Without the aliases Chromium falls through to its generic family, which on a Chinese
 /// system is SimSun for `monospace`. The scrollbar rules sit in a cascade layer, so any
 /// rule of the page wins.
 const PAGE_LOOK_CSS: &str = concat!(
     "@layer tc-system{*{scrollbar-width:thin}",
-    "html{scrollbar-color:rgba(128,128,128,.5) transparent}}",
+    "html{scrollbar-color:transparent transparent}",
+    "html:hover{scrollbar-color:rgba(128,128,128,.5) transparent}}",
     "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI\");font-weight:100 500}",
     "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Semibold\");font-weight:600}",
     "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Bold\");font-weight:700 900}",

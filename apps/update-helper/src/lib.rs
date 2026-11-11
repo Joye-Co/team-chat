@@ -126,6 +126,11 @@ pub struct Journal {
     pub stage: Stage,
     /// The helper that works on this update; while it lives nobody else touches it.
     pub helper_pid: u32,
+    /// When that helper's process was made. A process id alone is not the helper: after a
+    /// restart of the computer another program may have it. Missing in a journal of an older
+    /// helper, which is then known by its id alone.
+    #[serde(default)]
+    pub helper_started: Option<u64>,
     pub install_dir: PathBuf,
     pub backup_dir: PathBuf,
     pub marker: PathBuf,
@@ -240,6 +245,11 @@ pub trait Sys {
     /// This helper's process id.
     fn pid(&self) -> u32 {
         std::process::id()
+    }
+    /// When the running process `pid` was made (any unit, the same for one process as long
+    /// as it lives); `None` when the system cannot say.
+    fn started(&self, _pid: u32) -> Option<u64> {
+        None
     }
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
@@ -637,7 +647,11 @@ pub fn recover(journal_path: &Path, sys: &dyn Sys, log: &Log) -> Recovery {
         log.line("the journal cannot be read; leaving it");
         return Recovery::Nothing;
     };
-    if journal.helper_pid != sys.pid() && !sys.wait_exit(journal.helper_pid, Duration::ZERO) {
+    let name = recovery_name(&journal.app_exe);
+    if journal.helper_pid != sys.pid() && helper_lives(sys, &journal) {
+        // Not ours to touch now. The sign-in entry is used up once Windows has run it, so
+        // it is written again: the recovery is tried at every sign-in until it has ended.
+        let _ = sys.register_recovery(&name, journal_path);
         return Recovery::Busy;
     }
     log.line(&format!(
@@ -659,8 +673,26 @@ pub fn recover(journal_path: &Path, sys: &dyn Sys, log: &Log) -> Recovery {
         }
         Err(e) => {
             log.line(&format!("recovery failed: {e}"));
+            // Tried again at the next sign-in (and at the app's next start).
+            if let Err(why) = sys.register_recovery(&name, journal_path) {
+                log.line(&why);
+            }
             Recovery::Failed(e)
         }
+    }
+}
+
+/// Whether the helper that wrote the journal still runs: a live process with its id that
+/// was also made at the time the journal names. After a restart of the computer the id may
+/// belong to any program; that is not the helper, and the update is ours to recover.
+fn helper_lives(sys: &dyn Sys, journal: &Journal) -> bool {
+    if sys.wait_exit(journal.helper_pid, Duration::ZERO) {
+        return false;
+    }
+    match (journal.helper_started, sys.started(journal.helper_pid)) {
+        (Some(then), Some(now)) => then == now,
+        // An older helper's journal, or a system that cannot say: the id is all there is.
+        _ => true,
     }
 }
 
@@ -738,6 +770,7 @@ fn update(job: &Job, sys: &dyn Sys, log: &Log) -> Outcome {
     let mut journal = Journal {
         stage: Stage::Moving,
         helper_pid: sys.pid(),
+        helper_started: sys.started(sys.pid()),
         install_dir: job.install_dir.clone(),
         backup_dir: job.backup_dir.clone(),
         marker: job.marker.clone(),

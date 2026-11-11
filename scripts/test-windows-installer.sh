@@ -87,6 +87,8 @@ if [ -n "$SAME_AS" ]; then
 fi
 if [ "${DAEMON:-1}" = 1 ]; then check "machine daemon installed" test -f "$DIR/$SLUG-daemon.exe"; fi
 printf 'install log:\n'; sed 's/^/      /' "$DIR/install.log" 2>/dev/null || true
+# The installer refuses a Windows older than the one the docs promise (10 version 22H2).
+check "the installer asks for Windows 10 22H2" grep -q '^!define MIN_BUILD 19045$' "$ROOT/scripts/windows/installer.nsi"
 check "install log: version" grep -qx "version $VERSION" <(tr -d '\r' <"$DIR/install.log")
 # The runtime is there already (found) or the bootstrapper put it there (exit 0).
 check "install log: WebView2 runtime" grep -Eq '^webview2 (found [0-9.]+|bootstrapper exit 0)$' <(tr -d '\r' <"$DIR/install.log")
@@ -107,7 +109,9 @@ check "icon resource" is "$(ARG1="$(cygpath -w "$EXE")" \
   ARG2='[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint ExtractIconExW(string file, int index, IntPtr[] large, IntPtr[] small, uint count);' \
   ps_out 'Add-Type -Namespace W -Name Shell -MemberDefinition $env:ARG2; [W.Shell]::ExtractIconExW($env:ARG1, -1, $null, $null, 0) -ge 1')" True
 if [ "${EXPECT_SIGNED:-0}" = 1 ]; then
-  for f in "$EXE" "$DIR/$SLUG-update.exe" "$DIR/uninstall.exe"; do
+  signed=("$EXE" "$DIR/$SLUG-update.exe" "$DIR/uninstall.exe")
+  if [ "${DAEMON:-1}" = 1 ]; then signed+=("$DIR/$SLUG-daemon.exe"); fi
+  for f in "${signed[@]}"; do
     check "signature of $(basename "$f")" is "$(signature_status "$f")" Valid
   done
 fi
@@ -130,19 +134,25 @@ check "shortcut target" is "$(ARG1="$(cygpath -w "$LNK")" ps_out '(New-Object -C
 check "shortcut AppUserModelID" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
   '(New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ID")')" "$BUNDLE_ID"
 
-# The notification activator, when the app has one: the class on the shortcut is the class
-# in the registry, and it starts the installed app.
-TOAST_CLSID="$(toast_activator_clsid)"
-if [ -n "$TOAST_CLSID" ]; then
-  check "install log: notification activator" grep -qix "toast activator {$TOAST_CLSID}" <(tr -d '\r' <"$DIR/install.log")
-  check "notification activator: starts the app" is "$(reg_value "Software\\Classes\\CLSID\\{$TOAST_CLSID}\\LocalServer32" "")" "\"$WIN_DIR\\$NAME.exe\" -ToastActivated"
-  check "notification activator: named for the app id" is "$(reg_value "Software\\Classes\\AppUserModelId\\$BUNDLE_ID" CustomActivator | tr 'A-F' 'a-f')" "{$TOAST_CLSID}"
-  check "notification activator: on the shortcut" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
-    '"$((New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ToastActivatorCLSID"))"' | tr 'A-F' 'a-f' | tr -d '{}')" "$TOAST_CLSID"
-else
-  printf 'note  the app defines no notification activator (TOAST_ACTIVATOR_CLSID); none is registered\n'
-  check "no notification activator on the shortcut" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
-    '"$((New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ToastActivatorCLSID"))"')" ""
+# A notification that is clicked after the app has exited: the app's toasts are protocol
+# activated (their link is <scheme>://…), so Windows needs the URL scheme above and the
+# AppUserModelID on the shortcut, and no COM activator. Opening a link of the scheme the way
+# Windows does must start the installed app.
+if [ "${SKIP_WINDOW:-0}" != 1 ]; then
+  app_pids() { ARG1="$WIN_DIR\\$NAME.exe" ps_out '(Get-Process | Where-Object { $_.Path -ieq $env:ARG1 } | ForEach-Object { $_.Id }) -join " "'; }
+  check "the app is not running before the link" is "$(app_pids)" ""
+  ARG1="$SCHEME://group/installer-test/topic/installer-test" ps_out 'Start-Process $env:ARG1'
+  started=""
+  for _ in $(seq 1 60); do
+    started="$(app_pids)"
+    [ -z "$started" ] || break
+    sleep 0.5
+  done
+  check "a $SCHEME:// link starts the installed app" test -n "$started"
+  # Only the processes this step started, by the path of the install.
+  ARG1="$WIN_DIR\\$NAME.exe" ps_out 'Get-Process | Where-Object { $_.Path -ieq $env:ARG1 } | Stop-Process -Force' >/dev/null 2>&1 || true
+  for _ in $(seq 1 40); do [ -z "$(app_pids)" ] && break; sleep 0.5; done
+  check "the app has stopped again" is "$(app_pids)" ""
 fi
 
 # The installed app starts: it reports itself, takes a link as its argument, and the

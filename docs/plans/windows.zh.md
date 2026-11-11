@@ -162,7 +162,7 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 | 功能 | Windows 上的做法 | 代码 |
 | --- | --- | --- |
 | Token | Credential Manager 的普通凭据，目标名是 `<app id>:<服务器地址>`（和 Keychain 的 service、account 同一对），只存本机 | `crates/chat-core/src/token.rs` 的 `CredentialTokenStore` |
-| 通知 | GPUI 自带的 WinRT Toast（`App::show_system_notification`）。没有包身份，GPUI 给进程设 AppUserModelID 并在 `HKCU\Software\Classes\AppUserModelId\<id>` 登记显示名，不需要开始菜单快捷方式，开发构建也走这条路。Toast 的 tag 带群和话题，点击后打开对应话题。同时闪任务栏按钮；声音由客户端自己播系统通知音（GPUI 的 Toast 是静音的） | `apps/desktop/src/provider/windows.rs` |
+| 通知 | GPUI 自带的 WinRT Toast（`App::show_system_notification`）。没有包身份，GPUI 给进程设 AppUserModelID 并在 `HKCU\Software\Classes\AppUserModelId\<id>` 登记显示名，不需要开始菜单快捷方式，开发构建也走这条路。Toast 的 tag 带群和话题，点击后打开对应话题。当时同时闪任务栏按钮、声音由客户端自己播；后来改成应用自己建 Toast（按群分组、声音由系统播、退出后也能点开），不再闪任务栏，见 `windows-parity/system.zh.md` 第 1 节 | `apps/desktop/src/provider/windows.rs` |
 | 睡眠唤醒 | GPUI 的 `on_system_wake`（`WM_POWERBROADCAST`），再加时钟跳变兜底 | 同上 |
 | 网络变化 | 每 3 秒用 `GetAdaptersAddresses` 比较一次网卡地址，和 Mac 的做法一样 | 同上 |
 | 开机启动 | `HKCU\...\Run` 下以 app id 命名的值；同时读写 `Explorer\StartupApproved\Run`，所以在任务管理器里关掉后开关会显示关 | `views/settings/login_item.rs` |
@@ -196,7 +196,8 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 要在真机上看的（CI 没法验证）：
 
 1. Toast 能弹出，标题是产品名；点击后窗口到前台并打开对应话题；读完后通知中心里那条消失。
-2. 专注助手打开时不弹 Toast，任务栏按钮仍然闪；设置里关掉声音后不响。
+2. 专注助手打开时不弹 Toast、不响，通知进通知中心；设置里关掉声音后不响。任务栏按钮不闪（后来去掉了，和 Mac 不跳
+   Dock 一致，未读数在任务栏角标上）。这一节的真机项后来都并进了 `windows-parity/system.zh.md` 末尾的清单。
 3. 睡眠再唤醒、切换 Wi-Fi 或拔网线后几秒内重连（日志里有 `system change`）。
 4. 托盘图标在深色和浅色任务栏上都看得清，100% 和 150% 缩放下不糊；有未读时带点，悬停提示是未读数；
    右键菜单每一项都能用，「退出」后图标立刻消失；重启资源管理器后图标回来；设置里关掉后图标消失。

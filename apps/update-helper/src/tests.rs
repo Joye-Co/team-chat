@@ -40,6 +40,9 @@ struct Fake {
     app_exits: bool,
     /// The helper of the journal is still running, and this is another helper looking.
     helper_alive: bool,
+    /// The process that has the journal's helper id now was made at another time: the
+    /// computer restarted and the id went to some other program.
+    helper_id_reused: bool,
     /// The step at which this helper is killed (a panic the test catches).
     dies_at: Option<&'static str>,
     /// The helper is killed while the installer is half way through.
@@ -95,6 +98,16 @@ impl Sys for Fake {
         } else {
             HELPER
         }
+    }
+
+    fn started(&self, pid: u32) -> Option<u64> {
+        // The helper that writes the journal is made at 1000. Whoever has its id when
+        // another helper looks was made then too, unless the id was reused.
+        Some(if pid == HELPER && self.helper_id_reused {
+            2000
+        } else {
+            1000
+        })
     }
 
     fn register_recovery(&self, name: &str, journal: &Path) -> Result<(), String> {
@@ -233,6 +246,7 @@ fn world() -> World {
     let sys = Fake {
         app_exits: true,
         helper_alive: false,
+        helper_id_reused: false,
         dies_at: None,
         dies_in_installer: false,
         installer_ok: true,
@@ -625,6 +639,73 @@ fn the_recovery_leaves_a_running_update_alone() {
 }
 
 #[test]
+fn a_recovery_that_must_wait_is_registered_for_the_next_sign_in_again() {
+    let mut w = world();
+    w.sys.dies_at = Some("moved");
+    killed(&w);
+    w.sys.dies_at = None;
+    // Windows has run the sign-in entry and removed it; the helper still lives.
+    *w.sys.recovery.borrow_mut() = None;
+    w.sys.helper_alive = true;
+    assert_eq!(recover_later(&w), Recovery::Busy);
+    assert_eq!(
+        w.sys.recovery.borrow().as_ref().map(|(_, j)| j.clone()),
+        Some(w.job.journal())
+    );
+}
+
+#[test]
+fn a_process_that_only_has_the_dead_helpers_id_does_not_block_the_recovery() {
+    let mut w = world();
+    w.sys.dies_at = Some("moved");
+    killed(&w);
+    w.sys.dies_at = None;
+    // After a restart of the computer some other program has the helper's process id: a
+    // live process, made at another time than the journal says.
+    w.sys.helper_alive = true;
+    w.sys.helper_id_reused = true;
+    assert_eq!(recover_later(&w), Recovery::Restored);
+    assert_old_version(&w);
+    assert!(w.sys.recovery.borrow().is_none());
+    // A journal of a helper from before the start time was written is known by the id alone.
+    let mut w = world();
+    w.sys.dies_at = Some("moved");
+    killed(&w);
+    w.sys.dies_at = None;
+    let mut journal: Journal =
+        serde_json::from_slice(&std::fs::read(w.job.journal()).unwrap()).unwrap();
+    assert_eq!(journal.helper_started, Some(1000));
+    journal.helper_started = None;
+    std::fs::write(w.job.journal(), serde_json::to_vec(&journal).unwrap()).unwrap();
+    w.sys.helper_alive = true;
+    w.sys.helper_id_reused = true;
+    assert_eq!(recover_later(&w), Recovery::Busy);
+}
+
+#[test]
+fn a_recovery_that_fails_is_tried_at_the_next_sign_in() {
+    let mut w = world();
+    w.sys.dies_at = Some("moved");
+    killed(&w);
+    w.sys.dies_at = None;
+    *w.sys.recovery.borrow_mut() = None;
+    // The install folder is gone and a file has its name: nothing can be put back into it.
+    std::fs::remove_dir_all(&w.job.install_dir).unwrap();
+    std::fs::write(&w.job.install_dir, b"in the way").unwrap();
+    assert!(matches!(recover_later(&w), Recovery::Failed(_)));
+    assert!(w.job.journal().exists());
+    assert_eq!(
+        w.sys.recovery.borrow().as_ref().map(|(_, j)| j.clone()),
+        Some(w.job.journal())
+    );
+    // The way is clear again: the next sign-in puts the old version back.
+    std::fs::remove_file(&w.job.install_dir).unwrap();
+    std::fs::create_dir_all(&w.job.install_dir).unwrap();
+    assert_eq!(recover_later(&w), Recovery::Restored);
+    assert_old_version(&w);
+}
+
+#[test]
 fn a_new_update_first_undoes_an_interrupted_one() {
     let mut w = world();
     w.sys.dies_in_installer = true;
@@ -787,41 +868,4 @@ fn real_processes() {
     assert_eq!(read(&job.install_dir.join("daemon.exe")), "old daemon");
     assert!(!job.backup_dir.exists());
     assert!(!job.journal().exists());
-}
-
-#[test]
-fn a_class_id_is_read_with_or_without_braces() {
-    let id = "0f6c3a52-7d1e-4b9a-9c55-2e8f4a1b6d03";
-    assert_eq!(crate::sys::class_id(id).unwrap(), id);
-    assert_eq!(
-        crate::sys::class_id(" {0F6C3A52-7D1E-4B9A-9C55-2E8F4A1B6D03} ").unwrap(),
-        id
-    );
-    for bad in [
-        "",
-        "{}",
-        "0f6c3a52",
-        "0f6c3a52-7d1e-4b9a-9c55-2e8f4a1b6dzz",
-        "0f6c3a527d1e4b9a9c552e8f4a1b6d03",
-    ] {
-        assert!(crate::sys::class_id(bad).is_err(), "{bad}");
-    }
-    // An argument the helper does not know stops it; a bad class id too.
-    let args = |list: &[&str]| {
-        list.iter()
-            .map(std::ffi::OsString::from)
-            .collect::<Vec<_>>()
-    };
-    assert!(
-        crate::sys::shortcut_from_args(&args(&[
-            "a.lnk",
-            "--target",
-            "a.exe",
-            "--app-id",
-            "x",
-            "--toast-activator",
-            "nope"
-        ]))
-        .is_err()
-    );
 }

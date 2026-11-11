@@ -11,9 +11,6 @@
 ;   SIGN_CMD  (optional) command that signs the file given as its last argument; used for
 ;             the uninstaller, which exists only while makensis runs
 ;   HAS_DAEMON (optional) set when STAGE holds the machine daemon
-;   TOAST_CLSID (optional) the class id of the app's notification activator, without braces:
-;             the app's own constant (TOAST_ACTIVATOR_CLSID). With it, a click on one of the
-;             app's notifications after the app has exited starts the app again
 ;   CACHE_DIR folder name under %LOCALAPPDATA% where the app keeps what it can make again
 ;             (the WebView2 user data and the drawn diagrams)
 ;
@@ -40,9 +37,8 @@ SetCompressor /SOLID lzma
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 !define APP_ID_KEY "Software\Classes\AppUserModelId\${APP_ID}"
 !define SCHEME_KEY "Software\Classes\${SCHEME}"
-!ifdef TOAST_CLSID
-  !define TOAST_KEY "Software\Classes\CLSID\{${TOAST_CLSID}}"
-!endif
+; Windows 10 version 22H2.
+!define MIN_BUILD 19045
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 !define STARTUP_APPROVED_KEY "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 ; The WebView2 Runtime's entry in Edge Update.
@@ -81,8 +77,8 @@ VIAddVersionKey /LANG=0 "ProductVersion" "${VERSION}"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
-LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10 或更高版本。"
-LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 or later."
+LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10（22H2）或 Windows 11。请先更新 Windows。"
+LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 (version 22H2) or Windows 11. Update Windows first."
 LangString NeedWindows11OnArm ${LANG_SIMPCHINESE} "在 ARM 芯片的电脑上，${NAME} 需要 Windows 11（Windows 10 不能运行 64 位 x86 程序）。"
 LangString NeedWindows11OnArm ${LANG_ENGLISH} "On a computer with an ARM processor, ${NAME} needs Windows 11 (Windows 10 cannot run 64-bit x86 programs)."
 LangString QuitAppFirst ${LANG_SIMPCHINESE} "${NAME} 还在运行。请先退出，再点「重试」。"
@@ -125,8 +121,11 @@ Function .onInit
   ${IfNot} ${Errors}
     StrCpy $IsUpdate "1"
   ${EndIf}
+  ; 64-bit Windows 10 version 22H2 (build 19045) or later, as docs/INSTALL.md says: the
+  ; oldest Windows 10 that still gets fixes, and the one the app is built against. Every
+  ; Windows 11 has a higher build.
   ${IfNot} ${RunningX64}
-  ${OrIfNot} ${AtLeastWin10}
+  ${OrIfNot} ${AtLeastBuild} ${MIN_BUILD}
     MessageBox MB_OK|MB_ICONSTOP "$(NeedWindows10)" /SD IDOK
     Abort
   ${EndIf}
@@ -211,11 +210,7 @@ Section "Install"
 
   ; Start menu shortcut with the AppUserModelID: Windows shows the app's notifications
   ; under the shortcut that carries the id the app sets for its process.
-  !ifdef TOAST_CLSID
-    nsExec::Exec '"$INSTDIR\${HELPER_EXE}" --shortcut "$SMPROGRAMS\${NAME}.lnk" --target "$INSTDIR\${APP_EXE}" --app-id "${APP_ID}" --toast-activator "${TOAST_CLSID}"'
-  !else
-    nsExec::Exec '"$INSTDIR\${HELPER_EXE}" --shortcut "$SMPROGRAMS\${NAME}.lnk" --target "$INSTDIR\${APP_EXE}" --app-id "${APP_ID}"'
-  !endif
+  nsExec::Exec '"$INSTDIR\${HELPER_EXE}" --shortcut "$SMPROGRAMS\${NAME}.lnk" --target "$INSTDIR\${APP_EXE}" --app-id "${APP_ID}"'
   Pop $1
   ${If} $1 == "0"
     !insertmacro Log "shortcut with app id ${APP_ID}"
@@ -224,16 +219,6 @@ Section "Install"
     !insertmacro Log "shortcut without app id (helper exit $1)"
   ${EndIf}
   WriteRegStr HKCU "${APP_ID_KEY}" "DisplayName" "${NAME}"
-  !ifdef TOAST_CLSID
-    ; A notification that is clicked when the app no longer runs: Windows starts the class
-    ; named on the shortcut, which is the app itself with -ToastActivated (Windows adds
-    ; -Embedding). The app registers the class when it starts and opens what the
-    ; notification was about.
-    WriteRegStr HKCU "${APP_ID_KEY}" "CustomActivator" "{${TOAST_CLSID}}"
-    WriteRegStr HKCU "${TOAST_KEY}" "" "${NAME}"
-    WriteRegStr HKCU "${TOAST_KEY}\LocalServer32" "" '"$INSTDIR\${APP_EXE}" -ToastActivated'
-    !insertmacro Log "toast activator {${TOAST_CLSID}}"
-  !endif
 
   ; <scheme>:// links open the app.
   WriteRegStr HKCU "${SCHEME_KEY}" "" "URL:${NAME}"
@@ -300,9 +285,6 @@ Section "Uninstall"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "${SCHEME_KEY}"
   DeleteRegKey HKCU "${APP_ID_KEY}"
-  !ifdef TOAST_CLSID
-    DeleteRegKey HKCU "${TOAST_KEY}"
-  !endif
   ; 登录时打开, when the user turned it on in the app, and what Task Manager remembers of
   ; that entry (enabled or disabled there).
   DeleteRegValue HKCU "${RUN_KEY}" "${APP_ID}"

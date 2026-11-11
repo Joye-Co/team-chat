@@ -151,6 +151,10 @@ pub fn open(
     Ok(handle)
 }
 
+/// How long a page may take to show. A CI runner without a graphics card starts two web
+/// views and a video in about 12 s; 15 s was too close on Windows.
+const PAGE_WAIT: Duration = Duration::from_secs(45);
+
 async fn wait_for<T>(
     cx: &mut AsyncApp,
     timeout: Duration,
@@ -186,12 +190,34 @@ const MEDIA: &str = "(function(){var v=document.getElementById('v'),a=document.g
 return JSON.stringify({playing:v.currentTime>0&&v.videoWidth>0,audio:a.duration||0});})()";
 
 async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
-    let inline = wait_for(cx, Duration::from_secs(15), |cx| {
-        embed(INLINE_ID, cx).filter(|e| e.read(cx).shown() && e.read(cx).bounds().is_some())
-    })
-    .await
-    .ok_or("the inline page did not load")?;
-    let pane = wait_for(cx, Duration::from_secs(15), |cx| {
+    // The scrolled scene opens at the end of a long 话题: whether a sliver of the page is
+    // in view then depends on the window's content height (32 less under the Windows
+    // caption strip, where it starts out of view and is not shown). Wheel the thread
+    // back until the page is there.
+    let mut inline = None;
+    let started = Instant::now();
+    while inline.is_none() && started.elapsed() < PAGE_WAIT {
+        inline = wait_for(cx, Duration::from_secs(2), |cx| {
+            embed(INLINE_ID, cx).filter(|e| e.read(cx).shown() && e.read(cx).bounds().is_some())
+        })
+        .await;
+        if inline.is_none() && mode == Mode::Scrolled {
+            let _ = cx.update(|cx| {
+                handle.update(cx, |_, window, cx| {
+                    window.dispatch_event(
+                        gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                            position: point(px(700.), px(400.)),
+                            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(120.))),
+                            ..Default::default()
+                        }),
+                        cx,
+                    );
+                })
+            });
+        }
+    }
+    let inline = inline.ok_or("the inline page did not load")?;
+    let pane = wait_for(cx, PAGE_WAIT, |cx| {
         embed(PANE_ID, cx).filter(|e| e.read(cx).shown())
     })
     .await

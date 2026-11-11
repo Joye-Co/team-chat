@@ -27,9 +27,9 @@ pub use source::MentionTarget;
 // --- inc-refs: the Markdown block counter (REFS §A2.1) ---
 pub use source::{MdBlock, mark_query, top_level_blocks};
 // --- end inc-refs ---
+pub use source::normalize_fences;
 use source::{
-    AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark,
-    link_mentions, normalize_fences,
+    AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark, link_mentions,
 };
 
 use crate::{copy::timeline as t, theme};
