@@ -292,10 +292,19 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - `run.assign.leaseMs` is the time the server waits without hearing about a run before it
   declares the run lost. Every `heartbeat` lists the daemon's runs and renews each listed
   run's lease to `now + leaseMs`; any `run.*` frame for a run also renews it.
-- When a lease expires, the server marks the run lost and leaves it out of later
-  `welcome.runs`, so the daemon stops it on reconnect. BotDesk sets the run and the topic to
-  `blocked` with one short note. A lost run is never assigned again: a new run needs a new
-  mention. Late frames of a lost or closed run are acked and dropped.
+- When a lease expires while the machine is away (no heartbeat), BotDesk keeps waiting: the
+  run stays open with a new lease and stays in `welcome.runs`, so a daemon that comes back
+  still holding it replays its frames and goes on. The topic gets one note that the run waits
+  for its computer, and one when it is back; a waiting run is not counted as silent. After
+  30 minutes away the run moves to another healthy machine that can take it (a new run, a new
+  session); with no such machine it waits on. A removed machine is not waited for.
+- When a lease expires while the machine is connected (the daemon no longer reports the run),
+  the server marks the run lost and leaves it out of later `welcome.runs`, so the daemon stops
+  it. BotDesk starts it again or sets the run and the topic to `blocked` with one short note.
+  Late frames of a lost or closed run are acked and dropped.
+- The daemon's own `stalled` status is a signal only: the server does not restart a run for
+  it. A silent run gets one nudge, then is restarted in the same session on the same machine,
+  then on another machine when one can take it, and only then is it marked `blocked`.
 - The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is 2 hours.
 - The server closes the link when it hears nothing for 90 s. The daemon drops the link when
   it receives nothing for 3 heartbeat intervals and reconnects with exponential backoff
@@ -310,14 +319,17 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - Input that reaches the daemon after the run's last turn has ended and the CLI exits is not
   taken: no `input.accepted` comes, `run.done` follows. BotDesk must then start a new run for
   that input (with the topic context in its prompt).
-- `approval.request` comes from CLIs that ask (ACP `session/request_permission`), from
-  `chat-run secret` (see **Environment**) and from gated commands (see "Gated actions"). The
+- `approval.request` comes from `chat-run secret` (see **Environment**) and from gated
+  commands (see "Gated actions"; a CLI's own permission request that matches no gate is
+  answered by the daemon at once, without one). The
   server answers `run.approval`; the daemon answers the CLI (or keeps the secret's answer, or
   lets the waiting command run or not) and emits `approval.resolved`. Since 1.2.1
   an AI member always has every permission and nothing in `daemon.toml` narrows it: Claude Code
   runs with `--permission-mode bypassPermissions` and `--allowedTools` for the shell, edit, web,
   todo and task tools and `Bash(chat-run:*)` (`-p` has nobody to ask); Codex runs with sandbox
-  `danger-full-access` and approval `never`. Only a side chat run (aside) is read-only.
+  `danger-full-access` and approval `never` (`untrusted` when the run has gates, see "Gated
+  actions"; the daemon then answers every request itself). Only a side chat run (aside) is
+  read-only.
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
   SIGTERM to the CLI's whole process group and to the tool groups below it (see **pause**),
   SIGKILL after 3 s, and ends with
@@ -683,16 +695,34 @@ An AI member runs with every permission; only the few kinds the team checked nee
   `run.cancel` stops the CLI as usual (the hook ends with it).
 - **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
   fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
-  run, socket gone), the command runs and the reason goes to the hook's standard error: the
-  daemon is the run's parent, so this happens only when the run is ending anyway. On Windows
-  the command is refused instead (the hook prints the deny decision), and a hook that cannot
-  start, times out or ends with an unexpected code blocks the command (`onFailure`).
-- **Codex** (`gates` absent): not gated yet. Its app-server asks
-  (`item/commandExecution/requestApproval`) only under an approval policy (`untrusted`,
-  `on-request`, `granular`) that asks for nearly every command and changes how the model works
-  with its sandbox, so the daemon would have to answer every command itself; that was not
-  checked against the real CLI. Codex runs keep approval `never`, and the server keeps the
-  rules in the prompt for them. Side chat runs and ACP / PTY runtimes are never gated.
+  run, the socket gone, the daemon restarting), the command is refused on every system: the
+  hook prints the deny decision with a reason that tells the CLI to wait a few seconds and run
+  the same command again, and the reason goes to the hook's standard error. On Windows a hook
+  that cannot start, times out or ends with an unexpected code also blocks the command
+  (`onFailure`).
+- **Codex** (`CliInfo.gates = true` on every system): a run with gates starts its thread with
+  approval policy `untrusted` (sandbox still `danger-full-access`), so the app-server asks for
+  every command that is not a known read-only one and for every file change. The daemon answers
+  each request itself, with the same matching: `item/commandExecution/requestApproval` is
+  matched as the script inside Codex's shell wrapper (`/bin/zsh -lc '<script>'`, `bash -c`,
+  `powershell -Command`, unquoted as a shell reads it); an MCP tool approval
+  (`mcpServer/elicitation/request` with `_meta.codex_approval_kind = "mcp_tool_call"`) as
+  `mcp__<server>__<tool> <tool_params JSON>`. No match: `accept` at once, no card. A match: the
+  same `approval.request` (`daemon-gate-<n>`) and wait as for Claude Code, then `accept` or
+  `decline`. File changes (`item/fileChange/requestApproval`) and requested permissions
+  (`item/permissions/requestApproval`) are granted at once. Checked with the real `codex
+  app-server` (0.159): the requests come with no delay a person would notice, an accepted
+  command and a file change run as before, a declined one does not run and the turn goes on.
+  A run without gates keeps approval `never`.
+- **ACP** (`CliInfo.gates = true` only when its `[runtimes.<name>]` sets `asks_permission =
+  true`): each `session/request_permission` is matched as the tool call's `rawInput.command` (a
+  string or a list of words), else `<title> <rawInput JSON>`. No match (or a run without
+  gates): the first `allow_*` option at once, no card. A match: the same `approval.request` and
+  wait, then the first `allow_*` or `reject_*` option. An agent that never asks (OpenCode by
+  default, any agent whose own permissions allow everything) would not be stopped, so without
+  `asks_permission` the daemon does not report `gates` for it and the server keeps the plain
+  "Team rule" paragraph in its prompt.
+- Side chat runs and the PTY runtime are never gated.
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 
@@ -818,6 +848,17 @@ POST /v1/machine/runs/:id/github/rejected                                       
   that git got an authentication failure, so the server checks the token once.
 - The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
   `secret`; they are never `output` run events.
+- What the daemon does with `run.assign.github`: `GIT_COMMITTER_*` is the AI member and
+  `GIT_AUTHOR_*` the person when `author` is given. With `source: "app"` it clears github.com's
+  credential helpers and sets `!chat-run git-credential` instead (`GIT_CONFIG_COUNT/KEY/VALUE`),
+  puts a `gh` proxy first on `PATH` (`<run folder>/bin/gh`; in a VM `/opt/runner/bin/gh` on the
+  tools disk) that runs the real `gh` with `GH_TOKEN` for that one command, and sets
+  `CHAT_GITHUB_AS` to the person's name (`gh auth login|logout|refresh|setup-git` are refused).
+  Its own clone and fetch of the mirror use the token as an HTTP header of those git processes
+  only. Every token it gets is masked in that run's frames, files, session upload and
+  `stderr.log`. Before a VM run it removes an earlier GitHub sign-in from the member's kept home
+  (`.config/gh/hosts.yml`, `.git-credentials`, github.com credential and token `url.*` sections
+  of `.gitconfig`). Any other `source` gets only the committer.
 
 Take-over (feature `takeover`):
 
@@ -982,8 +1023,9 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
-`command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
+`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `self_update`, `[runtimes.<name>]` with `kind`,
+`command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
+calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
 `shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
@@ -1024,6 +1066,22 @@ found on PATH.
   action (`repair.exe repair-program <daemon>`, a copy of the daemon that `install-service`
   keeps next to the log and updates never touch) renames the newest `<name>.exe.old-*` back
   before the daemon is started.
+- Updating itself (a daemon installed on its own, today the Linux x86_64 daemon of a host; the
+  app updates the daemon it ships on macOS and Windows): when systemd started it (`daemon
+  install-service`) and `self_update` is not `false`, the daemon asks
+  `GET /v1/machine/updates/latest?platform=linux-x86_64` with its machine token 10 minutes after
+  it starts and then every hour (docs/protocol.md, "Updates and downloads"). A release newer than
+  its own version (never an older one) is downloaded from the answer's `downloadUrl`, which must
+  be on the configured server, to `<program>.new` next to the program, and checked against the
+  answer's size and SHA-256; a file that does not match is deleted. Once no run is active the
+  daemon renames it over its program (on Windows it would follow the replace steps above) and
+  exits; systemd's `Restart=always` starts the new version. If somebody else replaced the
+  program file meanwhile, theirs wins and the download is dropped. Every step is logged; a
+  failed check is tried again an hour later. A download that waits for the daemon to be idle is
+  put in place even if the release was withdrawn on the server meanwhile: withdraw a bad release
+  before hosts download it, or replace the program by hand (which wins over the download).
+  `scripts/runner/install-daemon.sh` (run by
+  `scripts/runner/host-setup.sh`) installs the released daemon of a host the first time.
 
 ## Tests
 

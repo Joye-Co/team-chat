@@ -604,6 +604,8 @@ impl AdminView {
         let id = x.id.to_string();
         let off = x.deactivated;
         let view = cx.entity();
+        // The roster's member, for the AI member sheets.
+        let member = x.is_bot().then(|| x.clone());
         crate::views::settings::widgets::more_button(
             SharedString::from(format!("team-more-{id}")),
             window,
@@ -611,6 +613,38 @@ impl AdminView {
         )
         .dropdown_menu(move |menu, _, _| {
             let (services, id, view) = (services.clone(), id.clone(), view.clone());
+            // An AI member: 更换电脑… (常用设置) and 编辑… (everything). Without them 团队管理
+            // had no way to change an AI member's computer.
+            let menu = match member.clone().filter(|_| !off) {
+                Some(bot) => {
+                    let (s1, b1) = (services.clone(), bot.clone());
+                    let (s2, b2) = (services.clone(), bot);
+                    menu.item(
+                        PopupMenuItem::new(crate::copy::settings::QUICK_MENU).on_click(
+                            move |_, window, cx| {
+                                crate::views::settings::bot_quick::open_bot_quick(
+                                    s1.clone(),
+                                    &b1,
+                                    window,
+                                    cx,
+                                )
+                            },
+                        ),
+                    )
+                    .item(PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
+                        move |_, window, cx| {
+                            crate::views::settings::members::open_edit_bot(
+                                s2.clone(),
+                                &b2,
+                                window,
+                                cx,
+                            );
+                        },
+                    ))
+                    .separator()
+                }
+                None => menu,
+            };
             menu.item(
                 PopupMenuItem::new(if off {
                     m::TEAM_REACTIVATE

@@ -45,6 +45,12 @@ name: Release
 # windows_unsigned=true: an unsigned installer (SmartScreen warning) is published only on
 # purpose. A prerelease gets its installer on the GitHub Release only, as it gets its DMG (the
 # app updates only to MAJOR.MINOR.PATCH).
+#
+# Linux: the job "Linux daemon" builds <slug>-daemon-<version>-x86_64-unknown-linux-gnu (the
+# daemon alone, for Linux hosts) on an Ubuntu runner in the modes dry-run and release.
+# "Publish the Linux daemon" adds it to the GitHub Release and uploads it to production as the
+# linux-x86_64 file of the release, which Linux daemons update themselves from (release), or
+# uploads the daemon of the GitHub Release again (upload-only). A prerelease: GitHub only.
 
 # The jobs are in release-jobs.yml (a called workflow, so that the server URLs are masked in
 # the logs).

@@ -45,7 +45,7 @@ pub(super) fn build(
     can_recall: bool,
     // The hover toolbar's 更多: 开个话题 is the toolbar's own button there.
     from_toolbar: bool,
-    _cx: &mut Context<PopupMenu>,
+    cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let sent = !message.id.is_empty() && message.deleted_at.is_none();
     let failed = message.send_state == SendState::Failed;
@@ -98,6 +98,23 @@ pub(super) fn build(
             let _ = view.update(cx, |this, _| this.retry(&m));
         })
     };
+    // 常用设置 of the AI member who wrote it (owners only): which computer it works on,
+    // without going through 团队管理.
+    let quick = view.upgrade().and_then(|v| {
+        let v = v.read(cx);
+        let author = v.members.iter().find(|a| a.id == m.author_id)?.clone();
+        crate::views::settings::bot_quick::can_open(&v.services, &author)
+            .then(|| (v.services.clone(), author))
+    });
+    let quick = quick.map(|(services, author)| {
+        let label = crate::copy::fill(
+            crate::copy::settings::QUICK_MENU_NAMED,
+            &[("name", crate::ui::avatar::name_beside_avatar(&author.name))],
+        );
+        PopupMenuItem::new(label).on_click(move |_, window, cx| {
+            crate::views::settings::bot_quick::open_bot_quick(services.clone(), &author, window, cx)
+        })
+    });
     menu.when(in_chat && !from_toolbar, |menu| menu.item(open_topic))
         .when(in_chat, |menu| menu.item(reply))
         .when(failed, |menu| menu.item(retry))
@@ -106,6 +123,7 @@ pub(super) fn build(
         .when(can_edit || can_recall, |menu| menu.separator())
         .when(can_edit, |menu| menu.item(edit))
         .when(can_recall, |menu| menu.item(recall))
+        .when_some(quick, |menu, quick| menu.separator().item(quick))
 }
 
 fn confirm_recall(

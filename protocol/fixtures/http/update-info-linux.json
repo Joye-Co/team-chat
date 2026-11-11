@@ -1,0 +1,14 @@
+{
+  "kind": "UpdateInfo",
+  "valid": true,
+  "description": "the Linux daemon, as a machine gets it",
+  "value": {
+    "version": "1.2.10",
+    "notes": "## 新功能\n\n- 卡片",
+    "size": 30000000,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "publishedAt": 1762128000000,
+    "downloadUrl": "https://chat-api-e2e.example.workers.dev/v1/machine/updates/1.2.10/download?platform=linux-x86_64",
+    "platform": "linux-x86_64"
+  }
+}

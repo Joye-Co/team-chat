@@ -69,6 +69,8 @@ export interface DecideInput {
   request: string;
   /** The topic is a DM with this member. */
   dm: boolean;
+  /** 接 1.4: the message does not @ this member; it came from the requester after its last answer. */
+  followUp?: boolean;
   /** 沉淀: the memory index (memory/inject.ts), reference material in the fixed prefix. */
   memory?: string;
 }
@@ -94,6 +96,9 @@ export function userPrompt(i: DecideInput): string {
     "",
     `New request from ${i.requester}:`,
     i.request,
+    ...(i.followUp
+      ? ["", "(This message does not @ you. It came in this topic after your last answer. Skip it when it is small talk or meant for someone else; handle it only when it continues the work with you.)"]
+      : []),
   ].join("\n");
 }
 

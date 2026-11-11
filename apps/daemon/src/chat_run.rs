@@ -161,6 +161,8 @@ pub struct Outputs {
     gate: OnceLock<Arc<crate::secrets::Gate>>,
     /// The run's gated actions (`chat-run gate`, the CLI's hook).
     gates: OnceLock<Arc<crate::gates::Gates>>,
+    /// Feature "github", `app` mode: the run's GitHub (`git-credential`, the `gh` proxy).
+    github: OnceLock<Arc<crate::github::Run>>,
 }
 
 impl Outputs {
@@ -185,6 +187,11 @@ impl Outputs {
     /// Lets the run's hook (`chat-run gate`) check commands against the run's gates.
     pub fn set_gates(&self, gates: Arc<crate::gates::Gates>) {
         let _ = self.gates.set(gates);
+    }
+
+    /// Lets the run's git credential helper and `gh` proxy ask for the person's GitHub.
+    pub fn set_github(&self, github: Arc<crate::github::Run>) {
+        let _ = self.github.set(github);
     }
 
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
@@ -243,7 +250,7 @@ pub fn set_exe(p: PathBuf) {
     let _ = EXE.set(p);
 }
 
-fn exe() -> std::io::Result<PathBuf> {
+pub(crate) fn exe() -> std::io::Result<PathBuf> {
     match EXE.get() {
         Some(p) => Ok(p.clone()),
         None => std::env::current_exe(),
@@ -650,6 +657,31 @@ pub async fn handle(
         let answer = gate.get(&req["body"], emit, std::time::Instant::now());
         eprintln!(
             "{} chat-run secret: {}",
+            crate::proto::now_ms(),
+            if answer["ok"] == json!(true) {
+                "ok".to_string()
+            } else {
+                safe_word(answer["error"]["code"].as_str().unwrap_or("failed"))
+            }
+        );
+        return answer;
+    }
+    // GitHub: answered here, never sent up (the token must not become a run event).
+    if let Some(op) = req["op"]
+        .as_str()
+        .filter(|o| crate::github::OPS.contains(o))
+    {
+        let Some(github) = outputs.github.get().cloned() else {
+            return error(
+                "not_found",
+                Some("github.off"),
+                "this run does not use a GitHub sign-in from the app",
+            );
+        };
+        let body = req.get("body").cloned().unwrap_or(Value::Null);
+        let answer = github.handle(op, &body, emit).await;
+        eprintln!(
+            "{} chat-run {op}: {}",
             crate::proto::now_ms(),
             if answer["ok"] == json!(true) {
                 "ok".to_string()
@@ -1503,6 +1535,10 @@ pub fn main(args: Vec<String>) -> i32 {
     // The CLI's SessionStart hook of a gated run: this CLI runs the run's hooks.
     if args.len() == 1 && args[0] == "gate-alive" {
         return crate::gates::alive_main();
+    }
+    // git's credential helper in a run that uses the app's GitHub (crate::github).
+    if args[0] == crate::github::OP_CREDENTIAL {
+        return crate::github::credential_main(&args[1..]);
     }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));

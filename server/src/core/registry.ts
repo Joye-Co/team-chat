@@ -1,7 +1,7 @@
 // Extension points. Feature modules (server/src/<feature>/) call these at module load time;
 // server/src/features.ts imports every feature module so the registrations run in the Worker
 // and in both Durable Object classes (they share one module graph).
-import type { ClientFrame, Event, Member, Message, TopicStatus } from "@chat/protocol";
+import type { ClientFrame, Event, Member, Message, Topic, TopicStatus } from "@chat/protocol";
 import type { z } from "zod";
 import type { AuthContext } from "./auth";
 import type { Env } from "./env";
@@ -141,6 +141,21 @@ export interface RoomContext {
   // cards2: card writes that read a message, await, then write it run one at a time per key.
   /** Runs `fn` after every earlier `serial` call with the same key has settled. */
   serial<T>(key: string, fn: () => Promise<T>): Promise<T>;
+  /**
+   * Usable (design-relay R1): writes a topic's status, waitingOn and owner inside `commit` and
+   * appends `topic.updated` (through the topic status filters, as `topic.update` does). `extra`
+   * joins the event's data (`participants`, `relay`). Non-members are left out of waitingOn and
+   * ownerId. Does nothing in the 群聊 or for an unknown topic.
+   */
+  updateTopic(tx: RoomTx, actorId: string, topicId: string, change: TopicChange): void;
+}
+
+/** What `RoomContext.updateTopic` changes; absent fields stay as they are. */
+export interface TopicChange {
+  status?: TopicStatus;
+  waitingOn?: string[];
+  ownerId?: string | null;
+  extra?: Record<string, unknown>;
 }
 
 export type RoomRpcHandler = (room: RoomContext, actor: Actor | null, args: unknown) => Promise<unknown> | unknown;
@@ -268,6 +283,13 @@ export type TopicStatusFilter = (sql: SqlStorage, topicId: string, next: { statu
 export const topicStatusFilters: TopicStatusFilter[] = [];
 export function registerTopicStatusFilter(f: TopicStatusFilter): void {
   topicStatusFilters.push(f);
+}
+
+/** Usable: fields a feature adds to every `Topic` the room returns (`participants`, `relay`). */
+export type TopicFields = (sql: SqlStorage, topicId: string) => Partial<Topic>;
+export const topicFields: TopicFields[] = [];
+export function registerTopicFields(f: TopicFields): void {
+  topicFields.push(f);
 }
 
 // cards2: what one member may see of a stored event or a message (non-public polls and

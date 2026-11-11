@@ -1,9 +1,11 @@
 // D1 access of the bots feature: runner configuration, machines and machine tokens.
 import type { BotRunner } from "@chat/protocol";
-import { bearerToken } from "../core/auth";
+import { auditStatement } from "../core/audit";
+import { type AuthContext, bearerToken } from "../core/auth";
 import { sha256Hex } from "../core/crypto";
 import type { Env } from "../core/env";
 import { ApiError } from "../core/errors";
+import { logger } from "../core/logger";
 import { type MachineView, mergeLabels } from "./dispatch";
 import { linkStub } from "./env";
 
@@ -55,14 +57,29 @@ export interface MachineRow {
   created_at: number;
   revoked_at: number | null;
   last_seen_at: number | null;
+  /** Usable (migration 0017_machine_owner): the person whose own machine it is; NULL = a team machine. */
+  owner_id?: string | null;
 }
 
 /** D1 rows joined with each link's live status. */
 export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolean } = {}) {
-  const rows = await env.DB.prepare(
-    `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at FROM machines
-     ${opts.includeRevoked ? "" : "WHERE revoked_at IS NULL"} ORDER BY created_at, id`,
-  ).all<MachineRow>();
+  const [rows, checked] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id FROM machines
+       ${opts.includeRevoked ? "" : "WHERE revoked_at IS NULL"} ORDER BY created_at, id`,
+    ).all<MachineRow>(),
+    env.DB.prepare("SELECT machine_id, bot_id, repo_path FROM machine_bots ORDER BY created_at, bot_id").all<{
+      machine_id: string;
+      bot_id: string;
+      repo_path: string | null;
+    }>(),
+  ]);
+  const checkedBots = new Map<string, Map<string, string | null>>();
+  for (const c of checked.results) {
+    let m = checkedBots.get(c.machine_id);
+    if (!m) checkedBots.set(c.machine_id, (m = new Map()));
+    m.set(c.bot_id, c.repo_path);
+  }
   return Promise.all(
     rows.results.map(async (row) => {
       const owner = JSON.parse(row.labels) as string[];
@@ -74,6 +91,10 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
         connected: false,
         runningRuns: [],
       };
+      if (row.owner_id) {
+        base.ownerId = row.owner_id;
+        base.personalBots = checkedBots.get(row.id) ?? new Map();
+      }
       if (row.revoked_at !== null) return { row, view: base };
       try {
         const s = await linkStub(env, row.id).status();
@@ -98,6 +119,85 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
 /** Machines for routing runs: only the labels an owner gave count (daemon labels are shown only). */
 export async function loadMachines(env: Env): Promise<MachineView[]> {
   return (await loadMachineViews(env)).map(({ row, view }) => ({ ...view, labels: JSON.parse(row.labels) as string[] }));
+}
+
+/** Who may manage a machine: an admin for a team machine, only its owner for a personal one. */
+export function mayManageMachine(auth: Pick<AuthContext, "memberId" | "member">, ownerId: string | null | undefined): boolean {
+  return ownerId ? auth.memberId === ownerId : auth.member.level === "owner";
+}
+
+export interface ManagedMachine {
+  id: string;
+  name: string;
+  owner_id: string | null;
+  revoked_at: number | null;
+}
+
+/**
+ * The machine, when the caller may manage it (`mayManageMachine`): `not_found` for an unknown
+ * (or, unless `includeRevoked`, a removed) machine, `forbidden` with `machine.not_yours` otherwise.
+ */
+export async function requireMachineManager(
+  db: D1Database,
+  auth: Pick<AuthContext, "memberId" | "member">,
+  machineId: string,
+  opts: { includeRevoked?: boolean } = {},
+): Promise<ManagedMachine> {
+  const row = await db
+    .prepare("SELECT id, name, owner_id, revoked_at FROM machines WHERE id = ?")
+    .bind(machineId)
+    .first<ManagedMachine>();
+  if (!row || (row.revoked_at !== null && !opts.includeRevoked)) throw new ApiError("not_found", "machine not found");
+  if (!mayManageMachine(auth, row.owner_id)) {
+    throw new ApiError(
+      "forbidden",
+      row.owner_id ? "only its owner manages a personal machine" : "only an admin manages a team machine",
+      "machine.not_yours",
+    );
+  }
+  return row;
+}
+
+/**
+ * Removes machines (`DELETE /v1/machines/:id`, and a deactivated person's personal machines):
+ * one batch sets `revoked_at` (the token stops working at once), unpins the AI members placed on
+ * them, drops their checked AI members and audits `machine.revoke`; then each link is closed,
+ * retried once, and a link that still fails is logged (the daemon's next request is refused
+ * anyway). Returns the ids removed by this call.
+ */
+export async function revokeMachines(
+  env: Env,
+  actor: Pick<AuthContext, "memberId" | "tokenId"> | null,
+  machineIds: string[],
+  opts: { now?: number; closeLink?: (id: string) => Promise<unknown> } = {},
+): Promise<string[]> {
+  if (machineIds.length === 0) return [];
+  const now = opts.now ?? Date.now();
+  const stmts: D1PreparedStatement[] = [];
+  for (const id of machineIds) {
+    stmts.push(
+      env.DB.prepare("UPDATE machines SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, id),
+      // Bots pinned to it go back to any machine with their labels.
+      env.DB.prepare("UPDATE bot_runners SET machine_id = NULL WHERE machine_id = ?").bind(id),
+      env.DB.prepare("DELETE FROM machine_bots WHERE machine_id = ?").bind(id),
+      auditStatement(env.DB, actor, { action: "machine.revoke", target: id }, now),
+    );
+  }
+  const res = await env.DB.batch(stmts);
+  const revoked = machineIds.filter((_, i) => (res[i * 4].meta.changes ?? 0) > 0);
+  const close = opts.closeLink ?? ((id: string) => linkStub(env, id).revoke(id));
+  for (const id of revoked) {
+    try {
+      await close(id);
+    } catch {
+      try {
+        await close(id);
+      } catch (err) {
+        logger.warn("closing a removed machine's link failed", { machineId: id, err });
+      }
+    }
+  }
+  return revoked;
 }
 
 export const MACHINE_TOKEN_PATTERN = /^tm_[A-Za-z0-9_-]{43}$/;

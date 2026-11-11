@@ -932,11 +932,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "context",
                         "effort",
                         "gates",
+                        "github",
                         "accounts"
                     ]
                     .map(String::from)[..]
                 )
             );
+            // Feature "github": where runs execute (no `[vm]` here).
+            assert_eq!(machine.runs_in.as_deref(), Some("host"));
             // Feature "accounts": the machine key made next to the token file.
             assert_eq!(machine.public_key.as_deref().map(str::len), Some(44));
             assert_eq!(

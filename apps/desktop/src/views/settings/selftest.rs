@@ -1207,6 +1207,118 @@ pub fn open_edit_bot_dialog(
     )
 }
 
+/// The main window with an AI member's 常用设置 sheet (its computer) open, as its entries
+/// open it.
+pub fn open_bot_quick_dialog(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = crate::selftest::scenes::open_main(services.clone(), content, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let bot = services.provider.members().into_iter().find(|m| m.is_bot());
+        if let Some(bot) = bot {
+            super::bot_quick::open_bot_quick(services, &bot, window, cx);
+        }
+    });
+    Ok(handle)
+}
+
+/// The main window with a right-click on an AI member's avatar in the open 群: the message
+/// menu with 更换 … 的电脑… at its end. `TC_CLICK=x,y` moves the click while you look for
+/// the spot.
+pub fn open_bot_quick_avatar_menu(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = crate::selftest::scenes::open_main(services, content, cx)?;
+    click_when_drawn(handle, (304., 512.), gpui::MouseButton::Right, cx)?;
+    Ok(handle)
+}
+
+/// Opens the first 话题 whose first message an AI member wrote, so its avatar is the first
+/// in the timeline.
+pub fn open_topic_led_by_bot(services: &Services, cx: &mut App) {
+    let bots: Vec<String> = services
+        .provider
+        .members()
+        .into_iter()
+        .filter(|m| m.is_bot())
+        .map(|m| m.id)
+        .collect();
+    for group in services.provider.groups() {
+        for topic in services.provider.topics(&group.id) {
+            if topic.id == crate::fake::LONG_TOPIC {
+                continue;
+            }
+            let window = services.provider.messages(&group.id, &topic.id, 50);
+            let first = window.messages.first();
+            if first.is_some_and(|m| bots.contains(&m.author_id)) {
+                let (g, t) = (group.id.clone(), topic.id.clone());
+                services.nav.update(cx, |nav, cx| nav.open_topic(g, t, cx));
+                return;
+            }
+        }
+    }
+}
+
+/// Clicks `at` (window points, or `TC_CLICK=x,y`) with `button` once the window has
+/// drawn a few frames (the real pointer does not move).
+pub fn click_when_drawn(
+    handle: AnyWindowHandle,
+    at: (f32, f32),
+    button: gpui::MouseButton,
+    cx: &mut App,
+) -> Result<(), String> {
+    let at = std::env::var("TC_CLICK")
+        .ok()
+        .and_then(|v| {
+            let (x, y) = v.split_once(',')?;
+            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+        })
+        .unwrap_or(at);
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(Duration::from_millis(300))
+            .await;
+        let _ = handle.update(cx, |_, window, cx| {
+            let position = gpui::point(gpui::px(at.0), gpui::px(at.1));
+            let modifiers = gpui::Modifiers::default();
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position,
+                    pressed_button: None,
+                    modifiers,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                    button,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                    button,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                }),
+                cx,
+            );
+            window.refresh();
+        });
+    })
+    .detach();
+    Ok(())
+}
+
 /// 机器 with the 添加电脑 sheet open.
 pub fn open_machine_dialog(
     services: Services,
