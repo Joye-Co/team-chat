@@ -171,6 +171,7 @@ END;
 - 指定（`PUT /v1/bots/:id/runner` 的 `machineId`）仍只有管理员能做。新规则：只有当 `machineId` **变成**一台个人电脑（和存着的不同）时，调用的人必须是它的主人，否则 403 `machine.not_yours`。原样带回存着的 `machineId` 的编辑照常通过，所以管理员仍能改指定在别人电脑上的 AI 成员的模型、运行方式、标签。
 - 管理员改了这样的 AI 成员后 `updated_by` 变成管理员，按规则 3 钩子就不再用那台个人电脑；主人自己交代的事照常在那里做。环境变量名单改了也拿不到主人的密钥：密钥给谁由主人在自己电脑上定（`secret.members`）。表单在这种 AI 成员上显示一行 `BOT_PINNED_OTHER_HINT`。
 - 勾选（`machine_bots`）：主人可以勾任何没停用、他电脑上有运行方式的 AI 成员，只影响他自己交代的事，不改 AI 成员设置，所以普通成员也能做。
+  服务端只查 AI 成员没停用、有运行配置；「电脑上有这种运行方式」由客户端在勾选时按电脑报上来的 CLI 过滤，派活时由 R4 的 `reachable()` 判断（运行方式之后还能被管理员改，勾选时查一次也不够）。
 
 ### 3.5 归属怎么改、移除和停用
 
@@ -180,14 +181,14 @@ END;
 | --- | --- | --- |
 | 改名 | 团队电脑：管理员；个人电脑：主人 | — |
 | 个人 → 团队（`owner:null`） | 主人本人，而且他是管理员 | 删掉它的 `machine_bots` 行 |
-| 团队 → 我的（`owner:"me"`） | 管理员，归他自己 | 指定到它的 AI 成员：`updated_by` 不是他的，解除指定，给他补一行 `machine_bots` |
+| 团队 → 我的（`owner:"me"`） | 管理员（是人，不是 AI 成员），归他自己 | 指定到它的 AI 成员：`updated_by` 不是他的，解除指定，给他补一行 `machine_bots` |
 
 - 不能把电脑改给别人。原因：「这一版做可用」，没有真实场景要求；以前替别人登记的电脑由那个人重新「用这台电脑」即可。
 - 团队 → 我的时，电脑上的密钥和订阅登录原样保留。原因：新主人就是原来能管它们的管理员。确认框写明「团队的其他管理员以后管不了这台电脑」。
 - 普通成员想把自己的电脑给团队：请管理员在那台电脑上登记团队的电脑。这一版不做转交流程。
 - 移除（`DELETE /v1/machines/:id`）：团队电脑由管理员，个人电脑由主人。做的事和今天一样（设 `revoked_at`、解除指定、吊销连接、审计 `machine.revoke`），另外删 `machine_bots` 行。机 1.5 的改名、移除界面复用这两个路由。
 
-**停用一个人**：R3 在 `server/src/bots/` 里注册一个 `memberDeactivatedHooks` 钩子，不改 `core/routes.ts`。它对这个人的每台个人电脑做和 `DELETE /v1/machines/:id` 一样的事：先一批写库（`revoked_at`、解除指定、删 `machine_bots`、审计 `machine.revoke`，`actor_id` 是停用他的人），再吊销连接。写库成功后令牌已经失效，daemon 下一次请求就被拒；吊销连接失败重试一次，再失败写 warn 日志，下次活动页看得到 `machine.revoke`。这些电脑上跑着的运行按线 3 结束成「中断」，话题里照常有说明。解除指定的 AI 成员回到按标签匹配团队的电脑；活动页的 `machine.revoke` 条目就是给管理员的通知，不另发。
+**停用一个人**：R3 在 `server/src/bots/` 里注册一个 `memberDeactivatedHooks` 钩子，不改 `core/routes.ts`。它对这个人的每台个人电脑做和 `DELETE /v1/machines/:id` 一样的事：先一批写库（`revoked_at`、解除指定、删 `machine_bots`、审计 `machine.revoke`，`actor_id` 是停用他的人；钩子只拿到被停用的人，所以从最近一条停用他的审计行里取，见 `server/src/bots/deactivate.ts`），再吊销连接。写库成功后令牌已经失效，daemon 下一次请求就被拒；吊销连接失败重试一次，再失败写 warn 日志，下次活动页看得到 `machine.revoke`。这些电脑上跑着的运行按线 3 结束成「中断」，话题里照常有说明。解除指定的 AI 成员回到按标签匹配团队的电脑；活动页的 `machine.revoke` 条目就是给管理员的通知，不另发。
 
 **电脑上的路由按归属判断**：`/v1/machines/:id/logins*`、`/secrets*`、`/monitor`、`PATCH`、`DELETE`、`PUT/DELETE /v1/machines/:id/bots/:botId` 改成 `auth:"member"`，handler 里调新函数 `requireMachineManager(db, auth, machineId)`（`server/src/bots/store.ts`）：团队电脑要管理员，个人电脑要主人。
 
