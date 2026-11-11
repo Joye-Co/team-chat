@@ -47,7 +47,18 @@ Bun.serve({
     let file = Bun.file(join(dist, path.endsWith("/") ? `${path}index.html` : path));
     // Like the static host: /en serves en.html.
     if (!(await file.exists()) && !path.includes(".")) file = Bun.file(join(dist, `${path}.html`));
-    return (await file.exists()) ? new Response(file) : new Response("Not found", { status: 404 });
+    if (!(await file.exists())) return new Response("Not found", { status: 404 });
+    // Byte ranges, like the static host: a video is fetched in parts (Safari asks for a range before it plays).
+    const range = req.headers.get("range")?.match(/^bytes=(\d*)-(\d*)$/);
+    if (!range || (!range[1] && !range[2])) return new Response(file, { headers: { "Accept-Ranges": "bytes" } });
+    const size = file.size;
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(size - 1, Number(range[2])) : size - 1;
+    if (start > end || start >= size) return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+    return new Response(file.slice(start, end + 1), {
+      status: 206,
+      headers: { "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Type": file.type },
+    });
   },
 });
 console.log(`http://127.0.0.1:${port}/`);

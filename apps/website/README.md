@@ -19,6 +19,14 @@ dependencies.
 | `src/img/` | WebP screenshots in light and dark pairs (`*-light.webp`, `*-dark.webp`) and the app icon |
 | `src/img/ui/` | The screens of the screenshot tours |
 
+## The film
+
+Each page can show the promo film right under the hero. The video files are
+not in the repository, because the film carries the operator's own character art: put `film-zh.mp4`,
+`film-zh.jpg`, `film-en.mp4` and `film-en.jpg` in `WEBSITE_MEDIA` (default `~/.config/team-chat/website/media`)
+and the build copies them to `dist/media/`. A page whose two files are missing is built without its film block
+(`<!-- film -->` … `<!-- /film -->` in the HTML). The dev server answers byte ranges, as a static host does.
+
 ## Screenshots
 
 Every screenshot comes from the app's own screenshot self-test, with the sample team of
