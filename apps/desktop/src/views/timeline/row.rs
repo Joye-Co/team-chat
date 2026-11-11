@@ -577,18 +577,30 @@ impl TimelineView {
         } else {
             // A click on someone else's avatar @s them in the composer, once
             // and without a quote (回复 and a double click on the message
-            // quote it); the avatar keeps the row's message menu off it.
+            // quote it); a person's avatar keeps the row's message menu off it.
             let mention = author
                 .as_ref()
                 .filter(|a| self.me.as_deref() != Some(a.id.as_str()))
                 .map(|a| (a.id.clone(), a.name.clone()));
+            let bot_quick = author
+                .as_ref()
+                .is_some_and(|a| crate::views::settings::bot_quick::can_open(&self.services, a));
             div()
                 .id(ElementId::Name(format!("avatar-{key}").into()))
                 .w(gutter_w)
                 .flex_none()
-                .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                // An AI member's avatar lets the right-click through to the message menu,
+                // which holds 更换电脑… for owners.
+                .when(!bot_quick, |el| {
+                    el.on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                })
                 .when_some(mention, |el, (id, name)| {
-                    let tip: SharedString = fill(t::AVATAR_MENTION_TIP, &[("name", &name)]).into();
+                    let tip = if bot_quick {
+                        t::AVATAR_MENTION_TIP_BOT
+                    } else {
+                        t::AVATAR_MENTION_TIP
+                    };
+                    let tip: SharedString = fill(tip, &[("name", &name)]).into();
                     el.tooltip(move |window, cx| {
                         gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                     })

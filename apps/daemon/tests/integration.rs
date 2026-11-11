@@ -932,11 +932,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "context",
                         "effort",
                         "gates",
+                        "github",
                         "accounts"
                     ]
                     .map(String::from)[..]
                 )
             );
+            // Feature "github": where runs execute (no `[vm]` here).
+            assert_eq!(machine.runs_in.as_deref(), Some("host"));
             // Feature "accounts": the machine key made next to the token file.
             assert_eq!(machine.public_key.as_deref().map(str::len), Some(44));
             assert_eq!(
@@ -1423,6 +1426,7 @@ async fn interaction_envelope_and_chat_run() {
 
     // 1. chat-run card patch: the output event goes up redacted, the CLI gets the result.
     send(&mut ws, &assign("c1", "fake", "chatrun", None)).await;
+    #[cfg(unix)]
     let run_dir = tmp.path().join("work/runs/c1");
     let mut frames = collect(&mut ws, "c1", true, |f| {
         matches!(

@@ -55,6 +55,9 @@ pub struct RunSpec {
     /// runtime gives the CLI its prompt only after that: a CLI whose hooks are turned off
     /// never starts a gated run ([`crate::gates::claude_settings`]).
     pub gate_alive: Option<tokio::sync::watch::Receiver<bool>>,
+    /// The run's gated actions. Codex and ACP agents answer their CLI's own approval requests
+    /// with them ([`crate::gates::Gates::allows`]); None or empty: everything is allowed.
+    pub gates: Option<Arc<crate::gates::Gates>>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
 }

@@ -110,6 +110,9 @@ pub struct Redactor {
     /// github.com/login/device): they look like invite codes, but the person must read them,
     /// so once seen next to the sign-in page they are not masked.
     device_codes: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Values one run learned while it ran (feature "github": every token it fetched); shared
+    /// by the clones of that run's redactor ([`Self::for_run`]) and masked like `exact`.
+    extra: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
 }
 
 /// Text that shows a device sign-in: the codes in it are meant for a person.
@@ -133,7 +136,41 @@ impl Redactor {
         Redactor {
             exact,
             device_codes: Default::default(),
+            extra: Default::default(),
         }
+    }
+
+    /// A redactor for one run: the same rules, with its own list of values that can grow while
+    /// the run goes on ([`Self::add`]). Its clones share that list; other runs do not see it.
+    pub fn for_run(&self) -> Redactor {
+        Redactor {
+            exact: self.exact.clone(),
+            device_codes: self.device_codes.clone(),
+            extra: Default::default(),
+        }
+    }
+
+    /// Masks `value` from now on in this run's text (values shorter than 8 characters are
+    /// ignored, as for [`Self::new`]).
+    pub fn add(&self, value: &str) {
+        let v = value.trim();
+        if v.len() < MIN_EXACT_LEN {
+            return;
+        }
+        let mut extra = self.extra.write().unwrap_or_else(|e| e.into_inner());
+        if !extra.iter().any(|x| x == v) {
+            extra.push(v.to_string());
+            extra.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        }
+    }
+
+    /// True once [`Self::add`] took a value.
+    pub fn has_added(&self) -> bool {
+        !self
+            .extra
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// The machine token and the values of every `env_passthrough` and `gated_env` variable in
@@ -160,6 +197,11 @@ impl Redactor {
     pub fn text(&self, s: &str) -> String {
         let mut out = s.to_string();
         for v in &self.exact {
+            if out.contains(v.as_str()) {
+                out = out.replace(v.as_str(), MASK);
+            }
+        }
+        for v in self.extra.read().unwrap_or_else(|e| e.into_inner()).iter() {
             if out.contains(v.as_str()) {
                 out = out.replace(v.as_str(), MASK);
             }
@@ -214,6 +256,16 @@ impl Redactor {
                 .into_owned();
         }
         out
+    }
+
+    /// Redacts a text file of the run in place (`stderr.log`), when that changes it.
+    pub fn file(&self, path: &std::path::Path) {
+        let Ok(raw) = std::fs::read(path) else { return };
+        let text = String::from_utf8_lossy(&raw);
+        let masked = self.text(&text);
+        if masked != text {
+            let _ = std::fs::write(path, masked);
+        }
     }
 
     /// Redacts every free-text string inside a JSON value (ids and enums are left alone).

@@ -36,6 +36,7 @@ pub const FEATURES: &[&str] = &[
     feature::CONTEXT,
     feature::EFFORT,
     feature::GATES,
+    feature::GITHUB,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).
@@ -46,6 +47,14 @@ enum LinkEvent {
     Up(u64, mpsc::UnboundedSender<String>, Vec<CliInfo>),
     Frame(u64, String),
     Closed(u64, String),
+}
+
+/// A key saved while runs go on is masked in their frames too: each run's redactor copied the
+/// daemon's rules when it started, so the new value is added to its own list.
+fn mask_in_runs(runs: &HashMap<String, RunEntry>, value: &str) {
+    for r in runs.values() {
+        r.redactor.add(value);
+    }
 }
 
 struct RunEntry {
@@ -59,6 +68,9 @@ struct RunEntry {
     log: Option<std::fs::File>,
     /// `chat-run` outputs waiting for `run.output.result`.
     outputs: Arc<crate::chat_run::Outputs>,
+    /// The run's own redactor: the daemon's rules and the values the run learns (its GitHub
+    /// tokens).
+    redactor: Arc<crate::redact::Redactor>,
 }
 
 pub struct Daemon {
@@ -166,6 +178,19 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let mut exe = crate::selfupdate::Watch::current();
     let mut update_check =
         tokio::time::interval_at(tokio::time::Instant::now() + UPDATE_CHECK, UPDATE_CHECK);
+    // A daemon installed on its own (a Linux host) also fetches new releases itself.
+    let mut updater = match crate::selfupdate::Updater::new(d.cfg.self_update) {
+        Ok(u) => Some(u),
+        Err(why) => {
+            log!("self-update off: {why}");
+            None
+        }
+    };
+    let (release_tx, mut release_rx) = mpsc::unbounded_channel();
+    let mut release_check = tokio::time::interval_at(
+        tokio::time::Instant::now() + crate::selfupdate::FIRST_CHECK,
+        crate::selfupdate::CHECK_EVERY,
+    );
     let mut usage_tick = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(5),
         crate::usage::EVERY,
@@ -182,11 +207,32 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             _ = heartbeat.tick() => d.heartbeat(hb),
             Some(st) = login_rx.recv() => d.on_login_status(st),
             _ = usage_tick.tick(), if d.machine_key.is_some() => d.read_accounts(),
+            _ = release_check.tick(), if updater.as_ref().is_some_and(|u| u.wants_check()) => {
+                if let Some(u) = updater.as_mut() {
+                    u.check(d.cfg.server_url.clone(), d.token.clone(), release_tx.clone());
+                }
+            }
+            Some(r) = release_rx.recv() => {
+                if let Some(line) = updater.as_mut().and_then(|u| u.checked(r)) {
+                    log!("{line}");
+                }
+            }
             _ = update_check.tick() => {
                 // While runs are active the change stays ready; the next idle check restarts.
                 if exe.as_mut().is_some_and(|w| w.check()) && d.active_count() == 0 {
                     log!("a new version of the daemon is installed; restarting");
                     break;
+                }
+                // A downloaded release goes in only while no run is active.
+                if d.active_count() == 0 {
+                    match updater.as_mut().map(|u| u.install_when_idle(exe.as_ref())) {
+                        Some(Ok(true)) => {
+                            log!("installed a new version of the daemon; restarting");
+                            break;
+                        }
+                        Some(Err(e)) => log!("self-update: {e}"),
+                        _ => {}
+                    }
                 }
             }
             _ = cleanup.tick() => {
@@ -353,6 +399,7 @@ impl Daemon {
                     orphan: false,
                     log: None,
                     outputs: Arc::default(),
+                    redactor: Arc::new(self.redactor.for_run()),
                 },
             );
         }
@@ -504,8 +551,8 @@ impl Daemon {
                         ),
                         takeover_url: self.takeover_url(),
                         public_key: self.machine_key.as_ref().map(|k| k.public_b64()),
-                        // usable: reported with feature "github" (not yet).
-                        runs_in: None,
+                        // Feature "github": a run in a VM never has the machine's own sign-ins.
+                        runs_in: Some(if self.cfg.vm.is_some() { "vm" } else { "host" }.into()),
                     },
                     clis: self.clis.clone(),
                     health: health::health(&self.cfg, self.active_count()),
@@ -779,6 +826,7 @@ impl Daemon {
         }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         let outputs = Arc::new(crate::chat_run::Outputs::new(&id));
+        let redactor = Arc::new(self.redactor.for_run());
         self.runs.insert(
             id.clone(),
             RunEntry {
@@ -790,6 +838,7 @@ impl Daemon {
                 orphan: false,
                 log: None,
                 outputs: outputs.clone(),
+                redactor: redactor.clone(),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -811,7 +860,7 @@ impl Daemon {
             rt,
             control_rx: ctl_rx,
             out: self.run_tx.clone(),
-            redactor: self.redactor.clone(),
+            redactor,
             outputs,
             exec: self.exec.clone(),
             keys,
@@ -856,7 +905,7 @@ impl Daemon {
                     Up::RunSession(s) => s.seq = seq,
                     _ => {}
                 }
-                let Some(text) = self.redactor.frame(&up) else {
+                let Some(text) = r.redactor.frame(&up) else {
                     return;
                 };
                 if r.log.is_none() {
@@ -1031,6 +1080,7 @@ impl Daemon {
         match self.keys.set(name, value.clone(), members) {
             Ok(()) => {
                 log!("key {safe} saved");
+                mask_in_runs(&self.runs, &value);
                 self.key_values.push(value);
                 self.redactor = Arc::new(crate::redact::Redactor::for_daemon_with(
                     &self.cfg,
@@ -1108,5 +1158,38 @@ impl Daemon {
             }
         }
         m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_saved_during_a_run_is_masked_in_that_run() {
+        let daemon_rules = crate::redact::Redactor::new(vec!["old-key-0123456789".to_string()]);
+        let run_redactor = Arc::new(daemon_rules.for_run());
+        let (control, _rx) = mpsc::unbounded_channel();
+        let mut runs = HashMap::new();
+        runs.insert(
+            "run-test-1".to_string(),
+            RunEntry {
+                control,
+                next_seq: 1,
+                buffer: VecDeque::new(),
+                done: false,
+                finished: false,
+                orphan: false,
+                log: None,
+                outputs: Arc::default(),
+                redactor: run_redactor.clone(),
+            },
+        );
+        // The clone the run's task holds shares the list with the entry's.
+        let in_task = (*run_redactor).clone();
+        mask_in_runs(&runs, "new-key-9876543210");
+        let out = in_task.text("saw new-key-9876543210 and old-key-0123456789");
+        assert!(!out.contains("new-key-9876543210"), "{out}");
+        assert!(!out.contains("old-key-0123456789"), "{out}");
     }
 }

@@ -93,6 +93,23 @@ const STEPS: &[(&str, Steps)] = &[
     // --- v16/tail2 ---
     // ⇧Tab from the window root: the last tab stop of the pane.
     ("state-focus-settings-row", keys(&["shift-tab"])),
+    // The scene clicks on its own; wait for the menu it opens.
+    (
+        "bot-quick-avatar-menu",
+        Steps {
+            pointer: None,
+            keys: &[],
+            settle_ms: 800,
+        },
+    ),
+    (
+        "admin-member-ai-menu",
+        Steps {
+            pointer: None,
+            keys: &[],
+            settle_ms: 800,
+        },
+    ),
     // --- end v16/tail2 ---
 ];
 

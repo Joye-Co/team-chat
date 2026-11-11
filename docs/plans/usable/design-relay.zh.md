@@ -169,15 +169,15 @@ AddArtifactVersionRequest += { parentVersion?: number }
 
 **参与成员和话题状态**（新文件 `server/src/bots/participants.ts`）：
 
-- `bots.claim`（非 peek）：`bot_topics` 改成 upsert（替换 `room.ts:150`）；`topic_bots` 这一行 `working=1, run_id, started_at=now`；在同一个 commit 里用 `updateTopic` 把状态设成 `in_progress`、`ownerId` 设成这个 bot，`participants` 带上。返回的 `botId` 总是调用者。
+- `bots.claim`（非 peek）：`bot_topics` 改成 upsert（替换 `room.ts:150`），在同一个 commit 里用 `updateTopic` 把 `ownerId` 设成这个 bot（变了才追加 `topic.updated`）。返回的 `botId` 总是调用者。claim 不写 `topic_bots`：desk 在建 run 之前 claim，之后还可能因为竞争不建 run（`runs.ts` 的 `activeRun` 检查），那样会留下一行永远「在做」的行。`topic_bots` 的「在做」由 `run.updated` 写入器和 `bots.workState` 写（下面）。前台的 `ask` 也走这个 claim，所以提问后不带 @ 的回答送到它，但它不算参与成员（R1 实现时更正）。
 - `runs.ts:74` 和 `front.ts:51` 不再按占住的成员挡（谁收到消息由线 1 的路由决定）；如果线 1 已经删了这两处，就不再动。
-- 新 RPC `bots.workState { topicId, runId, outcome, status, waitingOn, stoppedBy?, handedOver?, result? }`：desk 的 `topic()`（`core.ts:629`）在 run 结束时改调它，不再自己带 `ownerId`。房间：写这一行 `working=0, report, ended_at`；处理链和接力（下面）；再汇总、`updateTopic`。调用失败时 desk 把参数存进 `pendingState:<runId>`，由 desk 的 alarm 重试，不丢。
-- 兜底：`run.updated` 的事件写入器（同步，不追加事件）在 run 到终态时，把对应行的 `working` 置 0。这样 desk 出错、电脑丢了 run，行也不会一直卡在「在做」。
+- 新 RPC `bots.workState { topicId, runId, status, waitingOn, ended }`（R1 只做这几项；`outcome`、`stoppedBy?`、`handedOver?`、`result?` 由 R2、R3 按需加上）：desk 的 `topic()`（`core.ts:629`）每次报状态都改调它（开始、等审批、卡住、结束），不再自己带 `ownerId`。房间：没结束时写这一行 `working=1, report, waiting_on`（新 run 时换 `run_id`、`started_at`）；结束时写 `working=0, report, ended_at`；处理链和接力（R2、R3）；再汇总、`updateTopic`。调用失败时 desk 把参数存进 `pendingState:<runId>`，由 desk 的 alarm 重试，不丢（R1 没做：失败只记日志，写入器保证行不卡在「在做」，话题状态等下一次报告；留给 R2 和出件箱一起做）。
+- 兜底：`run.updated` 的事件写入器（同步，不追加事件）看到新 run 时把这一行置为在做（`run_id`、`started_at`），run 到终态（有 `endedAt`）时把 `working` 置 0。这样 desk 出错、电脑丢了 run，行也不会一直卡在「在做」。写入器也在恢复存档时跑：导入的 run 一律不算在做。
 - 汇总规则（只算「当前的」行）：
-  1. 有 `working=1` 的行 → `in_progress`（卡片提问仍由 cards2 的过滤器叠上去）；
-  2. 否则只看 `ended_at >= 话题里最近一次 started_at` 的行，按 `waiting_answer > waiting_review > blocked > failed(按 blocked) > done` 取最高，`waitingOn` 取并集；
+  1. 有 `working=1` 的行 → `in_progress`；但在做的行报了 `waiting_answer`（等审批）、`waiting_review` 或 `blocked`（盯活判卡住）时取其中最急的，`waitingOn` 取这些行的并集（R1 实现时更正：不然审批和卡住在有人在做时看不见）。卡片提问仍由 cards2 的过滤器叠上去；
+  2. 否则只看 `ended_at >= 话题里最近一次 started_at` 的行，按 `waiting_answer > waiting_review > blocked > failed(按 blocked) > open(被人停下) > done` 取最高，`waitingOn` 取并集；
   3. 有 `running` 的接力且不在最后一步 → `in_progress`；`paused` → `blocked`，`waitingOn=[发起人]`。
-  这样「A 卡住，人再 @B，B 做完」时 A 那一行不再算（B 开始得更晚），话题是完成；接力第 1 步「带 PR 等审」不会在第 2 步时让话题变成「等你审」。人手动改的状态保持到下一个 run 开始或结束。
+  这样「A 卡住，人再 @B，B 做完」时：A 的 run 已经结束（以卡住结束）的，A 那一行不再算（B 开始得更晚），话题是完成；A 被盯活判卡住、run 还没结束的，A 仍是在做的行，话题保持卡住，直到 A 的 run 结束（被停或做完）后才只看 B；接力第 1 步「带 PR 等审」不会在第 2 步时让话题变成「等你审」。人手动改的状态保持到下一个 run 开始或结束。
 - `cardOwner`（`room.ts:58`）：卡片作者在 `topic_bots` 里就送给作者，否则送给 `ownerId`。
 - `bots.transfer` 删掉，归属的改动并进 `bots.chainStepResult`（下面）。
 - `bots.release`（`room.ts:316`）同时删这个 bot 的 `topic_bots` 行；它在接力里还没轮到的步，到那一步时按「接不了」处理。

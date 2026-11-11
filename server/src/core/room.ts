@@ -36,6 +36,7 @@ import {
   type HookContext,
   type RoomContext,
   type RoomTx,
+  type TopicChange,
   afterCommitHooks,
   editExtensions,
   eventDecorators,
@@ -45,6 +46,7 @@ import {
   type MessageWriteResult,
   eventViews,
   messageViews,
+  topicFields,
   topicStatusFilters,
   messageWriteHooks,
   roomAlarmHandlers,
@@ -543,6 +545,7 @@ export class GroupRoom extends DurableObject<Env> {
       waitUntil: (p) => this.ctx.waitUntil(p),
       wakeAt: (at) => this.wakeAt(at),
       serial: (key, fn) => this.serial(key, fn),
+      updateTopic: (tx, actorId, topicId, change) => this.updateTopicFromFeature(tx, actorId, topicId, change),
     };
   }
 
@@ -606,6 +609,7 @@ export class GroupRoom extends DurableObject<Env> {
     if (r.last_message_at !== null && r.last_message_at !== undefined) t.lastMessageAt = r.last_message_at;
     if (r.context) t.contextOf = JSON.parse(r.context) as TopicContext;
     if (this.isMain(r.id)) t.main = true;
+    for (const f of topicFields) Object.assign(t, f(this.sql, r.id));
     return t;
   }
 
@@ -1114,50 +1118,73 @@ export class GroupRoom extends DurableObject<Env> {
       ) {
         throw new ApiError("invalid", "nothing to update");
       }
-      let waitingOn = frame.waitingOn === undefined ? undefined : [...new Set(frame.waitingOn)];
+      const waitingOn = frame.waitingOn === undefined ? undefined : [...new Set(frame.waitingOn)];
       for (const id of [...(waitingOn ?? []), ...(frame.ownerId ? [frame.ownerId] : [])]) {
         if (!this.members.has(id)) throw new ApiError("invalid", "waitingOn and ownerId must be members of this group");
       }
-      const before = JSON.parse(row.waiting_on ?? "[]") as string[];
       return this.commit((tx) => {
-        // cards2: open blocking card asks keep the topic waiting (registerTopicStatusFilter).
-        let status = frame.status;
-        if (status !== undefined || waitingOn !== undefined) {
-          let next = { status: status ?? row.status, waitingOn: waitingOn ?? before };
-          for (const f of topicStatusFilters) next = f(this.sql, row.id, next);
-          if (status !== undefined || next.status !== row.status) status = next.status;
-          if (waitingOn !== undefined || next.waitingOn.length !== before.length || next.waitingOn.some((id) => !before.includes(id))) waitingOn = next.waitingOn;
-        }
-        const waitingAdded = (waitingOn ?? []).filter((id) => !before.includes(id));
-        const seq = tx.nextSeq();
-        this.sql.exec(
-          "UPDATE topics SET title = ?, status = ?, waiting_on = ?, owner_id = ?, last_seq = ? WHERE id = ?",
-          frame.title ?? row.title,
-          status ?? row.status,
-          waitingOn === undefined ? row.waiting_on : JSON.stringify(waitingOn),
-          frame.ownerId === undefined ? row.owner_id : frame.ownerId,
-          seq,
-          row.id,
-        );
-        // Auto-follow: members just added to waitingOn and a new owner.
-        const follow = new Set(waitingAdded);
-        if (frame.ownerId && frame.ownerId !== row.owner_id) follow.add(frame.ownerId);
-        for (const id of follow) setFollowing(this.sql, id, row.id, true);
-        const data: {
-          topicId: string;
-          title?: string;
-          status?: TopicStatus;
-          waitingOn?: string[];
-          ownerId?: string | null;
-        } = { topicId: row.id };
-        if (frame.title !== undefined) data.title = frame.title;
-        if (status !== undefined) data.status = status;
-        if (waitingOn !== undefined) data.waitingOn = waitingOn;
-        if (frame.ownerId !== undefined) data.ownerId = frame.ownerId;
-        tx.append({ type: "topic.updated", actorId: actor.id, topicId: row.id, data, hints: { waitingAdded } });
+        this.writeTopicUpdate(tx, actor.id, row, { title: frame.title, status: frame.status, waitingOn, ownerId: frame.ownerId });
         return { topic: this.toTopic(this.topicRow(row.id) as TopicRow) };
       });
     });
+  }
+
+  /** `RoomContext.updateTopic`: a feature's topic change, checked like a `topic.update`. */
+  private updateTopicFromFeature(tx: RoomTx, actorId: string, topicId: string, change: TopicChange): void {
+    const row = this.topicRow(topicId);
+    if (!row || this.isMain(row.id)) return;
+    const waitingOn = change.waitingOn === undefined ? undefined : [...new Set(change.waitingOn)].filter((id) => this.members.has(id));
+    const ownerId = change.ownerId && !this.members.has(change.ownerId) ? undefined : change.ownerId;
+    if (change.status === undefined && waitingOn === undefined && ownerId === undefined && !change.extra) return;
+    this.writeTopicUpdate(tx, actorId, row, { status: change.status, waitingOn, ownerId, extra: change.extra });
+  }
+
+  /**
+   * Writes a topic's title, status, waitingOn and owner and appends `topic.updated`. cards2: open
+   * blocking card asks keep the topic waiting (registerTopicStatusFilter).
+   */
+  private writeTopicUpdate(
+    tx: RoomTx,
+    actorId: string,
+    row: TopicRow,
+    change: { title?: string; status?: TopicStatus; waitingOn?: string[]; ownerId?: string | null; extra?: Record<string, unknown> },
+  ): void {
+    const before = JSON.parse(row.waiting_on ?? "[]") as string[];
+    let status = change.status;
+    let waitingOn = change.waitingOn;
+    if (status !== undefined || waitingOn !== undefined) {
+      let next = { status: status ?? row.status, waitingOn: waitingOn ?? before };
+      for (const f of topicStatusFilters) next = f(this.sql, row.id, next);
+      if (status !== undefined || next.status !== row.status) status = next.status;
+      if (waitingOn !== undefined || next.waitingOn.length !== before.length || next.waitingOn.some((id) => !before.includes(id))) waitingOn = next.waitingOn;
+    }
+    const waitingAdded = (waitingOn ?? []).filter((id) => !before.includes(id));
+    const seq = tx.nextSeq();
+    this.sql.exec(
+      "UPDATE topics SET title = ?, status = ?, waiting_on = ?, owner_id = ?, last_seq = ? WHERE id = ?",
+      change.title ?? row.title,
+      status ?? row.status,
+      waitingOn === undefined ? row.waiting_on : JSON.stringify(waitingOn),
+      change.ownerId === undefined ? row.owner_id : change.ownerId,
+      seq,
+      row.id,
+    );
+    // Auto-follow: members just added to waitingOn and a new owner.
+    const follow = new Set(waitingAdded);
+    if (change.ownerId && change.ownerId !== row.owner_id) follow.add(change.ownerId);
+    for (const id of follow) setFollowing(this.sql, id, row.id, true);
+    const data: {
+      topicId: string;
+      title?: string;
+      status?: TopicStatus;
+      waitingOn?: string[];
+      ownerId?: string | null;
+    } & Record<string, unknown> = { ...(change.extra ?? {}), topicId: row.id };
+    if (change.title !== undefined) data.title = change.title;
+    if (status !== undefined) data.status = status;
+    if (waitingOn !== undefined) data.waitingOn = waitingOn;
+    if (change.ownerId !== undefined) data.ownerId = change.ownerId;
+    tx.append({ type: "topic.updated", actorId, topicId: row.id, data, hints: { waitingAdded } });
   }
 
   /** A card button press (`card.action`): stored as `card.actioned` with the action's own value. */

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Tests the release guards of scripts/deploy-server.sh and scripts/release-check.sh against a
-# local stub of GET /v1/health, and the upload of scripts/release.sh (--upload-only, the DMG
-# and the Windows installer) against a local stub of the release routes. Deploys nothing and
-# needs no secret: the admin secret of the upload test is made up here.
+# local stub of GET /v1/health, and the upload of scripts/release.sh (--upload-only, the DMG,
+# the Windows installer and the Linux daemon) against a local stub of the release routes; the
+# name scripts/build-daemon.sh gives the daemon; and scripts/runner/install-daemon.sh against a
+# local stub of the GitHub API. Deploys nothing and needs no secret: the admin secret of the
+# upload test is made up here.
 #
 # Usage: scripts/test-release-scripts.sh
 set -euo pipefail
@@ -130,7 +132,18 @@ expect ok "the installer's type" is "$(got .type)" application/vnd.microsoft.por
 expect ok "the installer's checksum is the body's" is "$(got '.sha256Header + " " + .sha256Body')" "$(sha_of "$DIST/$NAME-9.9.9-setup.exe") $(sha_of "$DIST/$NAME-9.9.9-setup.exe")"
 expect ok "the same notes go with the installer" is "$(got .notes)" "$(cat "$WORK/notes.md")"
 
+LINUX_DAEMON="$DIST/$(product slug)-daemon-9.9.9-x86_64-unknown-linux-gnu"
+printf '\177ELF a daemon' >"$LINUX_DAEMON"
+expect ok "upload-only sends the Linux daemon" "$R" 9.9.9 --env staging --upload-only --platform linux-x86_64 --notes "$WORK/notes.md"
+expect ok "the Linux daemon goes to its route" is "$(got '.method + " " + .path')" "PUT /v1/admin/releases/9.9.9/assets/linux-x86_64"
+expect ok "the Linux daemon's type" is "$(got .type)" application/octet-stream
+expect ok "the Linux daemon's checksum is the body's" is "$(got '.sha256Header + " " + .sha256Body')" "$(sha_of "$LINUX_DAEMON") $(sha_of "$LINUX_DAEMON")"
+expect ok "the same notes go with the Linux daemon" is "$(got .notes)" "$(cat "$WORK/notes.md")"
+
 rm -f "$WORK/upload.json"
+expect fail "the Linux daemon is only uploaded by this script, never built here" "$R" 9.9.9 --env staging --platform linux-x86_64
+expect fail "a missing Linux daemon stops the upload" "$R" 9.9.8 --env staging --upload-only --platform linux-x86_64
+expect fail "a prerelease Linux daemon is not uploaded" "$R" 9.9.9-rc.1 --env staging --upload-only --platform linux-x86_64
 expect fail "the installer is only uploaded, never built here" "$R" 9.9.9 --env staging --platform windows
 expect fail "an unknown platform is refused" "$R" 9.9.9 --env staging --upload-only --platform linux
 expect fail "a prerelease is not uploaded" "$R" 9.9.9-rc.1 --env staging --upload-only --platform windows
@@ -149,6 +162,27 @@ expect ok "and says that nothing was uploaded" bash -c "grep -q 'has no route fo
 expect ok "unless the operator says the server has no such route" "$R" 9.9.9 --env staging --upload-only --platform windows --allow-missing-route
 upload_stub 500
 expect fail "a server error fails the upload" "$R" 9.9.9 --env staging --upload-only --platform windows
+# --- build-daemon.sh: the daemon alone is named by its target and has its .sha256 ---------------
+# The release's Linux job builds the Linux daemon with it; release.sh --platform linux-x86_64
+# uploads that name. No compile here: --skip-build takes a program already in the target folder.
+if command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
+  FAKE_TARGET="$WORK/target"
+  rm -rf "$FAKE_TARGET" "$WORK/daemon-dist" && mkdir -p "$FAKE_TARGET/release"
+  # Any small program: build-daemon.sh signs it on a Mac.
+  for t in /usr/bin/true /bin/true; do [ -x "$t" ] && { cp "$t" "$FAKE_TARGET/release/daemon"; break; }; done
+  TRIPLE="$(rustc -vV | awk '/^host:/ { print $2 }')"
+  built() { CARGO_TARGET_DIR="$FAKE_TARGET" DIST="$WORK/daemon-dist" "$ROOT/scripts/build-daemon.sh" --skip-build 2>/dev/null | tail -n 1; }
+  DAEMON_OUT="$WORK/daemon-dist/$(product slug)-daemon-$(workspace_version)-$TRIPLE"
+  expect ok "build-daemon names the daemon by version and target" is "$(built)" "$DAEMON_OUT"
+  expect ok "its .sha256 checks" bash -c "cd '$WORK/daemon-dist' && shasum -a 256 -c '$(basename "$DAEMON_OUT").sha256'"
+  expect ok "it is executable" test -x "$DAEMON_OUT"
+  if [ "$TRIPLE" = x86_64-unknown-linux-gnu ]; then
+    expect ok "the Linux daemon has the name release.sh uploads" test -f "$WORK/daemon-dist/$(product slug)-daemon-$(workspace_version)-x86_64-unknown-linux-gnu"
+  fi
+else
+  printf 'skip  build-daemon.sh (no cargo here)\n'
+fi
+
 # --- the previous Windows installer, for the publisher comparison of a release -----------------
 # A stand-in for gh: releases newest first; v9.9.9 is the release being made (the macOS job has
 # created it already), v9.9.8 has no installer, v9.9.7 has one. GH_FAIL makes one call fail.
@@ -198,6 +232,100 @@ expect ok "the lowest release has nothing below it" is "$(prev 9.9.6 "$WORK/prev
 for step in list view download; do
   expect fail "a failed 'gh release $step' fails the check" env PATH="$FAKE_BIN:$PATH" GH_FAIL="$step" "$P" 9.9.9 "$WORK/previous"
 done
+
+# --- scripts/runner/install-daemon.sh: a Linux host takes the released daemon -----------------
+# A stand-in for the GitHub API: release v9.9.9 has the Linux daemon (with the digest GitHub
+# keeps), v9.9.8 has none. GH_DIGEST overrides the announced digest.
+gh_stub() {
+  cleanup
+  SLUG="$(product slug)" GH_DIGEST="${1:-}" bun -e '
+    const { createHash } = require("node:crypto");
+    const port = Number(process.argv[1]);
+    const name = `${process.env.SLUG}-daemon-9.9.9-x86_64-unknown-linux-gnu`;
+    const body = "\x7fELF the daemon of 9.9.9";
+    const digest = process.env.GH_DIGEST || `sha256:${createHash("sha256").update(body).digest("hex")}`;
+    const base = `http://127.0.0.1:${port}`;
+    const v999 = { tag_name: "v9.9.9", assets: [
+      { name: "X-9.9.9.dmg", browser_download_url: `${base}/dl/X-9.9.9.dmg`, digest: "sha256:" + "0".repeat(64) },
+      { name, browser_download_url: `${base}/dl/${name}`, digest },
+    ] };
+    const v998 = { tag_name: "v9.9.8", assets: [{ name: "X-9.9.8.dmg", browser_download_url: `${base}/dl/X-9.9.8.dmg`, digest: "sha256:" + "0".repeat(64) }] };
+    Bun.serve({ hostname: "127.0.0.1", port, fetch(req) {
+      const p = new URL(req.url).pathname;
+      if (p === "/v1/health") return Response.json({ ok: true, version: "gh" });
+      if (p === "/repos/o/r/releases/latest" || p === "/repos/o/r/releases/tags/v9.9.9") return Response.json(v999);
+      if (p === "/repos/o/r/releases/tags/v9.9.8") return Response.json(v998);
+      if (p === `/dl/${name}`) return new Response(body);
+      return new Response("not found", { status: 404 });
+    } })' "$PORT" >"$WORK/stub.log" 2>&1 &
+  STUB_PID=$!
+  local _
+  for _ in $(seq 1 50); do
+    [ "$(curl -s "http://127.0.0.1:$PORT/v1/health" | jq -r .version 2>/dev/null)" = gh ] && return 0
+    sleep 0.1
+  done
+  die "GitHub stub did not start"
+}
+HOST="$WORK/host"
+rm -rf "$HOST" && mkdir -p "$HOST/bin"
+HOST_DAEMON="$HOST/bin/$(product slug)-daemon"
+install_daemon() {
+  GITHUB_API="http://127.0.0.1:$PORT" DAEMON_REPO=o/r DAEMON_ARCH=x86_64 DAEMON_UNIT_DIR="$HOST/units" \
+    "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON" "$@"
+}
+gh_stub
+expect ok "the host installs the released Linux daemon" install_daemon
+expect ok "it is the release's file" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
+expect ok "and executable" test -x "$HOST_DAEMON"
+expect ok "a version can be named" install_daemon --version 9.9.9
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "the same file is not installed twice" grep -q "installed already" "$WORK/said.log"
+printf 'an older daemon' >"$HOST_DAEMON"
+gh_stub "sha256:$(printf '0%.0s' $(seq 1 64))"
+expect fail "a download that does not match the digest stops" install_daemon
+expect ok "and leaves the installed daemon alone" is "$(cat "$HOST_DAEMON")" "an older daemon"
+expect ok "and no half file" bash -c "! ls '$HOST/bin' | grep -qE 'new|install'"
+gh_stub
+expect ok "a matching download replaces the older daemon" install_daemon
+expect ok "with the release's file" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
+expect fail "a version that is not a release is refused" install_daemon --version 9.9
+# The service: none yet, one that starts a hand-built daemon elsewhere, one that starts this file.
+UNIT="$HOST/units/$(product slug)-daemon.service"
+expect ok "without a service" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it says how to install one" grep -q "no daemon service yet.*install-service" "$WORK/said.log"
+mkdir -p "$HOST/units"
+printf '[Service]\nExecStart="%s" run --config "/x/daemon.toml"\nRestart=always\n' "$HOST/elsewhere/daemon" >"$UNIT"
+expect ok "with a service that starts another file" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it says the service does not take the new file" grep -q "service starts $HOST/elsewhere/daemon, not $HOST_DAEMON.*install-service" "$WORK/said.log"
+printf '[Service]\nExecStart=%s run --config /x/daemon.toml\n' "$HOST/elsewhere/daemon" >"$UNIT"
+expect ok "with an unquoted ExecStart" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it reads the file too" grep -q "service starts $HOST/elsewhere/daemon, not" "$WORK/said.log"
+printf '[Service]\nExecStart="%s" run --config "/x/daemon.toml"\n' "$HOST_DAEMON" >"$UNIT"
+expect ok "with a service that starts this file" install_daemon
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "it has nothing to say about the service" bash -c "! grep -q 'service' '$WORK/said.log'"
+# The daemon's own waiting download ($dest.new) is not the script's to touch.
+printf 'a download waiting for idle' >"$HOST_DAEMON.new"
+expect ok "a run next to a waiting download" install_daemon
+expect ok "leaves the download alone" is "$(cat "$HOST_DAEMON.new")" "a download waiting for idle"
+printf 'an older daemon' >"$HOST_DAEMON"
+expect ok "an install next to a waiting download" install_daemon
+expect ok "leaves it alone too" is "$(cat "$HOST_DAEMON.new")" "a download waiting for idle"
+expect ok "and leaves no file of its own" bash -c "! ls '$HOST/bin' | grep -q install"
+rm -f "$HOST_DAEMON.new"
+# Without a released Linux daemon it builds one, which needs cargo: a PATH without it fails.
+NO_CARGO="$WORK/no-cargo"
+rm -rf "$NO_CARGO" && mkdir -p "$NO_CARGO"
+for t in bash curl jq sha256sum sed dirname id cut getent uname cat mktemp rm git; do
+  if command -v "$t" >/dev/null 2>&1; then ln -sf "$(command -v "$t")" "$NO_CARGO/$t"; fi
+done
+expect fail "no released Linux daemon and no cargo stops" env HOME="$NO_CARGO" PATH="$NO_CARGO" GITHUB_API="http://127.0.0.1:$PORT" DAEMON_REPO=o/r DAEMON_ARCH=x86_64 \
+  "$NO_CARGO/bash" "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON" --version 9.9.8
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says what to do" grep -q "no released Linux daemon in o/r and no cargo" "$WORK/said.log"
 
 # --- a release is for both systems --------------------------------------------------------------
 # The preflight of a release, as a dry run prints it ("would stop: ..."): never a real run here.
@@ -435,6 +563,10 @@ expect ok "the failure does not print the host" bash -c "! grep -q 'example.org'
 printf 'TC_SERVERS_JSON: {"staging":"https://staging.chat.example.org"}\n' >"$WORK/logs/2.log"
 expect fail "a log with the staging host fails" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
 expect ok "a run without server URLs has nothing to check" env TC_SERVERS_JSON= LOG_DIR="$WORK/logs" "$L"
+# A rerun of only the failed jobs: each job's newest finished attempt is read, also when the
+# newest attempt holds one job.
+expect ok "a rerun reads the jobs of the earlier attempts too" is \
+  "$(printf '11\tBuild\n12\tLog scan\n\n21\tLog scan\n' | "$L" --newest-per-job)" "$(printf '11\tBuild\n21\tLog scan')"
 
 jq -n --argjson fails "$fails" --arg version "$(workspace_version)" '{ version: $version, failures: $fails }' >"$WORK/report.json"
 [ "$fails" = 0 ] || die "$fails release script test(s) failed"

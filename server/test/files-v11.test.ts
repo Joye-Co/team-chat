@@ -265,7 +265,7 @@ describe("SF-4 post a side chat answer to its topic", () => {
     const other = (await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "另一个话题" })).topic.id;
     const wrong = await c.request({ t: "send", groupId: gid, topicId: other, clientMsgId: clientMsgId(), body: "x", fromAside });
     expect(wrong).toMatchObject({ ok: false, error: { code: "invalid", reason: "aside.bad_origin" } });
-    const missing = await c.request({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "x", fromAside: { ...fromAside, messageId: side.message.id.replace(/.$/, "Z") } });
+    const missing = await c.request({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "x", fromAside: { ...fromAside, messageId: side.message.id.replace(/.$/, (ch: string) => (ch === "Z" ? "Y" : "Z")) } });
     expect(missing).toMatchObject({ ok: false, error: { code: "not_found" } });
     // Someone outside the DM cannot name it.
     const stranger = await createMember();
