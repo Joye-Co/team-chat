@@ -187,6 +187,11 @@ pub enum Target {
 /// what exists is resolved with its symbolic links, the rest must be plain names.
 pub fn resolve_out(root: &Path, out: &str) -> Result<Target, Value> {
     // Windows: see `chat_run_files::inside`.
+    let out = if cfg!(windows) {
+        crate::sys::windows_plain_path(out)
+    } else {
+        out
+    };
     if cfg!(windows)
         && let Some(why) = crate::sys::windows_path_problem(out)
     {

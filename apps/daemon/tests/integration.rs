@@ -597,17 +597,8 @@ async fn daemon_end_to_end() {
     })
     .await;
     assert!(matches!(start[0], Up::RunAccept { .. }));
-    for _ in 0..200 {
-        if pidfile.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let pid: i32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // The file can be there before its content.
+    let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     send(
         &mut ws,
         &Down::RunCancel {
@@ -708,17 +699,8 @@ async fn unknown_run_after_reconnect_is_cancelled() {
     })
     .await;
     let pidfile = tmp.path().join("work/runs/r9/work/fake.pid");
-    for _ in 0..200 {
-        if pidfile.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let pid: i32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // The file can be there before its content.
+    let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     drop(ws);
     let (mut ws, _) = tokio::time::timeout(Duration::from_secs(40), m.conns.recv())
         .await
