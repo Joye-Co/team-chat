@@ -73,6 +73,31 @@ pub fn order_front(_window: &Window) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether Windows treats this process as per-monitor DPI aware. Only the exe's manifest
+/// says so (GPUI embeds one through its `windows-manifest` feature, which
+/// `gpui-pre-platform` turns on): without it Windows stretches every window as a bitmap on
+/// a display above 100 %, which a 100 % CI screenshot cannot show.
+#[cfg(target_os = "windows")]
+pub fn dpi_aware() -> bool {
+    use windows::Win32::UI::HiDpi::{
+        AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        GetThreadDpiAwarenessContext,
+    };
+    // SAFETY: reads this thread's DPI awareness.
+    unsafe {
+        AreDpiAwarenessContextsEqual(
+            GetThreadDpiAwarenessContext(),
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        )
+        .as_bool()
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn dpi_aware() -> bool {
+    true
+}
+
 #[cfg(target_os = "windows")]
 fn hwnd(window: &Window) -> Result<windows::Win32::Foundation::HWND, String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -220,7 +245,16 @@ pub fn draw_as_key(window: &Window) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: makes the window the active one for real. The self-test runs there
+/// on a CI runner nobody is using, so taking the focus disturbs nobody, and an
+/// active window is what draws carets, selections and active titles.
+#[cfg(target_os = "windows")]
+pub fn draw_as_key(window: &Window) -> Result<(), String> {
+    window.activate_window();
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn draw_as_key(_window: &Window) -> Result<(), String> {
     Ok(())
 }
