@@ -25,6 +25,7 @@ mod engine;
 pub mod files;
 pub mod http;
 mod http_ext;
+mod http_push;
 pub mod logging;
 pub mod memory;
 pub mod proto;

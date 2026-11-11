@@ -204,9 +204,6 @@ pub fn attach_window(window: &Window, cx: &mut App) {
     if cx.has_global::<NavGlobal>() {
         cx.global_mut::<NavGlobal>().window = Some(window.window_handle());
     }
-    // The unread badge of the taskbar button (the Dock badge on macOS needs no window).
-    #[cfg(target_os = "windows")]
-    status_item::window_attached(cx);
 }
 
 pub(crate) fn services_of(cx: &App) -> Services {
@@ -246,6 +243,21 @@ fn show_main_window_now(cx: &mut App) {
             eprintln!("failed to open the window: {error}");
         }
     }
+}
+
+/// Shows the main window and runs `action` in it: a command that comes from outside any
+/// window (the notification-area menu, a task of the taskbar's jump list). The commands
+/// of the main window (新话题) are handled in it, so the action is dispatched there; signed
+/// out there is none, and the app's own handlers get it.
+pub(crate) fn run_in_main_window(action: Box<dyn gpui::Action>, cx: &mut App) {
+    show_main_window(cx);
+    // After the window is shown (that is deferred too).
+    cx.defer(move |cx| {
+        let in_window = action.boxed_clone();
+        if !with_main_window(cx, |window, cx| window.dispatch_action(in_window, cx)) {
+            cx.dispatch_action(action.as_ref());
+        }
+    });
 }
 
 /// The place to save for this navigation state.

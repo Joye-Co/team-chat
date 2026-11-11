@@ -673,6 +673,8 @@ impl ArtifactWindow {
             transparent,
             viewer,
             ref_menu,
+            // AppKit gives the window the app's appearance itself.
+            chrome: _,
         } = options;
         let state = new_state(artifact_id, version, capabilities)?;
         {
@@ -789,6 +791,10 @@ impl ArtifactWindow {
             popup.setHidden(versions.is_empty());
         }
     }
+
+    /// Nothing to do on macOS: the window follows the app's appearance (see
+    /// [`crate::Chrome`]).
+    pub fn set_chrome(&self, _chrome: crate::Chrome) {}
 
     pub fn set_title(&self, title: &str) {
         self.window.setTitle(&NSString::from_str(title));

@@ -62,18 +62,28 @@ pub fn fit_zoom(w: f32, viewport_w: f32) -> f32 {
     ((viewport_w - 2. * MARGIN).max(1.) / w.max(1.)).clamp(FIT_FLOOR, 1.0)
 }
 
-/// `name` as a file name every system takes: Windows refuses `< > : " / \ | ? *`,
-/// control characters and a name that ends in a dot or a space, and reads `CON`, `NUL`
-/// and their kind as devices whatever follows the dot.
+/// `name` as a file name. Every system: `/`, `:` and `\` become `-`, as before. Windows
+/// also refuses `< > " | ? *`, control characters and a name that ends in a dot or a
+/// space, and reads `CON`, `NUL` and their kind as devices whatever follows the dot;
+/// those are changed only there, so a title that made a valid file name on the Mac keeps
+/// that name on the Mac.
 fn file_stem(name: &str) -> String {
+    file_stem_on(name, cfg!(windows))
+}
+
+fn file_stem_on(name: &str, windows: bool) -> String {
     let safe: String = name
         .chars()
         .map(|ch| match ch {
-            '/' | ':' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' => '-',
-            ch if ch.is_control() => '-',
+            '/' | ':' | '\\' => '-',
+            '<' | '>' | '"' | '|' | '?' | '*' if windows => '-',
+            ch if windows && ch.is_control() => '-',
             ch => ch,
         })
         .collect();
+    if !windows {
+        return safe;
+    }
     let safe = safe.trim_end_matches(['.', ' ']).trim_start();
     let device = matches!(
         safe.split('.')
@@ -836,16 +846,25 @@ mod tests {
 
     #[test]
     fn an_exported_picture_gets_a_name_windows_takes() {
-        assert_eq!(file_stem("登录流程"), "登录流程");
-        assert_eq!(file_stem("a/b: c?"), "a-b- c-");
+        assert_eq!(file_stem_on("登录流程", true), "登录流程");
+        assert_eq!(file_stem_on("a/b: c?", true), "a-b- c-");
         assert_eq!(
-            file_stem("为什么慢？ <v2> \"x\"|*"),
+            file_stem_on("为什么慢？ <v2> \"x\"|*", true),
             "为什么慢？ -v2- -x---"
         );
-        assert_eq!(file_stem("结束. "), "结束");
-        assert_eq!(file_stem("con"), "diagram-con");
-        assert_eq!(file_stem("NUL.v2"), "diagram-NUL.v2");
-        assert_eq!(file_stem(" . "), "diagram-");
+        assert_eq!(file_stem_on("结束. ", true), "结束");
+        assert_eq!(file_stem_on("con", true), "diagram-con");
+        assert_eq!(file_stem_on("NUL.v2", true), "diagram-NUL.v2");
+        assert_eq!(file_stem_on(" . ", true), "diagram-");
+    }
+
+    /// The Mac's names do not change: only `/`, `:` and `\` were ever replaced there.
+    #[test]
+    fn an_exported_picture_keeps_its_name_on_the_mac() {
+        for title in ["登录流程", "why? <v2> \"x\"|*", "结束. ", "con", " . "] {
+            assert_eq!(file_stem_on(title, false), title);
+        }
+        assert_eq!(file_stem_on("a/b: c\\d", false), "a-b- c-d");
     }
 
     #[test]

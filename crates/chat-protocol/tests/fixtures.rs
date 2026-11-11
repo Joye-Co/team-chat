@@ -80,6 +80,9 @@ check!(
     UpdateMemoryRequest,
     MemoryUpdatesResponse,
     MachineMemoryNoteRequest,
+    RegisterPushDeviceRequest,
+    PushData,
+    AnswerCardRequest,
     SetPasswordRequest,
     RemovePasswordRequest,
     PasswordSignInRequest,
@@ -309,6 +312,20 @@ const KINDS: &[(&str, RoundTrip)] = &[
         "PutArtifactMediaResponse",
         plain::<PutArtifactMediaResponse>,
     ),
+    // Push
+    (
+        "RegisterPushDeviceRequest",
+        validated::<RegisterPushDeviceRequest>,
+    ),
+    ("PushDevice", plain::<PushDevice>),
+    ("PushDevicesResponse", plain::<PushDevicesResponse>),
+    (
+        "RemovePushDeviceResponse",
+        plain::<RemovePushDeviceResponse>,
+    ),
+    ("BadgeResponse", plain::<BadgeResponse>),
+    ("PushData", validated::<PushData>),
+    ("AnswerCardRequest", validated::<AnswerCardRequest>),
 ];
 
 fn fixtures_root() -> PathBuf {

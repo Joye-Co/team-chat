@@ -55,7 +55,7 @@ struct MeScreen: View {
                 .foregroundStyle(.primary)
             }
 
-            // M3 adds the notification settings row here.
+            // 通知 (M3).
             MeNotificationsSlot()
 
             Section {
@@ -153,7 +153,9 @@ struct MeScreen: View {
 
 /// The 通知 row slot: M3 (notifications) fills it; until then it shows nothing.
 struct MeNotificationsSlot: View {
-    var body: some View { EmptyView() }
+    var body: some View {
+        Section { NavigationLink(value: Route.notifySettings) { Label(Copy.notifyTitle, systemImage: "bell") } }
+    }
 }
 
 private struct DeviceRow: View {
