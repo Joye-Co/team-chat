@@ -75,7 +75,7 @@ UPDATE members SET team_owner = 1 WHERE kind = 'human' AND level = 'owner';
 | 审批规则 | 改 | 只读 | `settings/approvals.ts:49` 不变 |
 | 邀请新成员（普通成员、AI 成员） | 能 | 不能 | `core/routes.ts:350` 不变；新成员邀请码带 `level:"owner"` 只有所有者能发（旧客户端还能发） |
 | 给已有成员发重新登录的码（`memberId`） | 能，对象是管理员或所有者也能 | 不能 | 不变；不改对方身份 |
-| 改别人的名字、岗位、形象、汇报给、每周预算 | 能（对象是所有者时不能） | 只能改自己的名字和岗位 | `notify/members.ts` |
+| 改别人的名字、岗位、形象、汇报给、每周预算 | 能（对象是管理员或所有者时只有所有者能，和 3.8、protocol.md 一致） | 只能改自己的名字和岗位 | `notify/members.ts` |
 | 改身份（设为所有者、管理员、普通成员） | 只有所有者 | 不能 | `notify/members.ts` |
 | 停用、启用普通成员和 AI 成员；撤他们的令牌 | 能 | 只能撤自己的 | `notify/members.ts`、`core/routes.ts:192,431` |
 | 停用管理员或所有者，撤他们的令牌 | 只有所有者 | 不能 | 同上 |

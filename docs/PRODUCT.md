@@ -177,9 +177,17 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   post them; every interaction (not only answers) goes back to the card's author, which may change
   the card in place. Only people send interactions; a bot's message never starts a run. Clients
   before 1.1.0 see a v1 card that the server derives and refreshes on every change.
-- Permissions: levels `owner` (the team lead and the bots at that level) and `member` (everyone
-  else and their bots). Clients and bots use the same API. Every write is audited with who asked, who
-  did it, which credential, and what changed.
+- Permissions: three roles. 所有者 (team owner: `level` `owner` with `teamOwner`, people only),
+  管理员 (admin: `level` `owner`, people and the AI members at that level) and 普通成员 (member:
+  `level` `member`, everyone else and their AI members). A 所有者 is also an admin. Admins manage
+  the team: the AI service key and model, the team's models, approval rules, invites, AI members,
+  team machines, usage and activity; members read the team settings. Only a 所有者 changes
+  anyone's role and deactivates, revokes or edits an admin or a 所有者. Invited people arrive as
+  members and get a role afterwards. The team keeps at least one active 所有者; the person who
+  sets up a server is its first 所有者, so someone using it alone notices no roles at all
+  (see [plans/usable/design-roles.zh.md](plans/usable/design-roles.zh.md)). Clients and bots use
+  the same API. Every write is audited with who asked, who did it, which credential, and what
+  changed.
 - Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. After that a
   member can add a sign-in email in 账号 and sign in on any Mac with a 6-digit code sent there.
   The app keeps one session per server (正式服务器, 测试服务器 or another), so switching servers
