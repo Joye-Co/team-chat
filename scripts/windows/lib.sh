@@ -30,6 +30,40 @@ signature_status() {
   ARG1="$(cygpath -w "$1")" ps_out '(Get-AuthenticodeSignature -LiteralPath $env:ARG1).Status'
 }
 
+# signer <file>: "<status>|<certificate subject>|<certificate thumbprint>" of its signature;
+# the last two are empty for a file that is not signed.
+signer() {
+  ARG1="$(cygpath -w "$1")" ps_out \
+    '$s = Get-AuthenticodeSignature -LiteralPath $env:ARG1; "$($s.Status)|$($s.SignerCertificate.Subject)|$($s.SignerCertificate.Thumbprint)"'
+}
+
+# same_publisher <previous signer> <new signer>: whether an app installed from the previous
+# installer takes the new one as an update. The rule of apps/update-helper (signer_allows):
+# a validly signed app takes only a valid signature of the same subject; an app whose
+# certificate this machine does not trust takes only the same certificate; an unsigned app
+# takes an unsigned or a validly signed installer.
+same_publisher() {
+  local old_status old_subject old_thumb new_status new_subject new_thumb
+  IFS='|' read -r old_status old_subject old_thumb <<<"$1"
+  IFS='|' read -r new_status new_subject new_thumb <<<"$2"
+  case "$old_status" in
+    NotSigned)
+      case "$new_status" in NotSigned | Valid) return 0 ;; esac
+      printf 'the new installer has a signature that does not verify (%s)\n' "$new_status"; return 1 ;;
+    Valid)
+      [ "$new_status" = Valid ] || { printf 'the previous release is signed (%s); the new installer is %s, so installed apps would refuse it\n' "$old_subject" "$new_status"; return 1; }
+      [ "$new_subject" = "$old_subject" ] || { printf 'another publisher: "%s", before "%s"; installed apps would refuse the update\n' "$new_subject" "$old_subject"; return 1; } ;;
+    *)
+      [ -n "$old_thumb" ] && [ "$new_thumb" = "$old_thumb" ] || { printf 'the previous release is signed by a certificate this machine does not trust (%s); only the same certificate updates it\n' "$old_status"; return 1; } ;;
+  esac
+}
+
+# pe_machine <exe>: the machine field of its PE header in hex (8664 = x64, aa64 = ARM64).
+pe_machine() {
+  ARG1="$(cygpath -w "$1")" ps_out \
+    '$b = [IO.File]::ReadAllBytes($env:ARG1); $pe = [BitConverter]::ToInt32($b, 0x3C); "{0:x4}" -f [BitConverter]::ToUInt16($b, $pe + 4)'
+}
+
 # run_native <program> <args...>: runs a Windows program with its arguments untouched (Git
 # Bash would turn /S into a path).
 run_native() {
@@ -47,6 +81,20 @@ start_menu_shortcut() {
 
 uninstall_key() {
   printf 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%s' "$(product bundleId)"
+}
+
+RUN_KEY='Software\Microsoft\Windows\CurrentVersion\Run'
+STARTUP_APPROVED_KEY='Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+
+# app_cache_dir: where the app keeps what it can make again (the WebView2 user data, the drawn
+# diagrams); the name of scripts/build-windows-installer.sh (CACHE_DIR).
+app_cache_dir() {
+  printf '%s/team-chat' "$(cygpath -u "$LOCALAPPDATA")"
+}
+
+# app_data_dir: the user's messages, settings and logs, which an uninstall keeps.
+app_data_dir() {
+  printf '%s/%s' "$(cygpath -u "$APPDATA")" "$(product bundleId)"
 }
 
 # silent_install <setup.exe>: installs for this user into the default folder.
@@ -78,5 +126,11 @@ assert_uninstalled() {
   if reg_key_exists "Software\\Classes\\$scheme"; then printf 'left: the URL scheme\n' >&2; left=1; fi
   if reg_key_exists "Software\\Classes\\AppUserModelId\\$id"; then printf 'left: the app id entry\n' >&2; left=1; fi
   if compgen -G "$(dirname "$dir")/.$(product name).old-*" >/dev/null; then printf 'left: an update backup\n' >&2; left=1; fi
+  if [ -n "$(reg_value "$RUN_KEY" "$id")" ]; then printf 'left: the sign-in start entry\n' >&2; left=1; fi
+  if [ -n "$(reg_value "$STARTUP_APPROVED_KEY" "$id")" ]; then printf 'left: the startup-approved record\n' >&2; left=1; fi
+  if [ -n "$(reg_value "${RUN_KEY}Once" "$(product name).update-recovery")" ]; then printf 'left: the update recovery\n' >&2; left=1; fi
+  for cache in webview2 diagrams; do
+    if [ -e "$(app_cache_dir)/$cache" ]; then printf 'left: the %s cache\n' "$cache" >&2; left=1; fi
+  done
   return "$left"
 }

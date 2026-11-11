@@ -448,6 +448,11 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # The server URLs of the sign-in screen, given to the build as the Release workflow gives
+      # them (the repository variable, never a file of the repository). A fork has no such
+      # variable: its build carries no URLs and the test checks exactly that.
+      TC_SERVERS_JSON: ${{ vars.SERVERS_JSON }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml
@@ -484,6 +489,14 @@ jobs:
           Import-Certificate -FilePath $file -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
           Import-Certificate -FilePath $file -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
           "TEST_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Build the update helper of the interruption test
+        # With the pause switch that the shipped helper does not have; built first, so the
+        # installer's build replaces it in the target folder.
+        run: |
+          cargo build --release --locked -p update-helper --features test-pause
+          mkdir -p .tmp/test-helper
+          cp "${CARGO_TARGET_DIR:-target}/release/update-helper.exe" .tmp/test-helper/update-helper-pause.exe
+          echo "PAUSE_HELPER=$PWD/.tmp/test-helper/update-helper-pause.exe" >>"$GITHUB_ENV"
       - name: Build the installer
         run: |
           . scripts/lib.sh
@@ -517,6 +530,22 @@ jobs:
           cargo update --workspace --offline
           DIST=dist/unsigned scripts/build-windows-installer.sh
           WINDOWS_SIGN_THUMBPRINT="$TEST_SIGN_THUMBPRINT" DIST=dist/signed scripts/build-windows-installer.sh --skip-build
+      - name: Check the publisher comparison of a release
+        # What test-windows-installer.sh --same-as decides in the Release workflow, on the four
+        # installers of this run and a program of another publisher.
+        run: |
+          . scripts/lib.sh
+          . scripts/windows/lib.sh
+          a_signed="$(signer "dist/signed/$APP_NAME-$A_VERSION-setup.exe")"
+          b_signed="$(signer "dist/signed/$APP_NAME-$B_VERSION-setup.exe")"
+          a_plain="$(signer "dist/unsigned/$APP_NAME-$A_VERSION-setup.exe")"
+          b_plain="$(signer "dist/unsigned/$APP_NAME-$B_VERSION-setup.exe")"
+          other="$(signer "$(cygpath -u "$SYSTEMROOT")/System32/whoami.exe")"
+          same_publisher "$a_signed" "$b_signed"
+          same_publisher "$a_plain" "$b_plain"
+          same_publisher "$a_plain" "$b_signed"
+          if same_publisher "$a_signed" "$b_plain"; then echo "::error::an unsigned installer passed as the update of a signed app"; exit 1; fi
+          if same_publisher "$a_signed" "$other"; then echo "::error::another publisher passed as the same"; exit 1; fi
       - name: Test the update (the installed app updates itself, then a rollback)
         run: scripts/test-windows-update.sh "dist/unsigned/$APP_NAME-$A_VERSION-setup.exe" "dist/unsigned/$APP_NAME-$B_VERSION-setup.exe"
       - name: Test the update of a signed app

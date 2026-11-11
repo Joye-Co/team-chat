@@ -15,6 +15,12 @@
 #                 shows the SmartScreen warning for the installer.
 #      WINDOWS_BIN_DIR  folder with the built programs (default CARGO_TARGET_DIR/release);
 #                 with --skip-build this lets the packing step run on another system
+#      TC_SERVERS_JSON, TC_OPS_DIR  the server URLs the app offers at sign-in, as for the DMG
+#                 (scripts/release.sh): { "staging": "<url>", "production": "<url>" } in
+#                 TC_SERVERS_JSON, else deploy/servers.json of the ops checkout. The build
+#                 embeds only these URLs, never the rest of an ops checkout. Without them the
+#                 app asks for the server address at sign-in.
+#      REQUIRE_SERVERS=1  stop when there are no server URLs (the Release workflow)
 #
 # The installer holds <name>.exe, <slug>-update.exe (apps/update-helper) and, with DAEMON=1,
 # <slug>-daemon.exe. Names, the bundle id and the URL scheme come from product.json.
@@ -29,7 +35,7 @@ skip_build=0
 for arg in "$@"; do
   case "$arg" in
     --skip-build) skip_build=1 ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,29p' "$0"; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
@@ -57,6 +63,13 @@ BUNDLE_ID="$(product bundleId)"
 SCHEME="$(product urlScheme)"
 VERSION="$(workspace_version)"
 valid_release_version "$VERSION" || die "version '$VERSION' is not MAJOR.MINOR.PATCH: the installer and the app's updater take no other form"
+# The folder under %LOCALAPPDATA% of the app's caches, which the uninstaller removes: the name
+# in apps/desktop/src/ui/web_embed.rs (webview2) and src/diagrams/cache.rs (diagrams). It is an
+# infra name and does not follow the product name.
+CACHE_DIR="team-chat"
+for f in apps/desktop/src/ui/web_embed.rs apps/desktop/src/diagrams/cache.rs; do
+  grep -q "\.join(\"$CACHE_DIR\")" "$ROOT/$f" || die "$f no longer keeps its cache in %LOCALAPPDATA%/$CACHE_DIR: update CACHE_DIR here"
+done
 ICON="$ROOT/assets/brand/AppIcon.ico"
 [ -s "$ICON" ] || die "missing assets/brand/AppIcon.ico; run bun assets/brand/ico.mjs"
 WITH_DAEMON="${DAEMON:-1}"
@@ -66,6 +79,18 @@ if [ "$skip_build" = 0 ]; then
   is_windows || die "the release build runs on Windows (use --skip-build with WINDOWS_BIN_DIR elsewhere)"
   host="$(rustc -vV | awk '/^host:/ { print $2 }')"
   [ "$host" = x86_64-pc-windows-msvc ] || die "expected the x86_64-pc-windows-msvc toolchain, found $host"
+  # As release_ops of scripts/release.sh: an ops folder that holds servers.json alone.
+  ops="$ROOT/.tmp/release-ops"
+  rm -rf "$ops" && mkdir -p "$ops/deploy"
+  if servers_json >"$ops/deploy/servers.json" 2>/dev/null && jq -e '.production | strings | length > 0' "$ops/deploy/servers.json" >/dev/null; then
+    log "embedding the server URLs"
+  else
+    [ "${REQUIRE_SERVERS:-0}" != 1 ] || die "the build needs the server URLs: TC_SERVERS_JSON, or TC_OPS_DIR with deploy/servers.json"
+    log "no server URLs (TC_SERVERS_JSON or an ops checkout): this build asks for the server address at sign-in"
+    printf '{}\n' >"$ops/deploy/servers.json"
+  fi
+  TC_OPS_DIR="$(native "$ops")"
+  export TC_OPS_DIR
   packages=(-p desktop -p update-helper)
   if [ "$WITH_DAEMON" = 1 ]; then packages+=(-p daemon); fi
   log "building ${packages[*]} $VERSION (release)"
@@ -147,7 +172,7 @@ log "packing $(basename "$OUT")"
 if ! is_windows; then export LC_ALL=en_US.UTF-8; fi
 if ! "$MAKENSIS" -V2 -INPUTCHARSET UTF8 \
   "-DNAME=$NAME" "-DSLUG=$SLUG" "-DAPP_ID=$BUNDLE_ID" "-DSCHEME=$SCHEME" \
-  "-DVERSION=$VERSION" "-DVERSION4=$VERSION.0" \
+  "-DVERSION=$VERSION" "-DVERSION4=$VERSION.0" "-DCACHE_DIR=$CACHE_DIR" \
   "-DSTAGE=$(native "$STAGE")" "-DICON=$(native "$ICON")" "-DOUT=$(native "$OUT")" \
   ${defines[@]+"${defines[@]}"} \
   "$(native "$ROOT/scripts/windows/installer.nsi")" >"$WORK/makensis.log" 2>&1; then

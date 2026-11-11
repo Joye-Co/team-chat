@@ -257,9 +257,11 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Write the server URLs
+      - name: Check the server URLs
         # The same URLs the Mac build embeds (the app's server menu): the repository variable
-        # SERVERS_JSON, as an ops folder that holds servers.json alone.
+        # SERVERS_JSON. build-windows-installer.sh makes the ops folder that holds servers.json
+        # alone, as release.sh does for the DMG, and the installer test checks that the
+        # installed app carries exactly these URLs.
         env:
           TC_SERVERS_JSON: ${{ vars.SERVERS_JSON }}
         run: |
@@ -267,10 +269,7 @@ jobs:
             echo "::error::set the repository variable SERVERS_JSON to {\"staging\": \"<url>\", \"production\": \"<url>\"}; see docs/ENVIRONMENTS.md"
             exit 1
           fi
-          dir="$RUNNER_TEMP/release-ops"
-          mkdir -p "$dir/deploy"
-          printf '%s' "$TC_SERVERS_JSON" | jq -c . >"$dir/deploy/servers.json"
-          echo "TC_OPS_DIR=$(cygpath -w "$dir")" >>"$GITHUB_ENV"
+          echo "TC_SERVERS_JSON=$(printf '%s' "$TC_SERVERS_JSON" | jq -c .)" >>"$GITHUB_ENV"
 
       - name: Import the signing certificate
         # Into the runner user's certificate store, so no password is on a command line. The
@@ -321,17 +320,40 @@ jobs:
           cargo update --workspace --offline
 
       - name: Build the installer
-        run: scripts/build-windows-installer.sh
+        run: REQUIRE_SERVERS=1 scripts/build-windows-installer.sh
 
       # The installer test draws one screen of the installed app.
       - name: Set the screen to 1920x1080
         shell: pwsh
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
+      - name: Get the previous release's installer
+        # test-windows-installer.sh --same-as then proves that apps installed from the last
+        # release accept this one as an update (the update helper takes only the same
+        # publisher), as the Mac job does with the previous DMG.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev="$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')"
+          if [ -z "$prev" ] || [ "$prev" = "v$VERSION" ]; then
+            echo "no earlier release to compare with"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/previous"
+          if ! gh release download "$prev" --pattern '*-setup.exe' --dir "$RUNNER_TEMP/previous"; then
+            echo "release $prev has no Windows installer to compare with"
+            exit 0
+          fi
+          setup="$(find "$RUNNER_TEMP/previous" -name '*-setup.exe' | head -n 1)"
+          echo "comparing with $prev: $(basename "$setup")"
+          echo "SAME_AS_SETUP=$setup" >>"$GITHUB_ENV"
+
       - name: Test the installer (install, check, start, uninstall)
         run: |
           if [ -n "${WINDOWS_SIGN_THUMBPRINT:-}" ]; then export EXPECT_SIGNED=1; fi
-          scripts/test-windows-installer.sh
+          args=()
+          [ -n "${SAME_AS_SETUP:-}" ] && args+=(--same-as "$SAME_AS_SETUP")
+          scripts/test-windows-installer.sh ${args[@]+"${args[@]}"}
 
       - name: Keep the installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

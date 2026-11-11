@@ -11,6 +11,8 @@
 ;   SIGN_CMD  (optional) command that signs the file given as its last argument; used for
 ;             the uninstaller, which exists only while makensis runs
 ;   HAS_DAEMON (optional) set when STAGE holds the machine daemon
+;   CACHE_DIR folder name under %LOCALAPPDATA% where the app keeps what it can make again
+;             (the WebView2 user data and the drawn diagrams)
 ;
 ; Per user, no administrator rights: files go to %LOCALAPPDATA%\Programs\<NAME>, registry
 ; entries to HKEY_CURRENT_USER. Silent install: <setup>.exe /S [/D=<folder>]. The update
@@ -36,6 +38,7 @@ SetCompressor /SOLID lzma
 !define APP_ID_KEY "Software\Classes\AppUserModelId\${APP_ID}"
 !define SCHEME_KEY "Software\Classes\${SCHEME}"
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
+!define STARTUP_APPROVED_KEY "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 ; The WebView2 Runtime's entry in Edge Update.
 !define WEBVIEW2_CLIENT "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
@@ -74,6 +77,8 @@ VIAddVersionKey /LANG=0 "ProductVersion" "${VERSION}"
 
 LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10 或更高版本。"
 LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 or later."
+LangString NeedWindows11OnArm ${LANG_SIMPCHINESE} "在 ARM 芯片的电脑上，${NAME} 需要 Windows 11（Windows 10 不能运行 64 位 x86 程序）。"
+LangString NeedWindows11OnArm ${LANG_ENGLISH} "On a computer with an ARM processor, ${NAME} needs Windows 11 (Windows 10 cannot run 64-bit x86 programs)."
 LangString QuitAppFirst ${LANG_SIMPCHINESE} "${NAME} 还在运行。请先退出，再点「重试」。"
 LangString QuitAppFirst ${LANG_ENGLISH} "${NAME} is still running. Quit it, then choose Retry."
 
@@ -117,6 +122,13 @@ Function .onInit
   ${IfNot} ${RunningX64}
   ${OrIfNot} ${AtLeastWin10}
     MessageBox MB_OK|MB_ICONSTOP "$(NeedWindows10)" /SD IDOK
+    Abort
+  ${EndIf}
+  ; The programs are x64. Windows 11 on ARM runs them under its x64 emulation; Windows 10 on
+  ; ARM emulates only 32-bit x86, so this installer would start there and the app would not.
+  ${If} ${IsNativeARM64}
+  ${AndIfNot} ${AtLeastBuild} 22000
+    MessageBox MB_OK|MB_ICONSTOP "$(NeedWindows11OnArm)" /SD IDOK
     Abort
   ${EndIf}
 FunctionEnd
@@ -268,10 +280,20 @@ Section "Uninstall"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "${SCHEME_KEY}"
   DeleteRegKey HKCU "${APP_ID_KEY}"
-  ; 登录时打开, when the user turned it on in the app.
+  ; 登录时打开, when the user turned it on in the app, and what Task Manager remembers of
+  ; that entry (enabled or disabled there).
   DeleteRegValue HKCU "${RUN_KEY}" "${APP_ID}"
+  DeleteRegValue HKCU "${STARTUP_APPROVED_KEY}" "${APP_ID}"
+  ; What the app can make again: the WebView2 user data (产出 pages, diagrams) and the cache
+  ; of drawn diagrams. The folder itself goes only when nothing else is in it.
+  RMDir /r "$LOCALAPPDATA\${CACHE_DIR}\webview2"
+  RMDir /r "$LOCALAPPDATA\${CACHE_DIR}\diagrams"
+  RMDir "$LOCALAPPDATA\${CACHE_DIR}"
   ; The recovery of an update that was cut short (the update helper registers it).
   DeleteRegValue HKCU "${RUN_KEY}Once" "${NAME}.update-recovery"
-  ; Messages, settings and the sign-in stay (%APPDATA%\<APP_ID>): docs/INSTALL.md says how
-  ; to remove them.
+  ; What is the user's stays, as it does on a Mac when the app goes to the Trash: messages,
+  ; settings and logs (%APPDATA%\<APP_ID>), the sign-in (Credential Manager), and this
+  ; computer's identity as a machine of the team (%USERPROFILE%\.config\<SLUG>, with the
+  ; daemon's log in %LOCALAPPDATA%\<SLUG>-daemon), so a reinstall carries on where it was.
+  ; docs/INSTALL.md says how to remove them.
 SectionEnd
