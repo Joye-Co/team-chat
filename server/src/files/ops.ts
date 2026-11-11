@@ -1,8 +1,9 @@
-// Diagnostics uploads, app releases (the DMG and the Windows installer), update checks and the
-// public download.
+// Diagnostics uploads, app releases (the DMG, the Windows installer and the Linux daemon), update
+// checks and the public download.
 import { MAX_DIAGNOSTICS_BYTES, MAX_FILE_BYTES, ReleasePlatform, ReleaseVersion, type UpdateInfo } from "@chat/protocol";
 import { z } from "zod";
 import product from "../../../product.json";
+import { authenticateMachine } from "../bots/store";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
 import {
@@ -46,6 +47,13 @@ const PLATFORMS: Record<ReleasePlatform, { file: (version: string) => string; mi
     table: "release_assets",
     where: "platform = 'windows' AND ",
   },
+  // The machine daemon alone: a Linux host installs it, and the daemon updates itself from it.
+  "linux-x86_64": {
+    file: (version) => `${product.slug}-daemon-${version}-x86_64-unknown-linux-gnu`,
+    mime: "application/octet-stream",
+    table: "release_assets",
+    where: "platform = 'linux-x86_64' AND ",
+  },
 };
 
 /** The `platform` query parameter; missing = the DMG. */
@@ -68,7 +76,14 @@ type ReleaseRow = {
   withdrawn_at: number | null;
 };
 
-function toUpdateInfo(r: ReleaseRow, origin: string, platform: ReleasePlatform = "macos"): UpdateInfo {
+function toUpdateInfo(r: ReleaseRow, origin: string, platform: ReleasePlatform = "macos", machine = false): UpdateInfo {
+  // A machine downloads with its machine token, so its URL is the machine route.
+  if (machine) {
+    return {
+      ...toUpdateInfo(r, origin, platform),
+      downloadUrl: `${origin}/v1/machine/updates/${r.version}/download?platform=${platform}`,
+    };
+  }
   return {
     version: r.version,
     notes: r.notes,
@@ -263,16 +278,31 @@ export function registerOpsRoutes(): void {
     method: "GET",
     path: "/v1/updates/:version/download",
     auth: "member",
-    async handler({ env, request, url, params }) {
+    handler: ({ env, request, url, params }) => downloadVersion(env, request, url, params.version),
+  });
+
+  // The same two for a machine daemon that updates itself (machine token): a Linux host's
+  // daemon asks for `platform=linux-x86_64`. See docs/machine-protocol.md, "Updating itself".
+  registerRoute({
+    method: "GET",
+    path: "/v1/machine/updates/latest",
+    auth: "none",
+    async handler({ env, request, url }) {
+      await authenticateMachine(request, env.DB);
       const platform = platformOf(url.searchParams.get("platform"));
-      const p = PLATFORMS[platform];
-      const r = await env.DB.prepare(
-        `SELECT * FROM ${p.table} WHERE ${p.where}version = ? AND status = 'ready' AND withdrawn_at IS NULL`,
-      )
-        .bind(params.version)
-        .first<ReleaseRow>();
-      if (!r) throw new ApiError("not_found", "no such release");
-      return serveRelease(request, env, r, platform);
+      const r = await latestRelease(env.DB, platform);
+      if (!r) throw new ApiError("not_found", "no release");
+      return toUpdateInfo(r, url.origin, platform, true);
+    },
+  });
+
+  registerRoute({
+    method: "GET",
+    path: "/v1/machine/updates/:version/download",
+    auth: "none",
+    async handler({ env, request, url, params }) {
+      await authenticateMachine(request, env.DB);
+      return downloadVersion(env, request, url, params.version);
     },
   });
 
@@ -311,6 +341,19 @@ export function registerOpsRoutes(): void {
       return downloadFor(env, request, form.get("code") ?? "", form.get("platform"));
     },
   });
+}
+
+/** The file of one ready, not withdrawn release for the `platform` query parameter. */
+async function downloadVersion(env: Env, request: Request, url: URL, version: string): Promise<Response> {
+  const platform = platformOf(url.searchParams.get("platform"));
+  const p = PLATFORMS[platform];
+  const r = await env.DB.prepare(
+    `SELECT * FROM ${p.table} WHERE ${p.where}version = ? AND status = 'ready' AND withdrawn_at IS NULL`,
+  )
+    .bind(version)
+    .first<ReleaseRow>();
+  if (!r) throw new ApiError("not_found", "no such release");
+  return serveRelease(request, env, r, platform);
 }
 
 /** Stores the file of `version` for `platform` (admin secret) and answers with its `UpdateInfo`. */

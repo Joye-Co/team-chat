@@ -475,6 +475,10 @@ set it up once per machine:
 
 To update a hand-installed daemon, wait until the machine has no running work (stopping the
 daemon cancels its runs), replace the binary, and run `doctor` and `install-service` again.
+A Linux daemon installed this way from a release (`scripts/runner/install-daemon.sh`, which
+`scripts/runner/host-setup.sh` runs) and started by `install-service` updates itself from the
+server's releases once it has no running work; `self_update = false` in `daemon.toml` turns
+that off.
 On Windows run `install-daemon.ps1 -Update -DaemonUrl <url> -Sha256 <hex>` instead, at any time: it renames
 the running program aside and puts the new one in its place, and the daemon restarts on the new
 version by itself once it has no running work.

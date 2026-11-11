@@ -166,6 +166,19 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let mut exe = crate::selfupdate::Watch::current();
     let mut update_check =
         tokio::time::interval_at(tokio::time::Instant::now() + UPDATE_CHECK, UPDATE_CHECK);
+    // A daemon installed on its own (a Linux host) also fetches new releases itself.
+    let mut updater = match crate::selfupdate::Updater::new(d.cfg.self_update) {
+        Ok(u) => Some(u),
+        Err(why) => {
+            log!("self-update off: {why}");
+            None
+        }
+    };
+    let (release_tx, mut release_rx) = mpsc::unbounded_channel();
+    let mut release_check = tokio::time::interval_at(
+        tokio::time::Instant::now() + crate::selfupdate::FIRST_CHECK,
+        crate::selfupdate::CHECK_EVERY,
+    );
     let mut usage_tick = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(5),
         crate::usage::EVERY,
@@ -182,11 +195,32 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             _ = heartbeat.tick() => d.heartbeat(hb),
             Some(st) = login_rx.recv() => d.on_login_status(st),
             _ = usage_tick.tick(), if d.machine_key.is_some() => d.read_accounts(),
+            _ = release_check.tick(), if updater.as_ref().is_some_and(|u| u.wants_check()) => {
+                if let Some(u) = updater.as_mut() {
+                    u.check(d.cfg.server_url.clone(), d.token.clone(), release_tx.clone());
+                }
+            }
+            Some(r) = release_rx.recv() => {
+                if let Some(line) = updater.as_mut().and_then(|u| u.checked(r)) {
+                    log!("{line}");
+                }
+            }
             _ = update_check.tick() => {
                 // While runs are active the change stays ready; the next idle check restarts.
                 if exe.as_mut().is_some_and(|w| w.check()) && d.active_count() == 0 {
                     log!("a new version of the daemon is installed; restarting");
                     break;
+                }
+                // A downloaded release goes in only while no run is active.
+                if d.active_count() == 0 {
+                    match updater.as_mut().map(|u| u.install_when_idle(exe.as_ref())) {
+                        Some(Ok(true)) => {
+                            log!("installed a new version of the daemon; restarting");
+                            break;
+                        }
+                        Some(Err(e)) => log!("self-update: {e}"),
+                        _ => {}
+                    }
                 }
             }
             _ = cleanup.tick() => {

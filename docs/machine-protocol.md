@@ -866,7 +866,7 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
+`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `self_update`, `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
 `shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
@@ -908,6 +908,19 @@ found on PATH.
   action (`repair.exe repair-program <daemon>`, a copy of the daemon that `install-service`
   keeps next to the log and updates never touch) renames the newest `<name>.exe.old-*` back
   before the daemon is started.
+- Updating itself (a daemon installed on its own, today the Linux x86_64 daemon of a host; the
+  app updates the daemon it ships on macOS and Windows): when systemd started it (`daemon
+  install-service`) and `self_update` is not `false`, the daemon asks
+  `GET /v1/machine/updates/latest?platform=linux-x86_64` with its machine token 10 minutes after
+  it starts and then every hour (docs/protocol.md, "Updates and downloads"). A release newer than
+  its own version (never an older one) is downloaded from the answer's `downloadUrl`, which must
+  be on the configured server, to `<program>.new` next to the program, and checked against the
+  answer's size and SHA-256; a file that does not match is deleted. Once no run is active the
+  daemon renames it over its program (on Windows it would follow the replace steps above) and
+  exits; systemd's `Restart=always` starts the new version. If somebody else replaced the
+  program file meanwhile, theirs wins and the download is dropped. Every step is logged; a
+  failed check is tried again an hour later. `scripts/runner/install-daemon.sh` (run by
+  `scripts/runner/host-setup.sh`) installs the released daemon of a host the first time.
 
 ## Tests
 

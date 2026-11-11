@@ -1,4 +1,4 @@
-//! App updates and downloads of the DMG and the Windows installer (docs/protocol.md, "Updates and downloads").
+//! App updates and downloads of the DMG, the Windows installer and the Linux daemon (docs/protocol.md, "Updates and downloads").
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,8 @@ pub struct UpdateInfo {
     pub published_at: Millis,
     /// Absolute URL of `GET /v1/updates/:version/download`.
     pub download_url: String,
-    /// What the file runs on: `"macos"` (the DMG) or `"windows"` (the installer). Missing
+    /// What the file runs on: `"macos"` (the DMG), `"windows"` (the installer) or
+    /// `"linux-x86_64"` (the machine daemon alone). Missing
     /// means `"macos"`: servers older than the Windows client never send it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
@@ -27,6 +28,9 @@ pub struct UpdateInfo {
 pub const PLATFORM_MACOS: &str = "macos";
 /// `UpdateInfo.platform` of the Windows installer.
 pub const PLATFORM_WINDOWS: &str = "windows";
+/// `UpdateInfo.platform` of the machine daemon alone for x86_64 Linux (glibc): what a Linux
+/// host installs and what its daemon updates itself from (`GET /v1/machine/updates/latest`).
+pub const PLATFORM_LINUX_X86_64: &str = "linux-x86_64";
 
 /// True for `MAJOR.MINOR.PATCH` without leading zeros.
 pub fn is_release_version(v: &str) -> bool {

@@ -720,6 +720,58 @@ describe("releases and updates", () => {
     expect((await withdraw("30.0.0", { restore: true })).status).toBe(200);
     expect((await latest("?platform=windows")).body.version).toBe("30.0.0");
   });
+
+  it("serves the Linux daemon to a machine that updates itself", async () => {
+    const { owner, member } = await setup();
+    const publishLinux = async (version: string, bytes: Uint8Array) =>
+      raw(`/v1/admin/releases/${version}/assets/linux-x86_64`, {
+        method: "PUT",
+        body: bytes,
+        headers: { "x-admin-secret": "test-admin-secret", "x-sha256": await sha(bytes), "x-release-notes": btoa("notes") },
+      });
+    const m = await api("/v1/machines", { token: owner.token, body: { name: "runner-host", labels: ["linux"] } });
+    expect(m.status, JSON.stringify(m.body)).toBe(200);
+    const machine = m.body.token as string;
+    const latest = (token: string, query = "?platform=linux-x86_64") => api(`/v1/machine/updates/latest${query}`, { token });
+
+    // A DMG alone is never offered to the Linux daemon.
+    expect((await publish("40.0.0", enc.encode("the dmg of 40.0.0"))).status).toBe(200);
+    expect((await latest(machine)).status).toBe(404);
+
+    const bin = enc.encode("\x7fELF the daemon of 40.0.0");
+    const published = await publishLinux("40.0.0", bin);
+    expect(published.status).toBe(200);
+    expect(UpdateInfo.parse(await published.json())).toMatchObject({ version: "40.0.0", platform: "linux-x86_64", size: bin.length });
+    expect(await env.FILES.head("releases/40.0.0/team-chat-daemon-40.0.0-x86_64-unknown-linux-gnu")).not.toBeNull();
+
+    // The machine token reads it, and its download URL is the machine route.
+    expect((await latest("tm_not-a-real-token")).status).toBe(401);
+    expect((await latest(member.token)).status).toBe(401);
+    expect((await latest(machine, "?platform=amiga")).status).toBe(400);
+    const got = await latest(machine);
+    expect(got.status, JSON.stringify(got.body)).toBe(200);
+    const info = UpdateInfo.parse(got.body);
+    expect(info).toMatchObject({ version: "40.0.0", platform: "linux-x86_64", sha256: await sha(bin) });
+    expect(info.downloadUrl).toBe(`${BASE}/v1/machine/updates/40.0.0/download?platform=linux-x86_64`);
+    const dl = await raw("/v1/machine/updates/40.0.0/download?platform=linux-x86_64", { token: machine });
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-type")).toBe("application/octet-stream");
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(bin);
+    expect((await raw("/v1/machine/updates/40.0.0/download?platform=linux-x86_64", { token: member.token })).status).toBe(401);
+    expect((await raw("/v1/machine/updates/40.0.1/download?platform=linux-x86_64", { token: machine })).status).toBe(404);
+    // Members reach it through the member routes, as every platform's file.
+    expect((await api("/v1/updates/latest?platform=linux-x86_64", { token: member.token })).body.downloadUrl).toBe(
+      `${BASE}/v1/updates/40.0.0/download?platform=linux-x86_64`,
+    );
+
+    // A revoked machine gets nothing; a withdrawn version is not offered.
+    expect((await publishLinux("40.1.0", enc.encode("\x7fELF 40.1.0"))).status).toBe(200);
+    expect((await latest(machine)).body.version).toBe("40.1.0");
+    await api("/v1/admin/releases/40.1.0/withdraw", { headers: { "x-admin-secret": "test-admin-secret" }, body: {} });
+    expect((await latest(machine)).body.version).toBe("40.0.0");
+    await env.DB.prepare("UPDATE machines SET revoked_at = ? WHERE id = ?").bind(Date.now(), m.body.machine.id).run();
+    expect((await latest(machine)).status).toBe(401);
+  });
 });
 
 describe("files: review fixes", () => {

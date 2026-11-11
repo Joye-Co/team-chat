@@ -654,6 +654,8 @@ Module: `updates.ts` / `updates.rs`.
 | `GET /v1/updates/:version/download?platform=` | member | | the file of that platform (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
 | `PUT /v1/admin/releases/:version/assets/:platform` | header `X-Admin-Secret` | the raw file of that platform; same headers | `UpdateInfo` |
+| `GET /v1/machine/updates/latest?platform=` | machine token | | `UpdateInfo` of the newest release for that platform, `downloadUrl` the machine route below; 404 when there is none |
+| `GET /v1/machine/updates/:version/download?platform=` | machine token | | the file of that platform (`Range` supported) |
 | `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }` (`latest` is the newest DMG); a withdrawn release is not `latest` and not downloadable, on every platform |
 | `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
 | `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
@@ -665,7 +667,9 @@ other request the DMG. The page of `GET /download` posts `platform=windows` from
 Windows. When that platform has no release the answer is 404, never the other platform's file.
 
 ```ts
-ReleasePlatform = "macos" | "windows"   // macos = the DMG; windows = the installer (-setup.exe, x64)
+ReleasePlatform = "macos" | "windows" | "linux-x86_64"
+  // macos = the DMG; windows = the installer (-setup.exe, x64);
+  // linux-x86_64 = the machine daemon alone (<slug>-daemon-<version>-x86_64-unknown-linux-gnu)
 UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl, platform?: ReleasePlatform }
   // version "MAJOR.MINOR.PATCH" without leading zeros; notes Markdown <= 20,000; downloadUrl absolute
   // platform: sent by every server that knows platforms; missing = "macos"
@@ -689,6 +693,11 @@ Platforms (added for the Windows client; old clients and scripts are not affecte
   answers with an `UpdateInfo` that has no `platform`.
 - `/download`: the page posts `platform=windows` when the browser runs on Windows; any other
   value, or none, serves the DMG.
+- `linux-x86_64` (added for Linux hosts): the release flow uploads the daemon binary with
+  `PUT /v1/admin/releases/:version/assets/linux-x86_64`. A daemon installed on its own asks
+  `GET /v1/machine/updates/latest?platform=linux-x86_64` with its machine token, downloads the
+  `downloadUrl` (the machine route, same origin) and checks size and SHA-256 before it puts the
+  file in place (docs/machine-protocol.md, "Updating itself"). The member routes serve it too.
 
 `GET /download` accepts an invite code that is not expired (used or
 not), is rate limited per IP, answers 404 with a plain-text body for a bad code or when the

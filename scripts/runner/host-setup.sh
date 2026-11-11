@@ -6,7 +6,9 @@
 #
 # What it does: system packages, Docker (builds the base image), Firecracker and jailer from the
 # official release (checked against its SHA256SUMS), the `runner` user that runs the daemon (kvm
-# and docker groups, systemd linger), /srv/runner for images, the daemon's runs and the VMs, and
+# and docker groups, systemd linger), the machine daemon from the release for that user
+# (install-daemon.sh; DAEMON_VERSION picks one, default latest), /srv/runner for images, the
+# daemon's runs and the VMs, and
 # the VM network: IP forwarding, the NFS server, the static firewall (runner-vm.nft, loaded at
 # boot by runner-vm-net.service) and the root helper runner-vm that the daemon runs with sudo.
 # It does not touch SSH settings. Run it from its folder in a checkout (it installs siblings).
@@ -66,6 +68,15 @@ install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 750 \
 if [[ -s /root/.ssh/authorized_keys ]]; then
   install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 700 "/home/$RUNNER_USER/.ssh"
   install -o "$RUNNER_USER" -g "$RUNNER_USER" -m 600 /root/.ssh/authorized_keys "/home/$RUNNER_USER/.ssh/authorized_keys"
+fi
+
+echo "== daemon"
+# The released Linux daemon for the runner user, in a folder it owns so the daemon can update
+# itself; built from this checkout only when the release has none. A daemon already running
+# restarts on the new file once it has no run. Registering the machine, daemon.toml and
+# `install-service` stay steps of their own (docs/bots.md).
+if ! "$here/install-daemon.sh" --owner "$RUNNER_USER" --version "${DAEMON_VERSION:-latest}"; then
+  echo "warning: the daemon is not installed; see the message above" >&2
 fi
 
 echo "== VM network"
