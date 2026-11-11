@@ -22,6 +22,28 @@ pub const fn drawn() -> bool {
     cfg!(not(target_os = "macos"))
 }
 
+/// The height the caption strip takes above `window`'s content: none on the
+/// Mac and in full screen.
+pub fn height(window: &Window) -> gpui::Pixels {
+    if drawn() && !window.is_fullscreen() {
+        metrics::CAPTION
+    } else {
+        gpui::px(0.)
+    }
+}
+
+/// Where a sheet or an alert hangs, from the window's top edge: under the
+/// toolbar row (NATIVE.md §7.1), which sits under the caption strip off the
+/// Mac. A dialog is configured without its window, so a full-screen window
+/// (no strip) keeps the strip's height as a gap above its sheets.
+pub fn sheet_top() -> gpui::Pixels {
+    if drawn() {
+        metrics::TOOLBAR_ROW + metrics::CAPTION
+    } else {
+        metrics::TOOLBAR_ROW
+    }
+}
+
 /// `content` under the window's caption strip; `content` alone on macOS and
 /// in full screen.
 pub fn framed(

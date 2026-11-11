@@ -233,7 +233,7 @@ pub fn avatar(member: Option<&crate::data::Member>, size: Pixels, cx: &App) -> A
     let photo = member
         .and_then(|m| m.avatar_url.as_deref())
         .map(|p| p.strip_prefix("file://").unwrap_or(p))
-        .is_some_and(|p| p.starts_with('/'));
+        .is_some_and(crate::ui::avatar::is_local_file);
     let letter = member.is_some_and(|m| !m.is_bot() && m.character.is_none()) && !photo;
     if !letter {
         return crate::ui::MemberAvatar::new(member, size).into_any_element();

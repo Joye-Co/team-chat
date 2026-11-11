@@ -3,8 +3,8 @@
 //! The executor records each run's VM here as it boots, runs, pauses and goes; every heartbeat
 //! the daemon takes one [`Sampler::sample`]: whole-host CPU, memory, network and uptime, and per
 //! VM its CPU (from the Firecracker process), resident memory and scratch disk use. CPU and
-//! network are rates since the previous sample. Linux reads `/proc`; macOS gives CPU, memory and
-//! uptime; other numbers are left out. Nothing here reads a credential's value: CLI logins are
+//! network are rates since the previous sample. Linux reads `/proc`; macOS and Windows give CPU,
+//! memory and uptime; other numbers are left out. Nothing here reads a credential's value: CLI logins are
 //! only checked for presence.
 
 use crate::config::{Config, RuntimeConfig};
@@ -494,7 +494,43 @@ mod host {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// Windows: the same three numbers macOS gives (CPU, memory, uptime), from the system's own
+/// counters. No network counters, as on macOS.
+#[cfg(windows)]
+mod host {
+    use super::*;
+    use windows_sys::Win32::System::SystemInformation::{
+        GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX,
+    };
+
+    pub fn cpu_times() -> Option<CpuTimes> {
+        crate::sys::cpu_times().map(|(total, idle)| CpuTimes { total, idle })
+    }
+    pub fn net_bytes() -> Option<NetBytes> {
+        None
+    }
+    pub fn memory() -> Option<(u64, u64)> {
+        // SAFETY: an all-zero MEMORYSTATUSEX with its length set is what the call fills in.
+        unsafe {
+            let mut m: MEMORYSTATUSEX = std::mem::zeroed();
+            m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+            (GlobalMemoryStatusEx(&mut m) != 0)
+                .then(|| (m.ullTotalPhys, m.ullAvailPhys.min(m.ullTotalPhys)))
+        }
+    }
+    pub fn uptime_secs() -> Option<u64> {
+        // SAFETY: plain call without arguments.
+        Some(unsafe { GetTickCount64() } / 1000)
+    }
+    pub fn clock_ticks() -> f64 {
+        100.0
+    }
+    pub fn process(_pid: i32) -> Option<ProcStat> {
+        None
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod host {
     use super::*;
     pub fn cpu_times() -> Option<CpuTimes> {
@@ -644,6 +680,32 @@ mod tests {
         // 900 more ticks, 700 of them idle or iowait.
         assert_eq!(busy_pct(&a, &b), Some(22.22));
         assert_eq!(busy_pct(&b, &a), None);
+    }
+
+    /// macOS, Linux and Windows all report the host's CPU, memory and uptime.
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn the_host_reports_cpu_memory_and_uptime() {
+        let a = host::cpu_times().expect("cpu times");
+        let (total, avail) = host::memory().expect("memory");
+        assert!(total > 0 && avail <= total, "{total} {avail}");
+        assert!(host::uptime_secs().is_some());
+        // Burn some CPU so the counters move, then a second reading gives a share.
+        let until = Instant::now() + std::time::Duration::from_millis(300);
+        let mut x = 0u64;
+        while Instant::now() < until {
+            x = x.wrapping_mul(31).wrapping_add(1);
+        }
+        std::hint::black_box(x);
+        let b = host::cpu_times().expect("cpu times");
+        assert!(b.total > a.total, "{a:?} {b:?}");
+        let pct = busy_pct(&a, &b).expect("a share");
+        assert!((0.0..=100.0).contains(&pct), "{pct}");
+        let cfg =
+            Config::parse("server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n")
+                .unwrap();
+        let m = Sampler::new().sample(&cfg, None, &[]);
+        assert!(m.mem_total_bytes.is_some() && m.uptime_secs.is_some());
     }
 
     #[test]
