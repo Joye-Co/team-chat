@@ -337,6 +337,8 @@ export interface TopicMessage {
   refs?: RefSource[];
   /** Author of the message this one quotes (`replyTo`), if any. */
   replyToAuthorId?: string;
+  /** The message this one quotes (`replyTo`), if any: a reply to an approval card answers it. */
+  replyToMessageId?: string;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */
@@ -547,8 +549,10 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     args.refs = resolveRefs(c.sql, m.blockRefs);
   }
   const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
-  const quoted = parseExt(ext).replyTo?.authorId;
+  const replyTo = parseExt(ext).replyTo;
+  const quoted = replyTo?.authorId;
   if (quoted) args.replyToAuthorId = quoted;
+  if (replyTo?.messageId) args.replyToMessageId = replyTo.messageId;
   await deskStub(c.env, target).onMessage(target, args);
 }
 

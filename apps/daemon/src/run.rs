@@ -364,6 +364,7 @@ pub async fn supervise(ctx: RunCtx) {
                     .filter(|s| runtime::valid_session_id(s)),
                 gate_hook,
                 gate_alive,
+                gates: Some(gates.clone()),
                 exec: exec.clone(),
             };
             let work = spec.cwd.clone();

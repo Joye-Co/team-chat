@@ -255,12 +255,22 @@ export abstract class DeskEvents extends DeskRuns {
     else this.sql.exec("DELETE FROM meta WHERE key = ?", `approval:${r.id}`);
     const shown = gate ? (TEXT.gateKinds[gate.kind] ?? title) : title;
     const what = gate ? (gate.command ?? detail) : detail;
-    const body = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
+    // The approvers; with none among the owners, the requester (and the card says why).
+    const { ids: askWho, noOwner } = await this.approversOrRequester(r, gate?.kind);
+    const cardMeta = (messageId?: string) =>
+      this.sql.exec(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+        `approvalCard:${r.id}`,
+        JSON.stringify({ approvalId, noOwner, ...(messageId ? { messageId } : {}) }),
+      );
+    cardMeta();
+    const asked = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
+    const body = noOwner ? `${TEXT.approvalNoOwner}\n\n${asked}` : asked;
     const card: Card = {
       v: 1,
       title: cut(`需要你确认：${shown}`, 200),
       tone: "warning",
-      blocks: what ? [{ type: "code", text: cut(what, 8000) }] : [],
+      blocks: [...(noOwner ? [{ type: "text" as const, text: TEXT.approvalNoOwner }] : []), ...(what ? [{ type: "code" as const, text: cut(what, 8000) }] : [])],
       actions: [
         { id: cut(`approve:${approvalId}`, 64), label: TEXT.approve, style: "primary" },
         ...(gate ? [{ id: cut(`approveall:${approvalId}`, 64), label: TEXT.approveRun, confirm: TEXT.approveRunConfirm }] : []),
@@ -268,14 +278,14 @@ export abstract class DeskEvents extends DeskRuns {
       ],
     };
     const cmid = `run:${r.id}:approval:${cut(approvalId, 24)}`;
-    const askWho = await this.approvers(r, gate?.kind);
     try {
-      await this.post(r, cmid, body, { card, mentions: askWho });
+      // A reply that quotes this message answers it (approvalDecision).
+      cardMeta(await this.post(r, cmid, body, { card, mentions: askWho }));
     } catch (err) {
       // A card the room rejects (for example an action id that is too long) falls back to text.
       this.log.warn("approval card failed", { runId: r.id, err });
       try {
-        await this.post(r, `${cmid}:text`, body, { mentions: askWho });
+        cardMeta(await this.post(r, `${cmid}:text`, body, { mentions: askWho }));
       } catch (err2) {
         // Nobody can be asked (for example the bot left the group): the answer is no.
         this.log.warn("approval post failed, denying", { runId: r.id, err: err2 });

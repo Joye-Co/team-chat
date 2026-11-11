@@ -10,7 +10,11 @@ runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DI
 the thread "th-old" (any other id is an error, like a thread Codex no longer has); each thread
 call goes to threads.json; each turn/start's `effort` (null when absent) goes to efforts.json.
 `model/list` answers two pages (cursor "p2"), with a hidden model and a configWarning
-notification before the first page."""
+notification before the first page. Each thread call's `approvalPolicy` goes to policies.json.
+When the prompt says "gated", the turn asks approval for `ls -la`, a file change,
+`git push origin main` (both as Codex wraps commands: `/bin/zsh -lc '...'`) and a GitHub MCP
+merge (an MCP tool approval elicitation), one after the other, and writes the answers to
+gated.json."""
 import json, os, subprocess, sys, threading, time
 
 assert sys.argv[1:2] == ["app-server"]
@@ -21,8 +25,14 @@ def out(o):
 
 thread = "th-1"
 path = os.path.join(os.getcwd(), "..", "codex-rollout.jsonl")
-state = {"turn": None, "steer": [], "n": 0, "approval": None}
+state = {"turn": None, "steer": [], "n": 0, "approval": None, "answers": {}}
 pending = {}
+
+def ask(rid, method, params):
+    ev = threading.Event(); pending[rid] = ev
+    out({"id": rid, "method": method, "params": params})
+    ev.wait(10)
+    return state["answers"].get(rid)
 
 def run_turn(tid, text):
     out({"method": "turn/started", "params": {"threadId": thread, "turn": {"id": tid, "items": [], "status": "inProgress"}}})
@@ -32,6 +42,17 @@ def run_turn(tid, text):
         ev.wait(10)
         dec = state["approval"]
         out({"method": "item/completed", "params": {"threadId": thread, "turnId": tid, "item": {"type": "commandExecution", "id": "c1", "command": "rm -rf build", "status": "completed" if dec == "accept" else "declined", "aggregatedOutput": "", "exitCode": 0 if dec == "accept" else None}}})
+    if "gated" in text:
+        base = {"threadId": thread, "turnId": tid}
+        answers = [
+            ask(101, "item/commandExecution/requestApproval", dict(base, itemId="c1", kind="command", command="/bin/zsh -lc 'ls -la'")),
+            ask(102, "item/fileChange/requestApproval", dict(base, itemId="f1", reason=None)),
+            ask(103, "item/commandExecution/requestApproval", dict(base, itemId="c2", kind="command", command="/bin/zsh -lc 'git push origin main'")),
+            ask(104, "mcpServer/elicitation/request", {"threadId": thread, "turnId": tid, "serverName": "github", "mode": "form",
+                "_meta": {"codex_approval_kind": "mcp_tool_call", "tool_params": {"owner": "o", "repo": "r", "pullNumber": 5}},
+                "message": "Allow the github MCP server to run tool \"merge_pull_request\"?", "requestedSchema": {"type": "object", "properties": {}}}),
+        ]
+        open("gated.json", "w").write(json.dumps(answers))
     if "chatrun" in text:
         d = os.environ.get("CHAT_RUN_DIR", "")
         mode = oct(os.stat(d).st_mode & 0o777) if d and os.path.isdir(d) else "none"
@@ -83,16 +104,22 @@ def run_turn(tid, text):
     if late:
         state["late_done"].set()
 
+def record_policy(params):
+    seen = json.load(open("policies.json")) if os.path.exists("policies.json") else []
+    open("policies.json", "w").write(json.dumps(seen + [params.get("approvalPolicy")]))
+
 for line in sys.stdin:
     m = json.loads(line)
     meth, mid = m.get("method"), m.get("id")
     if meth is None and mid in pending:
-        state["approval"] = m["result"]["decision"]; pending.pop(mid).set(); continue
+        state["answers"][mid] = m.get("result")
+        state["approval"] = (m.get("result") or {}).get("decision"); pending.pop(mid).set(); continue
     if meth == "initialize":
         out({"id": mid, "result": {"userAgent": "fake", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}})
     elif meth == "initialized":
         pass
     elif meth == "thread/resume":
+        record_policy(m["params"])
         calls = json.load(open("threads.json")) if os.path.exists("threads.json") else []
         open("threads.json", "w").write(json.dumps(calls + [[meth, m["params"].get("threadId")]]))
         if m["params"]["threadId"] == "th-old":
@@ -101,6 +128,7 @@ for line in sys.stdin:
         else:
             out({"id": mid, "error": {"code": -32600, "message": "no rollout found for thread id"}})
     elif meth == "thread/start":
+        record_policy(m["params"])
         calls = json.load(open("threads.json")) if os.path.exists("threads.json") else []
         open("threads.json", "w").write(json.dumps(calls + [[meth, None]]))
         assert m["params"]["cwd"] == os.getcwd() or os.path.realpath(m["params"]["cwd"]) == os.path.realpath(os.getcwd())

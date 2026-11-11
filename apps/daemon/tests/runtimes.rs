@@ -72,6 +72,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         resume_session_id: None,
         gate_hook: None,
         gate_alive: None,
+        gates: None,
         exec: daemon::executor::local(),
     }
 }
@@ -201,16 +202,175 @@ async fn codex_late_steer_gets_next_turn() {
     );
 }
 
+/// The run's gates: merging into main, and a GitHub MCP merge.
+fn merge_gates() -> std::sync::Arc<daemon::gates::Gates> {
+    std::sync::Arc::new(daemon::gates::Gates::new(&[daemon::proto::RunGate {
+        kind: "mergeMain".into(),
+        patterns: vec![
+            r"\bgh pr merge\b".into(),
+            r"\bgit push\b.*[\s:](refs/heads/)?(main|master)(\s|$)".into(),
+            r"^mcp__github__merge_pull_request\b".into(),
+        ],
+    }]))
+}
+
+/// A gated Codex run: approval policy `untrusted`; a command that is not gated, a file change
+/// and requested permissions are accepted at once without a card; a gated command and a gated
+/// MCP tool call ask a person through the gates (one card each) and get that person's answer.
+#[tokio::test]
+async fn codex_gated_run_answers_its_own_approvals() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        dir.path(),
+        "codex",
+        &fake("fake_codex.py"),
+        &[],
+        "gated work",
+    );
+    let gates = merge_gates();
+    s.gates = Some(gates.clone());
+    assert_eq!(runtime::codex::thread_policy(&s).0, "untrusted");
+    let work = s.cwd.clone();
+    let mut asked = vec![];
+    let (o, evs) = drive(s, |e| {
+        if let RunEvent::ApprovalRequest {
+            approval_id,
+            kind,
+            command,
+            ..
+        } = e
+        {
+            assert_eq!(kind.as_deref(), Some("mergeMain"));
+            asked.push(command.clone().unwrap_or_default());
+            // Deny the push, approve the MCP merge.
+            let approve = asked.len() == 2;
+            assert!(gates.answer(approval_id, approve, false).is_some());
+        }
+        None
+    })
+    .await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(
+        asked,
+        [
+            "git push origin main".to_string(),
+            r#"mcp__github__merge_pull_request {"owner":"o","pullNumber":5,"repo":"r"}"#
+                .to_string(),
+        ]
+    );
+    // Only the gated ones were cards; the daemon itself answered every request.
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::ApprovalRequest { .. }))
+            .count(),
+        2
+    );
+    let answers: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(work.join("gated.json")).unwrap()).unwrap();
+    assert_eq!(
+        answers,
+        serde_json::json!([
+            { "decision": "accept" },
+            { "decision": "accept" },
+            { "decision": "decline" },
+            { "action": "accept", "content": null, "_meta": null },
+        ])
+    );
+    let policies = std::fs::read_to_string(work.join("policies.json")).unwrap();
+    assert_eq!(policies, r#"["untrusted"]"#);
+}
+
+/// What a gated Codex run answers to each kind of app-server request.
+#[test]
+fn codex_gate_answers() {
+    use runtime::codex::{GateAnswer, gate_answer};
+    use serde_json::json;
+    let g = merge_gates();
+    let cmd = |c: &str| json!({ "command": c });
+    assert_eq!(
+        gate_answer(
+            "item/commandExecution/requestApproval",
+            &cmd("/bin/zsh -lc 'cargo test'"),
+            &g
+        ),
+        GateAnswer::Now(json!({ "decision": "accept" }))
+    );
+    // No command (stdin to a running process): accepted.
+    assert_eq!(
+        gate_answer("item/commandExecution/requestApproval", &json!({}), &g),
+        GateAnswer::Now(json!({ "decision": "accept" }))
+    );
+    assert!(matches!(
+        gate_answer("item/commandExecution/requestApproval", &cmd("/bin/bash -lc 'gh pr merge 9'"), &g),
+        GateAnswer::Ask { line, .. } if line == "gh pr merge 9"
+    ));
+    let perms = json!({ "network": { "enabled": true } });
+    assert_eq!(
+        gate_answer(
+            "item/permissions/requestApproval",
+            &json!({ "permissions": perms }),
+            &g
+        ),
+        GateAnswer::Now(json!({ "permissions": perms, "scope": "turn" }))
+    );
+    // An MCP tool approval of another tool: accepted; an elicitation that is not a tool
+    // approval, or another request: not the gates' to answer.
+    let mcp = |kind: &str| {
+        json!({ "serverName": "github", "message": "Allow the github MCP server to run tool \"get_issue\"?",
+            "_meta": { "codex_approval_kind": kind, "tool_params": {} } })
+    };
+    assert_eq!(
+        gate_answer("mcpServer/elicitation/request", &mcp("mcp_tool_call"), &g),
+        GateAnswer::Now(json!({ "action": "accept", "content": null, "_meta": null }))
+    );
+    assert_eq!(
+        gate_answer("mcpServer/elicitation/request", &mcp("other"), &g),
+        GateAnswer::NotMine
+    );
+    assert_eq!(
+        gate_answer("item/tool/requestUserInput", &json!({}), &g),
+        GateAnswer::NotMine
+    );
+}
+
+/// A Codex run without gates keeps approval `never`: nothing to ask about.
+#[tokio::test]
+async fn codex_run_without_gates_never_asks() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "codex", &fake("fake_codex.py"), &[], "plain");
+    s.gates = Some(std::sync::Arc::new(daemon::gates::Gates::new(&[])));
+    let work = s.cwd.clone();
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let policies = std::fs::read_to_string(work.join("policies.json")).unwrap();
+    assert_eq!(policies, r#"["never"]"#);
+}
+
+/// ACP: a permission request that matches a gate asks a person through the gates; the agent
+/// gets the person's answer.
 #[tokio::test]
 async fn acp_permission_flow() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "approve this");
-    let (o, evs) = drive(s, |e| match e {
-        RunEvent::ApprovalRequest { approval_id, .. } => Some(Control::Approval {
-            approval_id: approval_id.clone(),
-            approve: false,
-        }),
-        _ => None,
+    let mut s = spec(
+        dir.path(),
+        "acp",
+        &fake("fake_acp.py"),
+        &[],
+        "approve merge",
+    );
+    let gates = merge_gates();
+    s.gates = Some(gates.clone());
+    let (o, evs) = drive(s, |e| {
+        if let RunEvent::ApprovalRequest {
+            approval_id,
+            command,
+            ..
+        } = e
+        {
+            assert_eq!(command.as_deref(), Some("gh pr merge 5"));
+            assert!(gates.answer(approval_id, false, false).is_some());
+        }
+        None
     })
     .await;
     assert_eq!(o.status, Status::Succeeded, "{o:?}");
@@ -223,6 +383,29 @@ async fn acp_permission_flow() {
     assert!(
         evs.iter()
             .any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == "s1"))
+    );
+}
+
+/// ACP: permission is open; a request that matches no gate (here: the run has none) is allowed
+/// at once, with no card.
+#[tokio::test]
+async fn acp_permission_without_a_gate_is_allowed_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "approve this");
+    let (o, evs) = drive(s.clone(), |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.result_text.as_deref(), Some("permission yes"));
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, RunEvent::ApprovalRequest { .. }))
+    );
+    // With gates that do not match the request: the same.
+    s.gates = Some(merge_gates());
+    let (o, evs) = drive(s, |_| None).await;
+    assert_eq!(o.result_text.as_deref(), Some("permission yes"));
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, RunEvent::ApprovalRequest { .. }))
     );
 }
 
@@ -1489,6 +1672,21 @@ fn codex_runs_always_have_full_access() {
         assert!(runtime::codex::chat_run_works(&s));
         assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
     }
+    // Gated actions: still full access, approval `untrusted` so commands come to the daemon;
+    // a side chat stays read-only with `never`.
+    s.gates = Some(merge_gates());
+    assert_eq!(
+        runtime::codex::thread_policy(&s),
+        ("untrusted".to_string(), "danger-full-access".to_string())
+    );
+    assert!(runtime::codex::chat_run_works(&s));
+    s.aside = true;
+    assert_eq!(
+        runtime::codex::thread_policy(&s),
+        ("never".to_string(), "read-only".to_string())
+    );
+    s.aside = false;
+    s.gates = None;
     s.cfg.args = vec!["-c".into(), "model_reasoning_effort=\"high\"".into()];
     assert_eq!(
         runtime::codex::app_server_args(&s).unwrap(),
