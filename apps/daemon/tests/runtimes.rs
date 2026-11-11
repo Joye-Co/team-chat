@@ -1057,14 +1057,21 @@ async fn codex_read_only_on_windows_report() {
     .unwrap();
 }
 
-/// Windows, experiment: Codex's elevated sandbox with one Codex home, in a plain folder and in
-/// a folder private to the user (as run folders are). Report only.
+/// Windows: what a command of a Codex side chat can reach on the network. Codex's `read-only`
+/// blocks the network on macOS and Linux; on Windows, in the sandbox the daemon turns on for a
+/// side chat (`unelevated`, the one that needs no administrator), Codex only points the proxy
+/// settings of the command's environment at a dead port.
+///
+/// Asserted, with the arguments the daemon sends: a program that honors the proxy settings
+/// (curl) does not reach a listener on this computer's own address. Not asserted, written to
+/// `codex-windows-network.json` in the test folder (CI prints it): the same program told to
+/// ignore the proxy settings, which is the declared difference from the Mac
+/// (docs/plans/windows-parity/machine.zh.md). With `TC_CODEX_ELEVATED_SANDBOX` the report
+/// also tries Codex's elevated sandbox, in a folder private to the user (as run folders are)
+/// and in one where its sandbox accounts were given read access.
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
-async fn codex_elevated_side_chat_report() {
-    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_none() {
-        return;
-    }
+async fn codex_side_chat_network_on_windows() {
     let Some(codex) = real_codex() else { return };
     let base = outside_temp();
     let home = base.path().join("codex-home");
@@ -1073,86 +1080,65 @@ async fn codex_elevated_side_chat_report() {
         .and_then(|u| u.connect("8.8.8.8:53").and_then(|_| u.local_addr()))
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|_| "127.0.0.1".into());
+    let mut variants = vec![("the daemon's side chat", "private")];
+    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_some() {
+        variants.extend([
+            ("elevated", "private"),
+            ("elevated", "private, read access granted"),
+            ("elevated", "private, read access granted"),
+        ]);
+    }
     let mut report = Vec::new();
-    for (i, (mode, kind)) in [
-        ("unelevated", "plain"),
-        ("elevated", "plain granted"),
-        ("elevated", "private granted"),
-        ("elevated", "plain granted"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for (i, (mode, kind)) in variants.into_iter().enumerate() {
         let root = base.path().join(format!("root-{i}"));
-        if kind.starts_with("private") {
-            daemon::winacl::create_dir(&root).unwrap();
-        } else {
-            std::fs::create_dir_all(&root).unwrap();
-        }
-        let cwd = root.join("work");
-        std::fs::create_dir_all(&cwd).unwrap();
-        std::fs::write(cwd.join("seed.txt"), "seed-text").unwrap();
+        daemon::winacl::create_dir(&root).unwrap();
+        let mut s = spec(&root, "codex", "codex", &[], "hi");
+        s.aside = true;
+        std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
         if kind.ends_with("granted") {
             for user in ["CodexSandboxOffline", "CodexSandboxOnline"] {
-                let out = std::process::Command::new("icacls.exe")
-                    .arg(&cwd)
+                let _ = std::process::Command::new("icacls.exe")
+                    .arg(&s.cwd)
                     .args(["/grant", &format!("{user}:(OI)(CI)RX")])
                     .output();
-                println!("grant {user}: {:?}", out.map(|o| o.status));
             }
         }
-        let args: Vec<String> = [
-            "app-server",
-            "-c",
-            "sandbox_mode=\"read-only\"",
-            "-c",
-            "approval_policy=\"never\"",
-            "-c",
-            &format!("windows.sandbox=\"{mode}\""),
-        ]
-        .map(String::from)
-        .into();
+        let (approval, sandbox) = runtime::codex::thread_policy(&s);
+        let mut args = if mode == "elevated" {
+            vec![
+                "app-server".to_string(),
+                "-c".into(),
+                "windows.sandbox=\"elevated\"".into(),
+            ]
+        } else {
+            runtime::codex::app_server_args(&s).unwrap()
+        };
+        args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
+        args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
         let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
-        let outside = base.path().join(format!("outside-{i}.txt"));
         let mut calls = serde_json::Map::new();
         calls.insert("mode".into(), format!("{mode}, {kind} folder").into());
-        let raw = |host: &str| -> Vec<String> {
-            vec![
-                "powershell.exe".into(),
-                "-NoProfile".into(),
-                "-Command".into(),
-                format!(
-                    "try {{ (New-Object Net.Sockets.TcpClient).Connect('{host}', {port}); 'connected' }} catch {{ 'failed' }}"
-                ),
-            ]
-        };
-        let cmd = |line: String| -> Vec<String> { vec!["cmd.exe".into(), "/c".into(), line] };
-        for (what, command) in [
-            ("read", cmd("type seed.txt".into())),
-            ("write inside", cmd("echo x> written.txt".into())),
+        for (what, line) in [
+            ("reading a file", "type seed.txt".to_string()),
             (
-                "write outside",
-                cmd(format!("echo x> {}", outside.display())),
+                "curl to this computer's own address",
+                format!("curl.exe -s -m 5 http://{own_ip}:{port}/"),
             ),
             (
-                "curl loopback",
-                cmd(format!("curl.exe -s -m 5 http://127.0.0.1:{port}/")),
+                "curl to this computer's own address, ignoring proxy settings",
+                format!("curl.exe --noproxy * -s -m 5 http://{own_ip}:{port}/"),
             ),
             (
-                "curl own address",
-                cmd(format!("curl.exe -s -m 5 http://{own_ip}:{port}/")),
+                "curl to the internet, ignoring proxy settings",
+                "curl.exe --noproxy * -s -m 10 -o NUL https://github.com/".to_string(),
             ),
-            (
-                "curl internet",
-                cmd("curl.exe -s -m 10 -o NUL https://github.com/".into()),
-            ),
-            ("socket loopback", raw("127.0.0.1")),
-            ("socket own address", raw(&own_ip)),
-            ("env", cmd("set | findstr /i proxy".into())),
+            ("proxy settings", "set | findstr /i proxy".to_string()),
         ] {
-            let (codex, args, home, dir) = (codex.clone(), args.clone(), home.clone(), cwd.clone());
+            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
+            let (codex, args, home, dir) =
+                (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
             let answer = tokio::task::spawn_blocking(move || {
                 codex_exec(&codex, &args, &home, &dir, &command, serde_json::json!({}))
             })
@@ -1162,51 +1148,38 @@ async fn codex_elevated_side_chat_report() {
             while listener.accept().is_ok() {
                 arrived += 1;
             }
+            if mode != "elevated" && what == "reading a file" {
+                assert!(
+                    answer["result"]["stdout"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains("seed-text"),
+                    "{answer}"
+                );
+            }
+            if mode != "elevated" && what == "curl to this computer's own address" {
+                assert_eq!(
+                    arrived, 0,
+                    "a program that honors proxy settings reached the network: {answer}"
+                );
+            }
             calls.insert(
                 what.into(),
-                serde_json::json!({ "answer": answer.get("result").or(answer.get("error")), "connections": arrived }),
+                serde_json::json!({
+                    "answer": answer.get("result").or(answer.get("error")),
+                    "connections that arrived": arrived,
+                }),
             );
         }
         calls.insert(
-            "written inside".into(),
-            cwd.join("written.txt").exists().into(),
-        );
-        calls.insert("written outside".into(), outside.exists().into());
-        calls.insert(
-            "daemon's privacy check of the root".into(),
+            "the daemon's privacy check of the run folder".into(),
             format!("{:?}", daemon::winacl::check(&root)).into(),
-        );
-        let icacls = std::process::Command::new("icacls.exe").arg(&cwd).output();
-        calls.insert(
-            "icacls of the working folder".into(),
-            icacls
-                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                .unwrap_or_default()
-                .into(),
         );
         report.push(serde_json::Value::Object(calls));
     }
-    fn names(dir: &std::path::Path, depth: usize, out: &mut Vec<String>) {
-        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            out.push(e.path().display().to_string());
-            if depth > 0 && e.path().is_dir() {
-                names(&e.path(), depth - 1, out);
-            }
-        }
-    }
-    let mut files = vec![];
-    names(&home, 1, &mut files);
-    files.retain(|f| f.contains("sandbox"));
-    let users = std::process::Command::new("net.exe").arg("user").output();
-    let all = serde_json::json!({
-        "own address": own_ip,
-        "runs": report,
-        "codex home": files,
-        "users": users.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
-    });
     std::fs::write(
-        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-elevated.json"),
-        serde_json::to_string_pretty(&all).unwrap(),
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-network.json"),
+        serde_json::to_string_pretty(&report).unwrap(),
     )
     .unwrap();
 }

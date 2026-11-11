@@ -15,5 +15,5 @@ jobs:
           TC_REQUIRE_REAL_CODEX: "1"
           TC_CODEX_ELEVATED_SANDBOX: "1"
         run: |
-          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_elevated_side_chat_report || true
-          cat target/tmp/codex-elevated.json || true
+          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_side_chat_network_on_windows || true
+          cat target/tmp/codex-windows-network.json || true
