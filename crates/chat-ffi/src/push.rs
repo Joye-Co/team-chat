@@ -5,8 +5,9 @@
 
 use chat_core::HttpClient;
 use chat_core::proto::{
-    AnswerCardRequest, NotifyReason, PushData, PushEnvironment, PushPlatform,
-    RegisterPushDeviceRequest,
+    AnswerCardRequest, NotifyEventSwitchesPatch, NotifyReason, NotifySettings, PushData,
+    PushEnvironment, PushPlatform, QuietHoursPatch, RegisterPushDeviceRequest,
+    UpdateNotifySettingsRequest,
 };
 
 use crate::CoreError;
@@ -152,6 +153,72 @@ pub fn parse_push(json: String) -> Option<PushInfo> {
     })
 }
 
+/// My notification settings (通知): what to hear about and the quiet hours. They live on the
+/// server and hold for every device of mine.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NotifyPrefs {
+    /// 需要我回复
+    pub waiting: bool,
+    /// 有人 @我
+    pub mention: bool,
+    /// 我交代的事有结果
+    pub result: bool,
+    /// 成员卡住了
+    pub blocked: bool,
+    pub quiet: bool,
+    /// "HH:MM"
+    pub quiet_start: String,
+    pub quiet_end: String,
+}
+
+impl From<NotifySettings> for NotifyPrefs {
+    fn from(s: NotifySettings) -> Self {
+        NotifyPrefs {
+            waiting: s.events.waiting,
+            mention: s.events.mention,
+            result: s.events.result,
+            blocked: s.events.blocked,
+            quiet: s.quiet_hours.enabled,
+            quiet_start: s.quiet_hours.start,
+            quiet_end: s.quiet_hours.end,
+        }
+    }
+}
+
+#[uniffi::export]
+pub fn notify_prefs(base_url: String, token: String) -> Result<NotifyPrefs, CoreError> {
+    let http = authed(&base_url, token)?;
+    Ok(run(async move { http.notify_settings().await })?.into())
+}
+
+/// Saves every field, with the phone's time zone (an IANA name such as `Asia/Shanghai`).
+#[uniffi::export]
+pub fn set_notify_prefs(
+    base_url: String,
+    token: String,
+    prefs: NotifyPrefs,
+    time_zone: String,
+) -> Result<NotifyPrefs, CoreError> {
+    let http = authed(&base_url, token)?;
+    let req = UpdateNotifySettingsRequest {
+        events: Some(NotifyEventSwitchesPatch {
+            waiting: Some(prefs.waiting),
+            mention: Some(prefs.mention),
+            result: Some(prefs.result),
+            blocked: Some(prefs.blocked),
+        }),
+        quiet_hours: Some(QuietHoursPatch {
+            enabled: Some(prefs.quiet),
+            start: Some(prefs.quiet_start),
+            end: Some(prefs.quiet_end),
+        }),
+        time_zone: (!time_zone.is_empty()).then_some(time_zone),
+        ..Default::default()
+    };
+    req.validate().map_err(|_| CoreError::Invalid)?;
+    Ok(run(async move { http.update_notify_settings(&req).await })?.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +339,37 @@ mod tests {
         let req = rx.recv().unwrap();
         assert!(req.starts_with("POST /v1/groups/g/messages/m/answer "));
         assert!(req.contains(r#""actionId":"ok""#));
+
+        let settings = r#"{"events":{"waiting":true,"mention":false,"result":true,"blocked":true},"digestAt":null,
+            "quietHours":{"enabled":true,"start":"22:00","end":"08:00"},"timeZone":"Asia/Shanghai","updatedAt":1}"#;
+        let (base, rx) = one_shot("200 OK", settings);
+        let prefs = notify_prefs(base, "tok".into()).unwrap();
+        assert!(!prefs.mention && prefs.quiet);
+        assert!(
+            rx.recv()
+                .unwrap()
+                .starts_with("GET /v1/me/notify-settings ")
+        );
+        let (base, rx) = one_shot("200 OK", settings);
+        set_notify_prefs(base, "tok".into(), prefs.clone(), "Asia/Shanghai".into()).unwrap();
+        let req = rx.recv().unwrap();
+        assert!(req.starts_with("PATCH /v1/me/notify-settings "));
+        assert!(
+            req.contains(r#""mention":false"#) && req.contains(r#""timeZone":"Asia/Shanghai""#)
+        );
+        let bad = NotifyPrefs {
+            quiet_start: "25:00".into(),
+            ..prefs
+        };
+        assert!(matches!(
+            set_notify_prefs(
+                "http://127.0.0.1:9".into(),
+                "tok".into(),
+                bad,
+                String::new()
+            ),
+            Err(CoreError::Invalid)
+        ));
 
         let (base, _rx) = one_shot("200 OK", r#"{"waiting":3}"#);
         assert_eq!(push_badge(base, "tok".into()).unwrap(), 3);
