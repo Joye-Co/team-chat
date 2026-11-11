@@ -49,6 +49,14 @@ enum LinkEvent {
     Closed(u64, String),
 }
 
+/// A key saved while runs go on is masked in their frames too: each run's redactor copied the
+/// daemon's rules when it started, so the new value is added to its own list.
+fn mask_in_runs(runs: &HashMap<String, RunEntry>, value: &str) {
+    for r in runs.values() {
+        r.redactor.add(value);
+    }
+}
+
 struct RunEntry {
     control: mpsc::UnboundedSender<RunCtl>,
     next_seq: u64,
@@ -1038,6 +1046,7 @@ impl Daemon {
         match self.keys.set(name, value.clone(), members) {
             Ok(()) => {
                 log!("key {safe} saved");
+                mask_in_runs(&self.runs, &value);
                 self.key_values.push(value);
                 self.redactor = Arc::new(crate::redact::Redactor::for_daemon_with(
                     &self.cfg,
@@ -1115,5 +1124,38 @@ impl Daemon {
             }
         }
         m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_saved_during_a_run_is_masked_in_that_run() {
+        let daemon_rules = crate::redact::Redactor::new(vec!["old-key-0123456789".to_string()]);
+        let run_redactor = Arc::new(daemon_rules.for_run());
+        let (control, _rx) = mpsc::unbounded_channel();
+        let mut runs = HashMap::new();
+        runs.insert(
+            "run-test-1".to_string(),
+            RunEntry {
+                control,
+                next_seq: 1,
+                buffer: VecDeque::new(),
+                done: false,
+                finished: false,
+                orphan: false,
+                log: None,
+                outputs: Arc::default(),
+                redactor: run_redactor.clone(),
+            },
+        );
+        // The clone the run's task holds shares the list with the entry's.
+        let in_task = (*run_redactor).clone();
+        mask_in_runs(&runs, "new-key-9876543210");
+        let out = in_task.text("saw new-key-9876543210 and old-key-0123456789");
+        assert!(!out.contains("new-key-9876543210"), "{out}");
+        assert!(!out.contains("old-key-0123456789"), "{out}");
     }
 }
