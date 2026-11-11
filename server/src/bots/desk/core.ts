@@ -33,6 +33,7 @@ import { ROOM_REACT_RPC } from "../../reactions";
 import type { BotsEnv } from "../env";
 import { ACK_EMOJI } from "../proof";
 import type { TopicMessage } from "../room";
+import type { WorkState } from "../participants";
 import type { Brief } from "../../agent/frontdesk";
 
 export type RunRow = {
@@ -684,17 +685,17 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {
     // A side chat answers in the asker's DM; its topic keeps no work status.
     if (r.kind === RUN_KIND_ASIDE) return;
+    // Usable (design-relay R1): the room keeps this run's report and rolls the topic's status up
+    // from every AI member working there; the routing owner is set when a run claims the topic.
     try {
       unwrap(
-        await this.room(r).topicUpdate(r.group_id, this.actor(), {
-          t: "topic.update",
-          rid: "bot",
-          groupId: r.group_id,
+        await this.room(r).rpc(r.group_id, "bots.workState", this.actor(), {
           topicId: r.topic_id,
+          runId: r.id,
           status,
           waitingOn,
-          ownerId: this.botId,
-        } as never),
+          ended: r.ended_at !== null,
+        } satisfies WorkState),
       );
     } catch (err) {
       this.log.warn("topic update failed", { runId: r.id, status, err });
@@ -707,6 +708,15 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       unwrap(await this.room(r).rpc(r.group_id, ROOM_REACT_RPC, this.actor(), { messageId, emoji: ACK_EMOJI, on: true }));
     } catch (err) {
       this.log.warn("ack reaction failed", { runId: r.id, err });
+    }
+  }
+
+  /** Takes the acknowledgement back (接 1.11: the front desk decided the message is not for it). */
+  protected async unack(groupId: string, messageId: string): Promise<void> {
+    try {
+      unwrap(await roomStub(this.env, groupId).rpc(groupId, ROOM_REACT_RPC, this.actor(), { messageId, emoji: ACK_EMOJI, on: false }));
+    } catch (err) {
+      this.log.warn("ack removal failed", { messageId, err });
     }
   }
 

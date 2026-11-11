@@ -266,7 +266,7 @@ Module: `topic.ts` / `topic.rs`.
 ```ts
 Topic += {
   waitingOn?: string[]          // member ids the topic waits on; absent = []; at most 20
-  ownerId?: string | null       // the one responsible member; absent or null = none
+  ownerId?: string | null       // usable: the AI member that most recently started a run here (a follow-up without an @ goes to it); absent or null = none
   lastMessageAt?: number        // createdAt of the newest non-deleted message
 }
 { t: "topic.update", ..., waitingOn?: string[], ownerId?: string | null }
@@ -868,16 +868,22 @@ Rules:
   1.2.2: a runner with `machineId` runs only on that machine (its labels do not count; the other
   conditions do). `PUT` without `machineId` keeps the stored one, `null` clears it, and an
   unknown or revoked machine is `not_found`. Revoking the machine clears it.
-- Trigger: a `message.created` by a human that mentions a runner-backed bot starts a run in
-  that topic, unless the topic already has a responsible bot. The first bot that starts a run
-  in a topic becomes its only responsible bot. Messages written by bots never start runs or
-  reach a run (no loops). In a DM with a runner-backed bot every human message counts as a
-  mention of it. A deactivated bot, or one whose runner is disabled, gets no more messages; on
-  deactivation its active runs are cancelled and its topics released.
-- While a run of the topic's bot is active (`created`, `running`, `waiting`, `blocked`), every
-  later human message in the topic goes to that run as input. A message that reaches the run
-  after its last turn ended starts a new run. When no run is active, only a new mention of the
-  bot starts a run.
+- Trigger: a `message.created` by a human goes to each runner-backed bot it mentions, each on
+  its own, whether or not another bot works in the topic. A message without any @ goes to the
+  topic's `ownerId`: the bot that most recently started a run there. Several bots may work in
+  one topic (`Topic.participants`); the topic's status is rolled up from all of them. Messages
+  written by bots never start runs or reach a run (no loops). In a DM with a runner-backed bot
+  every human message counts as a mention of it. A deactivated bot, or one whose runner is
+  disabled, gets no more messages; on deactivation its active runs are cancelled and its topics
+  released.
+- While a run of a bot is active in the topic (`created`, `running`, `waiting`, `blocked`), a
+  later human message that reaches the bot goes to that run as input when it mentions the bot,
+  quotes it, comes from the run's requester, answers its approval or asks how it goes; other
+  people's talk stays in the topic and reaches the next turn as context. A plain 停 / 别做了
+  from the requester stops the run when no front desk is configured. A message that reaches the
+  run after its last turn ended starts a new run. When no run is active, a mention starts a run,
+  and so does a message without an @ from the last run's requester within 30 minutes after it
+  ended (with a front desk, the front desk decides; small talk gets no answer).
 - The bot acknowledges the message that started the run with one reaction (👀; before 1.1, a
   short text line). It posts nothing while it works: progress lives in the run (`plan`, the run
   log; before 1.1, one streaming message). When the run ends it posts one result message and
@@ -960,7 +966,7 @@ id. It must be a bot member of the group with an enabled runner. An unknown name
 Bots' own messages never start runs, so the hand-over goes desk to desk, and a visible message says
 who took what.
 
-- **转交** (`member.handoff`): the other member becomes the topic's responsible member, and the
+- **转交** (`member.handoff`): the other member becomes the topic's `ownerId`, and the
   calling bot posts "@B 转交给你：goal". B starts a run in the same topic, whose prompt carries the
   work order (`goal`, `doneWhen`, `notes`). The calling run should stop.
 - **分出去** (`member.assign`): the calling bot opens a new topic with "@B goal". B works there.
@@ -982,10 +988,10 @@ and makes one forced tool call `decide`, which answers with one of four actions:
   No run, no machine.
 - `dispatch`: a run as before. Its prompt carries the work order (`WorkBrief`: goal, done-when
   checks, notes) after the request.
-- `ask`: the bot posts one question and becomes the topic's responsible bot. For an hour the
+- `ask`: the bot posts one question and becomes the topic's `ownerId`. For an hour the
   requester's next message in the topic counts as addressed to the bot without an @; the front
   desk then decides again with the answer in the topic.
-- `skip`: nothing is posted.
+- `skip`: nothing is posted, and the 👀 it put on the request is taken back.
 
 The 👀 reaction goes on the request while the front desk reads it. A decision is stored before
 it is acted on, so a retried delivery never posts twice. Any doubt becomes a `dispatch`: an
