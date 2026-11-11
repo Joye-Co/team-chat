@@ -68,10 +68,10 @@ install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 750 \
   "$RUNNER_HOME_DATA" "$RUNNER_HOME_DATA/images" "$RUNNER_HOME_DATA/kernels" \
   "$RUNNER_HOME_DATA/cache" "$RUNNER_HOME_DATA/daemon" "$RUNNER_HOME_DATA/vms"
 # The AI members' home folders (the daemon's [vm].homes) and their fixed-size disk images, which
-# only root reads (runner-vm home-up makes and mounts each; existing homes move into theirs on
+# only root reads (the runner's group lists the folder) (runner-vm home-up makes and mounts each; existing homes move into theirs on
 # first use and are kept). Existing folders are left as they are.
 [[ -d "$RUNNER_HOME_DATA/homes" ]] || install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 755 "$RUNNER_HOME_DATA/homes"
-install -d -o root -g root -m 711 "$RUNNER_HOME_DATA/home-images"
+install -d -o root -g "$RUNNER_USER" -m 750 "$RUNNER_HOME_DATA/home-images"
 # The daemon user gets its own copy of root's keys so an operator can log in as it.
 if [[ -s /root/.ssh/authorized_keys ]]; then
   install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 700 "/home/$RUNNER_USER/.ssh"

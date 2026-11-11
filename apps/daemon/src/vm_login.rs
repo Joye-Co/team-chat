@@ -15,7 +15,13 @@
 //!   token; a copy without the field is not signed in). Access tokens last 10 days; when the
 //!   host's runs out before the run could end, the host's Codex refreshes it first
 //!   (`account/read` with `refreshToken`), so refreshing stays on this host.
-//! - **Pi**: a copy of `auth.json` with each `refresh` emptied, and its settings.
+//! - **Pi**: a copy of `auth.json` with each `refresh` emptied, and its settings. When an OAuth
+//!   access token runs out before the run could end, the host's Pi refreshes it first
+//!   (`pi auth print-bearer-token --provider <p> --min-expiry <s>s`, its output thrown away); a
+//!   run whose every sign-in has run out fails up front.
+//!
+//! Refreshes on this host take turns (one at a time in the daemon, and each one first looks
+//! whether another has just renewed the sign-in), so a refresh token is never used twice.
 //!
 //! The host's settings (`settings.json`, `config.toml`) are copied for each run. A run that
 //! resumes a session from before this (kept in the host's folders) gets that one session file
@@ -24,8 +30,10 @@
 use crate::config::RuntimeConfig;
 use base64::Engine as _;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -112,12 +120,67 @@ pub fn pi_run_auth(text: &str) -> Option<String> {
     serde_json::to_string(&v).ok()
 }
 
+/// The OAuth sign-ins of Pi's `auth.json` and when each runs out (ms): `(provider, expires)`.
+pub fn pi_oauth(text: &str) -> Vec<(String, u64)> {
+    let Ok(Value::Object(v)) = serde_json::from_str::<Value>(text) else {
+        return vec![];
+    };
+    v.into_iter()
+        .filter(|(_, e)| e.get("type").and_then(Value::as_str) == Some("oauth"))
+        .filter_map(|(p, e)| Some((p, e.get("expires")?.as_u64()?)))
+        .collect()
+}
+
+/// Whether a run can use Pi's `auth.json` at `now`: some sign-in is an API key or has not run
+/// out (an empty file is fine: Pi may take a key from the environment).
+pub fn pi_usable(text: &str, now: u64) -> bool {
+    let Ok(Value::Object(v)) = serde_json::from_str::<Value>(text) else {
+        return true;
+    };
+    v.is_empty()
+        || v.values().any(|e| {
+            e.get("type").and_then(Value::as_str) != Some("oauth")
+                || e.get("expires")
+                    .and_then(Value::as_u64)
+                    .is_none_or(|x| x > now)
+        })
+}
+
+/// Refreshes on this host, one at a time.
+static HOST_REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Refreshes this host's sign-in when `expires` (read again after waiting for its turn) is
+/// before `until`. True when it ran `refresh`.
+pub async fn renew<F, Fut>(expires: impl Fn() -> Option<u64>, until: u64, refresh: F) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let due = || expires().is_some_and(|e| e < until);
+    if !due() {
+        return false;
+    }
+    let _turn = HOST_REFRESH.lock().await;
+    // Another run may have renewed it while this one waited.
+    if !due() {
+        return false;
+    }
+    refresh().await;
+    true
+}
+
 /// Writes a file only the daemon user can read.
 fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    static N: AtomicU64 = AtomicU64::new(0);
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
-    let tmp = path.with_extension("tmp");
+    // Its own temporary name: two writers never take each other's.
+    let tmp = path.with_extension(format!(
+        "{}.{}.tmp",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_file(&tmp);
     {
         let mut o = std::fs::OpenOptions::new();
@@ -221,6 +284,8 @@ pub async fn prepare(
         env.retain(|(n, _)| *n != k);
         env.push((k, v));
     }
+    // Runs of one member that start together take turns writing its folders.
+    let _turn = crate::vm_home::lock(&format!("login:{}", member.display())).await;
     let until = now_ms() + need.as_millis() as u64;
     match rt.kind.as_str() {
         "claude" => {
@@ -242,16 +307,16 @@ pub async fn prepare(
                     .ok()
                     .and_then(|t| claude_access(&t))
             };
-            let mut found = read();
-            if found
-                .as_ref()
-                .is_some_and(|(_, exp)| exp.is_some_and(|e| e < until))
-            {
-                // Claude Code refreshes its sign-in when it talks to the service.
-                crate::usage::read_all(vec![("claude".into(), rt.clone())]).await;
-                found = read();
-            }
-            Ok(found.map(|(token, _)| {
+            // Claude Code refreshes its sign-in when it talks to the service.
+            renew(
+                || read().and_then(|(_, e)| e),
+                until,
+                || async {
+                    crate::usage::read_all(vec![("claude".into(), rt.clone())]).await;
+                },
+            )
+            .await;
+            Ok(read().map(|(token, _)| {
                 env.push((CLAUDE_TOKEN.into(), token.clone()));
                 token
             }))
@@ -265,15 +330,15 @@ pub async fn prepare(
                 carry_codex_session(&host, &own, sid);
             }
             let read = || std::fs::read_to_string(host.join("auth.json")).ok();
-            let mut text = read();
-            if text
-                .as_deref()
-                .and_then(codex_expires_at)
-                .is_some_and(|e| e < until)
-            {
-                refresh_codex(rt).await;
-                text = read();
-            }
+            renew(
+                || read().as_deref().and_then(codex_expires_at),
+                until,
+                || async {
+                    refresh_codex(rt).await;
+                },
+            )
+            .await;
+            let text = read();
             let target = own.join("auth.json");
             match text.as_deref().and_then(codex_run_auth) {
                 Some(copy) => write_private(&target, &copy)
@@ -291,10 +356,38 @@ pub async fn prepare(
                 let own = member.join(".pi/agent");
                 copy_setting(&host, &own, "settings.json");
                 copy_setting(&host, &own, "models.json");
-                if let Some(copy) = std::fs::read_to_string(host.join("auth.json"))
-                    .ok()
-                    .and_then(|t| pi_run_auth(&t))
-                {
+                let read = || std::fs::read_to_string(host.join("auth.json")).ok();
+                renew(
+                    || {
+                        read()
+                            .map(|t| pi_oauth(&t))
+                            .and_then(|o| o.iter().map(|(_, e)| *e).min())
+                    },
+                    until,
+                    || async {
+                        let due: Vec<String> = read()
+                            .map(|t| pi_oauth(&t))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|(_, e)| *e < until)
+                            .map(|(p, _)| p)
+                            .collect();
+                        let secs = until.saturating_sub(now_ms()) / 1000 + 1;
+                        for p in due {
+                            refresh_pi(rt, &host, &p, secs).await;
+                        }
+                    },
+                )
+                .await;
+                let text = read();
+                if text.as_deref().is_some_and(|t| !pi_usable(t, now_ms())) {
+                    return Err(
+                        "Pi's sign-in on this computer has run out and could not be \
+renewed: sign in to Pi on it again, or give the machine an API key"
+                            .into(),
+                    );
+                }
+                if let Some(copy) = text.as_deref().and_then(pi_run_auth) {
                     let target = own.join("auth.json");
                     write_private(&target, &copy)
                         .map_err(|e| format!("{}: {e}", target.display()))?;
@@ -303,6 +396,39 @@ pub async fn prepare(
             Ok(None)
         }
     }
+}
+
+/// Lets this host's Pi refresh one provider's sign-in: it asks for a token that lasts `secs`
+/// more seconds and writes the renewed sign-in back to its `auth.json`. The token it prints is
+/// thrown away.
+async fn refresh_pi(rt: &RuntimeConfig, host: &Path, provider: &str, secs: u64) -> bool {
+    let Some(program) = crate::health::which("pi") else {
+        return false;
+    };
+    let mut cmd = crate::health::command(&program);
+    cmd.args(["auth", "print-bearer-token", "--provider", provider])
+        .arg("--min-expiry")
+        .arg(format!("{secs}s"))
+        .envs(&rt.env)
+        .env("PI_CODING_AGENT_DIR", host)
+        .current_dir(crate::config::home())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let ok = tokio::time::timeout(Duration::from_secs(60), crate::health::output(&mut cmd))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .is_some_and(|o| o.status.success());
+    if !ok {
+        eprintln!(
+            "{} pi: the sign-in of {} could not be refreshed",
+            now_ms(),
+            crate::chat_run::safe_word(provider)
+        );
+    }
+    ok
 }
 
 /// What to do after a line of `codex app-server` in [`refresh_codex`].
@@ -483,6 +609,106 @@ mod tests {
         assert_eq!(copy["anthropic"]["refresh"], "");
         assert_eq!(copy["anthropic"]["access"], "A");
         assert_eq!(copy["openai"]["key"], "K");
+    }
+
+    #[test]
+    fn pi_says_which_sign_ins_run_out_and_whether_any_is_usable() {
+        let t = json!({ "anthropic": { "type": "oauth", "refresh": "R", "access": "A", "expires": 5 }, "openai": { "type": "api_key", "key": "K" } }).to_string();
+        assert_eq!(pi_oauth(&t), vec![("anthropic".to_string(), 5)]);
+        // An API key is always usable.
+        assert!(pi_usable(&t, 10));
+        let only =
+            json!({ "anthropic": { "type": "oauth", "access": "A", "expires": 5 } }).to_string();
+        assert!(pi_usable(&only, 4));
+        assert!(!pi_usable(&only, 6));
+        assert!(pi_usable("{}", 6));
+        assert!(pi_oauth("not json").is_empty());
+    }
+
+    #[tokio::test]
+    async fn host_refreshes_take_turns_and_never_repeat() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        // The host's token runs out in 10 s; eight runs that need an hour start together.
+        let expires = Arc::new(AtomicU64::new(now_ms() + 10_000));
+        let refreshes = Arc::new(AtomicUsize::new(0));
+        let until = now_ms() + 3_600_000;
+        let runs = (0..8).map(|_| {
+            let (expires, refreshes) = (expires.clone(), refreshes.clone());
+            tokio::spawn(async move {
+                let read = expires.clone();
+                renew(
+                    move || Some(read.load(Ordering::SeqCst)),
+                    until,
+                    || async move {
+                        refreshes.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        expires.store(now_ms() + 86_400_000, Ordering::SeqCst);
+                    },
+                )
+                .await
+            })
+        });
+        let ran: Vec<bool> = futures_join(runs).await;
+        assert_eq!(refreshes.load(Ordering::SeqCst), 1);
+        assert_eq!(ran.iter().filter(|r| **r).count(), 1);
+        // A sign-in that lasts is never refreshed.
+        assert!(!renew(|| Some(u64::MAX), until, || async { unreachable!() }).await);
+        assert!(!renew(|| None, until, || async { unreachable!() }).await);
+    }
+
+    async fn futures_join<T: Send + 'static>(
+        tasks: impl Iterator<Item = tokio::task::JoinHandle<T>>,
+    ) -> Vec<T> {
+        let mut out = vec![];
+        for t in tasks.collect::<Vec<_>>() {
+            out.push(t.await.unwrap());
+        }
+        out
+    }
+
+    #[test]
+    fn writers_of_one_sign_in_copy_never_take_each_others_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("m/.codex/auth.json");
+        std::thread::scope(|s| {
+            for i in 0..16 {
+                let target = &target;
+                s.spawn(move || write_private(target, &format!("{{\"n\":{i}}}")).unwrap());
+            }
+        });
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        assert!(v["n"].is_u64());
+        // No temporary file is left.
+        assert_eq!(
+            std::fs::read_dir(target.parent().unwrap()).unwrap().count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pi_run_fails_up_front_when_every_sign_in_ran_out() {
+        let tmp = tempfile::tempdir().unwrap();
+        let host = tmp.path().join("host-pi");
+        std::fs::create_dir_all(&host).unwrap();
+        let member = tmp.path().join("homes/01BOT");
+        let r = rt("acp", &[("PI_CODING_AGENT_DIR", &host)]);
+        let run = |env: &mut Vec<(String, String)>| {
+            let (r, member, cwd) = (r.clone(), member.clone(), tmp.path().to_path_buf());
+            let mut e = std::mem::take(env);
+            async move { prepare(&r, &member, &cwd, None, Duration::from_secs(9000), &mut e).await }
+        };
+        // A sign-in that lasts: copied without its refresh token, nothing refreshed.
+        let fresh = json!({ "none-such": { "type": "oauth", "refresh": "SECRET-R", "access": "A", "expires": now_ms() + 86_400_000 } });
+        std::fs::write(host.join("auth.json"), fresh.to_string()).unwrap();
+        run(&mut vec![]).await.unwrap();
+        let copy = std::fs::read_to_string(member.join(".pi/agent/auth.json")).unwrap();
+        assert!(copy.contains("\"access\":\"A\"") && !copy.contains("SECRET-R"));
+        // Run out, and this host cannot renew it (no Pi, or a provider it does not know).
+        let gone = json!({ "none-such": { "type": "oauth", "refresh": "SECRET-R", "access": "A", "expires": 1 } });
+        std::fs::write(host.join("auth.json"), gone.to_string()).unwrap();
+        let e = run(&mut vec![]).await.unwrap_err();
+        assert!(e.contains("Pi"), "{e}");
     }
 
     #[test]

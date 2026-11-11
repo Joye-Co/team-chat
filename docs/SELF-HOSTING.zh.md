@@ -337,7 +337,9 @@ AI 成员。
   `scripts/runner/runner-vm` 或 `runner-vm.nft` 有改动时一定要再跑一遍（重装 root 辅助脚本、重载防火墙）；
   AI 成员的家目录会保留。
 - **从把登录目录共享给虚拟机的旧版本升级**（家目录镜像之前）：用 root 在 `/root/team-chat` 里
-  `git checkout` 新版本，再跑一遍 `bash scripts/runner/host-setup.sh`，然后让 daemon 更新。`daemon.toml`
+  `git checkout` 新版本，再跑一遍 `bash scripts/runner/host-setup.sh`。daemon 会自己更新，可能比这一步早：
+  在 `host-setup.sh` 跑完之前，任务照常能跑，只是 AI 成员的家目录还是不限大小的普通文件夹，daemon 的日志和
+  `team-chat-daemon doctor` 会提示需要重装 root 辅助脚本。`daemon.toml`
   的 `[vm]` 里如果写过 `shares = [...]` 就删掉（daemon 反正会跳过这些目录）。每个 AI 成员原有的家目录在它
   下一次任务时搬进它的 20 GB 镜像；超过大小的保持为不限大小的文件夹，直到被清空。以前的会话能接着用：
   续接时把那一个会话文件拷进成员自己的目录。

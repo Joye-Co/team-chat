@@ -12,7 +12,8 @@
 # Slot n uses 10.200.0.0/16 at offset 4n: host .1, guest .2. Exported paths must be under
 # /srv/runner or the runner user's home, and never the runner's home itself, one of its dot
 # folders (the CLIs' sign-ins, the daemon's config and token, SSH keys) or the host's images.
-# Home images live in <homes>/../home-images (root only); <homes> must be under /srv/runner.
+# Home images live in <homes>/../home-images (root's, listable by the runner's group); <homes>
+# must be under /srv/runner. Home commands of one member wait for each other (flock).
 # A home folder from before the images moves into its image on its first home-up; when it does
 # not fit, it stays a folder without a limit (and a `<member>.unlimited` mark) until cleared.
 # The static firewall (/etc/runner-vm.nft) does the rest.
@@ -41,6 +42,14 @@ home_args() {
   images="$(dirname "$homes")/home-images"
   dir="$homes/$member"
   img="$images/$member.ext4"
+  # The runner user lists the images (the daemon reports each one's use); each stays root's.
+  [[ -d "$images" ]] || install -d -o root -g "$gid" -m 750 "$images"
+  chown root:"$gid" "$images"
+  chmod 750 "$images"
+  # One home command per member at a time: two runs that start together never mount or make
+  # the same image twice.
+  exec 9>"$images/$member.lock"
+  flock 9
 }
 
 case "${1:-}" in
@@ -49,7 +58,6 @@ case "${1:-}" in
     gb="${4:-}"
     [[ "$gb" =~ ^[0-9]{1,5}$ ]] && (( gb > 0 )) || die "bad size"
     [[ -d "$homes" ]] || install -d -o "$uid" -g "$gid" -m 755 "$homes"
-    [[ -d "$images" ]] || install -d -o root -g root -m 711 "$images"
     # A larger size grows the mounted image (ext4 grows online); a smaller one leaves it.
     grow() {
       local want dev

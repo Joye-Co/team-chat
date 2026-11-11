@@ -65,7 +65,7 @@ pub fn vm_note(vm: &crate::config::VmConfig) -> String {
         "Your working folder is kept for your next run in this topic; nothing outside it is kept."
             .to_string()
     } else {
-        let size = if crate::vm_home::images_on(vm) {
+        let size = if crate::vm_home::limited(vm) {
             format!(" Your home folder holds {} GB in all.", vm.home_gb)
         } else {
             String::new()

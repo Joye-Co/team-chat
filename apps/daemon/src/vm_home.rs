@@ -11,10 +11,64 @@
 //!
 //! The daemon reports each image's size and the bytes it takes on the host disk
 //! (`MachineMetrics.homes`), and empties a member's home on `home.clear`.
+//!
+//! A daemon can update itself before root reruns `host-setup.sh`: with a root helper from before
+//! the images (no `home-up`), homes stay plain folders without a limit, and the daemon's log and
+//! `daemon doctor` say to rerun it.
 
 use crate::config::VmConfig;
 use crate::proto::HomeUse;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// What the daemon says when the root helper cannot make home images.
+pub const OLD_HELPER: &str = "the root helper has no home-up: run scripts/runner/host-setup.sh \
+again as root; until then the AI members' homes are plain folders without a size limit";
+
+/// Set once a run found the root helper from before the images, so the log says it once. The
+/// helper is looked at on every run: once root installs the new one, homes are images again.
+static HELPER_OLD: AtomicBool = AtomicBool::new(false);
+
+/// Whether the installed root helper can make home images: None when its file cannot be read
+/// (then `home-up` is tried).
+pub fn helper_has_homes(vm: &VmConfig) -> Option<bool> {
+    std::fs::read_to_string(&vm.helper)
+        .ok()
+        .map(|s| s.contains("home-up"))
+}
+
+/// An error of a root helper from before the images: it reads `home-up` as a slot.
+fn old_helper_error(e: &str) -> bool {
+    e.contains("bad slot")
+}
+
+fn note_old_helper() {
+    if !HELPER_OLD.swap(true, Ordering::Relaxed) {
+        eprintln!("{} [vm] {OLD_HELPER}", crate::proto::now_ms());
+    }
+}
+
+/// Whether homes are fixed-size images on this host now: on in the config and a root helper
+/// that makes them.
+pub fn limited(vm: &VmConfig) -> bool {
+    images_on(vm) && helper_has_homes(vm) != Some(false)
+}
+
+/// One lock per key in this process: runs of one member that start together take turns
+/// (mounting its home, writing its sign-in copy).
+pub async fn lock(key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    static LOCKS: Mutex<Option<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = Mutex::new(None);
+    let m = {
+        let mut g = LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(HashMap::new)
+            .entry(key.to_string())
+            .or_default()
+            .clone()
+    };
+    m.lock_owned().await
+}
 
 /// A member id the daemon uses as a folder name: 1-64 ASCII letters and digits.
 pub fn plain_id(id: &str) -> bool {
@@ -53,11 +107,18 @@ pub fn member_dir(vm: &VmConfig, bot: &str) -> Option<PathBuf> {
 /// plain folder. Returns the folder.
 pub async fn ensure(vm: &VmConfig, bot: &str) -> Result<PathBuf, String> {
     let dir = member_dir(vm, bot).ok_or("the AI member's id is not a folder name")?;
-    if images_on(vm) {
-        let homes = vm.homes.to_string_lossy().to_string();
-        let gb = vm.home_gb.to_string();
-        helper(vm, &["home-up", &homes, bot, &gb]).await?;
-    } else {
+    let _turn = lock(&format!("home:{bot}")).await;
+    if images(
+        vm,
+        &[
+            "home-up",
+            &vm.homes.to_string_lossy(),
+            bot,
+            &vm.home_gb.to_string(),
+        ],
+    )
+    .await?
+    {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     if !dir.is_dir() {
@@ -69,15 +130,35 @@ pub async fn ensure(vm: &VmConfig, bot: &str) -> Result<PathBuf, String> {
 /// Empties a member's home: the image and its mount go, the next run starts with a new one.
 pub async fn clear(vm: &VmConfig, bot: &str) -> Result<(), String> {
     let dir = member_dir(vm, bot).ok_or("the AI member's id is not a folder name")?;
-    if images_on(vm) {
-        let homes = vm.homes.to_string_lossy().to_string();
-        helper(vm, &["home-clear", &homes, bot]).await
+    let _turn = lock(&format!("home:{bot}")).await;
+    if !images(vm, &["home-clear", &vm.homes.to_string_lossy(), bot]).await? {
+        Ok(())
     } else {
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(format!("{}: {e}", dir.display())),
         }
+    }
+}
+
+/// Runs a home command of the root helper when homes are images. Ok(true): homes are plain
+/// folders here (images off, or a helper from before them), the caller does the folder work.
+async fn images(vm: &VmConfig, args: &[&str]) -> Result<bool, String> {
+    if !images_on(vm) {
+        return Ok(true);
+    }
+    if helper_has_homes(vm) == Some(false) {
+        note_old_helper();
+        return Ok(true);
+    }
+    match helper(vm, args).await {
+        Ok(()) => Ok(false),
+        Err(e) if old_helper_error(&e) => {
+            note_old_helper();
+            Ok(true)
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -194,6 +275,68 @@ mod tests {
         // Emptying a home that is not there is fine.
         clear(&v, "01BOT").await.unwrap();
         assert!(ensure(&v, "a/b").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_root_helper_from_before_the_images_keeps_plain_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let homes = tmp.path().join("homes");
+        let mut v = vm(
+            &homes.to_string_lossy(),
+            20,
+            &tmp.path().join("vms").to_string_lossy(),
+        );
+        // The helper installed before this release knows only up, export and down.
+        let old = tmp.path().join("runner-vm");
+        std::fs::write(&old, "case \"${1:-}\" in up) ;; export) ;; down) ;; esac\n").unwrap();
+        v.helper = old.to_string_lossy().to_string();
+        assert_eq!(helper_has_homes(&v), Some(false));
+        // The run gets a plain folder; the helper is never asked for home-up.
+        let dir = ensure(&v, "01BOT").await.unwrap();
+        assert_eq!(dir, homes.join("01BOT"));
+        assert!(dir.is_dir());
+        assert!(!limited(&v));
+        clear(&v, "01BOT").await.unwrap();
+        assert!(!dir.exists());
+        // What it says when it is run with home-up anyway.
+        assert!(old_helper_error(
+            "/usr/local/sbin/runner-vm home-up: runner-vm: bad slot"
+        ));
+        assert!(!old_helper_error("runner-vm: bad member id"));
+        // The helper in this checkout makes images.
+        v.helper = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/runner/runner-vm"
+        )
+        .into();
+        assert_eq!(helper_has_homes(&v), Some(true));
+    }
+
+    /// The daemon (the runner user) lists the images for the monitor: the folder is readable by
+    /// the runner's group, each image stays root's.
+    #[test]
+    fn the_image_folder_is_listable_by_the_runner() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/runner/");
+        let helper = std::fs::read_to_string(format!("{root}runner-vm")).unwrap();
+        assert!(helper.contains(r#"install -d -o root -g "$gid" -m 750 "$images""#));
+        assert!(helper.contains(r#"chown root:"$gid" "$images""#));
+        let setup = std::fs::read_to_string(format!("{root}host-setup.sh")).unwrap();
+        assert!(setup.contains(
+            r#"install -d -o root -g "$RUNNER_USER" -m 750 "$RUNNER_HOME_DATA/home-images""#
+        ));
+        assert!(!helper.contains("711") && !setup.contains("711"));
+    }
+
+    #[tokio::test]
+    async fn runs_of_one_member_take_turns() {
+        let a = lock("home:01BOT").await;
+        // Another member is not held up.
+        drop(lock("home:01OTHER").await);
+        let waiting = tokio::spawn(async { drop(lock("home:01BOT").await) });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!waiting.is_finished());
+        drop(a);
+        waiting.await.unwrap();
     }
 
     /// Unix only: a VM host is Linux, and elsewhere a 20 GB file may not be sparse.

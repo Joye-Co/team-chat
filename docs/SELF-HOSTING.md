@@ -377,7 +377,9 @@ and people who sign in with an invite code use these AI members without setting 
   members' homes are kept.
 - **From a version that shared the sign-in folders with the VMs** (before home images): as root,
   `git checkout` the new version in `/root/team-chat` and run `bash scripts/runner/host-setup.sh`
-  again, then let the daemon update. Remove `shares = [...]` from `[vm]` in `daemon.toml` if you
+  again. The daemon updates itself and may do so first: until `host-setup.sh` has run, its runs
+  keep working with the AI members' homes as plain folders without a size limit, and its log and
+  `team-chat-daemon doctor` say that the root helper must be installed again. Remove `shares = [...]` from `[vm]` in `daemon.toml` if you
   added it (the daemon skips those folders anyway). Each AI member's existing home folder moves
   into its 20 GB image on its next run; one that is larger stays a folder without a limit until
   it is emptied. Sessions from before continue: a run that resumes one gets it copied into its

@@ -1010,7 +1010,15 @@ run. The sign-in reaches the run in a form it cannot use to change the host's:
   would run out before the run's limit plus 30 minutes, the host's Codex refreshes it first
   (`codex app-server`, `account/read` with `refreshToken: true`), so a refresh never happens in
   a VM and never rotates the host's refresh token away.
-- Pi: a copy of its `auth.json` with every `refresh` emptied.
+- Pi: a copy of its `auth.json` with every `refresh` emptied. When an OAuth access token would
+  run out before the run's limit plus 30 minutes, the host's Pi refreshes it first
+  (`pi auth print-bearer-token --provider <p> --min-expiry <s>s`, output discarded); when every
+  sign-in in it has run out and cannot be renewed, the run fails before it starts.
+
+Refreshes on the host take turns (one at a time per daemon; each first rereads the host's file
+and skips when another run just renewed it), so a refresh token is never used twice. Runs of one
+member that start together take turns preparing its home (the daemon, and `flock` in the root
+helper) and writing its sign-in copy.
 
 A run that resumes a session from before per-member folders gets that one session file copied
 from the host's folder into its member's.
