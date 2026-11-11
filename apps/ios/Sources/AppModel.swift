@@ -27,6 +27,8 @@ final class AppModel: ObservableObject {
 
     /// Feature files (`AppModel+<Feature>.swift`) reach the core through this.
     private(set) var client: ChatClient?
+    /// A sentence for the sign-in screen about why the app is there (signed out elsewhere).
+    @Published var notice: String?
     private var groupsReloadQueued = false
 
     init() {
@@ -46,6 +48,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func signIn(server: String, token: String) -> String? {
         if let failure = open(server: server, token: token) { return failure }
+        notice = nil
         do {
             try Session.save(server: server, token: token)
             return nil
@@ -197,6 +200,11 @@ final class AppModel: ObservableObject {
         switch update {
         case .connection:
             connection = client.connectionState()
+            // Signed out from another device, or the token was revoked: back to sign-in.
+            if connection == "unauthorized" {
+                signOut()
+                notice = Copy.signedOutElsewhere
+            }
         case .directory:
             reloadDirectory()
         case .group:

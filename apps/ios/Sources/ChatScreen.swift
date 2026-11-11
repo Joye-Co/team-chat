@@ -102,6 +102,13 @@ struct ChatScreen: View {
                     }
                 }
             }
+            if let details = detailsRoute {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: details) {
+                        Image(systemName: "info.circle").accessibilityLabel(Copy.details)
+                    }
+                }
+            }
         }
         .quickLookPreview($preview)
         .photosPicker(isPresented: $pickingPhoto, selection: $photo, matching: .images)
@@ -126,6 +133,14 @@ struct ChatScreen: View {
     }
 
     private let bottomId = "bottom"
+
+    /// 详情: the 群's page, the other member's page in a 私聊, or the 话题's page.
+    private var detailsRoute: Route? {
+        guard let group else { return nil }
+        if !isMain { return .topicInfo(group: groupId, topic: topicId) }
+        if group.isDm { return group.peerId.map { .member(id: $0) } }
+        return .groupInfo(group: groupId)
+    }
 
     private var subtitle: String? {
         if isMain {

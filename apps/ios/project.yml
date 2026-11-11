@@ -37,11 +37,14 @@ targets:
       - Sources
       - Shared
       - Extensions/Notify/AskCategory.swift
+      - Resources
       - path: ../../.tmp/ios/gen/chat_ffi.swift
         group: Generated
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
+        # Rendered from assets/brand/src/icon-ios.svg.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # The generated bindings import the C module of the Rust core.
         OTHER_SWIFT_FLAGS: $(inherited) -Xcc -fmodule-map-file=$(CORE_GEN_DIR)/chat_ffiFFI.modulemap
         SWIFT_INCLUDE_PATHS: $(CORE_GEN_DIR)
