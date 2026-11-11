@@ -111,6 +111,25 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/topic-message-response.json", "TopicMessageResponse", { message: cm });
   ok("http/context-search-response.json", "ContextSearchResponse", { hits: [{ messageId: ID.msg, topicId: ID.topic, topicTitle: "发布", seq: 150, authorName: "张三", at: T0, snippet: "看下这张图" }] });
   bad("http/context-search-response-missing-snippet.json", "ContextSearchResponse", { hits: [{ messageId: ID.msg, topicId: ID.topic, seq: 1, authorName: "x", at: T0 }] }, "snippet is required");
+  // What a run reads of its group (chat-run artifact, card, decisions, member, topic state)
+  const art = { id: "01JBX0ART000000000000000AH", groupId: ID.general, topicId: ID.topic, title: "上线方案", kind: "file", currentVersion: 2, createdBy: ID.bot, createdAt: T0, updatedAt: T0 + 60_000 };
+  const artFile = { path: "plan.md", fileId: "01JBX0FILE00000000000000AA", size: 1200, mime: "text/markdown" };
+  const artV2 = { artifactId: art.id, version: 2, entry: "plan.md", files: [artFile], note: "改了回滚步骤", createdBy: ID.bot, createdAt: T0 + 60_000 };
+  const artV1 = { artifactId: art.id, version: 1, entry: "plan.md", files: [artFile], createdBy: ID.bot, createdAt: T0 };
+  ok("http/run-artifacts-response.json", "RunArtifactsResponse", { artifacts: [art] });
+  ok("http/run-artifact-response.json", "RunArtifactResponse", { artifact: art, versions: [artV2, artV1], version: 2, text: "# 上线方案\n1. 先灰度 10%" });
+  ok("http/run-artifact-response-binary.json", "RunArtifactResponse", { artifact: { ...art, kind: "html" }, versions: [artV1], version: 1 }, "the entry is not text: no text, read the files by id");
+  const cardDoc = { v: 2, rev: 1, intent: "ask", title: "选上线时间", fallback: "选上线时间", blocks: [] };
+  ok("http/run-card-response.json", "RunCardResponse", { topicId: ID.topic, message: cm, card: cardDoc, ask: { status: "open", from: ["张三"] }, answers: [{ actorId: ID.alice, actorName: "Alice", at: T0, value: "fri" }] });
+  ok("http/run-card-response-no-answers.json", "RunCardResponse", { topicId: ID.topic, message: cm, card: cardDoc, answers: [], answerCount: 3 }, "a private card: only the count");
+  bad("http/run-card-response-missing-answers.json", "RunCardResponse", { topicId: ID.topic, message: cm, card: cardDoc }, "answers is required");
+  const runDecision = { seq: 52, messageId: ID.msg, topicId: ID.topic, rev: 1, title: "发布吗？", actionId: "ship", actionLabel: "发布", answeredBy: ID.alice, answeredAt: T0, answeredByName: "Alice" };
+  ok("http/run-decisions-response.json", "RunDecisionsResponse", { decisions: [runDecision], hasMore: false });
+  ok("http/run-decisions-response-recorded.json", "RunDecisionsResponse", { decisions: [], hasMore: false, recorded: [{ id: "01JBX0DEC000000000000000AJ", seq: 60, topicId: null, text: "周五不发版", recordedBy: ID.owner, recordedAt: T0, recordedByName: "张三" }] }, "decisions recorded by hand");
+  bad("http/run-decisions-response-missing-name.json", "RunDecisionsResponse", { decisions: [{ ...runDecision, answeredByName: undefined }], hasMore: false }, "answeredByName is required");
+  ok("http/run-members-response.json", "RunMembersResponse", { members: [{ id: ID.owner, name: "张三", role: "产品负责人", ai: false }, { id: ID.bot, name: "小克", ai: true }] });
+  bad("http/run-members-response-missing-ai.json", "RunMembersResponse", { members: [{ id: ID.owner, name: "张三" }] }, "ai is required");
+  ok("http/topic-state-response.json", "TopicStateResponse", { topicId: ID.topic, title: "发布", text: "话题「发布」\n产出：上线方案 v2" });
 
   // Runner-backed bots
   ok("http/set-bot-runner-request.json", "SetBotRunnerRequest", { runtime: "codex", labels: ["mac", "main"], repo: { url: "https://github.com/Joye-Co/team-chat" }, baseBranch: "main", model: "gpt-5.5", envAllowlist: ["GITHUB_TOKEN"] });

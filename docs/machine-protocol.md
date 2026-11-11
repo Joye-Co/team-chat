@@ -338,7 +338,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
-| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`), see "Topic context". |
+| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
 | `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
 
 How the 1.1 daemon does each one:
@@ -701,14 +701,35 @@ with the machine token (results can be larger than a frame); they only read.
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `topic.history` | `{ before?, after?, limit? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N]` → `{ messages: ContextMessage[], hasMore }` |
-| `topic.message` | `{ messageId }` | `chat-run topic message --id M` → `{ message: ContextMessage }` |
+| `topic.history` | `{ before?, after?, limit?, topicId? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N] [--topic T]` → `{ messages: ContextMessage[], hasMore }` |
+| `topic.message` | `{ messageId, topicId? }` | `chat-run topic message --id M [--topic T]` → `{ message: ContextMessage }` |
 | `context.search` | `{ query, scope?, limit? }` | `chat-run search --query Q [--group] [--limit N]` → `{ hits: ContextHit[] }` |
 | `file.get` | `{ fileId, out? }` | `chat-run file get --id F [--out PATH]` → `{ path, name, mime, size }` |
+| `topic.state` | `{ topicId? }` | `chat-run topic state [--topic T]` → `TopicStateResponse` |
+| `artifact.list` | `{ scope?, topicId? }` | `chat-run artifact list [--group \| --topic T]` → `RunArtifactsResponse` |
+| `artifact.get` | `{ artifactId, version?, out? }` | `chat-run artifact get --id A [--version N] [--out PATH]` → `RunArtifactResponse` (with `path` when `out` is set) |
+| `card.get` | `{ messageId }` | `chat-run card get --message M` → `RunCardResponse` |
+| `decisions.list` | `{ limit? }` | `chat-run decisions list [--limit N]` → `RunDecisionsResponse` |
+| `member.list` | `{}` | `chat-run member list` → `RunMembersResponse` |
 
 ```ts
-GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=   -> { messages: ContextMessage[], hasMore: boolean }
-GET /v1/machine/runs/:id/topic/messages/:messageId              -> { message: ContextMessage }
+GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=&topic=   -> { messages: ContextMessage[], hasMore: boolean }
+GET /v1/machine/runs/:id/topic/messages/:messageId?topic=               -> { message: ContextMessage }
+GET /v1/machine/runs/:id/topic/state?topic=                     -> TopicStateResponse
+GET /v1/machine/runs/:id/artifacts?scope=topic|group&topic=     -> RunArtifactsResponse
+GET /v1/machine/runs/:id/artifacts/:artifactId?version=         -> RunArtifactResponse
+GET /v1/machine/runs/:id/cards/:messageId                       -> RunCardResponse
+GET /v1/machine/runs/:id/decisions?limit=                       -> RunDecisionsResponse
+GET /v1/machine/runs/:id/members                                -> RunMembersResponse
+TopicStateResponse = { topicId, title, text /* <= 2000 characters */ }
+RunArtifactsResponse = { artifacts: Artifact[] }
+RunArtifactResponse = { artifact: Artifact, versions: ArtifactVersion[], version, text?, truncated? }
+RunCardResponse = { topicId, message: ContextMessage, card /* CardV2 or the 1.0 card */,
+                    ask?: { status, from: string[] /* names */ },
+                    answers: { actorId, actorName, at?, value?, inputs? }[], answerCount? }
+RunDecisionsResponse = { decisions: (GroupDecision & { answeredByName })[], hasMore,
+                         recorded?: (RecordedDecision & { recordedByName })[] }
+RunMembersResponse = { members: { id, name, role?, ai: boolean }[] }
 GET /v1/machine/runs/:id/search?q=&scope=topic|group&limit=     -> { hits: ContextHit[] }
 GET /v1/machine/runs/:id/files/:fileId                          -> the file's bytes
     headers: Content-Type, Content-Length, X-File-Name (URI-encoded UTF-8)
@@ -716,8 +737,11 @@ ContextMessage = { id, seq, authorId, authorName, at /* ms */, text }
 ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
 ```
 
-- The run must be on the calling machine, active and not a side chat, as for files.
-- `topic.history` reads the run's topic, oldest first. `before` and `after` are message seqs
+- The run must be on the calling machine and active. These ops only read, so a side chat run
+  (单独问) may call them too (its group is the side chat's). Everything is of the run's own group:
+  `topicId` (`--topic`) names another topic of that group, and a topic, 产出, card or file of
+  another group is `not_found`, like an unknown one.
+- `topic.history` reads the run's topic (or `topicId`), oldest first. `before` and `after` are message seqs
   (`ContextMessage.seq`, also printed in the prompt) and exclusive. Without either it returns the
   newest messages. `limit` is 1-100, default 30. `hasMore` says that more messages lie past the page
   in the direction of the read (older without `after`, newer with it). Deleted messages are left out.
@@ -731,6 +755,21 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   `file.outside_workspace` otherwise); without `out`, to `<working folder>/.chat-files/<fileId>/<name>`
   (the folder gets a `.gitignore` of `*`). It refuses files over 100 MiB with `too_large`.
   `chat-run` waits up to 5 minutes for it.
+- `topic.state` is one compact state card of a topic, at most 2000 characters: who did what (the
+  newest authors with their last message), the 产出 with their latest versions, open cards and who
+  they wait on, the latest decisions. Members work together through 产出 and state; this is how
+  one reads where the others are.
+- `artifact.list` gives the 产出 of the run's topic (or `topicId`), or with `scope: "group"`
+  (`--group`) of the whole group, newest first (at most 100). `artifact.get` gives one 产出 with
+  all its versions; `version` (default the current one) is the one read, and `text` is its entry
+  file when that is text (`text/*`, JSON, XML, YAML, SVG; up to 200,000 characters, else
+  `truncated`). Other files are read by id with `file.get`. With `out` the daemon also writes the
+  entry file there, under the same rules as `file.get`.
+- `card.get` gives a card message of the group whole: the card document, the open ask with the
+  names it waits on, and the live answers (a private card shows only `answerCount`, as to members).
+- `decisions.list` gives the group's decisions (群里的决定), newest first, `limit` 1-100, default 20,
+  with the decisions recorded by hand. `member.list` gives the group's active members, people
+  first: name, 岗位 (`role`) and `ai` for AI members.
 - A daemon with this feature reports `context`; the server's prompt then names these commands for
   messages it left out. The `chat-run` note lists them.
 

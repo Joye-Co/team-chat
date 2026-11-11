@@ -839,6 +839,7 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
 | `GET /v1/machine/runs/:id/topic/messages`, `…/topic/messages/:messageId`, `…/search`, `…/files/:fileId` | machine token | | the run's topic context (machine-protocol.md, "Topic context") |
+| `GET /v1/machine/runs/:id/topic/state`, `…/artifacts`, `…/artifacts/:artifactId`, `…/cards/:messageId`, `…/decisions`, `…/members` | machine token | | what the run's group produced: `TopicStateResponse`, `RunArtifactsResponse`, `RunArtifactResponse`, `RunCardResponse`, `RunDecisionsResponse`, `RunMembersResponse` (machine-protocol.md, "Topic context") |
 
 Rules:
 
@@ -994,11 +995,15 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   [#42 m 01J… · 张三 · 11-08 14:02] the body (cut at 600 characters; the rest by id)
     ↪ quotes m 01J… (王五: the excerpt)
     [file f 01J… · 设计稿.png · image/png · 1280×720]
-    [产出 a 01J… v3]
+    [产出 a 01J… v3 · 上线方案]
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
-  `#42` is the message's seq. A system message (`kind: "system"`) is one line in brackets.
+  `#42` is the message's seq. A system message (`kind: "system"`) is one line in brackets. A
+  产出 line carries the 产出's current title.
+- **Members.** The executor's prompt lists the group's active members, people first, one line
+  each: name, 岗位, `AI member` for bots and `you` for the run's own member (at most 40; the rest
+  with `chat-run member list`).
 - **Budget, not a count.** The topic's first message is always there. Then the newest messages,
   newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
   between them, one line says how many and, for a machine with feature `context`, how to read them

@@ -1,0 +1,19 @@
+{
+  "kind": "RunArtifactsResponse",
+  "valid": true,
+  "value": {
+    "artifacts": [
+      {
+        "id": "01JBX0ART000000000000000AH",
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "title": "上线方案",
+        "kind": "file",
+        "currentVersion": 2,
+        "createdBy": "01JBX0BOT000000000000000AC",
+        "createdAt": 1762128000000,
+        "updatedAt": 1762128060000
+      }
+    ]
+  }
+}

@@ -19,13 +19,28 @@ pub const CONTEXT_SEARCH: &str = "context.search";
 pub const FILE_GET: &str = "file.get";
 /// Keeps something for later (docs/machine-protocol.md, "Memory notes"): POST, pending until the daily consolidation.
 pub const MEMORY_NOTE: &str = "memory.note";
+/// What the topic and the group produced: 产出, cards, decisions, members, a topic's state.
+pub const ARTIFACT_LIST: &str = "artifact.list";
+pub const ARTIFACT_GET: &str = "artifact.get";
+pub const CARD_GET: &str = "card.get";
+pub const DECISIONS_LIST: &str = "decisions.list";
+pub const MEMBER_LIST: &str = "member.list";
+pub const TOPIC_STATE: &str = "topic.state";
 pub const OPS: &[&str] = &[
     TOPIC_HISTORY,
     TOPIC_MESSAGE,
     CONTEXT_SEARCH,
     FILE_GET,
     MEMORY_NOTE,
+    ARTIFACT_LIST,
+    ARTIFACT_GET,
+    CARD_GET,
+    DECISIONS_LIST,
+    MEMBER_LIST,
+    TOPIC_STATE,
 ];
+/// `decisions.list` page size: 1-100.
+pub const MAX_DECISIONS_LIMIT: u64 = 100;
 /// Memory kinds a run may write (protocol `MemoryKind`).
 pub const MEMORY_KINDS: &[&str] = &[
     "convention",
@@ -51,7 +66,7 @@ pub const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long the daemon (and `chat-run`) wait for `op`.
 pub fn timeout(op: &str) -> Duration {
-    if op == FILE_GET {
+    if op == FILE_GET || op == ARTIFACT_GET {
         FILE_TIMEOUT
     } else {
         READ_TIMEOUT
@@ -81,6 +96,34 @@ fn number(body: &Value, k: &str, lo: u64, hi: u64) -> Result<Option<u64>, Value>
     }
 }
 
+/// `?a&b`, or nothing.
+fn query(q: Vec<String>) -> String {
+    if q.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", q.join("&"))
+    }
+}
+
+/// An id field of `body` that goes into the URL path.
+fn id_field<'a>(body: &'a Value, k: &str) -> Result<&'a str, Value> {
+    body[k]
+        .as_str()
+        .filter(|s| valid_id(s))
+        .ok_or_else(|| err("invalid", None, format!("{k} is required")))
+}
+
+/// `topic=<id>` for `topicId`: another topic of the run's group (the server refuses any other).
+fn topic(body: &Value) -> Result<Option<String>, Value> {
+    match &body["topicId"] {
+        Value::Null => Ok(None),
+        v => match v.as_str().filter(|s| valid_id(s)) {
+            Some(id) => Ok(Some(format!("topic={id}"))),
+            None => Err(err("invalid", None, "topicId must be a topic id")),
+        },
+    }
+}
+
 /// The path and query of one read op (`file.get` is not one).
 pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
     match op {
@@ -95,19 +138,51 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
                     q.push(format!("{k}={n}"));
                 }
             }
-            let q = if q.is_empty() {
-                String::new()
-            } else {
-                format!("?{}", q.join("&"))
-            };
-            Ok(format!("/v1/machine/runs/{run}/topic/messages{q}"))
+            q.extend(topic(body)?);
+            Ok(format!("/v1/machine/runs/{run}/topic/messages{}", query(q)))
         }
         TOPIC_MESSAGE => {
-            let Some(id) = body["messageId"].as_str().filter(|s| valid_id(s)) else {
-                return Err(err("invalid", None, "messageId is required"));
-            };
-            Ok(format!("/v1/machine/runs/{run}/topic/messages/{id}"))
+            let id = id_field(body, "messageId")?;
+            let q = query(topic(body)?.into_iter().collect());
+            Ok(format!("/v1/machine/runs/{run}/topic/messages/{id}{q}"))
         }
+        TOPIC_STATE => {
+            let q = query(topic(body)?.into_iter().collect());
+            Ok(format!("/v1/machine/runs/{run}/topic/state{q}"))
+        }
+        ARTIFACT_LIST => {
+            let mut q = vec![];
+            match &body["scope"] {
+                Value::Null => {}
+                v => match v.as_str() {
+                    Some(s @ ("topic" | "group")) => q.push(format!("scope={s}")),
+                    _ => return Err(err("invalid", None, "scope must be topic or group")),
+                },
+            }
+            if body["scope"] == "group" && !body["topicId"].is_null() {
+                return Err(err("invalid", None, "topicId goes with scope topic"));
+            }
+            q.extend(topic(body)?);
+            Ok(format!("/v1/machine/runs/{run}/artifacts{}", query(q)))
+        }
+        ARTIFACT_GET => {
+            let id = id_field(body, "artifactId")?;
+            let q = number(body, "version", 1, u32::MAX as u64)?
+                .map(|n| vec![format!("version={n}")])
+                .unwrap_or_default();
+            Ok(format!("/v1/machine/runs/{run}/artifacts/{id}{}", query(q)))
+        }
+        CARD_GET => {
+            let id = id_field(body, "messageId")?;
+            Ok(format!("/v1/machine/runs/{run}/cards/{id}"))
+        }
+        DECISIONS_LIST => {
+            let q = number(body, "limit", 1, MAX_DECISIONS_LIMIT)?
+                .map(|n| vec![format!("limit={n}")])
+                .unwrap_or_default();
+            Ok(format!("/v1/machine/runs/{run}/decisions{}", query(q)))
+        }
+        MEMBER_LIST => Ok(format!("/v1/machine/runs/{run}/members")),
         CONTEXT_SEARCH => {
             let Some(query) = body["query"].as_str().filter(|s| !s.trim().is_empty()) else {
                 return Err(err("invalid", None, "query is required"));
@@ -440,7 +515,39 @@ pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
         (Ok(u), Ok(c)) => (u, c),
         (Err(e), _) | (_, Err(e)) => return e,
     };
-    answer(c.get(u).bearer_auth(local.token.as_str()).send().await).await
+    let mut res = answer(c.get(u).bearer_auth(local.token.as_str()).send().await).await;
+    // `artifact get --out`: the entry file of the version read goes there too.
+    if op == ARTIFACT_GET
+        && res["ok"] == true
+        && let Some(out) = body["out"].as_str().filter(|s| !s.is_empty())
+    {
+        let Some(file_id) = entry_file(&res["result"]) else {
+            return err("not_found", None, "the version has no entry file");
+        };
+        let got = get(local, &json!({ "fileId": file_id, "out": out })).await;
+        if got["ok"] != true {
+            return got;
+        }
+        res["result"]["path"] = got["result"]["path"].clone();
+    }
+    res
+}
+
+/// The file id of the entry file of the version an `artifact.get` result read.
+pub fn entry_file(result: &Value) -> Option<String> {
+    let version = result["version"].as_u64()?;
+    let v = result["versions"]
+        .as_array()?
+        .iter()
+        .find(|v| v["version"].as_u64() == Some(version))?;
+    let entry = v["entry"].as_str()?;
+    v["files"]
+        .as_array()?
+        .iter()
+        .find(|f| f["path"].as_str() == Some(entry))?["fileId"]
+        .as_str()
+        .filter(|s| valid_id(s))
+        .map(str::to_string)
 }
 
 /// Links that lead out of a working folder, for the tests of the path rules here and in
@@ -543,6 +650,51 @@ mod tests {
             p(CONTEXT_SEARCH, json!({ "query": "x" })).unwrap(),
             "/v1/machine/runs/R1/search?q=x&scope=topic"
         );
+        // Another topic of the group, and what the group produced.
+        assert_eq!(
+            p(TOPIC_HISTORY, json!({ "limit": 5, "topicId": "T2" })).unwrap(),
+            "/v1/machine/runs/R1/topic/messages?limit=5&topic=T2"
+        );
+        assert_eq!(
+            p(TOPIC_MESSAGE, json!({ "messageId": "M1", "topicId": "T2" })).unwrap(),
+            "/v1/machine/runs/R1/topic/messages/M1?topic=T2"
+        );
+        assert_eq!(
+            p(TOPIC_STATE, json!({})).unwrap(),
+            "/v1/machine/runs/R1/topic/state"
+        );
+        assert_eq!(
+            p(TOPIC_STATE, json!({ "topicId": "T2" })).unwrap(),
+            "/v1/machine/runs/R1/topic/state?topic=T2"
+        );
+        assert_eq!(
+            p(ARTIFACT_LIST, json!({})).unwrap(),
+            "/v1/machine/runs/R1/artifacts"
+        );
+        assert_eq!(
+            p(ARTIFACT_LIST, json!({ "scope": "group" })).unwrap(),
+            "/v1/machine/runs/R1/artifacts?scope=group"
+        );
+        assert_eq!(
+            p(ARTIFACT_LIST, json!({ "topicId": "T2" })).unwrap(),
+            "/v1/machine/runs/R1/artifacts?topic=T2"
+        );
+        assert_eq!(
+            p(ARTIFACT_GET, json!({ "artifactId": "A1", "version": 3 })).unwrap(),
+            "/v1/machine/runs/R1/artifacts/A1?version=3"
+        );
+        assert_eq!(
+            p(CARD_GET, json!({ "messageId": "M1" })).unwrap(),
+            "/v1/machine/runs/R1/cards/M1"
+        );
+        assert_eq!(
+            p(DECISIONS_LIST, json!({ "limit": 7 })).unwrap(),
+            "/v1/machine/runs/R1/decisions?limit=7"
+        );
+        assert_eq!(
+            p(MEMBER_LIST, json!({})).unwrap(),
+            "/v1/machine/runs/R1/members"
+        );
         for (op, bad) in [
             (TOPIC_HISTORY, json!({ "limit": 0 })),
             (TOPIC_HISTORY, json!({ "limit": 101 })),
@@ -553,6 +705,14 @@ mod tests {
             (CONTEXT_SEARCH, json!({ "query": "x", "limit": 51 })),
             (CONTEXT_SEARCH, json!({ "query": "x", "scope": "all" })),
             ("card.post", json!({})),
+            (TOPIC_HISTORY, json!({ "topicId": "../x" })),
+            (TOPIC_STATE, json!({ "topicId": 3 })),
+            (ARTIFACT_LIST, json!({ "scope": "all" })),
+            (ARTIFACT_LIST, json!({ "scope": "group", "topicId": "T2" })),
+            (ARTIFACT_GET, json!({})),
+            (ARTIFACT_GET, json!({ "artifactId": "A1", "version": 0 })),
+            (CARD_GET, json!({ "messageId": "a/b" })),
+            (DECISIONS_LIST, json!({ "limit": 101 })),
         ] {
             let e = p(op, bad.clone()).unwrap_err();
             assert_eq!(e["ok"], false, "{op} {bad}");
@@ -819,6 +979,61 @@ mod tests {
         assert_eq!(a["error"]["reason"], "file.outside_workspace");
         // Refused before any download.
         assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn artifact_get_prints_the_json_and_writes_the_entry_with_out() {
+        let root = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(root.path()).unwrap();
+        let files =
+            json!([{ "path": "plan.md", "fileId": "F2", "size": 9, "mime": "text/markdown" }]);
+        let res = json!({
+            "artifact": { "id": "A1", "title": "上线方案", "currentVersion": 2 },
+            "versions": [
+                { "artifactId": "A1", "version": 2, "entry": "plan.md", "files": files },
+                { "artifactId": "A1", "version": 1, "entry": "old.md", "files": [{ "path": "old.md", "fileId": "F1" }] },
+            ],
+            "version": 2,
+            "text": "# 上线方案",
+        });
+        assert_eq!(entry_file(&res).as_deref(), Some("F2"));
+        assert_eq!(
+            entry_file(&json!({ "version": 1, "versions": res["versions"] })).as_deref(),
+            Some("F1")
+        );
+        assert_eq!(
+            entry_file(&json!({ "version": 3, "versions": res["versions"] })),
+            None
+        );
+        // The canned server answers every request with the same body: the JSON, then the file.
+        let (url, seen) = server("200 OK", json_headers(), res.to_string().into_bytes()).await;
+        let l = local(&url, root.path());
+        let a = handle(ARTIFACT_GET, &json!({ "artifactId": "A1" }), &l).await;
+        assert_eq!(a, json!({ "ok": true, "result": res }));
+        let a = handle(
+            ARTIFACT_GET,
+            &json!({ "artifactId": "A1", "version": 2, "out": "plan.md" }),
+            &l,
+        )
+        .await;
+        assert_eq!(a["result"]["text"], "# 上线方案");
+        assert_eq!(
+            a["result"]["path"],
+            real.join("plan.md").display().to_string()
+        );
+        assert!(real.join("plan.md").exists());
+        let seen = seen.lock().unwrap().clone();
+        assert!(seen[0].starts_with("GET /v1/machine/runs/R1/artifacts/A1 "));
+        assert!(seen[1].starts_with("GET /v1/machine/runs/R1/artifacts/A1?version=2 "));
+        assert!(seen[2].starts_with("GET /v1/machine/runs/R1/files/F2 "));
+        // Out must stay in the working folder.
+        let a = handle(
+            ARTIFACT_GET,
+            &json!({ "artifactId": "A1", "out": "../plan.md" }),
+            &l,
+        )
+        .await;
+        assert_eq!(a["error"]["reason"], "file.outside_workspace");
     }
 
     #[tokio::test]
