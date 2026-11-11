@@ -2505,6 +2505,20 @@ Rules:
 - Deactivating a person revokes their personal machines (as `DELETE /v1/machines/:id`).
 - Old clients ignore `teamOwner`, `ownerId` and `personalBots` and show a 所有者 as an admin.
 
+### What each CLI can do
+
+```ts
+CliInfo += { resume?: boolean,   // runs continue the topic's last session (ACP: the agent has session/load)
+             aside?: boolean }   // the CLI has a read-only mode for 单独问
+                                 // absent (an older daemon): true for kinds "claude" and "codex" only
+```
+
+`Machine.clis` carries them. The server sends `resumeSessionId` (and the short resume prompt)
+only for a CLI with `resume`, and gives a side chat only to a machine whose CLI for the AI
+member has `aside`. A member's settings read them, with `efforts` (absent or empty: no
+思考强度), to say what the runtime cannot do instead of offering it. Machine side:
+machine-protocol.md, "resume".
+
 ## Participants, chains and relays
 
 Module: `relay.ts` / `relay.rs`. Several AI members may work in one topic, at once or one after

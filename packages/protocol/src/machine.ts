@@ -83,6 +83,10 @@ export const CliInfo = z.object({
   efforts: z.array(Effort).max(MAX_EFFORTS).optional(),
   /** Feature "gates": runs of this CLI stop at `run.assign.gates` matches; absent = they cannot. */
   gates: z.boolean().optional(),
+  /** Usable (feature "resume"): runs of this CLI continue `run.assign.resumeSessionId`; absent = only kinds "claude" and "codex" do. */
+  resume: z.boolean().optional(),
+  /** Usable (feature "aside"): this CLI has a read-only mode for side chats; absent = only kinds "claude" and "codex" do. */
+  aside: z.boolean().optional(),
 });
 export type CliInfo = z.infer<typeof CliInfo>;
 
