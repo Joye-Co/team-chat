@@ -22,10 +22,18 @@ pub const fn drawn() -> bool {
     cfg!(not(target_os = "macos"))
 }
 
+thread_local! {
+    /// The windows whose content sits under a caption strip ([`frame`]).
+    static FRAMED: std::cell::RefCell<std::collections::HashSet<gpui::WindowId>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 /// The height the caption strip takes above `window`'s content: none on the
-/// Mac and in full screen.
+/// Mac, in full screen, and in a window that draws no strip (the self-tests'
+/// own sample windows).
 pub fn height(window: &Window) -> gpui::Pixels {
-    if drawn() && !window.is_fullscreen() {
+    let framed = FRAMED.with(|f| f.borrow().contains(&window.window_handle().window_id()));
+    if drawn() && framed && !window.is_fullscreen() {
         metrics::CAPTION
     } else {
         gpui::px(0.)
@@ -98,6 +106,7 @@ fn frame(
     if !drawn() || window.is_fullscreen() {
         return content.into_any_element();
     }
+    FRAMED.with(|f| f.borrow_mut().insert(window.window_handle().window_id()));
     let k = native_colors(cx);
     div()
         .size_full()
