@@ -371,8 +371,7 @@ async function publishRelease(env: Env, request: Request, url: URL, version: str
 
 /** Rate limited per IP; the code is never logged (this function logs nothing). */
 async function downloadFor(env: Env, request: Request, raw: string, rawPlatform: string | null = null): Promise<Response> {
-  // An unknown platform gets the DMG, as every link did before platforms.
-  const platform = ReleasePlatform.safeParse(rawPlatform).data ?? "macos";
+  const platform = downloadPlatform(rawPlatform, request.headers.get("user-agent"));
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   const key = `download:${await sha256Hex(ip)}`;
   if (!(await rateHit(env.DB, key, DOWNLOAD_RATE.windowMs, DOWNLOAD_RATE.max))) {
@@ -389,6 +388,17 @@ async function downloadFor(env: Env, request: Request, raw: string, rawPlatform:
   const r = await latestRelease(env.DB, platform);
   if (!r) return plain(404, platform === "macos" ? "No release yet.\n" : "No release for this system yet.\n");
   return serveRelease(request, env, r, platform);
+}
+
+/**
+ * Which file an invite download gets. A named platform wins; an unknown name gets the DMG, as
+ * every link did before platforms. With no name (a link from before the fragment form, opened
+ * directly, or a page script that could not tell) a browser that says it runs on Windows gets
+ * the installer: the DMG is of no use there.
+ */
+export function downloadPlatform(named: string | null, userAgent: string | null): ReleasePlatform {
+  if (named === null && /\bWindows\b/.test(userAgent ?? "")) return "windows";
+  return ReleasePlatform.safeParse(named).data ?? "macos";
 }
 
 /**

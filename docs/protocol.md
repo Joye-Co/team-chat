@@ -654,7 +654,12 @@ Module: `updates.ts` / `updates.rs`.
 | `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }` (`latest` is the newest DMG); a withdrawn release is not `latest` and not downloadable, on every platform |
 | `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
 | `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
-| `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG (links made before the fragment form) |
+| `GET /download?code=<invite code>&platform=` | anyone with a valid invite code | | the same (links made before the fragment form) |
+
+The invite download picks the file like this: a `platform` the server knows wins; an unknown one
+gets the DMG; with none, a request whose `User-Agent` says Windows gets the installer and every
+other request the DMG. The page of `GET /download` posts `platform=windows` from a browser on
+Windows. When that platform has no release the answer is 404, never the other platform's file.
 
 ```ts
 ReleasePlatform = "macos" | "windows"   // macos = the DMG; windows = the installer (-setup.exe, x64)
