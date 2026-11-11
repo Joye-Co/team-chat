@@ -1,0 +1,8 @@
+{
+  "kind": "QrClaimRequest",
+  "valid": true,
+  "value": {
+    "code": "7k2m 9qpx",
+    "deviceName": "Joye 的 iPhone"
+  }
+}
