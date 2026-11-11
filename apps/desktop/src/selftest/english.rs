@@ -45,13 +45,16 @@ fn table() -> &'static Table {
                 exact.insert(zh, en);
             }
         }
-        patterns.sort_by_key(|(parts, _)| std::cmp::Reverse(parts.iter().map(|p| p.len()).sum::<usize>()));
+        patterns.sort_by_key(|(parts, _)| {
+            std::cmp::Reverse(parts.iter().map(|p| p.len()).sum::<usize>())
+        });
         Table { exact, patterns }
     })
 }
 
 fn has_chinese(text: &str) -> bool {
-    text.chars().any(|c| ('\u{3000}'..='\u{9fff}').contains(&c) || ('\u{ff00}'..='\u{ffef}').contains(&c))
+    text.chars()
+        .any(|c| ('\u{3000}'..='\u{9fff}').contains(&c) || ('\u{ff00}'..='\u{ffef}').contains(&c))
 }
 
 /// Matches `text` against a source split at `{}`, giving the filled parts.
@@ -120,7 +123,10 @@ fn translate(text: &str) -> Option<String> {
     }
     // Text of several lines: each line on its own.
     if core.contains('\n') {
-        let lines: Vec<String> = text.split('\n').map(|l| translate(l).unwrap_or_else(|| l.to_string())).collect();
+        let lines: Vec<String> = text
+            .split('\n')
+            .map(|l| translate(l).unwrap_or_else(|| l.to_string()))
+            .collect();
         return Some(lines.join("\n"));
     }
     // A leading separator: "· 今天 09:12".
@@ -138,7 +144,10 @@ fn translate(text: &str) -> Option<String> {
     }
     // Bidi isolates around names and titles: translate what is inside each.
     if core.contains('\u{2068}') {
-        let plain: String = core.chars().filter(|c| *c != '\u{2068}' && *c != '\u{2069}').collect();
+        let plain: String = core
+            .chars()
+            .filter(|c| *c != '\u{2068}' && *c != '\u{2069}')
+            .collect();
         if let Some(en) = translate(&plain) {
             return Some(format!("{lead}{en}{trail}"));
         }
@@ -147,7 +156,16 @@ fn translate(text: &str) -> Option<String> {
     // "A · B · C": each part on its own.
     if core.contains(" · ") {
         let parts: Vec<&str> = core.split(" · ").collect();
-        let done: Vec<Option<String>> = parts.iter().map(|p| if has_chinese(p) { translate(p) } else { Some((*p).to_string()) }).collect();
+        let done: Vec<Option<String>> = parts
+            .iter()
+            .map(|p| {
+                if has_chinese(p) {
+                    translate(p)
+                } else {
+                    Some((*p).to_string())
+                }
+            })
+            .collect();
         if done.iter().all(Option::is_some) {
             let en: Vec<String> = done.into_iter().map(Option::unwrap).collect();
             return Some(format!("{lead}{}{trail}", en.join(" · ")));
@@ -176,9 +194,17 @@ fn translate(text: &str) -> Option<String> {
 /// The shortest text this run's text was cut from, among the entries and the texts seen whole.
 fn full_for_prefix(prefix: &str) -> Option<String> {
     let t = table();
-    let from_table = t.exact.keys().filter(|k| k.starts_with(prefix) && k.len() > prefix.len()).map(|k| k.to_string());
+    let from_table = t
+        .exact
+        .keys()
+        .filter(|k| k.starts_with(prefix) && k.len() > prefix.len())
+        .map(|k| k.to_string());
     let seen = SEEN.lock().unwrap();
-    let from_seen = seen.iter().filter(|k| k.starts_with(prefix) && k.len() > prefix.len()).cloned().collect::<Vec<_>>();
+    let from_seen = seen
+        .iter()
+        .filter(|k| k.starts_with(prefix) && k.len() > prefix.len())
+        .cloned()
+        .collect::<Vec<_>>();
     from_table.chain(from_seen).min_by_key(|k| k.len())
 }
 
@@ -203,7 +229,10 @@ pub fn write_misses(dir: &Path) {
         let _ = std::fs::remove_file(path);
         return;
     }
-    let text: String = misses.iter().map(|m| format!("{}\n", m.replace('\n', "\\n"))).collect();
+    let text: String = misses
+        .iter()
+        .map(|m| format!("{}\n", m.replace('\n', "\\n")))
+        .collect();
     if let Err(e) = std::fs::write(&path, text) {
         eprintln!("could not write {}: {e}", path.display());
     } else {
@@ -228,8 +257,14 @@ mod tests {
     #[test]
     fn fills_patterns_and_parts() {
         assert_eq!(translate("已用 55 分钟").as_deref(), Some("55 min elapsed"));
-        assert_eq!(translate("产出「重连测试报告」v2").as_deref(), Some("Artifact “Reconnect test report” v2"));
-        assert_eq!(translate("Tata · 写第二版需求 · 已用 55 分钟").as_deref(), Some("Tata · Writing spec v2 · 55 min elapsed"));
+        assert_eq!(
+            translate("产出「重连测试报告」v2").as_deref(),
+            Some("Artifact “Reconnect test report” v2")
+        );
+        assert_eq!(
+            translate("Tata · 写第二版需求 · 已用 55 分钟").as_deref(),
+            Some("Tata · Writing spec v2 · 55 min elapsed")
+        );
         assert_eq!(translate("缺 李雪").as_deref(), Some("Lisa can't come"));
         assert_eq!(translate("Forge"), None);
     }
