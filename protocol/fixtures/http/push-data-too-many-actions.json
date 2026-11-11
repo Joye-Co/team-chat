@@ -1,0 +1,33 @@
+{
+  "kind": "PushData",
+  "valid": false,
+  "description": "at most 3 actions",
+  "value": {
+    "v": 1,
+    "reason": "waiting",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "seq": 1,
+    "ask": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "rev": 2,
+      "actions": [
+        {
+          "id": "ok",
+          "label": "可以"
+        },
+        {
+          "id": "no",
+          "label": "先不"
+        },
+        {
+          "id": "a",
+          "label": "A"
+        },
+        {
+          "id": "b",
+          "label": "B"
+        }
+      ]
+    }
+  }
+}

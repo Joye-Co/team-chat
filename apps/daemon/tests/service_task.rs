@@ -23,12 +23,16 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("run") {
         windows::stand_in(&args[2..]);
     }
-    println!("\nrunning 2 tests");
+    println!("\nrunning 4 tests");
     windows::a_program_others_can_replace_is_refused();
     println!("test a_program_others_can_replace_is_refused ... ok");
     windows::the_task_keeps_the_daemon_running();
     println!("test the_task_keeps_the_daemon_running ... ok");
-    println!("\ntest result: ok. 2 passed; 0 failed");
+    windows::a_second_daemon_of_the_config_does_not_run();
+    println!("test a_second_daemon_of_the_config_does_not_run ... ok");
+    windows::a_failed_install_leaves_nothing();
+    println!("test a_failed_install_leaves_nothing ... ok");
+    println!("\ntest result: ok. 4 passed; 0 failed");
 }
 
 #[cfg(windows)]
@@ -59,6 +63,24 @@ mod windows {
         let config = PathBuf::from(arg(args, "--config").expect("--config"));
         let log = arg(args, "--log-file").expect("--log-file");
         service::log_to(Path::new(log)).expect("log file");
+        // As the daemon: the only one of this config, or none. A stand-in that is not says so
+        // in the log and in a file the test counts, and ends.
+        let _instance = match service::single_instance(&config) {
+            Ok(i) => i,
+            Err(e) => {
+                eprintln!("stand-in {} not started: {e}", std::process::id());
+                let refused = config.with_extension("refused");
+                let n = std::fs::read_to_string(&refused)
+                    .ok()
+                    .and_then(|t| t.trim().parse::<u32>().ok())
+                    .unwrap_or(0);
+                let _ = std::fs::write(&refused, (n + 1).to_string());
+                std::process::exit(2);
+            }
+        };
+        service::stoppable(Path::new(log)).expect("stop event and pid file");
+        // A stand-in that is told to takes its time to stop, like a daemon with a run.
+        let slow = config.with_extension("slow-stop").exists();
         // Whether this process has a console (the headless console host's).
         let mut list = [0u32; 4];
         // SAFETY: the buffer has room for the count passed.
@@ -79,9 +101,12 @@ mod windows {
         std::fs::rename(&tmp, state_file(&config)).unwrap();
         eprintln!("stand-in started: {state}");
         // Asked to stop (uninstall, restart): the daemon shuts down.
-        std::thread::spawn(|| {
+        std::thread::spawn(move || {
             service::wait_stop();
             eprintln!("asked to stop");
+            if slow {
+                std::thread::sleep(Duration::from_secs(8));
+            }
             std::process::exit(0);
         });
         let start = Instant::now();
@@ -155,6 +180,109 @@ mod windows {
         fn drop(&mut self) {
             let _ = service::uninstall_task(&self.name, &self.dir, true);
         }
+    }
+
+    /// The pids of the running programs named `image`.
+    fn pids_of(image: &str) -> Vec<u32> {
+        let out = Command::new("tasklist")
+            .args(["/FI", &format!("IMAGENAME eq {image}"), "/FO", "CSV", "/NH"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.split(',').nth(1)?.trim_matches('"').parse().ok())
+            .collect()
+    }
+
+    /// One daemon per user and config: a second one started by hand with the same config
+    /// (as the Task Scheduler can, while the first shuts down) ends at once and leaves the
+    /// first one's pid file alone; with another config it runs.
+    pub fn a_second_daemon_of_the_config_does_not_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("stand-in-2.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+        let start = |dir: &str| {
+            let dir = tmp.path().join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("daemon.toml");
+            if !config.exists() {
+                std::fs::write(&config, "").unwrap();
+            }
+            let child = Command::new(&exe)
+                .args(["run", "--config"])
+                .arg(&config)
+                .arg("--log-file")
+                .arg(dir.join("daemon.log"))
+                .spawn()
+                .unwrap();
+            (child, config, dir)
+        };
+        let (mut first, config, dir) = start("a");
+        let running = wait_running(&config, None, Duration::from_secs(30), "first");
+        assert_eq!(running.pid, first.id());
+        let pid_file = std::fs::read_to_string(service::task_pid_file(&dir)).unwrap();
+
+        let (mut second, _, _) = start("a");
+        let code = second.wait().unwrap().code();
+        assert_eq!(
+            code,
+            Some(2),
+            "the second daemon of the config ended at once"
+        );
+        assert_eq!(
+            std::fs::read_to_string(config.with_extension("refused")).unwrap(),
+            "1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(service::task_pid_file(&dir)).unwrap(),
+            pid_file,
+            "the first daemon's pid file is as it was"
+        );
+        assert!(daemon::winjob::pid_alive(first.id()));
+
+        // Another config is another daemon.
+        let (mut other, other_config, other_dir) = start("b");
+        wait_running(
+            &other_config,
+            None,
+            Duration::from_secs(30),
+            "another config",
+        );
+
+        // Stopping the first by its pid file leaves the other; and once the first is gone
+        // its config can be run again.
+        assert_eq!(service::stop_daemon(&dir), Ok(true));
+        let _ = first.wait();
+        assert!(daemon::winjob::pid_alive(other.id()));
+        let (mut again, _, _) = start("a");
+        wait_running(&config, Some(running.pid), Duration::from_secs(30), "again");
+        for (child, dir) in [(&mut again, &dir), (&mut other, &other_dir)] {
+            assert_eq!(service::stop_daemon(dir), Ok(true));
+            let _ = child.wait();
+        }
+    }
+
+    /// An install whose task cannot be registered leaves nothing: no definition file (the
+    /// app reads it as "this computer is set up"), no repair copy, no folder.
+    pub fn a_failed_install_leaves_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("state");
+        let exe = tmp.path().join("stand-in-3.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+        let config = tmp.path().join("daemon.toml");
+        std::fs::write(&config, "").unwrap();
+        // The Task Scheduler takes no task of this name (a `*` cannot be in one).
+        let name = format!("{}.bad*name-{}", service::task_name(), std::process::id());
+        let err = service::install_task(&name, &exe, &config, &dir, true)
+            .expect_err("a task with this name cannot be registered");
+        println!("  refused: {err}");
+        assert!(!service::task_exists(&name));
+        assert!(!service::task_file(&dir).exists(), "no definition file");
+        assert!(
+            !dir.exists(),
+            "nothing left: {:?}",
+            std::fs::read_dir(&dir).map(|d| d.count())
+        );
     }
 
     /// A program that other users of the computer can replace is not registered: the task
@@ -268,8 +396,85 @@ mod windows {
         );
         assert!(exe.is_file() && !aside.exists(), "the program file is back");
 
-        // Uninstalled: no task, no process.
+        // A restart while the daemon is slow to stop (it has a run to cancel) and the task
+        // is asked to start again and again meanwhile, as its every-minute trigger does: the
+        // starts that come while the old daemon still runs end at once (one daemon per
+        // config), and afterwards exactly one daemon runs, the one the pid file names.
+        std::fs::write(config.with_extension("slow-stop"), "").unwrap();
+        let slow = {
+            // The running stand-in read the marker at its start: start one that has it.
+            service::restart_task(&name, &dir).expect("restart");
+            wait_running(
+                &config,
+                Some(third.pid),
+                Duration::from_secs(60),
+                "slow one",
+            )
+        };
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let trigger = {
+            let (stop, name) = (stop.clone(), name.clone());
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = schtasks(&["/Run", "/TN", &name]);
+                    std::thread::sleep(Duration::from_millis(400));
+                }
+            })
+        };
+        std::thread::sleep(Duration::from_secs(1));
+        service::restart_task(&name, &dir).expect("restart under starts");
+        let after = wait_running(
+            &config,
+            Some(slow.pid),
+            Duration::from_secs(90),
+            "started after a slow stop",
+        );
+        std::thread::sleep(Duration::from_secs(3));
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        trigger.join().unwrap();
+        assert!(!daemon::winjob::pid_alive(slow.pid), "the old daemon ended");
+        let image = exe.file_name().unwrap().to_string_lossy().into_owned();
+        wait_until(Duration::from_secs(30), "one daemon runs", || {
+            pids_of(&image).len() == 1
+        });
+        let only = pids_of(&image)[0];
+        let named: u32 = std::fs::read_to_string(service::task_pid_file(&dir))
+            .expect("the pid file is there")
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(named, only, "the pid file names the daemon that runs");
+        let third = Running {
+            pid: only,
+            console: after.console,
+        };
+
+        // Uninstalled while the daemon is slow to stop and starts keep coming: no task, no
+        // process, and none comes back.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let trigger = {
+            let (stop, name) = (stop.clone(), name.clone());
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = schtasks(&["/Run", "/TN", &name]);
+                    std::thread::sleep(Duration::from_millis(400));
+                }
+            })
+        };
+        std::thread::sleep(Duration::from_secs(1));
         service::uninstall_task(&name, &dir, true).expect("uninstall");
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        trigger.join().unwrap();
+        wait_until(Duration::from_secs(30), "no daemon runs", || {
+            pids_of(&image).is_empty()
+        });
+        assert!(
+            !service::task_pid_file(&dir).exists(),
+            "the pid file is gone"
+        );
+        // Uninstalled: no task, no process.
         assert!(!service::task_exists(&name));
         assert!(!file.exists());
         wait_until(Duration::from_secs(30), "the daemon ended", || {

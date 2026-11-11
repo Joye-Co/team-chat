@@ -785,3 +785,44 @@ fn reedit_puts_the_recalled_text_back_after_the_draft(cx: &mut TestAppContext) {
     });
     assert_eq!(h.text(cx), "先写的\n撤回的");
 }
+
+/// What Windows puts on the clipboard for copied spreadsheet cells: the text and a
+/// picture of it. The Mac's pasteboard gives only the text then, so does the composer.
+#[test]
+fn text_that_comes_with_its_picture_is_pasted_as_text() {
+    let picture = gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0x89, b'P', b'N', b'G']);
+    let text = || ClipboardEntry::String(gpui::ClipboardString::new("渠道\t新增".into()));
+    let both = [text(), ClipboardEntry::Image(picture.clone())];
+    assert!(clipboard_files(&both).is_empty());
+    // A picture alone, or with empty text, is still a picture.
+    assert_eq!(
+        clipboard_files(&[ClipboardEntry::Image(picture.clone())]).len(),
+        1
+    );
+    let blank = ClipboardEntry::String(gpui::ClipboardString::new("  ".into()));
+    assert_eq!(
+        clipboard_files(&[blank, ClipboardEntry::Image(picture)]).len(),
+        1
+    );
+}
+
+/// A clipboard bitmap arrives from Windows as a BMP file and is sent as a PNG.
+#[test]
+fn a_pasted_bitmap_is_sent_as_png() {
+    let pixels = image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 255]));
+    let mut bmp = Vec::new();
+    pixels
+        .write_to(&mut std::io::Cursor::new(&mut bmp), image::ImageFormat::Bmp)
+        .unwrap();
+    let picture = gpui::Image::from_bytes(gpui::ImageFormat::Bmp, bmp);
+    let NewFile::Image {
+        mime,
+        extension,
+        bytes,
+    } = clipboard_image(&picture)
+    else {
+        panic!("a picture");
+    };
+    assert_eq!((mime.as_str(), extension.as_str()), ("image/png", "png"));
+    assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+}

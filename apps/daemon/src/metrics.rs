@@ -690,14 +690,20 @@ mod tests {
         let (total, avail) = host::memory().expect("memory");
         assert!(total > 0 && avail <= total, "{total} {avail}");
         assert!(host::uptime_secs().is_some());
-        // Burn some CPU so the counters move, then a second reading gives a share.
-        let until = Instant::now() + std::time::Duration::from_millis(300);
+        // Burn some CPU until the counters move (their ticks are coarse), then a second
+        // reading gives a share.
+        let until = Instant::now() + std::time::Duration::from_secs(10);
         let mut x = 0u64;
-        while Instant::now() < until {
-            x = x.wrapping_mul(31).wrapping_add(1);
-        }
-        std::hint::black_box(x);
-        let b = host::cpu_times().expect("cpu times");
+        let b = loop {
+            for _ in 0..1_000_000 {
+                x = x.wrapping_mul(31).wrapping_add(1);
+            }
+            std::hint::black_box(x);
+            let b = host::cpu_times().expect("cpu times");
+            if b.total > a.total || Instant::now() > until {
+                break b;
+            }
+        };
         assert!(b.total > a.total, "{a:?} {b:?}");
         let pct = busy_pct(&a, &b).expect("a share");
         assert!((0.0..=100.0).contains(&pct), "{pct}");

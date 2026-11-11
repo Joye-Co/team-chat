@@ -29,6 +29,8 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("--fake-tick") => fake_tick(Path::new(&args[2])),
         Some("--fake-mid") => fake_mid(),
+        Some("--fake-churn") => fake_churn(),
+        Some("--fake-once") => fake_once(Path::new(&args[2])),
         _ => {}
     }
     if std::env::var(FAKE).as_deref() == Ok("cli") {
@@ -47,6 +49,10 @@ fn main() {
         (
             "pause_stops_the_tree_and_resume_lets_it_go_on",
             Box::pin(pause_stops_the_tree_and_resume_lets_it_go_on()),
+        ),
+        (
+            "pause_holds_a_tree_that_keeps_starting_processes",
+            Box::pin(pause_holds_a_tree_that_keeps_starting_processes()),
         ),
         (
             "an_npm_shim_starts_the_cli_without_cmd_exe",
@@ -92,6 +98,43 @@ fn fake_tick(file: &Path) -> ! {
             let _ = f.write_all(b"x\n");
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+    std::process::exit(0)
+}
+
+/// Appends one line to `file`, stays for a moment and ends: one of the short-lived processes
+/// of [`fake_churn`].
+fn fake_once(file: &Path) -> ! {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(file)
+    {
+        let _ = f.write_all(b"x\n");
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    std::process::exit(0)
+}
+
+/// A tool under load: starts a new short-lived process every 20 ms (a build, a test runner),
+/// each of which writes a line to `churn.ticks`.
+fn fake_churn() -> ! {
+    std::fs::write("churn.pid", std::process::id().to_string()).unwrap();
+    let end = Instant::now() + FAKE_LIFE;
+    let mut running: Vec<std::process::Child> = vec![];
+    while Instant::now() < end {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.arg("--fake-once")
+            .arg("churn.ticks")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(child) = c.spawn() {
+            running.push(child);
+        }
+        running.retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+        std::thread::sleep(Duration::from_millis(20));
     }
     std::process::exit(0)
 }
@@ -177,6 +220,17 @@ fn fake_cli(args: &[String]) -> ! {
         }
         n += 1;
         let mid = format!("msg_{n}");
+        if text.contains("churn") {
+            std::fs::write("cli.pid", std::process::id().to_string()).unwrap();
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--fake-churn")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            fake_tick(Path::new("cli.ticks"));
+        }
         if text.contains("spawn") {
             std::fs::write("cli.pid", std::process::id().to_string()).unwrap();
             let child = ticker("child.ticks").spawn().unwrap();
@@ -269,6 +323,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
         note: None,
         resume_session_id: None,
         gate_hook: None,
+        gate_alive: None,
         exec: daemon::executor::local(),
     }
 }
@@ -468,6 +523,55 @@ async fn pause_stops_the_tree_and_resume_lets_it_go_on() {
     })
     .await;
     assert!(ticks_stand_still(&work).await, "something still ticks");
+}
+
+/// Pause under load: a tool of the run starts a new process every 20 ms. After the pause no
+/// process of the run makes progress (none that was just being started slips through), resume
+/// lets the work go on, and a cancel while paused leaves nothing behind.
+async fn pause_holds_a_tree_that_keeps_starting_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(dir.path(), &this_program(), "churn");
+    let (work, run_dir, exec) = (s.cwd.clone(), s.run_dir.clone(), s.exec.clone());
+    let run = start(s);
+    let ticks = [work.join("churn.ticks"), work.join("cli.ticks")];
+    let sizes = || -> Vec<u64> { ticks.iter().map(|f| size(f)).collect() };
+    wait_for("the churn to be under way", || {
+        sizes().iter().all(|n| *n > 20)
+    })
+    .await;
+    let churn: u32 = std::fs::read_to_string(work.join("churn.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    for round in 0..3 {
+        let stopped = exec
+            .stop(&run_dir)
+            .expect("the CLI runs: it can be stopped");
+        // A write that had begun may still land.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let held = sizes();
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(sizes(), held, "round {round}: a stopped tree made progress");
+        assert!(alive(churn), "stopped, not ended");
+        stopped.resume();
+        wait_for("the churn to go on", || {
+            sizes().iter().zip(&held).all(|(now, then)| now > then)
+        })
+        .await;
+    }
+
+    let stopped = exec.stop(&run_dir).expect("stopped again");
+    run.control.send(Control::Cancel).unwrap();
+    let o = run.outcome.await.unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    drop(stopped);
+    wait_for("the churn to end", || !alive(churn)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let end = sizes();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_eq!(sizes(), end, "a process of the run outlived the cancel");
 }
 
 /// Windows: a CLI installed by npm is `<name>.cmd`. The run finds it by its bare name in the

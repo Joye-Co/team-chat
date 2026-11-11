@@ -248,7 +248,7 @@ crate::copy! {
     FLEET_TITLE = "机器",
     FLEET_SUB = "AI 成员在这些电脑上干活",
     FLEET_ADD = "添加电脑",
-    FLEET_ADD_DESC = "在 Mac 或 Linux 上装一个小程序，AI 成员就能在那台电脑上干活",
+    FLEET_ADD_DESC = "在 Mac、Windows 或 Linux 电脑上装一个小程序，AI 成员就能在那台电脑上干活",
     FLEET_KIND_VM = "每个任务一台 VM",
     FLEET_KIND_LOCAL = "直接在本机跑",
     FLEET_OFFLINE_FOR = "离线 {d}",

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 /// Owns the `ChatClient`. The lists every screen shows (群, 成员, the connection) are published
 /// here; a chat reads its own messages and reads them again when its topic's tick changes.
@@ -26,6 +27,8 @@ final class AppModel: ObservableObject {
 
     /// Feature files (`AppModel+<Feature>.swift`) reach the core through this.
     private(set) var client: ChatClient?
+    /// A sentence for the sign-in screen about why the app is there (signed out elsewhere).
+    @Published var notice: String?
     private var groupsReloadQueued = false
 
     init() {
@@ -45,6 +48,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func signIn(server: String, token: String) -> String? {
         if let failure = open(server: server, token: token) { return failure }
+        notice = nil
         do {
             try Session.save(server: server, token: token)
             return nil
@@ -54,6 +58,8 @@ final class AppModel: ObservableObject {
     }
 
     func signOut() {
+        if let saved = Session.saved() { Task.detached { PushCenter.forget(server: saved.server, token: saved.token) } }
+        UNUserNotificationCenter.current().setBadgeCount(0)
         client?.stop()
         client = nil
         Session.clear()
@@ -159,6 +165,7 @@ final class AppModel: ObservableObject {
 
     func send(_ body: String, group: String, topic: String, mentions: [String], quote: String?) {
         _ = try? client?.send(groupId: group, topicId: topic, body: body, mentions: mentions, quoteId: quote)
+        offerNotificationsAfterSend()
     }
 
     func retry(_ id: String) {
@@ -193,6 +200,11 @@ final class AppModel: ObservableObject {
         switch update {
         case .connection:
             connection = client.connectionState()
+            // Signed out from another device, or the token was revoked: back to sign-in.
+            if connection == "unauthorized" {
+                signOut()
+                notice = Copy.signedOutElsewhere
+            }
         case .directory:
             reloadDirectory()
         case .group:

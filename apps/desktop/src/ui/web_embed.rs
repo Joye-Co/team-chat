@@ -688,6 +688,9 @@ impl WebEmbedState {
         options.inspectable = cfg!(debug_assertions);
         options.viewer = self.spec.viewer.clone();
         options.ref_menu = self.spec.ref_menu.clone();
+        // The bindings can change in 设置 › 快捷键, so they are read again for each page.
+        #[cfg(windows)]
+        artifact_view::set_host_keys(host_keys(cx));
         let Some(attached) = attach_native(window, options, move |e| {
             let _ = tx.unbounded_send(e);
         }) else {
@@ -967,6 +970,78 @@ fn attach_native(
         options,
         on_event,
     ))
+}
+
+/// The app's own shortcuts, for a page that has the keyboard focus: a key with Ctrl or
+/// Alt, or a function key, that is bound for the whole app. On the Mac such a key reaches
+/// the menu bar whatever has the focus; on Windows the page's process gets it first, so
+/// the page host hands these keys back to the window ([`artifact_view::set_host_keys`]).
+/// A binding of a key context (a text field, a list, a sheet) is left out: its context
+/// does not have the focus while a page has it. The editing keys stay with the page.
+#[cfg(windows)]
+fn host_keys(cx: &App) -> Vec<artifact_view::HostKey> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    let mut keys = Vec::new();
+    for binding in keymap.bindings() {
+        if binding.predicate().is_some() {
+            continue;
+        }
+        let [stroke] = binding.keystrokes() else {
+            continue;
+        };
+        let (m, name) = (stroke.modifiers(), stroke.key());
+        let Some(key) = virtual_key(name) else {
+            continue;
+        };
+        let function = (0x70..=0x87).contains(&key);
+        let editing = m.control && !m.alt && matches!(name, "a" | "c" | "v" | "x" | "z" | "y");
+        if m.platform || editing || !(m.control || m.alt || function) {
+            continue;
+        }
+        let key = artifact_view::HostKey {
+            ctrl: m.control,
+            alt: m.alt,
+            shift: m.shift,
+            key,
+        };
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
+}
+
+/// The Windows virtual-key code of a GPUI key name, for the keys shortcuts use.
+#[cfg(any(windows, test))]
+fn virtual_key(name: &str) -> Option<u32> {
+    let mut chars = name.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c @ ('a'..='z' | '0'..='9')), None) => Some(c.to_ascii_uppercase() as u32),
+        (Some(c), None) => match c {
+            ';' => Some(0xBA),
+            '=' => Some(0xBB),
+            ',' => Some(0xBC),
+            '-' => Some(0xBD),
+            '.' => Some(0xBE),
+            '/' => Some(0xBF),
+            '`' => Some(0xC0),
+            '[' => Some(0xDB),
+            '\\' => Some(0xDC),
+            ']' => Some(0xDD),
+            '\'' => Some(0xDE),
+            _ => None,
+        },
+        _ => match name {
+            "enter" => Some(0x0D),
+            "space" => Some(0x20),
+            _ => name
+                .strip_prefix('f')
+                .and_then(|n| n.parse::<u32>().ok())
+                .filter(|n| (1..=24).contains(n))
+                .map(|n| 0x6F + n),
+        },
+    }
 }
 
 /// Sets up the process for embedded pages. Call it first in `main`, before GPUI starts.
@@ -1501,3 +1576,22 @@ pub fn page_preview(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>>
     PREVIEWS.with(|p| p.borrow().get(&(artifact_id.to_string(), version)).cloned())
 }
 // --- end v12/fx-cards ---
+
+#[cfg(test)]
+mod tests {
+    use super::virtual_key;
+
+    #[test]
+    fn shortcut_keys_have_their_windows_key_codes() {
+        assert_eq!(virtual_key("k"), Some(0x4B));
+        assert_eq!(virtual_key("1"), Some(0x31));
+        assert_eq!(virtual_key(","), Some(0xBC));
+        assert_eq!(virtual_key(";"), Some(0xBA));
+        assert_eq!(virtual_key("f6"), Some(0x75));
+        assert_eq!(virtual_key("f11"), Some(0x7A));
+        assert_eq!(virtual_key("enter"), Some(0x0D));
+        assert_eq!(virtual_key("up"), None);
+        assert_eq!(virtual_key("f"), Some(0x46));
+        assert_eq!(virtual_key("f0"), None);
+    }
+}

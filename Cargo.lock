@@ -1648,6 +1648,8 @@ dependencies = [
  "unicode-segmentation",
  "update-helper",
  "windows 0.62.2",
+ "windows-collections 0.3.2",
+ "windows-core 0.62.2",
  "windows-registry 0.6.1",
  "winresource",
 ]

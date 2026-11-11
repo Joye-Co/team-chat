@@ -25,3 +25,5 @@ import "./activity";
 import "./usage";
 import "./team";
 import "./budget";
+// After ./settings: its filter drops what the member switched off before push sees the frame.
+import "./push";

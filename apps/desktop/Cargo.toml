@@ -28,7 +28,7 @@ sha2 = "0.10"
 # Updater on Windows: the command line of the update helper (src/updater/install/windows.rs).
 update-helper = { path = "../update-helper" }
 # Thumbnails of image attachments (src/provider/files.rs).
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 # The 产出 window (src/views/artifacts/window.rs) and pages inside the window
 # (src/ui/web_embed.rs). Its native parts build only on macOS.
 artifact-view = { path = "../../crates/artifact-view" }
@@ -41,6 +41,8 @@ markdown = "=1.0.0"
 
 [dev-dependencies]
 tempfile = "3"
+# 「用这台电脑」 against a local server (provider/this_mac.rs, Windows CI).
+tokio = { version = "1", features = ["rt"] }
 gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
 
 [build-dependencies]
@@ -81,17 +83,24 @@ objc2-core-foundation = "0.3"
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
 windows-registry = "0.6"
+# `IIterable` for the share UI's storage items (the collections crate of `windows` 0.62).
+windows-collections = "0.3"
+# `#[implement]` (the drag source of a file dragged out of the window) names this crate.
+windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
-    "Win32_Media_Audio",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_Storage_Xps",
     "Win32_System_Com",
+    "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",
@@ -100,14 +109,21 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
     # 产出 media previews (src/views/media/native_windows.rs): Media Foundation's source
     # reader, Windows.Data.Pdf, Windows.Media.Playback.
+    "ApplicationModel_DataTransfer",
     "Data_Pdf",
+    "Data_Xml_Dom",
     "Foundation",
     "Globalization",
     "Media_Core",
     "Media_Playback",
+    "Storage",
+    "Storage_Search",
     "Storage_Streams",
+    "UI_Notifications",
+    "UI_ViewManagement",
     "Win32_Media_MediaFoundation",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
+    "Win32_System_WinRT",
 ] }
 # --- end win/system

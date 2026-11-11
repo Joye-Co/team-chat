@@ -657,6 +657,12 @@ pub async fn handle(
         );
         return answer;
     }
+    if req["op"] == crate::gates::ALIVE_OP {
+        if let Some(gates) = outputs.gates.get() {
+            gates.mark_alive();
+        }
+        return json!({ "ok": true, "result": {} });
+    }
     if req["op"] == crate::gates::OP {
         // A run without gates lets every command run.
         let Some(gates) = outputs.gates.get().cloned() else {
@@ -1489,6 +1495,10 @@ pub fn main(args: Vec<String>) -> i32 {
     if args.len() == 1 && args[0] == "gate" {
         return crate::gates::hook_main();
     }
+    // The CLI's SessionStart hook of a gated run: this CLI runs the run's hooks.
+    if args.len() == 1 && args[0] == "gate-alive" {
+        return crate::gates::alive_main();
+    }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));
         1
@@ -2122,6 +2132,31 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(bad["error"]["code"], "invalid");
+        // Only the daemon's user may open it: mode 600 on the socket; on Windows the pipe's
+        // owner and access list, read from a connection to it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        #[cfg(windows)]
+        {
+            let p = path.clone();
+            let private = tokio::task::spawn_blocking(move || {
+                let pipe = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&p)
+                    .map_err(|e| e.to_string())?;
+                crate::winacl::check_handle(&pipe)
+            })
+            .await
+            .unwrap();
+            assert_eq!(private, Ok(()), "the pipe's access list");
+        }
         drop(server);
         #[cfg(unix)]
         assert!(!path.exists());
@@ -2169,6 +2204,54 @@ mod tests {
         assert_eq!(taken.len(), 1, "{taken:?}");
         assert_eq!(taken[0].0, "mine");
         assert!(!spool.join("theirs.req").exists(), "removed");
+    }
+
+    /// Windows: a pipe this user may not open (what a CLI sandbox that takes the access away
+    /// looks like) is reported as the sandbox, like a socket that refuses the connect on Unix.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_blocked_pipe_names_the_sandbox() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let name = format!(r"\\.\pipe\chat-run-test-blocked-{}", std::process::id());
+        // Only SYSTEM may open it.
+        let mut system_only = crate::winacl::OnlyMe::for_sddl("D:P(A;;GA;;;SY)").unwrap();
+        // SAFETY: the attributes point at a security descriptor that `system_only` owns.
+        let _pipe = unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .create_with_security_attributes_raw(&name, system_only.as_ptr())
+        }
+        .unwrap();
+        let p = PathBuf::from(&name);
+        let v = tokio::task::spawn_blocking(move || {
+            call(
+                &p,
+                "interaction.resolve",
+                json!({ "eventId": "E" }),
+                TIMEOUT,
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["code"], "unavailable");
+        assert_eq!(v["error"]["reason"], "sandbox.blocked");
+        assert!(v["error"]["message"].as_str().unwrap().contains("sandbox"));
+    }
+
+    /// Windows: the pipe's name does not grow with the run folder's path, and two run folders
+    /// get two names (Unix: `a_long_run_folder_gets_a_short_socket_path`).
+    #[cfg(windows)]
+    #[test]
+    fn a_long_run_folder_gets_a_short_pipe_name() {
+        let long = PathBuf::from(format!(r"C:\{}", "x".repeat(400)));
+        let p = socket_path(&long);
+        let name = p.to_string_lossy().into_owned();
+        assert!(name.starts_with(r"\\.\pipe\chat-run-"), "{name}");
+        assert!(name.len() < 80, "{name}");
+        assert_ne!(p, socket_path(Path::new(r"C:\runs\r1")));
+        assert_eq!(socket_path(&long), p);
     }
 
     #[cfg(unix)]

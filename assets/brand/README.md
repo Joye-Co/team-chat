@@ -9,6 +9,7 @@ Chrome, `iconutil`, `tiffutil`). The design is in [docs/DESIGN.md](../../docs/DE
 | `AppIcon.icns` | App icon; `scripts/build-dmg.sh` copies it into the bundle and the DMG volume |
 | `AppIcon.ico` | Windows icon (16 to 256 px, from the iconset by `ico.mjs`): the exe's resource (`apps/desktop/build.rs`), the installer and the shortcuts |
 | `AppIcon.iconset/` | Every `.icns` slot, 16 to 512 pt at 1x and 2x |
+| `apps/ios/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png` | The iPhone app icon, from `src/icon-ios.svg` (full bleed; iOS rounds the corners). Render it with headless Chrome at 1024 x 1024 |
 | `menubar/StatusItemTemplate{,@2x}.png` | Menu bar status item, 16 pt template image |
 | `menubar/StatusItemWaitingTemplate{,@2x}.png` | The same with the dot: something waits on you |
 | `login/logo-mark{,-dark}-{32,88}{,@2x}.png` | The bare mark 「 ● ■ 」 for the login view, light and dark ink |

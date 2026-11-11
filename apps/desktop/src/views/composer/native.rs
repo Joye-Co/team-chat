@@ -67,8 +67,69 @@ impl ComposerView {
         .detach();
     }
 
+    /// 截图 on Windows: the system's snipping overlay (`ms-screenclip:`, the one
+    /// Win+Shift+S opens). It has no output file: the picture goes to the
+    /// clipboard. The composer takes the picture of this snip and no other
+    /// ([`crate::ui::clipboard::SnipWait`]): only a picture that reached the
+    /// clipboard after the click, and only until the overlay is gone. A second
+    /// click starts over, so one snip never becomes two chips.
+    #[cfg(target_os = "windows")]
+    fn take_screenshot(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::clipboard::{
+            Snip, SnipWait,
+            windows::{app_in_front, sequence},
+        };
+        const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+        self.snip += 1;
+        let mine = self.snip;
+        let before = sequence();
+        cx.open_url("ms-screenclip:");
+        cx.spawn(async move |this, cx| {
+            let mut wait = SnipWait::new(std::time::Instant::now());
+            let mut seen = before;
+            loop {
+                cx.background_executor().timer(POLL).await;
+                // A newer click took over, or the composer is gone.
+                if !this
+                    .update(cx, |this, _| this.snip == mine)
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+                let now = sequence();
+                let picture = if now != seen {
+                    seen = now;
+                    cx.update(|cx| {
+                        cx.read_from_clipboard().and_then(|item| {
+                            item.entries().iter().find_map(|entry| match entry {
+                                gpui::ClipboardEntry::Image(image) => {
+                                    Some(super::clipboard_image(image))
+                                }
+                                _ => None,
+                            })
+                        })
+                    })
+                } else {
+                    None
+                };
+                match wait.step(std::time::Instant::now(), app_in_front(), picture.is_some()) {
+                    Snip::Wait => {}
+                    Snip::Stop => return,
+                    Snip::Take => {
+                        if let Some(picture) = picture {
+                            let _ = this.update(cx, |this, cx| this.attach(vec![picture], cx));
+                        }
+                        return;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
     /// 截图: the system's interactive screenshot (`screencapture -i`); the
     /// picture becomes a chip when the person took one.
+    #[cfg(not(target_os = "windows"))]
     fn take_screenshot(&mut self, cx: &mut Context<Self>) {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

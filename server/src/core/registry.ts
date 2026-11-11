@@ -296,6 +296,8 @@ export interface GatewayContext {
   /** Sends a frame to every ready socket of this member. */
   broadcast(frame: unknown): void;
   online(): boolean;
+  /** Token ids of this member's ready sockets (push skips the devices of these sign-ins). */
+  openTokenIds(): string[];
   /** The member this gateway belongs to (null before its first socket or RPC binds it). */
   memberId: string | null;
   /** Wakes the gateway's alarm handlers (`registerGatewayAlarm`) at `at` or earlier. */

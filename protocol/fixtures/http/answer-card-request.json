@@ -1,0 +1,9 @@
+{
+  "kind": "AnswerCardRequest",
+  "valid": true,
+  "value": {
+    "rev": 2,
+    "actionId": "ok",
+    "clientEventId": "push-01JBX0"
+  }
+}
