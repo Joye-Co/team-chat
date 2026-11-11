@@ -653,6 +653,21 @@ impl WebEmbedState {
                 return;
             }
             if let Ok(Some(png)) = rx.await {
+                // Diagnosis of the 产出 thumbnail: which view's picture is the last one.
+                if std::env::var_os("TC_PREVIEW_LOG").is_some() && png.len() > 24 {
+                    let dim =
+                        |i: usize| u32::from_be_bytes([png[i], png[i + 1], png[i + 2], png[i + 3]]);
+                    let _ = this.update(cx, |s, _| {
+                        eprintln!(
+                            "preview snapshot: {} v{} {}x{} remember {}",
+                            s.artifact_id(),
+                            s.version(),
+                            dim(16),
+                            dim(20),
+                            s.remember
+                        )
+                    });
+                }
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
                     if s.remember {

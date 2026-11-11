@@ -14,6 +14,7 @@ exe="${CARGO_TARGET_DIR:-target}/debug/desktop.exe"
 main_screens="login,main,main-sidebar-hidden,window-inactive,settings-shortcuts,group-chat,dm-chat,desk,topic-v2,group-v2,members-v2,artifacts-v2,new-topic,switcher,account-menu,search,cards,settings-profile,settings-about,about,files-quick-look,media-video,media-audio,media-pdf"
 scenes="${SCENES:-$main_screens}"
 
+export TC_PREVIEW_LOG=1
 args=(--screenshot "$dir")
 if [ "$scenes" != all ]; then
   args+=(--scenes "$scenes")

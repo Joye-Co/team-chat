@@ -329,16 +329,7 @@ impl EmbeddedArtifact {
             win::post(move || done(None));
             return;
         }
-        // Diagnosis of the 产出 thumbnail (it starts below the page's top on Windows): what
-        // the page's viewport is when its picture is taken.
-        let page = self.page.clone();
-        self.page.evaluate_text(
-            "JSON.stringify([scrollX, scrollY, innerWidth, innerHeight, document.documentElement.scrollHeight, location.host])",
-            move |view| {
-                eprintln!("artifact-view snapshot: {view:?}");
-                page.capture(None, move |png| done(png.ok()));
-            },
-        );
+        self.page.capture(None, move |png| done(png.ok()));
     }
 
     /// Shows another version (new origin, content and data) in the same view. `caps` are
