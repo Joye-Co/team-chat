@@ -1,8 +1,8 @@
 //! Character art fitted into a bot tile (DESIGN.md §7.9).
 //!
-//! The tile draws the character cropped to the painted bounds of its idle
-//! pose (the character pack's `boxes.json`, embedded by `build.rs`; empty
-//! without the pack), fitted by the larger side to 62 % of
+//! The tile draws the character cropped to the painted bounds of its calm
+//! face (the avatar pack's `boxes.json`, embedded by `build.rs`), the same
+//! for every emotion so a change of face never resizes it, fitted by the larger side to 62 % of
 //! the tile with its center 2 % above the middle. At 40 pt and below the
 //! status lamp, the question bubble, the working ring and the sleep marks are
 //! removed: at list sizes they read as notification badges.
@@ -15,7 +15,7 @@ use std::{collections::HashMap, sync::OnceLock};
 
 use gpui::{Img, Pixels, SharedString, Styled as _, img};
 
-use super::{CharacterId, CharacterStatus, assets, bundled_size};
+use super::{CharacterId, Look, assets, bundled_size};
 
 /// Share of the tile the art's larger side takes.
 pub const FILL: f32 = 0.62;
@@ -40,22 +40,25 @@ fn boxes() -> &'static HashMap<String, [f32; 4]> {
     B.get_or_init(|| serde_json::from_str(BOXES_JSON).unwrap_or_default())
 }
 
-#[cfg(test)]
-/// The painted bounds `[x, y, w, h]` of a character's idle pose, in the
-/// units of its SVG viewBox.
-pub fn idle_box(character: CharacterId) -> Option<[f32; 4]> {
-    boxes()
-        .get(&format!("{}__idle", character.as_str()))
-        .copied()
+/// The key of the box every face of a character is fitted by.
+fn box_key(id: &str) -> String {
+    format!("{id}__calm")
 }
 
-/// The asset path of the fitted art of `character` at `status` in a tile of
+#[cfg(test)]
+/// The painted bounds `[x, y, w, h]` of a character's calm face, in the
+/// units of its SVG viewBox.
+pub fn calm_box(character: CharacterId) -> Option<[f32; 4]> {
+    boxes().get(&box_key(character.as_str())).copied()
+}
+
+/// The asset path of the fitted art of `character` with `look` in a tile of
 /// `size`.
-pub fn tile_path(character: CharacterId, status: CharacterStatus, size: Pixels) -> SharedString {
+pub fn tile_path(character: CharacterId, look: Look, size: Pixels) -> SharedString {
     format!(
         "{PREFIX}{}/{}-{}.svg",
         character.as_str(),
-        status.as_str(),
+        look.face(),
         bundled_size(size)
     )
     .into()
@@ -67,13 +70,8 @@ pub fn tile_path(character: CharacterId, status: CharacterStatus, size: Pixels) 
 /// SVG image at twice its own `width` (`SMOOTH_SVG_SCALE_FACTOR`), so the
 /// bundled 32 pt art over a 28 pt tile was a 64 px bitmap squeezed into 56
 /// device pixels, which reads soft.
-pub fn tile_image(
-    character: CharacterId,
-    status: CharacterStatus,
-    size: Pixels,
-    scale: f32,
-) -> Img {
-    img(device_path(tile_path(character, status, size), size, scale))
+pub fn tile_image(character: CharacterId, look: Look, size: Pixels, scale: f32) -> Img {
+    img(device_path(tile_path(character, look, size), size, scale))
         .size(size)
         .flex_none()
 }
@@ -89,13 +87,13 @@ const DEVICE_MARK: char = '@';
 /// GPUI rasterizes an SVG image at this multiple of its `width`.
 const GPUI_SVG_SCALE: f32 = gpui::SMOOTH_SVG_SCALE_FACTOR;
 
-/// The asset path of the art of `character` at `status` and `size`, without
+/// The asset path of the art of `character` with `look` at `size`, without
 /// the marks up to 64 pt.
-pub fn clean_path(character: CharacterId, status: CharacterStatus, size: Pixels) -> SharedString {
+pub fn clean_path(character: CharacterId, look: Look, size: Pixels) -> SharedString {
     format!(
         "{CLEAN_PREFIX}{}/{}-{}.svg",
         character.as_str(),
-        status.as_str(),
+        look.face(),
         bundled_size(size)
     )
     .into()
@@ -130,7 +128,7 @@ pub fn load(path: &str) -> Option<Vec<u8>> {
     if !fit {
         return Some(svg.into_bytes());
     }
-    if let Some(b) = boxes().get(&format!("{id}__idle")) {
+    if let Some(b) = boxes().get(&box_key(id)) {
         let side = b[2].max(b[3]) / FILL;
         let x = b[0] + b[2] / 2. - side / 2.;
         let y = b[1] + b[3] / 2. - side * CENTER_Y;
@@ -272,14 +270,25 @@ mod tests {
     use gpui::px;
 
     use super::*;
+    use crate::characters::{CharacterStatus, Emotion};
+
+    /// Every face the pack has: the 16 emotions and offline.
+    fn looks() -> Vec<Look> {
+        let mut looks: Vec<Look> = Emotion::ALL
+            .iter()
+            .map(|&emotion| Look {
+                status: CharacterStatus::Idle,
+                emotion,
+            })
+            .collect();
+        looks.push(CharacterStatus::Offline.into());
+        looks
+    }
 
     #[test]
     fn no_marks_up_to_64_pt() {
-        if !super::super::available() {
-            return;
-        }
         for &c in CharacterId::ALL {
-            for s in CharacterStatus::ALL {
+            for s in looks() {
                 for size in [16., 20., 24., 32., 36., 48., 64.] {
                     for path in [tile_path(c, s, px(size)), clean_path(c, s, px(size))] {
                         let svg = String::from_utf8(load(&path).expect("loads")).unwrap();
@@ -299,7 +308,7 @@ mod tests {
         // 128 pt keeps the full art.
         let big = load(&tile_path(
             CharacterId::Jojo,
-            CharacterStatus::Idle,
+            CharacterStatus::Idle.into(),
             px(128.),
         ))
         .unwrap();
@@ -315,15 +324,12 @@ mod tests {
         let Some(dir) = std::env::var_os("TILE_DUMP") else {
             return;
         };
-        if !super::super::available() {
-            return;
-        }
         std::fs::create_dir_all(&dir).unwrap();
         for &c in CharacterId::ALL {
-            for s in CharacterStatus::ALL {
+            for s in looks() {
                 for size in [24., 32., 36., 64.] {
                     let svg = load(&tile_path(c, s, px(size))).unwrap();
-                    let name = format!("{}-{}-{size}.svg", c.as_str(), s.as_str());
+                    let name = format!("{}-{}-{size}.svg", c.as_str(), s.face());
                     std::fs::write(std::path::Path::new(&dir).join(name), svg).unwrap();
                 }
             }
@@ -332,11 +338,8 @@ mod tests {
 
     #[test]
     fn a_tile_rasterizes_at_its_device_pixel_size() {
-        if !super::super::available() {
-            return;
-        }
         let path = device_path(
-            tile_path(CharacterId::Jojo, CharacterStatus::Idle, px(28.)),
+            tile_path(CharacterId::Jojo, CharacterStatus::Idle.into(), px(28.)),
             px(28.),
             2.,
         );
@@ -348,31 +351,10 @@ mod tests {
     }
 
     #[test]
-    fn without_the_pack_no_tile_loads() {
-        if super::super::available() {
-            return;
-        }
-        assert!(boxes().is_empty());
-        let path = tile_path(CharacterId::Jojo, CharacterStatus::Idle, px(24.));
-        assert!(load(&path).is_none());
-        assert!(
-            load(&clean_path(
-                CharacterId::Jojo,
-                CharacterStatus::Idle,
-                px(24.)
-            ))
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn every_character_has_an_idle_box_and_a_tile() {
-        if !super::super::available() {
-            return;
-        }
+    fn every_character_has_a_box_and_a_tile() {
         for &c in CharacterId::ALL {
-            assert!(idle_box(c).is_some(), "no box for {}", c.as_str());
-            let path = tile_path(c, CharacterStatus::NeedsInput, px(24.));
+            assert!(calm_box(c).is_some(), "no box for {}", c.as_str());
+            let path = tile_path(c, CharacterStatus::NeedsInput.into(), px(24.));
             let svg = String::from_utf8(load(&path).expect("tile loads")).unwrap();
             assert!(svg.starts_with("<svg"));
             assert!(!svg.contains("-g-glow)\""), "lamp kept in {path}");

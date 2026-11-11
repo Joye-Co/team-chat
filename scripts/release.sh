@@ -5,7 +5,8 @@
 # the server so the app can update itself.
 #
 # Usage: scripts/release.sh <version> [--env staging|production] [--notes <file>]
-#                           [--dry-run [--build]] [--upload-only] [--same-as <dmg>]
+#                           [--dry-run [--build]] [--upload-only [--platform windows]]
+#                           [--same-as <dmg>]
 #   --env          server to upload to (default production)
 #   --notes        Markdown release notes (default: notes that GitHub generates)
 #   --dry-run      run the checks and print the plan; change nothing
@@ -15,6 +16,10 @@
 #                  (the previous release), as scripts/test-dmg.sh --same-as does
 #   --upload-only  only upload the existing dist/<name>-<version>.dmg to the server
 #                  (retry after the endpoint was missing or the upload failed)
+#   --platform     with --upload-only: macos (default, the DMG) or windows, which uploads
+#                  dist/<name>-<version>-setup.exe as the Windows file of the release. The
+#                  installer is built on Windows by scripts/build-windows-installer.sh (the
+#                  Release workflow's Windows job); this script only publishes it.
 # Env: CHAT_API_BASE overrides the server URL. The admin secret is read from
 #      ~/.config/team-chat/<env>/admin-secret (TEAM_CHAT_CONFIG_DIR overrides
 #      ~/.config/team-chat) and is never printed. The Release workflow
@@ -30,6 +35,7 @@ DRY_RUN=0
 UPLOAD_ONLY=0
 BUILD=0
 SAME_AS=""
+PLATFORM=macos
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_NAME="${2:-}"; shift 2 ;;
@@ -38,10 +44,12 @@ while [ $# -gt 0 ]; do
     --notes=*) NOTES="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --upload-only) UPLOAD_ONLY=1; shift ;;
+    --platform) PLATFORM="${2:-}"; shift 2 ;;
+    --platform=*) PLATFORM="${1#*=}"; shift ;;
     --build) BUILD=1; shift ;;
     --same-as) SAME_AS="${2:-}"; shift 2 ;;
     --same-as=*) SAME_AS="${1#*=}"; shift ;;
-    -h | --help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,28p' "$0"; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac
@@ -49,6 +57,8 @@ done
 
 [ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] [--dry-run [--build]] [--upload-only] [--same-as <dmg>]"
 [ "$BUILD" = 0 ] || [ "$DRY_RUN" = 1 ] || die "--build goes with --dry-run (a real run always builds)"
+case "$PLATFORM" in macos | windows) ;; *) die "--platform must be macos or windows" ;; esac
+[ "$PLATFORM" = macos ] || [ "$UPLOAD_ONLY" = 1 ] || die "--platform windows goes with --upload-only: the installer is built on Windows by scripts/build-windows-installer.sh"
 VERSION="${VERSION#v}"
 valid_semver "$VERSION" || die "version '$VERSION' is not semver (for example 0.2.0 or 0.2.0-rc.1)"
 # The server takes only MAJOR.MINOR.PATCH for app updates. A prerelease goes to GitHub only.
@@ -66,6 +76,12 @@ need git jq curl shasum base64
 NAME="$(product name)"
 TAG="v$VERSION"
 DMG="$DIST/$NAME-$VERSION.dmg"
+# What upload_to_server sends: the DMG to the release route every server has, or the Windows
+# installer to the route for the files of other platforms (docs/protocol.md).
+case "$PLATFORM" in
+  macos) ASSET="$DMG"; ASSET_ROUTE="/v1/admin/releases/$VERSION"; ASSET_TYPE="application/x-apple-diskimage" ;;
+  windows) ASSET="$DIST/$NAME-$VERSION-setup.exe"; ASSET_ROUTE="/v1/admin/releases/$VERSION/assets/windows"; ASSET_TYPE="application/vnd.microsoft.portable-executable" ;;
+esac
 SECRET_FILE="${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/$ENV_NAME/admin-secret"
 
 # Empty when this machine has no ops checkout; the upload and the preflight report it.
@@ -85,47 +101,49 @@ upload_to_server() {
     log "skip server upload: $VERSION is a prerelease; the app updates only to MAJOR.MINOR.PATCH releases"
     return 0
   fi
-  [ -f "$DMG" ] || die "no DMG at $DMG"
+  [ -f "$ASSET" ] || die "no file at $ASSET"
+  local again="scripts/release.sh $VERSION --env $ENV_NAME --upload-only"
+  if [ "$PLATFORM" != macos ]; then again="$again --platform $PLATFORM"; fi
   if [ ! -s "$SECRET_FILE" ]; then
     log "skip server upload: no admin secret at $SECRET_FILE"
-    log "after you add it, run: scripts/release.sh $VERSION --env $ENV_NAME --upload-only"
+    log "after you add it, run: $again"
     return 0
   fi
   if [ -n "$(find "$SECRET_FILE" -perm -004 2>/dev/null)" ]; then log "warning: $SECRET_FILE is world-readable; run chmod 600"; fi
 
   local sha hdr resp code
   [ -n "$BASE" ] || die "no server URL for $ENV_NAME: set TC_OPS_DIR (deploy/servers.json) or CHAT_API_BASE"
-  sha="$(shasum -a 256 "$DMG" | awk '{ print $1 }')"
+  sha="$(shasum -a 256 "$ASSET" | awk '{ print $1 }')"
   hdr="$(mktemp)"
   resp="$(mktemp)"
   chmod 600 "$hdr"
   # The secret goes into a mode-600 header file so it never shows in argv or output.
   { printf 'X-Admin-Secret: '; tr -d '\r\n' <"$SECRET_FILE"; printf '\n'; } >"$hdr"
-  log "uploading $(basename "$DMG") to $BASE ($ENV_NAME)"
-  code="$(curl -sS -o "$resp" -w '%{http_code}' --upload-file "$DMG" \
+  log "uploading $(basename "$ASSET") to $BASE ($ENV_NAME)"
+  code="$(curl -sS -o "$resp" -w '%{http_code}' --upload-file "$ASSET" \
     --max-time 900 --retry 2 \
     -H @"$hdr" \
-    -H "Content-Type: application/x-apple-diskimage" \
+    -H "Content-Type: $ASSET_TYPE" \
     -H "X-Sha256: $sha" \
     -H "X-Release-Notes: $(release_notes_b64)" \
-    "$BASE/v1/admin/releases/$VERSION")" || code="000"
+    "$BASE$ASSET_ROUTE")" || code="000"
   rm -f "$hdr"
   case "$code" in
     2??) log "server upload done ($code)" ;;
     404)
       log "skip server upload: $BASE has no release endpoint yet (404)"
-      log "when it exists, run: scripts/release.sh $VERSION --env $ENV_NAME --upload-only" ;;
+      log "when it exists, run: $again" ;;
     401 | 403) rm -f "$resp"; die "the server rejected the admin secret ($code); check $SECRET_FILE" ;;
     *)
       log "server answered $code: $(head -c 300 "$resp" | tr -d '\r')"
       rm -f "$resp"
-      die "server upload failed; retry with: scripts/release.sh $VERSION --env $ENV_NAME --upload-only" ;;
+      die "server upload failed; retry with: $again" ;;
   esac
   rm -f "$resp"
 }
 
 if [ "$UPLOAD_ONLY" = 1 ]; then
-  [ "$DRY_RUN" = 0 ] || { log "dry run: would upload $DMG to $BASE/v1/admin/releases/$VERSION"; exit 0; }
+  [ "$DRY_RUN" = 0 ] || { log "dry run: would upload $ASSET to $BASE$ASSET_ROUTE"; exit 0; }
   upload_to_server
   exit 0
 fi
@@ -156,7 +174,7 @@ if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; th
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
 # release_ops: a release embeds only the server URLs (the 正式服务器 / 测试服务器 menu), never
-# the local character pack or roster. Builds against an ops dir that holds servers.json alone,
+# the local roster (the character art is in the repository). Builds against an ops dir that holds servers.json alone,
 # from TC_SERVERS_JSON (the Release workflow) or the ops checkout's deploy/servers.json.
 release_ops() {
   local dir="$ROOT/.tmp/release-ops"
@@ -197,7 +215,7 @@ Release plan (dry run, nothing changed):
   commit         chore(release): $TAG  (Cargo.toml, Cargo.lock, CHANGELOG.md date)
   push           origin HEAD:main, then tag $TAG
   GitHub         ${REPO:-?}: release $TAG$([[ "$VERSION" == *-* ]] && printf ' (prerelease)')
-                 assets: $NAME-$VERSION.dmg, daemon, .sha256 files
+                 assets: $NAME-$VERSION.dmg, daemon (GitHub shows their SHA-256)
   notes          ${NOTES:-generated by GitHub}
   server         $([ "$SERVER_UPLOAD" = 1 ] && printf 'PUT %s/v1/admin/releases/%s (%s)' "$BASE" "$VERSION" "$ENV_NAME" || printf 'none: a prerelease is not offered as an app update')
   admin secret   $SECRET_FILE ($([ -s "$SECRET_FILE" ] && echo present || echo missing))
@@ -232,7 +250,7 @@ fi
 git push --quiet origin "refs/tags/$TAG"
 
 log "creating GitHub release $TAG"
-gh_args=(release create "$TAG" "$DMG" "$DMG.sha256" "$DAEMON" "$DAEMON.sha256" --verify-tag --title "$NAME $VERSION")
+gh_args=(release create "$TAG" "$DMG" "$DAEMON" --verify-tag --title "$NAME $VERSION")
 if [ -n "$NOTES" ]; then gh_args+=(--notes-file "$NOTES"); else gh_args+=(--generate-notes); fi
 if [[ "$VERSION" == *-* ]]; then gh_args+=(--prerelease); fi
 gh "${gh_args[@]}"

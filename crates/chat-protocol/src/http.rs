@@ -65,6 +65,9 @@ pub struct CreateInviteRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub member_id: Option<String>,
+    /// How long the code works, 1-168 hours (absent: a week).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_in_hours: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +178,14 @@ impl RedeemRequest {
 impl CreateInviteRequest {
     pub fn validate(&self) -> Validation {
         check_name("name", &self.name)?;
+        if let Some(h) = self.expires_in_hours
+            && !(1..=168).contains(&h)
+        {
+            return Err(crate::limits::ValidationError {
+                field: "expiresInHours",
+                message: "1 to 168 hours".into(),
+            });
+        }
         self.member_id
             .as_deref()
             .map_or(Ok(()), |id| check_id("memberId", id))

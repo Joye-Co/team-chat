@@ -38,6 +38,7 @@ pub mod sidebar;
 pub mod toggles;
 pub mod tokens;
 pub mod toolbar;
+pub mod window_chrome;
 
 #[allow(unused_imports)]
 pub use badge::{

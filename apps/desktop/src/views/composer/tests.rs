@@ -147,7 +147,7 @@ fn shift_enter_adds_a_line_and_cmd_enter_sends(cx: &mut TestAppContext) {
     cx.simulate_input("cd");
     assert_eq!(h.text(cx), "ab\ncd");
     assert_eq!(h.count(TOPIC), before);
-    cx.simulate_keystrokes("cmd-enter");
+    cx.simulate_keystrokes(crate::secondary!("enter"));
     assert_eq!(h.count(TOPIC), before + 1);
     assert_eq!(h.last(TOPIC).body, "ab\ncd");
     // Enter on an empty composer sends nothing.
@@ -310,7 +310,7 @@ fn pending_files_become_chips_and_go_with_the_message(cx: &mut TestAppContext) {
     // Paste of an image from the clipboard.
     let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0x89, b'P', b'N', b'G']);
     cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes(crate::secondary!("v"));
     assert_eq!(h.view.update(cx, |this, _| this.files.len()), 3);
     assert_eq!(h.text(cx), "", "an image paste adds no text");
 
@@ -718,9 +718,9 @@ fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut
     // then removes both.
     quote(cx);
     cx.simulate_input("同意");
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
     assert!(!h.view.update(cx, |this, _| this.chips_selected));
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
     assert!(h.view.update(cx, |this, _| this.chips_selected));
     cx.simulate_keystrokes("backspace");
     assert_eq!(h.text(cx), "");
@@ -730,7 +730,8 @@ fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut
     // A single ⌘A selects the text only: Backspace keeps the quote.
     quote(cx);
     cx.simulate_input("嗯");
-    cx.simulate_keystrokes("cmd-a backspace");
+    cx.simulate_keystrokes(crate::secondary!("a"));
+    cx.simulate_keystrokes("backspace");
     assert_eq!(h.text(cx), "");
     assert!(quoted(cx));
     h.view.update(cx, |this, cx| this.remove_quote(cx));
@@ -738,14 +739,15 @@ fn backspace_and_cmd_a_take_the_mention_and_the_quote_without_the_mouse(cx: &mut
     // ⌘A on an empty field: nothing more to select, the quote at once.
     h.provider.set_quote(&key, Some(target.id.clone()));
     cx.run_until_parked();
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
     cx.simulate_keystrokes("delete");
     assert!(!quoted(cx));
 
     // Moving the caret drops the chip selection: Backspace edits the text.
     quote(cx);
     cx.simulate_input("好");
-    cx.simulate_keystrokes("cmd-a cmd-a");
+    cx.simulate_keystrokes(crate::secondary!("a"));
+    cx.simulate_keystrokes(crate::secondary!("a"));
     cx.simulate_keystrokes("right");
     assert!(!h.view.update(cx, |this, _| this.chips_selected));
     cx.simulate_keystrokes("backspace");
@@ -782,4 +784,45 @@ fn reedit_puts_the_recalled_text_back_after_the_draft(cx: &mut TestAppContext) {
         this.restore_recalled(GROUP, TOPIC, "撤回的", &[], window, cx)
     });
     assert_eq!(h.text(cx), "先写的\n撤回的");
+}
+
+/// What Windows puts on the clipboard for copied spreadsheet cells: the text and a
+/// picture of it. The Mac's pasteboard gives only the text then, so does the composer.
+#[test]
+fn text_that_comes_with_its_picture_is_pasted_as_text() {
+    let picture = gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0x89, b'P', b'N', b'G']);
+    let text = || ClipboardEntry::String(gpui::ClipboardString::new("渠道\t新增".into()));
+    let both = [text(), ClipboardEntry::Image(picture.clone())];
+    assert!(clipboard_files(&both).is_empty());
+    // A picture alone, or with empty text, is still a picture.
+    assert_eq!(
+        clipboard_files(&[ClipboardEntry::Image(picture.clone())]).len(),
+        1
+    );
+    let blank = ClipboardEntry::String(gpui::ClipboardString::new("  ".into()));
+    assert_eq!(
+        clipboard_files(&[blank, ClipboardEntry::Image(picture)]).len(),
+        1
+    );
+}
+
+/// A clipboard bitmap arrives from Windows as a BMP file and is sent as a PNG.
+#[test]
+fn a_pasted_bitmap_is_sent_as_png() {
+    let pixels = image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 255]));
+    let mut bmp = Vec::new();
+    pixels
+        .write_to(&mut std::io::Cursor::new(&mut bmp), image::ImageFormat::Bmp)
+        .unwrap();
+    let picture = gpui::Image::from_bytes(gpui::ImageFormat::Bmp, bmp);
+    let NewFile::Image {
+        mime,
+        extension,
+        bytes,
+    } = clipboard_image(&picture)
+    else {
+        panic!("a picture");
+    };
+    assert_eq!((mime.as_str(), extension.as_str()), ("image/png", "png"));
+    assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
 }

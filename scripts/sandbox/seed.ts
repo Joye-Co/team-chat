@@ -22,6 +22,7 @@ import {
   type Target,
 } from "../../packages/bot-sdk/src/index.ts";
 import { mainTopicId } from "../../packages/protocol/src/topic.ts";
+import { picture } from "./pictures.ts";
 
 type Json = Record<string, unknown>;
 
@@ -36,6 +37,11 @@ export interface SeedOptions {
    */
   startMachine?: () => Promise<void>;
 }
+
+/** The sample owner's sign-in email. */
+export const OWNER_EMAIL = "owner@example.com";
+/** The sample owner's password (sandbox only), for 邮箱和密码 sign-in. */
+export const OWNER_PASSWORD = "sandbox-password";
 
 /** AI members that run on the sample machine, and their runtime. */
 const RUNNERS = [
@@ -85,6 +91,17 @@ export async function seedMachine(o: SeedOptions, owner: string, ids: Record<str
   log("runs: 6 on runner-1");
   return m.machine.id;
 }
+
+/**
+ * Weekly budgets in cents. Scout's two sample runs run straight through (machine.ts asks for
+ * approval on every third Claude run and fails 8% at random), and one costs $0.36-2.70, so its
+ * $0.40 is passed once either ends; Forge and Tata stay well under theirs.
+ */
+const BUDGETS = [
+  ["scout", 40],
+  ["forge", 2000],
+  ["tata", 5000],
+] as const;
 
 const HUMANS = [
   { key: "xiaowang", name: "小王", role: "前端实习" },
@@ -142,6 +159,15 @@ export async function seed(o: SeedOptions): Promise<Json> {
   });
   const owner = boot.token;
   writeSecret(join(o.out, "owner-token"), owner);
+
+  // The owner's sign-in email, so a client's sign-in screens can be tried: ask for a code at
+  // owner@example.com, then read it with `bun scripts/sandbox/email-code.ts`.
+  await call(url, "POST", "/v1/me/email/code", { token: owner, body: { email: OWNER_EMAIL } });
+  const sent = await call<{ codes: { code: string }[] }>(url, "GET", `/v1/admin/email-outbox?email=${encodeURIComponent(OWNER_EMAIL)}`, {
+    admin: o.adminSecret,
+  });
+  await call(url, "POST", "/v1/me/email", { token: owner, body: { email: OWNER_EMAIL, code: sent.codes[0].code } });
+  await call(url, "PUT", "/v1/me/password", { token: owner, body: { password: OWNER_PASSWORD } });
   await call(url, "PATCH", `/v1/members/${boot.member.id}`, { token: owner, body: { role: "负责人" } });
   const ids = { joye: boot.member.id } as Record<Key, string>;
   const tokens = { joye: owner } as Record<Key, string>;
@@ -165,6 +191,15 @@ export async function seed(o: SeedOptions): Promise<Json> {
     tokens[b.key] = r.token;
   }
   log(`members: ${Object.keys(ids).length}`);
+
+  // 团队管理 samples: weekly budgets (Scout's is low, so its sample runs pass 80% and reach it:
+  // 要注意 and 活动记录 show it), and an invite nobody accepted that ends in 36 hours.
+  for (const [k, cents] of BUDGETS) {
+    await call(url, "PATCH", `/v1/members/${ids[k]}`, { token: owner, body: { weeklyBudgetCents: cents } });
+  }
+  await call(url, "POST", "/v1/invites", { token: owner, body: { name: "Lina", kind: "human", level: "member", role: "运营", expiresInHours: 36 } });
+  await call(url, "POST", "/v1/invites", { token: owner, body: { name: "周周", kind: "human", level: "member", role: "设计" } });
+  log("budgets: 3 · invites: 2 pending");
 
   // --- 群 ---
   const group = async (name: string, purpose: string, members: Key[]) => {
@@ -392,6 +427,42 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await pocket.updateTopic(weekly.groupId, weekly.topicId, { status: "done" });
     }
 
+    // 夹夹增长 / 3.0 宣传图: pictures in every layout (one, three, four, eleven).
+    const art = await topic("chenchen", growth, "3.0 宣传图", "海报出了三版，大家看看哪版好", []);
+    {
+      const pics = async (who: Key, specs: [number, number, number, boolean?][], prefix: string) => {
+        const bot = await as(who);
+        const refs = [];
+        for (const [i, [w, h, p, phone]] of specs.entries()) {
+          refs.push(
+            await bot.uploadFile({ ...art, name: `${prefix}-${i + 1}.png`, mime: "image/png", data: picture(w, h, p, phone), width: w, height: h }),
+          );
+        }
+        return refs;
+      };
+      await (await as("chenchen")).send(art, {
+        body: "A 竖版、B 方图、C 横版",
+        attachments: await pics("chenchen", [[900, 1200, 0], [1000, 1000, 1], [1200, 800, 2]], "海报"),
+      });
+      await say("joye", art, "A 版好看，主色再亮一点");
+      await (await as("chenchen")).send(art, {
+        body: "改好了，顺便出了首页横幅",
+        attachments: await pics("chenchen", [[1600, 900, 3]], "首页横幅"),
+      });
+      await (await as("taro")).send(art, {
+        body: "微博配图四宫格",
+        attachments: await pics("taro", [[800, 800, 4], [800, 800, 5], [800, 800, 6], [800, 800, 7]], "微博配图"),
+      });
+      await (await as("chenchen")).send(art, {
+        body: "App Store 截图 11 张，按顺序",
+        attachments: await pics(
+          "chenchen",
+          Array.from({ length: 11 }, (_, i) => [390, 844, i, true] as [number, number, number, boolean]),
+          "截图",
+        ),
+      });
+    }
+
     // Decisions recorded by hand.
     await call(url, "POST", `/v1/groups/${dev}/decisions`, { token: owner, body: { text: "登录只用邀请码，不做手机号" } });
     await call(url, "POST", `/v1/groups/${growth}/decisions`, { token: owner, body: { text: "日活按去重设备算", topicId: report.topicId } });
@@ -401,7 +472,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
     await topic("jojo", jojoDm.id, "今天的待办", "早上好！今天有 3 件事等你：PR #61、v2.14 上线和一条微博文案。");
     const xwDm = (await (await as("xiaowang")).http.dm(ids.joye)).group;
     await topic("xiaowang", xwDm.id, "搜索高亮", "Joye，高亮那块我下午看。");
-    log("topics: 14");
+    log("topics: 15");
 
     const machineId = await seedMachine(o, owner, ids, { dev, growth });
     const out = { url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };

@@ -136,6 +136,69 @@ function event(v: Vm, ev: unknown) {
   send({ t: "run.event", runId: v.runId, seq: v.seq, at: Date.now(), event: ev });
 }
 
+/**
+ * A sample run's usage with its models, as a 1.3 daemon reports it: Claude Code with its own cost
+ * per model (mostly cache reads), Codex with tokens only (the server prices them).
+ */
+function sampleUsage(runtime: string, tokens: number) {
+  const input = Math.round(tokens * 0.85);
+  const output = Math.round(tokens * 0.15);
+  if (runtime === "claude") {
+    const cost = Math.round(tokens * 0.0009) / 100;
+    const main = { model: "claude-sonnet-4-5-20250929", inputTokens: Math.round(input * 0.1), outputTokens: output - 400, cacheReadTokens: Math.round(input * 0.8), cacheWriteTokens: input - Math.round(input * 0.1) - Math.round(input * 0.8), costUsd: Math.round(cost * 95) / 100 };
+    const small = { model: "claude-haiku-4-5-20251001", inputTokens: 0, outputTokens: 400, costUsd: Math.round(cost * 5) / 100 };
+    return { inputTokens: input, outputTokens: output, costUsd: cost, models: [main, small] };
+  }
+  return { inputTokens: input, outputTokens: output, models: [{ model: "gpt-5.1-codex", inputTokens: Math.round(input * 0.3), outputTokens: output, cacheReadTokens: input - Math.round(input * 0.3) }] };
+}
+
+/**
+ * What a real run's log holds, so the run log (工作记录, 实时查看) has something to draw: what
+ * the member said in Markdown with its acceptance block, a step that went well with a long
+ * output, changed files and a step that failed.
+ */
+function sampleSteps(v: Vm) {
+  const turnId = "t1";
+  event(v, { type: "turn.started", turnId });
+  event(v, { type: "message", itemId: "m1", role: "assistant", turnId, text: "先看一下现在的测试覆盖了哪些情况，再补缺的。" });
+  event(v, { type: "tool.call", itemId: "s1", turnId, tool: "Bash", title: "Bash: bun run test -- test/login.test.ts", input: { command: "bun run test -- test/login.test.ts", description: "跑登录相关的测试" } });
+  event(v, {
+    type: "tool.result",
+    itemId: "s1",
+    turnId,
+    ok: true,
+    output: ["$ vitest run test/login.test.ts", "", " RUN  v4.1.12", "", " ✓ test/login.test.ts (6 tests) 412ms", "   ✓ 邀请码登录", "   ✓ 粘贴凭证登录", "   ✓ 服务器地址默认值", "", " Test Files  1 passed (1)", "      Tests  6 passed (6)", "   Duration  1.92s"].join("\n"),
+  });
+  event(v, { type: "tool.call", itemId: "s2", turnId, tool: "Edit", title: "Edit: test/login.test.ts", input: { file_path: "test/login.test.ts" } });
+  event(v, { type: "tool.result", itemId: "s2", turnId, ok: true, output: "The file test/login.test.ts has been updated." });
+  event(v, { type: "file.change", itemId: "s2:file", turnId, changes: [{ path: "test/login.test.ts", kind: "modify" }] });
+  event(v, { type: "tool.call", itemId: "s3", turnId, tool: "Bash", title: "Bash: bun run test -- test/login.test.ts", input: { command: "bun run test -- test/login.test.ts" } });
+  event(v, {
+    type: "tool.result",
+    itemId: "s3",
+    turnId,
+    ok: false,
+    output: ["Exit code 1", " ✗ test/login.test.ts > 邀请码过期时提示重新要一个", "   AssertionError: expected '邀请码无效' to be '邀请码已过期'", "    at test/login.test.ts:88:31", "", " Test Files  1 failed (1)", "      Tests  1 failed | 6 passed (7)"].join("\n"),
+  });
+  event(v, {
+    type: "message",
+    itemId: "m2",
+    role: "assistant",
+    turnId,
+    text: [
+      "补了一条用例，发现一个**真问题**：邀请码过期时，界面提示的是「邀请码无效」。",
+      "",
+      "- **现状**：6 条用例通过，新加的 `邀请码过期` 这条失败。",
+      "- **原因**：`login.rs` 把两种错误合成了一种。",
+      "- **下一步**：拆开错误类型，再跑一遍。",
+      "",
+      "```acceptance",
+      '[{ "text": "补齐登录页端到端测试", "state": "pending" }]',
+      "```",
+    ].join("\n"),
+  });
+}
+
 function finish(v: Vm, ok: boolean, error?: string) {
   v.seq += 1;
   const tokens = Math.round(40_000 + Math.random() * 260_000);
@@ -146,7 +209,7 @@ function finish(v: Vm, ok: boolean, error?: string) {
     at: Date.now(),
     status: ok ? "succeeded" : "failed",
     ...(ok
-      ? { resultText: "（样例机器）做完了：这是沙盒里的演示结果。", summary: "（样例机器）做完了", usage: { inputTokens: Math.round(tokens * 0.85), outputTokens: Math.round(tokens * 0.15), ...(v.runtime === "claude" ? { costUsd: Math.round(tokens * 0.0009) / 100 } : {}) } }
+      ? { resultText: "（样例机器）做完了：这是沙盒里的演示结果。", summary: "（样例机器）做完了", usage: sampleUsage(v.runtime, tokens) }
       : { error: error ?? "failed" }),
     durationMs: Date.now() - v.startedAt,
   });
@@ -184,6 +247,7 @@ function take(runId: string, runtime: string, seq = 0) {
     event(v, { type: "status", state: "running" });
     event(v, { type: "session", sessionId: `sample-${runId.slice(-8)}`, runtime: v.runtime });
     event(v, { type: "plan", items: [{ text: "读需求", state: "done" }, { text: "动手做", state: "current" }, { text: "自查", state: "pending" }] });
+    sampleSteps(v);
     if (v.ask) {
       event(v, { type: "approval.request", approvalId: `sample-${runId.slice(-6)}`, title: "使用 GITHUB_TOKEN", detail: "（样例机器）演示：这一步等你批准" });
     }

@@ -195,10 +195,13 @@ as in [bots.md](bots.md). The main bot is the active bot named Jojo, else the ol
 (see [protocol.md](protocol.md)): it gets the first DM of a new member and is the default for
 单独问 and ⌘↵.
 
-A bot's avatar shows its live state with a status signal: idle, working, needs-input, success,
-error, offline. With the optional character pack (`characters/` in the operator's ops checkout,
-see [ENVIRONMENTS.md](ENVIRONMENTS.md#ops-checkout)) each bot can have a character; without it,
-avatars are monograms.
+A bot's avatar is its character from Jojo & Friends (26 characters, art CC BY 4.0, vendored in
+`apps/desktop/assets/characters/`); a new bot gets one no other member uses. The avatar shows
+its live state in two channels: the status (idle, working, needs-input, success, error,
+offline) and the face, one of 16 emotions that tells the case apart (thinking before it
+writes, focused while it writes, shy when its work waits for review, celebrating a finished
+topic, aggrieved when stuck in several places). A bot whose character is cleared shows a
+monogram.
 
 ## V1: production use by 5 people and 5 bots
 

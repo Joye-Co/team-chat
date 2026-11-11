@@ -26,13 +26,13 @@ Member = {
   level: "owner" | "member"    // owner = full admin
   avatarUrl?: string | null
   deactivated?: boolean
-  character?: CharacterId | null // the avatar's character from the optional character pack; absent or null = none
+  character?: CharacterId | null // the avatar's character (Jojo & Friends avatar pack); absent or null = none
   reportsTo?: string           // 1.1: the member it reports to (汇报给); absent = nobody
   weeklyBudgetCents?: number   // 1.1: weekly spending limit in US cents (限额), 0..100,000,000; absent = none
 }
 
 CharacterId = "jojo" | "h02" | "h03" | "h04" | "h05" | "h06"
-            | "o01" | "o02" | ... | "o20"   // the 26 character pack ids, lower case
+            | "o01" | "o02" | ... | "o20"   // the 26 Jojo & Friends character ids, lower case
 
 Group = {
   id: string
@@ -212,7 +212,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `POST /v1/auth/redeem` | anyone with an invite code | `{ inviteCode, deviceName }` | `{ token, member }` |
 | `GET /v1/me` | member | | `Member` |
 | `GET /v1/members` | member | | `Member[]` |
-| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member |
+| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId?, expiresInHours? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member; `expiresInHours` 1-168, default 168 (a week) |
 | `POST /v1/bots` | owner | `{ name, role?, character? }` | `{ member, token }` |
 | `POST /v1/tokens/revoke` | owner, or the token's member | `{ memberId?, all? }` | `{ revoked }` |
 | `GET /v1/groups` | member | | `GroupSummary[]` |
@@ -477,6 +477,7 @@ file's group.
 | `GET /v1/files/:id/content` | | the bytes; supports `Range` (206) |
 | `PUT /v1/members/:id/avatar` | raw image bytes | `Member` (new `avatarUrl`) |
 | `GET /v1/members/:id/avatar` | | the image |
+| `DELETE /v1/members/:id/avatar` | | `Member` (`avatarUrl: null`) |
 
 ```ts
 FileMeta = { id, groupId, topicId?: string | null, name, size, mime, sha256, width?, height?,
@@ -510,7 +511,9 @@ Rules:
   `image/webp`. Files are never served as `text/html` inline from the API origin.
 - Avatars: self or an owner; `image/png`, `image/jpeg` or `image/webp`, at most 1 MiB. The server
   sets `avatarUrl` to `/v1/members/:id/avatar?v=<n>` (absolute) and pushes a `directory` frame with
-  the member. Reading an avatar needs a member token.
+  the member. Reading an avatar needs a member token. `DELETE` (same callers) removes the image,
+  sets `avatarUrl` to null and pushes the member again; a member without one gets it unchanged.
+  An AI member with an avatar is drawn with it instead of its character.
 
 ## 产出 (artifacts)
 
@@ -568,7 +571,7 @@ Rules:
   connections. Every change is audited and pushed to every connection as `directory` with the
   changed `members`.
 - `character` is owner only (`forbidden` for a member, also on self); `null` clears it. Only
-  the 26 character pack ids are accepted (`invalid` otherwise); a new id is a protocol change,
+  the 26 Jojo & Friends character ids are accepted (`invalid` otherwise); a new id is a protocol change,
   because clients bundle the images and reject unknown ids. Clients draw the character with the
   member's live status (idle, working, needs-input, success, error, offline); members without
   one keep their initial avatar. `welcome`, `directory`, `GET /v1/members` and `GET /v1/me`
@@ -647,24 +650,51 @@ Module: `updates.ts` / `updates.rs`.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
-| `GET /v1/updates/latest` | member | | `UpdateInfo`; 404 when no release exists |
-| `GET /v1/updates/:version/download` | member | | the DMG (`Range` supported) |
+| `GET /v1/updates/latest?platform=` | member | | `UpdateInfo` of the newest release for that platform; 404 when there is none |
+| `GET /v1/updates/:version/download?platform=` | member | | the file of that platform (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
-| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }`; a withdrawn release is not `latest` and not downloadable |
+| `PUT /v1/admin/releases/:version/assets/:platform` | header `X-Admin-Secret` | the raw file of that platform; same headers | `UpdateInfo` |
+| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }` (`latest` is the newest DMG); a withdrawn release is not `latest` and not downloadable, on every platform |
 | `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
-| `POST /download` | anyone with a valid invite code | form `code=<invite code>` | the latest DMG |
-| `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG (links made before the fragment form) |
+| `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
+| `GET /download?code=<invite code>&platform=` | anyone with a valid invite code | | the same (links made before the fragment form) |
+
+The invite download picks the file like this: a `platform` the server knows wins; an unknown one
+gets the DMG; with none, a request whose `User-Agent` says Windows gets the installer and every
+other request the DMG. The page of `GET /download` posts `platform=windows` from a browser on
+Windows. When that platform has no release the answer is 404, never the other platform's file.
 
 ```ts
-UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl }
+ReleasePlatform = "macos" | "windows"   // macos = the DMG; windows = the installer (-setup.exe, x64)
+UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl, platform?: ReleasePlatform }
   // version "MAJOR.MINOR.PATCH" without leading zeros; notes Markdown <= 20,000; downloadUrl absolute
+  // platform: sent by every server that knows platforms; missing = "macos"
 ```
 
-Rules: latest = the highest version by numeric comparison. A `PUT` of an existing version is
-`conflict`. The server checks the body's SHA-256 against `X-Sha256` (`invalid` otherwise) and
-the body is at most 100 MB. `GET /download` accepts an invite code that is not expired (used or
-not), is rate limited per IP, answers 404 with a plain-text body for a bad code, and sends
-`Content-Disposition: attachment; filename="<slug>-<version>.dmg"`. Invite links put the code in
+Rules: latest = the highest version by numeric comparison, per platform: each platform's file
+of a version is uploaded on its own, so the newest Windows release may be older than the
+newest DMG. A `PUT` of an existing version and platform is `conflict`. The server checks the
+body's SHA-256 against `X-Sha256` (`invalid` otherwise) and the body is at most 100 MB.
+
+Platforms (added for the Windows client; old clients and scripts are not affected):
+
+- A request without `platform` means `macos`, and the DMG's `downloadUrl` has no query. So a
+  Mac client from before platforms sends and receives what it always did, plus the
+  `platform: "macos"` field it ignores. An unknown `platform` is `invalid`.
+- `PUT /v1/admin/releases/:version/assets/macos` is the same upload as
+  `PUT /v1/admin/releases/:version`.
+- A client asks for its own platform and must drop an `UpdateInfo` whose `platform` (missing =
+  `macos`) is another one. A Windows client therefore never takes the DMG: a server without a
+  Windows release answers 404, and a server from before platforms ignores the parameter and
+  answers with an `UpdateInfo` that has no `platform`.
+- `/download`: the page posts `platform=windows` when the browser runs on Windows; any other
+  value, or none, serves the DMG.
+
+`GET /download` accepts an invite code that is not expired (used or
+not), is rate limited per IP, answers 404 with a plain-text body for a bad code or when the
+platform has no release, and sends
+`Content-Disposition: attachment; filename="<slug>-<version>.dmg"` (`<slug>-<version>-setup.exe`
+for Windows). Invite links put the code in
 the URL fragment, which browsers never send, so no request log (the app's or the Workers
 invocation log) records it. Logs must redact the `code` query parameter of old links. Every
 publish is audited.
@@ -877,7 +907,10 @@ stops trying, and the topic gets one note.
 
 - **Silent 5 minutes**: one `run.input` to the CLI (`inputId` `desk-nudge-…`) asking where it
   stands. It is not a member's message, so it never starts a follow-up run. Any event clears it.
-- **Silent 10 minutes, the daemon's `stalled` report, or the machine gone** (no heartbeat for
+  A run with a `tool.call` that has no `tool.result` yet waits for a step it started (a build, a
+  test run): it gets no nudge, and it counts as silent only after 30 minutes. A run out of tries
+  gets no nudge either.
+- **Silent 10 minutes (30 with a step open), the daemon's `stalled` report, or the machine gone** (no heartbeat for
   2 minutes, or `runLost` past the lease): the run is cancelled without a message (`cancelled`,
   summary `restarted: …`), and its request starts again with the same work order on a healthy
   machine. The topic hears nothing. Out of tries, the old behavior applies: `blocked` with one
@@ -1208,8 +1241,20 @@ transaction as the write, with a `kind` the page filters by:
 | `invite` | `invite.create`, `invite.redeem` |
 | `key` | `machine.secret.set`, `machine.secret.delete` |
 | `approval` | `run.approval`, `settings.approvals` |
-| `login` | `email.sign_in`, `machine.login.start` |
+| `login` | `email.sign_in`, `password.sign_in`, `qr.sign_in`, `machine.login.start` |
 | `machine` | `machine.create`, `machine.revoke` |
+
+The server also writes events it notices itself (`audit_id` 0, no actor but the AI member):
+
+| `kind` | Action | When |
+| --- | --- | --- |
+| `run` | `run.failed` | a run of an AI member ended failed; `actorId` the AI member, `target` the 话题, `details { runId, groupId, requestedBy, title? }` |
+| `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
+| `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
+| `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
+| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
+| `budget` | `budget.raised` | an owner chose 这周再加: `actorId` the owner, `target` the AI member, `details { extraCents, runId }` |
+| `budget` | `budget.stopped` | an owner chose 先停: the held run is cancelled; `details { runId, topicId, title? }` |
 
 ```ts
 ActivityEntry    = { id, at, kind, action, actorId?, target?, machineId? /* machine.* actions */, details? }
@@ -1229,20 +1274,58 @@ days) reads every runner bot's BotDesk for runs that ended in `[from, to)` and i
 before it, and stores nothing.
 
 ```ts
-Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */ }
+Spend     = { costUsd, inputTokens, outputTokens, runs, topics /* distinct 话题 */,
+              estimatedUsd? /* the part of costUsd estimated from tokens */,
+              unpricedTokens? /* tokens of models with no known price, not in costUsd */ }
 TeamUsage = { from, to, total: Spend, previous: { costUsd, topics },
               teamBudgetCents? /* sum of the AI members' weeklyBudgetCents */,
-              bots: (Spend & { memberId, budgetCents? })[], initiators: (Spend & { memberId })[],
+              bots: (Spend & { memberId, budgetCents?, models?: string[] /* by cost */,
+                               heldRuns? /* runs waiting at the budget for an owner */ })[],
+              initiators: (Spend & { memberId })[],
+              models?: (Spend & { model, name, runtimes: string[] })[] /* by model the runs used */,
               machines: (Spend & { machineId })[], runtimes: (Spend & { runtime, machineId? })[],
+              pairs?: (Spend & { initiatorId, memberId })[] /* who asked which AI member */,
               daily: { start, costUsd, bots: { memberId, costUsd }[] }[] /* 24 h from `from` */ }
 ```
 
-- Cost is `run.done.usage.costUsd` (Claude Code reports it at API prices, also under a
-  subscription); runs without it (Codex today) count tokens and 0 cost.
-- `initiators` is the person who asked for each run (`requestedBy`). `runtimes` is split by machine,
-  so a client can tell subscription from API-key spend by the machine's CLI login (`MonitorCli.method`).
+- Cost is priced per model. A daemon from 1.3 sends `run.done.usage.models` (machine-protocol.md
+  `ModelUsage`): the model each turn used, its input, output, cache read and cache write tokens,
+  and, from Claude Code, its own cost. A model's cost is the CLI's figure when it gives one, else
+  its tokens at that model's list price by kind; that part also counts in `estimatedUsd`. The
+  list comes from models.dev (`server/src/usage/prices.ts`): the daily cron stores the last good
+  copy in D1 (`model_prices`, migration 0014), and a small built-in list stands in only before the
+  first good sync. A model matches its own entry only (a date or `-latest` suffix and a provider
+  prefix are ignored); one with no price adds `unpricedTokens`, never another model's price.
+  Runs from older daemons keep their reported cost; with none, they are priced only by the model
+  the AI member is set to run (`bot_runners.model`), else unpriced.
+- `initiators` is the person who asked for each run (`requestedBy`); `pairs` splits that by AI
+  member, so a client can show whom each person works with most (optional: older servers omit it).
+- `runtimes` is split by machine, so a client can tell subscription from API-key spend by the
+  machine's CLI login (`MonitorCli.method`).
 - Lists are sorted by cost, highest first. External bot runs (`POST /v1/runs`) are left out.
 - A member's budget is changed with `PATCH /v1/members/:id { weeklyBudgetCents }` as before.
+
+## Budget pause
+
+到了预算先停下来问: before a run of an AI member starts (or leaves the queue), the server compares
+the member's spend this week with its `weeklyBudgetCents` plus what owners added for this week.
+The week starts Monday 00:00 in the team's time zone; spend is priced per model as in Team usage,
+estimates included. At or over the line the run does not start: it stays `waiting` with no
+machine, the topic waits on the team's owners in the group (`waiting_answer`, so 首页 and
+notifications show it), and the AI member posts a Card v1 to them:
+
+- title 「Forge 这周花了 $100，到了预算。继续吗？」
+- `budget-raise:<runId>` 「这周再加 $X」: X is half the weekly budget, rounded up to whole
+  dollars (at least $1), for this week only (D1 `budget_grants`, migration 0015). The held runs
+  go back in the queue and start.
+- `budget-edit:<runId>` 「改每周预算…」, `value { memberId }`: the app opens 团队管理 › 用量 with
+  that member's budget editor; the server ignores the press. A new `weeklyBudgetCents` that covers
+  the spend lets held runs go.
+- `budget-stop:<runId>` 「先停」: the held run is cancelled and the topic says so in plain words.
+
+Only an owner's press counts. A run already on a machine finishes. No `weeklyBudgetCents`, no
+limit. 活动记录 records `budget.paused`, `budget.raised` and `budget.stopped`; `GET /v1/usage` gives
+each budgeted member's `heldRuns`.
 
 ## Team roster
 
@@ -1969,7 +2052,10 @@ only at the moment a command would run: the machine stops the command and asks
   wording only when every machine with its runtime stops commands.
 - Patterns are regular expressions matched case-insensitively against each simple command of a
   shell line (split at newlines, `;`, `&&`, `||`, `|`; whitespace runs count as one space), and
-  against `<tool name> <input JSON>` of MCP tool calls. `PATCH` rejects a pattern that
+  against `<tool name> <input JSON>` of MCP tool calls. The daemon matches each command as
+  written and as its plain words (the program without its folder, quotes and `.exe` / `.cmd` /
+  `.bat` / `.com` / `.ps1`, the arguments without quotes), so a pattern written for
+  `gh pr merge` also holds for `gh.exe pr merge` and `"C:\Program Files\GitHub CLI\gh.exe" pr merge`. `PATCH` rejects a pattern that
   JavaScript cannot compile or that uses lookaround, backreferences or possessive forms (Rust's
   `regex` on the daemon does not have them). They are meant to be few and sure: a wrong match is
   a useless card; GitHub branch protection and approval-gated deploy environments catch the rest.
@@ -1980,7 +2066,7 @@ only at the moment a command would run: the machine stops the command and asks
   | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
   | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
   | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
-  | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
+  | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; on Windows `Remove-Item`/`ri`/`rm`/`rmdir`/`rd`/`del`/`erase` of a drive's root (`C:\`, `C:\*`, `\`), of `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%` itself, and `rm` with flags of a Git Bash drive (`/c/`); `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
   | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
 
   A force push to a work branch is not gated (the agent rebases its own PR branch); a force push
@@ -2122,3 +2208,140 @@ Rules:
   when `ENVIRONMENT` is `local` or `e2e`: there the code goes to the `email_outbox` D1 table
   instead (read by tests with `GET /v1/admin/email-outbox?email=…` and the `x-admin-secret`
   header), and is never sent or logged.
+
+## Push
+
+Phones get notifications through the platform's push service while the app is not connected.
+The server sends a push for the same decision as the `notify` field of a live event frame
+("Notifications"), after the member's notification settings ("Notification settings").
+
+```ts
+PushPlatform = "apns"
+PushEnvironment = "production" | "sandbox"            // development builds use sandbox tokens
+RegisterPushDeviceRequest = { platform, token /* lower-case hex, 32..400 */, appId /* bundle id */, environment }
+PushDevice = { id, platform, appId, environment, createdAt, updatedAt, current }   // never the token
+PushDevicesResponse = { devices: PushDevice[] }
+RemovePushDeviceResponse = { removed: number }
+BadgeResponse = { waiting: number }                   // topics whose waitingOn has me (等你)
+AnswerCardRequest = { rev, actionId, clientEventId? }
+PushData = { v: 1, reason: NotifyReason, notifyEvent?: NotifyEvent, groupId, topicId?, messageId?, seq,
+             ask?: { messageId, rev, actions: { id, label }[] /* 1..3 */ } }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/me/push-devices` | member | `RegisterPushDeviceRequest` | `PushDevice`; one device per push token: registering a known token moves it to this sign-in |
+| `GET /v1/me/push-devices` | member | | `PushDevicesResponse`, my devices; `current` = registered with this request's token |
+| `DELETE /v1/me/push-devices` | member | | `RemovePushDeviceResponse`: removes the devices of this request's sign-in (turning push off, signing out) |
+| `DELETE /v1/me/push-devices/:id` | member, own | | `RemovePushDeviceResponse`; an unknown or another member's id is `not_found` |
+| `GET /v1/me/badge` | member | | `BadgeResponse` |
+| `POST /v1/groups/:id/messages/:messageId/answer` | member of the group | `AnswerCardRequest` | `CardEventAck`: the same as the `card.answer` frame (same checks, audit and events), for a notification action without a socket |
+
+Rules:
+
+- A device belongs to the sign-in (token) that registered it. Revoking that token (signing out,
+  `DELETE /v1/me/devices/:id`, deactivation) stops its pushes and the device is removed. A
+  device whose token the push service rejects as no longer valid (APNs 410, or 400
+  `BadDeviceToken`) is removed.
+- A device gets no push while its own sign-in has an open connection (the app is in front and
+  shows the event itself). Other connections of the member do not hold pushes back.
+- APNs payload: `aps.alert` `{ title, body }` (the group or the 成员, and a short text; the app's
+  notification extension may replace it from its cache), `aps.badge` = `BadgeResponse.waiting`,
+  `aps.sound` `"default"`, `aps.thread-id` = topic id (or group id), `aps.mutable-content: 1`,
+  and `tc: PushData`. `apns-collapse-id` = the topic id (a newer push for the same topic
+  replaces the older one). A push with `ask` has `aps.category` `"tc.ask.<messageId>.<rev>"`: the
+  app registers that category with the ask's answers as buttons (its notification extension
+  when the push arrives) and adds 打开.
+- `ask` is set for an open card ask of the topic (`reason` `waiting`, or a `mention` on the ask
+  message) when the card's footer actions can be pressed without more input: kind `submit` or
+  `reject`, no `confirm`, no `inputs`, style not `danger`, role not `approve`, and the ask has no
+  `irreversible`. Otherwise there is no `ask` and the only action is to open the app.
+- When the badge changes without a notification (an answer elsewhere), the server sends a
+  badge-only push (`aps.badge` alone, priority 5) to each device.
+- The server signs APNs requests with a token key (ES256 JWT) from Worker secrets. Without the
+  secrets it stores devices but sends nothing.
+
+## Password sign-in
+
+A person may add a password and then sign in with the sign-in email and that password. The
+password is optional; email codes keep working.
+
+```ts
+Password = string   // 8..128 characters (code points), not only spaces
+MyPasswordResponse = { set: boolean, updatedAt: number | null }
+SetPasswordRequest = { password: Password, currentPassword?: string /* 1..128 */ }
+RemovePasswordRequest = { currentPassword?: string }
+PasswordSignInRequest = { email: EmailAddress, password: string /* 1..128 */, deviceName /* 1..128 */ }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `GET /v1/me/password` | member | `MyPasswordResponse` |
+| `PUT /v1/me/password` | person | `MyPasswordResponse`; sets or changes my password (audited as `password.set`) |
+| `POST /v1/me/password/remove` | person | `MyPasswordResponse` with `set: false` (audited as `password.remove`) |
+| `POST /v1/auth/password/sign-in` | anyone | `RedeemResponse`: one more token for the member whose sign-in email it is (audited as `password.sign_in`); a wrong address or password is `unauthorized`, the same either way |
+
+Rules:
+
+- The server stores only a slow hash: PBKDF2-HMAC-SHA256 with 100 000 iterations (the most
+  Workers allow), a 16-byte random salt and a 32-byte key, as
+  `pbkdf2-sha256$<iterations>$<salt>$<key>` (base64url). A missing account still runs one hash,
+  so the answer time does not tell whether an address has a password.
+- Changing or removing a set password needs `currentPassword`, unless this request's token signed
+  in within the last 10 minutes (so a member who forgot it signs in with an email code and sets a
+  new one). A missing or wrong one is 400 `invalid` with reason `password.current`.
+- Signing in allows 10 tries per client IP per minute and 10 wrong tries per address per hour; a
+  right password does not use one up. `currentPassword` checks share the IP limit. Over a limit
+  the answer is 429 `rate_limited`.
+- Only people have passwords; a bot's `PUT` is `forbidden`. A deactivated member cannot sign in.
+
+## Code sign-in (扫码登录)
+
+A signed-in device lets a new device in with a one-time code, shown as a QR image and as text.
+It works both ways:
+
+- **Offer**: the signed-in device shows a code (`POST /v1/me/qr/offer`); the new device scans or
+  types it (`POST /v1/auth/qr/claim`) and gets a token for the same member. The signed-in device
+  polls `GET /v1/me/qr/offers/:id` to show who signed in.
+- **Request**: the new device shows a code (`POST /v1/auth/qr/request`); the signed-in device
+  scans or types it, sees the device name (`POST /v1/me/qr/peek`) and approves it
+  (`POST /v1/me/qr/approve`). The new device polls `POST /v1/auth/qr/poll` with its secret and
+  gets the token once.
+
+```ts
+SignInCode = string                 // 8 Crockford characters shown XXXX-XXXX, read like an invite code
+QrOfferResponse = { id, code, expiresAt }
+QrOfferStatus = { state: "waiting" | "used" | "expired", deviceName?: string }
+QrClaimRequest = { code: SignInCode, deviceName /* 1..128 */ }
+QrRequestRequest = { deviceName /* 1..128 */ }
+QrRequestResponse = { id, code, secret, expiresAt }
+QrPollRequest = { id, secret }
+QrPollResponse = { state: "waiting" | "approved" | "expired", token?: string, member?: Member }
+QrCodeRequest = { code: SignInCode }
+QrPeekResponse = { deviceName, expiresAt }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `POST /v1/me/qr/offer` | person | `QrOfferResponse` (audited as `qr.offer`) |
+| `GET /v1/me/qr/offers/:id` | the person who offered it | `QrOfferStatus`; another member's or an unknown id is `not_found` |
+| `POST /v1/auth/qr/claim` | anyone | `RedeemResponse` (audited as `qr.sign_in` with `details.via = "offer"`); a wrong, used or expired code is `unauthorized` |
+| `POST /v1/auth/qr/request` | anyone | `QrRequestResponse` |
+| `POST /v1/auth/qr/poll` | the device that asked (its secret) | `QrPollResponse`; `approved` makes the token (audited as `qr.sign_in` with `details.via = "request"`) and ends the request; an unknown id or a wrong secret is `expired` |
+| `POST /v1/me/qr/peek` | person | `QrPeekResponse`; a wrong, used or expired code is `not_found` |
+| `POST /v1/me/qr/approve` | person | `{ ok: true }` (audited as `qr.approve`); the new token belongs to the approver and is named by the request's `deviceName` |
+
+Rules:
+
+- Codes have the invite code format (40 bits), are stored as SHA-256 digests of the normalized
+  code, are single use and expire after 5 minutes. A secret is 32 random bytes (base64url),
+  stored as a SHA-256 digest.
+- `claim`, `peek` and `approve` allow 10 wrong codes per client IP per minute; `request` allows 20
+  per client IP per hour; `poll` 120 per client IP per minute. Over a limit the answer is 429
+  `rate_limited`. Clients poll every 2 seconds.
+- A member keeps at most 5 open offers; a new one ends the oldest. Approving takes effect once:
+  a second `approve` of the same code is `not_found`.
+- The QR image holds `tc-sign-in:<CODE>`, followed by `?server=<percent-encoded base URL>` when
+  the showing app knows its server, so a phone that has none yet signs in to the right one. A
+  scanner also accepts a bare code.
+- The activity log (`login` kind) also records `password.sign_in` and `qr.sign_in`.

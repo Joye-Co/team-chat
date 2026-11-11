@@ -70,7 +70,11 @@ CliInfo   = { runtime: string, kind: "codex" | "claude" | "acp" | "pty", command
               // runtime = the name configured on the machine; run.assign.runtime names one
 Health    = { diskFreeBytes, diskTotalBytes, load1, load5, load15, cpuCount, activeRuns }
 RunCursor = { runId, lastSeq: number /* highest seq produced */, done: boolean }
-Usage     = { inputTokens: number, outputTokens: number, costUsd?: number }
+Usage     = { inputTokens: number, outputTokens: number, costUsd?: number,
+              models?: ModelUsage[] /* per model the run used; older daemons omit it */ }
+ModelUsage = { model: string /* the id the CLI reported */, inputTokens /* not cached */,
+              outputTokens, cacheReadTokens?, cacheWriteTokens?,
+              costUsd? /* the CLI's own figure for this model (Claude Code), else none */ }
 ```
 
 ## Server to daemon
@@ -140,7 +144,8 @@ RunEvent =
 ```
 
 - `status: "preparing"` comes first (worktree setup), then `running`.
-- `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event; the
+- `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event, or
+  after 30 minutes while a `tool.call` has no `tool.result` yet (the CLI waits for a step); the
   next event clears it. BotDesk uses it for the topic's stuck state.
 - `tool.result.itemId` equals the `tool.call.itemId` it answers.
 - `plan` carries the CLI's own to-do list, mapped by the daemon: Claude Code's `TodoWrite` tool
@@ -401,7 +406,9 @@ How the 1.1 daemon does each one:
   `~/.claude`), so the run keeps its auth and model; it is mode 0600, never on the command line,
   left out when there is nothing to keep, and removed when the run ends. The tool set keeps a
   user allow rule for a command or edit tool from widening the run. Codex gets
-  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
+  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands; on Windows Codex enforces
+  it only through its own Windows sandbox, so the daemon adds `-c windows.sandbox="unelevated"`:
+  no writes, but commands still reach the network),
   and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
   each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
   working directory and the folders above it (MCP tools run outside the sandbox): each one is
@@ -632,15 +639,32 @@ An AI member runs with every permission; only the few kinds the team checked nee
 
 - **Matching**: each pattern is a regular expression, matched case-insensitively against each
   simple command of the tool's shell line (split at newlines, `;`, `&`, `|`; whitespace runs as
-  one space), so a pattern cannot span two commands. An MCP tool call is matched as
+  one space), so a pattern cannot span two commands. Each command is matched as written and as
+  its plain words: the program without its folder, quotes and `.exe` / `.cmd` / `.bat` /
+  `.com` / `.ps1`, the arguments without quotes (`"C:\Program Files\GitHub CLI\gh.exe" pr merge 5`,
+  `gh.exe pr merge 5` and `'gh' pr merge 5` are all `gh pr merge 5`), so a pattern holds for
+  every spelling a shell accepts. An MCP tool call is matched as
   `<tool name> <input JSON>`. The first kind (assignment order) with a matching pattern wins. A
   pattern the daemon cannot compile is left out and logged; a kind left with none is dropped.
 - **Claude Code** (`CliInfo.gates = true`): the run gets `--settings <run folder>/.gate-settings.json`
-  with a PreToolUse hook (matcher `^(Bash|mcp__.*)$`, anchored: Claude Code reads a matcher with
-  other characters than letters, digits and `|` as an unanchored regex) that runs
+  with a PreToolUse hook (matcher `^(Bash|PowerShell|Monitor|mcp__.*)$`: the tools that run a
+  shell line, and every MCP tool; anchored: Claude Code reads a matcher with other characters
+  than letters, digits and `|` as an unanchored regex) that runs
   `<run folder>/bin/chat-run gate` (timeout 24 h instead of the 600 s default; the run's own
-  deadline ends it sooner). Claude Code merges hooks of all settings files, so the user's own
-  stay; a `disableAllHooks` in the user's settings would turn the hook off. The hook reads the hook input on standard input and sends `gate.check
+  deadline ends it sooner). On Windows the hook is in the exec form
+  (`command: <run folder>/bin/chat-run.exe`, `args: ["gate"]`: started without a shell, because
+  Claude Code runs a shell line in Git Bash or, without it, in PowerShell, and no quoted path
+  with an argument is a command in both) with `onFailure: "block"`; a Windows daemon reports
+  `gates` only for a Claude Code of 2.1.322 or later, the version its tests run against
+  (`onFailure` for command hooks came with 2.1.295), and a run whose gates reach a CLI that was
+  not reported as gated fails before the CLI starts. Claude Code merges hooks of all settings files, so the user's own
+  stay. Hooks can be turned off outside the run. The run's settings say `disableAllHooks: false`,
+  which wins over the user's and the project's settings. Managed settings rank above the run's
+  (`allowManagedHooksOnly`, or `disableAllHooks` there), so the settings also install a
+  SessionStart hook, `chat-run gate-alive` (op `gate.alive`): the CLI runs it when it starts,
+  before it takes input, and the daemon writes a gated run's prompt only after it ran. When it
+  has not run within 45 s the run fails ("the approval hook did not start") and no command of it
+  ever runs. The hook reads the hook input on standard input and sends `gate.check
   { tool, command }` over the run's `chat-run` socket. No match: it exits 0 at once with no
   output. A match: the daemon emits `approval.request { approvalId: "daemon-gate-<n>", title: <the
   kind's 设置 name>, detail: command, kind, command }` and the hook waits. `run.approval approve`
@@ -648,7 +672,8 @@ An AI member runs with every permission; only the few kinds the team checked nee
   reason the CLI reads ("a person declined it … do the rest another way"). The daemon emits
   `approval.resolved`. Hooks run before the permission flow, so the deny holds although the run
   uses `bypassPermissions` (Claude Code hooks reference, "PreToolUse decision control"; checked
-  with the fake CLI in `tests/integration.rs`, not yet with the real one).
+  with the fake CLI and with the real CLI against a fake model in `tests/integration.rs` and
+  `tests/real_cli.rs`, on Linux and Windows CI).
 - **One question at a time**: the server keeps one open approval per run, so a second gated
   command waits until the first is answered, then asks (or passes, see scope).
 - **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
@@ -658,7 +683,9 @@ An AI member runs with every permission; only the few kinds the team checked nee
 - **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
   fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
   run, socket gone), the command runs and the reason goes to the hook's standard error: the
-  daemon is the run's parent, so this happens only when the run is ending anyway.
+  daemon is the run's parent, so this happens only when the run is ending anyway. On Windows
+  the command is refused instead (the hook prints the deny decision), and a hook that cannot
+  start, times out or ends with an unexpected code blocks the command (`onFailure`).
 - **Codex** (`gates` absent): not gated yet. Its app-server asks
   (`item/commandExecution/requestApproval`) only under an approval policy (`untrusted`,
   `on-request`, `granular`) that asks for nearly every command and changes how the model works
@@ -784,7 +811,11 @@ shares of the host, mounted at their host paths, so the worktree, session files,
 and 产出 stay where the daemon reads them. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
-folder. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
+folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
+one more share, mounted as the VM's `$HOME`: what a bot clones, installs and signs in to
+(`gh auth login`) is there again in its next run, in every VM of that bot; the rest of the
+disk still goes with the VM. The CLI's system note says so, and that processes left running
+when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
 before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
 
 The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
@@ -816,7 +847,8 @@ Group members read run events, so the daemon redacts every frame before it sends
 it, and the session file before upload: the exact values of the `env_passthrough` and
 `gated_env` variables and the machine token, known token formats (`tc_`, `whk_`, `tm_`, GitHub, OpenAI, Anthropic,
 AWS, Slack, Google keys, bearer values, private key blocks, URL passwords, secret query
-parameters, invite codes) and secret-named `key=value` pairs become `<redacted>`.
+parameters, invite codes; not the one-time code of a device sign-in such as `gh auth login`,
+which a person has to read) and secret-named `key=value` pairs become `<redacted>`.
 `message.delta` text is released per line (or after 1 s, all but its last two words), so a
 secret split over two deltas is redacted whole.
 
@@ -825,7 +857,7 @@ secret split over two deltas is redacted whole.
 | kind | Command | Protocol |
 | --- | --- | --- |
 | `codex` | `codex app-server` | JSON-RPC lines on stdio (v2): `initialize`, `initialized`, `thread/start {cwd, approvalPolicy, sandbox, model?}`, `turn/start`, `turn/steer`, `turn/interrupt`; notifications `turn/*`, `item/*`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, `error`; server requests `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` |
-| `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in; `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
+| `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in (a line the CLI reads while a turn runs joins that turn; the CLI echoes each line it takes up, and the run ends when a `result` arrives with no line unread); `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
 | `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new`, `session/prompt`, `session/update`, `session/request_permission`, `session/cancel` |
 | `pty` | configured; `{prompt}` in args is replaced | a pseudo terminal; output without ANSI codes streams as message item `out` |
 
@@ -837,7 +869,7 @@ example-config` prints a commented example. Keys: `server_url`, `token_file`, `m
 `stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
-`shares`. `approval_policy`, `sandbox`, `permission_mode` and
+`shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 
@@ -848,6 +880,34 @@ found on PATH.
   KeepAlive, the current PATH, logs in `~/Library/Logs/<slug>-daemon/`) and loads it with
   `launchctl bootstrap gui/<uid>`; `--no-load` only writes the file.
   `daemon uninstall-service` unloads and removes it.
+- Windows: `daemon install-service` registers a scheduled task of the current user (named by
+  security id) called `<bundleId>.daemon` (`schtasks /Create /XML`; the definition is kept in
+  `%LOCALAPPDATA%\<slug>-daemon\task.xml`) and starts it. It refuses a daemon whose file, folder
+  or a folder above it can be changed by anyone but this user and administrators. The task starts at this user's logon and
+  runs only in this user's logon session, so the CLIs see the user's logins; one instance only; a
+  second trigger asks for a start every minute, which starts the daemon again within a minute
+  after it ended for any reason; no time limit; not stopped on battery. Its program is
+  `conhost.exe --headless <daemon> run --config <file> --log-file <file>`: the daemon gets a
+  console without a window, and writes its own log to `%LOCALAPPDATA%\<slug>-daemon\daemon.log`
+  (moved to `daemon.log.1` above 10 MB at a start). `--no-load` only writes the definition file.
+  `daemon uninstall-service` ends and deletes the task and stops its daemon;
+  `daemon restart-service` (Windows only) stops the daemon and starts the task again. Ending the
+  task ends only the console host, so the task's daemon writes its pid and its process
+  creation time to `%LOCALAPPDATA%\<slug>-daemon\daemon.pid` and waits on the event
+  `Local\<slug>-daemon-stop-<pid>`: setting it shuts the daemon down as Ctrl+C does (runs are
+  cancelled and reported). From another logon session of the same user (SSH, WinRM), where the
+  event is not visible, or after 20 s, the process (matched by pid and creation time) is
+  terminated. Both commands fail when the daemon is still running afterwards.
+- Windows, replacing the program file (every updater follows this; the daemon is never stopped
+  for an update): write the new program completely as `<name>.exe.new` in the same folder and
+  check its SHA-256; rename the running `<name>.exe` to `<name>.exe.old-<anything unique>`;
+  rename `<name>.exe.new` to `<name>.exe` (if that fails, rename the old file back). The daemon
+  sees the new file, exits once no run is active, and the task starts the new one within a
+  minute; a starting daemon deletes the `<name>.exe.old-*` files next to it. An update
+  interrupted between the two renames (power loss) leaves no `<name>.exe`: the task's first
+  action (`repair.exe repair-program <daemon>`, a copy of the daemon that `install-service`
+  keeps next to the log and updates never touch) renames the newest `<name>.exe.old-*` back
+  before the daemon is started.
 
 ## Tests
 

@@ -252,7 +252,7 @@ pub fn open_quiet(
     options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
     let handle = gpui_kit::open_window(options, cx, move |_, cx| {
-        cx.new(|cx| QuietPage {
+        let view = cx.new(|cx| QuietPage {
             provider: services.provider.clone(),
             // Redraws until the check finished, so the capture shows its result.
             _poll: cx.spawn(async move |this, cx| {
@@ -266,7 +266,8 @@ pub fn open_quiet(
                     }
                 }
             }),
-        })
+        });
+        cx.new(|_| crate::ui::native::window_chrome::Framed::new(env!("PRODUCT_NAME"), view))
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())?;

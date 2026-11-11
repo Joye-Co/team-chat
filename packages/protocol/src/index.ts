@@ -145,6 +145,15 @@ import {
   UpdateNotifySettingsRequest,
 } from "./settings.ts";
 import {
+  AnswerCardRequest,
+  BadgeResponse,
+  PushData,
+  PushDevice,
+  PushDevicesResponse,
+  RegisterPushDeviceRequest,
+  RemovePushDeviceResponse,
+} from "./push.ts";
+import {
   CreateMemoryRequest,
   MachineMemoryNoteRequest,
   MemoriesResponse,
@@ -154,7 +163,23 @@ import {
   UpdateMemoryRequest,
 } from "./memory.ts";
 
+import {
+  MyPasswordResponse,
+  PasswordSignInRequest,
+  QrClaimRequest,
+  QrCodeRequest,
+  QrOfferResponse,
+  QrOfferStatus,
+  QrPeekResponse,
+  QrPollRequest,
+  QrRequestRequest,
+  QrRequestResponse,
+  RemovePasswordRequest,
+  SetPasswordRequest,
+} from "./account.ts";
+
 export * from "./common.ts";
+export * from "./account.ts";
 export * from "./characters.ts";
 export * from "./topic.ts";
 export * from "./reads.ts";
@@ -183,6 +208,7 @@ export * from "./roster.ts";
 export * from "./bots.ts";
 export * from "./plan.ts";
 export * from "./settings.ts";
+export * from "./push.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -654,6 +680,14 @@ export type RedeemRequest = z.infer<typeof RedeemRequest>;
 export const RedeemResponse = z.object({ token: z.string(), member: Member });
 export type RedeemResponse = z.infer<typeof RedeemResponse>;
 
+/** `POST /v1/auth/qr/poll`: `approved` carries the new token once; then the request is gone. */
+export const QrPollResponse = z.object({
+  state: z.enum(["waiting", "approved", "expired"]),
+  token: z.string().optional(),
+  member: Member.optional(),
+});
+export type QrPollResponse = z.infer<typeof QrPollResponse>;
+
 /** `GET /v1/me` */
 export const MeResponse = Member;
 export type MeResponse = Member;
@@ -668,6 +702,8 @@ export const CreateInviteRequest = z.object({
   role: z.string().optional(),
   /** Sign-in code for this existing member: redeeming it adds a token, not a member. */
   memberId: Id.optional(),
+  /** How long the code works, 1-168 hours (default 168, a week). */
+  expiresInHours: z.int().min(1).max(168).optional(),
 });
 export type CreateInviteRequest = z.infer<typeof CreateInviteRequest>;
 export const CreateInviteResponse = z.object({ code: z.string(), expiresAt: Millis });
@@ -734,6 +770,20 @@ export const schemas = {
   BootstrapResponse,
   RedeemRequest,
   RedeemResponse,
+  // account: password and code sign-in
+  MyPasswordResponse,
+  SetPasswordRequest,
+  RemovePasswordRequest,
+  PasswordSignInRequest,
+  QrOfferResponse,
+  QrOfferStatus,
+  QrClaimRequest,
+  QrRequestRequest,
+  QrRequestResponse,
+  QrPollRequest,
+  QrPollResponse,
+  QrCodeRequest,
+  QrPeekResponse,
   MeResponse,
   MembersResponse,
   CreateInviteRequest,
@@ -869,6 +919,14 @@ export const schemas = {
   MemoryVersionsResponse,
   MemoryUpdatesResponse,
   MachineMemoryNoteRequest,
+  // push
+  RegisterPushDeviceRequest,
+  PushDevice,
+  PushDevicesResponse,
+  RemovePushDeviceResponse,
+  BadgeResponse,
+  PushData,
+  AnswerCardRequest,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

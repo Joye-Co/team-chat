@@ -142,10 +142,15 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
+        KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
+        KeyBinding::new(crate::secondary!("enter"), GiveToHelper, Some(CONTEXT)),
+    ]);
+    // ⌃P and ⌃N move a line on the Mac, in every list and text field. On
+    // Windows Ctrl is the command key: Ctrl+N is 新话题 and Ctrl+P prints.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
         KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
-        KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
-        KeyBinding::new("cmd-enter", GiveToHelper, Some(CONTEXT)),
     ]);
 }
 

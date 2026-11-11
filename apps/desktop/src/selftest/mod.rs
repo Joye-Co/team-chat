@@ -19,6 +19,8 @@
 //! its entry, or the first that failed under `error`.
 //! Scenes live in [`scenes::all`].
 
+#[cfg(target_os = "windows")]
+pub mod artifact_window;
 pub mod capture;
 pub mod clock;
 pub mod drawn;
@@ -69,6 +71,58 @@ struct Options {
     settle: Duration,
 }
 
+/// Waits until every embedded page that is on screen has painted. "Ready" is the page's
+/// load; its first picture comes later, by seconds on a computer without a graphics card
+/// (the Windows CI runner), and a capture in between shows an empty frame where a person
+/// would see the page a moment later. A page tells that it painted with two animation
+/// frames (the browser runs them only when it draws). Windows only: WebKit's views are
+/// part of the window's own layer tree and are there with its next frame.
+async fn wait_for_first_paint(cx: &mut AsyncApp) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    const MARK: &str = "window.__tcPainted || (window.__tcPainted = 0, \
+        requestAnimationFrame(function () { requestAnimationFrame(function () { \
+        window.__tcPainted = 1; }); })); String(window.__tcPainted)";
+    let waiting = Instant::now();
+    while waiting.elapsed() < Duration::from_secs(15) {
+        let pages: Vec<_> = cx.update(|cx| {
+            crate::ui::web_embed::live(cx)
+                .into_iter()
+                .filter(|page| page.read(cx).shown())
+                .collect()
+        });
+        let mut waiting_for = 0;
+        for page in &pages {
+            let (tx, rx) = futures::channel::oneshot::channel();
+            cx.update(|cx| {
+                page.read(cx).evaluate_text(MARK, move |text| {
+                    let _ = tx.send(text);
+                })
+            });
+            if rx.await.ok().flatten().as_deref() != Some("1") {
+                waiting_for += 1;
+            }
+        }
+        if waiting_for == 0 {
+            // The frame the page drew still has to reach the screen.
+            if !pages.is_empty() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(400))
+                    .await;
+            }
+            return;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+    eprintln!("an embedded page did not paint within 15 s");
+}
+
+/// How long a scene's native content (a web page) may take to draw.
+const NATIVE_READY: Duration = Duration::from_secs(60);
+
 const USAGE: &str = "usage: desktop --screenshot <dir> [--theme light|dark|both] \
 [--scenes a,b,...] [--worst-case] [--size WxH] [--settle-ms n] [--list]";
 
@@ -80,6 +134,10 @@ pub fn main_if_requested() -> Option<i32> {
             println!("{:<12} {}", s.name, s.about);
         }
         return Some(0);
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(code) = artifact_window::main_if_requested(&args) {
+        return Some(code);
     }
     if !args.iter().any(|a| a == "--screenshot") {
         return None;
@@ -268,6 +326,13 @@ fn run(options: Options) -> i32 {
             // this Mac keeps the focus. The windows draw as inactive
             // windows (grey traffic lights).
             cx.set_activation_policy(ActivationPolicy::Accessory);
+            // Off the Mac GPUI quits when the last window closes, which
+            // every scene's window does before the next one opens.
+            cx.set_quit_mode(gpui::QuitMode::Explicit);
+            // Off the Mac the menus draw inside the main window's caption
+            // strip, so the scenes show them as the app does.
+            #[cfg(not(target_os = "macos"))]
+            crate::views::nav::menus::install(cx);
             capture::keep_frames();
             // The key scenes press the app's real keys: Tab through the tab
             // stops and the arrows of the lists and sheets (the member
@@ -311,6 +376,10 @@ fn exit_now(code: i32) -> ! {
 
 async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
     let mut all_ok = true;
+    if !capture::dpi_aware() {
+        eprintln!("the process is not per-monitor DPI aware: the exe has no manifest");
+        all_ok = false;
+    }
     let mut shots = Vec::new();
     for &mode in &options.modes {
         cx.update(|cx| {
@@ -489,16 +558,28 @@ async fn shoot(
         }
         // web-embed: native content (a web page) draws on its own schedule.
         if let Some(ready) = scenes::ready_check(scene.name) {
-            let deadline = Instant::now() + Duration::from_secs(20);
+            // The first page of a run also starts the web view's own processes, which on
+            // a CI runner without a graphics card took longer than 20 s.
+            let waiting = Instant::now();
+            let deadline = waiting + NATIVE_READY;
             while !cx.update(|cx| ready(cx)) {
                 if Instant::now() > deadline {
-                    return Err("the native content was not ready within 20 s".into());
+                    return Err(format!(
+                        "the native content was not ready within {} s",
+                        NATIVE_READY.as_secs()
+                    ));
                 }
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
                     .await;
                 let _ = next_frame(handle, cx).await;
             }
+            eprintln!(
+                "{}: native content ready after {:.1} s",
+                scene.name,
+                waiting.elapsed().as_secs_f32()
+            );
+            wait_for_first_paint(cx).await;
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
@@ -517,6 +598,8 @@ async fn shoot(
             let _ = next_frame(handle, cx).await;
             let _ = next_frame(handle, cx).await;
         }
+        // Also for a scene without a readiness check of its own (a page in a card).
+        wait_for_first_paint(cx).await;
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
@@ -577,6 +660,12 @@ async fn shoot(
 fn park_pointer(handle: AnyWindowHandle, at: gpui::Point<Pixels>, cx: &mut AsyncApp) {
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
+            // Hover points are measured on the Mac's layout; off the Mac the
+            // caption strip pushes the content down.
+            let mut at = at;
+            if at.y >= gpui::px(0.) {
+                at.y += crate::ui::native::window_chrome::height(window);
+            }
             window.dispatch_event(
                 gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
                     position: at,

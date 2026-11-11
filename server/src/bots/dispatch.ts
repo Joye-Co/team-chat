@@ -299,6 +299,7 @@ export function buildPrompt(opts: {
   const lines = [
     `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
     "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
+    "People also watch what you say while you work: write those lines in the language of the request too.",
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
     ...(opts.rules ? [opts.rules] : []),

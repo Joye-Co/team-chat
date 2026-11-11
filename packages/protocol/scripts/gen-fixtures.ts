@@ -13,6 +13,7 @@ import { addGapFixtures } from "./fixtures-v11-gaps.ts";
 import { addFilesFixtures } from "./fixtures-v11-files.ts";
 import { addMemberFixtures } from "./fixtures-members.ts";
 import { addMemoryFixtures } from "./fixtures-memory.ts";
+import { addPushFixtures } from "./fixtures-push.ts";
 
 type Fixture = {
   kind: string;
@@ -319,6 +320,8 @@ ok("http/members-response.json", "MembersResponse", [ownerFull, aliceMinimal, bo
 ok("http/members-response-empty.json", "MembersResponse", []);
 ok("http/create-invite-request.json", "CreateInviteRequest", { name: "小王", kind: "human", level: "member", role: "后端工程师" });
 ok("http/create-invite-request-minimal.json", "CreateInviteRequest", { name: "Ops", kind: "bot", level: "owner" });
+ok("http/create-invite-request-expires.json", "CreateInviteRequest", { name: "Lina", kind: "human", level: "member", expiresInHours: 36 }, "a code that works for 36 hours");
+bad("http/create-invite-request-expires-too-long.json", "CreateInviteRequest", { name: "Lina", kind: "human", level: "member", expiresInHours: 169 }, "at most a week");
 ok("http/create-invite-request-member.json", "CreateInviteRequest", { name: "小王", kind: "human", level: "member", memberId: "01HZX5Q0Y7R0V9C8B7N6M5K4J3" }, "sign-in code for an existing member");
 ok("http/create-invite-response.json", "CreateInviteResponse", { code: "WXYZ-2345", expiresAt: T0 + 7 * 86_400_000 }, "code is a fake placeholder");
 ok("http/create-bot-request.json", "CreateBotRequest", { name: "Reviewer 🔍", role: "代码审查" });
@@ -357,6 +360,7 @@ addGapFixtures({ ok, bad, T0, ID, base, message });
 addFilesFixtures({ ok, bad, T0, ID, base, message });
 addMemberFixtures({ ok, bad, T0, ID, base, message });
 addMemoryFixtures({ ok, bad, T0, ID });
+addPushFixtures({ ok, bad, T0, ID });
 
 // ---------------------------------------------------------------------------
 

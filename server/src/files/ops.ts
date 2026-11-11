@@ -1,5 +1,6 @@
-// Diagnostics uploads, app releases, update checks and the public DMG download.
-import { MAX_DIAGNOSTICS_BYTES, MAX_FILE_BYTES, ReleaseVersion, type UpdateInfo } from "@chat/protocol";
+// Diagnostics uploads, app releases (the DMG and the Windows installer), update checks and the
+// public download.
+import { MAX_DIAGNOSTICS_BYTES, MAX_FILE_BYTES, ReleasePlatform, ReleaseVersion, type UpdateInfo } from "@chat/protocol";
 import { z } from "zod";
 import product from "../../../product.json";
 import { auditStatement } from "../core/audit";
@@ -25,8 +26,35 @@ const STALE_UPLOAD_MS = 30 * 60_000;
 const MAX_NOTES_CHARS = 20_000;
 
 const diagnosticsKey = (memberId: string, id: string) => `diagnostics/${memberId}/${id}.gz`;
-const releaseFile = (version: string) => `${product.slug}-${version}.dmg`;
 const releaseKey = (version: string, file: string) => `releases/${version}/${file}`;
+
+/**
+ * One file per release and platform. The DMG rows are the `releases` table, as before the
+ * Windows client; every other platform is a row of `release_assets`. A request that names no
+ * platform means the DMG, so clients and scripts from before keep working unchanged.
+ */
+const PLATFORMS: Record<ReleasePlatform, { file: (version: string) => string; mime: string; table: string; where: string }> = {
+  macos: {
+    file: (version) => `${product.slug}-${version}.dmg`,
+    mime: "application/x-apple-diskimage",
+    table: "releases",
+    where: "",
+  },
+  windows: {
+    file: (version) => `${product.slug}-${version}-setup.exe`,
+    mime: "application/vnd.microsoft.portable-executable",
+    table: "release_assets",
+    where: "platform = 'windows' AND ",
+  },
+};
+
+/** The `platform` query parameter; missing = the DMG. */
+function platformOf(raw: string | null): ReleasePlatform {
+  if (raw === null) return "macos";
+  const p = ReleasePlatform.safeParse(raw);
+  if (!p.success) throw new ApiError("invalid", "unknown platform");
+  return p.data;
+}
 
 type ReleaseRow = {
   version: string;
@@ -40,29 +68,32 @@ type ReleaseRow = {
   withdrawn_at: number | null;
 };
 
-function toUpdateInfo(r: ReleaseRow, origin: string): UpdateInfo {
+function toUpdateInfo(r: ReleaseRow, origin: string, platform: ReleasePlatform = "macos"): UpdateInfo {
   return {
     version: r.version,
     notes: r.notes,
     size: r.size,
     sha256: r.sha256,
     publishedAt: r.published_at ?? r.created_at,
-    downloadUrl: `${origin}/v1/updates/${r.version}/download`,
+    // The DMG's URL is the one old clients know; other platforms name themselves.
+    downloadUrl: `${origin}/v1/updates/${r.version}/download${platform === "macos" ? "" : `?platform=${platform}`}`,
+    platform,
   };
 }
 
-async function latestRelease(db: D1Database): Promise<ReleaseRow | null> {
+async function latestRelease(db: D1Database, platform: ReleasePlatform = "macos"): Promise<ReleaseRow | null> {
+  const p = PLATFORMS[platform];
   return db
     .prepare(
-      "SELECT * FROM releases WHERE status = 'ready' AND withdrawn_at IS NULL ORDER BY major DESC, minor DESC, patch DESC LIMIT 1",
+      `SELECT * FROM ${p.table} WHERE ${p.where}status = 'ready' AND withdrawn_at IS NULL ORDER BY major DESC, minor DESC, patch DESC LIMIT 1`,
     )
     .first<ReleaseRow>();
 }
 
-function serveRelease(request: Request, env: Env, r: ReleaseRow): Promise<Response> {
+function serveRelease(request: Request, env: Env, r: ReleaseRow, platform: ReleasePlatform = "macos"): Promise<Response> {
   return serveObject(request, env.FILES, releaseKey(r.version, r.file_name), {
     size: r.size,
-    mime: "application/x-apple-diskimage",
+    mime: PLATFORMS[platform].mime,
     disposition: contentDisposition("attachment", r.file_name),
     headers: { "cache-control": "private, max-age=3600" },
   });
@@ -173,57 +204,15 @@ export function registerOpsRoutes(): void {
     method: "PUT",
     path: "/v1/admin/releases/:version",
     auth: "none",
-    async handler({ env, request, url, params }) {
-      const given = request.headers.get("x-admin-secret") ?? "";
-      const expected = env.ADMIN_SECRET ?? "";
-      const ok = await timingSafeEqualString(given, expected);
-      if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
-      const version = params.version;
-      if (!ReleaseVersion.safeParse(version).success) throw new ApiError("invalid", "version must be MAJOR.MINOR.PATCH");
-      const sha256 = (request.headers.get("x-sha256") ?? "").trim();
-      if (!/^[0-9a-f]{64}$/.test(sha256)) throw new ApiError("invalid", "X-Sha256 must be 64 lowercase hex");
-      const notes = decodeNotes(request.headers.get("x-release-notes"));
-      const declared = request.headers.get("content-length");
-      if (declared === null || !/^\d+$/.test(declared)) throw new ApiError("invalid", "Content-Length is required");
-      const size = Number(declared);
-      if (size > MAX_FILE_BYTES) throw new ApiError("too_large", "release too large");
-      if (size === 0) throw new ApiError("invalid", "empty body");
-      const [major, minor, patch] = version.split(".").map(Number);
-      const file = releaseFile(version);
-      const now = Date.now();
+    handler: ({ env, request, url, params }) => publishRelease(env, request, url, params.version, "macos"),
+  });
 
-      // Claim the version first, so two uploads of one version never overwrite each other.
-      const claim = await env.DB.prepare(
-        `INSERT INTO releases (version, major, minor, patch, file_name, size, sha256, notes, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'uploading', ?)
-         ON CONFLICT (version) DO UPDATE SET size = excluded.size, sha256 = excluded.sha256,
-           notes = excluded.notes, created_at = excluded.created_at
-         WHERE releases.status = 'uploading' AND releases.created_at < ?`,
-      )
-        .bind(version, major, minor, patch, file, size, sha256, notes, now, now - STALE_UPLOAD_MS)
-        .run();
-      if (claim.meta.changes !== 1) throw new ApiError("conflict", "release exists");
-
-      try {
-        await putVerified(env.FILES, releaseKey(version, file), request.body, size, sha256, {
-          contentType: "application/x-apple-diskimage",
-        });
-      } catch (err) {
-        await env.DB.prepare("DELETE FROM releases WHERE version = ? AND status = 'uploading' AND created_at = ?")
-          .bind(version, now)
-          .run();
-        throw err;
-      }
-      const published = Date.now();
-      await env.DB.batch([
-        env.DB.prepare(
-          "UPDATE releases SET status = 'ready', published_at = ? WHERE version = ? AND created_at = ?",
-        ).bind(published, version, now),
-        auditStatement(env.DB, null, { action: "release.publish", target: version, details: { size, sha256 } }, published),
-      ]);
-      const row = await env.DB.prepare("SELECT * FROM releases WHERE version = ?").bind(version).first<ReleaseRow>();
-      return toUpdateInfo(row as ReleaseRow, url.origin);
-    },
+  // The file of a release for one platform. `macos` is the same upload as the route above.
+  registerRoute({
+    method: "PUT",
+    path: "/v1/admin/releases/:version/assets/:platform",
+    auth: "none",
+    handler: ({ env, request, url, params }) => publishRelease(env, request, url, params.version, platformOf(params.platform)),
   });
 
   // Withdraw a bad release: it is no longer offered as latest (the previous ready release is)
@@ -238,13 +227,19 @@ export function registerOpsRoutes(): void {
       const ok = await timingSafeEqualString(given, expected);
       if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
       const b = await body(z.object({ restore: z.boolean().optional() }));
-      const row = await env.DB.prepare("SELECT * FROM releases WHERE version = ? AND status = 'ready'")
-        .bind(params.version)
-        .first<ReleaseRow>();
+      // A version is withdrawn as a whole: its DMG and the files of its other platforms.
+      const row =
+        (await env.DB.prepare("SELECT * FROM releases WHERE version = ? AND status = 'ready'")
+          .bind(params.version)
+          .first<ReleaseRow>()) ??
+        (await env.DB.prepare("SELECT * FROM release_assets WHERE version = ? AND status = 'ready' LIMIT 1")
+          .bind(params.version)
+          .first<ReleaseRow>());
       if (!row) throw new ApiError("not_found", "no such release");
       const now = Date.now();
       await env.DB.batch([
         env.DB.prepare("UPDATE releases SET withdrawn_at = ? WHERE version = ?").bind(b.restore ? null : now, row.version),
+        env.DB.prepare("UPDATE release_assets SET withdrawn_at = ? WHERE version = ?").bind(b.restore ? null : now, row.version),
         auditStatement(env.DB, null, { action: b.restore ? "release.restore" : "release.withdraw", target: row.version }, now),
       ]);
       const latest = await latestRelease(env.DB);
@@ -257,9 +252,10 @@ export function registerOpsRoutes(): void {
     path: "/v1/updates/latest",
     auth: "member",
     async handler({ env, url }) {
-      const r = await latestRelease(env.DB);
+      const platform = platformOf(url.searchParams.get("platform"));
+      const r = await latestRelease(env.DB, platform);
       if (!r) throw new ApiError("not_found", "no release");
-      return toUpdateInfo(r, url.origin);
+      return toUpdateInfo(r, url.origin, platform);
     },
   });
 
@@ -267,12 +263,16 @@ export function registerOpsRoutes(): void {
     method: "GET",
     path: "/v1/updates/:version/download",
     auth: "member",
-    async handler({ env, request, params }) {
-      const r = await env.DB.prepare("SELECT * FROM releases WHERE version = ? AND status = 'ready' AND withdrawn_at IS NULL")
+    async handler({ env, request, url, params }) {
+      const platform = platformOf(url.searchParams.get("platform"));
+      const p = PLATFORMS[platform];
+      const r = await env.DB.prepare(
+        `SELECT * FROM ${p.table} WHERE ${p.where}version = ? AND status = 'ready' AND withdrawn_at IS NULL`,
+      )
         .bind(params.version)
         .first<ReleaseRow>();
       if (!r) throw new ApiError("not_found", "no such release");
-      return serveRelease(request, env, r);
+      return serveRelease(request, env, r, platform);
     },
   });
 
@@ -286,7 +286,9 @@ export function registerOpsRoutes(): void {
     auth: "none",
     async handler({ env, request, url }) {
       // Links made before the fragment form keep working.
-      if (url.searchParams.has("code")) return downloadFor(env, request, url.searchParams.get("code") ?? "");
+      if (url.searchParams.has("code")) {
+        return downloadFor(env, request, url.searchParams.get("code") ?? "", url.searchParams.get("platform"));
+      }
       return new Response(DOWNLOAD_PAGE, {
         headers: {
           "content-type": "text/html; charset=utf-8",
@@ -305,13 +307,71 @@ export function registerOpsRoutes(): void {
     auth: "none",
     async handler({ env, request }) {
       const text = new TextDecoder().decode(await readBytes(request, 1024));
-      return downloadFor(env, request, new URLSearchParams(text).get("code") ?? "");
+      const form = new URLSearchParams(text);
+      return downloadFor(env, request, form.get("code") ?? "", form.get("platform"));
     },
   });
 }
 
+/** Stores the file of `version` for `platform` (admin secret) and answers with its `UpdateInfo`. */
+async function publishRelease(env: Env, request: Request, url: URL, version: string, platform: ReleasePlatform): Promise<UpdateInfo> {
+  const given = request.headers.get("x-admin-secret") ?? "";
+  const expected = env.ADMIN_SECRET ?? "";
+  const ok = await timingSafeEqualString(given, expected);
+  if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
+  if (!ReleaseVersion.safeParse(version).success) throw new ApiError("invalid", "version must be MAJOR.MINOR.PATCH");
+  const sha256 = (request.headers.get("x-sha256") ?? "").trim();
+  if (!/^[0-9a-f]{64}$/.test(sha256)) throw new ApiError("invalid", "X-Sha256 must be 64 lowercase hex");
+  const notes = decodeNotes(request.headers.get("x-release-notes"));
+  const declared = request.headers.get("content-length");
+  if (declared === null || !/^\d+$/.test(declared)) throw new ApiError("invalid", "Content-Length is required");
+  const size = Number(declared);
+  if (size > MAX_FILE_BYTES) throw new ApiError("too_large", "release too large");
+  if (size === 0) throw new ApiError("invalid", "empty body");
+  const [major, minor, patch] = version.split(".").map(Number);
+  const p = PLATFORMS[platform];
+  const file = p.file(version);
+  const now = Date.now();
+  // `releases` has no platform column: its rows are the DMGs.
+  const [platformColumn, platformValue] = platform === "macos" ? ["", ""] : ["platform, ", `'${platform}', `];
+  const conflict = platform === "macos" ? "version" : "version, platform";
+
+  // Claim the version first, so two uploads of one version never overwrite each other.
+  const claim = await env.DB.prepare(
+    `INSERT INTO ${p.table} (${platformColumn}version, major, minor, patch, file_name, size, sha256, notes, status, created_at)
+     VALUES (${platformValue}?, ?, ?, ?, ?, ?, ?, ?, 'uploading', ?)
+     ON CONFLICT (${conflict}) DO UPDATE SET size = excluded.size, sha256 = excluded.sha256,
+       notes = excluded.notes, created_at = excluded.created_at
+     WHERE ${p.table}.status = 'uploading' AND ${p.table}.created_at < ?`,
+  )
+    .bind(version, major, minor, patch, file, size, sha256, notes, now, now - STALE_UPLOAD_MS)
+    .run();
+  if (claim.meta.changes !== 1) throw new ApiError("conflict", "release exists");
+
+  try {
+    await putVerified(env.FILES, releaseKey(version, file), request.body, size, sha256, { contentType: p.mime });
+  } catch (err) {
+    await env.DB.prepare(`DELETE FROM ${p.table} WHERE ${p.where}version = ? AND status = 'uploading' AND created_at = ?`)
+      .bind(version, now)
+      .run();
+    throw err;
+  }
+  const published = Date.now();
+  // The DMG's audit entry keeps its shape; another platform names itself.
+  const details = platform === "macos" ? { size, sha256 } : { size, sha256, platform };
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE ${p.table} SET status = 'ready', published_at = ? WHERE ${p.where}version = ? AND created_at = ?`,
+    ).bind(published, version, now),
+    auditStatement(env.DB, null, { action: "release.publish", target: version, details }, published),
+  ]);
+  const row = await env.DB.prepare(`SELECT * FROM ${p.table} WHERE ${p.where}version = ?`).bind(version).first<ReleaseRow>();
+  return toUpdateInfo(row as ReleaseRow, url.origin, platform);
+}
+
 /** Rate limited per IP; the code is never logged (this function logs nothing). */
-async function downloadFor(env: Env, request: Request, raw: string): Promise<Response> {
+async function downloadFor(env: Env, request: Request, raw: string, rawPlatform: string | null = null): Promise<Response> {
+  const platform = downloadPlatform(rawPlatform, request.headers.get("user-agent"));
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   const key = `download:${await sha256Hex(ip)}`;
   if (!(await rateHit(env.DB, key, DOWNLOAD_RATE.windowMs, DOWNLOAD_RATE.max))) {
@@ -325,13 +385,27 @@ async function downloadFor(env: Env, request: Request, raw: string): Promise<Res
     .bind(await sha256Hex(code), Date.now())
     .first<{ id: string }>();
   if (!invite) return plain(404, "Invite code not found or expired.\n");
-  const r = await latestRelease(env.DB);
-  if (!r) return plain(404, "No release yet.\n");
-  return serveRelease(request, env, r);
+  const r = await latestRelease(env.DB, platform);
+  if (!r) return plain(404, platform === "macos" ? "No release yet.\n" : "No release for this system yet.\n");
+  return serveRelease(request, env, r, platform);
 }
 
-/** Reads the code from the fragment (or an old query link), drops it from the address bar, posts it. */
-const DOWNLOAD_SCRIPT = `(function(){var h=new URLSearchParams(location.hash.slice(1)),q=new URLSearchParams(location.search),c=h.get("code")||q.get("code")||"";history.replaceState(null,"",location.pathname);if(!c){document.getElementById("m").textContent="Invite code not found or expired.";return}var f=document.createElement("form");f.method="POST";f.action="/download";var i=document.createElement("input");i.type="hidden";i.name="code";i.value=c;f.appendChild(i);document.body.appendChild(f);f.submit()})();`;
+/**
+ * Which file an invite download gets. A named platform wins; an unknown name gets the DMG, as
+ * every link did before platforms. With no name (a link from before the fragment form, opened
+ * directly, or a page script that could not tell) a browser that says it runs on Windows gets
+ * the installer: the DMG is of no use there.
+ */
+export function downloadPlatform(named: string | null, userAgent: string | null): ReleasePlatform {
+  if (named === null && /\bWindows\b/.test(userAgent ?? "")) return "windows";
+  return ReleasePlatform.safeParse(named).data ?? "macos";
+}
+
+/**
+ * Reads the code from the fragment (or an old query link), drops it from the address bar, posts
+ * it. A browser on Windows also posts `platform=windows` and so gets the installer, not the DMG.
+ */
+const DOWNLOAD_SCRIPT = `(function(){var h=new URLSearchParams(location.hash.slice(1)),q=new URLSearchParams(location.search),c=h.get("code")||q.get("code")||"";history.replaceState(null,"",location.pathname);if(!c){document.getElementById("m").textContent="Invite code not found or expired.";return}var f=document.createElement("form");f.method="POST";f.action="/download";var i=document.createElement("input");i.type="hidden";i.name="code";i.value=c;f.appendChild(i);if(/Windows/.test(navigator.userAgent)){var p=document.createElement("input");p.type="hidden";p.name="platform";p.value="windows";f.appendChild(p)}document.body.appendChild(f);f.submit()})();`;
 
 const DOWNLOAD_PAGE =
   '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Download</title>' +

@@ -5,32 +5,242 @@ use crate::proto::{CliInfo, Health};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// The program file for `cmd`: a path as given, or a name looked up in `PATH`. On Windows a
+/// name without an extension gets the extensions of `PATHEXT` (`claude` is `claude.cmd` or
+/// `claude.exe`).
 pub fn which(cmd: &str) -> Option<PathBuf> {
-    if cmd.contains('/') {
-        let p = PathBuf::from(cmd);
-        return is_executable(&p).then_some(p);
+    which_in(cmd, std::env::var_os("PATH").as_deref())
+}
+
+/// [`which`] with the `PATH` to search (a run's CLI is looked up in the run's `PATH`).
+pub fn which_in(cmd: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    if cmd.is_empty() {
+        return None;
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|d| d.join(cmd))
+    let names: Vec<String> = if cfg!(windows) {
+        let pathext = std::env::var("PATHEXT").unwrap_or_default();
+        windows_names(cmd, &pathext)
+    } else {
+        vec![cmd.to_string()]
+    };
+    let is_path = cmd.contains('/') || (cfg!(windows) && (cmd.contains('\\') || cmd.contains(':')));
+    if is_path {
+        return names.iter().map(PathBuf::from).find(|p| is_executable(p));
+    }
+    std::env::split_paths(path?)
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
         .find(|p| is_executable(p))
 }
 
 fn is_executable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    crate::sys::is_executable(p)
+}
+
+/// The extensions Windows can start directly (`.bat` and `.cmd` through `cmd.exe`). `PATHEXT`
+/// also lists script types (`.JS`, `.VBS`) that need a host program: those are not CLIs.
+const WINDOWS_EXTS: &[&str] = &[".com", ".exe", ".bat", ".cmd"];
+
+/// The file names to try for `cmd` on Windows: `cmd` itself when it already ends in a
+/// startable extension, else `cmd` with each startable extension in the order of `pathext`.
+/// Never the bare name: npm puts a shell script `claude` next to `claude.cmd`.
+pub fn windows_names(cmd: &str, pathext: &str) -> Vec<String> {
+    let lower = cmd.to_ascii_lowercase();
+    if WINDOWS_EXTS.iter().any(|e| lower.ends_with(e)) {
+        return vec![cmd.to_string()];
+    }
+    let mut exts: Vec<String> = pathext
+        .split(';')
+        .map(|e| e.trim().to_ascii_lowercase())
+        .filter(|e| WINDOWS_EXTS.contains(&e.as_str()))
+        .collect();
+    for e in WINDOWS_EXTS {
+        if !exts.iter().any(|x| x == e) {
+            exts.push(e.to_string());
+        }
+    }
+    exts.iter().map(|e| format!("{cmd}{e}")).collect()
+}
+
+/// How to start a CLI's program file: the program and the arguments that go before the
+/// caller's own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Launch {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+}
+
+/// How to start `program`. On Unix the file itself. On Windows an npm-installed CLI is a
+/// `.cmd` file that starts `node <script>` or an `.exe` of the package: that target is started
+/// directly, so a prompt never goes through `cmd.exe` and its quoting rules. Any other `.cmd`
+/// or `.bat` is started as it is; the standard library then quotes the arguments for
+/// `cmd.exe` and refuses the ones it cannot quote safely.
+pub fn launch(program: &Path) -> Launch {
+    let direct = Launch {
+        program: program.to_path_buf(),
+        args: vec![],
+    };
+    if !cfg!(windows) {
+        return direct;
+    }
+    let ext = program
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext != "cmd" && ext != "bat" {
+        return direct;
+    }
+    let Some(dir) = program.parent() else {
+        return direct;
+    };
+    let text = match std::fs::read(program) {
+        Ok(b) if b.len() <= 64 * 1024 => String::from_utf8_lossy(&b).into_owned(),
+        _ => return direct,
+    };
+    let Some(target) = shim_target(&text) else {
+        return direct;
+    };
+    let target = dir.join(target.replace('\\', std::path::MAIN_SEPARATOR_STR));
+    if !target.is_file() {
+        return direct;
+    }
+    let ext = target
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "exe" => Launch {
+            program: target,
+            args: vec![],
+        },
+        "js" | "cjs" | "mjs" => {
+            // Like the shim: the node.exe next to it, else the one on PATH.
+            let beside = dir.join("node.exe");
+            let node = if beside.is_file() {
+                Some(beside)
+            } else {
+                which("node")
+            };
+            match node {
+                Some(node) => Launch {
+                    program: node,
+                    args: vec![target.to_string_lossy().into_owned()],
+                },
+                None => direct,
+            }
+        }
+        _ => direct,
+    }
+}
+
+/// The file an npm, pnpm or yarn `.cmd` shim starts, relative to the shim's folder (with
+/// backslashes, as written). The shim's last command line ends in `"<%dp0%>\<target>" %*`.
+/// None when the text is not such a shim.
+pub fn shim_target(text: &str) -> Option<String> {
+    let line = text.lines().rev().find(|l| l.contains("%*"))?;
+    let line = &line[..line.rfind("%*")?];
+    // The last quoted word before `%*`.
+    let end = line.rfind('"')?;
+    let start = line[..end].rfind('"')?;
+    let word = &line[start + 1..end];
+    let rest = ["%dp0%\\", "%~dp0\\", "%~dp0"]
+        .iter()
+        .find_map(|p| word.strip_prefix(p))?;
+    let plain = !rest.is_empty()
+        && !rest.starts_with('\\')
+        && !rest.contains(['%', '"', '^', '&', '|', '<', '>', '!', ':']);
+    plain.then(|| rest.to_string())
+}
+
+/// Why `args` cannot be given to `program` (what [`launch`] says to start). A `.cmd` or `.bat`
+/// file runs in `cmd.exe`, whose command line ends at the first line break: an argument with
+/// one (a run's instructions have several) would be cut off there, and what follows it would
+/// be read as more commands. None for a program that is not a batch file.
+pub fn batch_problem(program: &Path, args: &[String]) -> Option<String> {
+    let ext = program
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext != "cmd" && ext != "bat" {
+        return None;
+    }
+    args.iter().any(|a| a.contains(['\n', '\r'])).then(|| {
+        format!(
+            "{} is a batch file that is not an npm shim, and cmd.exe cannot carry an argument \
+with a line break. Set the runtime's command to the program that the batch file starts",
+            program.display()
+        )
+    })
+}
+
+/// A command that starts the program file `program` (see [`launch`]).
+pub fn command(program: &Path) -> tokio::process::Command {
+    let l = launch(program);
+    let mut c = tokio::process::Command::new(&l.program);
+    c.args(&l.args);
+    c
+}
+
+/// A helper process of the daemon (a probe of a CLI, a sign-in). Windows: it is in a Job
+/// Object of its own, so ending it also ends what it started: killing only the `.cmd` wrapper
+/// of an npm-installed CLI would leave the real program running. Unix: the child as it is.
+pub struct Helper {
+    child: tokio::process::Child,
+    #[cfg(windows)]
+    _job: crate::winjob::Job,
+}
+
+impl std::ops::Deref for Helper {
+    type Target = tokio::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for Helper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+/// Starts a helper process (see [`Helper`]).
+pub fn spawn(cmd: &mut tokio::process::Command) -> std::io::Result<Helper> {
+    #[cfg(windows)]
+    {
+        let (child, job) = crate::winjob::spawn(cmd, false)?;
+        Ok(Helper { child, _job: job })
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Helper {
+            child: cmd.spawn()?,
+        })
+    }
+}
+
+/// Runs a helper process to its end and collects its output, like `Command::output`. The
+/// caller sets `stdout` and `stderr` (what it does not set is inherited on Windows). When the
+/// caller gives up (a timeout drops this future) the process and what it started are ended.
+pub async fn output(cmd: &mut tokio::process::Command) -> std::io::Result<std::process::Output> {
+    #[cfg(windows)]
+    {
+        let Helper { child, _job } = spawn(cmd)?;
+        child.wait_with_output().await
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.output().await
+    }
 }
 
 /// First line of `<cmd> --version`, with a 10 s limit.
 pub async fn cli_version(cmd: &str) -> Option<String> {
-    let mut c = tokio::process::Command::new(cmd);
+    let mut c = command(Path::new(cmd));
     c.arg("--version")
         .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
-    let out = tokio::time::timeout(Duration::from_secs(10), c.output())
+    let out = tokio::time::timeout(Duration::from_secs(10), output(&mut c))
         .await
         .ok()?
         .ok()?;
@@ -56,6 +266,7 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         _ => None,
     };
     let can_run = crate::models::discover(rt, found.as_deref()).await;
+    let gates = crate::gates::reported_for(&rt.kind, version.as_deref()).then_some(true);
     CliInfo {
         runtime: name.to_string(),
         kind: rt.kind.clone(),
@@ -65,7 +276,7 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         models: can_run.models,
         efforts: can_run.efforts,
         // Only Claude Code runs stop at gated commands (a PreToolUse hook); Codex cannot yet.
-        gates: crate::gates::enforced_by(&rt.kind).then_some(true),
+        gates,
     }
 }
 
@@ -76,28 +287,12 @@ pub fn disk(path: &Path) -> (u64, u64) {
             break;
         }
     }
-    let Ok(c) = std::ffi::CString::new(p.to_string_lossy().as_bytes()) else {
-        return (0, 0);
-    };
-    // SAFETY: statvfs writes into a zeroed struct; c is a valid NUL-terminated path.
-    unsafe {
-        let mut s: libc::statvfs = std::mem::zeroed();
-        if libc::statvfs(c.as_ptr(), &mut s) != 0 {
-            return (0, 0);
-        }
-        let frsize = s.f_frsize as u64;
-        (s.f_bavail as u64 * frsize, s.f_blocks as u64 * frsize)
-    }
+    crate::sys::disk(&p)
 }
 
 pub fn health(cfg: &Config, active_runs: u32) -> Health {
     let (free, total) = disk(&cfg.work_root);
-    let mut l = [0f64; 3];
-    // SAFETY: l has room for 3 doubles.
-    let n = unsafe { libc::getloadavg(l.as_mut_ptr(), 3) };
-    if n < 3 {
-        l = [0.0; 3];
-    }
+    let l = crate::sys::load_avg();
     let round = |x: f64| (x * 100.0).round() / 100.0;
     Health {
         disk_free_bytes: free,
@@ -109,5 +304,129 @@ pub fn health(cfg: &Config, active_runs: u32) -> Health {
             .map(|n| n.get() as u32)
             .unwrap_or(1),
         active_runs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_names_follow_pathext_and_never_try_the_bare_name() {
+        assert_eq!(
+            windows_names("claude", ".COM;.EXE;.BAT;.CMD;.VBS;.JS"),
+            ["claude.com", "claude.exe", "claude.bat", "claude.cmd"]
+        );
+        // The order of PATHEXT wins; what it leaves out is still tried, last.
+        assert_eq!(
+            windows_names("codex", ".CMD;.EXE"),
+            ["codex.cmd", "codex.exe", "codex.com", "codex.bat"]
+        );
+        assert_eq!(windows_names("git.EXE", ".COM;.EXE"), ["git.EXE"]);
+        assert_eq!(
+            windows_names("C:\\bin\\claude.cmd", ""),
+            ["C:\\bin\\claude.cmd"]
+        );
+        // A dot in the name is not an extension Windows can start.
+        assert_eq!(windows_names("tool.v2", ".EXE")[0], "tool.v2.exe");
+    }
+
+    #[test]
+    fn shim_target_reads_npm_pnpm_and_old_shims() {
+        let npm = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n";
+        assert_eq!(
+            shim_target(npm).as_deref(),
+            Some("node_modules\\@anthropic-ai\\claude-code\\cli.js")
+        );
+        let native = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*\r\n";
+        assert_eq!(
+            shim_target(native).as_deref(),
+            Some("node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe")
+        );
+        let old = "@IF EXIST \"%~dp0\\node.exe\" (\r\n  \"%~dp0\\node.exe\"  \"%~dp0\\node_modules\\x\\cli.js\" %*\r\n) ELSE (\r\n  @SETLOCAL\r\n  @SET PATHEXT=%PATHEXT:;.JS;=;%\r\n  node  \"%~dp0\\node_modules\\x\\cli.js\" %*\r\n)\r\n";
+        assert_eq!(shim_target(old).as_deref(), Some("node_modules\\x\\cli.js"));
+        let pnpm = "@SETLOCAL\r\n@IF EXIST \"%~dp0\\node.exe\" (\r\n  \"%~dp0\\node.exe\"  \"%~dp0\\..\\pkg\\bin\\cli.mjs\" %*\r\n) ELSE (\r\n  node  \"%~dp0\\..\\pkg\\bin\\cli.mjs\" %*\r\n)\r\n";
+        assert_eq!(shim_target(pnpm).as_deref(), Some("..\\pkg\\bin\\cli.mjs"));
+    }
+
+    #[test]
+    fn shim_target_refuses_what_is_not_a_plain_shim() {
+        assert_eq!(shim_target("@echo off\r\necho hi\r\n"), None);
+        assert_eq!(shim_target("@python \"%~dp0\\tool.py\" %1\r\n"), None);
+        // A target that names another variable or leaves the shim's folder by an absolute path.
+        assert_eq!(shim_target("\"%dp0%\\%NAME%.exe\" %*"), None);
+        assert_eq!(shim_target("\"C:\\tools\\x.exe\" %*"), None);
+        assert_eq!(shim_target("\"%dp0%\\\" %*"), None);
+        assert_eq!(shim_target("node %*"), None);
+    }
+
+    #[test]
+    fn a_batch_file_takes_no_argument_with_a_line_break() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let multi = args(&["-p", "first line\nsecond line"]);
+        assert!(batch_problem(Path::new("C:/tools/claude.exe"), &multi).is_none());
+        assert!(
+            batch_problem(Path::new("C:/tools/wrap.cmd"), &args(&["-p", "one line"])).is_none()
+        );
+        let why = batch_problem(Path::new("C:/tools/wrap.CMD"), &multi).unwrap();
+        assert!(why.contains("line break"), "{why}");
+        assert!(batch_problem(Path::new("wrap.bat"), &args(&["a\rb"])).is_some());
+    }
+
+    #[test]
+    fn launch_is_the_file_itself_for_a_program_that_is_not_a_shim() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("tool");
+        std::fs::write(&exe, "x").unwrap();
+        assert_eq!(
+            launch(&exe),
+            Launch {
+                program: exe,
+                args: vec![]
+            }
+        );
+    }
+
+    /// The shim's `.exe` target is started directly, and a `.js` target with the `node.exe`
+    /// next to the shim.
+    #[cfg(windows)]
+    #[test]
+    fn launch_resolves_an_npm_shim() {
+        let dir = tempfile::tempdir().unwrap();
+        let pkg = dir.path().join("node_modules").join("x");
+        std::fs::create_dir_all(pkg.join("bin")).unwrap();
+        std::fs::write(pkg.join("bin").join("x.exe"), "x").unwrap();
+        std::fs::write(pkg.join("cli.js"), "x").unwrap();
+        std::fs::write(dir.path().join("node.exe"), "x").unwrap();
+        let native = dir.path().join("native.cmd");
+        std::fs::write(&native, "\"%dp0%\\node_modules\\x\\bin\\x.exe\"   %*\r\n").unwrap();
+        assert_eq!(
+            launch(&native),
+            Launch {
+                program: pkg.join("bin").join("x.exe"),
+                args: vec![]
+            }
+        );
+        let js = dir.path().join("js.cmd");
+        std::fs::write(
+            &js,
+            "\"%_prog%\"  \"%dp0%\\node_modules\\x\\cli.js\" %*\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            launch(&js),
+            Launch {
+                program: dir.path().join("node.exe"),
+                args: vec![pkg.join("cli.js").to_string_lossy().into_owned()]
+            }
+        );
+        // Found by name through PATHEXT, in the given PATH.
+        let found = which_in("js", Some(dir.path().as_os_str())).unwrap();
+        assert_eq!(
+            found.file_name().unwrap().to_string_lossy().to_lowercase(),
+            "js.cmd"
+        );
+        assert!(which_in("native.cmd", Some(dir.path().as_os_str())).is_some());
+        assert!(which_in("missing", Some(dir.path().as_os_str())).is_none());
     }
 }

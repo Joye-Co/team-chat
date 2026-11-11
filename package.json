@@ -12,6 +12,8 @@
     "test:protocol": "bun run --cwd packages/protocol test",
     "dev:server": "bun run --cwd server dev",
     "dev:desktop": "bash scripts/dev-desktop.sh",
+    "dev:website": "bun run --cwd apps/website dev",
+    "build:website": "bun run --cwd apps/website build",
     "test:server": "bun run --cwd server test",
     "typecheck:server": "bun run --cwd server typecheck",
     "admin": "bun server/scripts/admin.ts"

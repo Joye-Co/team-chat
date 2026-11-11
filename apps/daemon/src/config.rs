@@ -81,6 +81,11 @@ pub struct VmConfig {
     /// Folders shared with every VM at their host paths (the CLIs' sessions and logins).
     #[serde(default = "default_vm_shares")]
     pub shares: Vec<PathBuf>,
+    /// One folder per bot here is that bot's home folder in every VM it runs in, so what it
+    /// installs, clones and signs in to is still there in its next run. Empty: the home folder
+    /// is part of the run's scratch disk and goes with the VM.
+    #[serde(default = "default_vm_homes")]
+    pub homes: PathBuf,
 }
 
 fn default_vm_dir() -> PathBuf {
@@ -100,6 +105,9 @@ fn default_vm_firecracker() -> String {
 }
 fn default_vm_helper() -> String {
     "/usr/local/sbin/runner-vm".into()
+}
+fn default_vm_homes() -> PathBuf {
+    PathBuf::from("/srv/runner/homes")
 }
 fn default_vm_shares() -> Vec<PathBuf> {
     ["~/.claude", "~/.codex", "~/.pi"]
@@ -189,15 +197,7 @@ impl RuntimeConfig {
 }
 
 fn default_name() -> String {
-    let mut buf = [0u8; 256];
-    // SAFETY: buf is valid for writes of buf.len() bytes.
-    let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
-    if rc == 0 {
-        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
-    } else {
-        "machine".into()
-    }
+    crate::sys::host_name().unwrap_or_else(|| "machine".into())
 }
 fn default_work_root() -> PathBuf {
     home().join(format!("{}-runs", crate::product::slug()))
@@ -219,15 +219,20 @@ fn default_heartbeat_secs() -> u64 {
 }
 
 pub fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    // Windows names the profile folder USERPROFILE; HOME is set only by some shells.
+    #[cfg(windows)]
+    let home = home.or_else(|| std::env::var_os("USERPROFILE").filter(|h| !h.is_empty()));
+    home.map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 pub fn expand(p: &Path) -> PathBuf {
     match p.to_str() {
         Some("~") => home(),
-        Some(s) if s.starts_with("~/") => home().join(&s[2..]),
+        Some(s) if s.starts_with("~/") || (cfg!(windows) && s.starts_with("~\\")) => {
+            home().join(&s[2..])
+        }
         _ => p.to_path_buf(),
     }
 }
@@ -259,6 +264,7 @@ impl Config {
             vm.rootfs = expand(&vm.rootfs);
             vm.dir = expand(&vm.dir);
             vm.shares = vm.shares.iter().map(|p| expand(p)).collect();
+            vm.homes = expand(&vm.homes);
         }
         if c.runtimes.is_empty() {
             for kind in ["codex", "claude"] {
@@ -304,10 +310,16 @@ impl Config {
                 self.token_file.display()
             )),
             Ok(m) => {
-                use std::os::unix::fs::PermissionsExt;
-                if m.permissions().mode() & 0o077 != 0 {
+                if crate::sys::open_to_others(&m) {
                     out.push(format!(
                         "token file {} must have mode 600",
+                        self.token_file.display()
+                    ));
+                }
+                // Windows: the same question, asked of the owner and the access list.
+                if let Some(why) = crate::sys::acl_problem(&self.token_file) {
+                    out.push(format!(
+                        "token file {} must be private to this user: {why}",
                         self.token_file.display()
                     ));
                 }
@@ -424,6 +436,7 @@ kind = "claude"
 # vcpus = 2
 # mem_mib = 4096                     # a cap; the host gives only what the VM touches
 # shares = ["~/.claude", "~/.codex", "~/.pi"]
+# homes = "/srv/runner/homes"         # one home folder per bot, kept between runs ("" = not kept)
 "#;
 
 #[cfg(test)]

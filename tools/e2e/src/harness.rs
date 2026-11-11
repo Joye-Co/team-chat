@@ -2,7 +2,7 @@
 //! files with mode 600; nothing here prints them.
 
 use anyhow::{Context, Result, anyhow, bail};
-use chat_core::proto::{Member, MemberKind, MemberLevel};
+use chat_core::proto::{GroupKind, Member, MemberKind, MemberLevel};
 use chat_core::{Client, ClientConfig, ClientUpdate, ConnectionState, DropLiveEvent, HttpClient};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -55,12 +55,15 @@ fn read_secret(path: &Path) -> Result<Option<String>> {
 
 fn write_secret(path: &Path, value: &str) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    // Windows has no file modes: the user's profile folder is private already.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts
         .open(path)
         .with_context(|| format!("write {}", path.display()))?;
     writeln!(f, "{value}")?;
@@ -176,9 +179,13 @@ impl Harness {
             name: m.name,
             token,
         };
-        // New members join the default groups; leave them so runs stay apart.
+        // New members join the default groups; leave them so runs stay apart. A new person's
+        // first DM with the default bot cannot be left and stays.
         let http = self.http(&acc);
         for g in http.groups().await.context("groups")? {
+            if g.group.kind == GroupKind::Dm {
+                continue;
+            }
             http.remove_group_member(&g.group.id, &acc.id)
                 .await
                 .context("leave default group")?;

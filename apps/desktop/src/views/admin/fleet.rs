@@ -222,7 +222,7 @@ impl AdminView {
             .into_any_element()
     }
 
-    fn machine_card(
+    pub(super) fn machine_card(
         &self,
         x: &MachineInfo,
         now: u64,

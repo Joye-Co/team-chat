@@ -243,6 +243,35 @@ pub struct Navigation {
     /// Where an 产出 page was opened from (the place and the open 话题), so its back
     /// button returns there. Set when the page opens from somewhere else.
     pub artifact_return: Option<(Option<Place>, Option<(GroupId, TopicId)>)>,
+    /// Places left behind and ahead (⌘[ / ⌘]).
+    history: crate::history::History<Location>,
+    /// The next move is a step of a walk with ↑↓ through the sidebar.
+    replace_next: bool,
+    /// The last move was such a step: the next step replaces the place
+    /// instead of keeping it, so ⌘[ goes back to where the walk began.
+    walking: bool,
+}
+
+/// One place of the window's history: the place and the open 话题.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Location {
+    pub place: Option<Place>,
+    pub topic: Option<(GroupId, TopicId)>,
+}
+
+impl Location {
+    /// A move from `self` to `next` that only changes what one page shows
+    /// (another member on 成员, another version of one 产出): it replaces
+    /// the place instead of adding one.
+    fn same_page(&self, next: &Location) -> bool {
+        match (&self.place, &next.place) {
+            (Some(Place::Members(_)), Some(Place::Members(_))) => self.topic == next.topic,
+            (Some(Place::Artifact { id: a, .. }), Some(Place::Artifact { id: b, .. })) => {
+                a == b && self.topic == next.topic
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Scroll the open topic to this message and highlight it. `serial` grows
@@ -281,6 +310,9 @@ impl Navigation {
         self.side_panel_auto_at = None;
         self.right_pane = RightPane::default();
         self.artifact_return = None;
+        self.history.clear();
+        self.replace_next = false;
+        self.walking = false;
         cx.notify();
     }
 
@@ -300,7 +332,83 @@ impl Navigation {
             right_pane: RightPane::default(),
             rail_mode: RailMode::default(),
             artifact_return: None,
+            history: Default::default(),
+            replace_next: false,
+            walking: false,
         }
+    }
+
+    /// Where the window is.
+    pub fn here(&self) -> Location {
+        Location {
+            place: self.place.clone(),
+            topic: self.topic.clone(),
+        }
+    }
+
+    /// Moves to `place` with `topic` open, keeping the place it leaves to go
+    /// back to. `false` when it is there already.
+    fn go(&mut self, place: Option<Place>, topic: Option<(GroupId, TopicId)>) -> bool {
+        let next = Location { place, topic };
+        let here = self.here();
+        let step = std::mem::take(&mut self.replace_next);
+        if here == next {
+            return false;
+        }
+        let blank = here.place.is_none() && here.topic.is_none();
+        let replace = step && self.walking;
+        self.walking = step;
+        if !replace && !blank && !here.same_page(&next) {
+            self.history.push(here);
+        }
+        self.place = next.place;
+        self.topic = next.topic;
+        true
+    }
+
+    /// The next move is a step of a walk with ↑↓ through the sidebar.
+    pub fn replace_next(&mut self) {
+        self.replace_next = true;
+    }
+
+    /// Where ⌘[ leads now.
+    pub fn previous(&self) -> Option<&Location> {
+        self.history.peek_back(&self.here())
+    }
+
+    /// ⌘[: back to the place before. Its 话题 opens where it was left
+    /// (`timeline/resume.rs`).
+    pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        if let Some(to) = self.history.back(self.here()) {
+            self.arrive(to, cx);
+        }
+    }
+
+    /// ⌘]: forward again after going back.
+    pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(to) = self.history.forward(self.here()) {
+            self.arrive(to, cx);
+        }
+    }
+
+    fn arrive(&mut self, to: Location, cx: &mut Context<Self>) {
+        self.replace_next = false;
+        self.walking = false;
+        self.place = to.place;
+        self.topic = to.topic;
+        cx.notify();
+    }
+
+    /// Forgets the kept places that no longer exist (a 群 left, a 话题
+    /// deleted): `exists` says whether a 群 and 话题 are still there.
+    pub fn forget_gone(&mut self, exists: impl Fn(&GroupId, Option<&TopicId>) -> bool) {
+        self.history.retain(|l| {
+            let group_ok = match &l.place {
+                Some(Place::Group(g)) => exists(g, None),
+                _ => true,
+            };
+            group_ok && l.topic.as_ref().is_none_or(|(g, t)| exists(g, Some(t)))
+        });
     }
 
     /// The page to show (v2 shell).
@@ -317,22 +425,19 @@ impl Navigation {
 
     /// 首页.
     pub fn open_desk(&mut self, cx: &mut Context<Self>) {
-        self.place = Some(Place::Desk);
-        self.topic = None;
+        self.go(Some(Place::Desk), None);
         cx.notify();
     }
 
     /// 成员, with `member` selected.
     pub fn open_members(&mut self, member: Option<MemberId>, cx: &mut Context<Self>) {
-        self.place = Some(Place::Members(member));
-        self.topic = None;
+        self.go(Some(Place::Members(member)), None);
         cx.notify();
     }
 
     /// 产出: the list.
     pub fn open_artifacts(&mut self, cx: &mut Context<Self>) {
-        self.place = Some(Place::Artifacts);
-        self.topic = None;
+        self.go(Some(Place::Artifacts), None);
         cx.notify();
     }
 
@@ -346,8 +451,7 @@ impl Navigation {
         if matches!(&self.right_pane, RightPane::Artifact { id: open, .. } if *open == id) {
             self.right_pane = RightPane::None;
         }
-        self.place = Some(Place::Artifact { id, version });
-        self.topic = None;
+        self.go(Some(Place::Artifact { id, version }), None);
         cx.notify();
     }
 
@@ -356,8 +460,7 @@ impl Navigation {
     pub fn back_from_artifact(&mut self, cx: &mut Context<Self>) {
         match self.artifact_return.take() {
             Some((place, topic)) if place.is_some() || topic.is_some() => {
-                self.place = place;
-                self.topic = topic;
+                self.go(place, topic);
                 cx.notify();
             }
             _ => self.open_artifacts(cx),
@@ -468,14 +571,13 @@ impl Navigation {
     }
 
     pub fn open_todo(&mut self, cx: &mut Context<Self>) {
-        self.place = Some(Place::Todo);
+        self.go(Some(Place::Todo), self.topic.clone());
         cx.notify();
     }
 
     pub fn open_group(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
         if self.place.as_ref() != Some(&Place::Group(group_id.clone())) {
-            self.place = Some(Place::Group(group_id));
-            self.topic = None;
+            self.go(Some(Place::Group(group_id)), None);
             cx.notify();
         }
     }
@@ -491,8 +593,7 @@ impl Navigation {
     /// The 群 page (its 话题 lists) also from its 群聊 or one of its 话题,
     /// which [`Navigation::open_group`] leaves open.
     pub fn open_group_page(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
-        self.place = Some(Place::Group(group_id));
-        self.topic = None;
+        self.go(Some(Place::Group(group_id)), None);
         cx.notify();
     }
 
@@ -505,10 +606,12 @@ impl Navigation {
     }
 
     pub fn open_topic(&mut self, group_id: GroupId, topic_id: TopicId, cx: &mut Context<Self>) {
-        if self.place != Some(Place::Todo) {
-            self.place = Some(Place::Group(group_id.clone()));
-        }
-        self.topic = Some((group_id, topic_id));
+        let place = if self.place == Some(Place::Todo) {
+            self.place.clone()
+        } else {
+            Some(Place::Group(group_id.clone()))
+        };
+        self.go(place, Some((group_id, topic_id)));
         cx.notify();
     }
 
@@ -549,8 +652,10 @@ impl Navigation {
         cx: &mut Context<Self>,
     ) {
         let serial = self.focus.as_ref().map_or(0, |f| f.serial) + 1;
-        self.place = Some(Place::Group(group_id.clone()));
-        self.topic = Some((group_id.clone(), topic_id.clone()));
+        self.go(
+            Some(Place::Group(group_id.clone())),
+            Some((group_id.clone(), topic_id.clone())),
+        );
         self.focus = Some(FocusRequest {
             group_id,
             topic_id,
@@ -564,7 +669,7 @@ impl Navigation {
 
     /// Clears the open topic so the composer starts a new one in the current group.
     pub fn new_topic(&mut self, cx: &mut Context<Self>) {
-        self.topic = None;
+        self.go(self.place.clone(), None);
         cx.notify();
     }
 
@@ -623,7 +728,9 @@ impl Navigation {
     /// the leading edge in full screen. It stays there whether the sidebar is
     /// shown or hidden.
     pub fn sidebar_toggle_x(&self) -> gpui::Pixels {
-        if self.fullscreen {
+        // No lights in full screen, and none off the Mac (the window buttons
+        // are in the caption strip above).
+        if self.fullscreen || crate::ui::native::window_chrome::drawn() {
             theme::SIDEBAR_TOGGLE_X_FULLSCREEN
         } else {
             theme::SIDEBAR_TOGGLE_X
@@ -750,6 +857,11 @@ pub struct RootView {
     /// The account the window shows (server, member id): another account
     /// signed in opens a fresh window for it.
     account: Option<(String, String)>,
+    /// The image viewer over the whole window, while it is open.
+    lightbox: Option<(
+        Entity<crate::views::files::lightbox::Lightbox>,
+        Subscription,
+    )>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -862,6 +974,7 @@ impl RootView {
             last_pane: RightPane::None,
             focus,
             account: shown_account(&services_for_account),
+            lightbox: None,
             _subscriptions: subscriptions,
         }
     }
@@ -1035,13 +1148,13 @@ impl RootView {
             .into_any_element()
     }
 
-    /// The 产出 pane's resize handle: an 8 pt strip centred on its leading edge with the
-    /// resize cursor. A drag to the left widens the pane (400–960 pt, rubber band past the
-    /// bounds); a double-click resets the width.
-    fn artifact_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The right pane's resize handle: an 8 pt strip centred on its leading edge with the
+    /// resize cursor. A drag to the left widens the pane (320–960 pt, rubber band past the
+    /// bounds); a double-click resets the width. Every pane kind shares the one width.
+    fn right_pane_handle(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::views::columns::Column;
         div()
-            .id("artifact-pane-resize")
+            .id("right-pane-resize")
             .absolute()
             .top_0()
             .bottom_0()
@@ -1053,9 +1166,9 @@ impl RootView {
                 cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     if e.click_count >= 2 {
-                        this.columns.reset(Column::ArtifactPane);
+                        this.columns.reset(Column::RightPane);
                     } else {
-                        this.columns.start_drag(Column::ArtifactPane, e.position.x);
+                        this.columns.start_drag(Column::RightPane, e.position.x);
                     }
                     cx.notify();
                 }),
@@ -1092,6 +1205,19 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        use crate::ui::native::window_chrome;
+        if self.show_inactive {
+            window_chrome::framed_main_inactive(env!("PRODUCT_NAME"), body, window, cx)
+        } else {
+            window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+        }
+    }
+}
+
+impl RootView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
@@ -1103,9 +1229,23 @@ impl Render for RootView {
         let root = div()
             .id("root")
             .track_focus(&self.focus)
+            .relative()
             .size_full()
             .bg(k.bg)
             .text_color(k.ink);
+        // Off the Mac, Ctrl+W closes the main window only while the app stays reachable
+        // without it (the notification-area icon is shown, as the Dock icon always is on
+        // the Mac); otherwise closing it would quit, and the command does nothing.
+        #[cfg(not(target_os = "macos"))]
+        let root = root.on_action(|_: &crate::views::nav::menus::CloseWindow, window, cx| {
+            if crate::views::nav::close_command_closes(
+                crate::views::nav::app_outlives_windows(cx),
+                cx.windows().len(),
+                true,
+            ) {
+                window.remove_window();
+            }
+        });
         // v12/behavior: the 显示 commands of the rail and the toolbar panes.
         let root =
             crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
@@ -1188,6 +1328,10 @@ impl Render for RootView {
         // flush with the window edge (traffic lights inside it), the page
         // column with its toolbar row, and the inspector edge to edge.
         use crate::views::columns::Column;
+        // Off the Mac the sidebar keeps the windowed layout too (the tools at
+        // the end of the top row, the search field with the whole width under
+        // it): only the traffic lights are missing, so the toggle takes their
+        // place at the leading edge (`sidebar_toggle_x`).
         let fullscreen = window.is_fullscreen();
         self.services
             .nav
@@ -1273,15 +1417,19 @@ impl Render for RootView {
         } else {
             px(0.)
         };
-        let artifact_pane = matches!(drawn_pane, RightPane::Artifact { .. });
-        let full_pane_w = if artifact_pane {
-            // The 产出 pane takes the width it was dragged to.
-            self.columns
-                .width(crate::views::columns::Column::ArtifactPane)
+        // Every pane kind takes the one width the pane was dragged to (D13).
+        let full_pane_w = if drawn_pane == RightPane::None {
+            px(0.)
         } else {
-            self.panes
-                .fitted_width(&drawn_pane, window_w, window_w - rail_w, cx)
+            self.columns.width(Column::RightPane)
         };
+        if drawn_pane != RightPane::None
+            && cx
+                .try_global::<crate::views::columns::RightPaneWidth>()
+                .is_none_or(|w| w.0 != full_pane_w)
+        {
+            cx.set_global(crate::views::columns::RightPaneWidth(full_pane_w));
+        }
         let pane_w = full_pane_w * right;
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
@@ -1325,16 +1473,16 @@ impl Render for RootView {
                         .into_any_element()
                 })
         };
-        // The 产出 pane's leading edge resizes it (a page needs room for its own layout).
+        // The pane's leading edge resizes it.
         let pane_el = match pane_el {
-            Some(el) if artifact_pane && !floats && right >= 1. => Some(
+            Some(el) if !floats && right >= 1. => Some(
                 div()
                     .relative()
                     .flex_none()
                     .h_full()
                     .flex()
                     .child(el)
-                    .child(self.artifact_pane_handle(cx))
+                    .child(self.right_pane_handle(cx))
                     .into_any_element(),
             ),
             el => el,
@@ -1364,6 +1512,32 @@ impl Render for RootView {
             .child(page_el)
             .children(pane_el)
             .child(toggle)
+            .children(self.lightbox.as_ref().map(|(v, _)| v.clone()))
+    }
+}
+
+impl RootView {
+    /// The provider this window shows.
+    pub fn provider(&self) -> Arc<dyn ChatProvider> {
+        self.services.provider.clone()
+    }
+
+    /// Opens the image viewer over the window at `opening` (files::lightbox).
+    pub fn open_lightbox(
+        &mut self,
+        opening: crate::views::files::lightbox::Opening,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::views::files::lightbox::{Dismiss, Lightbox};
+        let services = self.services.clone();
+        let viewer = cx.new(|cx| Lightbox::new(&services, opening, window, cx));
+        let sub = cx.subscribe(&viewer, |this, _, _: &Dismiss, cx| {
+            this.lightbox = None;
+            cx.notify();
+        });
+        self.lightbox = Some((viewer, sub));
+        cx.notify();
     }
 }
 
@@ -1463,9 +1637,26 @@ pub fn bind_view_keys(cx: &mut App) {
         KeyBinding::new("shift-tab", FocusPrev, None),
         KeyBinding::new("f6", FocusNextRegion, None),
         KeyBinding::new("shift-f6", FocusPrevRegion, None),
+    ]);
+    // ⌥Tab on the Mac. Windows keeps Alt+Tab for its own window switcher and
+    // never hands it to an app: F6 is the key there, as in every Windows app.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
         KeyBinding::new("alt-tab", FocusNextRegion, None),
         KeyBinding::new("alt-shift-tab", FocusPrevRegion, None),
     ]);
+    // Windows' other keys for redo, paste and copy, which its users' hands know
+    // beside Ctrl+Y, Ctrl+V and Ctrl+C (the Mac has no such second set).
+    #[cfg(not(target_os = "macos"))]
+    {
+        use gpui_component::input::{Copy, Paste, Redo};
+        cx.bind_keys([
+            KeyBinding::new("ctrl-shift-z", Redo, Some("Input")),
+            KeyBinding::new("shift-insert", Paste, Some("Input")),
+            KeyBinding::new("ctrl-insert", Copy, Some("Input")),
+            KeyBinding::new("ctrl-insert", Copy, Some("TextView")),
+        ]);
+    }
     crate::views::topic_list::bind_keys(cx);
     // --- v12/behavior ---
     crate::views::rail::bind_keys(cx);
@@ -1477,18 +1668,30 @@ pub fn bind_view_keys(cx: &mut App) {
 
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
 pub fn install_menus_and_actions(services: Services, cx: &mut App) {
+    // Windows quits with Alt+F4 and the close button; Ctrl+Q would end the
+    // app without a warning.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
+        KeyBinding::new(crate::secondary!(","), OpenSettings, None),
+        KeyBinding::new(crate::secondary!("alt-i"), ToggleSidePanel, None),
         // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
-        KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
-        KeyBinding::new("cmd-n", NewTopic, None),
-        KeyBinding::new("cmd-;", ToggleSideChat, None),
-        KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
-        KeyBinding::new("cmd-shift-h", OpenDesk, None),
-        KeyBinding::new("cmd-shift-m", OpenMembers, None),
-        KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
+        // Windows has no second command key: Ctrl+Alt+S.
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "ctrl-cmd-s"
+            } else {
+                "ctrl-alt-s"
+            },
+            ToggleSidebar,
+            None,
+        ),
+        KeyBinding::new(crate::secondary!("n"), NewTopic, None),
+        KeyBinding::new(crate::secondary!(";"), ToggleSideChat, None),
+        KeyBinding::new(crate::secondary!("alt-r"), ToggleTopicRail, None),
+        KeyBinding::new(crate::secondary!("shift-h"), OpenDesk, None),
+        KeyBinding::new(crate::secondary!("shift-m"), OpenMembers, None),
+        KeyBinding::new(crate::secondary!("shift-o"), OpenArtifacts, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     {
@@ -1554,6 +1757,70 @@ mod tests {
             assert_eq!(n.page(), Page::Artifact);
             n.back_from_artifact(cx);
             assert_eq!(n.page(), Page::Artifacts);
+        });
+    }
+
+    /// ⌘[ and ⌘] walk the places the window went through; a new move drops
+    /// what lay ahead.
+    #[gpui::test]
+    fn back_and_forward_walk_the_places_of_the_window(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        nav.update(cx, |n, cx| {
+            n.open_desk(cx);
+            n.open_topic("g1".into(), "t1".into(), cx);
+            n.open_message("g2".into(), "t2".into(), "m1".into(), 4, cx);
+            assert_eq!(n.topic, Some(("g2".into(), "t2".into())));
+            assert_eq!(
+                n.previous().and_then(|l| l.topic.clone()),
+                Some(("g1".into(), "t1".into()))
+            );
+            n.go_back(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t1".into())));
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk);
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk, "nothing before the first place");
+            n.go_forward(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t1".into())));
+            n.open_members(None, cx);
+            n.go_forward(cx);
+            assert_eq!(n.page(), Page::Members, "a new move drops what lay ahead");
+            // Another member on 成员 is the same page: one step back leaves it.
+            n.open_members(Some("m2".into()), cx);
+            n.go_back(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t1".into())));
+        });
+    }
+
+    /// A walk with ↑↓ through the sidebar is one step of history: ⌘[ goes
+    /// back to where it began.
+    #[gpui::test]
+    fn a_sidebar_walk_goes_back_to_where_it_began(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        nav.update(cx, |n, cx| {
+            n.open_desk(cx);
+            for t in ["t1", "t2", "t3"] {
+                n.replace_next();
+                n.open_topic("g1".into(), t.into(), cx);
+            }
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk);
+            n.go_forward(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t3".into())));
+        });
+    }
+
+    /// A 群 the person left drops out of the history.
+    #[gpui::test]
+    fn a_group_left_is_forgotten_by_the_history(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        nav.update(cx, |n, cx| {
+            n.open_desk(cx);
+            n.open_topic("gone".into(), "t1".into(), cx);
+            n.open_artifacts(cx);
+            n.forget_gone(|g, _| g != "gone");
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk);
         });
     }
 

@@ -59,7 +59,48 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
         })
         .detach();
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        use super::windows;
+        let mode = windows::install_notifications(cx);
+        tracing::info!(?mode, "notifications");
+
+        let reconnect = core.clone();
+        windows::watch_system(
+            Arc::new(move |why| {
+                tracing::info!(why, "system change");
+                reconnect.reconnect_now_inner();
+            }),
+            cx,
+        );
+
+        // A click on a toast opens its 话题 through the toast's link, which reaches the
+        // app as a launch (`provider::instance`), also after the app quit.
+        let mut notices = core.notices();
+        cx.spawn(async move |cx| {
+            while let Some(notice) = notices.next().await {
+                // Runs on the main thread.
+                if !windows::app_is_active() {
+                    cx.update(|_| {
+                        let group_name = services
+                            .provider
+                            .groups()
+                            .into_iter()
+                            .find(|g| g.id == notice.group_id)
+                            .map(|g| g.name)
+                            .unwrap_or_default();
+                        windows::post(
+                            &notice,
+                            &group_name,
+                            crate::views::settings::prefs::get().sound,
+                        )
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (core, services, cx);
     }

@@ -639,6 +639,7 @@ pub fn data_script(data: &Value, meta: &Value) -> String {
 
 const PAGE_TEMPLATE: &str = r#"(function(){
   var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge;
+  if (!h) { var c = window.chrome && window.chrome.webview; if (c) h = { postMessage: function (m) { c.postMessage(m); } }; }
   if (!h) return;
   var init = __INIT__;
   var n = 0, pending = new Map(), subs = [], last = null, asking = false;
@@ -763,7 +764,7 @@ const REF_TEMPLATE: &str = r#"(function(){
     var root = host.attachShadow({ mode: 'closed' });
     var b = document.createElement('button');
     b.textContent = m.label;
-    b.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;font:13px -apple-system,system-ui;padding:6px 12px;border-radius:8px;cursor:default;' +
+    b.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;font:13px -apple-system,system-ui,"Segoe UI","Microsoft YaHei UI",sans-serif;padding:6px 12px;border-radius:8px;cursor:default;' +
       'background:' + m.bg + ';color:' + m.ink + ';border:1px solid ' + m.line + ';box-shadow:0 4px 16px rgba(0,0,0,.16)';
     b.addEventListener('click', function (ev) { ev.stopPropagation(); close(); send(el); });
     root.appendChild(b);

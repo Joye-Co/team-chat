@@ -149,10 +149,9 @@ impl DiskCache {
 
     /// `<cache_dir>/team-chat/diagrams` (`~/Library/Caches/team-chat/diagrams` on macOS).
     pub fn default_dir() -> PathBuf {
-        let base = std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join("Library").join("Caches"))
-            .unwrap_or_else(std::env::temp_dir);
-        base.join("team-chat").join("diagrams")
+        crate::paths::cache_base()
+            .join("team-chat")
+            .join("diagrams")
     }
 
     pub fn open(dir: PathBuf, limit: u64) -> Self {
@@ -354,6 +353,10 @@ impl<K: Eq + Hash + Clone, V> Lru<K, V> {
                 None => break,
             }
         }
+    }
+
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.map.remove(key).map(|e| e.1)
     }
 
     #[cfg(test)]

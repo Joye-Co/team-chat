@@ -104,7 +104,7 @@ impl ShortcutsPage {
         let function_key = keystroke.key.len() > 1
             && keystroke.key.starts_with('f')
             && keystroke.key[1..].chars().all(|c| c.is_ascii_digit());
-        if !(m.platform || m.control || m.alt || function_key) {
+        if !accepts(m, function_key, cfg!(target_os = "windows")) {
             self.refused = Some(s::SHORTCUT_NEEDS_MODIFIER.into());
             return cx.notify();
         }
@@ -196,6 +196,27 @@ impl ShortcutsPage {
 }
 
 /// One key cap per key (1.8 Kbd): each modifier, then the key.
+#[cfg(not(target_os = "macos"))]
+pub fn shortcut_caps(text: &str) -> Vec<String> {
+    // "Ctrl+Shift+K"; a trailing "+" is the plus key itself ("Ctrl++").
+    let (text, plus) = match text.strip_suffix("++") {
+        Some(rest) => (rest, true),
+        None if text == "+" => ("", true),
+        None => (text, false),
+    };
+    let mut caps: Vec<String> = text
+        .split('+')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if plus {
+        caps.push("+".into());
+    }
+    caps
+}
+
+/// One key cap per key (1.8 Kbd): each modifier, then the key.
+#[cfg(target_os = "macos")]
 pub fn shortcut_caps(text: &str) -> Vec<String> {
     let mut caps = Vec::new();
     let mut rest = text;
@@ -212,7 +233,42 @@ pub fn shortcut_caps(text: &str) -> Vec<String> {
     caps
 }
 
+/// A key as Windows menus write it: Ctrl+Alt+Shift+Win+ then the key.
+#[cfg(not(target_os = "macos"))]
+pub fn shortcut_text(modifiers: &gpui::Modifiers, key: &str) -> String {
+    let mut out = String::new();
+    for (on, name) in [
+        (modifiers.control, "Ctrl+"),
+        (modifiers.alt, "Alt+"),
+        (modifiers.shift, "Shift+"),
+        (modifiers.platform, "Win+"),
+    ] {
+        if on {
+            out.push_str(name);
+        }
+    }
+    let key = match key {
+        "up" => "↑".to_string(),
+        "down" => "↓".to_string(),
+        "left" => "←".to_string(),
+        "right" => "→".to_string(),
+        "escape" => "Esc".to_string(),
+        "backspace" => "Backspace".to_string(),
+        "delete" => "Del".to_string(),
+        k if k.chars().count() == 1 => k.to_uppercase(),
+        k => {
+            let mut c = k.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect())
+                .unwrap_or_default()
+        }
+    };
+    out.push_str(&key);
+    out
+}
+
 /// A key as the Mac menus write it: ⌃⌥⇧⌘ then the key.
+#[cfg(target_os = "macos")]
 pub fn shortcut_text(modifiers: &gpui::Modifiers, key: &str) -> String {
     let mut out = String::new();
     if modifiers.control {
@@ -375,6 +431,17 @@ fn reset(action: Option<&str>, cx: &mut App) {
     rebind(&prefs::get().shortcuts, cx);
 }
 
+/// Whether a key press can be a shortcut: it needs ⌘, ⌃ or ⌥, or is a function key. On
+/// Windows the Windows key never counts and is never part of one: the system keeps its
+/// combinations for itself, and the hint there asks for Ctrl or Alt.
+pub fn accepts(m: gpui::Modifiers, function_key: bool, windows: bool) -> bool {
+    if windows {
+        !m.platform && (m.control || m.alt || function_key)
+    } else {
+        m.platform || m.control || m.alt || function_key
+    }
+}
+
 /// The source form of a key press ("ctrl-alt-shift-cmd-k").
 pub fn keystroke_source(k: &Keystroke) -> String {
     let m = k.modifiers;
@@ -481,6 +548,32 @@ impl Render for ShortcutsPage {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_shortcut_needs_a_modifier_and_never_the_windows_key() {
+        let m = |control, alt, platform| gpui::Modifiers {
+            control,
+            alt,
+            platform,
+            ..Default::default()
+        };
+        for windows in [false, true] {
+            assert!(accepts(m(true, false, false), false, windows));
+            assert!(accepts(m(false, true, false), false, windows));
+            assert!(accepts(m(false, false, false), true, windows), "F5");
+            assert!(
+                !accepts(m(false, false, false), false, windows),
+                "a bare key"
+            );
+        }
+        assert!(
+            accepts(m(false, false, true), false, false),
+            "⌘K on the Mac"
+        );
+        assert!(!accepts(m(false, false, true), false, true), "Win+K");
+        assert!(!accepts(m(true, false, true), false, true), "Ctrl+Win+K");
+        assert!(!accepts(m(false, false, true), true, true), "Win+F5");
+    }
+
     /// Recording: a click arms the row, the next key press with ⌘ becomes
     /// the command's shortcut (the old one is gone), a key another command
     /// holds is refused, and 恢复默认 puts the default back.
@@ -491,8 +584,8 @@ mod tests {
         cx.update(|cx| {
             gpui_component::init(cx);
             cx.bind_keys([
-                KeyBinding::new("cmd-,", crate::app::OpenSettings, None),
-                KeyBinding::new("cmd-q", crate::app::Quit, None),
+                KeyBinding::new(crate::secondary!(","), crate::app::OpenSettings, None),
+                KeyBinding::new(crate::secondary!("q"), crate::app::Quit, None),
             ]);
         });
         let (page, cx) = cx.add_window_view(|window, cx| ShortcutsPage::new(window, cx));
@@ -507,9 +600,21 @@ mod tests {
                     .and_then(|r| r.keys)
             })
         };
-        assert_eq!(keys(cx).as_deref(), Some("⌘,"));
+        // ⌘ on the Mac, Ctrl elsewhere (the Windows key is never part of a shortcut).
+        let (comma, shift_k, quit, record, saved) = if cfg!(target_os = "macos") {
+            ("⌘,", "⇧⌘K", "cmd-q", "cmd-shift-k", "shift-cmd-k")
+        } else {
+            (
+                "Ctrl+,",
+                "Ctrl+Shift+K",
+                "ctrl-q",
+                "ctrl-shift-k",
+                "ctrl-shift-k",
+            )
+        };
+        assert_eq!(keys(cx).as_deref(), Some(comma));
         page.update(cx, |p, cx| p.start(settings.clone(), cx));
-        cx.simulate_keystrokes("cmd-q");
+        cx.simulate_keystrokes(quit);
         page.read_with(cx, |p, _| {
             assert!(p.recording.is_some(), "⌘Q belongs to 退出: still recording");
             assert!(p.refused.is_some());
@@ -518,17 +623,58 @@ mod tests {
         page.read_with(cx, |p, _| {
             assert!(p.recording.is_some(), "K alone is refused")
         });
-        cx.simulate_keystrokes("cmd-shift-k");
+        cx.simulate_keystrokes(record);
         page.read_with(cx, |p, _| assert!(p.recording.is_none(), "recorded"));
-        assert_eq!(keys(cx).as_deref(), Some("⇧⌘K"));
+        assert_eq!(keys(cx).as_deref(), Some(shift_k));
         assert_eq!(
             prefs::get().shortcuts.get(&settings).map(String::as_str),
-            Some("shift-cmd-k")
+            Some(saved)
         );
+        #[cfg(not(target_os = "macos"))]
+        {
+            // The Windows key is refused, with or without Ctrl.
+            page.update(cx, |p, cx| p.start(settings.clone(), cx));
+            cx.simulate_keystrokes("cmd-k");
+            page.read_with(cx, |p, _| {
+                assert!(p.recording.is_some() && p.refused.is_some(), "Win+K")
+            });
+            cx.simulate_keystrokes("escape");
+        }
         cx.update(|_, cx| reset(Some(&settings), cx));
-        assert_eq!(keys(cx).as_deref(), Some("⌘,"));
+        assert_eq!(keys(cx).as_deref(), Some(comma));
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn shortcuts_read_as_windows_menus_write_them() {
+        let ctrl = gpui::Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(shortcut_text(&ctrl, ","), "Ctrl+,");
+        let all = gpui::Modifiers {
+            platform: true,
+            shift: true,
+            alt: true,
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(shortcut_text(&all, "n"), "Ctrl+Alt+Shift+Win+N");
+        assert_eq!(shortcut_text(&ctrl, "down"), "Ctrl+↓");
+        assert_eq!(shortcut_text(&ctrl, "enter"), "Ctrl+Enter");
+        assert_eq!(
+            shortcut_caps("Ctrl+Alt+Shift+N"),
+            vec!["Ctrl", "Alt", "Shift", "N"]
+        );
+        assert_eq!(shortcut_caps("Ctrl++"), vec!["Ctrl", "+"]);
+        assert_eq!(shortcut_caps("F11"), vec!["F11"]);
+        // `secondary!` is Ctrl here, so the app's bindings read Ctrl.
+        let k = Keystroke::parse(crate::secondary!("shift-k")).unwrap();
+        assert_eq!(shortcut_text(&k.modifiers, &k.key), "Ctrl+Shift+K");
+        assert_eq!(keystroke_source(&k), "ctrl-shift-k");
+    }
+
+    #[cfg(target_os = "macos")]
     #[test]
     fn shortcuts_read_as_mac_menus_write_them() {
         let cmd = gpui::Modifiers {

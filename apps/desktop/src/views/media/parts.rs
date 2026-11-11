@@ -4,8 +4,8 @@
 use std::{path::Path, sync::Arc};
 
 use gpui::{
-    App, ClipboardEntry, ClipboardItem, Div, ElementId, Hsla, ImageFormat, IntoElement,
-    ParentElement, SharedString, Styled, div, px,
+    App, Div, ElementId, Hsla, ImageFormat, IntoElement, ParentElement, SharedString, Styled, div,
+    px,
 };
 use gpui_component::button::Button;
 
@@ -154,20 +154,22 @@ pub fn copy_image_file(path: &Path, cx: &mut App) {
 }
 
 pub fn copy_image(format: ImageFormat, bytes: Vec<u8>, cx: &mut App) {
-    cx.write_to_clipboard(ClipboardItem {
-        entries: vec![ClipboardEntry::Image(gpui::Image::from_bytes(
-            format, bytes,
-        ))],
-    });
+    crate::ui::clipboard::write_image(&gpui::Image::from_bytes(format, bytes), cx);
     toast(cm::COPIED, cx);
 }
 
 /// Copies files into ~/Downloads (keeping their names, adding ` 2` on a clash).
 pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
-    let Some(home) = std::env::var_os("HOME") else {
+    // A folder that is gone or cannot be written says so (F: no silent miss).
+    let failed = |cx: &mut App| {
+        crate::ui::overlay::Toast::new(Sym::Alert, cm::SAVE_FAILED.to_string())
+            .tone(crate::ui::overlay::Tone::Danger)
+            .push(cx)
+    };
+    let Some(dir) = crate::paths::downloads() else {
+        failed(cx);
         return;
     };
-    let dir = Path::new(&home).join("Downloads");
     for p in paths {
         let Some(name) = p.file_name() else { continue };
         let mut out = dir.join(name);
@@ -183,6 +185,7 @@ pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
             n += 1;
         }
         if std::fs::copy(p, &out).is_err() {
+            failed(cx);
             return;
         }
     }
@@ -209,9 +212,25 @@ pub fn send_image(target: &Target, bytes: Vec<u8>, cx: &mut App) {
     toast(cm::VIDEO_FRAME_SENT, cx);
 }
 
-/// Opens a local file with its default app (the 产出 window path for pages is separate).
+/// Opens a local file with its default app (the 产出 window path for pages is separate),
+/// behind the guard of 打开 ([`crate::views::files::open_kind`]): a file the system would
+/// run (a script, a program, an installer) or a page a browser would run is shown in the
+/// file manager instead. A viewer may show such a file as text; this button must not be
+/// the one click that runs it.
 pub fn open_with_system(path: &Path, cx: &mut App) {
-    cx.open_with_system(path);
+    if opens_with_system(path) {
+        cx.open_with_system(path);
+    } else {
+        cx.reveal_path(path);
+    }
+}
+
+/// Whether [`open_with_system`] hands `path` to its default app.
+pub fn opens_with_system(path: &Path) -> bool {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return false;
+    };
+    crate::views::files::open_kind(&name, path) == crate::views::files::OpenKind::System
 }
 
 /// An empty box of a given size with a centered note: loading or not available.
@@ -265,4 +284,46 @@ pub fn play_button(
             n.label,
         ))
         .on_click(on_click)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The viewer's 用系统应用打开 never runs a file: every type 打开 treats as risky
+    /// (on this system and on Windows) is revealed, never opened.
+    #[test]
+    fn the_open_button_never_runs_a_risky_file() {
+        use crate::views::files::{OpenKind, open_kind_on};
+        let risky = [
+            "js", "py", "rb", "sh", "bash", "zsh", "command", "app", "pkg", "dmg", "exe", "bat",
+            "cmd", "com", "scr", "msi", "ps1", "psm1", "vbs", "vbe", "jse", "wsf", "wsh", "hta",
+            "lnk", "url", "reg", "jar", "cpl", "dll", "iso", "html", "htm", "svg",
+        ];
+        for ext in risky {
+            let name = format!("report.{ext}");
+            let path = Path::new("/cache/abc").join(&name);
+            assert_ne!(
+                open_kind_on(&name, &path, true),
+                OpenKind::System,
+                "{name} on Windows"
+            );
+            if crate::views::files::opens_unsafely(&name) || crate::views::files::is_html(&name) {
+                assert!(!opens_with_system(&path), "{name} here");
+            }
+        }
+        for name in ["run.sh", "tool.py", "page.html", "noext"] {
+            assert!(
+                !opens_with_system(&Path::new("/cache/abc").join(name)),
+                "{name}"
+            );
+        }
+        for name in ["notes.txt", "a.pdf", "photo.png", "data.csv"] {
+            assert!(
+                opens_with_system(&Path::new("/cache/abc").join(name)),
+                "{name}"
+            );
+        }
+        assert!(!opens_with_system(Path::new("/")));
+    }
 }

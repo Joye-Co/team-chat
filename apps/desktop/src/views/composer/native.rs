@@ -67,8 +67,69 @@ impl ComposerView {
         .detach();
     }
 
+    /// 截图 on Windows: the system's snipping overlay (`ms-screenclip:`, the one
+    /// Win+Shift+S opens). It has no output file: the picture goes to the
+    /// clipboard. The composer takes the picture of this snip and no other
+    /// ([`crate::ui::clipboard::SnipWait`]): only a picture that reached the
+    /// clipboard after the click, and only until the overlay is gone. A second
+    /// click starts over, so one snip never becomes two chips.
+    #[cfg(target_os = "windows")]
+    fn take_screenshot(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::clipboard::{
+            Snip, SnipWait,
+            windows::{app_in_front, sequence},
+        };
+        const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+        self.snip += 1;
+        let mine = self.snip;
+        let before = sequence();
+        cx.open_url("ms-screenclip:");
+        cx.spawn(async move |this, cx| {
+            let mut wait = SnipWait::new(std::time::Instant::now());
+            let mut seen = before;
+            loop {
+                cx.background_executor().timer(POLL).await;
+                // A newer click took over, or the composer is gone.
+                if !this
+                    .update(cx, |this, _| this.snip == mine)
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+                let now = sequence();
+                let picture = if now != seen {
+                    seen = now;
+                    cx.update(|cx| {
+                        cx.read_from_clipboard().and_then(|item| {
+                            item.entries().iter().find_map(|entry| match entry {
+                                gpui::ClipboardEntry::Image(image) => {
+                                    Some(super::clipboard_image(image))
+                                }
+                                _ => None,
+                            })
+                        })
+                    })
+                } else {
+                    None
+                };
+                match wait.step(std::time::Instant::now(), app_in_front(), picture.is_some()) {
+                    Snip::Wait => {}
+                    Snip::Stop => return,
+                    Snip::Take => {
+                        if let Some(picture) = picture {
+                            let _ = this.update(cx, |this, cx| this.attach(vec![picture], cx));
+                        }
+                        return;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
     /// 截图: the system's interactive screenshot (`screencapture -i`); the
     /// picture becomes a chip when the person took one.
+    #[cfg(not(target_os = "windows"))]
     fn take_screenshot(&mut self, cx: &mut Context<Self>) {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -232,7 +293,12 @@ impl ComposerView {
                 self.render_refs(cx),
                 &ref_labels,
             ));
-            for file in self.files.clone() {
+            // Images show as thumbnails in one row (above the chips); other files as chips.
+            let images: Vec<_> = self.files.iter().filter(|f| f.is_image).cloned().collect();
+            if !images.is_empty() {
+                above.push(self.render_image_thumbs(images, cx));
+            }
+            for file in self.files.clone().into_iter().filter(|f| !f.is_image) {
                 let id = file.id.clone();
                 chips.push(
                     self.render_chip(
@@ -415,6 +481,98 @@ impl ComposerView {
                     )
                     .children(self.render_mentions(window, cx)),
             )
+            .into_any_element()
+    }
+}
+
+thread_local! {
+    /// Decoded clipboard pictures of the composer, by pending file id (the bytes would be
+    /// hashed again every frame otherwise).
+    static PASTED: std::cell::RefCell<std::collections::HashMap<String, std::sync::Arc<gpui::Image>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+impl ComposerView {
+    /// The images not sent yet, as square thumbnails with a remove button on each (Messages,
+    /// Slack): what is going out is seen, not only named.
+    fn render_image_thumbs(
+        &self,
+        images: Vec<crate::data::PendingFile>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::ui::native::tokens::{gallery, radius};
+        use gpui::{ObjectFit, StyledImage as _, img};
+        use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
+        let k = native_colors(cx);
+        let side = gallery::DRAFT_THUMB;
+        let live: std::collections::HashSet<String> = images.iter().map(|f| f.id.clone()).collect();
+        PASTED.with_borrow_mut(|m| m.retain(|id, _| live.contains(id)));
+        let thumbs = images.into_iter().map(|file| {
+            let picture: AnyElement = match &file.source {
+                NewFile::Path(path) => img(path.clone())
+                    .size_full()
+                    .rounded(radius::ITEM)
+                    .object_fit(ObjectFit::Cover)
+                    .into_any_element(),
+                NewFile::Image { mime, bytes, .. } => {
+                    let image = PASTED.with_borrow_mut(|m| {
+                        m.entry(file.id.clone())
+                            .or_insert_with(|| {
+                                std::sync::Arc::new(gpui::Image::from_bytes(
+                                    gpui::ImageFormat::from_mime_type(mime)
+                                        .unwrap_or(gpui::ImageFormat::Png),
+                                    bytes.to_vec(),
+                                ))
+                            })
+                            .clone()
+                    });
+                    img(image)
+                        .size_full()
+                        .rounded(radius::ITEM)
+                        .object_fit(ObjectFit::Cover)
+                        .into_any_element()
+                }
+            };
+            let id = file.id.clone();
+            let remove = Button::new(ElementId::Name(SharedString::from(format!(
+                "image-remove-{}",
+                file.id
+            ))))
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .color(gpui::hsla(0., 0., 0., 0.55))
+                    .foreground(gpui::white())
+                    .hover(gpui::hsla(0., 0., 0., 0.75))
+                    .active(gpui::hsla(0., 0., 0., 0.85)),
+            )
+            .icon(ui::button_glyph(Sym::Close, px(10.), px(20.)))
+            .with_size(px(20.))
+            .size(px(20.))
+            .rounded_full()
+            .tooltip(crate::copy::files::DRAFT_IMAGE_REMOVE)
+            .on_click(cx.listener(move |this, _, _, cx| this.remove_file(&id, cx)));
+            div()
+                .id(ElementId::Name(SharedString::from(format!(
+                    "image-draft-{}",
+                    file.id
+                ))))
+                .relative()
+                .flex_none()
+                .size(side)
+                .rounded(radius::ITEM)
+                .border_1()
+                .border_color(k.separator)
+                .bg(k.fill)
+                .child(picture)
+                .child(div().absolute().top(px(-6.)).right(px(-6.)).child(remove))
+        });
+        div()
+            .flex()
+            .flex_wrap()
+            .gap(space::S8)
+            .pt(px(6.))
+            .pr(px(6.))
+            .children(thumbs)
             .into_any_element()
     }
 }

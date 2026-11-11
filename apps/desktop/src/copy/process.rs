@@ -99,6 +99,6 @@ crate::copy! {
     DEV_DOWNLOADING = "正在下载原始记录…",
     DEV_DOWNLOADED = "已存到 {path}",
     DEV_DOWNLOAD_FAILED = "没能下载：{error}",
-    DEV_RAW = "原始事件（{n} 条，最新的在最后）",
+    DEV_RAW = "原始事件（{n} 条，最新的在最后；点一条展开并复制）",
     DEV_CONTEXT = "存下这次带的上下文（.txt）",
 }

@@ -1,0 +1,11 @@
+{
+  "kind": "CreateInviteRequest",
+  "valid": true,
+  "description": "a code that works for 36 hours",
+  "value": {
+    "name": "Lina",
+    "kind": "human",
+    "level": "member",
+    "expiresInHours": 36
+  }
+}

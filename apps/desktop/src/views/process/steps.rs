@@ -19,8 +19,10 @@ use super::status_text;
 const MAX_STEPS: usize = 300;
 /// Characters of one text shown at most.
 const MAX_TEXT: usize = 4000;
-/// Lines of a command's output shown.
+/// Lines of a command's output shown: a step that went well needs a glance, a failed or
+/// running one needs reading.
 const OUTPUT_LINES: usize = 12;
+const OUTPUT_LINES_OK: usize = 3;
 
 /// Cuts `text` to `max` characters.
 pub fn clip(text: &str, max: usize) -> String {
@@ -90,9 +92,17 @@ fn block(_cx: &App) -> gpui::Div {
 
 /// Command lines and output, in the thread's code recipe (§2.17, R2-07):
 /// `code` 13/20 Menlo, a 1 px border, radius 8, px 12, and lines that never
-/// wrap mid-token: a long line scrolls sideways inside the box. Explicit
-/// line breaks stay. `id` is unique within the step list.
-fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+/// wrap mid-token: a long line scrolls sideways inside the box, with a
+/// scrollbar along its bottom edge that shows whenever a line is cut (owner
+/// decision 2026-11-10), so the box never reads as clipped. Explicit line
+/// breaks stay. `id` is unique within the step list.
+fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > px(0.);
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
     // The thread's scroll cue (R1-04): a 16 fade into the box fill at the
@@ -120,22 +130,43 @@ fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> 
         .bg(k.code_bg)
         .overflow_hidden()
         .child(
-            div().id(id).w_full().overflow_x_scroll().child(
-                div()
-                    .pl(space::S12)
-                    .pr(space::S16)
-                    .py(space::S8)
-                    .t_code()
-                    .whitespace_nowrap()
-                    .text_color(k.text_1)
-                    .children(
-                        text.lines()
-                            .map(|l| div().child(l.to_string()))
-                            .collect::<Vec<_>>(),
-                    ),
-            ),
+            div()
+                .id(id)
+                .w_full()
+                // A row whose one item keeps its content width: the lines
+                // are as wide as the longest one, so the box has something
+                // to scroll (a block child would take the box's width and
+                // only overflow its paint).
+                .flex()
+                .overflow_x_scroll()
+                .track_scroll(&scroll)
+                .child(
+                    div()
+                        .flex_none()
+                        .min_w_full()
+                        .pl(space::S12)
+                        .pr(space::S16)
+                        .pt(space::S8)
+                        // Room for the scrollbar under the last line.
+                        .pb(if scrolls { space::S16 } else { space::S8 })
+                        .t_code()
+                        .whitespace_nowrap()
+                        .text_color(k.text_1)
+                        .children(
+                            text.lines()
+                                .map(|l| div().child(l.to_string()))
+                                .collect::<Vec<_>>(),
+                        ),
+                ),
         )
         .child(fade)
+        // Draws nothing while every line fits.
+        .child(
+            div().absolute().inset_0().child(
+                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+            ),
+        )
 }
 
 /// Where a path is cut: the folders before the last two parts, and those
@@ -341,14 +372,22 @@ fn render_step(
             } else {
                 p::STEP_INPUT.to_string()
             };
+            // What the bot wrote is Markdown, as in the topic; its acceptance block is for
+            // the app, not for readers (normalize_fences drops it).
+            let shown = crate::markdown::normalize_fences(&clip(text, MAX_TEXT));
+            let body = if *from_bot {
+                crate::markdown::message_body(
+                    ElementId::NamedInteger("process-said".into(), ix as u64),
+                    shown,
+                    &[],
+                )
+                .into_any_element()
+            } else {
+                shown.into_any_element()
+            };
             block(cx)
                 .child(label(who, cx))
-                .child(
-                    div()
-                        .t_body()
-                        .text_color(colors.text_1)
-                        .child(clip(text, MAX_TEXT)),
-                )
+                .child(div().t_body().text_color(colors.text_1).child(body))
                 .when(*streaming, |el| {
                     el.child(label(p::STEP_WRITING.to_string(), cx))
                 })
@@ -402,7 +441,12 @@ fn render_step(
                 );
             }
             let out = output.as_deref().filter(|o| !o.trim().is_empty()).map(|o| {
-                let (head, more) = head_lines(o, OUTPUT_LINES);
+                let lines = if *ok == Some(true) && !developer {
+                    OUTPUT_LINES_OK
+                } else {
+                    OUTPUT_LINES
+                };
+                let (head, more) = head_lines(o, lines);
                 (clip(&head, MAX_TEXT), more)
             });
             block(cx)

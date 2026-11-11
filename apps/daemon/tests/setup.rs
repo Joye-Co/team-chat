@@ -1,8 +1,12 @@
 //! Protocol fixtures, config, launchd and systemd services, run folders and cleanup.
+//!
+//! The launchd and systemd cases are Unix only (Windows has `tests/service_task.rs` for its
+//! scheduled task); the rest runs on every system.
 
 use daemon::config::Config;
 use daemon::proto::{Down, RepoSpec, Up};
 use serde_json::Value;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
@@ -40,12 +44,22 @@ fn machine_protocol_fixtures_round_trip() {
     );
 }
 
+/// A `pty` runtime whose program every system has.
+fn shell_runtime() -> &'static str {
+    if cfg!(windows) {
+        "[runtimes.sh]\nkind = \"pty\"\ncommand = \"cmd.exe\"\n"
+    } else {
+        "[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\n"
+    }
+}
+
 fn base_config(dir: &std::path::Path) -> String {
     let token = dir.join("token");
     std::fs::write(&token, "tm_x").unwrap();
-    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // Only this user may read it: mode 600, on Windows an access list of its own.
+    daemon::sys::set_mode(&token, 0o600).unwrap();
     format!(
-        "server_url = \"https://x.example\"\ntoken_file = \"{}\"\nwork_root = \"{}\"\n",
+        "server_url = \"https://x.example\"\ntoken_file = '{}'\nwork_root = '{}'\n",
         token.display(),
         dir.join("work").display()
     )
@@ -55,19 +69,39 @@ fn base_config(dir: &std::path::Path) -> String {
 fn config_defaults_and_problems() {
     let dir = tempfile::tempdir().unwrap();
     let mut text = base_config(dir.path());
-    text.push_str("[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\n");
+    text.push_str(shell_runtime());
     let c = Config::parse(&text).unwrap();
     assert_eq!(c.max_parallel_runs, 2);
     assert_eq!(c.keep_runs_hours, 72);
     assert_eq!(c.ws_url(), "wss://x.example/v1/machine/ws");
     assert!(c.problems().is_empty(), "{:?}", c.problems());
 
-    std::fs::set_permissions(
-        dir.path().join("token"),
-        std::fs::Permissions::from_mode(0o644),
-    )
-    .unwrap();
-    assert!(c.problems().iter().any(|p| p.contains("mode 600")));
+    // A token that other users of the machine can read stops the daemon.
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(
+            dir.path().join("token"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert!(c.problems().iter().any(|p| p.contains("mode 600")));
+    }
+    #[cfg(windows)]
+    {
+        let opened = Command::new("icacls")
+            .arg(dir.path().join("token"))
+            .args(["/grant", "*S-1-1-0:R"])
+            .output()
+            .unwrap();
+        assert!(opened.status.success(), "{opened:?}");
+        assert!(
+            c.problems()
+                .iter()
+                .any(|p| p.contains("private to this user")),
+            "{:?}",
+            c.problems()
+        );
+    }
     let bad = text.replace("https://x.example", "http://x.example");
     assert!(
         Config::parse(&bad)
@@ -86,7 +120,8 @@ fn config_defaults_and_problems() {
 fn doctor_reports_without_secrets() {
     let dir = tempfile::tempdir().unwrap();
     let mut text = base_config(dir.path());
-    text.push_str("[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\n[runtimes.gone]\nkind = \"acp\"\ncommand = \"/nonexistent/agent\"\n");
+    text.push_str(shell_runtime());
+    text.push_str("[runtimes.gone]\nkind = \"acp\"\ncommand = \"/nonexistent/agent\"\n");
     let c = Config::parse(&text).unwrap();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let (report, ok) = rt.block_on(daemon::doctor::report(&c));
@@ -96,6 +131,7 @@ fn doctor_reports_without_secrets() {
     assert!(!report.contains("tm_x"), "doctor must not print the token");
 }
 
+#[cfg(unix)]
 #[test]
 fn launchd_plist_install_and_uninstall() {
     let dir = tempfile::tempdir().unwrap();
@@ -139,6 +175,7 @@ fn launchd_plist_install_and_uninstall() {
     assert!(!file.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn systemd_unit_install_and_uninstall() {
     let dir = tempfile::tempdir().unwrap();
@@ -174,10 +211,12 @@ fn systemd_unit_install_and_uninstall() {
 /// Parses the LaunchAgent plist as XML on every platform and checks its structure: a
 /// `plist` 1.0 root with one `dict` of key/value pairs, the program arguments and the keys
 /// launchd needs.
+#[cfg(unix)]
 fn elems<'a, 'i>(n: roxmltree::Node<'a, 'i>) -> Vec<roxmltree::Node<'a, 'i>> {
     n.children().filter(|c| c.is_element()).collect()
 }
 
+#[cfg(unix)]
 fn check_plist(text: &str, config: &std::path::Path) {
     let opts = roxmltree::ParsingOptions {
         allow_dtd: true,
@@ -265,7 +304,11 @@ async fn worktree_scratch_and_cleanup() {
         ],
     );
     let mut text = base_config(dir.path());
-    text.push_str(&format!("repo_roots = [\"{}\"]\nkeep_runs_hours = 0\n[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\n", dir.path().display()));
+    text.push_str(&format!(
+        "repo_roots = ['{}']\nkeep_runs_hours = 0\n{}",
+        dir.path().display(),
+        shell_runtime()
+    ));
     let cfg = Config::parse(&text).unwrap();
 
     let spec = RepoSpec {
@@ -276,7 +319,7 @@ async fn worktree_scratch_and_cleanup() {
     daemon::workspace::validate_repo(&cfg, &spec).unwrap();
     let outside = RepoSpec {
         url: None,
-        path: Some("/tmp".into()),
+        path: Some(if cfg!(windows) { r"C:\Windows" } else { "/tmp" }.into()),
         base_branch: None,
     };
     assert!(daemon::workspace::validate_repo(&cfg, &outside).is_err());
@@ -368,7 +411,8 @@ async fn mirror_runs_keep_their_branches() {
     git(&origin, &["init", "-q", "-b", "main"]);
     commit(&origin, "init");
     let mut text = base_config(dir.path());
-    text.push_str("keep_runs_hours = 0\n[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\n");
+    text.push_str("keep_runs_hours = 0\n");
+    text.push_str(shell_runtime());
     let cfg = Config::parse(&text).unwrap();
     let url = origin.to_string_lossy().to_string();
 

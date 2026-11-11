@@ -599,6 +599,67 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// The Windows twin of the symbolic link above: a file link, a directory link and a
+    /// junction that point out of the version's folder, and paths written with `\`.
+    /// Nothing outside the folder is served through any of them.
+    #[cfg(windows)]
+    #[test]
+    fn windows_links_and_junctions_do_not_leave_the_folder() {
+        let dir = std::env::temp_dir().join(format!("artifact-view-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let root = dir.join("v1");
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("index.html"), b"<p>ok</p>").unwrap();
+        std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        // A junction needs no privilege; symbolic links need one (CI runs elevated).
+        let junction = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("junction"))
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(junction.status.success(), "mklink /J: {junction:?}");
+        let file_link =
+            std::os::windows::fs::symlink_file(outside.join("secret.txt"), root.join("link.txt"))
+                .is_ok();
+        let dir_link = std::os::windows::fs::symlink_dir(&outside, root.join("dirlink")).is_ok();
+        let c = Content::Folder(root.clone()).prepared().unwrap();
+        let status = |path: &str| {
+            serve(
+                &c,
+                "a-v1",
+                "index.html",
+                "GET",
+                &format!("artifact://a-v1/{path}"),
+            )
+            .status
+        };
+        assert_eq!(status("index.html"), 200);
+        assert_eq!(status("junction/secret.txt"), 404);
+        if file_link {
+            assert_eq!(status("link.txt"), 404);
+        }
+        if dir_link {
+            assert_eq!(status("dirlink/secret.txt"), 404);
+        }
+        for path in [
+            "..%5Coutside%5Csecret.txt",
+            "..\\outside\\secret.txt",
+            "%2e%2e%5coutside%5csecret.txt",
+            "junction%5Csecret.txt",
+        ] {
+            assert_eq!(status(path), 404, "{path}");
+        }
+        eprintln!("links: file {file_link}, directory {dir_link}, junction true");
+        // Removes the links themselves, never what they point at.
+        let _ = std::fs::remove_dir(root.join("junction"));
+        let _ = std::fs::remove_dir(root.join("dirlink"));
+        let _ = std::fs::remove_file(root.join("link.txt"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn ranges() {
         assert_eq!(

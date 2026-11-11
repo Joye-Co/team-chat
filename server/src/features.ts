@@ -14,6 +14,8 @@ import "./sidechat";
 import "./settings";
 import "./desknote";
 import "./email";
+import "./password";
+import "./qr";
 import "./aiservice";
 import "./autotitle";
 import "./summary";
@@ -22,3 +24,6 @@ import "./monitor";
 import "./activity";
 import "./usage";
 import "./team";
+import "./budget";
+// After ./settings: its filter drops what the member switched off before push sees the frame.
+import "./push";

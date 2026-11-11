@@ -3,7 +3,13 @@
 //!
 //! Both run on a later main-queue turn, outside any GPUI update: the panel's key-window
 //! change and the picker's menu loop call back into GPUI, which must not be borrowed then.
-//! Off macOS every call does nothing.
+//!
+//! Windows has no Quick Look panel: Space shows the file in the app's own viewer
+//! ([`super::quick_look`]). Only a file no viewer shows comes here, to
+//! [`system_preview`]: "open with the default app", behind the same guard as 打开
+//! ([`super::open_kind`]): a file that Windows would run, install or mount, and any page a
+//! browser would run, is shown selected in Explorer instead, so Space on a teammate's file
+//! never runs it. 共享… opens the Windows share UI for the window ([`win_share`]).
 
 use std::path::PathBuf;
 
@@ -11,15 +17,36 @@ use gpui::{Pixels, Point, Window};
 
 /// Shows `path` in the Quick Look panel, or closes the panel when it is open (Space
 /// toggles it, as in Finder; the panel itself closes on Space and Escape when it is key).
+#[cfg(target_os = "macos")]
 pub fn toggle_quick_look(path: PathBuf) {
-    #[cfg(target_os = "macos")]
     dispatch2::DispatchQueue::main().exec_async(move || mac::toggle_quick_look(&path));
-    #[cfg(not(target_os = "macos"))]
-    let _ = path;
+}
+
+/// Hands a file that no viewer of the app shows to Windows: its default app, or Explorer
+/// with the file selected when opening it is not safe.
+#[cfg(target_os = "windows")]
+pub fn system_preview(path: &std::path::Path) {
+    if preview_opens(path, true) {
+        win::shell_open(path);
+    } else {
+        win::reveal(path);
+    }
+}
+
+/// Whether previewing `path` may hand it to its default app: only what 打开 would hand to
+/// the system too. Anything risky, a page (a browser would run it outside the 产出
+/// window), and a path without a file name are shown in the file manager instead.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn preview_opens(path: &std::path::Path, windows: bool) -> bool {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return false;
+    };
+    super::open_kind_on(&name, path, windows) == super::OpenKind::System
 }
 
 /// Opens the share picker for `paths` at `at` (window points from the top left of the
 /// content) in `window`'s content view.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn share(paths: Vec<PathBuf>, at: Point<Pixels>, window: &Window) {
     #[cfg(target_os = "macos")]
     {
@@ -33,8 +60,182 @@ pub fn share(paths: Vec<PathBuf>, at: Point<Pixels>, window: &Window) {
             mac::share(&view, &paths, x, y);
         });
     }
+    // Windows shows its share UI through [`win_share::share`], which needs the app.
     #[cfg(not(target_os = "macos"))]
     let _ = (paths, at, window);
+}
+
+/// The Windows share UI (`DataTransferManager`): the system's picker of nearby devices,
+/// contacts and apps that take files, the twin of the macOS share picker.
+///
+/// A Win32 window has no share contract of its own: `IDataTransferManagerInterop` gives the
+/// manager for an HWND and shows the UI for it. The files are opened as storage items on
+/// a background thread (an asynchronous WinRT call that must not block the UI thread);
+/// then the picker opens, asks for the data once on the UI thread, and gets them.
+#[cfg(target_os = "windows")]
+pub mod win_share {
+    use std::{cell::RefCell, path::PathBuf};
+
+    use windows::{
+        ApplicationModel::DataTransfer::{DataRequestedEventArgs, DataTransferManager},
+        Foundation::TypedEventHandler,
+        Storage::{IStorageItem, StorageFile, StorageFolder},
+        Win32::{Foundation::HWND, UI::Shell::IDataTransferManagerInterop},
+        core::{AgileReference, HSTRING, Interface as _},
+    };
+    use windows_collections::IIterable;
+
+    thread_local! {
+        /// The handler of the share that is showing, with its manager, so the next share
+        /// replaces it instead of adding a second one.
+        static CURRENT: RefCell<Option<(DataTransferManager, i64)>> = const { RefCell::new(None) };
+    }
+
+    /// A file or a folder the share UI can take, as a reference that may cross from the
+    /// thread that opened it to the UI thread.
+    pub struct Item(AgileReference<IStorageItem>);
+
+    impl Item {
+        pub fn storage_item(&self) -> windows::core::Result<IStorageItem> {
+            self.0.resolve()
+        }
+    }
+
+    /// The files and folders as storage items. Blocks: call off the UI thread.
+    pub fn storage_items(paths: &[PathBuf]) -> windows::core::Result<Vec<Item>> {
+        paths
+            .iter()
+            .map(|path| {
+                let name = HSTRING::from(path.as_os_str());
+                let item: IStorageItem = if path.is_dir() {
+                    StorageFolder::GetFolderFromPathAsync(&name)?
+                        .join()?
+                        .cast()?
+                } else {
+                    StorageFile::GetFileFromPathAsync(&name)?.join()?.cast()?
+                };
+                AgileReference::new(&item).map(Item)
+            })
+            .collect()
+    }
+
+    /// The share manager of `hwnd`, with `items` as what it shares under `title`.
+    pub fn prepare(
+        hwnd: HWND,
+        title: &str,
+        items: Vec<Item>,
+    ) -> windows::core::Result<IDataTransferManagerInterop> {
+        let interop: IDataTransferManagerInterop =
+            windows::core::factory::<DataTransferManager, IDataTransferManagerInterop>()?;
+        // SAFETY: `hwnd` is a live top-level window of this thread.
+        let manager: DataTransferManager = unsafe { interop.GetForWindow(hwnd)? };
+        if let Some((old, token)) = CURRENT.with_borrow_mut(Option::take) {
+            let _ = old.RemoveDataRequested(token);
+        }
+        let title = HSTRING::from(title);
+        let token = manager.DataRequested(&TypedEventHandler::<
+            DataTransferManager,
+            DataRequestedEventArgs,
+        >::new(move |_, args| {
+            let Some(args) = args.as_ref() else {
+                return Ok(());
+            };
+            let data = args.Request()?.Data()?;
+            data.Properties()?.SetTitle(&title)?;
+            let items: IIterable<IStorageItem> = items
+                .iter()
+                .map(|item| item.storage_item().map(Some))
+                .collect::<windows::core::Result<Vec<_>>>()?
+                .into();
+            data.SetStorageItemsReadOnly(&items)
+        }))?;
+        CURRENT.with_borrow_mut(|current| *current = Some((manager, token)));
+        Ok(interop)
+    }
+
+    /// Shows the share UI of the window `hwnd` for `paths`. The files are opened on a
+    /// background thread; the UI thread only shows the picker once they are.
+    pub fn share(paths: Vec<PathBuf>, hwnd: isize, cx: &mut gpui::App) {
+        let Some(title) = paths
+            .first()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+        else {
+            return;
+        };
+        let opening = cx
+            .background_executor()
+            .spawn(async move { storage_items(&paths) });
+        cx.spawn(async move |_| {
+            let items = match opening.await {
+                Ok(items) => items,
+                Err(error) => {
+                    tracing::warn!(%error, "cannot open the files to share");
+                    return;
+                }
+            };
+            let hwnd = HWND(hwnd as *mut _);
+            let shown = prepare(hwnd, &title, items)
+                // SAFETY: as in `prepare`; a window that closed meanwhile is an error.
+                .and_then(|interop| unsafe { interop.ShowShareUIForWindow(hwnd) });
+            if let Err(error) = shown {
+                tracing::warn!(%error, "cannot show the share UI");
+            }
+        })
+        .detach();
+    }
+}
+
+/// The argument that makes Explorer open a folder with `path` selected. Explorer splits
+/// its command line at commas, so the path is always quoted.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn explorer_select_arg(path: &std::path::Path) -> String {
+    format!("/select,\"{}\"", path.display())
+}
+
+#[cfg(target_os = "windows")]
+mod win {
+    use std::path::Path;
+
+    use windows::{
+        Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
+        core::{PCWSTR, w},
+    };
+
+    use crate::win32::wide;
+
+    /// Opens `path` with the app Windows has for its type. Only for a path that
+    /// [`super::preview_opens`] allowed.
+    pub fn shell_open(path: &Path) {
+        let file = wide(&path.display().to_string());
+        // SAFETY: both strings are NUL-terminated and outlive the call.
+        unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(file.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+        }
+    }
+
+    /// Shows `path` selected in an Explorer window.
+    pub fn reveal(path: &Path) {
+        let args = wide(&super::explorer_select_arg(path));
+        // SAFETY: as in `shell_open`.
+        unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                w!("explorer.exe"),
+                PCWSTR(args.as_ptr()),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+        }
+    }
 }
 
 /// The point in an AppKit view's own coordinates for a point measured from the top left:
@@ -256,6 +457,119 @@ mod mac {
 #[cfg(test)]
 mod tests {
     use super::view_point;
+
+    /// Space on a file a teammate posted must never run it or send a page to the browser.
+    #[test]
+    fn a_preview_never_opens_what_windows_would_run() {
+        let p = |n: &str| std::path::PathBuf::from(format!("/cache/abc/{n}"));
+        for name in [
+            "report.bat",
+            "report.BAT",
+            "report.bat.",
+            "report.bat ",
+            "report.exe",
+            "a.cmd",
+            "a.lnk",
+            "a.ps1",
+            "a.vbs",
+            "a.scr",
+            "a.msi",
+            "a.hta",
+            "a.js",
+            "a.url",
+            "a.iso",
+            "page.html",
+            "page.HTM",
+            "page.html.",
+            "page.svg",
+            "noext",
+            "a.pdf.exe . ",
+        ] {
+            assert!(!super::preview_opens(&p(name), true), "{name:?}");
+        }
+        for name in ["notes.txt", "a.pdf", "photo.PNG", "clip.mp4", "deck.pptx"] {
+            assert!(super::preview_opens(&p(name), true), "{name:?}");
+        }
+        assert!(!super::preview_opens(std::path::Path::new("/"), true));
+    }
+
+    /// The share UI gets real storage items for a file and for a page's folder (names
+    /// with spaces and Chinese), and the window's share manager takes the request handler.
+    /// The picker itself is not opened: nobody is there to close it.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_share_ui_gets_the_files_as_storage_items() {
+        use windows::{
+            Win32::UI::WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
+            },
+            core::w,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("季度 报告 v2.pdf");
+        std::fs::write(&file, b"%PDF-1.4").unwrap();
+        let folder = dir.path().join("Q3 复盘");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("index.html"), b"<p>").unwrap();
+        let paths = vec![file, folder];
+        // Off the test's own thread, as the app does it.
+        let items = std::thread::spawn({
+            let paths = paths.clone();
+            move || super::win_share::storage_items(&paths)
+        })
+        .join()
+        .unwrap()
+        .expect("storage items");
+        assert_eq!(items.len(), 2);
+        let name = |i: usize| items[i].storage_item().unwrap().Name().unwrap().to_string();
+        assert_eq!(name(0), "季度 报告 v2.pdf");
+        assert_eq!(name(1), "Q3 复盘");
+        assert!(
+            super::win_share::storage_items(&[dir.path().join("gone.txt")]).is_err(),
+            "a missing file is an error, not an empty share"
+        );
+        // SAFETY: a plain top-level window of this thread, destroyed below.
+        unsafe {
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!("share test"),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                200,
+                100,
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("a window");
+            let again_items = super::win_share::storage_items(&paths).expect("storage items");
+            let prepared = super::win_share::prepare(hwnd, "季度 报告 v2.pdf", items);
+            println!(
+                "share manager for a window: {:?}",
+                prepared.as_ref().map(|_| ())
+            );
+            // A second share replaces the first one's handler.
+            let again = super::win_share::prepare(hwnd, "Q3 复盘", again_items);
+            assert_eq!(prepared.is_ok(), again.is_ok());
+            // Windows Server without the share contract has no manager; a desktop has.
+            if let Err(error) = &prepared {
+                println!("no share manager in this session: {error}");
+            }
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    #[test]
+    fn explorer_selects_a_quoted_path() {
+        let path = std::path::Path::new(r"C:\Users\a b\x, y.txt");
+        assert_eq!(
+            super::explorer_select_arg(path),
+            r#"/select,"C:\Users\a b\x, y.txt""#
+        );
+    }
 
     #[test]
     fn a_point_from_the_top_left_lands_in_view_coordinates() {

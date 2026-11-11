@@ -17,6 +17,97 @@ use crate::{
 
 pub type Finish = fn(&PathBuf, serde_json::Value, bool, &mut App);
 
+/// Continuity across places: a 话题 reopens where it was left, ⌘[ / ⌘] walk
+/// back and forth (also with the caret in the composer), and a jump to a
+/// message offers the way back.
+async fn continuity_checks(
+    services: &Services,
+    handle: AnyWindowHandle,
+    cx: &mut AsyncApp,
+    check: &mut impl FnMut(&str, bool),
+) {
+    let provider = services.provider.clone();
+    // The two 话题 with the most messages.
+    let mut topics: Vec<(usize, String, String)> = provider
+        .groups()
+        .iter()
+        .flat_map(|g| {
+            provider
+                .topics(&g.id)
+                .into_iter()
+                .map(|t| (g.id.clone(), t.id))
+                .collect::<Vec<_>>()
+        })
+        .map(|(g, t)| (provider.messages(&g, &t, 200).messages.len(), g, t))
+        .collect();
+    topics.sort_by(|a, b| b.0.cmp(&a.0));
+    let (Some((_, ga, ta)), Some((_, gb, tb))) = (topics.first().cloned(), topics.get(1).cloned())
+    else {
+        check("continuity_has_two_topics", false);
+        return;
+    };
+    let timeline = handle
+        .update(cx, |_, window, cx| {
+            app::root_view(window, cx).map(|r| r.read(cx).timeline().clone())
+        })
+        .ok()
+        .flatten();
+    let Some(timeline) = timeline else {
+        check("continuity_finds_the_thread", false);
+        return;
+    };
+    let nav = services.nav.clone();
+    let (a, b) = ((ga.clone(), ta.clone()), (gb.clone(), tb.clone()));
+    cx.update(|cx| nav.update(cx, |n, cx| n.open_topic(ga.clone(), ta.clone(), cx)));
+    pause(cx).await;
+    cx.update(|cx| timeline.update(cx, |t, cx| t.selftest_scroll_up(gpui::px(600.), cx)));
+    pause(cx).await;
+    let left = cx.update(|cx| timeline.read(cx).selftest_place());
+    cx.update(|cx| nav.update(cx, |n, cx| n.open_topic(gb.clone(), tb.clone(), cx)));
+    pause(cx).await;
+    let other = cx.update(|cx| timeline.read(cx).selftest_place());
+    check("continuity_other_topic_opens_at_tail", other.0);
+    // ⌘[ with the caret in the composer still goes back.
+    let _ = handle.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(app::FocusComposer), cx)
+    });
+    pause(cx).await;
+    key(handle, super::go_back_key(), cx);
+    pause(cx).await;
+    let back_at = cx.update(|cx| nav.read(cx).topic.clone());
+    let back = cx.update(|cx| timeline.read(cx).selftest_place());
+    check(
+        "continuity_back_key_in_composer",
+        back_at == Some(a.clone()),
+    );
+    check(
+        "continuity_topic_reopens_where_left",
+        !left.0 && left.1.is_some() && back == left,
+    );
+    key(handle, super::go_forward_key(), cx);
+    pause(cx).await;
+    let forward_at = cx.update(|cx| nav.read(cx).topic.clone());
+    check("continuity_forward_key", forward_at == Some(b.clone()));
+    // A jump to a message in another 话题 offers the way back.
+    let target = provider
+        .messages(&ga, &ta, 200)
+        .messages
+        .first()
+        .map(|m| (m.id.clone(), m.created_seq));
+    if let Some((id, seq)) = target {
+        cx.update(|cx| {
+            nav.update(cx, |n, cx| {
+                n.open_message(ga.clone(), ta.clone(), id, seq, cx)
+            })
+        });
+        pause(cx).await;
+        let pill = cx.update(|cx| timeline.read(cx).selftest_came_from());
+        check("continuity_jump_offers_back", pill);
+    } else {
+        check("continuity_jump_offers_back", false);
+    }
+}
+
 async fn pause(cx: &mut AsyncApp) {
     cx.background_executor()
         .timer(Duration::from_millis(250))
@@ -111,7 +202,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         );
 
         // The keyboard path: Cmd+K, Down, then Enter picks the second entry.
-        key(handle, "cmd-k", cx);
+        key(handle, crate::secondary!("k"), cx);
         pause(cx).await;
         let open = handle
             .update(cx, |_, window, cx| window.has_active_dialog(cx))
@@ -182,7 +273,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         let _ = handle.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         pause(cx).await;
 
-        key(handle, "cmd-1", cx);
+        key(handle, crate::secondary!("1"), cx);
         pause(cx).await;
         let first = provider
             .groups()
@@ -319,6 +410,8 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
             "place_saved_through_provider",
             saved.is_some() && provider.saved_navigation() == saved,
         );
+
+        continuity_checks(&services, handle, cx, &mut check).await;
 
         let status = cx.update(|cx| super::status_item_ok(&services, cx));
         check("menu_bar_item_shows_unread_state", status);

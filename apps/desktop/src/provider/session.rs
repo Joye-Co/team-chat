@@ -73,7 +73,12 @@ impl TokenStorage {
             TokenStorage::Keychain => {
                 Box::new(chat_core::KeychainTokenStore::new(app_id(), server_url))
             }
-            #[cfg(not(target_os = "macos"))]
+            // The Credential Manager, one generic credential per server.
+            #[cfg(target_os = "windows")]
+            TokenStorage::Keychain => {
+                Box::new(chat_core::CredentialTokenStore::new(app_id(), server_url))
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             TokenStorage::Keychain => Box::new(chat_core::FileTokenStore::new(
                 default_data_root().join("token"),
             )),
@@ -162,15 +167,12 @@ pub const fn app_id() -> &'static str {
     }
 }
 
-/// `~/Library/Application Support/<app id>`.
+/// `~/Library/Application Support/<app id>` (`%APPDATA%\<app id>` on Windows).
 pub fn default_data_root() -> PathBuf {
     if let Some(root) = DATA_ROOT.get() {
         return root.clone();
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    home.join("Library/Application Support").join(app_id())
+    crate::paths::data_base().join(app_id())
 }
 
 /// The cache directory of one account.
@@ -423,20 +425,38 @@ pub fn save_session(root: &Path, session: &SavedSession) -> std::io::Result<Save
     Ok(saved)
 }
 
-/// The name of this Mac, shown in the member's device list.
-pub fn device_name() -> String {
+#[cfg(target_os = "macos")]
+fn host_name() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: the buffer is valid for its length; gethostname writes a C string.
     let ok = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0;
-    let name = if ok {
+    if ok {
         let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
         String::from_utf8_lossy(&buf[..end]).to_string()
     } else {
         String::new()
-    };
+    }
+}
+
+/// Windows sets `COMPUTERNAME` for every process; other systems may set `HOSTNAME`.
+#[cfg(not(target_os = "macos"))]
+fn host_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default()
+}
+
+/// The name of this computer, shown in the member's device list.
+pub fn device_name() -> String {
+    let name = host_name();
     let name = name.trim_end_matches(".local").trim();
     if name.is_empty() {
-        "Mac".into()
+        if cfg!(target_os = "macos") {
+            "Mac"
+        } else {
+            "PC"
+        }
+        .into()
     } else {
         name.chars().take(64).collect()
     }
@@ -520,6 +540,16 @@ pub async fn sign_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The device list shows this computer under its Windows name.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_device_name_is_the_computer_name() {
+        let name = device_name();
+        println!("device name: {name}");
+        assert_eq!(name, std::env::var("COMPUTERNAME").unwrap());
+        assert!(!name.is_empty() && name != "PC");
+    }
 
     #[test]
     fn server_url_is_normalized() {

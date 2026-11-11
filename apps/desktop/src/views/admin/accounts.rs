@@ -40,8 +40,10 @@ const LOGIN_POLL: Duration = Duration::from_millis(1500);
 /// The pages of 团队管理 that are live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Page {
-    /// 机器 › <machine> › 概览.
+    /// 团队 › 总览, where the window opens.
     #[default]
+    Home,
+    /// 机器 › <machine> › 概览.
     Overview,
     /// 账号与密钥.
     Accounts,
@@ -162,6 +164,7 @@ impl AdminView {
                 Page::Activity if !self.activity.loaded => self.fetch_activity(false, cx),
                 Page::Usage => self.fetch_usage(cx),
                 Page::Members => self.fetch_team(cx),
+                Page::Home => self.fetch_home(cx),
                 Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
                 _ => {}
             }

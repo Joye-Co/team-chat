@@ -106,7 +106,18 @@ const ID_KEYS: &[&str] = &[
 #[derive(Debug, Clone, Default)]
 pub struct Redactor {
     exact: Vec<String>,
+    /// One-time codes of a device sign-in (`gh auth login` prints `XXXX-XXXX` next to
+    /// github.com/login/device): they look like invite codes, but the person must read them,
+    /// so once seen next to the sign-in page they are not masked.
+    device_codes: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
+
+/// Text that shows a device sign-in: the codes in it are meant for a person.
+fn device_login(s: &str) -> bool {
+    s.contains("/login/device") || s.contains("one-time code")
+}
+
+const MAX_DEVICE_CODES: usize = 32;
 
 impl Redactor {
     /// Masks these exact values (each at least 8 characters) on top of the patterns.
@@ -119,7 +130,10 @@ impl Redactor {
         // Longest first, so a value that contains another is masked whole.
         exact.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         exact.dedup();
-        Redactor { exact }
+        Redactor {
+            exact,
+            device_codes: Default::default(),
+        }
     }
 
     /// The machine token and the values of every `env_passthrough` and `gated_env` variable in
@@ -170,6 +184,17 @@ impl Redactor {
         let inv = invite_rule();
         if inv.is_match(&out) {
             let src = out.clone();
+            let mut known = self.device_codes.lock().unwrap_or_else(|e| e.into_inner());
+            if device_login(&src) {
+                for m in inv.find_iter(&src) {
+                    if !known.iter().any(|k| k == m.as_str()) {
+                        if known.len() >= MAX_DEVICE_CODES {
+                            known.remove(0);
+                        }
+                        known.push(m.as_str().to_string());
+                    }
+                }
+            }
             out = inv
                 .replace_all(&src, |c: &Captures| {
                     let m = c.get(0).expect("match");
@@ -180,7 +205,7 @@ impl Redactor {
                     let t = m.as_str();
                     let mixed = t.bytes().any(|b| b.is_ascii_digit())
                         && t.bytes().any(|b| b.is_ascii_alphabetic());
-                    if mixed && !dashed(before) && !dashed(after) {
+                    if mixed && !dashed(before) && !dashed(after) && !known.iter().any(|k| k == t) {
                         MASK.to_string()
                     } else {
                         t.to_string()

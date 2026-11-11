@@ -36,7 +36,6 @@ this repository.
 | `deploy/servers.json` | `{ "e2e": "<url>", "staging": "<url>", "production": "<url>" }`: the base URLs of the deployed envs |
 | `deploy/server.wrangler.jsonc` | the full API Worker config: the top level as `server/wrangler.jsonc`, plus one `env.<name>` block per deployed env (Worker name, D1 id, R2 bucket, `EMAIL_FROM`, `VERSION`) |
 | `deploy/monitor.wrangler.jsonc` | the full monitor Worker config (`TARGETS` with your URLs and group names, service bindings) |
-| `characters/` | optional, local development only: the character pack, embedded by `apps/desktop/build.rs` in local builds; releases and builds without it draw bot avatars as monograms |
 | `roster/roster.json` | optional: your team's bots (name, character, 岗位, level) for your own scripts and notes |
 | `docs/` | optional: your own runbook notes, deploy state and to-dos |
 
@@ -56,8 +55,9 @@ Who reads what:
   same, inside `server/`: `bunx wrangler -c wrangler.deploy.jsonc <command> --env <env>`. The
   monitor works the same way with `deploy/monitor.wrangler.jsonc` in `ops/monitor/`.
 
-**Releases** embed the server URLs only. The character pack and the roster are for local
-development and are never part of a release: `scripts/release.sh` builds against a folder that
+**Releases** embed the server URLs only; the character art is in the repository
+(`apps/desktop/assets/characters/`). The roster is for local development and is never part of
+a release: `scripts/release.sh` builds against a folder that
 holds just `deploy/servers.json`, taken from `TC_SERVERS_JSON` when set, else from the ops
 checkout. The Release workflow sets `TC_SERVERS_JSON` from the repository variable
 `SERVERS_JSON`:
@@ -65,6 +65,12 @@ checkout. The Release workflow sets `TC_SERVERS_JSON` from the repository variab
 ```sh
 gh variable set SERVERS_JSON --body '{"staging":"<url>","production":"<url>"}'
 ```
+
+The workflows never print it: the jobs that use it are called workflows (`release-jobs.yml`,
+`windows-installer.yml`) that get it as a secret, each job masks every URL and host first, and
+a last job (`scripts/check-logs-for-servers.sh`) fails the run when a job log shows a host. Do
+not read `vars.SERVERS_JSON` through `env:` in a workflow: Actions prints the environment of
+every step, and the logs of this repository are public.
 
 The commands in these docs assume the copy exists. Make it by hand when you run wrangler
 without the deploy script:
@@ -194,7 +200,7 @@ CARGO_TARGET_DIR=<your target dir> bun apps/daemon/e2e/local-e2e.ts \
 CHAT_URL=<e2e base> CHAT_TOKEN_FILE=<bot token file> bun examples/echo-bot.ts
 
 # Desktop app from the DMG against staging, signed in with a test bot token (never the owner's)
-TeamChat.app/Contents/MacOS/TeamChat --selftest-live <staging base> \
+Cahoots.app/Contents/MacOS/Cahoots --selftest-live <staging base> \
   --token-file ~/.config/team-chat/staging/<test bot>.token --report <json>
 ```
 

@@ -714,17 +714,15 @@ pub fn bridge() -> Bridge {
         .with_max_payload_bytes(o.max_payload_bytes)
 }
 
-// --- macOS renderer --------------------------------------------------------------------
+// --- The renderer (macOS: WKWebView, Windows: WebView2) -------------------------------
 
-#[cfg(target_os = "macos")]
-pub use mac::{DiagramRenderer, RendererEvent};
+#[cfg(any(target_os = "macos", windows))]
+pub use native::{DiagramRenderer, RendererEvent};
 
-#[cfg(target_os = "macos")]
-mod mac {
-    use objc2_foundation::MainThreadMarker;
-
+#[cfg(any(target_os = "macos", windows))]
+mod native {
     use super::*;
-    use crate::{ArtifactEvent, ArtifactWindow, Error, Rect, VersionSpec};
+    use crate::{ArtifactEvent, ArtifactWindow, Error, MainThread, Rect, VersionSpec};
 
     /// What the renderer tells its host, on the main thread.
     #[derive(Clone, Debug, PartialEq)]
@@ -740,14 +738,15 @@ mod mac {
 
     /// One long-lived hidden window that renders diagrams (REFS §B2 step 3). Main thread
     /// only. A web view in a window that is never ordered on screen gives snapshot pixels
-    /// (the §B2 spike, `examples/snapshot_spike.rs`).
+    /// (the §B2 spike, `examples/snapshot_spike.rs`; on Windows the capture goes through
+    /// the DevTools protocol).
     pub struct DiagramRenderer {
         window: ArtifactWindow,
     }
 
     impl DiagramRenderer {
         pub fn open(
-            mtm: MainThreadMarker,
+            mtm: MainThread,
             on_event: impl Fn(RendererEvent) + 'static,
         ) -> Result<Self, Error> {
             let options = open_options();

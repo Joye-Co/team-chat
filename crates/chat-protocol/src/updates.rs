@@ -1,4 +1,4 @@
-//! App updates and DMG downloads (docs/protocol.md, "Updates and downloads").
+//! App updates and downloads of the DMG and the Windows installer (docs/protocol.md, "Updates and downloads").
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,16 @@ pub struct UpdateInfo {
     pub published_at: Millis,
     /// Absolute URL of `GET /v1/updates/:version/download`.
     pub download_url: String,
+    /// What the file runs on: `"macos"` (the DMG) or `"windows"` (the installer). Missing
+    /// means `"macos"`: servers older than the Windows client never send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
 }
+
+/// `UpdateInfo.platform` of the DMG.
+pub const PLATFORM_MACOS: &str = "macos";
+/// `UpdateInfo.platform` of the Windows installer.
+pub const PLATFORM_WINDOWS: &str = "windows";
 
 /// True for `MAJOR.MINOR.PATCH` without leading zeros.
 pub fn is_release_version(v: &str) -> bool {
@@ -40,6 +49,11 @@ pub fn parse_release_version(v: &str) -> Option<(u64, u64, u64)> {
 }
 
 impl UpdateInfo {
+    /// The platform of the file; an answer without one is the DMG.
+    pub fn platform(&self) -> &str {
+        self.platform.as_deref().unwrap_or(PLATFORM_MACOS)
+    }
+
     pub fn validate(&self) -> crate::Validation {
         if !is_release_version(&self.version) {
             return Err(crate::ValidationError {

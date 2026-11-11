@@ -18,10 +18,24 @@
 //! version, download, verify SHA-256, install (the new bundle must satisfy the old
 //! bundle's designated requirement), read the new version and requirement, and remove the
 //! old bundle. It never starts the new app. The work folder defaults to the install folder.
+//!
+//! Windows (`scripts/test-windows-update.sh`, run by the installed app itself):
+//!
+//!   <app>.exe --selftest-update <url> --token-file <path> --install-dir <dir> --workdir <dir>
+//!             --report <path> --finish-report <path>
+//!   <app>.exe --selftest-updated <marker> --report <path>
+//!   <app>.exe --selftest-installed --report <path>
+//!
+//! `--selftest-update --install-dir` goes the way the app does: check as this build's
+//! version, download the installer, verify SHA-256, start the update helper and exit. The
+//! helper then replaces the install folder and starts the new version with
+//! `--selftest-updated`, which finishes the update as the app does at start (removes the
+//! marker and the backup) and writes its version to `--finish-report`.
+//! `--selftest-installed` reports the version and the install folder of an installed copy,
+//! and which server URLs the build carries (as digests).
 
 use std::{
     ffi::OsString,
-    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -39,14 +53,30 @@ struct Args {
     workdir: PathBuf,
     install_dir: Option<PathBuf>,
     report: PathBuf,
+    /// Windows: where the new version writes its report after the update.
+    finish_report: Option<PathBuf>,
 }
 
 /// Runs the self-test when `--selftest-update` is on the command line.
 pub fn main_if_requested() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let value_of = |name: &str| {
+        let at = args.iter().position(|a| a == name)?;
+        args.get(at + 1).cloned()
+    };
+    if args.iter().any(|a| a == "--selftest-installed") {
+        return Some(report_installed(value_of("--report").map(PathBuf::from)));
+    }
+    if let Some(marker) = value_of("--selftest-updated") {
+        return Some(report_updated(
+            Path::new(&marker),
+            value_of("--report").map(PathBuf::from),
+        ));
+    }
     if !args.iter().any(|a| a == "--selftest-update") {
         return None;
     }
+    let finish_report = value_of("--finish-report").map(PathBuf::from);
     let mut url = None;
     let mut token_file = None;
     let mut workdir = None;
@@ -60,6 +90,9 @@ pub fn main_if_requested() -> Option<i32> {
             "--workdir" => workdir = it.next().map(PathBuf::from),
             "--install-dir" => install_dir = it.next().map(PathBuf::from),
             "--report" => report = it.next().map(PathBuf::from),
+            "--finish-report" => {
+                it.next();
+            }
             _ => {}
         }
     }
@@ -78,10 +111,12 @@ pub fn main_if_requested() -> Option<i32> {
         workdir,
         install_dir,
         report,
+        finish_report,
     };
     let started = Instant::now();
     let mut steps = serde_json::Map::new();
     let result = match &args.install_dir {
+        Some(dir) if cfg!(windows) => run_installed_windows(&args, dir, &mut steps),
         Some(dir) => run_install_dir(&args, dir, &mut steps),
         None => run(&args, &mut steps),
     };
@@ -141,10 +176,9 @@ fn download_verified(
         c.fetch_add(1, Ordering::Relaxed);
         l.store(p.done, Ordering::Relaxed);
     });
-    let dmg =
-        workdir
-            .join("updates")
-            .join(format!("{}-{}.dmg", env!("PRODUCT_NAME"), info.version));
+    let dmg = workdir
+        .join("updates")
+        .join(super::download_name(&info.version));
     let path = futures::executor::block_on(client.download_update(info.clone(), &dmg, progress))
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("download: {e}"))?;
@@ -163,6 +197,153 @@ fn download_verified(
         }),
     );
     Ok(path)
+}
+
+fn write_report(path: Option<PathBuf>, json: serde_json::Value) {
+    let Some(path) = path else { return };
+    if let Some(p) = path.parent() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    let _ = std::fs::write(
+        path,
+        serde_json::to_string_pretty(&json).unwrap_or_default() + "\n",
+    );
+}
+
+/// `--selftest-installed`: what an installed copy says about itself.
+fn report_installed(report: Option<PathBuf>) -> i32 {
+    let dir = super::running_bundle();
+    let ok = dir.is_some();
+    write_report(
+        report,
+        serde_json::json!({
+            "ok": ok,
+            "version": version::CURRENT,
+            "install_dir": dir,
+            "exe": std::env::current_exe().ok(),
+            "app_id": env!("PRODUCT_BUNDLE_ID"),
+            "url_scheme": env!("PRODUCT_URL_SCHEME"),
+            // The server URLs compiled into this build (the 正式服务器 / 测试服务器 menu and
+            // the sign-in default), as SHA-256 so a test log never shows a deployment's
+            // address; null when the build has none and sign-in asks for the address.
+            "servers": {
+                "production": url_digest(env!("PRODUCT_PRODUCTION_URL")),
+                "staging": url_digest(env!("PRODUCT_STAGING_URL")),
+            },
+        }),
+    );
+    if ok { 0 } else { 1 }
+}
+
+/// SHA-256 (hex) of a compiled-in server URL; `None` when the build has none.
+fn url_digest(url: &str) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    (!url.is_empty()).then(|| {
+        Sha256::digest(url.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    })
+}
+
+/// `--selftest-updated <marker>`: the first start of the new version after an update, as
+/// the app does it in `updater::install`.
+fn report_updated(marker: &Path, report: Option<PathBuf>) -> i32 {
+    let dir = super::running_bundle();
+    let old = std::fs::read(marker)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<install::Marker>(&b).ok())
+        .map(|m| m.old);
+    let finish = install::finish_on_launch(marker, dir.as_deref(), version::CURRENT);
+    let ok = finish == install::Finish::RemovedOld;
+    write_report(
+        report,
+        serde_json::json!({
+            "ok": ok,
+            "version": version::CURRENT,
+            "finish": format!("{finish:?}"),
+            "install_dir": dir,
+            "old_removed": old.is_some_and(|o| !o.exists()),
+        }),
+    );
+    if ok { 0 } else { 1 }
+}
+
+/// Windows: updates the installed app in `dir` the way the running app does, up to the
+/// point where it quits: the update helper does the rest after this process exits.
+fn run_installed_windows(
+    args: &Args,
+    dir: &Path,
+    steps: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    // Plain absolute paths: the installer does not take a canonical `\\?\` path.
+    let bundle = std::path::absolute(dir).map_err(|e| format!("install dir: {e}"))?;
+    if !bundle.join(install::windows::APP_EXE).is_file() {
+        return Err(format!("install dir: no app in {}", bundle.display()));
+    }
+    let finish_report = args
+        .finish_report
+        .as_ref()
+        .ok_or("--finish-report <path> is missing")?;
+    let finish_report = std::path::absolute(finish_report).map_err(|e| e.to_string())?;
+    step(
+        steps,
+        "before",
+        serde_json::json!({ "version": version::CURRENT }),
+    );
+    let token = std::fs::read_to_string(&args.token_file)
+        .map_err(|e| format!("token file: {e}"))?
+        .trim()
+        .to_string();
+    // Kept after this process exits: the helper reads the installer and writes the marker,
+    // its log and its result here.
+    let data = std::path::absolute(args.workdir.join("data")).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+    let client = chat_core::Client::new(chat_core::ClientConfig::new(
+        args.url.clone(),
+        token,
+        data.clone(),
+    ))
+    .map_err(|e| format!("client: {e}"))?;
+    let info = futures::executor::block_on(client.check_update(version::CURRENT))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("check: {e}"))?
+        .ok_or_else(|| format!("check: no update offered to {}", version::CURRENT))?;
+    step(
+        steps,
+        "check",
+        serde_json::json!({ "version": info.version, "size": info.size, "platform": info.platform }),
+    );
+    let path = download_verified(&client, &info, &data, steps)?;
+    let plan = install::Plan {
+        bundle,
+        dmg: path,
+        version: info.version.clone(),
+        sha256: info.sha256.clone(),
+        bundle_id: env!("PRODUCT_BUNDLE_ID").into(),
+        app_name: None,
+        marker: data.join("updates/pending.json"),
+    };
+    let launch = vec![
+        "--selftest-updated".into(),
+        plan.marker.clone().into(),
+        "--report".into(),
+        finish_report.into(),
+    ];
+    let (marker, staged) =
+        install::windows::prepare(&plan, launch).map_err(|e| format!("install: {e}"))?;
+    install::windows::start(&staged, std::process::id()).map_err(|e| format!("helper: {e}"))?;
+    step(
+        steps,
+        "helper",
+        serde_json::json!({
+            "program": staged.helper,
+            "result": staged.job.result,
+            "log": staged.job.log,
+            "backup": marker.old,
+        }),
+    );
+    Ok(())
 }
 
 /// Updates the real bundle in `dir` the way the running app updates itself.
@@ -340,6 +521,11 @@ fn fake_old_bundle(bundle: &Path) -> Result<(), String> {
     std::fs::write(bundle.join("Contents/Info.plist"), plist).map_err(|e| e.to_string())?;
     let exe = macos.join(env!("PRODUCT_NAME"));
     std::fs::write(&exe, "#!/bin/sh\nexit 0\n").map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

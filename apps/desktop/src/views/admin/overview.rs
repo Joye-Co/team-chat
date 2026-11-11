@@ -33,6 +33,7 @@ fn tone_color(tone: Tone, k: &NativeColors) -> Hsla {
         Tone::Warn => k.amber,
         Tone::Bad => k.red,
         Tone::Quiet => k.secondary,
+        Tone::Info => k.blue,
     }
 }
 
@@ -554,11 +555,16 @@ fn attention(
     time: &dyn Fn(u64) -> String,
     cx: &App,
 ) -> impl IntoElement {
+    attention_panel(model::attention(d, now, name, time), cx)
+}
+
+/// The 要注意 card: a list of items, or 没有要注意的事.
+pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
-    let items = model::attention(d, now, name, time);
     let n = items.len();
     panel(cx)
         .flex_1()
+        .min_w(gpui::Pixels::ZERO)
         .p(space::S24)
         .gap(space::S8)
         .child(
@@ -587,6 +593,8 @@ fn attention(
                 AttentionKind::Failed => Sym::Failed,
                 AttentionKind::Disk => Sym::Disk,
                 AttentionKind::Offline => Sym::Offline,
+                AttentionKind::Budget => Sym::BarChart,
+                AttentionKind::Invite => Sym::Invite,
             };
             let c = tone_color(a.tone, &k);
             div()
@@ -600,7 +608,12 @@ fn attention(
                         .flex_none()
                         .size(height::DEFAULT)
                         .rounded(radius::CONTROL)
-                        .bg(k.fill)
+                        // The tone's color, faint, under the symbol in that color (Admin artboard).
+                        .bg(c.opacity(if k.is_dark() {
+                            t::ATTENTION_TINT_DARK
+                        } else {
+                            t::ATTENTION_TINT
+                        }))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -814,7 +827,7 @@ fn members(
                 .rounded(radius::CONTAINER)
                 .border_1()
                 .border_color(k.separator)
-                .bg(k.content)
+                .bg(k.admin_panel())
                 .overflow_hidden()
                 .flex()
                 .flex_col()

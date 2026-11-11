@@ -44,6 +44,8 @@ pub struct TitleBar {
     style: StyleRefinement,
     children: SmallVec<[AnyElement; 1]>,
     on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
+    maximizable: bool,
+    controls_opacity: Option<f32>,
 }
 
 impl TitleBar {
@@ -53,7 +55,23 @@ impl TitleBar {
             style: StyleRefinement::default(),
             children: SmallVec::new(),
             on_close_window: None,
+            maximizable: true,
+            controls_opacity: None,
         }
+    }
+
+    /// Draws the window buttons at this opacity: the host dims them in a window that is
+    /// not the active one, as Windows' own title bars do.
+    pub fn controls_opacity(mut self, opacity: f32) -> Self {
+        self.controls_opacity = Some(opacity);
+        self
+    }
+
+    /// Whether the window can be maximized (default true). With `false`, for a window that
+    /// cannot be resized, the maximize button is drawn dimmed and takes no clicks.
+    pub fn maximizable(mut self, maximizable: bool) -> Self {
+        self.maximizable = maximizable;
+        self
     }
 
     /// Returns the default title bar options for compatible with the [`crate::TitleBar`].
@@ -113,6 +131,8 @@ enum ControlIcon {
     Minimize,
     Restore,
     Maximize,
+    /// The maximize button of a window that cannot be maximized: dimmed, no hover, no click.
+    MaximizeDisabled,
     Close {
         on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
     },
@@ -139,7 +159,7 @@ impl ControlIcon {
         match self {
             Self::Minimize => "minimize",
             Self::Restore => "restore",
-            Self::Maximize => "maximize",
+            Self::Maximize | Self::MaximizeDisabled => "maximize",
             Self::Close { .. } => "close",
         }
     }
@@ -148,17 +168,22 @@ impl ControlIcon {
         match self {
             Self::Minimize => IconName::WindowMinimize,
             Self::Restore => IconName::WindowRestore,
-            Self::Maximize => IconName::WindowMaximize,
+            Self::Maximize | Self::MaximizeDisabled => IconName::WindowMaximize,
             Self::Close { .. } => IconName::WindowClose,
         }
     }
 
-    fn window_control_area(&self) -> WindowControlArea {
+    fn window_control_area(&self) -> Option<WindowControlArea> {
         match self {
-            Self::Minimize => WindowControlArea::Min,
-            Self::Restore | Self::Maximize => WindowControlArea::Max,
-            Self::Close { .. } => WindowControlArea::Close,
+            Self::Minimize => Some(WindowControlArea::Min),
+            Self::Restore | Self::Maximize => Some(WindowControlArea::Max),
+            Self::MaximizeDisabled => None,
+            Self::Close { .. } => Some(WindowControlArea::Close),
         }
+    }
+
+    fn is_disabled(&self) -> bool {
+        matches!(self, Self::MaximizeDisabled)
     }
 
     fn is_close(&self) -> bool {
@@ -201,6 +226,8 @@ impl RenderOnce for ControlIcon {
         let hover_bg = self.hover_bg(cx);
         let active_bg = self.active_bg(cx);
         let icon = self.clone();
+        let disabled = self.is_disabled();
+        let area = self.window_control_area();
         let on_close_window = match &self {
             ControlIcon::Close { on_close_window } => on_close_window.clone(),
             _ => None,
@@ -217,12 +244,17 @@ impl RenderOnce for ControlIcon {
             .content_center()
             .items_center()
             .text_color(cx.theme().foreground)
-            .hover(|style| style.bg(hover_bg).text_color(hover_fg))
-            .active(|style| style.bg(active_bg).text_color(hover_fg))
-            .when(is_windows, |this| {
-                this.window_control_area(self.window_control_area())
+            .when(disabled, |this| {
+                this.text_color(cx.theme().muted_foreground).opacity(0.5)
             })
-            .when(is_linux, |this| {
+            .when(!disabled, |this| {
+                this.hover(|style| style.bg(hover_bg).text_color(hover_fg))
+                    .active(|style| style.bg(active_bg).text_color(hover_fg))
+            })
+            .when_some(area.filter(|_| is_windows), |this, area| {
+                this.window_control_area(area)
+            })
+            .when(is_linux && !disabled, |this| {
                 this.on_mouse_down(MouseButton::Left, move |_, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -232,6 +264,7 @@ impl RenderOnce for ControlIcon {
                     match icon {
                         Self::Minimize => window.minimize_window(),
                         Self::Restore | Self::Maximize => window.zoom_window(),
+                        Self::MaximizeDisabled => {}
                         Self::Close { .. } => {
                             if let Some(f) = on_close_window.clone() {
                                 f(&ClickEvent::default(), window, cx);
@@ -249,6 +282,8 @@ impl RenderOnce for ControlIcon {
 #[derive(IntoElement)]
 struct WindowControls {
     on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
+    maximizable: bool,
+    opacity: Option<f32>,
 }
 
 impl RenderOnce for WindowControls {
@@ -282,11 +317,14 @@ impl RenderOnce for WindowControls {
             .items_center()
             .flex_shrink_0()
             .h_full()
+            .when_some(self.opacity, |this, opacity| this.opacity(opacity))
             .when(supported.minimize, |this| {
                 this.child(ControlIcon::minimize())
             })
             .when(supported.maximize, |this| {
-                this.child(if window.is_maximized() {
+                this.child(if !self.maximizable {
+                    ControlIcon::MaximizeDisabled
+                } else if window.is_maximized() {
                     ControlIcon::restore()
                 } else {
                     ControlIcon::maximize()
@@ -404,6 +442,8 @@ impl RenderOnce for TitleBar {
                 )
                 .child(WindowControls {
                     on_close_window: self.on_close_window,
+                    maximizable: self.maximizable,
+                    opacity: self.controls_opacity,
                 }),
         )
     }

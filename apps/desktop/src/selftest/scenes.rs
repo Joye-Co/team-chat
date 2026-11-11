@@ -348,6 +348,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_about,
     },
     Scene {
+        name: "about",
+        about: "The 关于 window off the Mac (the Mac shows the system's about panel): icon, name, version",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |_, _, cx| crate::views::nav::about::open_window(false, cx),
+    },
+    Scene {
         name: "settings-ai-service",
         about: "Settings: 通用 › AI 服务 (owner) after 测试连接 with the saved DeepSeek key",
         start: Start::SignedIn,
@@ -485,6 +492,34 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open_menu,
     },
     Scene {
+        name: "files-lightbox",
+        about: "The files scene with the image viewer open on a poster: bar, side buttons, filmstrip",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_lightbox,
+    },
+    Scene {
+        name: "files-quick-look",
+        about: "Space on a file off the Mac: the app's viewer as a sheet (the Mac shows Quick Look)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look,
+    },
+    Scene {
+        name: "files-quick-look-no-preview",
+        about: "Space on a type without a viewer (a Word document): the sheet's no-preview state with 用系统应用打开",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look_no_preview,
+    },
+    Scene {
+        name: "files-quick-look-page",
+        about: "Space on an attached HTML page: the isolated 产出 view inside the sheet",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look_page,
+    },
+    Scene {
         name: "cards",
         about: "The 话题 of sample cards: status, fields, table, progress, list, code and actions",
         start: Start::SignedIn,
@@ -616,6 +651,27 @@ pub const SCENES: &[Scene] = &[
         about: "A search hit 5,000 messages up opened in its 话题 and highlighted",
         start: Start::SignedIn,
         setup: crate::views::search::preview::open_far_hit,
+        open: open_main,
+    },
+    Scene {
+        name: "topic-came-from",
+        about: "A reference opened 开发 / 断线重连后消息重复 at its first message from 首页: the message is highlighted and the 返回首页 pill offers the way back",
+        start: Start::V2,
+        setup: |s, cx| {
+            use crate::fake::v2::{DEV, T_RECONNECT};
+            s.nav.update(cx, |n, cx| n.open_desk(cx));
+            let first = s
+                .provider
+                .messages(DEV, T_RECONNECT, 200)
+                .messages
+                .into_iter()
+                .next();
+            if let Some(m) = first {
+                s.nav.update(cx, |n, cx| {
+                    n.open_message(DEV.into(), T_RECONNECT.into(), m.id, m.created_seq, cx)
+                });
+            }
+        },
         open: open_main,
     },
     Scene {
@@ -908,6 +964,7 @@ pub fn all() -> Vec<&'static Scene> {
         crate::views::members_page::scenes::SCENES,
         crate::views::memory::scenes::SCENES,
         crate::views::artifact_page::scenes::SCENES,
+        crate::views::admin::scenes::SCENES,
         V2_SHARED,
         // --- provider track ---
         CORE_SCENES,
@@ -1221,6 +1278,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     }
     // --- end inc-refs ---
     match name {
+        "files-quick-look-page" => Some(crate::views::files::preview::quick_look_settled),
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),

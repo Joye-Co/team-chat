@@ -159,6 +159,8 @@ pub enum Tone {
     Warn,
     Bad,
     Quiet,
+    /// Something to know, not to fix (an invite about to end).
+    Info,
 }
 
 /// One cell of the status strip.
@@ -229,6 +231,10 @@ pub enum AttentionKind {
     Failed,
     Disk,
     Offline,
+    /// 总览: an AI member near or over its weekly budget.
+    Budget,
+    /// 总览: an invite about to end.
+    Invite,
 }
 
 #[derive(Clone, Debug, PartialEq)]

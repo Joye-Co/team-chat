@@ -14,7 +14,11 @@ pub mod kind {
     pub const BUDGET: &str = "budget";
     pub const LOGIN: &str = "login";
     pub const MACHINE: &str = "machine";
-    pub const ALL: [&str; 8] = [MEMBER, LEVEL, INVITE, KEY, APPROVAL, BUDGET, LOGIN, MACHINE];
+    /// A task that did not finish (`run.failed`).
+    pub const RUN: &str = "run";
+    pub const ALL: [&str; 9] = [
+        MEMBER, LEVEL, INVITE, KEY, APPROVAL, BUDGET, LOGIN, MACHINE, RUN,
+    ];
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

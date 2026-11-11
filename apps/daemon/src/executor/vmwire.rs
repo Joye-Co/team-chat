@@ -50,12 +50,22 @@ impl Tag {
     }
 }
 
-/// An NFS share the agent mounts at the same path as on the host.
+/// An NFS share of the host: the agent mounts it at the same path, or at `at`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Mount {
     pub path: String,
     #[serde(default)]
     pub read_only: bool,
+    /// Where it goes in the VM when that is not the host path (the bot's home folder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+impl Mount {
+    /// The path in the VM.
+    pub fn target(&self) -> &str {
+        self.at.as_deref().unwrap_or(&self.path)
+    }
 }
 
 /// What the agent starts.

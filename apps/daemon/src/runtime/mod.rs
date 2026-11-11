@@ -51,6 +51,10 @@ pub struct RunSpec {
     /// The run's `chat-run` link when the run has gated actions (`run.assign.gates`): Claude
     /// Code gets a PreToolUse hook that runs `<link> gate` (see [`crate::gates`]).
     pub gate_hook: Option<PathBuf>,
+    /// Becomes true when the CLI ran the start-up hook of the gate settings. With it, the
+    /// runtime gives the CLI its prompt only after that: a CLI whose hooks are turned off
+    /// never starts a gated run ([`crate::gates::claude_settings`]).
+    pub gate_alive: Option<tokio::sync::watch::Receiver<bool>>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
 }
@@ -68,6 +72,15 @@ impl RunSpec {
             .iter()
             .find(|(n, _)| n == k)
             .map(|(_, v)| v.as_str())
+    }
+
+    /// The home folder of the run's CLI: `HOME`, or on Windows the profile folder
+    /// (`USERPROFILE`) when `HOME` is not set. `/` when the run has neither.
+    pub fn home(&self) -> PathBuf {
+        let home = self
+            .env_var("HOME")
+            .or_else(|| self.env_var("USERPROFILE").filter(|_| cfg!(windows)));
+        PathBuf::from(home.unwrap_or("/"))
     }
 }
 
@@ -310,11 +323,11 @@ pub const OUTPUT_LIMIT: usize = 16 * 1024;
 
 /// A random UUID v4 string.
 pub fn uuid_v4() -> String {
+    use crypto_box::aead::rand_core::RngCore as _;
     let mut b = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        let _ = f.read_exact(&mut b);
-    }
+    // The system's random source on every system (not `/dev/urandom`, which Windows has not:
+    // every session there had the same id).
+    crypto_box::aead::OsRng.fill_bytes(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();

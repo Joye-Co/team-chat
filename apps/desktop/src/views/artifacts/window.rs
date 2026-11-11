@@ -26,7 +26,7 @@ use crate::{
 /// Open 产出 windows and the 产出 being fetched.
 #[derive(Default)]
 pub struct ArtifactWindows {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     open: HashMap<String, artifact_view::ArtifactWindow>,
     /// 产出 ids whose version is being fetched (cards show 正在打开…).
     opening: HashSet<String>,
@@ -84,7 +84,7 @@ pub fn open_artifact(
     version: Option<u32>,
     cx: &mut App,
 ) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
     {
@@ -132,7 +132,7 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
         }
         return;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         let (title, items) = version_items(provider, &folder.artifact_id);
         let items: Vec<artifact_view::VersionItem> = items
@@ -172,7 +172,7 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             cx,
         );
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = provider;
         cx.open_with_system(&folder.dir.join(&folder.entry));
@@ -187,7 +187,7 @@ fn opens_in_window(folder: &ArtifactFolder) -> bool {
 /// Opens an HTML file attached to a message in its own isolated window
 /// (one version, no version list).
 pub fn open_html_file(file: &FileAttachment, path: &Path, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         use artifact_view::{Content, VersionSpec};
         let Some(dir) = path.parent() else { return };
@@ -216,14 +216,14 @@ pub fn open_html_file(file: &FileAttachment, path: &Path, cx: &mut App) {
             cx,
         );
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = file;
         cx.reveal_path(path);
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn open_window(
     provider: Arc<dyn ChatProvider>,
     artifact_id: String,
@@ -236,7 +236,7 @@ fn open_window(
     open_window_with(Some(provider), artifact_id, title, spec, items, caps, cx);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn open_window_with(
     provider: Option<Arc<dyn ChatProvider>>,
     artifact_id: String,
@@ -248,12 +248,15 @@ fn open_window_with(
 ) {
     use artifact_view::{ArtifactWindow, OpenOptions};
     use futures::StreamExt as _;
-    use objc2_foundation::MainThreadMarker;
 
-    let Some(mtm) = MainThreadMarker::new() else {
+    #[cfg(target_os = "macos")]
+    let Some(mtm) = artifact_view::MainThread::new() else {
         tracing::error!("the 产出 window must open on the main thread");
         return;
     };
+    // The app context lives on the thread of GPUI's message loop.
+    #[cfg(windows)]
+    let mtm = artifact_view::MainThread::current();
     let mut options = OpenOptions::new(title, artifact_id.clone(), spec);
     // Only a bot's version that declares events may send them (R10).
     options.capabilities = caps;
@@ -262,6 +265,8 @@ fn open_window_with(
         options.viewer = super::host::viewer(p.as_ref());
         options.ref_menu = Some(super::host::ref_menu(cx));
     }
+    options.chrome = Some(chrome(cx));
+    watch_theme(cx);
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let win = match ArtifactWindow::open(mtm, options, move |event| {
         let _ = tx.unbounded_send(event);
@@ -279,6 +284,12 @@ fn open_window_with(
     windows(cx).open.insert(artifact_id.clone(), win);
     cx.spawn(async move |cx: &mut AsyncApp| {
         while let Some(event) = rx.next().await {
+            #[cfg(windows)]
+            if artifact_id == SAMPLE_ID
+                && matches!(event, artifact_view::ArtifactEvent::Loaded { .. })
+            {
+                SAMPLE_LOADED.store(true, Ordering::SeqCst);
+            }
             let closed = matches!(event, artifact_view::ArtifactEvent::Closed);
             cx.update(|cx| on_event(provider.as_ref(), &artifact_id, event, cx));
             if closed {
@@ -289,7 +300,7 @@ fn open_window_with(
     .detach();
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn on_event(
     provider: Option<&Arc<dyn ChatProvider>>,
     artifact_id: &str,
@@ -336,7 +347,7 @@ pub(crate) fn push_to_window(
     snap: &artifact_view::Snapshot,
     cx: &mut App,
 ) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
     {
@@ -354,7 +365,7 @@ pub(crate) fn finish_in_window(
     result: Result<serde_json::Value, artifact_view::Reject>,
     cx: &mut App,
 ) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
     {
@@ -367,7 +378,7 @@ pub(crate) fn finish_in_window(
 /// A new version exists: a window that showed the latest (`before`) reloads in place and
 /// says 已更新到 v{n} in its title for 3 s; one on an older version says 有 v{n}.
 pub(crate) fn on_version_added(artifact_id: &str, before: u32, version: u32, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         use crate::copy::page_host as cp;
         let Some(shown) = windows(cx)
@@ -411,12 +422,12 @@ pub(crate) fn on_version_added(artifact_id: &str, before: u32, version: u32, cx:
             }
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (artifact_id, before, version, cx);
 }
 
 /// Loads `version` into the open window of `artifact_id` (reload in place).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u32, cx: &mut App) {
     let rx = provider.open_artifact_version(artifact_id, Some(version));
     let provider = provider.clone();
@@ -452,12 +463,98 @@ fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u
 
 // --- end inc-host track ---
 
+/// The id of the sample window of the Windows screenshot mode
+/// (`selftest::artifact_window`).
+#[cfg(windows)]
+const SAMPLE_ID: &str = "selftest-window";
+
+/// Opens a sample 产出 window as the app opens a real one: a page with a version list.
+#[cfg(windows)]
+pub(crate) fn open_sample(title: &str, cx: &mut App) {
+    use artifact_view::{Content, VersionItem, VersionSpec};
+    const PAGE: &str = "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">\
+<style>:root{color-scheme:light dark}body{margin:24px;font:14px/22px -apple-system,\"PingFang SC\",sans-serif}\
+code{font-family:Menlo,monospace}</style>\
+<h2>新增群涨了 12%，回复也更快了</h2><p>微博带来的新增最多，而且每周都在涨。</p>\
+<p><code>2026.10.01 – 10.31</code></p>";
+    let spec = VersionSpec::new(3, Content::single("index.html", PAGE.as_bytes().to_vec()));
+    let items = [(3, "v3 · 最新"), (2, "v2"), (1, "v1")]
+        .into_iter()
+        .map(|(version, label)| VersionItem {
+            version,
+            label: label.into(),
+        })
+        .collect();
+    SAMPLE_LOADED.store(false, Ordering::SeqCst);
+    open_window_with(
+        None,
+        SAMPLE_ID.into(),
+        title.into(),
+        spec,
+        items,
+        artifact_view::Capabilities::NONE,
+        cx,
+    );
+}
+
+/// Set when the sample window's page has loaded.
+#[cfg(windows)]
+static SAMPLE_LOADED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+pub(crate) fn sample_loaded(_cx: &mut App) -> bool {
+    SAMPLE_LOADED.load(Ordering::SeqCst)
+}
+
+#[cfg(windows)]
+pub(crate) fn close_sample(cx: &mut App) {
+    if let Some(window) = windows(cx).open.remove(SAMPLE_ID) {
+        window.close();
+    }
+}
+
+/// The 产出 window's frame in the app's theme. The Mac's window takes the
+/// app's appearance by itself; on Windows the title bar is the system's, so
+/// it gets the colors of the app's own caption strip
+/// (`ui::native::window_chrome`).
+#[cfg(any(target_os = "macos", windows))]
+fn chrome(cx: &App) -> artifact_view::Chrome {
+    let k = crate::ui::native::native_colors(cx);
+    let rgb = |c: gpui::Hsla, under: gpui::Hsla| {
+        let (t, u) = (gpui::Rgba::from(c), gpui::Rgba::from(under));
+        let mix = |a: f32, b: f32| ((a * t.a + b * (1. - t.a)).clamp(0., 1.) * 255.).round() as u8;
+        [mix(t.r, u.r), mix(t.g, u.g), mix(t.b, u.b)]
+    };
+    artifact_view::Chrome {
+        dark: crate::theme::is_dark(cx),
+        caption: rgb(k.sidebar, k.content),
+        text: rgb(k.label, k.sidebar),
+        border: rgb(k.separator, k.sidebar),
+    }
+}
+
+/// Recolors the open 产出 windows when the theme changes (once per app).
+#[cfg(any(target_os = "macos", windows))]
+fn watch_theme(cx: &mut App) {
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    if WATCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    cx.observe_global::<gpui_component::Theme>(|cx| {
+        let chrome = chrome(cx);
+        for window in windows(cx).open.values() {
+            window.set_chrome(chrome);
+        }
+    })
+    .detach();
+}
+
 /// Asks before a 产出 page opens a web link (also for pages embedded in the
 /// main window).
 pub(crate) fn ask_before_link(url: String) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     ask_to_open_link(url);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = url;
 }
 
@@ -466,7 +563,7 @@ static PROMPTING: AtomicBool = AtomicBool::new(false);
 
 /// Asks with a native alert before a 产出 page opens a web link. The alert
 /// runs on a later main-queue turn, outside any GPUI update.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn ask_to_open_link(url: String) {
     let ask = Ask {
         title: ca::LINK_TITLE.to_string(),
@@ -479,12 +576,26 @@ fn ask_to_open_link(url: String) {
 
 /// Asks before a machine's screen sharing address (接管) opens, and opens
 /// only a `vnc`, `http` or `https` address.
-pub(crate) fn ask_before_screen_share(name: &str, url: String) {
+pub(crate) fn ask_before_screen_share(name: &str, url: String, cx: &mut App) {
     if !artifact_view::is_screen_share_url(&url) {
         tracing::warn!("screen sharing address refused");
         return;
     }
-    #[cfg(target_os = "macos")]
+    // The Mac opens a `vnc:` address in its own 屏幕共享. Windows has no such app:
+    // without a viewer that registered the scheme nothing would happen after the
+    // question, so the person is told what is missing and gets the address to use
+    // once a viewer is there.
+    #[cfg(windows)]
+    if let Some((scheme, _)) = url.split_once(':')
+        && !artifact_view::has_url_handler(scheme)
+    {
+        use crate::copy::live as cl;
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(url.clone()));
+        notify_error(fill(cl::LIVE_SHARE_NO_APP, &[("url", &url)]), cx);
+        return;
+    }
+    let _ = &cx;
+    #[cfg(any(target_os = "macos", windows))]
     {
         use crate::copy::live as cl;
         let ask = Ask {
@@ -495,17 +606,40 @@ pub(crate) fn ask_before_screen_share(name: &str, url: String) {
         };
         ask_then_open(ask, url, artifact_view::open_screen_share_url);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = name;
 }
 
 /// The text of one open-a-link alert.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 struct Ask {
     title: String,
     detail: String,
     open: &'static str,
     cancel: &'static str,
+}
+
+/// Shows `ask` as a task dialog with the alert's own two buttons, the first the
+/// default as in the Mac's alert, on a later turn of the message loop (outside
+/// any GPUI update), and calls `open` with `url` only when the user agrees.
+#[cfg(windows)]
+fn ask_then_open(ask: Ask, url: String, open: fn(&str) -> bool) {
+    if PROMPTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let confirm = artifact_view::Confirm {
+        app: env!("PRODUCT_NAME").to_string(),
+        title: ask.title,
+        detail: ask.detail,
+        agree: ask.open.to_string(),
+        cancel: ask.cancel.to_string(),
+    };
+    artifact_view::confirm_later(confirm, move |agreed| {
+        if agreed && !open(&url) {
+            tracing::warn!("external link refused");
+        }
+        PROMPTING.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Shows `ask` as a native alert on a later main-queue turn (outside any
@@ -586,7 +720,7 @@ mod tests {
     /// Trust boundary: the separate 产出 window's page events go through the same
     /// user-activation gate as a page in the main window. An `emitEvent` or `ask` the page
     /// sends without the viewer's input in that window is dropped; with it, it is sent.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     #[gpui::test]
     fn window_page_events_need_the_viewer_s_input(cx: &mut gpui::TestAppContext) {
         use crate::data::page_host::PageEventKind;

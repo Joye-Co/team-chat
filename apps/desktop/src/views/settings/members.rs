@@ -264,6 +264,49 @@ impl MembersPage {
         .detach();
     }
 
+    /// Owner: picks an image file and uploads it as an AI member's avatar.
+    fn choose_avatar(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.status.busy() {
+            return;
+        }
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+        let provider = self.services.provider.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let Ok(reply) = this.update(cx, |this, cx| {
+                this.status = Status::Busy(s::AVATAR_UPLOADING.into());
+                cx.notify();
+                provider.upload_member_avatar(&id, path)
+            }) else {
+                return;
+            };
+            let result = answer(reply).await;
+            let _ = this.update(cx, |this, cx| {
+                this.status = match result {
+                    Ok(_) => Status::Done(s::AVATAR_DONE.into()),
+                    Err(e) => Status::from_error(e),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn remove_avatar(&mut self, id: String, cx: &mut Context<Self>) {
+        let reply = self.services.provider.remove_member_avatar(&id);
+        self.run(reply, cx);
+    }
+
     fn run(&mut self, reply: crate::data::AdminReply<Member>, cx: &mut Context<Self>) {
         self.status = Status::Idle;
         cx.spawn(async move |this, cx| {
@@ -534,6 +577,25 @@ impl MembersPage {
                     let services = edit_page.read(cx).services.clone();
                     open_edit_bot(services, &edit_member, window, cx);
                 }));
+                let (avatar_page, avatar_id) = (page.clone(), member.id.clone());
+                let menu = menu.item(PopupMenuItem::new(s::AVATAR_CHOOSE).on_click(
+                    move |_, _, cx| {
+                        let id = avatar_id.clone();
+                        avatar_page.update(cx, |p, cx| p.choose_avatar(id, cx));
+                    },
+                ));
+                // A photo wins over the character, so it can be taken off again.
+                let menu = if member.avatar_url.is_some() {
+                    let (remove_page, remove_id) = (page.clone(), member.id.clone());
+                    menu.item(
+                        PopupMenuItem::new(s::REMOVE_AVATAR).on_click(move |_, _, cx| {
+                            let id = remove_id.clone();
+                            remove_page.update(cx, |p, cx| p.remove_avatar(id, cx));
+                        }),
+                    )
+                } else {
+                    menu
+                };
                 // No look to change without the character pack.
                 if characters::available() {
                     menu.item(PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(
@@ -2323,6 +2385,8 @@ struct CharacterForm {
     member_id: String,
     name: String,
     selected: Option<CharacterId>,
+    /// The member has a photo; picking a character takes it off first.
+    has_photo: bool,
     status: Status,
 }
 
@@ -2331,15 +2395,21 @@ impl CharacterForm {
         if self.status.busy() {
             return;
         }
-        let reply = self
-            .services
-            .provider
-            .set_member_character(&self.member_id, Some(c));
+        let provider = self.services.provider.clone();
+        let id = self.member_id.clone();
+        let removed = self.has_photo.then(|| provider.remove_member_avatar(&id));
         self.selected = Some(c);
         self.status = Status::Busy(s::SAVING.into());
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
-            let result = answer(reply).await;
+            let removed = match removed {
+                Some(r) => answer(r).await.map(|_| ()),
+                None => Ok(()),
+            };
+            let result = match removed {
+                Ok(()) => answer(provider.set_member_character(&id, Some(c))).await,
+                Err(e) => Err(e),
+            };
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(_) => window.close_dialog(cx),
                 Err(e) => {
@@ -2356,7 +2426,11 @@ impl Render for CharacterForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = cx.entity();
         SheetLayout::new(fill(s::CHANGE_CHARACTER_TITLE, &[("name", &self.name)]))
-            .explanation(s::BOT_CHARACTER_HINT)
+            .explanation(if self.has_photo {
+                s::BOT_CHARACTER_REPLACES_PHOTO
+            } else {
+                s::BOT_CHARACTER_HINT
+            })
             .body(character_picker(
                 "member-character",
                 self.selected,
@@ -2395,6 +2469,7 @@ pub fn open_character(services: Services, member: &Member, window: &mut Window, 
         member_id: member.id.clone(),
         name: one_line(&member.name),
         selected: member.character,
+        has_photo: member.avatar_url.is_some(),
         status: Status::Idle,
     });
     widgets::open_sheet(

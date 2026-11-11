@@ -7,7 +7,9 @@
 //! `run.output.result`, and answers one JSON document `{ok, result?, error?}`.
 //!
 //! - Socket (`CHAT_RUN_SOCKET`): a unix socket of the run (mode 0600, only the daemon's own user
-//!   may connect), removed when the run ends. Runtimes without a sandbox use it.
+//!   may connect), removed when the run ends. Runtimes without a sandbox use it. On Windows it
+//!   is a named pipe (`\\.\pipe\chat-run-...`) that only the daemon's own user may open and no
+//!   remote client may reach; the variable and the framing are the same.
 //! - Files (`CHAT_RUN_DIR`): Codex runs. Codex's sandbox counts a unix socket connect as
 //!   network, so `chat-run` uses `<working folder>/.chat-run-<run id>` (a new folder that git
 //!   ignores, inside the writable workspace): it writes `<id>.req` atomically, the daemon
@@ -20,7 +22,6 @@ use crate::proto::{RunEvent, RunOutputError, RunOutputResult, output_op};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -44,6 +45,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(15);
 /// Largest request line (a machine frame is at most 1 MiB).
 pub const MAX_REQUEST: usize = 1 << 20;
 /// Longest socket path used in the run folder (`sun_path` is 104 bytes on macOS).
+#[cfg(unix)]
 const MAX_SOCKET_PATH: usize = 100;
 /// `interaction.resolve.note` limit.
 const MAX_NOTE: usize = 120;
@@ -249,24 +251,63 @@ fn exe() -> std::io::Result<PathBuf> {
 /// `<run folder>/chat-run.sock`, or a short path in the temp folder when that one is too long
 /// for a socket address.
 pub fn socket_path(run_dir: &Path) -> PathBuf {
-    let p = run_dir.join("chat-run.sock");
-    if p.as_os_str().len() <= MAX_SOCKET_PATH {
-        return p;
+    // Windows: a pipe name of the run (pipes do not live in folders). The process id keeps two
+    // daemons with the same work root apart.
+    #[cfg(windows)]
+    {
+        use sha2::Digest;
+        let h = sha2::Sha256::digest(run_dir.as_os_str().as_encoded_bytes());
+        let hex: String = h.iter().take(12).map(|b| format!("{b:02x}")).collect();
+        PathBuf::from(format!(r"\\.\pipe\chat-run-{hex}-{}", std::process::id()))
     }
-    use sha2::Digest;
-    let h = sha2::Sha256::digest(run_dir.as_os_str().as_encoded_bytes());
-    let hex: String = h.iter().take(8).map(|b| format!("{b:02x}")).collect();
-    std::env::temp_dir().join(format!("chat-run-{hex}.sock"))
+    #[cfg(not(windows))]
+    {
+        let p = run_dir.join("chat-run.sock");
+        if p.as_os_str().len() <= MAX_SOCKET_PATH {
+            return p;
+        }
+        use sha2::Digest;
+        let h = sha2::Sha256::digest(run_dir.as_os_str().as_encoded_bytes());
+        let hex: String = h.iter().take(8).map(|b| format!("{b:02x}")).collect();
+        std::env::temp_dir().join(format!("chat-run-{hex}.sock"))
+    }
 }
 
-/// `<run folder>/bin` with `chat-run` linked to the daemon binary.
+/// The file name of the client in `<run folder>/bin`: [`NAME`], with `.exe` on Windows.
+pub fn link_name() -> String {
+    format!("{NAME}{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// True when the program was started by the name `name` (`argv0`'s file name; on Windows
+/// without `.exe` and in any case).
+pub fn started_as(argv0: &std::ffi::OsStr, name: &str) -> bool {
+    let path = Path::new(argv0);
+    if cfg!(windows) {
+        path.file_stem()
+            .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(name))
+    } else {
+        path.file_name() == Some(std::ffi::OsStr::new(name))
+    }
+}
+
+/// `<run folder>/bin` with `chat-run` linked to the daemon binary: a symbolic link, or on
+/// Windows (where making one needs a privilege) a hard link, or a copy when the run folder is
+/// on another volume.
 pub fn install_link(run_dir: &Path) -> std::io::Result<PathBuf> {
     let bin = run_dir.join("bin");
     std::fs::create_dir_all(&bin)?;
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700))?;
-    let link = bin.join(NAME);
+    crate::sys::set_mode(&bin, 0o700)?;
+    let link = bin.join(link_name());
     let _ = std::fs::remove_file(&link);
+    #[cfg(unix)]
     std::os::unix::fs::symlink(exe()?, &link)?;
+    #[cfg(not(unix))]
+    {
+        let exe = exe()?;
+        if std::fs::hard_link(&exe, &link).is_err() {
+            std::fs::copy(&exe, &link)?;
+        }
+    }
     Ok(bin)
 }
 
@@ -276,6 +317,63 @@ pub struct Server {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// Windows: the socket is a named pipe. Its access list names only the daemon's own user (so
+/// no peer check is needed after a connect), remote clients are refused, and this must be the
+/// first pipe of the name (another program that made the name first cannot stand in for the
+/// daemon). Each request gets an instance of the pipe; the name is gone when the server drops.
+#[cfg(windows)]
+impl Server {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn start(
+        path: PathBuf,
+        outputs: Arc<Outputs>,
+        emit: impl Fn(RunEvent) + Send + Sync + 'static,
+        timeout: Duration,
+    ) -> std::io::Result<Server> {
+        use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+        let mut only_me = crate::winacl::OnlyMe::new()?;
+        let name = path.clone();
+        let mut instance = move |first: bool| -> std::io::Result<NamedPipeServer> {
+            // SAFETY: the attributes point at a security descriptor that `only_me` owns.
+            unsafe {
+                ServerOptions::new()
+                    .first_pipe_instance(first)
+                    .reject_remote_clients(true)
+                    .create_with_security_attributes_raw(&name, only_me.as_ptr())
+            }
+        };
+        let mut waiting = instance(true)?;
+        let emit: Arc<dyn Fn(RunEvent) + Send + Sync> = Arc::new(emit);
+        let task = tokio::spawn(async move {
+            loop {
+                if waiting.connect().await.is_err() {
+                    return;
+                }
+                // The next instance exists before this one is served: the name never goes away
+                // while the run lives.
+                let Ok(next) = instance(false) else {
+                    return;
+                };
+                let connected = std::mem::replace(&mut waiting, next);
+                let (outputs, emit) = (outputs.clone(), emit.clone());
+                tokio::spawn(async move {
+                    let (read, write) = tokio::io::split(connected);
+                    let mut read = serve(read, write, outputs, emit, timeout).await;
+                    // Closing a pipe can drop what the client has not read yet: wait for the
+                    // client to close its end first.
+                    let mut end = [0u8; 1];
+                    let _ = tokio::time::timeout(Duration::from_secs(5), read.read(&mut end)).await;
+                });
+            }
+        });
+        Ok(Server { path, task })
+    }
+}
+
+#[cfg(unix)]
 impl Server {
     pub fn path(&self) -> &Path {
         &self.path
@@ -292,7 +390,7 @@ impl Server {
         let _ = std::fs::remove_file(&path);
         let listener = tokio::net::UnixListener::bind(&path)?;
         // Only the daemon's own user; peers are checked too (the chmod comes after the bind).
-        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+        if let Err(e) = crate::sys::set_mode(&path, 0o600) {
             let _ = std::fs::remove_file(&path);
             return Err(e);
         }
@@ -302,12 +400,15 @@ impl Server {
                 let Ok((stream, _)) = listener.accept().await else {
                     return;
                 };
-                // SAFETY: plain syscall without arguments.
-                let me = unsafe { libc::geteuid() };
+                let me = crate::sys::euid();
                 if stream.peer_cred().map(|c| c.uid()).ok() != Some(me) {
                     continue;
                 }
-                tokio::spawn(serve(stream, outputs.clone(), emit.clone(), timeout));
+                let (read, write) = stream.into_split();
+                let (outputs, emit) = (outputs.clone(), emit.clone());
+                tokio::spawn(async move {
+                    serve(read, write, outputs, emit, timeout).await;
+                });
             }
         });
         Ok(Server { path, task })
@@ -317,6 +418,8 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         self.task.abort();
+        // A pipe is no file: its name goes with its last instance.
+        #[cfg(unix)]
         let _ = std::fs::remove_file(&self.path);
     }
 }
@@ -363,18 +466,17 @@ fn valid_id(s: &str) -> bool {
 
 /// Writes `path` atomically (a temp file renamed into place), mode 0600.
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     let _ = std::fs::remove_file(&tmp);
-    let res = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(data))
-        .and_then(|_| std::fs::rename(&tmp, path));
+    let res = crate::sys::mode(
+        std::fs::OpenOptions::new().write(true).create_new(true),
+        0o600,
+    )
+    .open(&tmp)
+    .and_then(|mut f| f.write_all(data))
+    .and_then(|_| std::fs::rename(&tmp, path));
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -402,7 +504,15 @@ impl Spool {
         timeout: Duration,
     ) -> std::io::Result<Spool> {
         std::fs::create_dir(&dir)?;
-        let made = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+        let made = crate::sys::set_mode(&dir, 0o700)
+            .and_then(|_| match crate::sys::acl_problem(&dir) {
+                // Windows: requests carry secrets; a folder others can reach serves nobody.
+                Some(why) => Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("{} is not private to this user: {why}", dir.display()),
+                )),
+                None => Ok(()),
+            })
             .and_then(|_| write_atomic(&dir.join(".gitignore"), b"*\n"));
         if let Err(e) = made {
             remove_spool(&dir);
@@ -411,8 +521,7 @@ impl Spool {
         let emit: Arc<dyn Fn(RunEvent) + Send + Sync> = Arc::new(emit);
         let watched = dir.clone();
         let task = tokio::spawn(async move {
-            // SAFETY: plain syscall without arguments.
-            let me = unsafe { libc::geteuid() };
+            let me = crate::sys::euid();
             let mut tick = tokio::time::interval(POLL);
             loop {
                 tick.tick().await;
@@ -449,7 +558,6 @@ impl Drop for Spool {
 /// Takes (reads and removes) each `<id>.req` in `dir`: a regular file of the daemon's own user.
 /// `None` is a request over 1 MiB.
 fn take_requests(dir: &Path, me: u32) -> Vec<(String, Option<Vec<u8>>)> {
-    use std::os::unix::fs::MetadataExt;
     let Ok(entries) = std::fs::read_dir(dir) else {
         return vec![];
     };
@@ -467,7 +575,11 @@ fn take_requests(dir: &Path, me: u32) -> Vec<(String, Option<Vec<u8>>)> {
         let Ok(meta) = std::fs::symlink_metadata(&path) else {
             continue;
         };
-        if !meta.file_type().is_file() || meta.uid() != me {
+        // Windows: the owner and the access list say whose request it is.
+        if !meta.file_type().is_file()
+            || crate::sys::owner(&meta) != me
+            || crate::sys::acl_problem(&path).is_some()
+        {
             let _ = std::fs::remove_file(&path);
             continue;
         }
@@ -492,13 +604,18 @@ fn error(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value 
     json!({ "ok": false, "error": e })
 }
 
-async fn serve(
-    stream: tokio::net::UnixStream,
+/// Serves one connection: a request line in, an answer line out. Returns the read half.
+async fn serve<R, W>(
+    read: R,
+    mut write: W,
     outputs: Arc<Outputs>,
     emit: Arc<dyn Fn(RunEvent) + Send + Sync>,
     timeout: Duration,
-) {
-    let (read, mut write) = stream.into_split();
+) -> R
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
     let mut line = Vec::new();
     let mut reader = tokio::io::BufReader::new(read).take(MAX_REQUEST as u64 + 1);
     let answer = match reader.read_until(b'\n', &mut line).await {
@@ -510,6 +627,7 @@ async fn serve(
     out.push(b'\n');
     let _ = write.write_all(&out).await;
     let _ = write.shutdown().await;
+    reader.into_inner().into_inner()
 }
 
 /// One request: check it, send the `output` run event, wait for `run.output.result`.
@@ -538,6 +656,12 @@ pub async fn handle(
             }
         );
         return answer;
+    }
+    if req["op"] == crate::gates::ALIVE_OP {
+        if let Some(gates) = outputs.gates.get() {
+            gates.mark_alive();
+        }
+        return json!({ "ok": true, "result": {} });
     }
     if req["op"] == crate::gates::OP {
         // A run without gates lets every command run.
@@ -1166,7 +1290,80 @@ fn absolute_new(path: &str) -> Result<String, String> {
     Ok(format!("{}/{path}", cwd.display()))
 }
 
+/// Sends one request to the run's pipe and reads the answer line.
+#[cfg(windows)]
+pub fn call(socket: &Path, op: &str, body: Value, read_timeout: Duration) -> Result<Value, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// The daemon may know who calls, never act as the caller.
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+    /// Every instance of the pipe is serving somebody: one comes free in a moment.
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let mut line =
+        serde_json::to_vec(&json!({ "op": op, "body": body })).map_err(|e| e.to_string())?;
+    if line.len() > MAX_REQUEST {
+        return Err("request over 1 MiB".into());
+    }
+    line.push(b'\n');
+    let busy_until = std::time::Instant::now() + Duration::from_secs(5);
+    let mut s = loop {
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .security_qos_flags(SECURITY_IDENTIFICATION)
+            .open(socket)
+        {
+            Ok(s) => break s,
+            Err(e)
+                if e.raw_os_error() == Some(ERROR_PIPE_BUSY)
+                    && std::time::Instant::now() < busy_until =>
+            {
+                std::thread::sleep(POLL);
+            }
+            // A CLI sandbox that takes the access to the pipe away.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Ok(error(
+                    "unavailable",
+                    Some("sandbox.blocked"),
+                    format!(
+                        "the sandbox of this CLI blocks the connection to the daemon at {}: {e}. \
+Answer in the group without chat-run",
+                        socket.display()
+                    ),
+                ));
+            }
+            Err(e) => {
+                return Err(format!(
+                    "cannot reach the daemon at {}: {e}",
+                    socket.display()
+                ));
+            }
+        }
+    };
+    s.write_all(&line)
+        .map_err(|e| format!("cannot send: {e}"))?;
+    // A pipe handle has no read timeout: the read runs on a thread of its own.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut answer = String::new();
+        let read = BufReader::new(s).read_line(&mut answer);
+        let _ = tx.send(read.map(|n| (n, answer)));
+    });
+    match rx.recv_timeout(read_timeout) {
+        Ok(Ok((0, _))) => Err("the daemon closed the connection".into()),
+        Ok(Ok((_, answer))) => {
+            serde_json::from_str(&answer).map_err(|e| format!("bad answer: {e}"))
+        }
+        Ok(Err(e)) => Err(format!("cannot read the answer: {e}")),
+        Err(_) => Ok(error(
+            "timeout",
+            Some("daemon.no_answer"),
+            "no answer from the daemon in time",
+        )),
+    }
+}
+
 /// Sends one request to the run's socket and reads the answer line.
+#[cfg(unix)]
 pub fn call(socket: &Path, op: &str, body: Value, read_timeout: Duration) -> Result<Value, String> {
     let mut s = match std::os::unix::net::UnixStream::connect(socket) {
         Ok(s) => s,
@@ -1262,6 +1459,8 @@ without chat-run",
                 return serde_json::from_slice(&answer).map_err(|e| format!("bad answer: {e}"));
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // Windows: the daemon is still moving the answer into place.
+            Err(e) if cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied => {}
             Err(e) => return Err(format!("cannot read the answer: {e}")),
         }
         if std::time::Instant::now() >= deadline {
@@ -1295,6 +1494,10 @@ pub fn main(args: Vec<String>) -> i32 {
     // The CLI's PreToolUse hook (the daemon installs it; the hook input is on standard input).
     if args.len() == 1 && args[0] == "gate" {
         return crate::gates::hook_main();
+    }
+    // The CLI's SessionStart hook of a gated run: this CLI runs the run's hooks.
+    if args.len() == 1 && args[0] == "gate-alive" {
+        return crate::gates::alive_main();
     }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));
@@ -1359,6 +1562,8 @@ pub fn main(args: Vec<String>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn args(s: &[&str]) -> Vec<String> {
         s.iter().map(|a| a.to_string()).collect()
@@ -1755,13 +1960,21 @@ mod tests {
             r(&["file", "get", "--id", "F1"]).unwrap(),
             ("file.get", json!({ "fileId": "F1" }))
         );
-        let (op, body) = r(&["file", "get", "--id", "F1", "--out", "/w/a.pdf"]).unwrap();
+        let abs = if cfg!(windows) {
+            r"C:\w\a.pdf"
+        } else {
+            "/w/a.pdf"
+        };
+        let (op, body) = r(&["file", "get", "--id", "F1", "--out", abs]).unwrap();
         assert_eq!(op, "file.get");
-        assert_eq!(body["out"], "/w/a.pdf");
+        assert_eq!(body["out"], abs);
         // A relative out is made absolute against the current folder, a folder keeps its `/`.
         let (_, body) = r(&["file", "get", "--id", "F1", "--out", "in/"]).unwrap();
         let out = body["out"].as_str().unwrap();
-        assert!(out.starts_with('/') && out.ends_with("/in/"), "{out}");
+        assert!(
+            Path::new(out).is_absolute() && out.ends_with("/in/"),
+            "{out}"
+        );
         assert!(crate::chat_run_context::OPS.contains(&op));
 
         for bad in [
@@ -1869,8 +2082,16 @@ mod tests {
         )
         .unwrap();
         let path = server.path().to_path_buf();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        // Windows: the name is taken; nobody else can stand in for the daemon.
+        #[cfg(windows)]
+        assert!(
+            Server::start(path.clone(), Arc::new(Outputs::default()), |_| {}, TIMEOUT).is_err()
+        );
         let p2 = path.clone();
         let client = tokio::task::spawn_blocking(move || {
             call(
@@ -1911,10 +2132,129 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(bad["error"]["code"], "invalid");
+        // Only the daemon's user may open it: mode 600 on the socket; on Windows the pipe's
+        // owner and access list, read from a connection to it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        #[cfg(windows)]
+        {
+            let p = path.clone();
+            let private = tokio::task::spawn_blocking(move || {
+                let pipe = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&p)
+                    .map_err(|e| e.to_string())?;
+                crate::winacl::check_handle(&pipe)
+            })
+            .await
+            .unwrap();
+            assert_eq!(private, Ok(()), "the pipe's access list");
+        }
         drop(server);
+        #[cfg(unix)]
         assert!(!path.exists());
+        // Windows: the pipe goes with its last instance (the request tasks let go of theirs
+        // when the clients are done).
+        #[cfg(windows)]
+        {
+            let mut gone = false;
+            for _ in 0..200 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                let p = path.clone();
+                let r = tokio::task::spawn_blocking(move || {
+                    call(&p, "card.delete", json!({}), Duration::from_secs(1))
+                })
+                .await
+                .unwrap();
+                if r.is_err() {
+                    gone = true;
+                    break;
+                }
+            }
+            assert!(gone, "the pipe is still there");
+        }
     }
 
+    /// Windows: a request file that somebody else could have written (its access list lets
+    /// others in) is thrown away, not served.
+    #[cfg(windows)]
+    #[test]
+    fn a_request_others_could_write_is_not_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        let spool = dir.path().join("spool");
+        std::fs::create_dir(&spool).unwrap();
+        crate::sys::protect(&spool).unwrap();
+        write_atomic(&spool.join("mine.req"), b"{}\n").unwrap();
+        write_atomic(&spool.join("theirs.req"), b"{}\n").unwrap();
+        // Everyone gets full access to one of them.
+        let status = std::process::Command::new("icacls")
+            .arg(spool.join("theirs.req"))
+            .args(["/grant", "*S-1-1-0:F"])
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{status:?}");
+        let taken = take_requests(&spool, crate::sys::euid());
+        assert_eq!(taken.len(), 1, "{taken:?}");
+        assert_eq!(taken[0].0, "mine");
+        assert!(!spool.join("theirs.req").exists(), "removed");
+    }
+
+    /// Windows: a pipe this user may not open (what a CLI sandbox that takes the access away
+    /// looks like) is reported as the sandbox, like a socket that refuses the connect on Unix.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_blocked_pipe_names_the_sandbox() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let name = format!(r"\\.\pipe\chat-run-test-blocked-{}", std::process::id());
+        // Only SYSTEM may open it.
+        let mut system_only = crate::winacl::OnlyMe::for_sddl("D:P(A;;GA;;;SY)").unwrap();
+        // SAFETY: the attributes point at a security descriptor that `system_only` owns.
+        let _pipe = unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .create_with_security_attributes_raw(&name, system_only.as_ptr())
+        }
+        .unwrap();
+        let p = PathBuf::from(&name);
+        let v = tokio::task::spawn_blocking(move || {
+            call(
+                &p,
+                "interaction.resolve",
+                json!({ "eventId": "E" }),
+                TIMEOUT,
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["code"], "unavailable");
+        assert_eq!(v["error"]["reason"], "sandbox.blocked");
+        assert!(v["error"]["message"].as_str().unwrap().contains("sandbox"));
+    }
+
+    /// Windows: the pipe's name does not grow with the run folder's path, and two run folders
+    /// get two names (Unix: `a_long_run_folder_gets_a_short_socket_path`).
+    #[cfg(windows)]
+    #[test]
+    fn a_long_run_folder_gets_a_short_pipe_name() {
+        let long = PathBuf::from(format!(r"C:\{}", "x".repeat(400)));
+        let p = socket_path(&long);
+        let name = p.to_string_lossy().into_owned();
+        assert!(name.starts_with(r"\\.\pipe\chat-run-"), "{name}");
+        assert!(name.len() < 80, "{name}");
+        assert_ne!(p, socket_path(Path::new(r"C:\runs\r1")));
+        assert_eq!(socket_path(&long), p);
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_blocked_connect_names_the_sandbox() {
         let dir = tempfile::tempdir().unwrap();
@@ -1991,7 +2331,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_request_folder_answers_with_the_result_and_goes_away() {
-        use std::os::unix::fs::MetadataExt;
         let cwd = tempfile::tempdir().unwrap();
         let outputs = Arc::new(Outputs::default());
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2006,7 +2345,11 @@ mod tests {
         .unwrap();
         let dir = spool.path().to_path_buf();
         assert_eq!(dir, cwd.path().join(".chat-run-r1"));
-        assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         assert_eq!(
             std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
             "*\n"
@@ -2110,16 +2453,20 @@ mod tests {
         assert_eq!(v["error"]["reason"], "daemon.no_answer");
     }
 
+    /// A request folder the client may not write into (what a CLI sandbox that makes the
+    /// working folder read-only looks like) is reported as the sandbox. Unix: the folder's
+    /// mode; Windows: an entry in its access list that denies this user the write.
     #[test]
     fn a_folder_the_sandbox_will_not_write_names_the_sandbox() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        crate::workspace::set_read_only(dir.path(), true);
         let v = call_files(dir.path(), "card.patch", json!({}), TIMEOUT).unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::workspace::set_read_only(dir.path(), false);
         assert_eq!(v["error"]["code"], "unavailable");
         assert_eq!(v["error"]["reason"], "sandbox.blocked");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_long_run_folder_gets_a_short_socket_path() {
         let long = PathBuf::from(format!("/{}", "x".repeat(120)));

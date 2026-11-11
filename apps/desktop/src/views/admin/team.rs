@@ -23,7 +23,7 @@ use crate::{
         native::{
             Alert, AlertTone, Badge, NativeType as _, PushSize, PushStyle, SearchField, Segment,
             Segmented, StatusBadge, TruncText, card_surface, native_colors, progress, push_button,
-            tokens::{avatar, height, metrics, monitor as t, radius, space},
+            tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
     },
@@ -349,7 +349,7 @@ impl AdminView {
                     .child(div().flex_1().min_w(gpui::Pixels::ZERO).child(table))
                     .child(
                         div()
-                            .w(metrics::INSPECTOR_WIDTH)
+                            .w(t::MEMBER_INSPECTOR)
                             .flex_none()
                             .child(self.member_inspector(window, cx)),
                     ),
@@ -367,30 +367,34 @@ impl AdminView {
             (
                 TeamSortKey::Level,
                 m::TEAM_COL_LEVEL,
-                Some(t::COL_COUNT),
+                Some(t::TEAM_COL_LEVEL),
                 false,
             ),
             (
                 TeamSortKey::Topics,
                 m::TEAM_COL_TOPICS,
-                Some(t::COL_COUNT),
+                Some(t::TEAM_COL_TOPICS),
                 true,
             ),
             (
                 TeamSortKey::Spend,
                 m::TEAM_COL_SPEND,
-                Some(t::COL_SPEND),
+                Some(t::TEAM_COL_SPEND),
                 false,
             ),
             (
                 TeamSortKey::Recent,
                 m::TEAM_COL_RECENT,
-                Some(t::COL_DONE),
+                Some(t::TEAM_COL_RECENT),
                 false,
             ),
         ];
         let cell = |w: Option<gpui::Pixels>, right: bool| {
-            let c = div().px(space::S12).flex().items_center().overflow_hidden();
+            let c = div()
+                .px(t::TEAM_CELL_PAD)
+                .flex()
+                .items_center()
+                .overflow_hidden();
             let c = match w {
                 Some(w) => c.w(w).flex_none(),
                 None => c.flex_1().min_w(gpui::Pixels::ZERO),
@@ -541,10 +545,10 @@ impl AdminView {
                                     }),
                             ),
                     )
-                    .child(cell(Some(t::COL_COUNT), false).child(Badge::new(level)))
-                    .child(cell(Some(t::COL_COUNT), true).child(r.topics.to_string()))
+                    .child(cell(Some(t::TEAM_COL_LEVEL), false).child(Badge::new(level)))
+                    .child(cell(Some(t::TEAM_COL_TOPICS), true).child(r.topics.to_string()))
                     .child(
-                        cell(Some(t::COL_SPEND), false).child(
+                        cell(Some(t::TEAM_COL_SPEND), false).child(
                             div()
                                 .w_full()
                                 .flex()
@@ -555,7 +559,7 @@ impl AdminView {
                         ),
                     )
                     .child(
-                        cell(Some(t::COL_DONE), false)
+                        cell(Some(t::TEAM_COL_RECENT), false)
                             .text_color(recent.1)
                             .child(recent.0),
                     )
@@ -574,7 +578,7 @@ impl AdminView {
             .rounded(radius::CONTAINER)
             .border_1()
             .border_color(k.separator)
-            .bg(k.content)
+            .bg(k.admin_panel())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -641,7 +645,7 @@ impl AdminView {
             .rounded(radius::CONTAINER)
             .border_1()
             .border_color(k.separator)
-            .bg(k.content)
+            .bg(k.admin_panel())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -775,6 +779,30 @@ impl AdminView {
         }
         recent.sort_by(|a, b| b.4.cmp(&a.4));
         uses.sort_by(|a, b| b.1.cmp(&a.1));
+        // With the server's split of 用量 by person and AI member, count this week's 话题 there:
+        // whom a person asks most, or who asks an AI member most.
+        let pairs = self
+            .team
+            .week
+            .as_ref()
+            .map(|w| w.pairs.as_slice())
+            .filter(|p| !p.is_empty());
+        let by_topics = pairs.is_some();
+        if let Some(pairs) = pairs {
+            uses = pairs
+                .iter()
+                .filter_map(|x| {
+                    let other = if bot {
+                        (x.member_id == id).then(|| x.initiator_id.clone())
+                    } else {
+                        (x.initiator_id == id).then(|| x.member_id.clone())
+                    };
+                    other.map(|o| (o, x.spend.topics))
+                })
+                .filter(|u| u.1 > 0)
+                .collect();
+            uses.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        }
         let max_use = uses.first().map(|u| u.1).unwrap_or(1).max(1);
         let roster = self
             .team
@@ -946,18 +974,17 @@ impl AdminView {
                             }),
                     ),
             )
-            .when(!bot && !uses.is_empty(), |d| {
+            .when(!uses.is_empty(), |d| {
                 d.child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(space::S8)
-                        .child(
-                            div()
-                                .n_section()
-                                .text_color(k.secondary)
-                                .child(m::TEAM_USES_MOST),
-                        )
+                        .child(div().n_section().text_color(k.secondary).child(if bot {
+                            m::TEAM_ASKED_BY
+                        } else {
+                            m::TEAM_USES_MOST
+                        }))
                         .children(uses.iter().take(3).map(|(bid, n)| {
                             let member = self.services.provider.member(bid);
                             div()
@@ -971,12 +998,14 @@ impl AdminView {
                                         .flex_1()
                                         .child(progress(*n as f32 / max_use as f32, cx)),
                                 )
-                                .child(
-                                    div()
-                                        .n_footnote()
-                                        .text_color(k.secondary)
-                                        .child(fill(m::TEAM_TIMES, &[("n", &n.to_string())])),
-                                )
+                                .child(div().n_footnote().text_color(k.secondary).child(fill(
+                                    if by_topics {
+                                        m::HOME_WHO_TOPICS
+                                    } else {
+                                        m::TEAM_TIMES
+                                    },
+                                    &[("n", &n.to_string())],
+                                )))
                         })),
                 )
             })
@@ -992,6 +1021,28 @@ impl AdminView {
                     .children(
                         joined.map(|j| fact(m::TEAM_JOINED, div().child(j).into_any_element())),
                     )
+                    .when(bot, |d| {
+                        let models = self
+                            .team
+                            .week
+                            .as_ref()
+                            .map(|w| super::usage::model_names(w, &id))
+                            .unwrap_or_default();
+                        d.child(fact(
+                            m::TEAM_MODELS,
+                            if models.is_empty() {
+                                div().child(m::TEAM_NO_MODELS).into_any_element()
+                            } else {
+                                // One a line: names are long ("Claude Sonnet 5.5").
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_end()
+                                    .children(models.into_iter().map(TruncText::new))
+                                    .into_any_element()
+                            },
+                        ))
+                    })
                     .when(!bot, |d| {
                         d.child(fact(
                             m::TEAM_DEVICES,

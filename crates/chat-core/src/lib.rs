@@ -14,6 +14,7 @@
 //! [`Client::reconnect_now`]. Before a client exists (sign-in), run
 //! [`HttpClient::redeem`] on [`background`] and keep the token in a [`TokenStore`].
 
+pub mod account;
 pub mod artifacts;
 pub mod backoff;
 pub mod client;
@@ -24,6 +25,7 @@ mod engine;
 pub mod files;
 pub mod http;
 mod http_ext;
+mod http_push;
 pub mod logging;
 pub mod memory;
 pub mod proto;
@@ -52,9 +54,11 @@ pub use store::{
     Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
     TopicRow,
 };
-#[cfg(target_os = "macos")]
+#[cfg(target_os = "windows")]
+pub use token::CredentialTokenStore;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use token::KeychainTokenStore;
-pub use token::{FileTokenStore, TokenStore, TokenStoreError};
+pub use token::{FileTokenStore, TokenStore, TokenStoreError, credential_target};
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {

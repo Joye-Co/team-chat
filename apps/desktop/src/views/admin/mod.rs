@@ -10,8 +10,10 @@
 mod accounts;
 mod activity;
 mod fleet;
+mod home;
 mod model;
 mod overview;
+pub mod scenes;
 mod spark;
 mod team;
 mod usage;
@@ -41,7 +43,7 @@ use crate::{
             Alert, AlertTone, Empty, NativeType as _, PushSize, PushStyle, Segment, Segmented,
             SidebarFooter, SidebarRow, TruncText, group_label, native_colors, push_button,
             sidebar_panel,
-            tokens::{height, metrics, monitor as t, radius, space},
+            tokens::{height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
     },
@@ -64,7 +66,11 @@ const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
 /// Binds [`OpenTeamAdmin`] and ⌥⌘,. The window itself checks again that I am an owner.
 pub fn install(services: Services, cx: &mut App) {
-    cx.bind_keys([gpui::KeyBinding::new("cmd-alt-,", OpenTeamAdmin, None)]);
+    cx.bind_keys([gpui::KeyBinding::new(
+        crate::secondary!("alt-,"),
+        OpenTeamAdmin,
+        None,
+    )]);
     cx.on_action(move |_: &OpenTeamAdmin, cx| {
         if i_am_owner(&services) {
             open(services.clone(), cx)
@@ -86,6 +92,23 @@ pub fn open(services: Services, cx: &mut App) {
 /// Opens 团队管理 at `page` (Settings sends 成员, 团队约定 and 机器 here).
 pub fn open_at(services: Services, page: AdminPage, cx: &mut App) {
     open_with(services, Some(page), cx);
+}
+
+/// 改每周预算… on a budget card: 团队管理 › 用量 with that AI member's budget editor open.
+pub fn open_budget(services: Services, member_id: String, cx: &mut App) {
+    if !i_am_owner(&services) {
+        return;
+    }
+    open_with(services, Some(AdminPage::Usage), cx);
+    if let Some((handle, view)) = cx.try_global::<AdminWindow>().and_then(|w| w.0.clone()) {
+        let _ = handle.update(cx, |_, _, cx| {
+            let _ = view.update(cx, |v, cx| {
+                v.usage.budget_for = Some(member_id);
+                v.usage.budget_error = None;
+                cx.notify();
+            });
+        });
+    }
 }
 
 fn open_with(services: Services, page: Option<AdminPage>, cx: &mut App) {
@@ -162,6 +185,8 @@ pub struct AdminView {
     data_for: Option<(String, Range)>,
     load: Load,
     scroll: ScrollHandle,
+    /// The sidebar's page list, which scrolls above the account footer when the window is short.
+    nav_scroll: ScrollHandle,
     _poll: Task<()>,
     _subs: Vec<Subscription>,
     /// The live page: 概览, 订阅账号 or API 密钥.
@@ -246,6 +271,7 @@ impl AdminView {
             data_for: None,
             load: Load::Idle,
             scroll: ScrollHandle::new(),
+            nav_scroll: ScrollHandle::new(),
             page: accounts::Page::default(),
             acct,
             fleet: fleet::Fleet::default(),
@@ -290,8 +316,14 @@ impl AdminView {
                             .map(|x| x.id.clone())
                     });
                     this.machines = Some(list);
-                    if this.page == accounts::Page::Machines {
-                        this.fetch_fleet(cx);
+                    match this.page {
+                        // These read the machines' monitors (logins, who is at work), which
+                        // need the machine list that just came in.
+                        accounts::Page::Machines
+                        | accounts::Page::Usage
+                        | accounts::Page::Members => this.fetch_fleet(cx),
+                        accounts::Page::Home => this.fetch_home(cx),
+                        _ => {}
                     }
                     this.fetch(cx);
                 }
@@ -443,34 +475,89 @@ fn error_text(e: AdminError) -> String {
 
 impl Render for AdminView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed(m::WINDOW_TITLE, body, window, cx)
+    }
+}
+
+impl AdminView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_budget_field(window, cx);
         let k = native_colors(cx);
         div()
             .id("admin-root")
             .size_full()
             .flex()
-            .bg(k.content)
+            .bg(k.admin_window())
             .text_color(k.label)
             .n_body()
             .child(self.sidebar(window, cx))
             .child(
+                // The content floats on the window: inset from the top, right and bottom edges.
                 div()
                     .flex_1()
                     .min_w(gpui::Pixels::ZERO)
                     .h_full()
+                    .pr(t::PANEL_INSET)
+                    .pb(t::PANEL_INSET)
                     .flex()
                     .flex_col()
-                    .child(self.toolbar(window, cx))
                     .child(
                         div()
-                            .id("admin-scroll")
-                            .flex_1()
-                            .min_h(gpui::Pixels::ZERO)
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll)
-                            .child(self.body(window, cx)),
+                            .id("admin-drag")
+                            .flex_none()
+                            .h(t::PANEL_INSET)
+                            .w_full()
+                            .on_mouse_down(MouseButton::Left, |e, window, _| {
+                                if e.click_count >= 2 {
+                                    window.titlebar_double_click();
+                                } else {
+                                    window.start_window_move();
+                                }
+                            }),
+                    )
+                    .child(
+                        content_panel(cx).child(self.toolbar(window, cx)).child(
+                            div()
+                                .id("admin-scroll")
+                                .flex_1()
+                                .min_h(gpui::Pixels::ZERO)
+                                .overflow_y_scroll()
+                                .track_scroll(&self.scroll)
+                                .child(self.body(window, cx)),
+                        ),
                     ),
             )
     }
+}
+
+/// The floating content panel: content fill, radius 12, a 1 px outline and, in light mode, a
+/// faint shadow.
+fn content_panel(cx: &gpui::App) -> gpui::Div {
+    let k = native_colors(cx);
+    let mut s = if k.is_dark() {
+        vec![]
+    } else {
+        crate::ui::native::tokens::shadow::xs()
+    };
+    s.push(crate::ui::native::tokens::shadow::line(k.label.opacity(
+        if k.is_dark() {
+            t::PANEL_OUTLINE_DARK
+        } else {
+            t::PANEL_OUTLINE_LIGHT
+        },
+    )));
+    div()
+        .flex_1()
+        .min_h(gpui::Pixels::ZERO)
+        .w_full()
+        .flex()
+        .flex_col()
+        .rounded(t::PANEL_RADIUS)
+        .bg(k.admin_panel())
+        .shadow(s)
+        .overflow_hidden()
 }
 
 impl AdminView {
@@ -515,15 +602,6 @@ impl AdminView {
                 })
                 .child(row)
         };
-        let page =
-            |id: &'static str, label: &'static str, s: Sym, trailing: Option<gpui::AnyElement>| {
-                let row = SidebarRow::new(id, label).leading(icon(s, false));
-                let row = match trailing {
-                    Some(el) => row.trailing_element(el),
-                    None => row,
-                };
-                soon(id.into(), row)
-            };
         // The pages that work: selected when open.
         let current_page = self.page;
         let live_page = |id: &'static str,
@@ -628,12 +706,21 @@ impl AdminView {
             _ => None,
         };
         sidebar_panel(t::SIDEBAR_WIDTH, cx)
+            // Flat on the window: the content panel carries the edge.
+            .border_r(gpui::Pixels::ZERO)
+            .bg(k.admin_window())
             .child(
                 // The traffic lights' row; dragging it moves the window.
+                // Off the Mac the caption strip above holds the window
+                // buttons: only the header's top margin is left here.
                 div()
                     .id("admin-lights")
                     .flex_none()
-                    .h(height::TOOLBAR)
+                    .h(if crate::ui::native::window_chrome::drawn() {
+                        crate::ui::native::tokens::space::S12
+                    } else {
+                        height::TOOLBAR
+                    })
                     .w_full()
                     .on_mouse_down(MouseButton::Left, |e, window, _| {
                         if e.click_count >= 2 {
@@ -650,10 +737,21 @@ impl AdminView {
                     .flex_1()
                     .min_h(gpui::Pixels::ZERO)
                     .overflow_y_scroll()
+                    .track_scroll(&self.nav_scroll)
+                    // Padding, not the first label's margin: a scroll area measures its content
+                    // from the first child's top, so a margin there would be cut from the end.
+                    .pt(t::NAV_GROUP_TOP)
+                    .pb(t::NAV_END_PAD)
                     .flex()
                     .flex_col()
-                    .child(group_label(m::NAV_TEAM, cx).mt(space::S12))
-                    .child(page("nav-home", m::NAV_HOME, Sym::Grid, None))
+                    .child(group_label(m::NAV_TEAM, cx).h(t::NAV_GROUP_HEIGHT))
+                    .child(live_page(
+                        "nav-home",
+                        m::NAV_HOME,
+                        Sym::Grid,
+                        accounts::Page::Home,
+                        None,
+                    ))
                     .child(live_page(
                         "nav-members",
                         m::NAV_MEMBERS,
@@ -675,7 +773,11 @@ impl AdminView {
                         accounts::Page::Activity,
                         None,
                     ))
-                    .child(group_label(m::NAV_MACHINES, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_MACHINES, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-machines",
                         m::NAV_ALL_MACHINES,
@@ -684,7 +786,11 @@ impl AdminView {
                         self.machines.as_ref().map(|l| count(l.len() as u32, false)),
                     ))
                     .children(machines)
-                    .child(group_label(m::NAV_ACCOUNTS, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_ACCOUNTS, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-subs",
                         m::NAV_SUBSCRIPTIONS,
@@ -704,7 +810,11 @@ impl AdminView {
                             .filter(|n| *n > 0)
                             .map(|n| count(n, false)),
                     ))
-                    .child(group_label(m::NAV_SETTINGS, cx).mt(space::S12))
+                    .child(
+                        group_label(m::NAV_SETTINGS, cx)
+                            .h(t::NAV_GROUP_HEIGHT)
+                            .mt(t::NAV_GROUP_TOP),
+                    )
                     .child(live_page(
                         "nav-ai",
                         m::NAV_AI,
@@ -778,7 +888,7 @@ impl AdminView {
 
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
-        let active = window.is_window_active();
+        let active = crate::ui::native::emphasized(window);
         let machine_name = self
             .machine()
             .map(|x| x.name.clone())
@@ -801,6 +911,7 @@ impl AdminView {
                 &[("machine", machine_name.as_deref().unwrap_or_default())],
             ),
             accounts::Page::Members => self.team_subtitle(),
+            accounts::Page::Home => self.home_subtitle(),
             accounts::Page::Machines => m::FLEET_SUB.to_string(),
             accounts::Page::Ai => m::AI_SUB.to_string(),
             accounts::Page::Rules => m::RULES_SUB.to_string(),
@@ -813,6 +924,7 @@ impl AdminView {
             accounts::Page::Accounts => m::ACCOUNTS_TITLE,
             accounts::Page::Keys => m::KEYS_TITLE,
             accounts::Page::Members => m::MEMBERS_TITLE,
+            accounts::Page::Home => m::NAV_HOME,
             accounts::Page::Machines => m::FLEET_TITLE,
             accounts::Page::Ai => m::AI_TITLE,
             accounts::Page::Rules => m::RULES_TITLE,
@@ -846,13 +958,12 @@ impl AdminView {
         div()
             .id("admin-toolbar")
             .flex_none()
-            .h(height::TOOLBAR)
             .px(space::S32)
+            .pt(t::HEADER_PAD_TOP)
+            .pb(t::HEADER_PAD_BOTTOM)
             .flex()
-            .items_center()
+            .items_end()
             .gap(space::S12)
-            .border_b(metrics::HAIRLINE)
-            .border_color(k.separator)
             .on_mouse_down(MouseButton::Left, |e, window, _| {
                 if e.click_count >= 2 {
                     window.titlebar_double_click();
@@ -866,48 +977,52 @@ impl AdminView {
                     .min_w(gpui::Pixels::ZERO)
                     .flex()
                     .flex_col()
+                    .when(overview, |d| {
+                        d.child(
+                            div()
+                                .mb(space::S6)
+                                .flex()
+                                .items_center()
+                                .gap(space::S6)
+                                .n_footnote()
+                                .text_color(k.secondary)
+                                .child(m::PATH_MACHINES)
+                                .children(machine_name.map(|n| {
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S6)
+                                        .child(sym_icon(
+                                            Sym::ChevronRight,
+                                            SymSize::INLINE_SMALL,
+                                            k.tertiary,
+                                        ))
+                                        .child(n)
+                                })),
+                        )
+                    })
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S4)
-                            .n_title3()
+                            .n_style(crate::ui::native::tokens::text::HERO)
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(if active { k.label } else { k.secondary })
-                            .when(overview, |d| {
-                                d.child(div().text_color(k.secondary).child(m::PATH_MACHINES))
-                                    .child(sym_icon(
-                                        Sym::ChevronRight,
-                                        SymSize::INLINE_SMALL,
-                                        k.tertiary,
-                                    ))
-                            })
-                            .children(machine_name.filter(|_| overview).map(|n| {
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::S4)
-                                    .child(div().text_color(k.secondary).child(n))
-                                    .child(sym_icon(
-                                        Sym::ChevronRight,
-                                        SymSize::INLINE_SMALL,
-                                        k.tertiary,
-                                    ))
-                            }))
                             .child(page_title),
                     )
                     .when(!subtitle.is_empty(), |d| {
                         d.child(
                             TruncText::new(subtitle)
-                                .n_subheadline()
+                                .mt(space::S4)
+                                .n_body()
                                 .n_figures()
                                 .text_color(k.secondary),
                         )
                     }),
             )
             .when(overview, |d| d.child(range))
-            .when(self.page == accounts::Page::Usage, |d| {
-                d.child(self.usage_range_control(cx))
-            })
+            .when(
+                matches!(self.page, accounts::Page::Usage | accounts::Page::Home),
+                |d| d.child(self.usage_range_control(cx)),
+            )
             .when(self.page == accounts::Page::Members, |d| {
                 d.child(self.team_actions(cx))
             })
@@ -918,7 +1033,7 @@ impl AdminView {
         let pad = div()
             .w_full()
             .px(space::S32)
-            .py(space::S24)
+            .pb(t::BODY_PAD_BOTTOM)
             .flex()
             .flex_col()
             .gap(space::S16);
@@ -979,6 +1094,9 @@ impl AdminView {
             // Settings panes bring their own 24 inset: 8 more lines them up with the toolbar.
             accounts::Page::Members => {
                 return pad.child(self.team_page(window, cx)).into_any_element();
+            }
+            accounts::Page::Home => {
+                return pad.child(self.home_page(window, cx)).into_any_element();
             }
             accounts::Page::Rules => {
                 return div()

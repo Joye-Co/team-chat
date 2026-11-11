@@ -1,11 +1,16 @@
-//! Native window that shows 产出 (HTML artifact) pages in an isolated WKWebView.
+//! Native window that shows 产出 (HTML artifact) pages in an isolated web view: WKWebView on
+//! macOS, WebView2 on Windows. Both backends have the same public API and the same rules.
 //!
-//! - Each version gets its own origin: `artifact://<artifactId>-v<version>/<path>`, served by a
-//!   `WKURLSchemeHandler` from a folder or from memory.
-//! - Every response carries a strict CSP; a `WKContentRuleList` blocks http, https, ws, ftp and
-//!   file loads; the navigation delegate denies every navigation away from the current origin.
-//! - The page talks to the host only through `window.webkit.messageHandlers.bridge`
-//!   (`window.artifact.getData()` / `window.artifact.emitEvent(name, payload)`), checked
+//! - Each version gets its own origin: `artifact://<artifactId>-v<version>/<path>`, served
+//!   from a folder or from memory (`WKURLSchemeHandler`; on Windows a registered custom scheme
+//!   answered in `WebResourceRequested`).
+//! - Every response carries a strict CSP; http, https, ws, ftp and file loads are blocked
+//!   (`WKContentRuleList`; on Windows every request outside the origin gets a 403 and the
+//!   browser process resolves no host name); every navigation away from the current origin
+//!   and every new window is denied.
+//! - The page talks to the host only through one message channel
+//!   (`window.webkit.messageHandlers.bridge`, on Windows `chrome.webview.postMessage`) behind
+//!   `window.artifact.getData()` / `window.artifact.emitEvent(name, payload)`, checked
 //!   against the window's [`Capabilities`].
 //!
 //! The same page can also live inside a host window ([`EmbeddedArtifact`]): a child view
@@ -13,18 +18,27 @@
 //! ([`embed`]). It has the same isolation as the window.
 //!
 //! All window functions run on the main thread inside an app that already runs
-//! `NSApplication`.
+//! `NSApplication` (on Windows: the thread that runs the message loop). [`MainThread`] is the
+//! token for it.
 
 pub mod bridge;
 pub mod diagram;
 pub mod embed;
 pub mod gate;
+mod page;
 pub mod resolve;
 
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(target_os = "macos")]
 mod mac_embed;
+#[cfg(windows)]
+mod win;
+#[cfg(windows)]
+mod win_embed;
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod win_support;
 
 use std::path::PathBuf;
 
@@ -37,6 +51,15 @@ use serde_json::Value;
 
 #[cfg(target_os = "macos")]
 pub use mac::{ArtifactWindow, open_external_url, open_screen_share_url};
+#[cfg(windows)]
+pub use win::{
+    ArtifactWindow, Confirm, HostKey, MainThread, confirm_later, has_url_handler,
+    open_external_url, open_screen_share_url, set_host_keys, set_user_data_dir,
+};
+
+/// Proof that the caller is on the main thread.
+#[cfg(target_os = "macos")]
+pub type MainThread = objc2_foundation::MainThreadMarker;
 
 /// Schemes a machine's screen sharing address (`takeoverUrl`) may use.
 pub const SCREEN_SHARE_SCHEMES: &[&str] = &["vnc", "http", "https"];
@@ -64,6 +87,8 @@ pub fn is_screen_share_url(url: &str) -> bool {
 }
 #[cfg(target_os = "macos")]
 pub use mac_embed::{EmbeddedArtifact, view_from_ptr};
+#[cfg(windows)]
+pub use win_embed::EmbeddedArtifact;
 
 /// One version of a 产出 to show.
 #[derive(Clone, Debug)]
@@ -166,6 +191,26 @@ pub struct OpenOptions {
     pub viewer: Option<Viewer>,
     /// The ⌥-click outline and `就这里提问` menu, when the page may `ref`.
     pub ref_menu: Option<RefMenu>,
+    /// The colors of the window's frame (Windows; see [`Chrome`]).
+    pub chrome: Option<Chrome>,
+}
+
+/// How the frame of an 产出 window is drawn where the host has to say it.
+///
+/// On macOS the window takes the app's appearance by itself (title bar, version pop-up
+/// and the page's `prefers-color-scheme` follow `NSApp.appearance`), so this is not read
+/// there. On Windows the title bar is the system's and knows nothing of the app's theme:
+/// the host gives its colors, as `[r, g, b]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chrome {
+    /// The app shows its dark theme.
+    pub dark: bool,
+    /// The fill of the title bar and of the strip that holds the version picker.
+    pub caption: [u8; 3],
+    /// The title's text.
+    pub text: [u8; 3],
+    /// The window's 1 px border.
+    pub border: [u8; 3],
 }
 
 impl OpenOptions {
@@ -189,6 +234,7 @@ impl OpenOptions {
             transparent: false,
             viewer: None,
             ref_menu: None,
+            chrome: None,
         }
     }
 }
@@ -257,6 +303,8 @@ pub enum Error {
     Closed,
     /// The host view to embed in has no superview (it is not in a window).
     NoHostView,
+    /// The native window or web view could not be created.
+    Native(String),
 }
 
 impl std::fmt::Display for Error {
@@ -267,6 +315,7 @@ impl std::fmt::Display for Error {
             Error::FolderMissing(p) => write!(f, "artifact folder missing: {}", p.display()),
             Error::Closed => write!(f, "artifact window closed"),
             Error::NoHostView => write!(f, "host view is not in a window"),
+            Error::Native(e) => write!(f, "native web view: {e}"),
         }
     }
 }

@@ -59,6 +59,26 @@ pub fn aside_capable(kind: &str) -> bool {
     matches!(kind, "codex" | "claude")
 }
 
+/// What a CLI must know about a run in a microVM: what is kept and what goes with the VM.
+pub fn vm_note(vm: &crate::config::VmConfig) -> String {
+    let kept = if vm.homes.as_os_str().is_empty() {
+        "Nothing outside your working folder is kept for your next run."
+    } else {
+        "Only your home folder ($HOME) is kept for your next run: clone repositories, install \
+tools and sign in there, and look there first for what an earlier run left. /tmp and \
+everything else outside it are gone after this run."
+    };
+    format!(
+        "You run in a virtual machine that was started for this run and is deleted when you end \
+your turn. {kept} Every process still running when your turn ends is killed: when you start \
+something you need the result of (a sign-in that waits for a person, a build, a test run), wait \
+for it in the foreground before you finish, never in the background."
+    )
+}
+
+/// A run that waits for a tool call it started counts as stalled only after this long.
+const TOOL_STALL: Duration = Duration::from_secs(30 * 60);
+
 const BASE_ENV: &[&str] = &[
     "PATH",
     "HOME",
@@ -81,7 +101,7 @@ pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String
         env.retain(|(n, _)| n != k);
         env.push((k.to_string(), v));
     };
-    for k in BASE_ENV {
+    for k in BASE_ENV.iter().chain(crate::sys::OS_ENV) {
         if let Ok(v) = std::env::var(k) {
             put(k, v);
         }
@@ -132,6 +152,9 @@ pub struct RunCtx {
     pub exec: Arc<dyn Executor>,
     /// Feature "accounts": the API keys this run's member gets (none for side chats).
     pub keys: Vec<(String, String)>,
+    /// The daemon reported this run's CLI as one whose runs stop at gated commands
+    /// (`CliInfo.gates`, [`crate::gates::reported_for`]).
+    pub gated: bool,
 }
 
 /// The `chat-run` transport of one run. Dropping it removes the socket or the folder.
@@ -204,7 +227,7 @@ fn start_chat_run(
         }
     };
     let path = match env.iter().find(|(k, _)| k == "PATH") {
-        Some((_, p)) if !p.is_empty() => format!("{}:{p}", bin.display()),
+        Some((_, p)) if !p.is_empty() => format!("{}{}{p}", bin.display(), crate::sys::PATH_SEP),
         _ => bin.display().to_string(),
     };
     env.retain(|(k, _)| {
@@ -227,6 +250,7 @@ pub async fn supervise(ctx: RunCtx) {
         outputs,
         exec,
         keys,
+        gated,
     } = ctx;
     let run_id = assign.run_id.clone();
     let started = Instant::now();
@@ -307,8 +331,16 @@ pub async fn supervise(ctx: RunCtx) {
             ));
             outputs.set_gates(gates.clone());
             let gate_hook =
-                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::NAME));
-            let notes: Vec<String> = [gate.note(), gates.note()].into_iter().flatten().collect();
+                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
+            let gate_alive = (!gates.is_empty()).then(|| gates.alive());
+            // Gates for a CLI the daemon did not report as gated (on Windows one older than
+            // the tested version, or one whose version changed since `hello`): its hook could
+            // let a command through, so the run does not start.
+            let ungated = !gates.is_empty() && !gated;
+            let notes: Vec<String> = [gate.note(), gates.note(), cfg.vm.as_ref().map(vm_note)]
+                .into_iter()
+                .flatten()
+                .collect();
             let spec = RunSpec {
                 run_id: run_id.clone(),
                 runtime_name: assign.runtime.clone(),
@@ -331,11 +363,21 @@ pub async fn supervise(ctx: RunCtx) {
                     .clone()
                     .filter(|s| runtime::valid_session_id(s)),
                 gate_hook,
+                gate_alive,
                 exec: exec.clone(),
             };
             let work = spec.cwd.clone();
             // The hook asks through chat-run: a gated run never goes on without it.
-            let res = if spec.gate_hook.is_some() && chat_run.is_none() {
+            let res = if ungated {
+                (
+                    Outcome::failed(format!(
+                        "this run has commands that need a person's approval, and the {} on \
+this machine cannot be made to stop at them (update it)",
+                        rt.command()
+                    )),
+                    false,
+                )
+            } else if spec.gate_hook.is_some() && chat_run.is_none() {
                 (
                     Outcome::failed("cannot ask for approvals: chat-run did not start"),
                     false,
@@ -448,6 +490,24 @@ pub async fn supervise(ctx: RunCtx) {
     let _ = out.send((run_id.clone(), RunMsg::Finished));
 }
 
+/// A run's two clocks after the machine slept for `asleep`: when the CLI was last heard
+/// (`last`) and when the run's time limit ends (`deadline`). The time asleep is no silence
+/// and no part of the limit. A paused run is left as it is: handing it back moves both by the
+/// whole pause, which has the sleep in it already; moving them here too would count it twice.
+fn after_sleep(
+    last: Instant,
+    deadline: Option<tokio::time::Instant>,
+    asleep: Duration,
+    now: Instant,
+    paused: bool,
+) -> (Instant, Option<tokio::time::Instant>) {
+    if paused {
+        (last, deadline)
+    } else {
+        ((last + asleep).min(now), deadline.map(|d| d + asleep))
+    }
+}
+
 /// Pause state of a run (接管).
 struct Paused {
     since: Instant,
@@ -491,13 +551,18 @@ async fn run_runtime(
     let fut = rt.start(spec, emit_tx, rt_rx);
     tokio::pin!(fut);
     let stall = Duration::from_secs(cfg.stall_minutes.max(1) * 60);
+    // Tool calls without a result: the CLI waits for a step it started (a build, a test run),
+    // so its silence is not a stall until much later.
+    let mut open_tools: std::collections::HashSet<String> = Default::default();
     let mut last = Instant::now();
     let mut stalled = false;
     let mut timed_out = false;
     let mut deadline = assign
         .max_duration_ms
         .map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms));
-    let mut tick = tokio::time::interval(Duration::from_secs(15));
+    const TICK: Duration = Duration::from_secs(15);
+    let mut tick = tokio::time::interval(TICK);
+    let mut ticked = Instant::now();
     let mut paused: Option<Paused> = None;
     let mut resumes = 0u32;
     let mut control_open = true;
@@ -518,6 +583,12 @@ async fn run_runtime(
             Some(ev) = emit_rx.recv() => {
                 last = Instant::now();
                 stalled = false;
+                match &ev {
+                    RunEvent::ToolCall { item_id, .. } => { open_tools.insert(item_id.clone()); }
+                    RunEvent::ToolResult { item_id, .. } => { open_tools.remove(item_id); }
+                    RunEvent::TurnCompleted { .. } => open_tools.clear(),
+                    _ => {}
+                }
                 let extra = acceptance.on_event(&ev);
                 for ev in gate.push(ev).into_iter().chain(extra) {
                     event(ev);
@@ -602,6 +673,14 @@ async fn run_runtime(
                 }
             }
             _ = tick.tick() => {
+                // The machine was asleep (or the daemon was not run) since the last tick:
+                // the CLI did not run either. That time is no silence of the CLI and no part
+                // of the run's time limit.
+                let now = Instant::now();
+                if let Some(asleep) = crate::sys::slept(now.duration_since(ticked), TICK) {
+                    (last, deadline) = after_sleep(last, deadline, asleep, now, paused.is_some());
+                }
+                ticked = now;
                 if paused.is_some() {
                     continue;
                 }
@@ -609,10 +688,11 @@ async fn run_runtime(
                 if own.gates.waiting() {
                     last = Instant::now();
                 }
-                if !stalled && last.elapsed() >= stall {
+                let limit = if open_tools.is_empty() { stall } else { stall.max(TOOL_STALL) };
+                if !stalled && last.elapsed() >= limit {
                     stalled = true;
                     event(RunEvent::Status { state: "stalled".into(),
-                        message: Some(format!("no output for {} minutes", stall.as_secs() / 60)) });
+                        message: Some(format!("no output for {} minutes", limit.as_secs() / 60)) });
                 }
                 if let Some(d) = deadline
                     && !timed_out && tokio::time::Instant::now() >= d {
@@ -640,4 +720,33 @@ async fn run_runtime(
         outcome.error = Some("run took longer than maxDurationMs".into());
     }
     (outcome, timed_out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A sleep moves a working run's clocks by the time asleep, once. A paused run's clocks
+    /// stay: the hand-back moves them by the whole pause, sleep included.
+    #[test]
+    fn a_sleep_is_counted_once_also_for_a_paused_run() {
+        let start = Instant::now();
+        let now = start + Duration::from_secs(1000);
+        let last = start + Duration::from_secs(10);
+        let deadline = tokio::time::Instant::from_std(start + Duration::from_secs(600));
+        let asleep = Duration::from_secs(900);
+        // Working: the CLI was silent for 990 s of which 900 asleep, and the limit moves.
+        let (l, d) = after_sleep(last, Some(deadline), asleep, now, false);
+        assert_eq!(now.duration_since(l), Duration::from_secs(90));
+        assert_eq!(d, Some(deadline + asleep));
+        // Never into the future.
+        let (l, _) = after_sleep(last, None, Duration::from_secs(5000), now, false);
+        assert_eq!(l, now);
+        // Paused since `last`: nothing moves here; the hand-back adds the pause (990 s, the
+        // 900 s of sleep in it), so the limit moves by 990 s in all, not by 1890 s.
+        let (l, d) = after_sleep(last, Some(deadline), asleep, now, true);
+        assert_eq!((l, d), (last, Some(deadline)));
+        let handed_back = d.map(|d| d + now.duration_since(last));
+        assert_eq!(handed_back, Some(deadline + Duration::from_secs(990)));
+    }
 }

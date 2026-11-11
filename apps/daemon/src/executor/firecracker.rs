@@ -236,6 +236,7 @@ impl Executor for Firecracker {
             run_dir: spec.run_dir.clone(),
             cwd: spec.cwd.clone(),
             env: spec.env.clone(),
+            home: bot_home(&self.cfg.homes, &spec.env),
             program: program.to_string(),
             args: args.to_vec(),
         };
@@ -364,8 +365,27 @@ struct Job {
     run_dir: PathBuf,
     cwd: PathBuf,
     env: Vec<(String, String)>,
+    /// The bot's kept home folder on the host and where it goes in the VM (`$HOME`).
+    home: Option<(PathBuf, String)>,
     program: String,
     args: Vec<String>,
+}
+
+/// The bot's home folder under `homes` and the VM's `$HOME`: made on first use. None when
+/// homes are off, the run names no bot, or the folder cannot be made (the run still works, on
+/// the scratch disk).
+fn bot_home(homes: &Path, env: &[(String, String)]) -> Option<(PathBuf, String)> {
+    let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    let bot = get("CHAT_BOT_MEMBER_ID")?;
+    let guest = get("HOME")?;
+    let plain =
+        !bot.is_empty() && bot.len() <= 64 && bot.bytes().all(|b| b.is_ascii_alphanumeric());
+    if homes.as_os_str().is_empty() || !plain || !guest.starts_with('/') {
+        return None;
+    }
+    let dir = homes.join(bot);
+    std::fs::create_dir_all(&dir).ok()?;
+    Some((std::fs::canonicalize(&dir).ok()?, guest.to_string()))
 }
 
 impl Job {
@@ -424,7 +444,7 @@ impl Job {
         let _ = helper(&self.cfg, &["down", &slot]).await;
         helper(&self.cfg, &["up", &slot]).await?;
         let shares = self.shares();
-        for s in &shares {
+        for s in shares.iter().chain(self.home.iter().map(|(h, _)| h)) {
             helper(&self.cfg, &["export", &slot, &s.to_string_lossy(), "rw"]).await?;
         }
         let _ = std::fs::remove_dir_all(&self.vm_dir);
@@ -577,7 +597,13 @@ impl Job {
                 .map(|p| vmwire::Mount {
                     path: p.to_string_lossy().to_string(),
                     read_only: false,
+                    at: None,
                 })
+                .chain(self.home.iter().map(|(host, guest)| vmwire::Mount {
+                    path: host.to_string_lossy().to_string(),
+                    read_only: false,
+                    at: Some(guest.clone()),
+                }))
                 .collect(),
             chat_run_socket: host_socket.map(|_| GUEST_CHAT_RUN_SOCKET.to_string()),
         };
@@ -722,6 +748,24 @@ async fn connect_agent(vsock: &Path) -> std::io::Result<tokio::net::UnixStream> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bot_gets_its_own_kept_home() {
+        let tmp = std::env::temp_dir().join(format!("homes-{}", std::process::id()));
+        let env = |bot: &str| {
+            vec![
+                ("HOME".to_string(), "/home/runner".to_string()),
+                ("CHAT_BOT_MEMBER_ID".to_string(), bot.to_string()),
+            ]
+        };
+        let (host, guest) = bot_home(&tmp, &env("01BOTHOME0000000000000TEST")).unwrap();
+        assert!(host.is_dir() && host.ends_with("01BOTHOME0000000000000TEST"));
+        assert_eq!(guest, "/home/runner");
+        // No path tricks, and no home when homes are off.
+        assert!(bot_home(&tmp, &env("../x")).is_none());
+        assert!(bot_home(Path::new(""), &env("01BOTHOME0000000000000TEST")).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn slots_get_their_own_slash_30() {

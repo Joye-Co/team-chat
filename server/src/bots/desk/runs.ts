@@ -150,6 +150,8 @@ export abstract class DeskRuns extends DeskCore {
         if (m.refs && m.refs.length > 0) {
           this.seeRefs(runId, [...claim.messages.map((x) => x.id), ...m.refs.map((x) => x.messageId)]);
         }
+        // 到了预算: the run waits for an owner instead of starting (budget/index.ts).
+        if (await this.budgetGate(r, prompt)) return;
         if (!machine) {
           this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
           r.queued_at = Date.now();
@@ -168,6 +170,14 @@ export abstract class DeskRuns extends DeskCore {
       }
       await this.scheduleStall();
     });
+  }
+
+  /**
+   * True when the run must wait for an owner before it starts (到了预算). The budget feature
+   * (BotDesk) holds the run; here nothing is held.
+   */
+  protected async budgetGate(_r: RunRow, _prompt: string): Promise<boolean> {
+    return false;
   }
 
   /** The request a run started with (meta `request:{runId}`), or null for runs before it. */
@@ -205,6 +215,7 @@ export abstract class DeskRuns extends DeskCore {
         const prompt = this.meta(`prompt:${id}`);
         const machine = prompt === null ? null : this.pick(r, runner, await loadMachines(this.env), JSON.parse(r.excluded) as string[]);
         if (!machine || prompt === null) return null;
+        if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
         this.sql.exec("UPDATE runs SET queued_at = NULL WHERE id = ?", id);
         r.queued_at = null;

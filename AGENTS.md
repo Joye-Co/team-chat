@@ -11,7 +11,9 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Product name**: only in `product.json`. The server imports it, `apps/desktop/build.rs`
   exports it as compile-time constants, scripts read it with bun or jq. Never type the product
   name in code or UI strings. Infra ids (Worker, D1, crate and package names) use neutral names
-  and do not change when the product is renamed. Server URLs are not in `product.json`: the app and the
+  and do not change when the product is renamed. After a rename, add the old name to
+  `formerNames` in `product.json`: the Windows installer keeps it as a second name of the app's
+  program, because an installed app starts `<old name>.exe` after it updates itself. Server URLs are not in `product.json`: the app and the
   scripts read them from `deploy/servers.json` in the ops checkout.
 - **Interface text**: Simplified Chinese, only from the desktop copy catalog, only the four
   product nouns 成员, 群, 话题, 产出 (see PRODUCT.md). Developer words stay in the developer view
@@ -27,7 +29,10 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   Mac client, not a web page: follow [docs/design/NATIVE.md](docs/design/NATIVE.md) (window,
   toolbar, sidebar, controls, SF Symbols, sheets, settings window, behavior), which wins over
   [docs/DESIGN.md](docs/DESIGN.md) where they differ; DESIGN.md still owns Card v2, status words
-  and content. Keep every color, size and duration in theme tokens. Look at your screens: capture
+  and content. The Windows app is the same app: [docs/design/WINDOWS.md](docs/design/WINDOWS.md) lists
+  the only differences from NATIVE.md there (title bar and window buttons, in-window menus and
+  tray, Ctrl shortcuts, fonts, the SVG icon set, scrollbars, dialogs), and COMPLETENESS.md binds
+  both systems. Keep every color, size and duration in theme tokens. Look at your screens: capture
   only the app's own window (`screencapture -l <window id> -o -x <png>`, or the app's
   screenshot self-test when it exists), never the full screen, in light and dark mode, and read
   the PNGs. Before merging UI work, check it with the vendored skills in

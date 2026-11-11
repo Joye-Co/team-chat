@@ -1,0 +1,813 @@
+//! The few things the daemon asks of the operating system that Unix and Windows spell
+//! differently: private files, the file owner, the host name, disk space and load.
+//!
+//! Windows has no file modes: who may open a file is its owner and its access list
+//! ([`crate::winacl`]). There a mode without bits for the group and others (`0600`, `0700`)
+//! means an access list for the daemon's user, SYSTEM and Administrators only, and the checks
+//! of the mode bits `077` and of the owner are [`acl_problem`].
+
+use std::path::Path;
+
+/// What separates the folders of `PATH`.
+pub const PATH_SEP: char = if cfg!(windows) { ';' } else { ':' };
+
+/// Variables every program on this system needs, which a run's CLI and a sign-in get besides
+/// the daemon's own list. Windows: without `SystemRoot` sockets and crypto fail to load, and
+/// the CLIs find their logins and caches through the profile folders. None on Unix.
+#[cfg(not(windows))]
+pub const OS_ENV: &[&str] = &[];
+#[cfg(windows)]
+pub const OS_ENV: &[&str] = &[
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    "USERDOMAIN",
+    "COMPUTERNAME",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "TEMP",
+    "TMP",
+    "OS",
+    "PROCESSOR_ARCHITECTURE",
+    "NUMBER_OF_PROCESSORS",
+];
+
+/// Sets the Unix mode a new file is made with.
+pub fn mode(opts: &mut std::fs::OpenOptions, mode: u32) -> &mut std::fs::OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    opts
+}
+
+/// `chmod`. Windows: a mode that leaves the group and others out gives the file or folder an
+/// access list of its own for the daemon's user only ([`protect`]); any other mode does nothing.
+pub fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    }
+    #[cfg(not(unix))]
+    {
+        if mode & 0o077 == 0 {
+            protect(path)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Windows: closes `path` (a file or a folder with all that is and will be in it) to everyone
+/// but the daemon's user, SYSTEM and Administrators, whatever the folder above allows. Fails
+/// on a volume without access lists. Unix: nothing, the mode of each file does this.
+pub fn protect(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        crate::winacl::protect(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Makes the folder `path` and the folders above it. Windows: the folders above are made the
+/// ordinary way; `path` itself is made with its access list (the daemon's user, SYSTEM and
+/// Administrators, nothing inherited), so nobody else is ever in it, and a folder of that name
+/// that is already there is used only when it is private ([`acl_problem`]). Unix:
+/// `create_dir_all`.
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::winacl::create_dir(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+/// Makes the new file `path` for writing, for the daemon's user alone: mode 0600 on Unix, on
+/// Windows an access list that is part of the creation. Fails when the file is already there.
+pub fn create_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(windows)]
+    {
+        crate::winacl::create_file(path)
+    }
+    #[cfg(not(windows))]
+    {
+        mode(
+            std::fs::OpenOptions::new().write(true).create_new(true),
+            0o600,
+        )
+        .open(path)
+    }
+}
+
+/// Windows: why somebody other than the daemon's user (and SYSTEM and Administrators) can get
+/// at `path`: its owner or an entry of its access list. None when it is private. Unix: always
+/// None; the mode bits ([`open_to_others`]) and the owner ([`owner`]) are checked there.
+pub fn acl_problem(path: &Path) -> Option<String> {
+    #[cfg(windows)]
+    {
+        crate::winacl::check(path).err()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// True when the group or everyone may read, write or run the file (mode bits `077`). Always
+/// false on Windows: ask [`acl_problem`] there.
+pub fn open_to_others(meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o077 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        false
+    }
+}
+
+/// True for a regular file that can be started: an executable bit on Unix, any file on Windows
+/// (the extension decides there, see [`crate::health::which`]).
+pub fn is_executable(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    meta.is_file()
+}
+
+/// The effective user id of the daemon (0 on Windows, like [`owner`]: [`acl_problem`] checks
+/// the owner there).
+pub fn euid() -> u32 {
+    #[cfg(unix)]
+    // SAFETY: plain syscall without arguments.
+    unsafe {
+        libc::geteuid()
+    }
+    #[cfg(not(unix))]
+    0
+}
+
+/// The user id that owns a file (0 on Windows, like [`euid`]).
+pub fn owner(meta: &std::fs::Metadata) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.uid()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        0
+    }
+}
+
+/// This machine's host name.
+pub fn host_name() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let mut buf = [0u8; 256];
+        // SAFETY: buf is valid for writes of buf.len() bytes.
+        let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+        (rc == 0).then(|| {
+            let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+            String::from_utf8_lossy(&buf[..end]).into_owned()
+        })
+    }
+    #[cfg(not(unix))]
+    std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty())
+}
+
+/// Free and total bytes of the volume that holds `path` (an existing folder). Zeroes when the
+/// system does not say.
+pub fn disk(path: &Path) -> (u64, u64) {
+    #[cfg(unix)]
+    {
+        let Ok(c) = std::ffi::CString::new(path.to_string_lossy().as_bytes()) else {
+            return (0, 0);
+        };
+        // SAFETY: statvfs writes into a zeroed struct; c is a valid NUL-terminated path.
+        unsafe {
+            let mut s: libc::statvfs = std::mem::zeroed();
+            if libc::statvfs(c.as_ptr(), &mut s) != 0 {
+                return (0, 0);
+            }
+            let frsize = s.f_frsize as u64;
+            (s.f_bavail as u64 * frsize, s.f_blocks as u64 * frsize)
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let (mut free, mut total) = (0u64, 0u64);
+        // SAFETY: wide is NUL-terminated; the two out pointers are valid u64s.
+        let ok = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free,
+                &mut total,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 { (0, 0) } else { (free, total) }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        (0, 0)
+    }
+}
+
+/// How long the machine was asleep (or this process was not run at all) between two ticks
+/// of a timer with the period `period` that came `between` apart: what is over the period,
+/// when that is more than a pause the scheduler or a busy machine explains. None for an
+/// ordinary tick.
+///
+/// A closed lid stops every clock a program can wait on, but not what the program measures
+/// afterwards: on Windows a monotonic clock counts the time asleep, on Unix a stopped process
+/// sees the time it was stopped. Whoever times "nothing happened for five minutes" or "the
+/// server has been silent" asks this first.
+pub fn slept(
+    between: std::time::Duration,
+    period: std::time::Duration,
+) -> Option<std::time::Duration> {
+    const LATE: std::time::Duration = std::time::Duration::from_secs(20);
+    (between > period + LATE).then(|| between - period)
+}
+
+/// How long the machine has been up, counting the time it was asleep, on a clock that a
+/// change of the date does not move (an NTP correction, a person setting the time). The
+/// clock a program asks "did the machine sleep since I last looked?": `Instant` does not
+/// count the sleep on Unix, and the date can jump for other reasons.
+/// Linux `CLOCK_BOOTTIME`, macOS `CLOCK_MONOTONIC` (its continuous time), Windows the tick
+/// count.
+pub fn since_boot() -> std::time::Duration {
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "linux")]
+        const CLOCK: libc::clockid_t = libc::CLOCK_BOOTTIME;
+        #[cfg(not(target_os = "linux"))]
+        const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
+        let mut t = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: the out pointer is a valid timespec.
+        if unsafe { libc::clock_gettime(CLOCK, &mut t) } != 0 {
+            return std::time::Duration::ZERO;
+        }
+        std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: plain call without arguments.
+        std::time::Duration::from_millis(unsafe {
+            windows_sys::Win32::System::SystemInformation::GetTickCount64()
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    std::time::Duration::ZERO
+}
+
+/// The 1, 5 and 15 minute load averages. Windows keeps none, so the daemon keeps its own
+/// ([`windows_load`]). The first call there measures for half a second and starts all three
+/// averages at what it saw, so the first report of a daemon (and `doctor`, which asks once) is
+/// the machine's load now, not zero.
+pub fn load_avg() -> [f64; 3] {
+    #[cfg(unix)]
+    {
+        let mut l = [0f64; 3];
+        // SAFETY: l has room for 3 doubles.
+        let n = unsafe { libc::getloadavg(l.as_mut_ptr(), 3) };
+        if n < 3 { [0.0; 3] } else { l }
+    }
+    #[cfg(windows)]
+    {
+        windows_load::get()
+    }
+    #[cfg(not(any(unix, windows)))]
+    [0.0; 3]
+}
+
+/// Windows: the processor time of the whole machine so far as (total, idle), in 100 ns units
+/// summed over all processors.
+#[cfg(windows)]
+pub fn cpu_times() -> Option<(u64, u64)> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetSystemTimes;
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut idle, mut kernel, mut user) = (zero, zero, zero);
+    // SAFETY: the three out pointers are valid FILETIMEs.
+    if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
+        return None;
+    }
+    let n = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    // The kernel time includes the idle time.
+    Some((n(kernel) + n(user), n(idle)))
+}
+
+/// One step of a load average: `prev` decays over `window` seconds and takes in `now`, the
+/// load of the last `step` seconds. The same exponential average Unix kernels keep.
+#[cfg(any(windows, test))]
+fn load_step(prev: f64, now: f64, step: f64, window: f64) -> f64 {
+    let keep = (-step / window).exp();
+    prev * keep + now * (1.0 - keep)
+}
+
+/// The load averages Windows does not keep. Unix counts the processes that run or wait for a
+/// processor; the nearest thing Windows gives without a performance counter session is how
+/// many processors were busy: the busy share of the last five seconds times the number of
+/// processors. Below full load the two say the same (2.0 is two busy processors); above it
+/// this one stops at the processor count where Unix keeps counting the queue. The server uses
+/// the number only to prefer the less busy of two machines.
+#[cfg(windows)]
+mod windows_load {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    const STEP: Duration = Duration::from_secs(5);
+    /// How long the first call measures.
+    const FIRST: Duration = Duration::from_millis(500);
+    static LOAD: OnceLock<&'static Mutex<[f64; 3]>> = OnceLock::new();
+
+    /// How many processors were busy between two readings.
+    fn busy(before: Option<(u64, u64)>, after: Option<(u64, u64)>, cpus: f64) -> Option<f64> {
+        let ((t0, i0), (t1, i1)) = (before?, after?);
+        (t1 > t0 && i1 >= i0)
+            .then(|| (1.0 - ((i1 - i0) as f64 / (t1 - t0) as f64).clamp(0.0, 1.0)) * cpus)
+    }
+
+    pub fn get() -> [f64; 3] {
+        let load = LOAD.get_or_init(|| {
+            // The load now: a restarted daemon (after every update) on a busy machine must
+            // not say it is idle, or the server prefers it for the next run.
+            let cpus = std::thread::available_parallelism()
+                .map(|n| n.get() as f64)
+                .unwrap_or(1.0);
+            let before = super::cpu_times();
+            std::thread::sleep(FIRST);
+            let now = busy(before, super::cpu_times(), cpus).unwrap_or(0.0);
+            let load: &'static Mutex<[f64; 3]> = Box::leak(Box::new(Mutex::new([now; 3])));
+            let _ = std::thread::Builder::new()
+                .name("load".into())
+                .spawn(move || sample(load));
+            load
+        });
+        *load.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn sample(load: &'static Mutex<[f64; 3]>) {
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get() as f64)
+            .unwrap_or(1.0);
+        let mut prev = super::cpu_times();
+        loop {
+            std::thread::sleep(STEP);
+            let now = super::cpu_times();
+            if let Some(busy) = busy(prev, now, cpus) {
+                let mut l = load.lock().unwrap_or_else(|e| e.into_inner());
+                for (v, window) in l.iter_mut().zip([60.0, 300.0, 900.0]) {
+                    *v = super::load_step(*v, busy, STEP.as_secs_f64(), window);
+                }
+            }
+            prev = now;
+        }
+    }
+}
+
+/// Why a path that a run's CLI names (a file to send, a place to save one) is not taken on
+/// Windows, before the file system is asked anything about it. None for a plain path: a
+/// relative one, or `X:\…`. The resolved path is still checked against the working folder
+/// afterwards; this refuses the spellings that reach outside the file system or that Windows
+/// reads as something else than they say:
+///
+/// - `\\server\share\…`, `\\?\…`, `\\.\…` (and with forward slashes): a network share makes
+///   the daemon sign in to a server of the CLI's choosing with the user's identity; the
+///   device and verbatim forms name pipes, disks and paths that skip the rules below;
+/// - a `:` anywhere but in a leading `X:\`: `C:name` is relative to another folder than the
+///   working folder, and `file.txt:stream` is another data stream of a file;
+/// - a name that ends in a dot or a space: Windows drops them, so `secret.txt.` is
+///   `secret.txt`, and a file made with them through a verbatim path cannot be removed by
+///   ordinary means;
+/// - a device name (`NUL`, `CON`, `COM1`, `LPT1`, …, with or without an extension).
+///
+/// Unix has none of these forms: there the function is not applied.
+///
+/// One verbatim form is a plain path and is read as one: `\\?\X:\…`, the form the system
+/// gives for a resolved path of a local disk (the `chat-run` client sends the paths it was
+/// given resolved, so this is what arrives for `--dir page`). Take it off with
+/// [`windows_plain_path`] first; the rules then hold for what is left.
+pub fn windows_path_problem(path: &str) -> Option<&'static str> {
+    let is_sep = |c: char| c == '\\' || c == '/';
+    let mut chars = path.chars();
+    let (a, b) = (chars.next(), chars.next());
+    if a.is_some_and(is_sep) && b.is_some_and(is_sep) {
+        return Some("a network, device or verbatim path");
+    }
+    let drive = a.is_some_and(|c| c.is_ascii_alphabetic()) && b == Some(':');
+    let rest = if drive { &path[2..] } else { path };
+    if drive && !rest.starts_with(is_sep) {
+        return Some("a path relative to a drive's current folder");
+    }
+    if rest.contains(':') {
+        return Some("a path with a colon (another data stream of a file)");
+    }
+    for name in rest.split(is_sep) {
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        if name.ends_with('.') || name.ends_with(' ') {
+            return Some("a name that ends in a dot or a space");
+        }
+        let stem = name.split('.').next().unwrap_or(name).trim_end();
+        let upper = stem.to_ascii_uppercase();
+        let numbered = |prefix: &str| {
+            upper
+                .strip_prefix(prefix)
+                .is_some_and(|n| n.len() == 1 && n != "0" && n.chars().all(|c| c.is_ascii_digit()))
+        };
+        if matches!(
+            upper.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || numbered("COM")
+            || numbered("LPT")
+        {
+            return Some("a device name");
+        }
+    }
+    None
+}
+
+/// Folders under the user's profile and the system's program folders where coding CLIs and
+/// the tools they need are usually installed, in the order they are added to `PATH`. Not all
+/// of them are on a Windows user's `PATH`: the Claude Code installer puts `claude.exe` in
+/// `.local\bin` and only says so. `var` reads an environment variable.
+#[cfg(any(windows, test))]
+fn usual_program_folders(
+    var: impl Fn(&str) -> Option<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    let mut add = |base: &str, rest: &[&str]| {
+        if let Some(mut p) = var(base) {
+            p.extend(rest);
+            out.push(p);
+        }
+    };
+    add("USERPROFILE", &[".local", "bin"]);
+    add("USERPROFILE", &[".claude", "local"]);
+    add("APPDATA", &["npm"]);
+    add("USERPROFILE", &[".bun", "bin"]);
+    add("USERPROFILE", &[".cargo", "bin"]);
+    add("ProgramFiles", &["nodejs"]);
+    add("ProgramFiles", &["Git", "cmd"]);
+    add("LOCALAPPDATA", &["Programs", "Git", "cmd"]);
+    out
+}
+
+/// True when two entries of `PATH` name the same folder, compared the way Windows compares
+/// paths: without case, and a trailing separator does not count.
+#[cfg(any(windows, test))]
+fn same_folder(a: &Path, b: &Path) -> bool {
+    let key = |p: &Path| {
+        p.to_string_lossy()
+            .trim()
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    };
+    key(a) == key(b)
+}
+
+/// Windows: adds the usual program folders that exist to this process's `PATH`, after what
+/// is there. On a Mac the app does this when it installs the service (the service keeps the
+/// login shell's `PATH` plus the usual folders); a scheduled task gets the user's `PATH`
+/// fresh at every start, so the daemon adds them itself, each time it starts. Call it before
+/// any thread is started. Unix: nothing.
+pub fn add_usual_program_folders() {
+    #[cfg(windows)]
+    {
+        let folders: Vec<_> = usual_program_folders(|k| {
+            std::env::var_os(k)
+                .filter(|v| !v.is_empty())
+                .map(Into::into)
+        })
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .collect();
+        // As the system gives it, also when it is not Unicode: what is there stays as it is.
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let have: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+        let more: Vec<std::path::PathBuf> = folders
+            .into_iter()
+            .filter(|f| !have.iter().any(|h| same_folder(h, f)))
+            .collect();
+        if !more.is_empty()
+            && let Ok(next) = std::env::join_paths(have.into_iter().chain(more))
+        {
+            // SAFETY: called at the start of `main`, before any other thread exists.
+            unsafe { std::env::set_var("PATH", next) };
+        }
+    }
+}
+
+/// Windows: the Git Bash that Claude Code would use for its Bash tool and for shell hooks,
+/// found the way the CLI finds it: `CLAUDE_CODE_GIT_BASH_PATH`, Git's usual install folders,
+/// then next to the `git` on `PATH`. None: the CLI uses PowerShell as its shell tool.
+#[cfg(windows)]
+pub fn git_bash() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let var = |k: &str| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let mut tries: Vec<PathBuf> = var("CLAUDE_CODE_GIT_BASH_PATH").into_iter().collect();
+    for base in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(p) = var(base) {
+            tries.push(p.join("Git").join("bin").join("bash.exe"));
+        }
+    }
+    if let Some(git) = crate::health::which("git")
+        && let Some(root) = git.parent().and_then(Path::parent)
+    {
+        tries.push(root.join("bin").join("bash.exe"));
+    }
+    tries.into_iter().find(|p| p.is_file())
+}
+
+/// `path` without the verbatim mark of a resolved local path: `\\?\C:\dir\file` is
+/// `C:\dir\file`. Every other path, also the other verbatim forms (`\\?\UNC\…`,
+/// `\\?\GLOBALROOT\…`), is returned as it is.
+pub fn windows_plain_path(path: &str) -> &str {
+    match path.strip_prefix(r"\\?\") {
+        Some(rest)
+            if rest.len() >= 3
+                && rest.as_bytes()[0].is_ascii_alphabetic()
+                && rest.as_bytes()[1] == b':'
+                && rest.as_bytes()[2] == b'\\' =>
+        {
+            rest
+        }
+        _ => path,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The clock that counts sleep moves forward and does not stand still.
+    #[test]
+    fn the_time_since_boot_moves_forward() {
+        let a = since_boot();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let b = since_boot();
+        assert!(a > std::time::Duration::ZERO, "{a:?}");
+        assert!(
+            b > a && b - a < std::time::Duration::from_secs(5),
+            "{a:?} {b:?}"
+        );
+    }
+
+    /// A tick that comes on time, or a little late, is a tick; one that comes much later
+    /// than its period means the machine slept for the rest.
+    #[test]
+    fn a_tick_that_is_far_too_late_means_the_machine_slept() {
+        use std::time::Duration as D;
+        assert_eq!(slept(D::from_secs(15), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(0), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(34), D::from_secs(15)), None);
+        assert_eq!(
+            slept(D::from_secs(36), D::from_secs(15)),
+            Some(D::from_secs(21))
+        );
+        assert_eq!(
+            slept(D::from_secs(8 * 3600), D::from_secs(30)),
+            Some(D::from_secs(8 * 3600 - 30))
+        );
+    }
+
+    /// A steady load of two busy processors is 2.0 after a few windows, on each average at
+    /// its own pace, and falls back to nothing when the machine goes idle.
+    #[test]
+    fn the_windows_load_average_follows_the_busy_processors() {
+        let mut l = [0.0f64; 3];
+        for _ in 0..(3600 / 5) {
+            for (v, w) in l.iter_mut().zip([60.0, 300.0, 900.0]) {
+                *v = load_step(*v, 2.0, 5.0, w);
+            }
+        }
+        assert!(
+            (l[0] - 2.0).abs() < 0.01 && (l[2] - 2.0).abs() < 0.05,
+            "{l:?}"
+        );
+        let one_minute = load_step(0.0, 2.0, 5.0, 60.0);
+        let fifteen = load_step(0.0, 2.0, 5.0, 900.0);
+        assert!(one_minute > fifteen && fifteen > 0.0);
+        for _ in 0..(3600 / 5) {
+            l[0] = load_step(l[0], 0.0, 5.0, 60.0);
+        }
+        assert!(l[0] < 0.01);
+    }
+
+    /// The spellings Windows reads as something else than a file under the working folder
+    /// are refused by their text alone; plain paths pass.
+    #[test]
+    fn windows_spellings_that_leave_the_file_system_are_refused() {
+        for plain in [
+            "a.html",
+            "docs/report.pdf",
+            r"docs\report.pdf",
+            r".\new\dir\",
+            "../x",
+            r"C:\Users\me\runs\r1\work\a.txt",
+            "C:/Users/me/runs/r1/work/a.txt",
+            r"\Users\me",
+            "报告 1.html",
+            "a..b",
+            ".hidden",
+            "console.log",
+            "com10.txt",
+            "nullable.rs",
+        ] {
+            assert_eq!(windows_path_problem(plain), None, "{plain}");
+        }
+        // The verbatim form of a resolved local path is that path; the rules hold for it.
+        assert_eq!(
+            windows_plain_path(r"\\?\C:\Users\me\work\page"),
+            r"C:\Users\me\work\page"
+        );
+        assert_eq!(
+            windows_path_problem(windows_plain_path(r"\\?\C:\Users\me\page")),
+            None
+        );
+        for kept in [
+            r"\\?\UNC\server\share\x",
+            r"\\?\GLOBALROOT\Device\x",
+            r"\\?\C:",
+            r"\\.\C:\x",
+            r"C:\x",
+            "page",
+        ] {
+            assert_eq!(windows_plain_path(kept), kept);
+        }
+        for bad in [
+            r"\\?\C:\Users\me\a.txt:stream",
+            r"\\?\C:\Users\me\secret.txt.",
+            r"\\?\C:\Users\me\NUL",
+        ] {
+            assert!(
+                windows_path_problem(windows_plain_path(bad)).is_some(),
+                "{bad}"
+            );
+        }
+        for bad in [
+            r"\\evil.example\share\x",
+            "//evil.example/share/x",
+            r"\\?\UNC\evil.example\share\x",
+            r"\\?\C:",
+            r"\\?\C:relative",
+            r"\\.\pipe\chat-run-x",
+            r"\\.\PhysicalDrive0",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\x",
+            "C:secret.txt",
+            "C:",
+            "D:..\\x",
+            "a.txt:stream",
+            "a.txt::$DATA",
+            r"docs\a.txt:$DATA",
+            r"C:\Users\me\a.txt:s",
+            "secret.txt.",
+            "secret.txt ",
+            r"docs.\a.txt",
+            "docs /a.txt",
+            "...",
+            "NUL",
+            "nul.txt",
+            r"docs\CON",
+            "COM1",
+            "lpt9.log",
+            "aux .txt",
+            "CONOUT$",
+        ] {
+            assert!(windows_path_problem(bad).is_some(), "{bad}");
+        }
+    }
+
+    /// The usual program folders come from the profile and program variables that are set,
+    /// and one that is on the PATH already (compared as Windows compares paths) is not added again.
+    #[test]
+    fn usual_program_folders_are_added_after_the_path_once() {
+        let var = |k: &str| match k {
+            "USERPROFILE" => Some(std::path::PathBuf::from(r"C:\Users\me")),
+            "APPDATA" => Some(std::path::PathBuf::from(r"C:\Users\me\AppData\Roaming")),
+            _ => None,
+        };
+        let folders = usual_program_folders(var);
+        let names: Vec<String> = folders
+            .iter()
+            .map(|p| p.to_string_lossy().replace('/', "\\"))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                r"C:\Users\me\.local\bin",
+                r"C:\Users\me\.claude\local",
+                r"C:\Users\me\AppData\Roaming\npm",
+                r"C:\Users\me\.bun\bin",
+                r"C:\Users\me\.cargo\bin",
+            ]
+        );
+        assert!(same_folder(
+            Path::new(r"c:\users\me\appdata\roaming\npm\"),
+            Path::new(r"C:\Users\Me\AppData\Roaming\NPM")
+        ));
+        assert!(!same_folder(
+            Path::new(r"C:\Users\me\.local\bin"),
+            Path::new(r"C:\Users\me\.local")
+        ));
+    }
+
+    /// Windows: the machine's processor time moves forward and the idle part is within it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_cpu_times_move_forward() {
+        let (t0, i0) = cpu_times().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let (t1, i1) = cpu_times().unwrap();
+        assert!(t1 > t0 && i1 >= i0 && i1 - i0 <= t1 - t0);
+        assert!(load_avg().iter().all(|v| *v >= 0.0));
+    }
+
+    /// Windows: the first load a process reports is what the machine does now. With every
+    /// processor kept busy from before the first call, it is not zero (it was, for the first
+    /// minutes of every daemon and always in `doctor`).
+    #[cfg(windows)]
+    #[test]
+    fn the_first_windows_load_is_measured_not_zero() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let workers: Vec<_> = (0..cpus)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let mut x = 0u64;
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        x = std::hint::black_box(x.wrapping_mul(31).wrapping_add(1));
+                    }
+                })
+            })
+            .collect();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let first = load_avg();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for w in workers {
+            w.join().unwrap();
+        }
+        // The other tests of this program may have asked first, at a calmer moment: then the
+        // averages are at least not negative; when this was the first call, all three are
+        // the load of busy processors.
+        assert!(first.iter().all(|v| *v >= 0.0), "{first:?}");
+        assert!(
+            first[0] == first[1] && first[1] == first[2] || first[0] > 0.0,
+            "{first:?}"
+        );
+    }
+}

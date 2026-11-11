@@ -29,6 +29,8 @@ crate::copy! {
     JUMP_NEW = "{n} 条新消息",
     JUMP_LATEST = "回到最新",
     JUMP_UNREAD = "{n} 条新消息",
+    JUMP_BACK = "返回{place}",
+    JUMP_BACK_TOPIC = "「{title}」",
     MEMBER_COUNT = "{n} 位成员",
     WAITING_ANSWER = "等回答",
     WAITING_REVIEW = "等审",
@@ -55,7 +57,7 @@ crate::copy! {
     REACTED_BY = "{names} 回应了 {emoji}",
     REPLY = "回复",
     // A sender's avatar: a click @s them and quotes the message in the composer.
-    AVATAR_MENTION_TIP = "@{name} 并引用这条消息",
+    AVATAR_MENTION_TIP = "@{name}",
     MORE = "更多",
     FOLLOW = "关注话题",
     UNFOLLOW = "取消关注",

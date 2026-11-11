@@ -471,9 +471,9 @@ Topic rail cards, in this order:
   initial. A photo replaces the circle fill. Away people: avatar at 50 %, name `ink-3`. No presence
   dots and no typing dots.
 - **Members with a character**: a rounded-square tile, radius ≈ 0.3 × size (16→5, 20→6, 24→7, 28→8,
-  40→12, 48→14), filled with the member's tint (§2.5), `tile-edge`. The character art from the
-  optional character pack for the member's current status sits centered at **72 %** of the tile
-  (without the pack, the member gets a monogram). The tile is `aria-hidden`; the name is
+  40→12, 48→14), filled with the member's tint (§2.5), `tile-edge`. The character art (the vendored
+  Jojo & Friends pack) with the member's current face sits centered at **72 %** of the tile
+  (a member whose character is cleared gets a monogram). The tile is `aria-hidden`; the name is
   always text beside it.
 - **Status art** by context: a working dot → `working`; a waiting dot or an ask to the viewer →
   `needs-input`; a finished result in that spot (做完了 rows and cards, answered states, proof) →

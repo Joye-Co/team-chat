@@ -6,6 +6,7 @@
 //! is. Dialogs open in the main window, which `RootView::new` registers with
 //! [`attach_window`].
 
+pub mod about;
 pub mod ask_scenes;
 pub mod dialogs;
 pub mod menus;
@@ -14,7 +15,11 @@ pub mod rename;
 pub mod selftest;
 #[cfg(target_os = "macos")]
 mod status_item;
+#[cfg(target_os = "windows")]
+#[path = "status_item_win.rs"]
+mod status_item;
 pub mod switcher;
+mod tray_icon;
 // --- v12/overlays ---
 pub mod new_topic;
 // --- end v12/overlays ---
@@ -40,6 +45,9 @@ gpui::actions!(
         StartDm,
         NextUnreadTopic,
         PreviousUnreadTopic,
+        // ⌘[ / ⌘]: back and forward through the places of the window.
+        GoBack,
+        GoForward,
         OpenGroup1,
         OpenGroup2,
         OpenGroup3,
@@ -73,6 +81,42 @@ enum Pending {
 
 impl Global for NavGlobal {}
 
+/// The key of 返回: ⌘[ on the Mac, Alt+← elsewhere.
+pub fn go_back_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-["
+    } else {
+        "alt-left"
+    }
+}
+
+/// The key of 前进: ⌘] on the Mac, Alt+→ elsewhere.
+pub fn go_forward_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-]"
+    } else {
+        "alt-right"
+    }
+}
+
+/// ⌘[ never leads to a 群 the person left. (An empty list is a snapshot
+/// still loading, not every 群 gone.)
+fn forget_gone_places(cx: &mut App) {
+    let services = services_of(cx);
+    let groups: HashSet<GroupId> = services
+        .provider
+        .groups()
+        .into_iter()
+        .map(|g| g.id)
+        .collect();
+    if groups.is_empty() {
+        return;
+    }
+    services
+        .nav
+        .update(cx, |nav, _| nav.forget_gone(|g, _| groups.contains(g)));
+}
+
 /// The keys inside the switcher, the sheets and 问: ↑↓ and Return in their
 /// lists (the screenshot self-test binds them too).
 pub fn bind_sheet_keys(cx: &mut App) {
@@ -87,19 +131,23 @@ pub fn bind_sheet_keys(cx: &mut App) {
 /// item. Call once after `gpui_kit::init`. `status_item` is false for self-tests.
 pub fn install(services: Services, status_item: bool, cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-k", QuickSwitch, None),
-        KeyBinding::new("cmd-shift-n", NewGroup, None),
+        KeyBinding::new(crate::secondary!("k"), QuickSwitch, None),
+        KeyBinding::new(crate::secondary!("shift-n"), NewGroup, None),
         KeyBinding::new("alt-down", NextUnreadTopic, None),
         KeyBinding::new("alt-up", PreviousUnreadTopic, None),
-        KeyBinding::new("cmd-1", OpenGroup1, None),
-        KeyBinding::new("cmd-2", OpenGroup2, None),
-        KeyBinding::new("cmd-3", OpenGroup3, None),
-        KeyBinding::new("cmd-4", OpenGroup4, None),
-        KeyBinding::new("cmd-5", OpenGroup5, None),
-        KeyBinding::new("cmd-6", OpenGroup6, None),
-        KeyBinding::new("cmd-7", OpenGroup7, None),
-        KeyBinding::new("cmd-8", OpenGroup8, None),
-        KeyBinding::new("cmd-9", OpenGroup9, None),
+        // Back and forward: ⌘[ ⌘] like Safari and Finder on the Mac, Alt+←
+        // Alt+→ like the browsers and Explorer on Windows (WINDOWS.md).
+        KeyBinding::new(go_back_key(), GoBack, None),
+        KeyBinding::new(go_forward_key(), GoForward, None),
+        KeyBinding::new(crate::secondary!("1"), OpenGroup1, None),
+        KeyBinding::new(crate::secondary!("2"), OpenGroup2, None),
+        KeyBinding::new(crate::secondary!("3"), OpenGroup3, None),
+        KeyBinding::new(crate::secondary!("4"), OpenGroup4, None),
+        KeyBinding::new(crate::secondary!("5"), OpenGroup5, None),
+        KeyBinding::new(crate::secondary!("6"), OpenGroup6, None),
+        KeyBinding::new(crate::secondary!("7"), OpenGroup7, None),
+        KeyBinding::new(crate::secondary!("8"), OpenGroup8, None),
+        KeyBinding::new(crate::secondary!("9"), OpenGroup9, None),
     ]);
     bind_sheet_keys(cx);
     cx.set_global(NavGlobal {
@@ -111,7 +159,9 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     cx.subscribe(&services.hub, |_, changes: &Changes, cx| {
         if changes.any(|c| matches!(c, Change::Groups)) {
             open_pending(cx);
+            forget_gone_places(cx);
         }
+
         if changes.any(|c| matches!(c, Change::Session)) {
             menus::refresh_server_menu(cx);
         }
@@ -141,6 +191,12 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
             }
         });
     });
+    cx.on_action(|_: &GoBack, cx| {
+        services_of(cx).nav.update(cx, |nav, cx| nav.go_back(cx));
+    });
+    cx.on_action(|_: &GoForward, cx| {
+        services_of(cx).nav.update(cx, |nav, cx| nav.go_forward(cx));
+    });
     cx.on_action(|_: &NextUnreadTopic, cx| go_to_unread(true, cx));
     cx.on_action(|_: &PreviousUnreadTopic, cx| go_to_unread(false, cx));
     cx.on_action(|_: &OpenGroup1, cx| open_group_at(0, cx));
@@ -167,28 +223,62 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     })
     .detach();
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     if status_item {
         status_item::install(services, cx);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = status_item;
 }
 
 /// 设置 › 通用 › 菜单栏里显示: hides or shows the menu bar item.
 pub fn show_status_item(shown: bool, cx: &mut App) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     status_item::set_visible(shown, cx);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (shown, cx);
 }
 
 /// For the self-test: the menu bar item is installed and up to date.
 pub fn status_item_ok(services: &Services, cx: &App) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     return status_item::check(services, cx);
-    #[cfg(not(target_os = "macos"))]
-    return true;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (services, cx);
+        true
+    }
+}
+
+/// Whether the app keeps running when its last window closes, with a way back to it: on
+/// macOS always (the Dock icon), on Windows while the notification-area icon is shown.
+/// Closing the last window from the keyboard is only offered then.
+pub fn app_outlives_windows(cx: &App) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = cx;
+        true
+    }
+    #[cfg(target_os = "windows")]
+    {
+        status_item::outlives_windows(cx)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = cx;
+        false
+    }
+}
+
+/// What 关闭窗口 (⌘W, Ctrl+W) does to a window: it closes unless that would end the app
+/// (the last window of an app that does not outlive its windows), and the main window
+/// only closes when the app stays reachable without it.
+pub fn close_command_closes(outlives: bool, windows: usize, main_window: bool) -> bool {
+    if main_window {
+        outlives
+    } else {
+        outlives || windows > 1
+    }
 }
 
 /// Registers the main window, where the navigation dialogs open.
@@ -235,6 +325,21 @@ fn show_main_window_now(cx: &mut App) {
             eprintln!("failed to open the window: {error}");
         }
     }
+}
+
+/// Shows the main window and runs `action` in it: a command that comes from outside any
+/// window (the notification-area menu, a task of the taskbar's jump list). The commands
+/// of the main window (新话题) are handled in it, so the action is dispatched there; signed
+/// out there is none, and the app's own handlers get it.
+pub(crate) fn run_in_main_window(action: Box<dyn gpui::Action>, cx: &mut App) {
+    show_main_window(cx);
+    // After the window is shown (that is deferred too).
+    cx.defer(move |cx| {
+        let in_window = action.boxed_clone();
+        if !with_main_window(cx, |window, cx| window.dispatch_action(in_window, cx)) {
+            cx.dispatch_action(action.as_ref());
+        }
+    });
 }
 
 /// The place to save for this navigation state.
@@ -531,6 +636,31 @@ fn go_to_unread(forward: bool, cx: &mut App) {
             nav.open_group(g.clone(), cx);
             nav.open_topic(g, t, cx);
         });
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::close_command_closes;
+
+    /// ⌘W on the Mac and Ctrl+W on Windows with the notification-area icon close any
+    /// window, the main one too (the app stays in the Dock or the tray). Without the icon
+    /// Ctrl+W never closes the main window or the last window: that would quit.
+    #[test]
+    fn the_close_command_never_ends_the_app() {
+        for windows in [1, 2, 3] {
+            assert!(close_command_closes(true, windows, true), "main, app stays");
+            assert!(close_command_closes(true, windows, false));
+            assert!(
+                !close_command_closes(false, windows, true),
+                "main, no way back"
+            );
+        }
+        assert!(!close_command_closes(false, 1, false), "the last window");
+        assert!(
+            close_command_closes(false, 2, false),
+            "设置 next to the main window"
+        );
     }
 }
 

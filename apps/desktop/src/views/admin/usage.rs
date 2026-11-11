@@ -21,7 +21,7 @@ use crate::{
         native::{
             Alert, AlertTone, Empty, NativeTextField, NativeType as _, PushSize, PushStyle,
             Segment, Segmented, TruncText, card_surface, native_colors, progress, push_button,
-            tokens::{avatar, height, monitor as t, radius, space, text},
+            tokens::{avatar, height, layout, monitor as t, radius, space, text},
         },
     },
     views::settings::widgets::answer,
@@ -91,8 +91,10 @@ pub struct Usage {
     pub error: Option<String>,
     /// 改预算 for this AI member.
     pub budget_for: Option<String>,
+    /// The member whose budget the field was filled with (it fills once each time it opens).
+    budget_filled: Option<String>,
     budget: Entity<InputState>,
-    budget_error: Option<String>,
+    pub budget_error: Option<String>,
     saving: bool,
 }
 
@@ -105,6 +107,7 @@ impl Usage {
             loading: false,
             error: None,
             budget_for: None,
+            budget_filled: None,
             budget: cx
                 .new(|cx| InputState::new(window, cx).placeholder(m::USAGE_BUDGET_PLACEHOLDER)),
             budget_error: None,
@@ -121,6 +124,121 @@ fn usd(x: f64) -> String {
     }
 }
 
+/// A KPI card of 用量 and 总览: label with icon, the figure, a foot line and an optional bar.
+pub(super) fn kpi_card(
+    label: &'static str,
+    icon: Sym,
+    value: String,
+    foot: String,
+    bar: Option<f32>,
+    cx: &gpui::App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    card_surface(cx)
+        .flex_1()
+        .min_w(gpui::Pixels::ZERO)
+        .p(space::S16)
+        .flex()
+        .flex_col()
+        .gap(space::S4)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .n_headline()
+                .text_color(k.secondary)
+                .child(crate::ui::icons::sym(
+                    icon,
+                    crate::ui::sf_symbols::SymSize::INLINE,
+                    k.secondary,
+                ))
+                .child(label),
+        )
+        .child(
+            div()
+                .n_style(text::KPI)
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .n_figures()
+                .child(value),
+        )
+        .child(
+            TruncText::new(foot)
+                .n_footnote()
+                .n_figures()
+                .text_color(k.secondary),
+        )
+        .children(bar.map(|b| div().mt(space::S8).child(progress(b, cx))))
+}
+
+/// A CLI as people know it, from a runtime name.
+fn cli_word(runtime: &str) -> String {
+    match runtime {
+        "claude" => "Claude Code".into(),
+        "codex" => "Codex".into(),
+        r => r.to_string(),
+    }
+}
+
+/// The names of the models an AI member used (`BotSpend::models`), from the usage's model list.
+pub fn model_names(u: &TeamUsage, member_id: &str) -> Vec<String> {
+    u.bots
+        .iter()
+        .find(|b| b.member_id == member_id)
+        .map(|b| {
+            b.models
+                .iter()
+                .map(|id| {
+                    u.models
+                        .iter()
+                        .find(|x| &x.model == id)
+                        .map(|x| x.name.clone())
+                        .unwrap_or_else(|| id.clone())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A cost, with ≈ when part of it is estimated from tokens (`Spend::estimated_usd`).
+fn usd_of(s: &Spend) -> String {
+    if s.estimated_usd.is_some_and(|e| e > 0.) {
+        fill(m::USAGE_ESTIMATED, &[("cost", &usd(s.cost_usd))])
+    } else {
+        usd(s.cost_usd)
+    }
+}
+
+/// The editor's text as cents: whole dollars or dollars with up to two decimals, at most $1,000,000.
+fn parse_budget(text: &str) -> Option<u64> {
+    let (whole, frac) = text.split_once('.').unwrap_or((text, ""));
+    if whole.is_empty()
+        || frac.len() > 2
+        || !whole
+            .chars()
+            .chain(frac.chars())
+            .all(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+    let dollars: u64 = whole.parse().ok()?;
+    let cents: u64 = if frac.is_empty() {
+        0
+    } else {
+        format!("{frac:0<2}").parse().ok()?
+    };
+    (dollars <= 1_000_000).then_some(dollars * 100 + cents)
+}
+
+/// A weekly budget as the editor shows it: whole dollars, or with cents when it has them.
+fn budget_text(cents: u64) -> String {
+    if cents % 100 == 0 {
+        (cents / 100).to_string()
+    } else {
+        format!("{:.2}", cents as f64 / 100.)
+    }
+}
+
 fn cents(c: u64) -> String {
     format!("${}", (c as f64 / 100.).round() as u64)
 }
@@ -132,7 +250,8 @@ pub fn included(u: &TeamUsage, method: &dyn Fn(&str, Option<&str>) -> Option<Str
         .iter()
         .filter(|r| method(&r.runtime, r.machine_id.as_deref()).as_deref() == Some("subscription"))
         .map(|r| r.spend.cost_usd)
-        .sum()
+        // A float sum of nothing is -0.0, which prints as "$-0.00".
+        .fold(0., |a, b| a + b)
 }
 
 impl AdminView {
@@ -191,9 +310,9 @@ impl AdminView {
         let cents = if text.is_empty() {
             None
         } else {
-            match text.parse::<u64>() {
-                Ok(d) if d <= 1_000_000 => Some(d * 100),
-                _ => {
+            match parse_budget(&text) {
+                Some(c) => Some(c),
+                None => {
                     self.usage.budget_error = Some(m::USAGE_BUDGET_INVALID.into());
                     cx.notify();
                     return;
@@ -249,8 +368,39 @@ impl AdminView {
         .into_any_element()
     }
 
+    /// 改预算 opened for a member: the field starts with the current weekly budget in dollars,
+    /// selected so it can be typed over at once; a member with no budget gets the placeholder.
+    pub(super) fn sync_budget_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.usage.budget_filled == self.usage.budget_for {
+            return;
+        }
+        // The budget comes with 用量: wait for it rather than fill the field empty.
+        if self.usage.budget_for.is_some() && self.usage.data.is_none() && self.team.week.is_none()
+        {
+            return;
+        }
+        self.usage.budget_filled = self.usage.budget_for.clone();
+        let Some(id) = self.usage.budget_for.clone() else {
+            return;
+        };
+        let cents = self
+            .usage
+            .data
+            .iter()
+            .chain(self.team.week.iter())
+            .find_map(|u| u.bots.iter().find(|b| b.member_id == id))
+            .and_then(|b| b.budget_cents);
+        let text = cents.map(budget_text).unwrap_or_default();
+        self.usage.budget.update(cx, |field, cx| {
+            field.set_value(text.clone(), window, cx);
+            field.focus(window, cx);
+            if !text.is_empty() {
+                field.select_all(window, cx);
+            }
+        });
+    }
+
     pub(super) fn usage_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let k = native_colors(cx);
         let Some(u) = self.usage.data.clone() else {
             return match &self.usage.error {
                 Some(e) => Alert::new(Sym::Failed, m::USAGE_FAILED)
@@ -284,57 +434,14 @@ impl AdminView {
             0.
         };
         let now_per = per_topic(&u.total);
-        let kpi = |_id: &'static str,
-                   label: &'static str,
-                   icon: Sym,
-                   value: String,
-                   foot: String,
-                   bar: Option<f32>| {
-            card_surface(cx)
-                .flex_1()
-                .min_w(gpui::Pixels::ZERO)
-                .p(space::S16)
-                .flex()
-                .flex_col()
-                .gap(space::S4)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .n_headline()
-                        .text_color(k.secondary)
-                        .child(crate::ui::icons::sym(
-                            icon,
-                            crate::ui::sf_symbols::SymSize::INLINE,
-                            k.secondary,
-                        ))
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .n_style(text::KPI)
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .n_figures()
-                        .child(value),
-                )
-                .child(
-                    TruncText::new(foot)
-                        .n_footnote()
-                        .n_figures()
-                        .text_color(k.secondary),
-                )
-                .children(bar.map(|b| div().mt(space::S8).child(progress(b, cx))))
-        };
         let kpis = div()
             .flex()
             .gap(space::S16)
-            .child(kpi(
-                "usage-total",
-                if week {
-                    m::USAGE_SPENT_WEEK
-                } else {
-                    m::USAGE_SPENT_MONTH
+            .child(kpi_card(
+                match self.usage.range {
+                    UsageRange::Week => m::USAGE_SPENT_WEEK,
+                    UsageRange::Month => m::USAGE_SPENT_MONTH,
+                    UsageRange::LastMonth => m::USAGE_SPENT_LAST_MONTH,
                 },
                 Sym::BarChart,
                 usd(total),
@@ -354,9 +461,9 @@ impl AdminView {
                 budget_cents
                     .filter(|b| *b > 0)
                     .map(|b| (total / (b as f64 / 100.)) as f32),
+                cx,
             ))
-            .child(kpi(
-                "usage-included",
+            .child(kpi_card(
                 m::USAGE_INCLUDED,
                 Sym::Account,
                 usd(inc),
@@ -373,17 +480,17 @@ impl AdminView {
                     )],
                 ),
                 None,
+                cx,
             ))
-            .child(kpi(
-                "usage-extra",
+            .child(kpi_card(
                 m::USAGE_EXTRA,
                 Sym::Key,
                 usd((total - inc).max(0.)),
                 m::USAGE_EXTRA_FOOT.into(),
                 None,
+                cx,
             ))
-            .child(kpi(
-                "usage-per-topic",
+            .child(kpi_card(
                 m::USAGE_PER_TOPIC,
                 Sym::Topic,
                 usd(now_per),
@@ -395,6 +502,7 @@ impl AdminView {
                     fill(m::USAGE_PER_TOPIC_MORE, &[("d", &usd(now_per - prev_per))])
                 },
                 None,
+                cx,
             ));
         div()
             .w_full()
@@ -493,7 +601,10 @@ impl AdminView {
                     })
                     .unwrap_or_default()
                 } else {
-                    t.map(|t| t.day().to_string()).unwrap_or_default()
+                    // A month's bars are too narrow for every date: the 1st and every 5th.
+                    t.filter(|t| t.day() == 1 || t.day() % 5 == 0)
+                        .map(|t| t.day().to_string())
+                        .unwrap_or_default()
                 }
             };
             div()
@@ -539,20 +650,53 @@ impl AdminView {
                                 )),
                         ),
                 )
-                .child(div().n_footnote().text_color(k.secondary).child(label))
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .n_footnote()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(label),
+                )
         });
         // The budget per day, as a line across the bars.
         let line = budget_cents.filter(|b| *b > 0).map(|b| {
             let per_day = b as f64 / 100. / 7.;
             let frac = (1. - per_day / max).clamp(0., 1.) as f32;
-            div()
+            let line = div()
                 .absolute()
                 .left_0()
                 .right_0()
-                .top(relative(frac * 0.86))
-                .border_t_1()
-                .border_dashed()
-                .border_color(k.amber)
+                .top(relative(frac * 0.86));
+            // GPUI's Direct3D renderer draws nothing for a dashed border on a box
+            // without a height (seen in the Windows screenshots): there the same
+            // dashes are painted as quads across whatever width the chart has.
+            if cfg!(target_os = "windows") {
+                let ink = k.amber;
+                line.h(layout::BORDER).child(
+                    gpui::canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            let (dash, gap) = layout::RULE_DASH;
+                            let mut x = bounds.left();
+                            while x < bounds.right() {
+                                let width = dash.min(bounds.right() - x);
+                                window.paint_quad(gpui::fill(
+                                    gpui::Bounds::new(
+                                        gpui::point(x, bounds.top()),
+                                        gpui::size(width, layout::BORDER),
+                                    ),
+                                    ink,
+                                ));
+                                x += dash + gap;
+                            }
+                        },
+                    )
+                    .size_full(),
+                )
+            } else {
+                line.border_t_1().border_dashed().border_color(k.amber)
+            }
         });
         let legend = top
             .iter()
@@ -603,41 +747,73 @@ impl AdminView {
 
     fn where_spent(&self, u: &TeamUsage, cx: &Context<Self>) -> AnyElement {
         let k = native_colors(cx);
-        // One row per CLI and way of paying.
-        let mut rows: Vec<(String, String, f64, u64)> = vec![];
-        for r in &u.runtimes {
-            let kind = self
-                .fleet
-                .monitors
-                .get(r.machine_id.as_deref().unwrap_or_default())
-                .and_then(|d| {
-                    d.clis
-                        .iter()
-                        .find(|c| c.runtime == r.runtime)
-                        .map(|c| c.kind.clone())
-                })
-                .unwrap_or_else(|| r.runtime.clone());
-            let name = model::cli_name(&kind, &r.runtime);
-            let via = match self
-                .cli_method(&r.runtime, r.machine_id.as_deref())
-                .as_deref()
-            {
-                Some("subscription") => m::USAGE_VIA_SUBSCRIPTION,
-                Some("api_key") => m::USAGE_VIA_KEY,
-                _ => "",
+        // (name, secondary label, cost, tokens, estimated cost, tokens with no price)
+        let mut rows: Vec<(String, String, f64, u64, f64, u64)> = vec![];
+        if !u.models.is_empty() {
+            // One row per model; the CLIs it ran in as the second label.
+            for x in &u.models {
+                let via = x
+                    .runtimes
+                    .iter()
+                    .map(|r| cli_word(r))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                rows.push((
+                    x.name.clone(),
+                    via,
+                    x.spend.cost_usd,
+                    x.spend.input_tokens + x.spend.output_tokens,
+                    x.spend.estimated_usd.unwrap_or(0.),
+                    x.spend.unpriced_tokens.unwrap_or(0),
+                ));
             }
-            .to_string();
-            let tokens = r.spend.input_tokens + r.spend.output_tokens;
-            match rows.iter_mut().find(|x| x.0 == name && x.1 == via) {
-                Some(x) => {
-                    x.2 += r.spend.cost_usd;
-                    x.3 += tokens;
+        } else {
+            // An older server: one row per CLI and way of paying.
+            for r in &u.runtimes {
+                let kind = self
+                    .fleet
+                    .monitors
+                    .get(r.machine_id.as_deref().unwrap_or_default())
+                    .and_then(|d| {
+                        d.clis
+                            .iter()
+                            .find(|c| c.runtime == r.runtime)
+                            .map(|c| c.kind.clone())
+                    })
+                    .unwrap_or_else(|| r.runtime.clone());
+                let name = model::cli_name(&kind, &r.runtime);
+                let via = match self
+                    .cli_method(&r.runtime, r.machine_id.as_deref())
+                    .as_deref()
+                {
+                    Some("subscription") => m::USAGE_VIA_SUBSCRIPTION,
+                    Some("api_key") => m::USAGE_VIA_KEY,
+                    _ => "",
                 }
-                None => rows.push((name, via, r.spend.cost_usd, tokens)),
+                .to_string();
+                let tokens = r.spend.input_tokens + r.spend.output_tokens;
+                let est = r.spend.estimated_usd.unwrap_or(0.);
+                match rows.iter_mut().find(|x| x.0 == name && x.1 == via) {
+                    Some(x) => {
+                        x.2 += r.spend.cost_usd;
+                        x.3 += tokens;
+                        x.4 += est;
+                    }
+                    None => rows.push((
+                        name,
+                        via,
+                        r.spend.cost_usd,
+                        tokens,
+                        est,
+                        r.spend.unpriced_tokens.unwrap_or(0),
+                    )),
+                }
             }
         }
         rows.sort_by(|a, b| b.2.total_cmp(&a.2));
         let max = rows.iter().map(|r| r.2).fold(0., f64::max).max(0.01);
+        let any_estimate = rows.iter().any(|r| r.4 > 0.);
+        let unpriced: u64 = rows.iter().map(|r| r.5).sum();
         card_surface(cx)
             .flex_1()
             .p(space::S24)
@@ -653,30 +829,55 @@ impl AdminView {
             .when(rows.is_empty(), |d| {
                 d.child(div().n_body().text_color(k.secondary).child(m::USAGE_EMPTY))
             })
-            .children(rows.into_iter().map(|(name, via, cost, tokens)| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S6)
-                    .child(
+            .children(
+                rows.into_iter()
+                    .map(|(name, via, cost, tokens, est, unknown)| {
                         div()
                             .flex()
-                            .items_baseline()
-                            .gap(space::S8)
-                            .child(div().n_headline().child(name))
-                            .child(div().n_footnote().text_color(k.secondary).child(via))
-                            .child(div().flex_1())
-                            .child(div().n_headline().n_figures().child(if cost > 0. {
-                                usd(cost)
-                            } else {
-                                fill(
-                                    m::USAGE_TOKENS_ONLY,
-                                    &[("tokens", &model::count_short(tokens))],
-                                )
-                            })),
-                    )
-                    .child(progress((cost / max) as f32, cx))
-            }))
+                            .flex_col()
+                            .gap(space::S6)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap(space::S8)
+                                    .child(div().n_headline().child(name))
+                                    .child(div().n_footnote().text_color(k.secondary).child(via))
+                                    .child(div().flex_1())
+                                    .child(div().n_headline().n_figures().child(if est > 0. {
+                                        fill(m::USAGE_ESTIMATED, &[("cost", &usd(cost))])
+                                    } else if cost > 0. {
+                                        usd(cost)
+                                    } else if unknown > 0 {
+                                        fill(
+                                            m::USAGE_PRICE_UNKNOWN,
+                                            &[("tokens", &model::count_short(unknown))],
+                                        )
+                                    } else {
+                                        fill(
+                                            m::USAGE_TOKENS_ONLY,
+                                            &[("tokens", &model::count_short(tokens))],
+                                        )
+                                    })),
+                            )
+                            .child(progress((cost / max) as f32, cx))
+                    }),
+            )
+            .when(any_estimate, |d| {
+                d.child(
+                    div()
+                        .mt(space::S4)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .child(m::USAGE_ESTIMATE_NOTE),
+                )
+            })
+            .when(unpriced > 0, |d| {
+                d.child(div().n_footnote().text_color(k.secondary).child(fill(
+                    m::USAGE_UNPRICED_NOTE,
+                    &[("tokens", &model::count_short(unpriced))],
+                )))
+            })
             .into_any_element()
     }
 
@@ -841,7 +1042,26 @@ impl AdminView {
                                     .as_ref()
                                     .map(|mm| MemberAvatar::new(Some(mm), avatar::SM)),
                             )
-                            .child(TruncText::new(name).n_headline()),
+                            .child({
+                                let models = if tab == UsageTab::Bots {
+                                    model_names(u, &id)
+                                } else {
+                                    vec![]
+                                };
+                                div()
+                                    .flex_1()
+                                    .min_w(gpui::Pixels::ZERO)
+                                    .flex()
+                                    .flex_col()
+                                    .child(TruncText::new(name).n_headline())
+                                    .when(!models.is_empty(), |d| {
+                                        d.child(
+                                            TruncText::new(models.join(" · "))
+                                                .n_footnote()
+                                                .text_color(k.secondary),
+                                        )
+                                    })
+                            }),
                     )
                     .child(
                         div()
@@ -850,7 +1070,7 @@ impl AdminView {
                             .px(space::S12)
                             .text_right()
                             .n_headline()
-                            .child(usd(s.cost_usd)),
+                            .child(usd_of(&s)),
                     )
                     .when(tab == UsageTab::Bots, |d| {
                         d.child(
@@ -1001,7 +1221,7 @@ impl AdminView {
                     .rounded(radius::CONTAINER)
                     .border_1()
                     .border_color(k.separator)
-                    .bg(k.content)
+                    .bg(k.admin_panel())
                     .overflow_hidden()
                     .flex()
                     .flex_col()
@@ -1059,5 +1279,41 @@ mod tests {
         let method =
             |_: &str, m: Option<&str>| (m == Some("m1")).then(|| "subscription".to_string());
         assert_eq!(included(&u, &method), 10.);
+    }
+
+    #[test]
+    fn an_ai_members_models_read_by_name() {
+        use chat_core::proto::usage::{BotSpend, ModelSpend};
+        let u = TeamUsage {
+            bots: vec![BotSpend {
+                member_id: "forge".into(),
+                spend: Spend::default(),
+                budget_cents: None,
+                held_runs: None,
+                models: vec!["claude-opus-5-5".into(), "mystery-1".into()],
+            }],
+            models: vec![ModelSpend {
+                model: "claude-opus-5-5".into(),
+                name: "Claude Opus 5.5".into(),
+                runtimes: vec!["claude".into()],
+                spend: Spend::default(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(model_names(&u, "forge"), ["Claude Opus 5.5", "mystery-1"]);
+        assert!(model_names(&u, "scout").is_empty());
+    }
+
+    #[test]
+    fn the_budget_field_shows_and_reads_dollars() {
+        assert_eq!(budget_text(4_000), "40");
+        assert_eq!(budget_text(40), "0.40");
+        assert_eq!(parse_budget("40"), Some(4_000));
+        assert_eq!(parse_budget("0.40"), Some(40));
+        assert_eq!(parse_budget("12.5"), Some(1_250));
+        assert_eq!(parse_budget(&budget_text(4_000)), Some(4_000));
+        assert_eq!(parse_budget("1.234"), None);
+        assert_eq!(parse_budget("-3"), None);
+        assert_eq!(parse_budget("2000000"), None);
     }
 }

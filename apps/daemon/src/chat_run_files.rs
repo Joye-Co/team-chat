@@ -48,6 +48,22 @@ pub(crate) fn err(code: &str, reason: Option<&str>, message: impl Into<String>) 
 
 /// A path inside the run's working folder, resolved (symbolic links included).
 pub(crate) fn inside(root: &Path, path: &str) -> Result<PathBuf, Value> {
+    // Windows: the spellings that reach outside the file system are refused before anything
+    // is opened (a network path would sign the daemon's user in to a server).
+    let path = if cfg!(windows) {
+        crate::sys::windows_plain_path(path)
+    } else {
+        path
+    };
+    if cfg!(windows)
+        && let Some(why) = crate::sys::windows_path_problem(path)
+    {
+        return Err(err(
+            "forbidden",
+            Some("file.outside_workspace"),
+            format!("{path} is {why}, not a file in the run's working folder"),
+        ));
+    }
     let root = std::fs::canonicalize(root).map_err(|e| {
         err(
             "unavailable",
@@ -403,18 +419,92 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let other = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("a.html"), "x").unwrap();
+        std::fs::create_dir(root.path().join("docs")).unwrap();
+        std::fs::write(root.path().join("docs").join("b.txt"), "x").unwrap();
         std::fs::write(other.path().join("secret"), "x").unwrap();
         assert!(inside(root.path(), "a.html").is_ok());
+        assert!(inside(root.path(), "docs/b.txt").is_ok());
+        assert!(inside(root.path(), root.path().join("a.html").to_str().unwrap()).is_ok());
         let out = inside(root.path(), other.path().join("secret").to_str().unwrap()).unwrap_err();
         assert_eq!(out["error"]["reason"], "file.outside_workspace");
         let out = inside(root.path(), "../../etc/passwd").unwrap_err();
         assert_ne!(out["ok"], true);
-        // A link that points out of the folder is refused too.
-        std::os::unix::fs::symlink(other.path().join("secret"), root.path().join("link")).unwrap();
-        assert_eq!(
-            inside(root.path(), "link").unwrap_err()["error"]["reason"],
-            "file.outside_workspace"
-        );
+        // A link that points out of the folder is refused too: a link to a file, and a link
+        // to a folder (on Windows a junction, which needs no privilege) with a file below it.
+        let links = crate::chat_run_context::test_links::make(root.path(), other.path());
+        for link in &links {
+            assert_eq!(
+                inside(root.path(), link).unwrap_err()["error"]["reason"],
+                "file.outside_workspace",
+                "{link}"
+            );
+        }
+        assert!(links.iter().any(|l| l.starts_with("away")), "{links:?}");
+    }
+
+    /// Windows: every spelling that names something else than a file under the working
+    /// folder is refused, most of them before the file system is asked.
+    #[cfg(windows)]
+    #[test]
+    fn windows_spellings_do_not_leave_the_working_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.html"), "x").unwrap();
+        std::fs::write(other.path().join("secret.txt"), "x").unwrap();
+        let outside = other.path().join("secret.txt");
+        let outside = outside.to_str().unwrap();
+        let drive = &outside[..2];
+        // The 8.3 short name of the other folder, when the volume keeps short names.
+        let short = crate::chat_run_context::test_links::short_name(other.path());
+        let mut bad: Vec<String> = vec![
+            outside.to_string(),
+            outside.to_uppercase(),
+            outside.to_lowercase(),
+            outside.replace('\\', "/"),
+            format!(r"\\?\{outside}"),
+            format!(r"\\?\UNC\localhost\{}$\{}", &drive[..1], &outside[3..]),
+            format!(r"\\.\{outside}"),
+            format!(r"\\localhost\{}$\{}", &drive[..1], &outside[3..]),
+            format!(r"\\127.0.0.1\{}$\{}", &drive[..1], &outside[3..]),
+            format!(
+                "//localhost/{}$/{}",
+                &drive[..1],
+                outside[3..].replace('\\', "/")
+            ),
+            format!("{drive}{}", &outside[3..]),
+            format!("{outside}."),
+            format!("{outside} "),
+            format!("{outside}::$DATA"),
+            format!("{outside}:stream"),
+            r"..\..\..\..\..\..\Windows\win.ini".to_string(),
+            r"C:\Windows\win.ini".to_string(),
+            r"\Windows\win.ini".to_string(),
+            "/Windows/win.ini".to_string(),
+            "a.html::$DATA".to_string(),
+            "a.html:other".to_string(),
+            "a.html.".to_string(),
+            "a.html ".to_string(),
+            "NUL".to_string(),
+            "CON".to_string(),
+            r"\\.\pipe\chat-run-test".to_string(),
+        ];
+        if let Some(short) = short {
+            bad.push(format!(r"{short}\secret.txt"));
+        }
+        for path in &bad {
+            let out = inside(root.path(), path);
+            assert!(out.is_err(), "{path} was taken as {out:?}");
+            assert_ne!(out.unwrap_err()["ok"], true, "{path}");
+        }
+        // The same file in the working folder under other spellings is the file itself.
+        let real = std::fs::canonicalize(root.path().join("a.html")).unwrap();
+        std::fs::create_dir_all(root.path().join("docs")).unwrap();
+        // Also the resolved form the `chat-run` client sends (`\\?\C:\…`).
+        let resolved = real.to_string_lossy().into_owned();
+        assert!(resolved.starts_with(r"\\?\"), "{resolved}");
+        for same in ["A.HTML", r".\a.html", r"docs\..\a.html", resolved.as_str()] {
+            assert_eq!(inside(root.path(), same).unwrap(), real, "{same}");
+        }
     }
 
     #[test]
