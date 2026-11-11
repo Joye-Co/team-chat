@@ -1003,12 +1003,17 @@ contract, but its shape is fixed here so the developer view and the daemon notes
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
-  `#42` is the message's seq. A system message (`kind: "system"`) is one line in brackets. A
-  产出 line carries the 产出's current title.
+  `#42` is the message's seq. The time is on the team's clock (`TEAM_TIME_ZONE`, default
+  Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets. A 产出 line
+  carries the 产出's current title.
+- **The request whole.** The request and every follow-up carry the same indented lines for the
+  message they quote, their files and their 产出, so a file is an id the run fetches with
+  `chat-run file get`; a message with only an image is its file line. The front desk reads the
+  request the same way.
 - **Members.** The executor's prompt lists the group's active members, people first, one line
   each: name, 岗位, `AI member` for bots and `you` for the run's own member (at most 40; the rest
   with `chat-run member list`).
-- **Budget, not a count.** The topic's first message is always there. Then the newest messages,
+- **Budget, not a count.** The topic's first message is always there, cut at 4,000 characters. Then the newest messages,
   newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
   between them, one line says how many and, for a machine with feature `context`, how to read them
   (`chat-run topic history --before <seq>`).
@@ -1073,7 +1078,8 @@ MemoryItem = { id, scope: MemoryScope, kind: MemoryKind, text /* 1..500 */, when
                note? /* <= 500: evidence, what a merge or promotion came from, why it was retired */,
                authorId, human: boolean /* a person wrote or last edited it */,
                status: "active" | "retired" | "pending", confidence /* 0..1 */, uses, lastUsedAt: number | null,
-               version /* >= 1 */, createdAt, updatedAt }
+               version /* >= 1 */, createdAt, updatedAt,
+               fromGroup? /* an AI member's memory: the group it was learned in, or "unknown" */ }
 CreateMemoryRequest = { scope, kind, text, when?, source? /* default { kind: "manual", ids: [] } */ }
 UpdateMemoryRequest = { kind?, text?, when?: string | null, status?: "active" | "retired" }
 MemoriesResponse = { memories: MemoryItem[] }                      // newest change first, <= 500
@@ -1084,7 +1090,7 @@ MemoryUpdate = { id, day /* YYYY-MM-DD, the team's local day */, scope, memoryId
                  change: "added" | "changed" | "retired" | "flagged", before: MemoryItem | null,
                  after: MemoryItem | null, note?, undoneAt: number | null, at }
 MemoryUpdatesResponse = { day: string | null, updates: MemoryUpdate[] }   // oldest first
-MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind, text, when? }
+MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind, text, when?, sourceMessageId? }
 ```
 
 Kinds, statuses, source kinds and changes may grow: Rust reads an unknown value as `Unknown`.
@@ -1096,6 +1102,7 @@ Kinds, statuses, source kinds and changes may grow: Rust reads an unknown value 
 | `GET /v1/memories/:id` | readers | | `MemoryItem` |
 | `PATCH /v1/memories/:id` | writers | `UpdateMemoryRequest` | `MemoryItem`, a new version (none when nothing changes). A person's edit of the text, kind or `when` makes it `human`; `status: "active"` on a pending memory makes it active at once; `retired` 停用 |
 | `GET /v1/memories/:id/versions` | readers | | `MemoryVersionsResponse` |
+| `POST /v1/memories/:id/release` | writers who are people and read it | | `MemoryItem`, a new version without `fromGroup`: every reader of the scope reads it, and every run of the member carries it |
 | `POST /v1/memories/:id/versions/:version/restore` | writers | | `MemoryItem`: a new version with that version's kind, text, `when` and status (a pending one keeps the current status) |
 | `GET /v1/memories/updates?scope=&day=` | readers | | `MemoryUpdatesResponse`: that day's 记忆更新 of the scope, or the newest day with any |
 | `POST /v1/memories/updates/:id/undo` | writers of the line's scope | | `MemoryUpdate` with `undoneAt`: `added` retires the memory, `changed` puts back `before`, `retired` makes it active again (each a new version); `flagged` cannot be undone (`invalid`); twice is `conflict` |
@@ -1109,8 +1116,17 @@ Who reads and writes:
 | `member:<botId>` | every member | owners and that AI member |
 | `person:<id>` | only that person | only that person |
 
-Another member's person scope, a group the caller is not in, or a scope whose group or member does
-not exist is `not_found`; a reader without write access gets `forbidden`. A version clash (two
+**Source group** (`fromGroup`): what an AI member learns in a group or a direct conversation is
+read only there. A memory with `fromGroup` is read (listed, fetched, its versions and its 记忆更新
+lines) only by members of that group, and goes into a prompt only in a group whose members are all
+in that group (so a direct conversation's lessons stay with that person and that member). Runs set
+it on their `member` notes and on the review's lessons; people's memories have none.
+`"unknown"` marks AI-written member memories from before the field (D1 migration
+`0017_memory_audience`): only owners read them and no prompt carries them until a person releases
+them. A person releases one with `POST /v1/memories/:id/release`.
+
+Another member's person scope, a group the caller is not in, a memory of a group the caller is not
+in, or a scope whose group or member does not exist is `not_found`; a reader without write access gets `forbidden`. A version clash (two
 writes of the same version) is `conflict`.
 
 Rules:
@@ -1118,20 +1134,27 @@ Rules:
 - Text, `when` and notes go through the server's redaction (the daemon's token formats) before
   they are stored: memory never keeps credentials.
 - **Runs** write with `POST /v1/machine/runs/:id/memories` (docs/machine-protocol.md, "Memory
-  notes"): `member` is the run's AI member, `person` the requester, `group` the run's group (not in
-  a direct conversation: `forbidden`). Always `pending`, source `{ kind: "run", ids: [runId] }`.
+  notes"): `member` is the run's AI member (with `fromGroup` the run's group), `person` the
+  requester, `group` the run's group (not in a direct conversation: `forbidden`). A `group` note
+  needs `sourceMessageId`, a person's message in the group; without one, or when it is not a
+  person's, the note goes to the member with `fromGroup` instead. Always `pending`, source
+  `{ kind: "run", ids: [runId, sourceMessageId?] }`.
 - **Review after a run** (复盘): with an AI service, when a run of a person's request ends on a
   machine (done, failed or stopped), one forced tool call reads the request, the work order, the
   progress and the result and writes at most 3 `lesson`s with their evidence (`note`) and `when`,
-  as `pending` in the member's scope. Requests of bots and integrations and side chats get no
+  as `pending` in the member's scope with the run's group as `fromGroup`. Requests of bots and integrations and side chats get no
   review. A review never fails or delays the run.
-- **Daily consolidation** (每天整理): once a day, at the first cron after 03:00 in the team's time
-  zone (`TEAM_TIME_ZONE`, default `Asia/Shanghai`), every scope with pending memories from before
-  that day's 03:00 is consolidated once (idempotent per scope and day). With an AI service, one
+- **Daily consolidation** (每天整理): once a day, at the first (hourly) cron after 03:00 in the
+  team's time zone (`TEAM_TIME_ZONE`, default `Asia/Shanghai`), every scope with pending memories
+  from before that day's 03:00 is consolidated once (idempotent per scope and day); a scope whose
+  model call failed is tried again at the next hourly cron. With an AI service, one
   forced tool call gets the scope's active and pending memories (and, for an AI member, the other
   members' lessons) and returns operations: add a pending one (maybe reworded), merge it into an
   active one, retire one with a reason, keep, or promote a lesson found on two or more members to
-  a team `convention` (its `note` names the sources). A pending memory no operation names becomes
+  a team `convention` (its `note` names the sources). A memory with `fromGroup` never widens its
+  audience by itself: it merges only into a memory of the same group, the other members' lessons
+  the model sees are only those without `fromGroup`, and a promotion with such a source writes no
+  team memory but a `flagged` line on that source for a person to decide. That line is read like its source, so only members of the source group (the owners among them) decide; when the sources come from more than one group the line names only the source ids, not the proposed text. A pending memory no operation names becomes
   active as it is. Memories with `human: true` are never changed: an operation on one becomes a
   `flagged` line. Without an AI service the pending memories become active as they are. AI-written
   active memories unused for 60 days are retired. Every change is a `MemoryUpdate` line of that
@@ -2136,6 +2159,34 @@ Rules:
   never an HTTP error of ours. Each call times out after 20 s.
 - Suggested models: `deepseek-chat` for DeepSeek, `claude-haiku-5-5` for Anthropic.
 - Not set up: a topic keeps its first line as its title.
+
+## Worker models (设置 › 模型)
+
+The team's model and 思考强度 for the executors, one choice per CLI runtime (the runtime names
+machines configure, such as `claude` and `codex`). The front desk, topic summaries and memory use
+the AI 服务 above; this section is only for runs on machines.
+
+```ts
+WorkerModel = { runtime: string /* ^[a-z][a-z0-9_-]{0,31}$ */,
+                model: string | null   /* the CLI's model id, 1..200 printable; null = the CLI's default */,
+                effort: Effort | null  /* null = the CLI's default */,
+                updatedAt: number }    // 0 = never changed
+WorkerModelsResponse = { workers: WorkerModel[] }   // only runtimes with a team choice
+SetWorkerModelRequest = { model?: string | null, effort?: Effort | null }   // absent keeps, null clears
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/settings/models` | member | | `WorkerModelsResponse` |
+| `PUT /v1/settings/models/:runtime` | owner | `SetWorkerModelRequest` | `WorkerModel`; audited as `settings.models` |
+
+Rules:
+
+- D1 `worker_models` (migration 0013), one row per runtime.
+- A run's `run.assign.model` is the runner's own model, else the team's for the runner's runtime,
+  else absent (the CLI's default). `effort` is chosen the same way, field by field, and still goes
+  only to a machine with feature `effort`.
+- The choices the settings offer are the models and efforts the machines report (`CliInfo`).
 
 ## Devices
 

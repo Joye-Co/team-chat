@@ -890,3 +890,92 @@ mod tests {
         assert!(long.validate().is_err());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Worker models (设置 › 模型)
+// ---------------------------------------------------------------------------
+
+fn is_runtime_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && b.len() <= 32
+        && b[0].is_ascii_lowercase()
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+}
+
+fn is_model_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 200 && s.bytes().all(|c| (0x21..=0x7e).contains(&c))
+}
+
+/// The team's model and effort for runs on one CLI runtime. A member's own runner choice wins;
+/// `None` = the CLI's own default.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerModel {
+    pub runtime: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// 0 = never changed.
+    pub updated_at: Millis,
+}
+
+impl WorkerModel {
+    pub fn validate(&self) -> Validation {
+        if !is_runtime_name(&self.runtime) {
+            return invalid("runtime", "a lower-case runtime name");
+        }
+        if let Some(m) = &self.model
+            && !is_model_id(m)
+        {
+            return invalid("model", "1..200 printable characters without spaces");
+        }
+        if let Some(e) = &self.effort
+            && !crate::bots::is_effort(e)
+        {
+            return invalid("effort", "an effort word");
+        }
+        Ok(())
+    }
+}
+
+/// `GET /v1/settings/models` (member).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerModelsResponse {
+    pub workers: Vec<WorkerModel>,
+}
+
+/// `PUT /v1/settings/models/:runtime` (owner). Absent keeps the stored value; `Some(None)` clears it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetWorkerModelRequest {
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub model: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub effort: Option<Option<String>>,
+}
+
+impl SetWorkerModelRequest {
+    pub fn validate(&self) -> Validation {
+        if let Some(Some(m)) = &self.model
+            && !is_model_id(m)
+        {
+            return invalid("model", "1..200 printable characters without spaces");
+        }
+        if let Some(Some(e)) = &self.effort
+            && !crate::bots::is_effort(e)
+        {
+            return invalid("effort", "an effort word");
+        }
+        Ok(())
+    }
+}

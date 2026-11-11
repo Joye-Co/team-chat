@@ -2014,6 +2014,12 @@ impl ChatProvider for FakeProvider {
     fn ai_service(&self) -> AdminReply<AiServiceSettings> {
         self.ai_service_fake()
     }
+    fn worker_models(&self) -> AdminReply<Vec<WorkerModelSetting>> {
+        self.worker_models_fake()
+    }
+    fn set_worker_model(&self, setting: WorkerModelSetting) -> AdminReply<WorkerModelSetting> {
+        self.set_worker_model_fake(setting)
+    }
     fn set_ai_service(&self, draft: AiServiceDraft) -> AdminReply<AiServiceSettings> {
         self.set_ai_service_fake(draft)
     }
@@ -2089,6 +2095,11 @@ impl ChatProvider for FakeProvider {
 
     fn restart_this_mac(&self) -> AdminReply<()> {
         reply_now(Ok(()))
+    }
+
+    /// The demo computer has Claude Code.
+    fn this_computer_clis(&self) -> AdminReply<Vec<String>> {
+        reply_now(Ok(vec!["claude".into()]))
     }
 
     fn use_this_mac(&self) -> AdminReply<()> {

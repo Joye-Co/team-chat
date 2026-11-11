@@ -781,17 +781,20 @@ and lengths before it calls the server.
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K --text T [--when W]` → `MemoryItem` |
+| `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K --text T [--when W] [--source <messageId>]` → `MemoryItem` |
 
 ```ts
 POST /v1/machine/runs/:id/memories   body MachineMemoryNoteRequest -> MemoryItem (status "pending")
-MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryKind, text /* 1..500 */, when? /* <= 300 */ }
+MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryKind, text /* 1..500 */, when? /* <= 300 */, sourceMessageId? }
 ```
 
 - The run must be on the calling machine, active and not a side chat, as for files.
-- `member` is the run's AI member (its lessons and playbooks), `person` the person who asked for the
-  run (their preferences), `group` the run's group (conventions people said in the group; a direct
-  conversation has none: `forbidden`). Teams' memory is never written by a run.
+- `member` is the run's AI member (its lessons and playbooks), read only in the run's group
+  (`fromGroup`), `person` the person who asked for the run (their preferences), `group` the run's
+  group (conventions people said in the group; a direct conversation has none: `forbidden`). A
+  `group` note cites the person's message it comes from (`--source`, `sourceMessageId`); without
+  one, or when that message is not a person's, it goes to the member's own memory of this group.
+  Teams' memory is never written by a run.
 - The memory is `pending` with source `{ kind: "run", ids: [runId] }` until the daily
   consolidation. The member's own pending lessons are already in its next runs' prompts.
 - Text is redacted before it is stored. At most 10 notes per run (`rate_limited` after that).

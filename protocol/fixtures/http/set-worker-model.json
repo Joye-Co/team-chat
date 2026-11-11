@@ -1,0 +1,9 @@
+{
+  "kind": "SetWorkerModelRequest",
+  "valid": true,
+  "description": "set the model, clear the effort",
+  "value": {
+    "model": "gpt-6-luna",
+    "effort": null
+  }
+}

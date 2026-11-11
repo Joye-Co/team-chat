@@ -266,6 +266,7 @@ mod tests {
             version: 2,
             created_at: 10,
             updated_at: 20,
+            from_group: None,
         }
     }
 

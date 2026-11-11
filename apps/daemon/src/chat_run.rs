@@ -94,9 +94,11 @@ this group, also for topic history and topic message):
 - `chat-run decisions list [--limit <n>]`: the decisions of this group
 - `chat-run member list`: the members of this group, their 岗位 and which are AI members
 Keep what will matter in later work with `chat-run memory note --scope member|person|group --kind \
-lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>]`: member for your \
-own lessons and how-tos, person for the requester's preferences, group for conventions people said \
-here. Notes are reviewed once a day; the team's memory is never written by a run. \
+lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source \
+<messageId>]`: member for your own lessons and how-tos (only this group reads them), person for the \
+requester's preferences, group for conventions people said here, with `--source` the id of the \
+person's message that says it (without one it stays your own). Notes are reviewed once a day; the \
+team's memory is never written by a run. \
 When another AI member of the group should do the work, hand it over with `chat-run handoff \
 --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]` (then stop), or give \
 a part out with `chat-run assign --member <name> --goal <text> ...`: it gets its own topic and its \
@@ -900,7 +902,7 @@ pub const USAGE: &str = "usage:
   chat-run card get --message <messageId>
   chat-run decisions list [--limit <1-100>]
   chat-run member list
-  chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>]
+  chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source <messageId>]
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
 prints its JSON Schema (no daemon needed). ops.json is a list of
@@ -1087,7 +1089,7 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         ["memory", "note"] => (
             crate::chat_run_context::MEMORY_NOTE,
             &args[2..],
-            &["scope", "kind", "when", "text"],
+            &["scope", "kind", "when", "text", "source"],
         ),
         ["file", "get"] => (
             crate::chat_run_context::FILE_GET,
@@ -1192,6 +1194,9 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
                 json!({ "scope": f.req("scope")?, "kind": f.req("kind")?, "text": f.req("text")? });
             if let Some(w) = f.opt("when") {
                 b["when"] = json!(w);
+            }
+            if let Some(m) = f.opt("source") {
+                b["sourceMessageId"] = json!(m);
             }
             let b = crate::chat_run_context::memory_body(&b).map_err(|e| {
                 e["error"]["message"]
@@ -1716,6 +1721,38 @@ mod tests {
         assert!(
             request(&args(&[
                 "memory", "note", "--scope", "member", "--kind", "lesson", "--text", " "
+            ]))
+            .is_err()
+        );
+        let (_, body) = request(&args(&[
+            "memory",
+            "note",
+            "--scope",
+            "group",
+            "--kind",
+            "convention",
+            "--text",
+            "周五不上线",
+            "--source",
+            "01MSG",
+        ]))
+        .unwrap();
+        assert_eq!(
+            body,
+            json!({ "scope": "group", "kind": "convention", "text": "周五不上线", "sourceMessageId": "01MSG" })
+        );
+        assert!(
+            request(&args(&[
+                "memory",
+                "note",
+                "--scope",
+                "group",
+                "--kind",
+                "convention",
+                "--text",
+                "x",
+                "--source",
+                "a b"
             ]))
             .is_err()
         );

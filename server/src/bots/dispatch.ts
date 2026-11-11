@@ -51,6 +51,13 @@ export const TEXT = {
     `需要你确认：${kind}${command ? `\n\n${command}` : ""}\n\n回复「同意」「拒绝」或「这件事里都同意」。`,
   approveRun: "这件事里都同意",
   approveRunConfirm: "这件事里之后同类的操作都不再问你。",
+  /** The approval card after the answer (DESIGN.md §7.10 answered): title and one record line. */
+  approvalClosed: {
+    approve: { title: (what: string) => `已同意：${what}`, line: (who: string, at: string) => `${who} 同意了 · ${at}` },
+    approve_run: { title: (what: string) => `已同意：${what}`, line: (who: string, at: string) => `${who} 同意了，这件事里同类的操作不再问 · ${at}` },
+    deny: { title: (what: string) => `已拒绝：${what}`, line: (who: string, at: string) => `${who} 拒绝了 · ${at}` },
+    expired: { title: (what: string) => `没用上：${what}`, line: (_who: string, at: string) => `这件事结束了，没等到回答 · ${at}` },
+  },
   /** 设置 › 默认规则 names of the gated kinds. */
   gateKinds: {
     mergeMain: "合并到 main",
@@ -167,6 +174,27 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
   if (m.health) out.health = m.health;
   if (m.clis) out.clis = m.clis;
   return out;
+}
+
+/**
+ * A CLI error as people read it: the message inside a JSON error body (the raw body stays in the
+ * run log), and a plain Chinese line for errors people can fix themselves.
+ */
+export function readableError(raw: string): string {
+  const t = raw.trim();
+  if (!t.startsWith("{")) return t;
+  try {
+    const j = JSON.parse(t) as { message?: unknown; error?: unknown };
+    const e = (typeof j.error === "object" && j.error !== null ? j.error : j) as { message?: unknown; code?: unknown };
+    const msg = typeof e.message === "string" ? e.message : typeof j.error === "string" ? j.error : "";
+    if (e.code === "model_not_found") {
+      const model = /'([^']+)'/.exec(msg)?.[1];
+      return `这台电脑上的账号用不了模型 ${model ?? ""}，换个模型再试`.replace("模型 ，", "这个模型，");
+    }
+    return msg || t;
+  } catch {
+    return t;
+  }
 }
 
 /** "同意" / "拒绝" (and a few common forms) answer a pending approval; anything else is input. */

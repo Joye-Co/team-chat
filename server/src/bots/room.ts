@@ -21,7 +21,7 @@ import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
-import { type ContextRow, parseExt } from "../context/render";
+import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
 
 registerRoomMigration({
   name: "bots-1",
@@ -346,6 +346,10 @@ export interface TopicMessage {
   refs?: RefSource[];
   /** Author of the message this one quotes (`replyTo`), if any. */
   replyToAuthorId?: string;
+  /** The message's files, 产出 and the message it quotes: rendered after the body for the run and the front desk. */
+  ext?: RequestExt;
+  /** The group is a direct chat (私聊) with the bot. */
+  dm?: boolean;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */
@@ -556,8 +560,12 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     args.refs = resolveRefs(c.sql, m.blockRefs);
   }
   const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
-  const quoted = parseExt(ext).replyTo?.authorId;
+  const parsed = parseExt(ext);
+  const quoted = parsed.replyTo?.authorId;
   if (quoted) args.replyToAuthorId = quoted;
+  const carried = requestExt(parsed);
+  if (carried) args.ext = carried;
+  if (peer) args.dm = true;
   await deskStub(c.env, target).onMessage(target, args);
 }
 

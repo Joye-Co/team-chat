@@ -1,6 +1,6 @@
 // 沉淀 (memory, docs/protocol.md "Memory"; agent-harness.zh.md section 7): the `/v1/memories`
 // routes, the run's memory note, the review after a run (retro.ts, called by the desk), the
-// daily consolidation (on every cron trigger; it runs once a day after 03:00 team time) and the
+// daily consolidation (on every cron trigger, hourly; it runs once a day after 03:00 team time) and the
 // index prompts carry (inject.ts).
 import { registerScheduled } from "../core/registry";
 import { consolidateAll } from "./consolidate";

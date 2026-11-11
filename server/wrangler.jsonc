@@ -15,7 +15,9 @@
   // invite code. The app logger logs every request with its path only (core/worker.ts).
   "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
   // Daily archive of every group log and of D1 to R2 (server/src/ops). Keep in sync with ARCHIVE_CRON.
-  "triggers": { "crons": ["0 3 * * *"] },
+  // Hourly: the memory consolidation runs after 03:00 in the team's time zone and retries a failed
+  // scope the next hour (server/src/memory). Deployed envs need the same two crons.
+  "triggers": { "crons": ["0 3 * * *", "0 * * * *"] },
   "vars": { "ENVIRONMENT": "local", "VERSION": "0.0.0-dev" },
   "d1_databases": [
     { "binding": "DB", "database_name": "chat-local", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }

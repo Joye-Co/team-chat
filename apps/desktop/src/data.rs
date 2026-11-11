@@ -1262,6 +1262,8 @@ pub struct MachineInfo {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CliChoice {
     pub runtime: String,
+    /// What the runtime runs: "claude", "codex", "acp" or "pty".
+    pub kind: String,
     /// Empty = the computer did not say: the model is typed.
     pub models: Vec<ModelChoice>,
     pub efforts: Vec<String>,
@@ -1981,6 +1983,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Restarts this Mac's daemon service (it then runs the daemon file now on disk).
     fn restart_this_mac(&self) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The coding programs on this computer ("claude", "codex"), looked up the way its daemon
+    /// looks for them when it starts. `Unsupported` where the app cannot look.
+    fn this_computer_clis(&self) -> AdminReply<Vec<String>> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// My mute and notify level of a group, from the cache.
@@ -2838,6 +2845,14 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn test_ai_service(&self, _draft: AiServiceDraft) -> AdminReply<AiTestOutcome> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// 通用 › 模型: the team's model and 思考强度 per CLI runtime (`GET /v1/settings/models`).
+    fn worker_models(&self) -> AdminReply<Vec<WorkerModelSetting>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 通用 › 模型, owners only: stores both fields for one runtime (`None` clears one).
+    fn set_worker_model(&self, _setting: WorkerModelSetting) -> AdminReply<WorkerModelSetting> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// 账号 › 登录的设备: my signed-in devices (`GET /v1/me/devices`), newest use first.
     fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
         reply_now(Err(AdminError::Unsupported))
@@ -3050,6 +3065,14 @@ impl AiProviderKind {
     pub fn needs_base_url(self) -> bool {
         self == AiProviderKind::OpenaiCompatible
     }
+}
+
+/// 设置 › 模型: the team's model and 思考强度 for one CLI runtime. `None` = the CLI's own default.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WorkerModelSetting {
+    pub runtime: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// The team's AI 服务 as the server keeps it. The key itself never reaches the client.

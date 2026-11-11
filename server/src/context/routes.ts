@@ -28,6 +28,7 @@ import { ROOM_SEARCH_RPC } from "../search/frame";
 import { DECISIONS_RPC } from "../cards2/decisions";
 import { type CardRead, groupMembers, stateIds, type TopicStateData, topicStateText } from "./read";
 import { type ContextRow, HISTORY_BODY_CHARS, renderMessage } from "./render";
+import { teamZone } from "../memory/consolidate";
 
 /** Files a run may fetch (machine-protocol.md: larger ones are `too_large`). */
 export const MAX_RUN_FILE_BYTES = 100 * 1024 ** 2;
@@ -57,7 +58,7 @@ async function toMessages(env: Env, rows: ContextRow[], bodyChars: number): Prom
     authorId: r.authorId,
     authorName: name(r.authorId),
     at: r.at,
-    text: renderMessage(r, name, bodyChars, bodyChars > 0 ? `rest: chat-run topic message --id ${r.id}` : ""),
+    text: renderMessage(r, name, bodyChars, bodyChars > 0 ? `rest: chat-run topic message --id ${r.id}` : "", teamZone(env)),
   }));
 }
 

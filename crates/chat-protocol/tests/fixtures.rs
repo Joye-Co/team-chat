@@ -67,6 +67,8 @@ check!(
     ApprovalPolicy,
     UpdateApprovalPolicyRequest,
     AiServiceConfig,
+    SetWorkerModelRequest,
+    WorkerModel,
     UpdateAiServiceRequest,
     RecordDecisionRequest,
     PutArtifactMediaRequest,
@@ -279,6 +281,9 @@ const KINDS: &[(&str, RoundTrip)] = &[
         validated::<UpdateApprovalPolicyRequest>,
     ),
     ("AiServiceConfig", validated::<AiServiceConfig>),
+    ("WorkerModel", validated::<WorkerModel>),
+    ("WorkerModelsResponse", plain::<WorkerModelsResponse>),
+    ("SetWorkerModelRequest", validated::<SetWorkerModelRequest>),
     (
         "UpdateAiServiceRequest",
         validated::<UpdateAiServiceRequest>,
