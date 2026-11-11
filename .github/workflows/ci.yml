@@ -114,8 +114,11 @@ jobs:
               - protocol/**
               - apps/ios/**
               - docs/PRODUCT.md
-            # The Windows installer, the update helper and the app's updater: a release build,
-            # so only what can change them.
+            # The Windows installer and everything that ends up in it: the app, the update
+            # helper and the machine daemon with the crates they are built from, and the
+            # server's release routes the update test talks to. The job installs the build,
+            # signs in, makes this runner a machine and updates the app with the daemon
+            # running, so a change to the client or the daemon is tried in that chain too.
             installer:
               - *common
               - .github/workflows/release.yml
@@ -131,15 +134,16 @@ jobs:
               - scripts/test-windows-update.sh
               - scripts/windows/**
               - apps/update-helper/**
-              - apps/desktop/build.rs
-              - apps/desktop/Cargo.toml
-              - apps/desktop/src/main.rs
-              - apps/desktop/src/updater/**
-              - crates/chat-core/src/updates.rs
-              - crates/chat-protocol/src/updates.rs
+              - apps/desktop/**
+              - apps/daemon/**
+              - crates/**
+              - assets/**
+              - third_party/**
+              - docs/releases/**
               - server/src/files/**
+              - server/src/bots/**
+              - server/src/core/**
               - server/migrations/**
-              - assets/brand/AppIcon.ico
 
   packages:
     name: Packages (bun)

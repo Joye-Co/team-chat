@@ -37,6 +37,8 @@ SetCompressor /SOLID lzma
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 !define APP_ID_KEY "Software\Classes\AppUserModelId\${APP_ID}"
 !define SCHEME_KEY "Software\Classes\${SCHEME}"
+; Windows 10 version 22H2.
+!define MIN_BUILD 19045
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 !define STARTUP_APPROVED_KEY "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 ; The WebView2 Runtime's entry in Edge Update.
@@ -75,8 +77,8 @@ VIAddVersionKey /LANG=0 "ProductVersion" "${VERSION}"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
-LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10 或更高版本。"
-LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 or later."
+LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10（22H2）或 Windows 11。请先更新 Windows。"
+LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 (version 22H2) or Windows 11. Update Windows first."
 LangString NeedWindows11OnArm ${LANG_SIMPCHINESE} "在 ARM 芯片的电脑上，${NAME} 需要 Windows 11（Windows 10 不能运行 64 位 x86 程序）。"
 LangString NeedWindows11OnArm ${LANG_ENGLISH} "On a computer with an ARM processor, ${NAME} needs Windows 11 (Windows 10 cannot run 64-bit x86 programs)."
 LangString QuitAppFirst ${LANG_SIMPCHINESE} "${NAME} 还在运行。请先退出，再点「重试」。"
@@ -119,8 +121,11 @@ Function .onInit
   ${IfNot} ${Errors}
     StrCpy $IsUpdate "1"
   ${EndIf}
+  ; 64-bit Windows 10 version 22H2 (build 19045) or later, as docs/INSTALL.md says: the
+  ; oldest Windows 10 that still gets fixes, and the one the app is built against. Every
+  ; Windows 11 has a higher build.
   ${IfNot} ${RunningX64}
-  ${OrIfNot} ${AtLeastWin10}
+  ${OrIfNot} ${AtLeastBuild} ${MIN_BUILD}
     MessageBox MB_OK|MB_ICONSTOP "$(NeedWindows10)" /SD IDOK
     Abort
   ${EndIf}
