@@ -1235,7 +1235,7 @@ transaction as the write, with a `kind` the page filters by:
 | `invite` | `invite.create`, `invite.redeem` |
 | `key` | `machine.secret.set`, `machine.secret.delete` |
 | `approval` | `run.approval`, `settings.approvals` |
-| `login` | `email.sign_in`, `machine.login.start` |
+| `login` | `email.sign_in`, `password.sign_in`, `qr.sign_in`, `machine.login.start` |
 | `machine` | `machine.create`, `machine.revoke` |
 
 The server also writes events it notices itself (`audit_id` 0, no actor but the AI member):
@@ -2171,3 +2171,88 @@ Rules:
   when `ENVIRONMENT` is `local` or `e2e`: there the code goes to the `email_outbox` D1 table
   instead (read by tests with `GET /v1/admin/email-outbox?email=…` and the `x-admin-secret`
   header), and is never sent or logged.
+
+## Password sign-in
+
+A person may add a password and then sign in with the sign-in email and that password. The
+password is optional; email codes keep working.
+
+```ts
+Password = string   // 8..128 characters (code points), not only spaces
+MyPasswordResponse = { set: boolean, updatedAt: number | null }
+SetPasswordRequest = { password: Password, currentPassword?: string /* 1..128 */ }
+RemovePasswordRequest = { currentPassword?: string }
+PasswordSignInRequest = { email: EmailAddress, password: string /* 1..128 */, deviceName /* 1..128 */ }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `GET /v1/me/password` | member | `MyPasswordResponse` |
+| `PUT /v1/me/password` | person | `MyPasswordResponse`; sets or changes my password (audited as `password.set`) |
+| `POST /v1/me/password/remove` | person | `MyPasswordResponse` with `set: false` (audited as `password.remove`) |
+| `POST /v1/auth/password/sign-in` | anyone | `RedeemResponse`: one more token for the member whose sign-in email it is (audited as `password.sign_in`); a wrong address or password is `unauthorized`, the same either way |
+
+Rules:
+
+- The server stores only a slow hash: PBKDF2-HMAC-SHA256 with 100 000 iterations (the most
+  Workers allow), a 16-byte random salt and a 32-byte key, as
+  `pbkdf2-sha256$<iterations>$<salt>$<key>` (base64url). A missing account still runs one hash,
+  so the answer time does not tell whether an address has a password.
+- Changing or removing a set password needs `currentPassword`, unless this request's token signed
+  in within the last 10 minutes (so a member who forgot it signs in with an email code and sets a
+  new one). A missing or wrong one is 400 `invalid` with reason `password.current`.
+- Signing in allows 10 tries per client IP per minute and 10 wrong tries per address per hour; a
+  right password does not use one up. `currentPassword` checks share the IP limit. Over a limit
+  the answer is 429 `rate_limited`.
+- Only people have passwords; a bot's `PUT` is `forbidden`. A deactivated member cannot sign in.
+
+## Code sign-in (扫码登录)
+
+A signed-in device lets a new device in with a one-time code, shown as a QR image and as text.
+It works both ways:
+
+- **Offer**: the signed-in device shows a code (`POST /v1/me/qr/offer`); the new device scans or
+  types it (`POST /v1/auth/qr/claim`) and gets a token for the same member. The signed-in device
+  polls `GET /v1/me/qr/offers/:id` to show who signed in.
+- **Request**: the new device shows a code (`POST /v1/auth/qr/request`); the signed-in device
+  scans or types it, sees the device name (`POST /v1/me/qr/peek`) and approves it
+  (`POST /v1/me/qr/approve`). The new device polls `POST /v1/auth/qr/poll` with its secret and
+  gets the token once.
+
+```ts
+SignInCode = string                 // 8 Crockford characters shown XXXX-XXXX, read like an invite code
+QrOfferResponse = { id, code, expiresAt }
+QrOfferStatus = { state: "waiting" | "used" | "expired", deviceName?: string }
+QrClaimRequest = { code: SignInCode, deviceName /* 1..128 */ }
+QrRequestRequest = { deviceName /* 1..128 */ }
+QrRequestResponse = { id, code, secret, expiresAt }
+QrPollRequest = { id, secret }
+QrPollResponse = { state: "waiting" | "approved" | "expired", token?: string, member?: Member }
+QrCodeRequest = { code: SignInCode }
+QrPeekResponse = { deviceName, expiresAt }
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `POST /v1/me/qr/offer` | person | `QrOfferResponse` (audited as `qr.offer`) |
+| `GET /v1/me/qr/offers/:id` | the person who offered it | `QrOfferStatus`; another member's or an unknown id is `not_found` |
+| `POST /v1/auth/qr/claim` | anyone | `RedeemResponse` (audited as `qr.sign_in` with `details.via = "offer"`); a wrong, used or expired code is `unauthorized` |
+| `POST /v1/auth/qr/request` | anyone | `QrRequestResponse` |
+| `POST /v1/auth/qr/poll` | the device that asked (its secret) | `QrPollResponse`; `approved` makes the token (audited as `qr.sign_in` with `details.via = "request"`) and ends the request; an unknown id or a wrong secret is `expired` |
+| `POST /v1/me/qr/peek` | person | `QrPeekResponse`; a wrong, used or expired code is `not_found` |
+| `POST /v1/me/qr/approve` | person | `{ ok: true }` (audited as `qr.approve`); the new token belongs to the approver and is named by the request's `deviceName` |
+
+Rules:
+
+- Codes have the invite code format (40 bits), are stored as SHA-256 digests of the normalized
+  code, are single use and expire after 5 minutes. A secret is 32 random bytes (base64url),
+  stored as a SHA-256 digest.
+- `claim`, `peek` and `approve` allow 10 wrong codes per client IP per minute; `request` allows 20
+  per client IP per hour; `poll` 120 per client IP per minute. Over a limit the answer is 429
+  `rate_limited`. Clients poll every 2 seconds.
+- A member keeps at most 5 open offers; a new one ends the oldest. Approving takes effect once:
+  a second `approve` of the same code is `not_found`.
+- The QR image holds `tc-sign-in:<CODE>`, followed by `?server=<percent-encoded base URL>` when
+  the showing app knows its server, so a phone that has none yet signs in to the right one. A
+  scanner also accepts a bare code.
+- The activity log (`login` kind) also records `password.sign_in` and `qr.sign_in`.

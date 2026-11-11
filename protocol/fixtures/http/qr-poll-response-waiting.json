@@ -1,0 +1,7 @@
+{
+  "kind": "QrPollResponse",
+  "valid": true,
+  "value": {
+    "state": "waiting"
+  }
+}

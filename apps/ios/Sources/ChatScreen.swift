@@ -385,6 +385,7 @@ private struct MessageRow: View {
         }
         .controlGroupStyle(.compactMenu)
         Button(Copy.quote, systemImage: "arrowshape.turn.up.left", action: quote)
+        AskAsideMenuItem(messageId: message.id)
         if !message.body.isEmpty {
             Button(Copy.copyText, systemImage: "doc.on.doc") { UIPasteboard.general.string = message.body }
         }

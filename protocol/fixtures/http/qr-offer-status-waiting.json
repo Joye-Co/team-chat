@@ -1,0 +1,7 @@
+{
+  "kind": "QrOfferStatus",
+  "valid": true,
+  "value": {
+    "state": "waiting"
+  }
+}

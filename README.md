@@ -98,7 +98,7 @@ scripts/release.sh 1.2.3 --env staging --upload-only    # the same DMG for stagi
 `release.sh` runs in any worktree whose HEAD is `origin/main` and whose tree is clean. It sets
 the workspace version (Cargo), builds and checks the DMG (`scripts/build-dmg.sh`,
 `scripts/test-dmg.sh`) and the daemon, tags `v<version>`, creates the GitHub Release with the
-DMG, the daemon and their `.sha256` files, and uploads the DMG to the server
+DMG and the daemon (GitHub shows each file's SHA-256), and uploads the DMG to the server
 (`PUT /v1/admin/releases/<version>`), which offers it as the in-app update and on invite
 download links. Write the notes in Chinese in `docs/releases/<version>.md` and add a
 `CHANGELOG.md` entry headed `## <version> (unreleased)`; `release.sh` writes the date and stops

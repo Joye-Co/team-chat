@@ -17,14 +17,14 @@ Use one of these:
   `TeamChat-<version>.dmg` from Assets. Or in Terminal:
 
   ```sh
-  gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg*'
+  gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg'
   ```
 
-Optional check that the file is complete (the `.sha256` file is next to the DMG in the
-release):
+Optional check that the file is complete: compare the output with the `sha256:` digest shown
+next to the DMG under Assets of the release:
 
 ```sh
-shasum -a 256 -c TeamChat-<version>.dmg.sha256   # prints "OK"
+shasum -a 256 TeamChat-<version>.dmg
 ```
 
 ## 2. Install
@@ -113,12 +113,12 @@ x64 emulation and cannot run it.
    Assets on <https://github.com/Joye-Co/team-chat/releases>, or run:
 
    ```powershell
-   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe*'
+   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe'
    ```
 
    Keep the invite code for the sign-in.
-2. Optional check that the file is complete, in PowerShell (compare with the `.sha256` file
-   of the release):
+2. Optional check that the file is complete, in PowerShell (compare with the `sha256:` digest
+   shown next to the installer under Assets of the release):
 
    ```powershell
    Get-FileHash .\TeamChat-<version>-setup.exe -Algorithm SHA256

@@ -150,9 +150,9 @@ gh workflow run release.yml --ref main -f version=<v> -f mode=upload-only # uplo
   (against the previous release's DMG too) and keeps them as a workflow artifact for 7 days.
   Nothing is committed, tagged or uploaded. "would stop" lines name what a release would refuse.
 - `release` (main only): `chore(release): v<v>` on `main`, tag `v<v>`, GitHub Release with the
-  DMG, the daemon and the `.sha256` files, then `PUT /v1/admin/releases/<v>` on production.
+  DMG and the daemon, then `PUT /v1/admin/releases/<v>` on production.
   The release commit is pushed with the workflow token, which starts no CI run on `main`.
-- `upload-only` (main only): downloads the DMG of release `v<v>`, checks its `.sha256` and uploads
+- `upload-only` (main only): downloads the DMG of release `v<v>`, checks it against the release's SHA-256 digest (`scripts/check-release-digest.sh`) and uploads
   it to production again.
 
 Repository secrets (Settings, Secrets and variables, Actions). The workflow never prints them:
@@ -178,7 +178,7 @@ The same workflow builds the Windows installer on a Windows runner (job **Window
 `scripts/build-windows-installer.sh`, then `scripts/test-windows-installer.sh`, which installs,
 checks, starts and uninstalls it there) in the modes `dry-run` and `release`, and keeps it as
 the artifact `windows-installer-<v>`. In `release` the job **Publish the Windows installer**
-adds `<name>-<v>-setup.exe` and its `.sha256` to the GitHub Release and uploads it with
+adds `<name>-<v>-setup.exe` and the Windows daemon to the GitHub Release and uploads it with
 `scripts/release.sh <v> --env production --upload-only --platform windows`
 (`PUT /v1/admin/releases/<v>/assets/windows`); `upload-only` uploads the installer of the GitHub
 Release again. A prerelease has no Windows installer.
