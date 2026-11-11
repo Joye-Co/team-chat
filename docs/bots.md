@@ -8,8 +8,8 @@ SDK is `packages/bot-sdk` (`@chat/bot-sdk`); it runs on Bun and on Node 22+.
 
 ## 1. Create a bot member and get its token file
 
-Only an owner can create a bot. `--character <id>` gives a bot a look from the optional
-character pack (without the pack, avatars are monograms). Keep your own list of bots and the
+Only an owner can create a bot. `--character <id>` gives a bot one of the 26 Jojo & Friends
+characters (the desktop app picks an unused one when you add a bot there). Keep your own list of bots and the
 commands that made them in your ops checkout ([ENVIRONMENTS.md](ENVIRONMENTS.md#ops-checkout)).
 With the owner token saved by `admin.ts bootstrap` (in
 `~/.config/team-chat/<env>/owner-token`):
