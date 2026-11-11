@@ -532,7 +532,9 @@ jobs:
       # is an elevated administrator). The same test programs, started as a standard user
       # made for it: runs, cancel and pause, the whole daemon against the mock server, and the
       # scheduled task of that user (install, restart, one daemon only, update, uninstall).
-      - name: The daemon as a standard user (runs, the scheduled task)
+      # The user gets a real logon session (Remote Desktop to this computer), in which the Task
+      # Scheduler starts the task; the step fails when it gets none.
+      - name: The daemon as a standard user in its own logon session (runs, the scheduled task, the install command)
         shell: powershell
         run: ./scripts/test-daemon-standard-user.ps1
       # A side chat's checkout is read-only to its CLI. The runner's own user is an elevated
@@ -569,9 +571,10 @@ jobs:
           TC_REQUIRE_REAL_CODEX: "1"
           TC_CODEX_ELEVATED_SANDBOX: "1"
         run: |
-          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_windows_sandbox_modes codex_read_only_on_windows_report || true
+          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_windows_sandbox_modes codex_read_only_on_windows_report codex_side_chat_network_on_windows || true
           cat target/tmp/codex-windows-sandbox.json || true
           cat target/tmp/codex-windows-read-only.json || true
+          cat target/tmp/codex-windows-network.json || true
 
   # The Windows release from end to end (docs/plans/windows.zh.md, R1): a release build of the
   # app, the update helper and the daemon, the NSIS installer, a silent install with its files,
