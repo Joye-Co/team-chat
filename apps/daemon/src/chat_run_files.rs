@@ -50,6 +50,11 @@ pub(crate) fn err(code: &str, reason: Option<&str>, message: impl Into<String>) 
 pub(crate) fn inside(root: &Path, path: &str) -> Result<PathBuf, Value> {
     // Windows: the spellings that reach outside the file system are refused before anything
     // is opened (a network path would sign the daemon's user in to a server).
+    let path = if cfg!(windows) {
+        crate::sys::windows_plain_path(path)
+    } else {
+        path
+    };
     if cfg!(windows)
         && let Some(why) = crate::sys::windows_path_problem(path)
     {
@@ -457,6 +462,7 @@ mod tests {
             outside.to_lowercase(),
             outside.replace('\\', "/"),
             format!(r"\\?\{outside}"),
+            format!(r"\\?\UNC\localhost\{}$\{}", &drive[..1], &outside[3..]),
             format!(r"\\.\{outside}"),
             format!(r"\\localhost\{}$\{}", &drive[..1], &outside[3..]),
             format!(r"\\127.0.0.1\{}$\{}", &drive[..1], &outside[3..]),
@@ -492,8 +498,11 @@ mod tests {
         }
         // The same file in the working folder under other spellings is the file itself.
         let real = std::fs::canonicalize(root.path().join("a.html")).unwrap();
-        for same in ["A.HTML", r".\a.html", r"docs\..\a.html"] {
-            std::fs::create_dir_all(root.path().join("docs")).unwrap();
+        std::fs::create_dir_all(root.path().join("docs")).unwrap();
+        // Also the resolved form the `chat-run` client sends (`\\?\C:\…`).
+        let resolved = real.to_string_lossy().into_owned();
+        assert!(resolved.starts_with(r"\\?\"), "{resolved}");
+        for same in ["A.HTML", r".\a.html", r"docs\..\a.html", resolved.as_str()] {
             assert_eq!(inside(root.path(), same).unwrap(), real, "{same}");
         }
     }

@@ -379,6 +379,11 @@ mod windows_load {
 /// - a device name (`NUL`, `CON`, `COM1`, `LPT1`, …, with or without an extension).
 ///
 /// Unix has none of these forms: there the function is not applied.
+///
+/// One verbatim form is a plain path and is read as one: `\\?\X:\…`, the form the system
+/// gives for a resolved path of a local disk (the `chat-run` client sends the paths it was
+/// given resolved, so this is what arrives for `--dir page`). Take it off with
+/// [`windows_plain_path`] first; the rules then hold for what is left.
 pub fn windows_path_problem(path: &str) -> Option<&'static str> {
     let is_sep = |c: char| c == '\\' || c == '/';
     let mut chars = path.chars();
@@ -516,6 +521,23 @@ pub fn git_bash() -> Option<std::path::PathBuf> {
     tries.into_iter().find(|p| p.is_file())
 }
 
+/// `path` without the verbatim mark of a resolved local path: `\\?\C:\dir\file` is
+/// `C:\dir\file`. Every other path, also the other verbatim forms (`\\?\UNC\…`,
+/// `\\?\GLOBALROOT\…`), is returned as it is.
+pub fn windows_plain_path(path: &str) -> &str {
+    match path.strip_prefix(r"\\?\") {
+        Some(rest)
+            if rest.len() >= 3
+                && rest.as_bytes()[0].is_ascii_alphabetic()
+                && rest.as_bytes()[1] == b':'
+                && rest.as_bytes()[2] == b'\\' =>
+        {
+            rest
+        }
+        _ => path,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,10 +587,41 @@ mod tests {
         ] {
             assert_eq!(windows_path_problem(plain), None, "{plain}");
         }
+        // The verbatim form of a resolved local path is that path; the rules hold for it.
+        assert_eq!(
+            windows_plain_path(r"\\?\C:\Users\me\work\page"),
+            r"C:\Users\me\work\page"
+        );
+        assert_eq!(
+            windows_path_problem(windows_plain_path(r"\\?\C:\Users\me\page")),
+            None
+        );
+        for kept in [
+            r"\\?\UNC\server\share\x",
+            r"\\?\GLOBALROOT\Device\x",
+            r"\\?\C:",
+            r"\\.\C:\x",
+            r"C:\x",
+            "page",
+        ] {
+            assert_eq!(windows_plain_path(kept), kept);
+        }
+        for bad in [
+            r"\\?\C:\Users\me\a.txt:stream",
+            r"\\?\C:\Users\me\secret.txt.",
+            r"\\?\C:\Users\me\NUL",
+        ] {
+            assert!(
+                windows_path_problem(windows_plain_path(bad)).is_some(),
+                "{bad}"
+            );
+        }
         for bad in [
             r"\\evil.example\share\x",
             "//evil.example/share/x",
-            r"\\?\C:\Windows\win.ini",
+            r"\\?\UNC\evil.example\share\x",
+            r"\\?\C:",
+            r"\\?\C:relative",
             r"\\.\pipe\chat-run-x",
             r"\\.\PhysicalDrive0",
             r"\\?\GLOBALROOT\Device\HarddiskVolume1\x",
