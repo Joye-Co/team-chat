@@ -428,7 +428,8 @@ How the 1.1 daemon does each one:
   itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
   says how to write the block (format, states and limits); side chat prompts do not.
 
-`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://build-mac.tailnet`).
+`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://<host>`). It is not
+how a person takes over a run: that is feature `takeover` (see "Usable features").
 It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
 doctor` reports a bad one, and the daemon does not send it). A value that redaction would
 change is not sent either.
@@ -756,6 +757,90 @@ MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryK
 - The memory is `pending` with source `{ kind: "run", ids: [runId] }` until the daily
   consolidation. The member's own pending lessons are already in its next runs' prompts.
 - Text is redacted before it is stored. At most 10 notes per run (`rate_limited` after that).
+
+## Usable features
+
+Additive, like the 1.1 features: the server sends a usable frame or field only to a daemon that
+reports its feature, and every new value is an open string (an unknown one is treated as the
+safe default named below). Protocol side: protocol.md, "Usable extensions".
+
+| Feature | What the daemon does |
+| --- | --- |
+| `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity and, with `source: "app"`, lets git and `gh` ask it for the person's token for each use; emits the `github` run event. |
+| `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
+| `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
+
+```ts
+// daemon -> server
+hello.machine += { runsIn?: "host" | "vm" }       // where runs execute; required with feature "github"
+run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
+RunEvent +=
+  | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
+  | { type: "hand.command", commandId, command /* 1..4000 */, by }           // feature "takeover"
+  | { type: "hand.output",  commandId, text /* <= 16 KiB per event */ }
+  | { type: "hand.result",  commandId, ok, exitCode?, ms, timedOut?,
+      error?: "not_held" | "busy" | "unsupported" }
+  | { type: "hand.summary", by, heldMs, commands, files /* <= 20 */, headFrom?, headTo? }
+
+// server -> daemon
+run.assign += { github?: RunGithub }              // feature "github"
+RunGithub = {
+  source: "app" | "machine",     // "app": git and gh get the person's token from the daemon; "machine": the machine's own sign-in; unknown = "machine"
+  memberId,                      // the person whose GitHub the run uses
+  login?,                        // with "app" when connected
+  author?: { name, email },      // absent = the machine's own git config
+  committer: { name, email },    // the AI member
+  rewriteSsh?: boolean           // rewrite git@github.com: and ssh://git@github.com/ to HTTPS, drop SSH_AUTH_SOCK
+}
+{ t: "run.pause", runId, by?, hold?: "takeover" }                  // feature "takeover"; absent hold = a pause
+{ t: "run.command", runId, commandId, command /* 1..4000 */, by }  // feature "takeover"; only while connected
+{ t: "run.command.cancel", runId, commandId }                      // feature "takeover"
+```
+
+GitHub (feature `github`), over HTTP with the machine token:
+
+```ts
+GET  /v1/machine/runs/:id/github        -> MachineGithubTokenResponse { token, login }
+POST /v1/machine/runs/:id/github/wait   MachineGithubWaitRequest { reason: "not_connected" | "invalid" } -> { ok: true }
+POST /v1/machine/runs/:id/github/rejected                                                               -> { ok: true }
+```
+
+- The token is given only for a run on the calling machine that has not ended, and only when the
+  machine may use that person's GitHub; it is fetched for each git or `gh` use and never cached,
+  written to a file, logged or put in the CLI's environment. Errors: `not_found` with reason
+  `github.not_connected`, `conflict` with `github.invalid` (GitHub refused the token), `forbidden`
+  with `github.not_allowed` (another machine, an ended run, or no right to it).
+- `/wait` reports that the run needs a GitHub the person has not connected; the server asks the
+  person once, and the run then ends waiting (its CLI stops and reports it). `/rejected` reports
+  that git got an authentication failure, so the server checks the token once.
+- The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
+  `secret`; they are never `output` run events.
+
+Take-over (feature `takeover`):
+
+- `run.pause` with `hold: "takeover"` stops the CLI as a pause does, or upgrades a pause, and the
+  daemon records the work folder (HEAD and `git status --short`) for the hand-back. `run.command`
+  is taken only while the run is held by a take-over of the same `by`; else `hand.result` with
+  `ok: false` and `error: "not_held"` (`"busy"` while another command runs). A command runs in
+  the work folder, one at a time, at most 10 minutes, with no `chat-run` and none of the run's
+  secrets. `run.resume` ends a running command, sends `hand.summary` and gives the CLI a note on
+  what the person did before `note`.
+- `hand.*` events are not the AI member's progress: they reset no stall timer and count as no
+  tool call. The server never queues `run.command` or `run.command.cancel` for a daemon that is
+  away.
+
+Other usable changes:
+
+- `run.done.code` comes from the run's worktree: its branch, its head commit and whether every
+  commit is on the remote. A daemon that cannot tell leaves it out.
+- `chat-run artifact version --parent <n>` sends `parentVersion` in the body of `artifact.version`
+  (`AddArtifactVersionRequest`).
+- `member.handoff` and `member.assign` keep their bodies and results; their errors may carry the
+  new reasons `delegation.cycle`, `delegation.stopped` and `delegation.not_for_requester`
+  (protocol.md, "Participants, chains and relays"). An older `chat-run` prints them as they come.
+- Machine ownership: a machine is the team's or one person's (protocol.md, "Roles: 所有者 and
+  personal machines"). The daemon does not know which; the server only assigns a run to a
+  personal machine when the run works for its owner.
 
 ## Raw session upload
 

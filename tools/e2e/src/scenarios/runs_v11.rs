@@ -111,6 +111,7 @@ async fn run(c: &mut Ctx) -> Result<()> {
         .create_machine(&CreateMachineRequest {
             name: h.name("mac"),
             labels: Some(vec![label.clone()]),
+            personal: None,
         })
         .await
         .context("create machine")?;

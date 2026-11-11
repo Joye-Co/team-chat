@@ -85,8 +85,11 @@ UPDATE members SET team_owner = 1 WHERE kind = 'human' AND level = 'owner';
 | 别人的个人电脑 | 只看到名字、主人、在不在线 | 同左 | 新；不能改、不能看监控和密钥 |
 | 团队电脑上的密钥 | 设、删 | 不能 | `monitor/accounts.ts` |
 | 个人电脑上的密钥和订阅登录 | 只有主人 | 只有主人 | 新 |
-| 个人电脑上跑着的运行：插话、批准、接管 | 只有交代人和电脑主人 | 同左 | 新，3.6 |
-| 团队电脑上跑着的运行：批准、接管 | 按审批规则；管理员能批、能接管 | 交代人能 | `input.ts:73`、`takeover.ts:27` 不变 |
+| 个人电脑上跑着的运行：插话、批准、暂停、继续 | 只有交代人和电脑主人 | 同左 | 新，3.6 |
+| 个人电脑上跑着的运行：接管 | 只有电脑主人 | 同左 | 新，3.6、design-takeover 3.2 |
+| 团队电脑上跑着的运行：批准、暂停、替人交还 | 按审批规则；管理员能批、能暂停、能替人交还 | 交代人能批、能暂停 | `input.ts:73`、`takeover.ts:27` |
+| 团队电脑上跑着的运行：接管 | 不能接管别人的任务 | 只有交代人，且只在报了 `takeover-isolated` 的电脑上 | design-takeover 3.2 |
+| 停止一个运行 | 群里任何一个人（今天的规则，不变） | 同左 | `routes.ts:451` |
 | 用量（全团队）、活动、审计、诊断 | 能 | 不能 | 不变 |
 | 预算卡的「加额度 / 停止」 | 能 | 不能 | `external.ts:177` 不变 |
 | 团队约定（团队层记忆）写入、撤回 | 能 | 只读 | `memory/access.ts:31` 不变 |
@@ -128,12 +131,17 @@ END;
 
 | 运行怎么来的 | `requested_for` |
 | --- | --- |
-| 人的消息（包括追问、重来） | 这个人 |
+| 人的消息（包括追问） | 这个人 |
+| 重来（`POST /v1/runs/:id/retry`） | 原运行的 `requested_for` |
+| 私密卡片的作答（`requested_by` 是 `anonymous`） | 真作答人（desk 的 `claim.askerId`） |
 | 转交、分出去（`delegate.ts`） | 前一个运行的 `requested_for`，`DelegateIn.requesterId` 改传它 |
-| 一个 AI 成员在话题里 @ 另一个（接力） | 前一个 AI 成员在这个话题里正在跑或最近一次运行的 `requested_for`；没有就 NULL |
+| 接力的一步（design-relay，房间按顺序叫醒） | 发起接力的人（`topic_relays.started_by`） |
+| 连上 GitHub 后自动起的跟进（design-github-identity） | 等待的那次运行的 `requested_for` |
 | 钩子触发 | NULL |
 
-原因：接力和转交是在替同一个人做事，跟着这个人走；钩子没有人。`requested_by` 含义不变，仍是触发消息的作者。
+原因：接力和转交是在替同一个人做事，跟着这个人走；钩子没有人。`requested_by` 含义不变，仍是触发消息的作者。AI 成员的消息永远不起运行（design-relay），所以没有「替 AI 成员做」的运行。
+
+协议上它是 `BotRun.requestedFor`（protocol.md「Who a run works for」），四份设计说的「交代人 / 请求人」都指它：design-github-identity 的身份人第 1 条、design-relay 的链请求人（`work_chains.requester_id`）、design-takeover 的「请求人」。私密卡片作答的运行在线上不带这个字段，作答人对外仍是匿名。规则 2 的「接力来的」：`fromMachine` 取前一步的运行所在的电脑。
 
 **派工规则**（`dispatch.ts` 的 `candidates` 加参数 `ctx: { botId, requestedFor, fromMachine?, updatedBy }`）。团队的电脑和今天一样：指定的或者标签匹配。个人电脑 P（主人 A）成为候选，要满足下面一条：
 
@@ -152,7 +160,7 @@ END;
 
 **排队不互相挡**：`dispatchQueued` 里找不到电脑的那条 `continue`，不再 `break`；只有所有候选电脑都没空位时才停。`queuePosition` 改成只数「更早排队、而且候选电脑有交集」的运行。原因：A 合上笔记本，不该让团队主机上 B 的活也停下。
 
-**做不了的立刻说**：派工前算 `reachable(...)`，只看归属、指定、勾选、`updated_by` 和运行方式，不看在不在线和忙不忙。一台都不可能时不排队：话题里回 `TEXT.personalOnly`，撤掉 👀，运行结束成「做不了」。转交和分出去在对方 desk 的 `takeDelegation` 里先算 `reachable`，为 false 就拒绝，前一个运行收到 `delegation.refused`，原因写「{成员}只做{人}交代的事」，它可以换一位成员。可能、只是离线或忙，就按线 3 排队。`personalOnly` 会说出别人有台个人电脑，这可以接受：电脑名字和主人本来对所有人可见。
+**做不了的立刻说**：派工前算 `reachable(...)`，只看归属、指定、勾选、`updated_by` 和运行方式，不看在不在线和忙不忙。一台都不可能时不排队：话题里回 `TEXT.personalOnly`，撤掉 👀，运行结束成「做不了」。转交和分出去在对方 desk 的 `takeDelegation` 里先算 `reachable`，为 false 就拒绝，前一个运行收到 `delegation.not_for_requester`（和 design-relay 同一个 reason），原因写「{成员}只做{人}交代的事」，它可以换一位成员。可能、只是离线或忙，就按线 3 排队。`personalOnly` 会说出别人有台个人电脑，这可以接受：电脑名字和主人本来对所有人可见。
 
 **追问和重来**：`requested_for` 是追问或重来的人自己。B 在 A 的个人电脑做过的话题里追问，B 的运行不能用 A 的电脑，会落到团队的电脑上（从新会话开始），或者 AI 成员只在 A 的电脑上时得到 `personalOnly`。原因：B 交代的事不能跑在 A 的电脑上，这是机 3.1 的底线。
 
@@ -198,7 +206,9 @@ END;
 
 - 插话：`toActive` 只把 `requested_for` 那个人的消息作为 `run.input` 送进去；别人的消息照常留在话题里，下次运行作为上下文读到。
 - 批准：`mayApprove` 去掉 `level === "owner"` 的放行，只认交代人（`requested_for`）和电脑主人。
-- 接管（暂停、继续、看接管地址）：`mayTakeOver` 同样去掉管理员放行，只认电脑主人。接管状态机本身见 design-takeover，它按这条规则判断谁能看。
+- 暂停、继续、看接管地址：去掉管理员放行，只认交代人（`requested_for`）和电脑主人。
+- 接管（能在工作目录里跑命令）：只认电脑主人，交代人也不行。接管状态机本身见 design-takeover 3.2，两份设计的权限按这两条对齐。
+- 停止：不变，群里任何一个人都能停（`routes.ts:451`）。
 
 原因：在个人电脑上运行和主人自己动手一样，团队的管理员不该替他批准或动他的电脑。团队电脑上一切不变。
 
@@ -211,8 +221,11 @@ END;
 - `Machine.ownerId?: Id`：不发表示团队的电脑。`Machine.personalBots?: { botId: Id; repoPath?: string }[]`：只发给主人。
 - `CreateMachineRequest.personal?: boolean`。
 - 新路由：`PATCH /v1/machines/:id`（`UpdateMachineRequest { name?: Name; owner?: "me" | null }`）；`PUT /v1/machines/:id/bots/:botId`（`{ repoPath?: string | null }`）；`DELETE /v1/machines/:id/bots/:botId`。
-- 新错误码（`ApiError.code` 的 reason）：`role.owner_only`、`role.last_owner`、`machine.not_yours`、`machine.team_admin_only`、`machine.personal_requester`（运行结束原因）。
+- 新错误码（`ApiError.code` 的 reason）：`role.owner_only`、`role.last_owner`、`machine.not_yours`、`machine.team_admin_only`、`machine.personal_requester`（运行结束原因；`POST /v1/runs/:id/retry` 因此被拒时也带它）。
+- `BotRun.requestedFor?: Id`：即 3.3 的 `requested_for`（私密卡片作答的运行不发）。四份设计合并协议时加的，派工、批准、接管和客户端判断「我能不能接管」都看它。
+- 转交、分出去被个人电脑挡下时的 reason 是 `delegation.not_for_requester`（和 design-relay 共用）。
 - 机器协议（`docs/machine-protocol.md`）不变，只加一段「电脑归属」说明；daemon 不知道归属。
+- 以上都已在协议 PR（四份设计合并的那一个）里加好；R1、R3 只做服务端和迁移。
 
 ### 3.8 服务端改动一览
 
@@ -306,7 +319,7 @@ R1、R3 可并行（R1 只碰成员，R3 只碰电脑，都不改对方文件，
 | R1 身份：服务端和协议 | 0017_roles；`teamOwner` 读写；所有者独有的检查；邀请规则；最后一位所有者守卫；bootstrap 写所有者；PRODUCT.md「Permissions」和 protocol.md「Members」改成三种身份 | `server/migrations/0017_roles.sql`、`server/src/core/{db,routes}.ts`（bootstrap、邀请）、`server/src/notify/members.ts`、`packages/protocol/src/{common,members,roster}.ts`、`crates/chat-protocol/src/{entities,members,roster}.rs`、`protocol/fixtures/http/member-*`、`docs/protocol.md`、`docs/PRODUCT.md` | 无 | vitest 每条矩阵行：管理员改身份 403；降最后一位所有者 409；管理员给另一位管理员发重新登录码成功、身份不变；管理员发 `level:"owner"` 新邀请 403；AI 成员设 `teamOwner` invalid；迁移后身份；活动页出现「level」；两边 fixture 测试 |
 | R2 身份：桌面端 | `team_owner` 进数据层；`i_am_team_owner`；身份列和「设为…」；文案统一 | `apps/desktop/src/{data.rs,provider/convert.rs,provider/settings.rs}`、`views/settings/{mod,members}.rs`（成员列表部分）、`views/admin/{team,mod}.rs`、`views/members_page/mod.rs`、`copy/{settings,admin}.rs`（身份段）、`fake/settings*.rs`（只给截图自测补字段） | R1 | `cargo test`（含文案目录测试）；截图自测：所有者、管理员、普通成员三视角，浅色和深色；沙盒两个账号实测 |
 | R3 电脑归属：服务端和协议 | 0017_machine_owner（含新触发器）；`POST /v1/machines` 带 `personal`；`PATCH`；`machine_bots` 路由；`requireMachineManager`；`GET` 按身份返回；`PUT runner` 的归属检查；停用钩子；machine-protocol.md 加「电脑归属」 | `server/migrations/0017_machine_owner.sql`、`server/src/bots/{routes,store}.ts`、`server/src/bots/deactivate.ts`（新，注册钩子）、`server/src/monitor/{accounts,index}.ts`、`packages/protocol/src/bots.ts`、`crates/chat-protocol/src/bots.rs`、`protocol/fixtures/http/machine-*`、`docs/protocol.md`（Machines 段）、`docs/machine-protocol.md` | 无 | vitest：普通成员加团队电脑 403、加个人电脑成功；管理员动不了别人个人电脑的密钥和监控；改名、交给团队、改成我的电脑；管理员带原 `machineId` 改别人个人电脑上的 AI 成员成功、改成别人的个人电脑 403；停用后电脑 `revoked_at` 有值、`machine_bots` 清空、审计有 `machine.revoke`；钩子写库独立成批、吊销连接失败时写库仍在；fixture 测试 |
-| R4 派工按归属 | `requesterKind`、`requesterOf`、`requested_for`（DO 迁移 `roles-1`）；`candidates` 三条规则和优先顺序；`reachable` 和 `personalOnly`、`waitPersonal`；`dispatchQueued` 不互相挡、`queuePosition`；转交带 `requested_for` 和 `fromMachine`、`takeDelegation` 先查；勾选变化重新派；个人电脑上的插话、批准、接管；代码仓库路径 | `server/src/bots/dispatch.ts`、`server/src/bots/desk/{core,runs,delegate,input,takeover}.ts`、`server/src/bots/routes.ts`（只在 `machine_bots` 路由里加一行重新派工）、`server/src/bots/store.ts`（只加 `requesterKind`） | R3；线 1–3、线 6 改 desk 的 PR | `dispatch.ts` 单元测试：一个人、一台个人电脑、没指定电脑的 AI 成员，他的请求落到这台电脑；别人请求不落；钩子只在 `updated_by` 是主人时落；勾选优先；desk 测试：A 的运行等 A 离线的电脑，B 后来的运行拿到团队主机；X 在 A 电脑上转交给 Y，Y 也在 A 电脑上；分出去给只在别人电脑上的成员得到 `delegation.refused`；B 追问 A 电脑上的话题落到团队电脑；B 的插话不进 A 电脑上的运行；管理员批不了 A 电脑上的审批、不能接管；tools/e2e 加两人两电脑场景 |
+| R4 派工按归属 | `requesterKind`、`requesterOf`、`requested_for`（DO 迁移 `roles-1`）；`candidates` 三条规则和优先顺序；`reachable` 和 `personalOnly`、`waitPersonal`；`dispatchQueued` 不互相挡、`queuePosition`；转交带 `requested_for` 和 `fromMachine`、`takeDelegation` 先查；勾选变化重新派；个人电脑上的插话、批准、接管；代码仓库路径 | `server/src/bots/dispatch.ts`、`server/src/bots/desk/{core,runs,delegate,input,takeover}.ts`、`server/src/bots/routes.ts`（只在 `machine_bots` 路由里加一行重新派工）、`server/src/bots/store.ts`（只加 `requesterKind`） | R3；线 1–3、线 6 改 desk 的 PR | `dispatch.ts` 单元测试：一个人、一台个人电脑、没指定电脑的 AI 成员，他的请求落到这台电脑；别人请求不落；钩子只在 `updated_by` 是主人时落；勾选优先；desk 测试：A 的运行等 A 离线的电脑，B 后来的运行拿到团队主机；X 在 A 电脑上转交给 Y，Y 也在 A 电脑上；分出去给只在别人电脑上的成员得到 `delegation.not_for_requester`；B 追问 A 电脑上的话题落到团队电脑；B 的插话不进 A 电脑上的运行；管理员批不了 A 电脑上的审批、不能接管；tools/e2e 加两人两电脑场景 |
 | R5 电脑归属：桌面端 | `personal:true`；`solo()`；电脑页分组和副标题、普通成员「添加电脑」；「谁用这台电脑」；交给团队、改成我的电脑；勾选和代码仓库；AI 成员表单的放置和「我交代的事」；默认选这台电脑；邀请表单提示；`seed.ts` 加一位普通成员和他的个人电脑 | `apps/desktop/src/provider/{settings,mod}.rs`、`crates/chat-core/src/runs.rs`（新路由的客户端）、`views/settings/machines.rs`、`views/settings/members.rs`（BotForm 和邀请表单部分）、`views/admin/fleet.rs`、`copy/settings.rs`（电脑段）、`scripts/sandbox/seed.ts` | R2、R3；线 10 改电脑的弹窗 | `cargo test`；截图自测（一个人、普通成员、管理员看电脑页，个人电脑详情），浅色和深色；`bun run dev:desktop` 实测；用 `docs/design/skills/emilkowalski/` 四个技能过一遍 |
 
 ## 7. 真电脑上的验收步骤

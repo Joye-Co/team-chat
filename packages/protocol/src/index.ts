@@ -174,6 +174,18 @@ import {
   RemovePasswordRequest,
   SetPasswordRequest,
 } from "./account.ts";
+// usable: roles, GitHub sign-in, relays, take-over
+import { SetMachineBotRequest, UpdateMachineRequest } from "./bots.ts";
+import {
+  GithubDeviceResponse,
+  GithubPollResponse,
+  GithubStatusResponse,
+  GithubStatusTransient,
+  MachineGithubTokenResponse,
+  MachineGithubWaitRequest,
+} from "./github.ts";
+import { ChainStopResponse, topicRelayFields, topicUpdatedRelayFields, TopicRelay } from "./relay.ts";
+import { RunCommandRequest, RunCommandResponse } from "./takeover.ts";
 
 export * from "./common.ts";
 export * from "./account.ts";
@@ -206,6 +218,9 @@ export * from "./bots.ts";
 export * from "./plan.ts";
 export * from "./settings.ts";
 export * from "./push.ts";
+export * from "./github.ts";
+export * from "./relay.ts";
+export * from "./takeover.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -229,6 +244,8 @@ export const Member = z.object({
   reportsTo: Id.optional(),
   /** 1.1: the member's weekly spending limit in US cents (限额), set by an owner; absent = none. */
   weeklyBudgetCents: z.int().nonnegative().max(MAX_WEEKLY_BUDGET_CENTS).optional(),
+  /** Usable: true for a 所有者 (always `level: "owner"`); sent only when true. */
+  teamOwner: z.boolean().optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -279,6 +296,7 @@ export const Topic = z.object({
   lastSeq: Seq,
   messageCount: z.int().nonnegative(),
   ...topicFields,
+  ...topicRelayFields,
 });
 export type Topic = z.infer<typeof Topic>;
 
@@ -321,6 +339,8 @@ export const ErrorBody = z.object({
   reason: z.string().min(1).max(64).optional(),
   /** 1.1, `rate_limited`: wait at least this long before the next try. */
   retryAfterMs: z.int().nonnegative().optional(),
+  /** Usable: the members the reason is about, e.g. who cannot take a relay (`relay.member_unavailable`). */
+  memberIds: z.array(Id).max(20).optional(),
 });
 export type ErrorBody = z.infer<typeof ErrorBody>;
 
@@ -342,6 +362,7 @@ export const TopicUpdatedEvent = z.object({
     title: Title.optional(),
     status: TopicStatus.optional(),
     ...topicUpdatedFields,
+    ...topicUpdatedRelayFields,
   }),
 });
 export const MessageCreatedEvent = z.object({
@@ -442,6 +463,8 @@ export const TransientEvent = z.discriminatedUnion("type", [
   ArtifactReplyTransient,
   // settings: only to connections whose hello has feature "settings/1".
   DigestTransient,
+  // usable: only to the person's own connections whose hello has feature "github/1".
+  GithubStatusTransient,
 ]);
 export type TransientEvent = z.infer<typeof TransientEvent>;
 
@@ -921,6 +944,18 @@ export const schemas = {
   BadgeResponse,
   PushData,
   AnswerCardRequest,
+  // usable
+  UpdateMachineRequest,
+  SetMachineBotRequest,
+  TopicRelay,
+  ChainStopResponse,
+  GithubStatusResponse,
+  GithubDeviceResponse,
+  GithubPollResponse,
+  MachineGithubTokenResponse,
+  MachineGithubWaitRequest,
+  RunCommandRequest,
+  RunCommandResponse,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

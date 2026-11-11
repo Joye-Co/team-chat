@@ -1,0 +1,15 @@
+{
+  "kind": "GithubStatusResponse",
+  "valid": true,
+  "description": "connected",
+  "value": {
+    "available": true,
+    "account": {
+      "login": "alice-dev",
+      "name": "Alice",
+      "status": "ok",
+      "connectedAt": 1762128000000
+    },
+    "waits": []
+  }
+}

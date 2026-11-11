@@ -20,6 +20,8 @@ export const RosterMember = z.object({
   /** The newest use of any of their tokens. */
   lastSeenAt: Millis.optional(),
   devices: z.array(RosterDevice).max(50),
+  /** Usable: true for a 所有者; sent only when true. */
+  teamOwner: z.boolean().optional(),
 });
 export type RosterMember = z.infer<typeof RosterMember>;
 

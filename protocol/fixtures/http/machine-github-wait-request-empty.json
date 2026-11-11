@@ -1,0 +1,6 @@
+{
+  "kind": "MachineGithubWaitRequest",
+  "valid": false,
+  "description": "reason is required",
+  "value": {}
+}

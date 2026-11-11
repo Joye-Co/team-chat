@@ -228,6 +228,71 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub queue_position: Option<u32>,
+    // Usable fields. Absent on older runs and servers.
+    /// The person the run works for (交代人); `None` = no person (a hook), a private card
+    /// answer, or a run from before (read `requested_by`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub requested_for: Option<String>,
+    /// The piece of work (chain) the run belongs to.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub chain_id: Option<String>,
+    /// Where the run left its code (`run.done.code`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub code: Option<crate::relay::RunCode>,
+    /// The one state people see ([`crate::takeover::RUN_PHASES`], or a newer value).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub phase: Option<String>,
+    /// What a waiting phase waits for ([`crate::takeover::RUN_WAITING_FOR`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub waiting_for: Option<String>,
+    /// With `paused_by` only: "pause" | "takeover".
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hold_kind: Option<String>,
+    /// With `paused_by` only: when the hold started.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub held_at: Option<Millis>,
+    /// How the run's machine can be taken over: "commands" | "isolated" | "none".
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub takeover: Option<String>,
+    /// The latest hand-back.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_handback: Option<crate::takeover::RunHandback>,
 }
 
 impl BotRun {
@@ -873,9 +938,40 @@ pub struct Machine {
         skip_serializing_if = "Option::is_none"
     )]
     pub takeover_url: Option<String>,
+    /// Usable: the person whose own machine this is (个人的电脑); `None` = a team machine.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<String>,
+    /// Usable: the AI members whose work for the owner runs here. Sent to the owner only.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub personal_bots: Option<Vec<PersonalBot>>,
 }
 
-/// `POST /v1/machines` (owner)
+/// Usable: at most this many AI members on one personal machine.
+pub const MAX_PERSONAL_BOTS: usize = 200;
+
+/// Usable: an AI member whose work for the machine's owner runs on that machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalBot {
+    pub bot_id: String,
+    /// The owner's code folder on this machine for that work.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub repo_path: Option<String>,
+}
+
+/// `POST /v1/machines` (owner; usable: any member, see `personal`)
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMachineRequest {
@@ -886,6 +982,13 @@ pub struct CreateMachineRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub labels: Option<Vec<String>>,
+    /// Usable: true = my own machine; `None` = a team machine for an admin, my own for a member.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub personal: Option<bool>,
 }
 
 impl CreateMachineRequest {
@@ -893,6 +996,67 @@ impl CreateMachineRequest {
         check_name("name", &self.name)?;
         if let Some(l) = &self.labels {
             check_labels("labels", l)?;
+        }
+        Ok(())
+    }
+}
+
+/// Usable: `UpdateMachineRequest.owner = "me"`.
+pub const MACHINE_OWNER_ME: &str = "me";
+
+/// `PATCH /v1/machines/:id` (usable): rename it, or move it between the team and me.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMachineRequest {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub name: Option<String>,
+    /// `Some(Some("me"))` = make it my own machine; `Some(None)` (`null`) = give it to the team.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner: Option<Option<String>>,
+}
+
+impl UpdateMachineRequest {
+    pub fn validate(&self) -> Validation {
+        if self.name.is_none() && self.owner.is_none() {
+            return fail("name", "name or owner is required");
+        }
+        if let Some(n) = &self.name {
+            check_name("name", n)?;
+        }
+        if let Some(Some(o)) = &self.owner
+            && o != MACHINE_OWNER_ME
+        {
+            return fail("owner", "owner is \"me\" or null");
+        }
+        Ok(())
+    }
+}
+
+/// `PUT /v1/machines/:id/bots/:botId` (the machine's owner, usable). Response: [`Machine`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMachineBotRequest {
+    /// My code folder on this machine; `Some(None)` (`null`) clears it, `None` keeps it.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub repo_path: Option<Option<String>>,
+}
+
+impl SetMachineBotRequest {
+    pub fn validate(&self) -> Validation {
+        if let Some(Some(p)) = &self.repo_path {
+            check_chars("repoPath", p, 1, 1024)?;
         }
         Ok(())
     }

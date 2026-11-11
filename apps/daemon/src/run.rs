@@ -439,6 +439,7 @@ this machine cannot be made to stop at them (update it)",
         session_id: outcome.session_id.clone(),
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
+        code: None,
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());

@@ -641,6 +641,7 @@ impl CoreProvider {
             let req = CreateMachineRequest {
                 name,
                 labels: (!labels.is_empty()).then_some(labels),
+                personal: None,
             };
             let r = client
                 .http()

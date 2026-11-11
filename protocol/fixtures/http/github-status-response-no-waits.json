@@ -1,0 +1,8 @@
+{
+  "kind": "GithubStatusResponse",
+  "valid": false,
+  "description": "waits is required",
+  "value": {
+    "available": true
+  }
+}

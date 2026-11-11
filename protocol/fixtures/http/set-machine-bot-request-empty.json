@@ -1,0 +1,6 @@
+{
+  "kind": "SetMachineBotRequest",
+  "valid": true,
+  "description": "check the bot, keep the folder",
+  "value": {}
+}
