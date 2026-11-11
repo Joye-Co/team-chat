@@ -1,3 +1,4 @@
+import PhotosUI
 import QuickLook
 import SwiftUI
 
@@ -19,6 +20,9 @@ struct ChatScreen: View {
     @State private var quote: MessageItem?
     @State private var mentioned: [MemberItem] = []
     @State private var preview: URL?
+    @State private var photo: PhotosPickerItem?
+    @State private var pickingPhoto = false
+    @State private var pickingFile = false
     @FocusState private var composing: Bool
 
     private var group: GroupItem? { model.group(groupId) }
@@ -55,6 +59,9 @@ struct ChatScreen: View {
                         )
                         .id(message.id)
                     }
+                    ForEach(model.uploads[topicId] ?? []) { item in
+                        UploadRow(item: item) { model.dismissUpload(item.id, in: topicId) }
+                    }
                     ForEach(pending, id: \.id) { item in
                         PendingRow(item: item, retry: { model.retry(item.id) }, discard: { model.discard(item.id) })
                             .id(item.id)
@@ -77,6 +84,7 @@ struct ChatScreen: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { dock }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 0) {
@@ -96,6 +104,16 @@ struct ChatScreen: View {
             }
         }
         .quickLookPreview($preview)
+        .photosPicker(isPresented: $pickingPhoto, selection: $photo, matching: .images)
+        .onChange(of: photo) { _, item in
+            guard let item else { return }
+            photo = nil
+            Task { await sendPhoto(item) }
+        }
+        .fileImporter(isPresented: $pickingFile, allowedContentTypes: [.item]) { result in
+            guard case .success(let url) = result else { return }
+            sendPicked(url)
+        }
         .onAppear {
             model.watch(topic: topicId)
             reload()
@@ -210,6 +228,25 @@ struct ChatScreen: View {
             .prefix(6).map { $0 }
     }
 
+    private func sendPhoto(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+        let name = "IMG_\(Int(Date.now.timeIntervalSince1970)).\(ext)"
+        guard let url = try? AppModel.stage(data: data, name: name) else { return }
+        model.sendFile(at: url, name: name, group: groupId, topic: topicId, quote: quote?.id)
+        quote = nil
+    }
+
+    private func sendPicked(_ picked: URL) {
+        let scoped = picked.startAccessingSecurityScopedResource()
+        defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: picked),
+            let url = try? AppModel.stage(data: data, name: picked.lastPathComponent)
+        else { return }
+        model.sendFile(at: url, name: picked.lastPathComponent, group: groupId, topic: topicId, quote: quote?.id)
+        quote = nil
+    }
+
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private func send() {
@@ -265,7 +302,15 @@ struct ChatScreen: View {
                 .padding(.leading, 18).padding(.trailing, 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 4) {
+                Menu {
+                    Button(Copy.attachPhoto, systemImage: "photo") { pickingPhoto = true }
+                    Button(Copy.attachFile, systemImage: "doc") { pickingFile = true }
+                } label: {
+                    Image(systemName: "plus").font(.headline).foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                }
+                .accessibilityLabel(Copy.attach)
                 TextField(Copy.composerPlaceholder, text: $draft, axis: .vertical).lineLimit(1...6)
                     .focused($composing).padding(.vertical, 8)
                 Button(action: send) {
@@ -277,7 +322,7 @@ struct ChatScreen: View {
                 .opacity(canSend ? 1 : 0.35)
                 .animation(.easeOut(duration: 0.15), value: canSend)
             }
-            .padding(.leading, 18).padding(.trailing, 6).padding(.vertical, 4)
+            .padding(.leading, 6).padding(.trailing, 6).padding(.vertical, 4)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: 24))
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
@@ -539,6 +584,37 @@ private struct PendingRow: View {
                     Text(Copy.sending).font(.footnote).foregroundStyle(.tertiary)
                 }
             }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 8)
+    }
+}
+
+/// A file of mine on its way up.
+private struct UploadRow: View {
+    let item: UploadItem
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Color.clear.frame(width: 36, height: 1)
+            HStack(spacing: 10) {
+                if item.failed {
+                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.bad)
+                } else {
+                    ProgressView()
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(item.name).font(.subheadline).lineLimit(1)
+                    Text(item.failed ? Copy.uploadFailed : Copy.uploading).font(.caption)
+                        .foregroundStyle(item.failed ? AnyShapeStyle(Theme.bad) : AnyShapeStyle(.secondary))
+                }
+                if item.failed {
+                    Button(Copy.discard, role: .destructive, action: dismiss).font(.footnote)
+                }
+            }
+            .padding(.horizontal, 12).frame(minHeight: 48)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
             Spacer(minLength: 0)
         }
         .padding(.top, 8)
