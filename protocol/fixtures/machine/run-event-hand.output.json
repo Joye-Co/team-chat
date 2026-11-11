@@ -1,0 +1,9 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "hand.output",
+    "commandId": "c1",
+    "text": "> app@1.0.0 test\n12 passed\n"
+  }
+}

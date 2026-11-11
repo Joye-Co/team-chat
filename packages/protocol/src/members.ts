@@ -20,6 +20,8 @@ export const UpdateMemberRequest = z.object({
   reportsTo: Id.nullable().optional(),
   /** 1.1, owner only: the weekly spending limit in US cents; null clears it. */
   weeklyBudgetCents: z.int().nonnegative().max(MAX_WEEKLY_BUDGET_CENTS).nullable().optional(),
+  /** Usable, 所有者 only: true makes a person a 所有者 (and `level` "owner"); false keeps them an admin. */
+  teamOwner: z.boolean().optional(),
 });
 export type UpdateMemberRequest = z.infer<typeof UpdateMemberRequest>;
 

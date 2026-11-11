@@ -1,0 +1,12 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "description": "the daemon refuses a command of someone who does not hold the run",
+  "value": {
+    "type": "hand.result",
+    "commandId": "c2",
+    "ok": false,
+    "ms": 0,
+    "error": "not_held"
+  }
+}

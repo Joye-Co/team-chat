@@ -414,9 +414,11 @@ impl Job {
         String::from_utf8_lossy(&s[start..]).trim().to_string()
     }
 
-    /// The paths shared with the VM: the run folder, the run's git dir, the CLIs' folders.
+    /// The paths shared with the VM: the run folder, the working folder (a line's folder, kept
+    /// on this host for the member's next run in the topic), the run's git dir, the CLIs'
+    /// folders.
     fn shares(&self) -> Vec<PathBuf> {
-        let mut out = vec![self.run_dir.clone()];
+        let mut out = vec![self.run_dir.clone(), self.cwd.clone()];
         if let Some(gd) = workspace::read_meta(&self.run_dir).and_then(|m| m.git_dir) {
             out.push(gd);
         }

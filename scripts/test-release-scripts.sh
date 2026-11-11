@@ -374,6 +374,17 @@ rm -f "$SB/gh/v9.9.9/$NAME-9.9.9.dmg"
 expect fail "a file missing on GitHub fails the reupload, for the DMG" rel --reupload
 expect ok "and the other file is still uploaded" is "$(uploads)" "windows "
 
+# Without the admin secret a repair uploads nothing: it must say so and fail, not report
+# that the files are on the server.
+upload_stub 200
+mv "$TEAM_CHAT_CONFIG_DIR/staging/admin-secret" "$WORK/admin-secret.away"
+expect fail "reupload without the admin secret fails" rel --reupload
+expect ok "and says why" bash -c "grep -q 'no admin secret' '$WORK/prev.log' && ! grep -q 'are on the server' '$WORK/prev.log'"
+expect ok "nothing was uploaded" test ! -e "$WORK/uploads.log"
+expect fail "upload-only without the admin secret fails too" "$R" 9.9.9 --env staging --upload-only --platform windows
+expect ok "and uploads nothing" test ! -e "$WORK/uploads.log"
+mv "$WORK/admin-secret.away" "$TEAM_CHAT_CONFIG_DIR/staging/admin-secret"
+
 # The run stops between the tag and the GitHub Release: --resume finishes it.
 sandbox; upload_stub 200
 expect fail "a release that cannot create the GitHub Release is red" rel_create_fails "${BOTH[@]}"

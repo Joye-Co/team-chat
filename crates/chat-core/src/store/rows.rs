@@ -341,6 +341,8 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
         weekly_budget_cents: r
             .get::<_, Option<i64>>(9)?
             .and_then(|c| u64::try_from(c).ok()),
+        // usable: not cached yet (the roles desktop work adds it).
+        team_owner: None,
     })
 }
 

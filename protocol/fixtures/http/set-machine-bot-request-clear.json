@@ -1,0 +1,8 @@
+{
+  "kind": "SetMachineBotRequest",
+  "valid": true,
+  "description": "null clears the folder",
+  "value": {
+    "repoPath": null
+  }
+}

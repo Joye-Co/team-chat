@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": false,
+  "description": "a machine cannot be given to someone else",
+  "value": {
+    "owner": "01JBX0ALICE0000000000000AB"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "kind": "ChainStopResponse",
+  "valid": true,
+  "value": {
+    "stoppedRuns": 2
+  }
+}

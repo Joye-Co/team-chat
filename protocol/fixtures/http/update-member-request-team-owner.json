@@ -1,0 +1,7 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "value": {
+    "teamOwner": true
+  }
+}

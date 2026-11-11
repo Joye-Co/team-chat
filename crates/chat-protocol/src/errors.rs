@@ -35,6 +35,14 @@ pub struct ErrorBody {
         skip_serializing_if = "Option::is_none"
     )]
     pub retry_after_ms: Option<u64>,
+    /// Usable: the members the reason is about (e.g. `relay.member_unavailable`).
+    #[serde(
+        rename = "memberIds",
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub member_ids: Option<Vec<String>>,
 }
 
 /// A frame that could not be parsed or encoded. Codes match `parseFrame` in packages/protocol:

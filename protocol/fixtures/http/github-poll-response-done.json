@@ -1,0 +1,13 @@
+{
+  "kind": "GithubPollResponse",
+  "valid": true,
+  "value": {
+    "state": "done",
+    "account": {
+      "login": "alice-dev",
+      "name": "Alice",
+      "status": "ok",
+      "connectedAt": 1762128000000
+    }
+  }
+}

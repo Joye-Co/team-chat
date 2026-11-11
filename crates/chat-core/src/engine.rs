@@ -140,6 +140,7 @@ fn card_live_write(id: &str, op: &OutboxOp) -> Option<LiveWrite> {
 pub(crate) fn offline_error() -> ErrorBody {
     ErrorBody {
         retry_after_ms: None,
+        member_ids: None,
         code: ErrorCode::Internal,
         message: "not connected".into(),
         reason: Some("client.offline".into()),
@@ -154,6 +155,7 @@ pub(crate) fn emit_live_ack(
 ) {
     let bad_result = || ErrorBody {
         retry_after_ms: None,
+        member_ids: None,
         code: ErrorCode::Internal,
         message: "ack without a valid result".into(),
         reason: None,
@@ -1523,6 +1525,7 @@ impl Session {
         }
         let err = error.unwrap_or(ErrorBody {
             retry_after_ms: None,
+            member_ids: None,
             code: ErrorCode::Internal,
             message: String::new(),
             reason: None,
@@ -1684,6 +1687,8 @@ impl Session {
             }
             // settings-backend: the daily digest (feature "settings/1").
             TransientEvent::Digest(d) => self.shared.emit(ClientUpdate::Digest(Box::new(d))),
+            // usable: GitHub sign-in (feature "github/1", not sent in hello yet).
+            TransientEvent::GithubStatus(_) => {}
         }
     }
 

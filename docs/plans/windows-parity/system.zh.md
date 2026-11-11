@@ -1,7 +1,8 @@
 # Windows 对齐清单：系统集成
 
 范围：`apps/desktop/src/provider/**`（不含 `this_mac.rs`）、`views/nav/**`、`views/settings/**`、
-`views/files/**`、`win32.rs`、`main.rs` 里启动和按系统分支的部分、`crates/chat-core/**`。目标是 Mac 版在这些地方给用户的每一个功能和行为，
+`views/files/**`、`win32.rs`、`main.rs` 里启动和按系统分支的部分、`crates/chat-core/**`；另外包括这条线改过的
+`views/media` 里和预览有关的部分（「用系统应用打开」的检查、没有预览时的文字）和任务栏角标对所有顶层窗口的监听。目标是 Mac 版在这些地方给用户的每一个功能和行为，
 Windows 版都有同样的结果。
 
 这份清单是对着代码做的：上面这些文件里每一处 `cfg(target_os = …)`、`cfg!(…)`，每一个在 macOS 以外
@@ -38,7 +39,7 @@ Windows 实现（`gpui-pre-windows 0.3.10`）也逐项查过：哪些调用是�
 | --- | --- | --- | --- | --- |
 | 应用图标上的未读数 | Dock 角标，未读数，0 时没有 | 任务栏按钮上的角标（`ITaskbarList3::SetOverlayIcon`）：红底白字的未读数，超过 99 写 `99+`（角标只有 16 px），0 时没有。应用的每个有任务栏按钮的窗口都有，包括产出窗口（它是普通的 Win32 窗口，GPUI 不知道它）：应用用 `SetWinEventHook` 看本进程每一个显示出来的顶层窗口，监听系统发给它的 `TaskbarButtonCreated`，按钮建好后设角标；资源管理器重启后任务栏对象重新取，新按钮建好时再设一次 | 一样 | CI（`the_taskbar_takes_the_unread_badge`：runner 上真的收到 `TaskbarButtonCreated`、设置和清除；`a_window_gpui_does_not_know_gets_the_badge_too`：普通 Win32 窗口被看到）。`crates/artifact-view` 没有改。重启资源管理器没有在 CI 上做（会打断同一个任务里后面的截图步骤），真机 |
 | 菜单栏图标 | `NSStatusItem`，有未读时带点，悬停提示未读数，点击打开主窗口 | 通知区域图标，同样 | 一样 | CI（`the_template_images_become_icons`、`the_icon_is_added_to_the_notification_area_and_removed`：图标真的加进通知区域再拿掉），样子要真机 |
-| 菜单栏图标的开关 | 设置 › 通用 › 菜单栏里显示 | 同一个开关，文案是「通知区域里显示」；关掉后图标拿掉，再同步也不会加回来 | 一样 | CI（同上一行的测试） |
+| 菜单栏图标的开关 | 设置 › 通用 › 菜单栏里显示 | 同一个开关，文案是「通知区域里显示」；关掉后图标拿掉，再同步也不会加回来 | 一样 | CI（运行中的应用里调开关的处理函数：关掉后图标不在通知区域，打开后回来，`--selftest-nav` 的 `windows_tray_switch_*`；`the_icon_is_added_to_the_notification_area_and_removed`） |
 | Dock 图标的右键菜单 | 新话题、新建群…、发起私聊…、显示主窗口 | 任务栏按钮的跳转列表有这四项（GPUI 用 `set_dock_menu` 建的）。应用先设 AppUserModelID、让进程加入多线程套间，再建列表。之前两样都缺：GPUI 在后台线程上提交列表，那个线程没有 COM，提交直接失败，所以任务栏按钮上其实没有这四项；点一项会启动新进程，新进程把命令转给正在运行的应用。托盘图标右键也有这四项加设置…和退出 | 一样 | CI 证明的是机制：`win_window_probe`（真的 GPUI 应用）不加入套间时系统里没有这份列表，加入后有，并且落在设的那个 id 下；`a_second_launch_hands_its_command_to_the_first` 证明转交。`menus::install` 里「先设 id 和套间、再建列表」这个顺序本身没有测试，只有代码和注释，真机第 12 步确认 |
 | 点 Dock 图标重新打开主窗口 | `on_reopen` | GPUI 在 Windows 上不会调 `on_reopen`。现在从开始菜单或任务栏再启动，正在运行的应用到前台并打开主窗口（见第 4 节）；点托盘图标也是 | 一样（PR 3） | CI（转交），真机 |
 | 关掉最后一个窗口后应用继续运行 | 是 | 托盘图标在时是；图标被隐藏时关掉最后一个窗口就退出（否则没有办法再找到它） | 一样 | CI（`the_app_outlives_its_windows_only_with_the_icon`），真机 |
@@ -56,10 +57,10 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 | 服务 | 系统的服务子菜单 | 没有 | 没有对应 | Windows 没有「服务」这个系统设施 |
 | 隐藏、隐藏其他、全部显示 | ⌘H、⌥⌘H | 没有 | 没有对应 | Windows 不能隐藏整个应用；对应的系统操作是最小化（Win+↓、Win+Home、Win+D），关掉窗口后应用留在托盘里 |
 | 退出 | 应用菜单 › 退出，⌘Q | 第一个菜单 › 退出，托盘菜单 › 退出，两处都是同一个退出命令。没有快捷键：Windows 上 Alt+F4 和关闭按钮是关窗口，托盘图标在时应用留在托盘里（图标被隐藏时关掉最后一个窗口就是退出） | 没有对应（快捷键） | Windows 应用没有「退出整个应用」的通用快捷键，Ctrl+Q 不是 Windows 的惯例，所以不绑；退出命令本身两处都有。CI（菜单项和托盘菜单的单元测试），真机 |
-| 文件：新话题、新建群…、发起私聊…、关闭窗口 | ⌘W 关当前窗口，主窗口也关，应用留在 Dock | Ctrl+W 同样：托盘图标在时主窗口也关，应用留在托盘里。图标被隐藏时关掉最后一个窗口应用就退出了，所以那时 Ctrl+W 不关主窗口、不关最后一个窗口（关闭按钮和 Alt+F4 照常） | 一样 | CI（`ctrl_w_closes_the_last_window_only_with_the_icon`：按键经应用的全局处理函数和托盘的真实状态，没有图标时最后一个窗口不关，有图标时关；`the_close_command_never_ends_the_app`：规则本身）。主窗口自己的处理函数（`app.rs`）用的是同一条规则，但没有单独的测试，真机第 10、11 步 |
+| 文件：新话题、新建群…、发起私聊…、关闭窗口 | ⌘W 关当前窗口，主窗口也关，应用留在 Dock | Ctrl+W 同样：托盘图标在时主窗口也关，应用留在托盘里。图标被隐藏时关掉最后一个窗口应用就退出了，所以那时 Ctrl+W 不关主窗口、不关最后一个窗口（关闭按钮和 Alt+F4 照常）。所有窗口（包括主窗口）走同一个处理函数 | 一样 | CI（运行中的应用里按 Ctrl+W：没有图标时主窗口还在，有图标时主窗口关掉、应用还在并能重新打开，`--selftest-nav` 的 `windows_*` 检查；`ctrl_w_closes_the_last_window_only_with_the_icon`；`the_close_command_never_ends_the_app`），真机 |
 | 编辑：撤销、重做、剪切、复制、粘贴、全选、查找三项 | | 同样 | 一样 | CI（菜单逐项对照） |
 | 编辑 › 表情与符号 | 系统的字符检视器，⌃⌘空格 | 系统的表情面板（Win+.）：应用替用户按下这个键，浏览器的做法 | 一样（PR 1） | 之前 Windows 上没有这一项。真机 |
-| 前往：快速切换…、首页、产出、成员、下一个未读话题、上一个未读话题（六项） | | 同样 | 一样 | CI（菜单逐项对照） |
+| 前往：快速切换…、后退、前进、首页、产出、成员、下一个未读话题、上一个未读话题（八项） | 后退 ⌘[，前进 ⌘] | 同样八项；后退 Alt+←，前进 Alt+→（Windows 的惯例） | 一样 | CI（菜单逐项对照） |
 | 显示：全部项、勾选状态、切换全屏幕 | ⌃⌘F | F11 | 一样 | CI（`the_view_menu_runs_the_toolbar_and_filter_commands`；`the_window_menu_commands_have_their_windows_keys`：F11；`win_window_probe`：真窗口进出全屏） |
 | 窗口 › 最小化 | ⌘M | 有，没有快捷键（系统的是 Win+↓） | 一样 | CI（`win_window_probe`：真窗口 `IsIconic`） |
 | 窗口 › 缩放 | 放大或还原 | 最大化或还原（GPUI 的缩放只会最大化，还原是应用补的），文案是「最大化或还原」 | 一样 | CI（`win_window_probe`：真窗口 `IsZoomed`；`a_maximized_window_is_restored`） |
@@ -74,7 +75,7 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 | --- | --- | --- | --- | --- |
 | 只运行一个应用 | 系统保证：再次打开只是把它带到前台 | 之前再启动一次就多一个进程、多一个托盘图标。现在是单实例（命名互斥量加隐藏窗口的 `WM_COPYDATA`）：后启动的进程把要做的事交给第一个、让它到前台，然后退出。第一个进程不接受的内容（太长的链接、不认识的消息）只是被丢掉，后启动的进程照样退出，不会因此开出第二个应用；只有第一个进程一直没有窗口（正在退出或卡死）时才自己启动。带链接启动时命令行上别的参数一律不读（链接的内容来自网页）；带别的参数启动的（自测、`--fake`）不参与 | 一样（PR 3） | CI（真的抢两次、经窗口转交、乱码和空指针不崩、链接后面的参数被忽略），真机 |
 | 点 `<scheme>://` 链接 | 系统把应用带到前台（应用不处理链接的内容） | 之前打开第二个应用。现在应用到前台，链接指向自己账号里的群或话题时打开它（通知点击走的就是这条路，所以 Windows 上比 Mac 多做了这一步；Mac 上接 `on_open_urls` 用同一个 `instance::run` 就能补上，不在这次范围里） | 一样（PR 3） | CI（解析、转交），真机 |
-| 登录时启动 | `SMAppService`，要批准时打开系统设置 | `HKCU\…\Run` 加 `StartupApproved`，任务管理器里关掉后开关显示关 | 一样 | CI（对真的注册表），真机 |
+| 登录时启动 | `SMAppService`，要批准时打开系统设置 | `HKCU\…\Run` 加 `StartupApproved`，任务管理器里关掉后开关显示关。产品改名后安装包把旧的 exe 名留成硬链接，之前写的值仍然指着旧名字：开关按「是不是同一个文件」判断，所以从新的快捷方式启动也显示开；应用启动时把这个值改写成当前的 exe | 一样 | CI（对真的注册表：`the_run_key_round_trip`、`a_login_item_under_the_former_exe_name_is_still_on_and_is_adopted`），真机 |
 | 睡眠唤醒后立即重连 | `NSWorkspaceDidWakeNotification` 加时钟跳变兜底 | `WM_POWERBROADCAST`（GPUI）加时钟跳变兜底 | 一样 | 真机 |
 | 网络变化后立即重连 | 每 3 秒比较一次网卡地址 | 同样的做法，`GetAdaptersAddresses` | 一样 | CI（读网卡），真机 |
 | 设备名 | `gethostname` 去掉 `.local` | `COMPUTERNAME` | 一样 | CI（`the_device_name_is_the_computer_name`） |
@@ -83,7 +84,7 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 
 | 功能 | Mac 上 | Windows 上现在 | 状态 | 怎么补 / 验证 |
 | --- | --- | --- | --- | --- |
-| 空格预览（快速查看） | Quick Look 面板：系统认识的类型都能预览，在系统的沙盒服务里做，不离开应用 | 应用里的预览面板（当前窗口上的一张 sheet），再按空格或 Esc 关掉。图片、视频、音频、PDF、文本和代码、Markdown、表格用应用自己的查看器；网页附件在隔离的产出视图里显示（不能联网，没有任何桥接能力）。应用没有查看器的类型（Office 文档、压缩包等）没有预览：面板写「这种文件在应用里没有预览，可以用系统应用打开」，并给过了「打开」那道检查的「用系统应用打开」。Windows 会运行的文件永远不预览，只在资源管理器里选中 | 没有对应（应用不认识的类型的预览） | macOS 的 Quick Look 在系统的沙盒服务里预览任何文件。Windows 上对应的是预览处理程序：各个程序自己登记的解析器，不在应用能控制的沙盒里，还能让 Office 去取远程模板或链接对象（低完整性也挡不住凭证泄露）。所以资源管理器自己已经不预览带「来自互联网」标记的文件。这个面板能显示的每一个文件都来自应用的下载缓存（每个都带这个标记，自己发出去的文件的副本也是）或者是产出的版本，所以应用和资源管理器做同样的选择：不把任何文件交给系统的预览处理程序，也不托管它们。用户得到的替代是：一键「用系统应用打开」，Office 会在受保护的视图里打开它。这比 Quick Look 窄，是有意的。（中途做过托管 RTF / Office 处理程序的版本，评审后去掉了：按这条规则没有文件能到达它。）网页选了「隔离视图里渲染」而不是「显示源码」：Quick Look 和「打开」都是渲染出来给人看。CI（`no_file_is_handed_to_a_system_preview_handler`：源码里没有对预览处理程序的调用；`files_the_app_can_show_preview_in_the_app`；`a_downloaded_file_is_marked_as_from_the_internet`：缓存里的文件带标记；`the_open_button_never_runs_a_risky_file`；截图 `files-quick-look`、`files-quick-look-page`、`files-quick-look-no-preview`），真机 |
+| 空格预览（快速查看） | Quick Look 面板：系统认识的类型都能预览，在系统的沙盒服务里做，不离开应用 | 应用里的预览面板（当前窗口上的一张 sheet），再按空格或 Esc 关掉。图片、视频、音频、PDF、文本和代码、Markdown、表格用应用自己的查看器；网页附件在隔离的产出视图里显示（不能联网，没有任何桥接能力）。应用没有查看器的类型（Office 文档、压缩包等）没有预览：面板写「这种文件在应用里没有预览，可以用系统应用打开」，并给过了「打开」那道检查的「用系统应用打开」。Windows 会运行的文件永远不预览，只在资源管理器里选中。空格从不启动别的程序：文件读不出来或产出已经不在时，面板打开并写明读不出来 | 没有对应（应用不认识的类型的预览） | macOS 的 Quick Look 在系统的沙盒服务里预览任何文件。Windows 上对应的是预览处理程序：各个程序自己登记的解析器，不在应用能控制的沙盒里，还能让 Office 去取远程模板或链接对象（低完整性也挡不住凭证泄露）。所以资源管理器自己已经不预览带「来自互联网」标记的文件。这个面板能显示的每一个文件都来自应用的下载缓存（每个都带这个标记，自己发出去的文件的副本也是）或者是产出的版本，所以应用和资源管理器做同样的选择：不把任何文件交给系统的预览处理程序，也不托管它们。用户得到的替代是：一键「用系统应用打开」，Office 会在受保护的视图里打开它。这比 Quick Look 窄，是有意的。（中途做过托管 RTF / Office 处理程序的版本，评审后去掉了：按这条规则没有文件能到达它。）网页选了「隔离视图里渲染」而不是「显示源码」：Quick Look 和「打开」都是渲染出来给人看。CI（`no_file_is_handed_to_a_system_preview_handler`：源码里没有对预览处理程序的调用，预览这段代码里也没有「用系统程序打开文件」的调用；`files_the_app_can_show_preview_in_the_app`；`a_downloaded_file_is_marked_as_from_the_internet`：缓存里的文件带标记；`the_open_button_never_runs_a_risky_file`；截图 `files-quick-look`、`files-quick-look-page`、`files-quick-look-no-preview`），真机 |
 | 共享… | 系统的共享面板 | 之前在资源管理器里选中文件。现在是 Windows 的共享界面（`DataTransferManager`，Win32 窗口用 `IDataTransferManagerInterop`），文件和网页文件夹都作为存储项交过去 | 一样（PR 2） | CI（存储项和窗口的共享管理器），界面本身要真机 |
 | 存储为… | 系统的存储面板，默认在下载文件夹 | 系统的保存对话框（GPUI 的 `IFileSaveDialog`） | 一样 | 真机 |
 | 把文件拖出窗口 | 拖到访达或别的应用 | 之前拖出窗口什么都不发生（GPUI 的 Windows 端没有实现向外拖）。现在指针离开窗口时应用自己发起系统拖放（`DoDragDrop`，用系统给这个文件的数据对象，带 `CF_HDROP`），只允许复制 | 一样（PR 2） | CI（数据对象里读回路径、放下和取消的判断），手感要真机 |
@@ -119,7 +120,7 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 | 快捷键 › 录制时接受的修饰键 | ⌘、⌃、⌥ 或 F 键 | Ctrl、Alt 或 F 键；带 Win 键的组合不接受（之前会被存下来，而 Win 组合键大多被系统占用），和提示「要带上 Ctrl 或 Alt」一致 | 一样（PR 4） | CI（单元测试） |
 | 设置窗口高度跟着分页变 | `NSWindow setFrame`，带动画 | `SetWindowPos`，不超出工作区 | 一样 | CI（`the_settings_window_fits_its_pane_and_has_one_size`：真的窗口高度按差值变、顶边不动；截图里各分页高度不同），顺滑程度要真机 |
 | 机器 › 用这台电脑 | launchd | 计划任务 | 一样 | 归机器那条线 |
-| 机器 › 添加电脑的安装命令 | 之前只有给 Mac / Linux 的 bash 命令 | 两个系统上都一样，**Mac 上也改了（有意的）**：添加成功后先选「那台电脑的系统」（Mac 或 Linux / Windows，默认是自己这台的系统），下面给对应的命令。Windows 的是 PowerShell 命令，做的事和 bash 那条相同：建只有当前用户、SYSTEM、Administrators 能打开的配置文件夹，写 token 和配置，再运行装好的应用自带的 daemon 的 `doctor` 和 `install-service`（计划任务）；那台电脑上找不到 daemon 时，命令打印一句「先安装应用再运行一次」。和 bash 那条一样要求那台电脑先装应用，所以不下载东西，也就不需要 `-Sha256` | 一样 | 没装应用的 Windows 电脑仍然用 `scripts/install-daemon.ps1`（见 `docs/bots.md`）：服务器没有分发这个脚本和 daemon 的接口，已告知。CI（`the_windows_install_command_runs_in_powershell`：命令在 runner 的 Windows PowerShell 5.1 里真的跑，检查写出的配置、token、文件夹的访问列表，和没有 daemon 时打印的那句话；截图 `settings-machine-created`），真机 |
+| 机器 › 添加电脑的安装命令 | 之前只有给 Mac / Linux 的 bash 命令 | 两个系统上都一样，**Mac 上也改了（有意的）**：添加成功后先选「那台电脑的系统」（Mac 或 Linux / Windows，默认是自己这台的系统），下面给对应的命令。Windows 的是 PowerShell 命令，做的事和 bash 那条相同：建只有当前用户、SYSTEM、Administrators 能打开的配置文件夹，写 token 和配置，再运行装好的应用自带的 daemon 的 `doctor` 和 `install-service`（计划任务）。daemon 按这个顺序找：安装包在卸载项里记的 `InstallLocation`（产品改名前装的应用更新后仍留在旧名字的文件夹里）、现在的名字的文件夹、以前的名字的文件夹、`PATH`；那台电脑上找不到 daemon 时，命令打印一句「先安装应用再运行一次」。和 bash 那条一样要求那台电脑先装应用，所以不下载东西，也就不需要 `-Sha256` | 一样 | 没装应用的 Windows 电脑仍然用 `scripts/install-daemon.ps1`（见 `docs/bots.md`）：服务器没有分发这个脚本和 daemon 的接口，已告知。CI（`the_windows_install_command_finds_an_install_under_a_former_name`：安装记录、旧名字文件夹、新名字文件夹三种布局都找到并运行，都没有时打印那句话；`the_windows_install_command_runs_in_powershell`：命令在 runner 的 Windows PowerShell 5.1 里真的跑，检查写出的配置、token、文件夹的访问列表，和没有 daemon 时打印的那句话；截图 `settings-machine-created`），真机 |
 
 ## 8. 跟随系统
 
@@ -157,6 +158,9 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 | `main.rs` `windows_subsystem` | — | 正式版是窗口程序，后面不带控制台窗口；调试版保留控制台给日志和自测 | 没有对应 | Mac 的应用包本来就没有控制台。CI（`windows-installer` 任务启动装好的正式版） |
 | `main.rs` `secondary!`、`command_key` | ⌘ | Ctrl | 一样 | 应用自己的快捷键和读修饰键的地方都经过这两个，Windows 键从不当命令键。CI（各快捷键测试在 Windows 上用 Ctrl 跑） |
 | `main.rs` 启动时认领单实例、读链接和 `--dock-action` | 系统做 | 应用做 | 一样 | 见第 4 节 |
+| `views/nav/mod.rs` 后退、前进的键 | ⌘[、⌘] | Alt+←、Alt+→ | 一样 | 见第 3 节「前往」 |
+| `views/files/lightbox.rs` 读命令键 | ⌘ | Ctrl，经 `command_key`（之前自己判断，结果一样） | 一样 | 图片大图里的 ⌘/Ctrl 快捷键 |
+| `views/files/lightbox.rs` 顶栏左边给红绿灯留的位置 | 非全屏时留出红绿灯的宽度 | 不留（窗口按钮在标题条里，在右边） | 一样 | 布局随窗口按钮的位置，WINDOWS.md §1 |
 
 ## 9. 发现的、归别的会话的事
 
@@ -167,7 +171,7 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 - 手动安装更新的文案是 Mac 的（`copy/update.rs`，发布；#149 已改）。
 - 登录的设备里 Windows 电脑的图标（`data.rs`，界面；已改）。
 - 添加电脑的 Windows 安装命令：已做（见第 7 节）。服务器没有分发 `install-daemon.ps1` 和 daemon 的接口，所以没装应用的电脑仍然要按 `docs/bots.md` 手动取脚本。
-- 团队管理 › 机器的说明写「在 Mac 或 Linux 上装一个小程序」（`copy/admin.rs`，界面）：现在也能装 Windows 机器，这句话要跟着改。
+- 团队管理 › 机器的说明（`copy/admin.rs` 的 `FLEET_ADD_DESC`）：界面那条线已改成「在 Mac、Windows 或 Linux 电脑上」。
 
 ## 10. PR
 
@@ -177,8 +181,9 @@ Windows 没有屏幕顶部的菜单栏，同一套菜单画在主窗口标题栏
 | #160 | 空格预览；共享；拖出文件 | 已合并 |
 | #163 | 单实例、链接、跳转列表；通知（分组、图标、声音、退出后点击） | 已合并 |
 | #165 | 强调色；快捷键录制；真机清单 | 已合并 |
-| PR 5 | 复核后的修正：Ctrl+W 关主窗口；产出窗口也有角标；先设 AppUserModelID 再建跳转列表；给没验证过的行补 CI 测试；改正这份清单 | 已提 |
-| PR 6 | 空格预览接系统的预览处理程序、网页附件在隔离视图里显示；添加电脑的 Windows 安装命令 | 已提 |
+| #170 | 复核后的修正：Ctrl+W 关主窗口；产出窗口也有角标；先设 AppUserModelID 再建跳转列表；给没验证过的行补 CI 测试；改正这份清单 | 已合并 |
+| #172 | 网页附件在隔离视图里预览、应用不认识的类型显示「没有预览」（不交给系统的预览处理程序）；添加电脑的 Windows 安装命令 | 已合并 |
+| PR 7 | 第二次复核：改名后找 daemon 和登录时启动；空格从不启动别的程序；Ctrl+W 和托盘开关在运行中的应用里测；改正这份清单 | 已提 |
 
 ## 要在真机上确认
 
@@ -226,7 +231,7 @@ CI 的 Windows 机器有桌面会话，上面标了 CI 的行都对着真的系�
 
 系统
 
-24. 设置 › 通用里打开「登录时启动」，注销再登录。→ 应用自己启动。在任务管理器 › 启动应用里把它禁用，回到设置。→ 开关显示为关。
+24. 设置 › 通用里打开「登录时启动」，注销再登录。→ 应用自己启动。在任务管理器 › 启动应用里把它禁用，回到设置。→ 开关显示为关。 如果这台电脑是产品改名前装的：从新名字的快捷方式启动后，开关仍显示开，注销再登录应用照样自己启动。
 25. 让电脑睡眠一分钟再唤醒。→ 几秒内连接恢复，第二个账号这时发的消息马上出现。关掉 Wi-Fi 十秒再打开。→ 同样几秒内恢复。
 26. 系统设置 › 个性化 › 颜色里把主题色改成红色。→ 应用里的强调色几秒内变红；改回默认蓝，应用回到石墨色。系统设置 › 辅助功能 › 视觉效果里关掉动画效果。→ 应用里的装饰动画停掉。
 27. 团队管理 › 机器 › 添加电脑，填名字后添加，系统选 Windows，把命令复制到另一台装了应用的 Windows 电脑的 PowerShell 里运行。→ 几秒后那台电脑在机器列表里显示在线。

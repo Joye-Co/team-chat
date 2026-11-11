@@ -6,6 +6,8 @@ import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, 
 import { RunPlan } from "./plan.ts";
 import { Artifact, ArtifactVersion } from "./files.ts";
 import { GroupDecision, RecordedDecision } from "./card2.ts";
+import { RunCode } from "./relay.ts";
+import { runPhaseFields } from "./takeover.ts";
 
 /** `BotRun.kind` of a side chat run. */
 export const RUN_KIND_ASIDE = "aside";
@@ -52,6 +54,16 @@ export const BotRun = z.object({
   queuedAt: Millis.optional(),
   /** 1.1 (排队): 1-based place among the bot's queued runs, oldest first; with `queuedAt`. */
   queuePosition: z.int().positive().optional(),
+  // Usable fields. Absent on older runs and servers.
+  /** The person the run works for (交代人): a hand-over, relay step, follow-up of a wait or retry
+   * keeps the first one; absent = no person (a hook), a private card answer (the answerer stays
+   * anonymous), or a run from before (read `requestedBy`). */
+  requestedFor: Id.optional(),
+  /** The piece of work (chain) the run belongs to: its root run and every hand-over and relay step. */
+  chainId: Id.optional(),
+  /** Where the run left its code (`run.done.code`). */
+  code: RunCode.optional(),
+  ...runPhaseFields,
 });
 export type BotRun = z.infer<typeof BotRun>;
 
@@ -347,6 +359,16 @@ export type BotRunner = z.infer<typeof BotRunner>;
 // Machines
 // ---------------------------------------------------------------------------
 
+/** Usable: at most this many AI members on one personal machine. */
+export const MAX_PERSONAL_BOTS = 200;
+/** Usable: an AI member whose work for the machine's owner runs on that machine. */
+export const PersonalBot = z.object({
+  botId: Id,
+  /** The owner's code folder on this machine for that work. */
+  repoPath: z.string().min(1).max(1024).optional(),
+});
+export type PersonalBot = z.infer<typeof PersonalBot>;
+
 export const Machine = z.object({
   id: Id,
   name: Name,
@@ -372,12 +394,36 @@ export const Machine = z.object({
   features: z.array(MachineFeature).optional(),
   /** Screen sharing address for 接管 (`hello.machine.takeoverUrl`). Owners and run requesters only. */
   takeoverUrl: z.string().min(1).max(2048).optional(),
+  /** Usable: the person whose own machine this is (个人的电脑); absent = a team machine. */
+  ownerId: Id.optional(),
+  /** Usable: the AI members whose work for the owner runs here. Sent to the owner only. */
+  personalBots: z.array(PersonalBot).max(MAX_PERSONAL_BOTS).optional(),
 });
 export type Machine = z.infer<typeof Machine>;
 
-/** `POST /v1/machines` (owner) */
-export const CreateMachineRequest = z.object({ name: Name, labels: Labels.optional() });
+/** `POST /v1/machines` (owner; usable: any member, see `personal`) */
+export const CreateMachineRequest = z.object({
+  name: Name,
+  labels: Labels.optional(),
+  /** Usable: true = my own machine; absent = a team machine for an admin, my own for a member. */
+  personal: z.boolean().optional(),
+});
 export type CreateMachineRequest = z.infer<typeof CreateMachineRequest>;
+/** `PATCH /v1/machines/:id` (usable): rename it, or move it between the team and me. At least one field. */
+export const UpdateMachineRequest = z
+  .object({
+    name: Name.optional(),
+    /** "me" = make it my own machine; null = give it to the team. */
+    owner: z.literal("me").nullable().optional(),
+  })
+  .refine((r) => r.name !== undefined || r.owner !== undefined, { message: "name or owner is required" });
+export type UpdateMachineRequest = z.infer<typeof UpdateMachineRequest>;
+/** `PUT /v1/machines/:id/bots/:botId` (the machine's owner, usable). Response: `Machine`. */
+export const SetMachineBotRequest = z.object({
+  /** My code folder on this machine for the bot's work for me; null clears it, absent keeps it. */
+  repoPath: z.string().min(1).max(1024).nullable().optional(),
+});
+export type SetMachineBotRequest = z.infer<typeof SetMachineBotRequest>;
 /** The token (`tm_` + 43 base64url) is shown only in this response. */
 export const CreateMachineResponse = z.object({ machine: Machine, token: z.string().min(1) });
 export type CreateMachineResponse = z.infer<typeof CreateMachineResponse>;

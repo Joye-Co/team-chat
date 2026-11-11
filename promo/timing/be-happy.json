@@ -1,0 +1,54 @@
+{
+  "name": "Be Happy — Michael Ramir C. (Mixkit 942), 120 BPM; the kick of bar b lands at 0.02 + 1.9998 b seconds",
+  "why": "approve on bar 12; the member page on the lift at bar 28; the 4-bar break (bars 32-35) carries the last features and the claim; the final chorus (bar 36) is the cut to black; the logo on bar 38; bars 40-43 are left out (bar 39 and bar 43 measure alike) so the final chord lands on the click and rings out",
+  "anchors": [
+    [
+      0,
+      0.35
+    ],
+    [
+      32,
+      24.02
+    ],
+    [
+      77,
+      56.02
+    ],
+    [
+      99,
+      72.02
+    ],
+    [
+      104,
+      76.02
+    ],
+    [
+      108,
+      78.52
+    ],
+    [
+      110,
+      80.02
+    ],
+    [
+      114.6,
+      84.25
+    ]
+  ],
+  "end": 84.2,
+  "music": {
+    "file": "ext/music/cand/942.mp3",
+    "segs": [
+      [
+        0,
+        80.0
+      ],
+      [
+        87.999,
+        92.4
+      ]
+    ],
+    "gain": 0.88,
+    "fadeOut": 0.4
+  }
+}

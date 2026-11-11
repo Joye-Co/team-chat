@@ -157,6 +157,7 @@ pub async fn create_version(
                 id,
                 &AddArtifactVersionRequest {
                     preview: None,
+                    parent_version: None,
                     entry: req.entry.clone(),
                     files: inputs,
                     note: req.note.clone(),
