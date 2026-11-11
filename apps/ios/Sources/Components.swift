@@ -6,6 +6,26 @@ enum Route: Hashable {
     case chat(group: String, topic: String)
     /// The 话题 of a group.
     case topics(group: String)
+    case search
+    case member(id: String)
+    case artifact(id: String)
+    case me
+}
+
+/// The screen of a route, for every navigation stack. Each feature owns its screen file.
+struct RouteView: View {
+    let route: Route
+
+    var body: some View {
+        switch route {
+        case .chat(let group, let topic): ChatScreen(groupId: group, topicId: topic)
+        case .topics(let group): TopicsScreen(groupId: group)
+        case .search: SearchScreen()
+        case .member(let id): MemberScreen(memberId: id)
+        case .artifact(let id): ArtifactScreen(artifactId: id)
+        case .me: MeScreen()
+        }
+    }
 }
 
 /// The first letter of a name on a tint: round for a person, squared for a 群 or an AI member.
