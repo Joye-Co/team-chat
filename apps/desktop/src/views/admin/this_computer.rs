@@ -64,6 +64,9 @@ pub struct Inputs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Readiness {
     pub service: Check,
+    /// 再试一次 is offered on the service line: it did not start, or it is set up but stays
+    /// offline although a CLI is here (its PATH may predate the CLI, its sign-in may be gone).
+    pub service_retry: bool,
     /// The service waits for a CLI: it stops at start without one.
     pub service_blocked: bool,
     pub found: Check,
@@ -143,8 +146,11 @@ pub fn readiness(i: &Inputs) -> Readiness {
         }
         _ => (Check::Waiting, None),
     };
+    let service_retry = !service_blocked
+        && (service == Check::Todo || (service == Check::Waiting && found == Check::Done));
     Readiness {
         service,
+        service_retry,
         service_blocked,
         found,
         found_names,
@@ -262,13 +268,16 @@ impl AdminView {
     pub(super) fn this_computer_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let inputs = self.this_inputs()?;
         let r = readiness(&inputs);
-        if r.ready() && !self.fleet.this.set_up_here && self.fleet.this.pinned.is_none() {
+        // Opened later, the card shows only when there is something to do: lines that are
+        // merely waiting (the monitor not in yet) would flash it in and out.
+        let to_do = [r.service, r.found, r.signed_in].contains(&Check::Todo) || r.service_retry;
+        if !to_do && !self.fleet.this.set_up_here && self.fleet.this.pinned.is_none() {
             return None;
         }
         let k = native_colors(cx);
         let busy = self.fleet.using;
         let view = cx.entity();
-        let retry = (r.service == Check::Todo && !r.service_blocked).then(|| {
+        let retry = r.service_retry.then(|| {
             let view = view.clone();
             loading_push(
                 push_button(
@@ -555,6 +564,37 @@ mod tests {
         assert_eq!(r.service, Check::Waiting);
         assert!(!r.service_blocked);
         assert_eq!(r.signed_in, Check::Waiting);
+    }
+
+    #[test]
+    fn an_installed_service_that_stays_offline_has_a_next_step() {
+        // Set up, a CLI found here, the computer not online: the service may have started
+        // with a PATH from before the CLI was installed, so 再试一次 sets it up again.
+        let r = readiness(&Inputs {
+            installed: true,
+            local: Some(vec!["claude".into()]),
+            ..Default::default()
+        });
+        assert_eq!(r.service, Check::Waiting);
+        assert!(r.service_retry);
+        // Without a CLI the next step is on the second line, not the first.
+        let r = readiness(&Inputs {
+            installed: true,
+            local: Some(vec![]),
+            ..Default::default()
+        });
+        assert!(!r.service_retry);
+        // Online: nothing to retry.
+        let r = readiness(&online(&["claude"], Some(vec![cli("claude", "logged_in")])));
+        assert!(!r.service_retry);
+        // Failed with a CLI here: retry as before.
+        let r = readiness(&Inputs {
+            failed: true,
+            local: Some(vec!["claude".into()]),
+            ..Default::default()
+        });
+        assert_eq!(r.service, Check::Todo);
+        assert!(r.service_retry);
     }
 
     #[test]

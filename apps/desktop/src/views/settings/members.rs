@@ -1813,7 +1813,6 @@ impl BotForm {
         );
     }
 
-    /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
     /// Reads which CLIs of each online computer are signed in (owners only: a failed read
     /// leaves the list unmarked).
     fn load_logins(&mut self, cx: &mut Context<Self>) {
@@ -1854,6 +1853,7 @@ impl BotForm {
         }
     }
 
+    /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
     fn pick_machine(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.machine = id;
         self.labels
@@ -2207,7 +2207,8 @@ impl Render for BotForm {
             let current = self.runtime_value(cx);
             let (models, efforts) = cli_choices(&self.machines, &current, self.machine.as_deref());
             let mut known = self.runtime_options();
-            let only = matches!(known.as_slice(), [o] if typed.is_empty() || typed == o.runtime);
+            // A signed-out only one stays in sight, with its mark.
+            let only = matches!(known.as_slice(), [o] if !o.signed_out && (typed.is_empty() || typed == o.runtime));
             if !current.is_empty() && !known.iter().any(|o| o.runtime == current) {
                 known.insert(
                     0,
