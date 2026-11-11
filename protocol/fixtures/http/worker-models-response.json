@@ -1,0 +1,21 @@
+{
+  "kind": "WorkerModelsResponse",
+  "valid": true,
+  "description": "a runtime with only an effort",
+  "value": {
+    "workers": [
+      {
+        "runtime": "claude",
+        "model": "opus",
+        "effort": "high",
+        "updatedAt": 1762128000000
+      },
+      {
+        "runtime": "codex",
+        "model": null,
+        "effort": "medium",
+        "updatedAt": 1762128000000
+      }
+    ]
+  }
+}

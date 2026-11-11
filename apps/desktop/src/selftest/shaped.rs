@@ -710,6 +710,15 @@ impl ChatProvider for Shaped {
     fn ai_service(&self) -> AdminReply<crate::data::AiServiceSettings> {
         self.inner.ai_service()
     }
+    fn worker_models(&self) -> AdminReply<Vec<crate::data::WorkerModelSetting>> {
+        self.inner.worker_models()
+    }
+    fn set_worker_model(
+        &self,
+        setting: crate::data::WorkerModelSetting,
+    ) -> AdminReply<crate::data::WorkerModelSetting> {
+        self.inner.set_worker_model(setting)
+    }
     fn set_ai_service(
         &self,
         draft: crate::data::AiServiceDraft,

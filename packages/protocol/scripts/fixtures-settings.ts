@@ -77,6 +77,14 @@ export function addSettingsFixtures({ ok, bad, T0, ID, base }: SettingsCtx) {
   ok("http/ai-service-test-ok.json", "AiServiceTestResult", { ok: true, latencyMs: 412 });
   ok("http/ai-service-test-failed.json", "AiServiceTestResult", { ok: false, error: "401 Authentication Fails (auth header format should be Bearer sk-...)", latencyMs: 230 }, "the provider's error");
 
+  const worker = { runtime: "claude", model: "opus", effort: "high", updatedAt: T0 };
+  ok("http/worker-model.json", "WorkerModel", worker);
+  ok("http/worker-models-response.json", "WorkerModelsResponse", { workers: [worker, { runtime: "codex", model: null, effort: "medium", updatedAt: T0 }] }, "a runtime with only an effort");
+  bad("http/worker-model-bad-runtime.json", "WorkerModel", { ...worker, runtime: "Claude Code" }, "runtime names are lower-case words");
+  ok("http/set-worker-model.json", "SetWorkerModelRequest", { model: "gpt-6-luna", effort: null }, "set the model, clear the effort");
+  ok("http/set-worker-model-keep.json", "SetWorkerModelRequest", { effort: "low" }, "absent keeps the model");
+  bad("http/set-worker-model-space.json", "SetWorkerModelRequest", { model: "gpt 6" }, "space in model");
+
   const device = { id: "01JBX0TOKEN0000000000000AH", name: "Joye 的 MacBook Pro", createdAt: T0, lastUsedAt: T0 + 60_000, current: true };
   ok("http/device.json", "Device", device);
   ok("http/devices-response.json", "DevicesResponse", {
