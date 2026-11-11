@@ -15,7 +15,7 @@ afterAll(async () => {
   expect(downViolations).toEqual([]);
 });
 
-const benv = env as unknown as { BOT_DESK: DurableObjectNamespace; MACHINE_LINK: DurableObjectNamespace };
+const benv = env as unknown as { BOT_DESK: DurableObjectNamespace; MACHINE_LINK: DurableObjectNamespace; GROUP_ROOM: DurableObjectNamespace };
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
 const linkOf = (machineId: string) => benv.MACHINE_LINK.get(benv.MACHINE_LINK.idFromName(machineId));
 const silence = (botId: string, runId: string, ms: number) =>
@@ -50,6 +50,9 @@ describe("recovery rules", () => {
     expect(outwardAction(ev(PUSH))).toBe("pushed with git: git push -u origin bot/abc");
     expect(outwardAction(ev(PR))).toBe("changed a pull request with gh: gh pr create --fill");
     expect(outwardAction(ev({ type: "tool.call", title: "git status" }))).toBeNull();
+    expect(outwardAction(ev({ type: "tool.call", title: "git -C ../repo push origin HEAD" }))).toBe("pushed with git: git -C ../repo push origin HEAD");
+    expect(outwardAction(ev({ type: "tool.call", title: "git -c http.extraHeader=x --no-pager push" }))).not.toBeNull();
+    expect(outwardAction(ev({ type: "tool.call", title: 'git commit -m "push the fix"' }))).toBeNull();
     expect(outwardAction(ev({ type: "tool.call", title: "git log --oneline | grep push" }))).toBeNull();
     expect(outwardAction(ev({ type: "output", op: "card.post", body: { cardV2: { title: "方案" } } }))).toBe("posted a card in the topic: 方案");
     expect(outwardAction(ev({ type: "output", op: "member.handoff", body: {} }))).toBe("handed this work to another member");
@@ -173,6 +176,90 @@ describe("a restart continues the work", () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(d2.frames.filter((f) => f.t === "run.assign" && !seen.has(f.runId) && f.runId !== run.runId)).toEqual([]);
     d2.close();
+    c.close();
+  });
+
+  it("carries what people sent while the daemon was down into the resumed run", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"] });
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    const last = d.event(a.runId, { type: "session", sessionId: "sess-a" });
+    await d.acked(a.runId, last);
+    d.close();
+    await waitUntil(() => d.closed, 5000, "closed");
+    // An input the CLI never took (as a card answer is kept while the run's computer is away).
+    await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => {
+      state.storage.sql.exec(
+        "INSERT INTO inputs (id, run_id, message_id, author_id, body, at) VALUES (?, ?, ?, ?, ?, ?)",
+        "in-1",
+        a.runId,
+        "msg-while-down",
+        w.human.id,
+        "选方案 B",
+        Date.now(),
+      );
+    });
+    const { d: d2 } = await Daemon.connect(w.machineToken, { features: ["resume"], runs: [{ runId: a.runId, lastSeq: last + 1, done: true }] });
+    d2.seq.set(a.runId, last);
+    await d2.acked(a.runId, d2.done(a.runId, { status: "failed", error: DAEMON_RESTARTED, sessionId: "sess-a" }));
+    const run = await d2.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(run.resumeSessionId).toBe("sess-a");
+    expect(run.prompt).toContain("选方案 B");
+    // Carried once: no follow-up run starts for it besides.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d2.frames.filter((f) => f.t === "run.assign" && f.runId !== run.runId)).toEqual([]);
+    d2.send({ t: "run.accept", runId: run.runId });
+    await d2.acked(run.runId, d2.done(run.runId, { status: "succeeded", resultText: "ok" }));
+    d2.close();
+    c.close();
+  });
+
+  it("does not move work whose earlier try made 产出 to another computer", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"] });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.event(a.runId, { type: "session", sessionId: "sess-a" }));
+    const other = await secondMachine(w, "mbp");
+    const { d: b } = await Daemon.connect(other.token, { features: ["resume"] });
+
+    await silence(w.bot.id, a.runId, STALL_MS + 1000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    const same = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    d.send({ t: "run.accept", runId: same.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === same.runId && e.data.run.status === "running");
+    // The first try made 产出 (its version keeps that run's id).
+    await runInDurableObject(benv.GROUP_ROOM.get(benv.GROUP_ROOM.idFromName(w.gid)), (_o, state: DurableObjectState) => {
+      const now = Date.now();
+      state.storage.sql.exec(
+        "INSERT INTO artifacts (id, topic_id, title, kind, current_version, created_by, created_at, updated_at) VALUES ('01JBX0ART000000000000000RC', ?, '方案', 'html', 1, ?, ?, ?)",
+        topicId,
+        w.bot.id,
+        now,
+        now,
+      );
+      state.storage.sql.exec(
+        "INSERT INTO artifact_versions (artifact_id, version, entry, files, created_by, created_at, run_id) VALUES ('01JBX0ART000000000000000RC', 1, 'index.html', '[]', ?, ?, ?)",
+        w.bot.id,
+        now,
+        a.runId,
+      );
+    });
+
+    await silence(w.bot.id, same.runId, STALL_MS + 1000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    const gaveUp = TEXT.gaveUp(10, ["打断后重来"]);
+    await waitUntil(() => botNotes(c, topicId, w.bot.id).includes(gaveUp), 5000, "gave up note");
+    expect(b.frames.filter((f) => f.t === "run.assign")).toHaveLength(0);
+    expect(await deskRow(w.bot.id, same.runId)).toMatchObject({ status: "blocked", stalled: 1 });
+    await d.acked(same.runId, d.done(same.runId, { status: "succeeded", resultText: "ok" }));
+    d.close();
+    b.close();
     c.close();
   });
 

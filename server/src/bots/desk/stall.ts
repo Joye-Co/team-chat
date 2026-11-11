@@ -299,7 +299,15 @@ export abstract class DeskStall extends DeskEvents {
     // The same session lives on its machine: the retry stays there (it waits when that is full).
     const keep: Restart = { ...how, why, ...(how.sameSession && r.machine_id ? { machine: r.machine_id } : {}) };
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `restart:${r.id}`, JSON.stringify(keep));
-    await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, request.followUps, r.id, request.brief);
+    // What people sent the old run that its CLI never took (a card answer given while the
+    // computer was off): the new run carries it, as a follow-up run would have.
+    const unread = this.sql
+      .exec<{ message_id: string; author_id: string; body: string }>("SELECT message_id, author_id, body FROM inputs WHERE run_id = ? AND accepted = 0 ORDER BY at", r.id)
+      .toArray();
+    const carried: { authorId: string; body: string }[] = [];
+    for (const x of unread) if (await this.answerStartsRun(r, x.message_id)) carried.push({ authorId: x.author_id, body: x.body });
+    this.sql.exec("UPDATE inputs SET accepted = 1 WHERE run_id = ? AND accepted = 0", r.id);
+    await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, [...request.followUps, ...carried], r.id, request.brief);
     const next = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
     if (next) this.sql.exec("UPDATE runs SET interventions = ?, stall_step = ?, nudge_sent = ? WHERE id = ?", r.interventions + (count ? 1 : 0), opts.step ?? r.stall_step, r.nudge_sent, next.id);
     this.log.info("supervise", { runId: r.id, why: `restart: ${why}`, next: next?.id });

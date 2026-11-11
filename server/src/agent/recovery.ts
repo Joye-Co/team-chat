@@ -22,7 +22,8 @@ export interface LoggedFrame {
 
 /** Shell commands that reach outside the machine. Matched against a tool call's command. */
 const OUTWARD: [RegExp, string][] = [
-  [/\bgit\s+(?:-\S+\s+)*push\b/i, "pushed with git"],
+  // Options before the subcommand, with the value of `-C <dir>` and `-c <key=value>`.
+  [/\bgit(?:\s+(?:-[cC]\s+\S+|-\S+))*\s+push\b/i, "pushed with git"],
   [/\bgh\s+pr\s+(?:create|merge|close|reopen|comment|edit|review|ready)\b/i, "changed a pull request with gh"],
   [/\bgh\s+(?:issue|release)\s+(?:create|comment|close|edit|delete|upload)\b/i, "changed GitHub with gh"],
   [/\bgh\s+api\b[^\n]*(?:-X|--method)\s*(?:POST|PUT|PATCH|DELETE)\b/i, "called the GitHub API with gh"],

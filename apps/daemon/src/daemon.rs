@@ -42,6 +42,19 @@ pub const FEATURES: &[&str] = &[
 /// `run.done.error` of a run found unfinished at start: the server continues it in its session.
 pub const DAEMON_RESTARTED: &str = "daemon restarted";
 
+/// A run the daemon's own stop cancelled ends as `daemon restarted` (with the session it was
+/// resuming when the CLI reported none), so the server continues it rather than stopping it.
+fn interrupted_by_stop(d: &mut RunDone, resumed: Option<&str>) {
+    if d.status != "cancelled" {
+        return;
+    }
+    d.status = "failed".into();
+    d.error = Some(DAEMON_RESTARTED.into());
+    if d.session_id.is_none() {
+        d.session_id = resumed.map(str::to_string);
+    }
+}
+
 /// `run.resume.note` limit (docs/machine-protocol.md).
 const MAX_RESUME_NOTE: usize = 2000;
 
@@ -74,6 +87,10 @@ struct RunEntry {
     /// The run's own redactor: the daemon's rules and the values the run learns (its GitHub
     /// tokens).
     redactor: Arc<crate::redact::Redactor>,
+    /// The server asked to stop the run (`run.cancel`, or it no longer holds it).
+    cancel_asked: bool,
+    /// The CLI session the run was assigned to resume, for a `run.done` without a session.
+    resume_session: Option<String>,
 }
 
 pub struct Daemon {
@@ -112,6 +129,8 @@ pub struct Daemon {
     accounts: Arc<std::sync::Mutex<HashMap<String, crate::proto::LoginAccount>>>,
     /// Values masked besides the config's: every key this process has held.
     key_values: Vec<String>,
+    /// The daemon is shutting down: the runs it stops itself end as `daemon restarted`.
+    stopping: bool,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -156,6 +175,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         usage: Arc::new(std::sync::Mutex::new(vec![])),
         accounts: Arc::new(std::sync::Mutex::new(HashMap::new())),
         key_values,
+        stopping: false,
     };
     d.read_accounts();
     d.recover();
@@ -249,6 +269,9 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     // Shutdown: stop every run and give them a moment to report and the server a moment to
     // ack their last frames (run.done), so it shows the runs as stopped, not lost.
     log!("daemon stopping");
+    // The runs this stop interrupts end as `daemon restarted`, so BotDesk continues them in
+    // their sessions when the daemon is back (a computer restart or a service restart, 盯 1.7).
+    d.stopping = true;
     for r in d.runs.values() {
         let _ = r.control.send(Control::Cancel.into());
     }
@@ -368,7 +391,9 @@ impl Daemon {
                         result_text: None,
                         summary: None,
                         error: Some(DAEMON_RESTARTED.into()),
-                        session_id,
+                        // A resumed run that ended before its CLI reported a session: the one
+                        // it resumed.
+                        session_id: session_id.or(meta.resume_session_id.clone()),
                         usage: None,
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
@@ -413,6 +438,8 @@ impl Daemon {
                     log: None,
                     outputs: Arc::default(),
                     redactor: Arc::new(self.redactor.for_run()),
+                    cancel_asked: false,
+                    resume_session: None,
                 },
             );
         }
@@ -624,6 +651,7 @@ impl Daemon {
                             let r = self.runs.get_mut(&id).expect("run");
                             if !r.done {
                                 log!("run {id} unknown to server: cancelling");
+                                r.cancel_asked = true;
                                 let _ = r.control.send(Control::Cancel.into());
                             }
                             r.orphan = true;
@@ -664,7 +692,8 @@ impl Daemon {
                 }
             }
             Down::RunCancel { run_id, .. } => {
-                if let Some(r) = self.runs.get(&run_id) {
+                if let Some(r) = self.runs.get_mut(&run_id) {
+                    r.cancel_asked = true;
                     let _ = r.control.send(Control::Cancel.into());
                 }
             }
@@ -852,6 +881,8 @@ impl Daemon {
                 log: None,
                 outputs: outputs.clone(),
                 redactor: redactor.clone(),
+                cancel_asked: false,
+                resume_session: a.resume_session_id.clone(),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -913,6 +944,9 @@ impl Daemon {
                     Up::RunDone(d) => {
                         d.seq = seq;
                         r.done = true;
+                        if self.stopping && !r.cancel_asked {
+                            interrupted_by_stop(d, r.resume_session.as_deref());
+                        }
                         log!("run {id} done: {}", d.status);
                     }
                     Up::RunSession(s) => s.seq = seq,
@@ -1178,6 +1212,37 @@ impl Daemon {
 mod tests {
     use super::*;
 
+    /// A run the daemon's own stop interrupted ends as `daemon restarted`, with the session it
+    /// resumed when the CLI reported none; other endings stay as they are.
+    #[test]
+    fn a_run_interrupted_by_the_stop_ends_as_daemon_restarted() {
+        let done = |status: &str, session: Option<&str>| RunDone {
+            run_id: "r1".into(),
+            seq: 1,
+            at: 0,
+            status: status.into(),
+            exit_code: None,
+            result_text: None,
+            summary: None,
+            error: None,
+            session_id: session.map(str::to_string),
+            usage: None,
+            duration_ms: 0,
+            code: None,
+        };
+        let mut d = done("cancelled", None);
+        interrupted_by_stop(&mut d, Some("sess-old"));
+        assert_eq!(d.status, "failed");
+        assert_eq!(d.error.as_deref(), Some(DAEMON_RESTARTED));
+        assert_eq!(d.session_id.as_deref(), Some("sess-old"));
+        let mut d = done("cancelled", Some("sess-new"));
+        interrupted_by_stop(&mut d, Some("sess-old"));
+        assert_eq!(d.session_id.as_deref(), Some("sess-new"));
+        let mut d = done("succeeded", None);
+        interrupted_by_stop(&mut d, None);
+        assert_eq!((d.status.as_str(), d.error), ("succeeded", None));
+    }
+
     #[test]
     fn a_key_saved_during_a_run_is_masked_in_that_run() {
         let daemon_rules = crate::redact::Redactor::new(vec!["old-key-0123456789".to_string()]);
@@ -1196,6 +1261,8 @@ mod tests {
                 log: None,
                 outputs: Arc::default(),
                 redactor: run_redactor.clone(),
+                cancel_asked: false,
+                resume_session: None,
             },
         );
         // The clone the run's task holds shares the list with the entry's.

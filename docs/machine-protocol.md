@@ -178,14 +178,16 @@ RunEvent =
 - **Daemon restart.** `run.json` records the CLI's process group. A daemon that starts after
   a crash stops the process groups of unfinished runs (when the group leader still runs the
   recorded CLI), then rebuilds those runs from `events.jsonl` and appends `run.done`
-  (`failed`, error `daemon restarted`, `sessionId` the last `session` event of the run) and a
-  failed `run.session`. Their frames, and those of runs that finished in the last hour, are
+  (`failed`, error `daemon restarted`, `sessionId` the last `session` event of the run, or the
+  session the run was assigned to resume when it logged none) and a failed `run.session`. Their frames, and those of runs that finished in the last hour, are
   offered in `hello` and replayed after `welcome` as above. BotDesk does not record such a run
   as failed: it continues the work in a new run on the same machine that resumes that CLI
   session, with the recovery note (see "Leases"); only after 3 such resumes in a row, or for a
   run it cannot start again (a side chat run), does the run fail, with a note that says the
-  computer's program restarted. On a graceful stop the daemon cancels its runs and waits up to
-  10 s for the server to ack their last frames.
+  computer's program restarted. On a graceful stop (a computer restart, a service restart,
+  Ctrl+C) the daemon stops its runs and ends each one the server did not cancel the same way
+  (`failed`, error `daemon restarted`, with its session), so BotDesk continues it when the
+  daemon is back; it waits up to 10 s for the server to ack their last frames.
 - `run.assign` is idempotent: when the daemon already holds the run it answers `run.accept`
   again. When the server gets neither `run.accept` nor `run.reject` within 30 s, or the link
   drops first, it sends the same `run.assign` again on the next link.
@@ -1073,7 +1075,7 @@ found on PATH.
   task ends only the console host, so the task's daemon writes its pid and its process
   creation time to `%LOCALAPPDATA%\<slug>-daemon\daemon.pid` and waits on the event
   `Local\<slug>-daemon-stop-<pid>`: setting it shuts the daemon down as Ctrl+C does (runs are
-  cancelled and reported). From another logon session of the same user (SSH, WinRM), where the
+  stopped and reported as `daemon restarted`). From another logon session of the same user (SSH, WinRM), where the
   event is not visible, or after 20 s, the process (matched by pid and creation time) is
   terminated. Both commands fail when the daemon is still running afterwards.
 - Windows, replacing the program file (every updater follows this; the daemon is never stopped

@@ -32,6 +32,10 @@ pub struct RunMeta {
     /// of its own, and removing the run leaves the line alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<PathBuf>,
+    /// The CLI session the run was assigned to resume: a restart reports it when the CLI did
+    /// not report one before the daemon stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_session_id: Option<String>,
 }
 
 pub fn runs_dir(cfg: &Config) -> PathBuf {

@@ -748,8 +748,9 @@ async fn unknown_run_after_reconnect_is_cancelled() {
 
 /// A daemon that starts after a crash finds an unfinished run folder: it stops the CLI that was
 /// left running, replays the frames the server has not acked, and ends the run with run.done
-/// (failed: daemon restarted, with the run's CLI session) and a failed run.session. On a graceful stop it waits for the
-/// ack of run.done before it exits.
+/// (failed: daemon restarted, with the run's CLI session) and a failed run.session. On a
+/// graceful stop the runs it interrupts end the same way, and it waits for the ack of run.done
+/// before it exits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn restart_recovers_unfinished_runs() {
     #[cfg(unix)]
@@ -857,8 +858,9 @@ async fn restart_recovers_unfinished_runs() {
         serde_json::from_slice(&std::fs::read(dir.join("run.json")).unwrap()).unwrap();
     assert!(meta["finishedAt"].is_u64());
 
-    // Graceful stop with a running run: run.done (cancelled) goes out, and the daemon exits
-    // soon after the server acks it.
+    // Graceful stop with a running run (a computer or service restart): run.done goes out as
+    // `daemon restarted`, so the server continues the run in its session (盯 1.7), and the
+    // daemon exits soon after the server acks it.
     send(&mut ws, &assign("r2", "fake", "hang", None)).await;
     collect(&mut ws, "r2", true, |f| {
         matches!(
@@ -872,10 +874,60 @@ async fn restart_recovers_unfinished_runs() {
     .await;
     stop_tx.send(()).unwrap();
     let frames = collect(&mut ws, "r2", true, |f| matches!(f, Up::RunDone(_))).await;
-    assert_eq!(done(&frames).status, "cancelled");
+    let d = done(&frames);
+    assert_eq!(d.status, "failed");
+    assert_eq!(d.error.as_deref(), Some("daemon restarted"));
     tokio::time::timeout(Duration::from_secs(8), daemon)
         .await
         .expect("daemon exits once run.done is acked")
+        .unwrap()
+        .unwrap();
+}
+
+/// A run that was itself a resume and stopped before its CLI reported a session: the restart
+/// reports the session it was resuming, so the conversation is not lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restart_reports_the_resumed_session_when_none_was_logged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let dir = tmp.path().join("work/runs/rc2");
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    let meta = serde_json::json!({ "runId": "rc2", "startedAt": now_ms() - 5000, "resumeSessionId": "sess-old" });
+    std::fs::write(dir.join("run.json"), meta.to_string()).unwrap();
+    let frame = serde_json::to_string(&Up::RunEvent {
+        run_id: "rc2".into(),
+        seq: 1,
+        at: now_ms(),
+        event: RunEvent::Status {
+            state: "running".into(),
+            message: None,
+        },
+    })
+    .unwrap();
+    std::fs::write(dir.join("events.jsonl"), format!("{frame}\n")).unwrap();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(
+        &mut ws,
+        &welcome(vec![KnownRun {
+            run_id: "rc2".into(),
+            acked_seq: 1,
+        }]),
+    )
+    .await;
+    let frames = collect(&mut ws, "rc2", true, |f| matches!(f, Up::RunSession(_))).await;
+    let d = done(&frames);
+    assert_eq!(d.error.as_deref(), Some("daemon restarted"));
+    assert_eq!(d.session_id.as_deref(), Some("sess-old"));
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(8), daemon)
+        .await
+        .expect("daemon exits")
         .unwrap()
         .unwrap();
 }

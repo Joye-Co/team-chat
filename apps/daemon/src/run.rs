@@ -433,6 +433,12 @@ pub async fn supervise(ctx: RunCtx) {
     let (outcome, timed_out) = match prepared {
         Err(e) => (Outcome::failed(e), false),
         Ok((cwd, line, line_note)) => {
+            if let Some(sid) = &assign.resume_session_id
+                && let Some(mut meta) = workspace::read_meta(&dir)
+            {
+                meta.resume_session_id = Some(sid.clone());
+                workspace::write_meta(&dir, &meta);
+            }
             event(RunEvent::Status {
                 state: "running".into(),
                 message: None,

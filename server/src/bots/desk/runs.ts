@@ -263,10 +263,11 @@ export abstract class DeskRuns extends DeskCore {
     const first = chain[chain.length - 1];
     let prs: string[] = [];
     let artifacts: string[] = [];
+    // 产出 of every try: a version keeps the run that made it, and an earlier try may have made it.
     if (last) {
       try {
         const proof = unwrap(
-          await roomStub(this.env, last.group_id).rpc(last.group_id, "bots.runProof", this.actor(), { topicId: last.topic_id, runId: last.id, since: first.created_at }),
+          await roomStub(this.env, last.group_id).rpc(last.group_id, "bots.runProof", this.actor(), { topicId: last.topic_id, runId: last.id, runIds: chain.map((x) => x.id), since: first.created_at }),
         ) as RunProof;
         prs = proof.prs.map((p) => `${p.url}${p.state ? ` (${p.state})` : ""}`);
         artifacts = proof.artifacts.map((a) => `"${a.title}" version ${a.version}`);

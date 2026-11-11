@@ -180,6 +180,9 @@ export function doneCardV1(card: CardV2): Card {
   return cardV2ToV1({ ...card, fallback: "", blocks: card.blocks.filter((b) => b.id !== "result") });
 }
 
+/** At most this many runs in one `bots.runProof` (a retry chain is at most 20 long). */
+const MAX_PROOF_RUNS = 20;
+
 /** What `bots.runProof` returns. */
 export interface RunProof {
   prs: PrRef[];
@@ -188,21 +191,24 @@ export interface RunProof {
 
 /**
  * Proof the room holds for a run of the calling bot in a topic: 产出 versions made by the run
- * (their `runId`), or by the bot in the topic since the run started; and the topic's pull
- * request links (`topic.linked`).
+ * (their `runId`; with `runIds`, by any of those runs, such as the tries of one piece of work),
+ * or by the bot in the topic since the run started; and the topic's pull request links
+ * (`topic.linked`).
  */
 registerRoomRpc("bots.runProof", (room, actor, args): RunProof => {
-  const { topicId, runId, since } = args as { topicId: string; runId: string; since: number };
+  const { topicId, runId, runIds, since } = args as { topicId: string; runId: string; runIds?: unknown; since: number };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  const listed = Array.isArray(runIds) ? runIds.filter((x): x is string => typeof x === "string").slice(0, MAX_PROOF_RUNS) : [];
+  const ids = listed.length > 0 ? listed : [runId];
   const artifacts: ArtifactProof[] = [];
   try {
     const rows = room.sql
       .exec<{ artifact_id: string; version: number; title: string }>(
         `SELECT v.artifact_id, v.version, a.title FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
-         WHERE a.topic_id = ? AND (v.run_id = ? OR (v.run_id IS NULL AND v.created_by = ? AND v.created_at >= ?))
+         WHERE a.topic_id = ? AND (v.run_id IN (${ids.map(() => "?").join(", ")}) OR (v.run_id IS NULL AND v.created_by = ? AND v.created_at >= ?))
          ORDER BY v.created_at, v.version LIMIT 50`,
         topicId,
-        runId,
+        ...ids,
         actor.id,
         since,
       )
