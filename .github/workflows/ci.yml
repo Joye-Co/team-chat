@@ -514,6 +514,23 @@ jobs:
           TC_REQUIRE_REAL_CLI: "1"
           TC_REQUIRE_REAL_CODEX: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
+      # TEMPORARY (removed before merge): the pause tests many times over, with the counts.
+      - name: Pause tests, 25 times each (temporary)
+        shell: bash
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
+        run: |
+          pass=0; fail=0
+          for i in $(seq 1 25); do
+            if cargo test --locked -p daemon --features test-fakes --test real_cli_pause > "pause-$i.log" 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); cat "pause-$i.log"; fi
+          done
+          echo "real_cli_pause: $pass passed, $fail failed of 25"
+          tpass=0; tfail=0
+          for i in $(seq 1 25); do
+            if cargo test --locked -p daemon --features test-fakes --test process_tree > "tree-$i.log" 2>&1; then tpass=$((tpass+1)); else tfail=$((tfail+1)); cat "tree-$i.log"; fi
+          done
+          echo "process_tree: $tpass passed, $tfail failed of 25"
+          [ "$fail" = 0 ] && [ "$tfail" = 0 ]
       # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
       # never gets the prompt of a gated run.
       - name: A gated run does not start when only managed hooks are allowed
