@@ -30,14 +30,6 @@ signature_status() {
   ARG1="$(cygpath -w "$1")" ps_out '(Get-AuthenticodeSignature -LiteralPath $env:ARG1).Status'
 }
 
-# same_publisher <update helper> <previous installer> <new installer>: whether an app
-# installed from the previous installer takes the new one as an update. The helper answers
-# with the rule an update goes by (`--accepts`, signer_allows in apps/update-helper), so
-# this check and the update cannot disagree. Prints the helper's reason when it says no.
-same_publisher() {
-  "$1" --accepts "$(cygpath -w "$2")" "$(cygpath -w "$3")" 2>&1
-}
-
 # pe_machine <exe>: the machine field of its PE header in hex (8664 = x64, aa64 = ARM64).
 pe_machine() {
   ARG1="$(cygpath -w "$1")" ps_out \
