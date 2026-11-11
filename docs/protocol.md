@@ -659,6 +659,10 @@ Module: `updates.ts` / `updates.rs`.
 | `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
 | `GET /download?code=<invite code>&platform=` | anyone with a valid invite code | | the same (links made before the fragment form) |
 
+Uploading the file a version already has (same size and SHA-256) answers 200 with the first
+upload's `UpdateInfo` and stores nothing; another file for a published version is `409 conflict`.
+A release script can therefore repeat its uploads after one of them failed.
+
 The invite download picks the file like this: a `platform` the server knows wins; an unknown one
 gets the DMG; with none, a request whose `User-Agent` says Windows gets the installer and every
 other request the DMG. The page of `GET /download` posts `platform=windows` from a browser on
