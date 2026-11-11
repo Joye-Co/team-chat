@@ -99,9 +99,11 @@ export abstract class DeskInput extends DeskDelegate {
     const kind = this.approvalKind(r);
     // 这件事里都同意 answers only a gated approval (one with a kind).
     const whole = kind !== null && approvesWholeWork(m.body);
-    const decision = r.approval_id ? (whole ? "approve" : approvalDecision(m.body)) : null;
+    // A short "好" / "ok" answers only in a reply that quotes the approval card.
+    const toCard = m.replyToMessageId !== undefined && m.replyToMessageId === this.approvalCard(r)?.messageId;
+    const decision = r.approval_id ? (whole ? "approve" : approvalDecision(m.body, toCard)) : null;
     // The room hook sends only human messages; other members' 同意 stays plain input.
-    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approver(kind))) {
+    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approverOfOpen(r, kind))) {
       await this.auditApproval(r, m.authorId, whole ? "approve_run" : decision, "text");
       // Recorded as an input so a retried call does not answer twice.
       this.sql.exec(
@@ -184,7 +186,7 @@ export abstract class DeskInput extends DeskDelegate {
     const whole = kind !== null && a.actionId.startsWith("approveall:");
     const decision = a.actionId.startsWith("approve:") || whole ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
     if (!decision) return;
-    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approver(kind))) {
+    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approverOfOpen(r, kind))) {
       this.log.info("approval press ignored", { runId: r.id, actorId: a.actorId, kind: a.actorKind });
       return;
     }

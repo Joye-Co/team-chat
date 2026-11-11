@@ -64,6 +64,7 @@ fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpe
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         },
         prompt: prompt.into(),
         model: None,
@@ -76,6 +77,7 @@ fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpe
         resume_session_id: None,
         gate_hook: None,
         gate_alive: None,
+        gates: None,
         exec: daemon::executor::local(),
     }
 }
@@ -217,11 +219,11 @@ async fn tool_result_with_hook(
 }
 
 /// The real CLI starts the approval hook of [`daemon::gates::claude_settings`] before a shell
-/// tool runs, and a hook that cannot ask the daemon does what this system says: Unix lets the
-/// command run (as it always has), Windows refuses it. The hook here is the real `chat-run`
-/// with no daemon behind it (no `CHAT_RUN_SOCKET`).
+/// tool runs, and a hook that cannot ask the daemon refuses the command on every system, with
+/// a reason that tells the CLI to try again shortly. The hook here is the real `chat-run` with
+/// no daemon behind it (no `CHAT_RUN_SOCKET`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_real_cli_starts_the_hook_and_a_hook_without_a_daemon_decides_by_system() {
+async fn the_real_cli_starts_the_hook_and_a_hook_without_a_daemon_refuses() {
     let Some(claude) = claude() else { return };
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let links = tempfile::tempdir().unwrap();
@@ -235,19 +237,15 @@ async fn the_real_cli_starts_the_hook_and_a_hook_without_a_daemon_decides_by_sys
         tool_result_with_hook(&claude, &hook, "Bash", "echo gated-marker-bash", &[])
             .await
             .expect("the Bash tool");
-    if cfg!(windows) {
-        assert!(is_error, "{text}");
-        assert!(
-            text.contains("the daemon could not be asked"),
-            "the hook's refusal: {text}"
-        );
-        assert!(
-            !text.contains("gated-marker-bash"),
-            "the command ran: {text}"
-        );
-    } else {
-        assert!(!is_error && text.contains("gated-marker-bash"), "{text}");
-    }
+    assert!(is_error, "{text}");
+    assert!(
+        text.contains("run the same command again"),
+        "the hook's refusal: {text}"
+    );
+    assert!(
+        !text.contains("gated-marker-bash"),
+        "the command ran: {text}"
+    );
 }
 
 /// A hook that cannot even be started (its program is not there): Windows blocks the command
@@ -305,24 +303,20 @@ async fn the_powershell_tool_goes_through_the_hook_too() {
         }
         return;
     };
-    if cfg!(windows) {
-        assert!(is_error, "{text}");
-        assert!(
-            text.contains("the daemon could not be asked"),
-            "the hook's refusal: {text}"
-        );
-        assert!(
-            !text.contains("gated-marker-pwsh"),
-            "the command ran: {text}"
-        );
-    } else {
-        assert!(!is_error && text.contains("gated-marker-pwsh"), "{text}");
-    }
+    assert!(is_error, "{text}");
+    assert!(
+        text.contains("run the same command again"),
+        "the hook's refusal: {text}"
+    );
+    assert!(
+        !text.contains("gated-marker-pwsh"),
+        "the command ran: {text}"
+    );
 }
 
 /// The Windows form of the hook (started without a shell, `onFailure: "block"`) before the
 /// real CLI of this system, whatever the system: a hook program that is not there blocks the
-/// command, and one that is there and says nothing lets it run. The CLI's hook runner is the
+/// command, and the real one with no daemon behind it refuses it. The CLI's hook runner is the
 /// same code on every system, so this is seen on the Mac and Linux too, not only on Windows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_windows_form_of_the_hook_blocks_when_it_cannot_start() {
@@ -335,8 +329,8 @@ async fn the_windows_form_of_the_hook_blocks_when_it_cannot_start() {
     let missing = links.path().join("nowhere").join("chat-run");
     for (hook, marker, runs) in [
         (&missing, "gated-marker-exec-missing", false),
-        // The real hook without a daemon: refuses on Windows, says nothing on Unix.
-        (&real, "gated-marker-exec-real", cfg!(unix)),
+        // The real hook without a daemon: refuses on every system.
+        (&real, "gated-marker-exec-real", false),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let model = model::Model::start().await;
@@ -395,6 +389,7 @@ async fn a_sign_in_with_the_real_cli_reports_the_link_and_can_be_cancelled() {
         sandbox: None,
         permission_mode: None,
         allowed_tools: None,
+        asks_permission: false,
     };
     let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -475,12 +470,15 @@ async fn the_real_clis_are_found_by_name_and_say_their_version() {
         real.models.as_ref().is_some_and(|m| !m.is_empty()),
         "{real:?}"
     );
-    assert_eq!(
-        clis.iter()
-            .find(|c| c.kind == "codex")
-            .and_then(|c| c.gates),
-        None
-    );
+    // The daemon answers Codex's own approval requests: gated on every system.
+    if codex.is_some() {
+        assert_eq!(
+            clis.iter()
+                .find(|c| c.kind == "codex")
+                .and_then(|c| c.gates),
+            Some(true)
+        );
+    }
     let (report, _) = daemon::doctor::report(&cfg).await;
     assert!(!report.contains("NOT FOUND"), "{report}");
     assert!(report.contains("Claude Code"), "{report}");

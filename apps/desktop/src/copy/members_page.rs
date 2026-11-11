@@ -84,6 +84,7 @@ crate::copy! {
     MEMBERS_COST_OF = "{cost} / 上限 {limit}",
     MEMBERS_WAITS_REVIEW_WORD = "等你审",
     MEMBERS_WHERE = "在哪干活",
+    MEMBERS_WHERE_CHANGE = "更换电脑…",
     MEMBERS_EDIT_MORE = "修改",
     // --- end pages track ---
     // --- v13/ux-pages: the member detail recipe (COMPLETENESS.md §2.18) ---

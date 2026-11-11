@@ -350,6 +350,10 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     // Set when a turn completed: the run ends (or the next turn starts) once no steer is
     // unanswered, or at this deadline.
     let mut ending: Option<tokio::time::Instant> = None;
+    // Gated runs: approval requests the daemon answers itself (`gate_answer`); a gated command
+    // waits here for a person: (json-rpc id, answer). Dropped (aborted) with the run.
+    let gates = spec.gates.clone().filter(|g| !g.is_empty() && !spec.aside);
+    let mut asks: tokio::task::JoinSet<(Value, Value)> = tokio::task::JoinSet::new();
 
     let id = ids.next_id();
     pending.insert(id, Pending::Initialize);
@@ -484,6 +488,23 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         }
                     }
                     Rpc::Request { id, method, params } => {
+                        // A gated run: the daemon answers the CLI's own approval requests.
+                        match gates.clone().map(|g| (gate_answer(method, params, &g), g)) {
+                            Some((GateAnswer::Now(result), _)) => {
+                                let _ = p.write_json(&json!({ "id": id, "result": result })).await;
+                                continue;
+                            }
+                            Some((GateAnswer::Ask { line, yes, no }, g)) => {
+                                let (rid, e) = (id.clone(), emit.clone());
+                                asks.spawn(async move {
+                                    let emit = move |ev: RunEvent| { let _ = e.send(ev); };
+                                    let ok = g.allows(&line, &emit).await;
+                                    (rid, if ok { yes } else { no })
+                                });
+                                continue;
+                            }
+                            _ => {}
+                        }
                         let approval = matches!(method,
                             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval");
                         if approval {
@@ -560,6 +581,12 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     }
                 }
             }
+            Some(done) = asks.join_next(), if !asks.is_empty() => {
+                // A person answered a gated command (or the run's gates were dropped).
+                if let Ok((rid, result)) = done {
+                    let _ = p.write_json(&json!({ "id": rid, "result": result })).await;
+                }
+            }
             _ = tokio::time::sleep_until(ending.unwrap_or_else(tokio::time::Instant::now)), if ending.is_some() => {
                 // No answer to a steer in time: its text gets the next turn.
                 let ids_left: Vec<u64> = pending
@@ -591,15 +618,74 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     }
 }
 
-/// `thread/start` approval policy and sandbox. An AI member has every permission: approval
-/// `never` and sandbox `danger-full-access` (nobody is there to approve), whatever `daemon.toml`
-/// says (`approval_policy` and `sandbox` are ignored; old configs still parse). A side chat run
-/// (`spec.aside`) is read-only: sandbox `read-only`, approval policy `never`.
+/// `thread/start` approval policy and sandbox. An AI member has every permission: sandbox
+/// `danger-full-access`, whatever `daemon.toml` says (`approval_policy` and `sandbox` are
+/// ignored; old configs still parse). Approval `never` (nobody is there to approve), except in
+/// a run with gated actions (`spec.gates`): `untrusted`, so every command that is not a known
+/// read-only one (and every file change) comes to the daemon as an approval request, which
+/// [`gate_answer`] answers: at once unless it matches a gate. A side chat run (`spec.aside`) is
+/// read-only: sandbox `read-only`, approval policy `never`.
 pub fn thread_policy(spec: &RunSpec) -> (String, String) {
     if spec.aside {
         return ("never".into(), "read-only".into());
     }
-    ("never".into(), "danger-full-access".into())
+    let gated = spec.gates.as_ref().is_some_and(|g| !g.is_empty());
+    let approval = if gated { "untrusted" } else { "never" };
+    (approval.into(), "danger-full-access".into())
+}
+
+/// How a gated run answers one request of the app-server ([`gate_answer`]).
+#[derive(Debug, PartialEq)]
+pub enum GateAnswer {
+    /// Answer at once with this result.
+    Now(Value),
+    /// `line` matches a gate: ask a person; `yes` or `no` is the result.
+    Ask { line: String, yes: Value, no: Value },
+    /// Not an approval request the gates answer.
+    NotMine,
+}
+
+/// The answer of a gated run to an app-server request: a command
+/// (`item/commandExecution/requestApproval`) is matched as the script inside its shell wrapper
+/// ([`crate::gates::shell_script`]), an MCP tool call (`mcpServer/elicitation/request` with
+/// `_meta.codex_approval_kind = "mcp_tool_call"`) as `mcp__<server>__<tool> <arguments JSON>`
+/// like Claude Code's; no match is accepted at once. File changes and requested permissions are
+/// granted at once: an AI member has every permission.
+pub fn gate_answer(method: &str, params: &Value, gates: &crate::gates::Gates) -> GateAnswer {
+    let ask = |line: String, yes: Value, no: Value| match gates.matches(&line) {
+        Some(_) => GateAnswer::Ask { line, yes, no },
+        None => GateAnswer::Now(yes),
+    };
+    match method {
+        "item/commandExecution/requestApproval" => {
+            let command = params["command"].as_str().unwrap_or_default();
+            ask(
+                crate::gates::shell_script(command),
+                json!({ "decision": "accept" }),
+                json!({ "decision": "decline" }),
+            )
+        }
+        "item/fileChange/requestApproval" => GateAnswer::Now(json!({ "decision": "accept" })),
+        "item/permissions/requestApproval" => GateAnswer::Now(json!({
+            "permissions": params["permissions"].clone(),
+            "scope": "turn",
+        })),
+        "mcpServer/elicitation/request"
+            if params["_meta"]["codex_approval_kind"] == "mcp_tool_call" =>
+        {
+            let server = params["serverName"].as_str().unwrap_or_default();
+            // `Allow the <server> MCP server to run tool "<tool>"?`
+            let message = params["message"].as_str().unwrap_or_default();
+            let tool = message
+                .split_once("tool \"")
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map_or("", |(t, _)| t);
+            let line = format!("mcp__{server}__{tool} {}", params["_meta"]["tool_params"]);
+            let answer = |action: &str| json!({ "action": action, "content": null, "_meta": null });
+            ask(line, answer("accept"), answer("decline"))
+        }
+        _ => GateAnswer::NotMine,
+    }
 }
 
 /// Whether `chat-run` works from a command Codex runs in this run: the sandbox is
