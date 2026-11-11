@@ -2023,6 +2023,18 @@ impl ChatProvider for FakeProvider {
     fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
         crate::data::email_reply_now(Ok(Some("joye@example.com".into())))
     }
+    // Code sign-in for a phone (screenshots only): a fixed code that stays waiting.
+    fn offer_phone_sign_in(&self) -> crate::data::EmailReply<crate::data::PhoneOffer> {
+        crate::data::email_reply_now(Ok(crate::data::PhoneOffer {
+            id: "offer".into(),
+            code: "7K2M-9QPX".into(),
+            qr_text: "tc-sign-in:7K2M-9QPX?server=https%3A%2F%2Fchat.example.com".into(),
+            expires_at: 0,
+        }))
+    }
+    fn phone_offer_state(&self, _id: &str) -> crate::data::EmailReply<crate::data::PhoneOfferState> {
+        crate::data::email_reply_now(Ok(crate::data::PhoneOfferState::Waiting))
+    }
     fn add_email_code(&self, _email: &str) -> crate::data::EmailReply<()> {
         crate::data::email_reply_now(Ok(()))
     }
