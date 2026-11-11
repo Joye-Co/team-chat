@@ -636,7 +636,11 @@ An AI member runs with every permission; only the few kinds the team checked nee
 
 - **Matching**: each pattern is a regular expression, matched case-insensitively against each
   simple command of the tool's shell line (split at newlines, `;`, `&`, `|`; whitespace runs as
-  one space), so a pattern cannot span two commands. An MCP tool call is matched as
+  one space), so a pattern cannot span two commands. Each command is matched as written and as
+  its plain words: the program without its folder, quotes and `.exe` / `.cmd` / `.bat` /
+  `.com` / `.ps1`, the arguments without quotes (`"C:\Program Files\GitHub CLI\gh.exe" pr merge 5`,
+  `gh.exe pr merge 5` and `'gh' pr merge 5` are all `gh pr merge 5`), so a pattern holds for
+  every spelling a shell accepts. An MCP tool call is matched as
   `<tool name> <input JSON>`. The first kind (assignment order) with a matching pattern wins. A
   pattern the daemon cannot compile is left out and logged; a kind left with none is dropped.
 - **Claude Code** (`CliInfo.gates = true`): the run gets `--settings <run folder>/.gate-settings.json`
@@ -648,9 +652,16 @@ An AI member runs with every permission; only the few kinds the team checked nee
   (`command: <run folder>/bin/chat-run.exe`, `args: ["gate"]`: started without a shell, because
   Claude Code runs a shell line in Git Bash or, without it, in PowerShell, and no quoted path
   with an argument is a command in both) with `onFailure: "block"`; a Windows daemon reports
-  `gates` only for a Claude Code of 2.1.295 or later, the first whose command hooks can block
-  on failure. Claude Code merges hooks of all settings files, so the user's own
-  stay; a `disableAllHooks` in the user's settings would turn the hook off. The hook reads the hook input on standard input and sends `gate.check
+  `gates` only for a Claude Code of 2.1.322 or later, the version its tests run against
+  (`onFailure` for command hooks came with 2.1.295), and a run whose gates reach a CLI that was
+  not reported as gated fails before the CLI starts. Claude Code merges hooks of all settings files, so the user's own
+  stay. Hooks can be turned off outside the run. The run's settings say `disableAllHooks: false`,
+  which wins over the user's and the project's settings. Managed settings rank above the run's
+  (`allowManagedHooksOnly`, or `disableAllHooks` there), so the settings also install a
+  SessionStart hook, `chat-run gate-alive` (op `gate.alive`): the CLI runs it when it starts,
+  before it takes input, and the daemon writes a gated run's prompt only after it ran. When it
+  has not run within 45 s the run fails ("the approval hook did not start") and no command of it
+  ever runs. The hook reads the hook input on standard input and sends `gate.check
   { tool, command }` over the run's `chat-run` socket. No match: it exits 0 at once with no
   output. A match: the daemon emits `approval.request { approvalId: "daemon-gate-<n>", title: <the
   kind's 设置 name>, detail: command, kind, command }` and the hook waits. `run.approval approve`

@@ -636,12 +636,26 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let program = spec.cfg.command();
     // The settings file holds auth values: it goes when the run ends, however it ends.
     let _settings = aside_settings.map(RemoveOnDrop);
+    let gate_settings_installed = gate_settings.is_some();
     let _gate_settings = gate_settings.map(RemoveOnDrop);
 
     let mut p = match Proc::spawn(&spec, &program, &args) {
         Ok(p) => p,
         Err(e) => return Outcome::failed(format!("cannot start {program}: {e}")),
     };
+    // A gated run: the prompt goes in only once the CLI has run the start-up hook of the gate
+    // settings. A CLI that does not run it has its hooks turned off (managed settings that
+    // allow only managed hooks), and would run every gated command unasked.
+    if let Some(mut alive) = spec.gate_alive.clone().filter(|_| gate_settings_installed) {
+        let started = tokio::time::timeout(crate::gates::HOOKS_START, alive.wait_for(|a| *a)).await;
+        if !matches!(started, Ok(Ok(_))) {
+            return Outcome::failed(
+                "the approval hook did not start: hooks are turned off for this CLI (its \
+managed settings allow only managed hooks), so commands that need a person's approval would \
+run unasked. The run was not started.",
+            );
+        }
+    }
     let mut norm = ClaudeNormalizer::default();
     for ev in norm.queue_turn() {
         let _ = emit.send(ev);

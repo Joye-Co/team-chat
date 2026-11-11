@@ -51,6 +51,10 @@ pub struct RunSpec {
     /// The run's `chat-run` link when the run has gated actions (`run.assign.gates`): Claude
     /// Code gets a PreToolUse hook that runs `<link> gate` (see [`crate::gates`]).
     pub gate_hook: Option<PathBuf>,
+    /// Becomes true when the CLI ran the start-up hook of the gate settings. With it, the
+    /// runtime gives the CLI its prompt only after that: a CLI whose hooks are turned off
+    /// never starts a gated run ([`crate::gates::claude_settings`]).
+    pub gate_alive: Option<tokio::sync::watch::Receiver<bool>>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
 }

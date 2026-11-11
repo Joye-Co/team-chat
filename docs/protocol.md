@@ -2041,7 +2041,10 @@ only at the moment a command would run: the machine stops the command and asks
   wording only when every machine with its runtime stops commands.
 - Patterns are regular expressions matched case-insensitively against each simple command of a
   shell line (split at newlines, `;`, `&&`, `||`, `|`; whitespace runs count as one space), and
-  against `<tool name> <input JSON>` of MCP tool calls. `PATCH` rejects a pattern that
+  against `<tool name> <input JSON>` of MCP tool calls. The daemon matches each command as
+  written and as its plain words (the program without its folder, quotes and `.exe` / `.cmd` /
+  `.bat` / `.com` / `.ps1`, the arguments without quotes), so a pattern written for
+  `gh pr merge` also holds for `gh.exe pr merge` and `"C:\Program Files\GitHub CLI\gh.exe" pr merge`. `PATCH` rejects a pattern that
   JavaScript cannot compile or that uses lookaround, backreferences or possessive forms (Rust's
   `regex` on the daemon does not have them). They are meant to be few and sure: a wrong match is
   a useless card; GitHub branch protection and approval-gated deploy environments catch the rest.
@@ -2052,7 +2055,7 @@ only at the moment a command would run: the machine stops the command and asks
   | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
   | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
   | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
-  | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
+  | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; on Windows `Remove-Item`/`ri`/`rm`/`rmdir`/`rd`/`del`/`erase` of a drive's root (`C:\`, `C:\*`, `\`), of `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%` itself, and `rm` with flags of a Git Bash drive (`/c/`); `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
   | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
 
   A force push to a work branch is not gated (the agent rebases its own PR branch); a force push

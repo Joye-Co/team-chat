@@ -75,6 +75,7 @@ fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpe
         note: None,
         resume_session_id: None,
         gate_hook: None,
+        gate_alive: None,
         exec: daemon::executor::local(),
     }
 }
@@ -448,8 +449,8 @@ async fn the_real_clis_are_found_by_name_and_say_their_version() {
         text.push_str("[runtimes.codex]\nkind = \"codex\"\n");
     } else {
         assert!(
-            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
-            "TC_REQUIRE_REAL_CLI is set and codex is not on PATH"
+            std::env::var_os("TC_REQUIRE_REAL_CODEX").is_none(),
+            "TC_REQUIRE_REAL_CODEX is set and codex is not on PATH"
         );
     }
     let cfg = daemon::config::Config::parse(&text).unwrap();
