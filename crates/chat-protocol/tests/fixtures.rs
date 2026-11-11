@@ -79,7 +79,13 @@ check!(
     CreateMemoryRequest,
     UpdateMemoryRequest,
     MemoryUpdatesResponse,
-    MachineMemoryNoteRequest
+    MachineMemoryNoteRequest,
+    SetPasswordRequest,
+    RemovePasswordRequest,
+    PasswordSignInRequest,
+    QrClaimRequest,
+    QrRequestRequest,
+    QrCodeRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -277,6 +283,20 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("EmailSignInRequest", validated::<EmailSignInRequest>),
     ("VerifyEmailRequest", validated::<VerifyEmailRequest>),
     ("MyEmailResponse", plain::<MyEmailResponse>),
+    // account: password and code sign-in
+    ("MyPasswordResponse", plain::<MyPasswordResponse>),
+    ("SetPasswordRequest", validated::<SetPasswordRequest>),
+    ("RemovePasswordRequest", validated::<RemovePasswordRequest>),
+    ("PasswordSignInRequest", validated::<PasswordSignInRequest>),
+    ("QrOfferResponse", plain::<QrOfferResponse>),
+    ("QrOfferStatus", plain::<QrOfferStatus>),
+    ("QrClaimRequest", validated::<QrClaimRequest>),
+    ("QrRequestRequest", validated::<QrRequestRequest>),
+    ("QrRequestResponse", plain::<QrRequestResponse>),
+    ("QrPollRequest", plain::<QrPollRequest>),
+    ("QrPollResponse", plain::<QrPollResponse>),
+    ("QrCodeRequest", validated::<QrCodeRequest>),
+    ("QrPeekResponse", plain::<QrPeekResponse>),
     // 1.1 gap fixes
     ("RecordedDecision", plain::<RecordedDecision>),
     ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
