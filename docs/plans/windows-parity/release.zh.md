@@ -11,6 +11,15 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 - **待补**：有差距，还没改完；写明谁来改。
 - **无对应**：Windows 没有这个东西，写明原因和替代做法。
 
+**哪些是怎么证明的（2026-11-12）。** 安装、更新、回滚、打断后恢复、卸载、带 daemon 的整条链路：在
+Windows runner 上真的跑过（每个相关 PR 的 `windows-installer` 任务，以及发版 workflow 的 dry-run）。
+发版的每条路径（两个系统一起的 `mode=release`、`upload-only`、`windows-only`、从 tag 续上）：由
+`scripts/test-release-scripts.sh` 在沙盒仓库里用假的 `gh` 和假的服务器跑真的 `release.sh` 证明，另有两次
+dry-run（[1.2.7](https://github.com/Joye-Co/team-chat/actions/runs/43057601733) 跑到底，
+[1.2.8](https://github.com/Joye-Co/team-chat/actions/runs/43057622498) 的 Windows 任务把真的 1.2.7 装上再
+更新过来）。**#175 之后还没有真的发过一次版**：tag、GitHub Release、往正式服务器上传这几步在新流程下
+没有真的发生过。第一次真实发版是运营方的事，要盯什么见第三节第 2 条。真机上才能看的见第三节第 3 条。
+
 验证方式：没人有 Windows 电脑。「CI 实测」指 `windows-installer` 任务在 `windows-2025` runner 上真的装、
 跑、卸了一遍；「只编译」指只过了 `cargo check --target x86_64-pc-windows-gnu` 和 Windows CI 的编译。
 
@@ -24,7 +33,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 旧式链接 `/download?code=<邀请码>`（邀请码在地址里，老版本客户端生成的） | 给 DMG | 原来也给 DMG，Windows 上没法用 | **已补**（PR 1）：请求没写 `platform` 时，服务器看 `User-Agent`，是 Windows 就给安装包；写了 `platform` 的以写的为准。新增测试：Edge 的 UA 拿到安装包，Safari 的 UA 拿到 DMG，`platform=macos` 能让 Windows 浏览器拿 DMG。`docs/protocol.md` 已更新 |
 | 这个平台还没有版本时 | 404「No release yet.」 | 404「No release for this system yet.」，不会给 DMG | 相同 |
 | 客户端里的下载接口 `GET /v1/updates/latest`、`/v1/updates/:version/download` | 不带参数 | 带 `?platform=windows`；回答的 `platform` 不是 `windows` 就当没有（`crates/chat-core/src/updates.rs`） | 相同 |
-| GitHub Releases | `<名字>-<版本>.dmg`；校验和是 GitHub 在 Assets 里显示的 `sha256:` | `<名字>-<版本>-setup.exe`，同样看 `sha256:`（`release.yml` 的 `windows-publish`，`check-release-digest.sh`） | 相同。1.2.7 起每个版本的 Assets 里都有安装包（`TeamChat-1.2.7-setup.exe` 是第一个） |
+| GitHub Releases | `<名字>-<版本>.dmg`；校验和是 GitHub 在 Assets 里显示的 `sha256:` | `<名字>-<版本>-setup.exe`，同样看 `sha256:`（Mac 任务一次建好 GitHub Release，安装包和 DMG 一起；`check-release-digest.sh`） | 相同。1.2.7 起每个版本的 Assets 里都有安装包（`TeamChat-1.2.7-setup.exe` 是第一个） |
 | 官网（`apps/website`） | 原来没有下载按钮，只有文字 | 原来没有下载按钮，文字还写着 Windows「正在开发」 | **已补**：首页和页尾各有「下载 macOS 版」「下载 Windows 版」两个按钮。不开脚本时都指向 GitHub 的最新 Release 页面；开着脚本时，访客所在系统的那个排在前面、是实心的，并直接指向最新版本里自己的文件（`.dmg` / `-setup.exe`，文件名从 GitHub 读）。「正在开发」只剩手机版。用无界面的浏览器分别以 Mac 和 Windows 的 User-Agent 截图看过 |
 | 不装客户端、只装 daemon | `<slug>-daemon-<版本>-aarch64-apple-darwin`（`build-daemon.sh`） | `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe`（`build-windows-installer.sh`），配 `scripts/install-daemon.ps1` | 相同 |
 
@@ -45,6 +54,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 程序的架构 | 只有 arm64；`test-dmg.sh` 检查 | 只有 x64；原来测试不检查 | **已补**（PR 1）：`test-windows-installer.sh` 读每个 exe 的 PE 头，必须是 x64 |
 | 另一种芯片 | Intel Mac 装不了 | ARM 的 Windows，见下面「Windows on ARM」 | 相同（都只出一种架构） |
 | 带的东西 | 客户端、daemon（在 `.app` 里）、图标、URL scheme（`Info.plist`） | 客户端、更新程序、daemon、卸载程序、图标和版本资源、URL scheme（注册表）、开始菜单快捷方式（带 AppUserModelID）、WebView2 bootstrapper | 相同。CI 实测 |
+| 产品改名之后（`product.json` 的 `formerNames`，TeamChat → Cahoots） | 更新时新的 `.app` 换进旧的位置：已经装着的那一份路径不变（还叫旧名字的 `.app`），新下载的 DMG 里是新名字。bundle id 不变，所以钥匙串里的登录还在 | 已经装着的：安装目录不变（`Programs\<旧名字>`），里面的程序换成 `<新名字>.exe`，旧名字的 exe 留一个硬链接（旧版本的更新程序装完后启动的是旧名字，找不到会回滚）；开始菜单的快捷方式换成新名字，旧的删掉。新装的直接用新名字的目录 | 相同。应用 ID、URL scheme、卸载项、计划任务名、凭据名都跟 bundle id 走，没变，所以更新后不用重新登录、通知和链接照常、daemon 还是那台机器。CI 实测：安装测试检查旧名字的 exe 和新的是同一个文件、旧快捷方式没了（#187）；dry-run [43057622498](https://github.com/Joye-Co/team-chat/actions/runs/43057622498) 把真的 `TeamChat-1.2.7-setup.exe` 装上，登录、当机器，再由它自己的更新程序更新到叫 Cahoots 的新构建，daemon 换到新版本，六个阶段的打断都恢复，最后卸载干净。Mac 这一侧是读代码得出的（`updater/install.rs` 的 `find_app`），这次没有跑 |
 | 内嵌网页的运行时 | 系统自带 WKWebView | Windows 11 自带 WebView2；没有时安装包联网装 Evergreen runtime，装不上也不拦安装 | 无对应的部分已有替代。CI 只走过「已经有」这条路，「没有」要真机（第三节） |
 | 服务器地址 | 发版的构建从 `deploy/servers.json`（或 `TC_SERVERS_JSON`）嵌进去，登录页默认连正式服务器（`release.sh` 的 `release_ops`、`apps/desktop/build.rs`） | 发版 workflow 的 Windows 任务原来自己拼了一个 ops 目录；CI 的安装包没有地址，登录时要手填 | **已补**（PR 1）：`build-windows-installer.sh` 自己做和 `release_ops` 一样的事（只嵌 `servers.json`，不嵌 ops 目录里别的东西）；发版时 `REQUIRE_SERVERS=1`，没有地址就停；CI 从仓库变量 `SERVERS_JSON` 拿，仓库里不放地址。`--selftest-installed` 报告嵌进去的地址的 SHA-256（日志里不出现地址），`test-windows-installer.sh` 核对它和给构建的一致；没给地址时核对确实没有 |
 | 登录 | 邀请码或邮箱验证码；凭证进钥匙串（service = bundle id，account = 服务器地址） | 同一个登录页；凭证进凭据管理器（`<bundle id>:<服务器地址>`） | 相同（只编译和单元测试；真机见第三节） |
@@ -173,7 +183,7 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
 | 撤回 | `withdraw-release`：这个版本不再被提供、不能下载 | 同一个命令，两个平台的文件一起撤回 | 相同。不能只撤一个平台：RUNBOOK 已写明做法（撤回后两边一起发更高的版本） |
 | 退回上一个版本 | 让人下载上一版 DMG 拖进去 | 原来没写 | **已补**（PR 1）：RUNBOOK 写了「退出客户端，运行上一版的 `-setup.exe` 覆盖安装」 |
 | `release-check.sh` | 检查版本号、`Cargo.lock`、CHANGELOG、说明、tag、服务器健康 | 同一个脚本，和平台无关 | 相同 |
-| `test-release-scripts.sh` | 测 `deploy-server.sh` 和 `release-check.sh` 的防呆；原来不测 `release.sh` | 同左；`release.sh --upload-only --platform windows` 原来没有测试 | **已补**（PR 2）：对着本地的假服务器测上传。DMG 和安装包各走各的路由、类型、校验和、说明都对；`--platform windows` 不带 `--upload-only`、未知平台、预发布版本、文件不存在都被拒绝且没有请求发出去；密钥不对算失败且不出现在输出里；服务器没有这个接口（404）算跳过；`ci.yml` 里改 `release.sh` 也会触发这个测试 |
+| `test-release-scripts.sh` | 测 `deploy-server.sh` 和 `release-check.sh` 的防呆；原来不测 `release.sh` | 同左；`release.sh --upload-only --platform windows` 原来没有测试 | **已补**（PR 2）：对着本地的假服务器测上传。DMG 和安装包各走各的路由、类型、校验和、说明都对；`--platform windows` 不带 `--upload-only`、未知平台、预发布版本、文件不存在都被拒绝且没有请求发出去；密钥不对算失败且不出现在输出里；服务器没有这个接口（404）算失败，除非加 `--allow-missing-route`；没有管理密钥时 `--reupload` 和 `--upload-only` 失败，不会装作传好了；`ci.yml` 里改 `release.sh` 也会触发这个测试。沙盒里的整条发布路径见「发版入口」一行 |
 | staging 冒烟（`staging-smoke.ts`） | 不查更新和下载接口 | 同左 | 相同 |
 | CI | DMG 的构建和测试只在手动触发时跑 | 安装包的构建、安装、更新、回滚、恢复、卸载在每个会进安装包的改动上跑（客户端、daemon、它们用到的 crate、安装脚本；#174 把路径范围放宽到这些）；发版 workflow 里再跑一遍安装测试和「从上一个版本更新」的测试（#175） | 相同（Windows 的更多） |
 
@@ -187,9 +197,11 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
    必须在硬件或云端密钥库里，通常拿不到 PFX 文件。
 2. 能拿到 PFX 的：在仓库的 Settings › Secrets and variables › Actions 里加两个 secret：
    `WINDOWS_SIGN_PFX_BASE64`（`base64 -i cert.pfx | tr -d '\n'` 的输出）和 `WINDOWS_SIGN_PASSWORD`。
-3. 拿不到 PFX 的（云端签名，如 Azure Trusted Signing、DigiCert KeyLocker）：在 `release.yml` 的 Windows 任务
-   里设 `WINDOWS_SIGN_CMD`，值是一条「给最后一个参数指的文件签名」的命令（`scripts/windows/sign.sh` 开头有
-   说明），凭据放 secret。
+3. 拿不到 PFX 的（云端签名，如 Azure Trusted Signing、DigiCert KeyLocker）：加 secret `WINDOWS_SIGN_CMD`，值是
+   一条「给最后一个参数指的文件签名」的命令（`scripts/windows/sign.sh` 开头有说明）；这条命令要用的环境
+   变量（密钥库的凭据）放进 secret `WINDOWS_SIGN_ENV`，一行一个 `NAME=value`，日志里会被遮掉。签名工具本身
+   要装在 Windows runner 上：在 `.github/workflows/release-jobs.yml` 的 `windows` 任务里、「Set up code
+   signing」之前加一步安装。
 4. 跑一次 `mode=dry-run` 的 Release workflow：「Test the installer」里每个程序的签名都应该是 `Valid`。
 5. 从签名的第一个版本起，以后每个版本都要用同一个主体（Subject）的证书签。发版的 Windows 任务会把上一个
    版本真的装上、让它更新到新构建，证书对不上时在发布之前就失败。
@@ -205,7 +217,15 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
    `curl -H "Authorization: Bearer <token>" "<服务器>/v1/updates/latest?platform=windows"` 返回这个版本；
    最后一个任务 `No server address in the logs` 是绿的。
 5. 发到一半停下：按 `docs/RUNBOOK.md`「When a release stops half way」那张表补。Windows 任务失败时什么都还没发出去，修好后重新 `mode=release`；GitHub Release 建好之后上传失败用 `mode=upload-only`；tag 推上去了但 Release 没建成，重新 `mode=release` 会自动从 tag 续上。
-6. 官网（`apps/website/src/index.html`）还写着「Windows 版正在开发」，改成已支持并加上下载说明。
+6. 第一次按新流程真实发版时盯这几处（之前都只在沙盒和 dry-run 里跑过）：
+   - Windows 任务先跑完并且是绿的，Mac 任务才开始；没有证书时启动要带 `-f windows_unsigned=true`。
+   - Mac 任务的「Release (release)」一步里：`chore(release): v<版本>` 推上了 `main`，tag 在这个提交上；
+     `gh release create` 只有一次，Assets 里同时有 DMG、`-setup.exe` 和两个系统的 daemon。
+   - 同一步的末尾有两行 `server upload done (200)`，先 DMG 后安装包；然后用第 4 步的 `curl` 确认
+     `?platform=windows` 和不带参数的两个接口都返回这个版本。
+   - 最后一个任务 `No server address in the logs` 是绿的。
+   - 中间哪一步红了：照 `docs/RUNBOOK.md`「When a release stops half way」那张表做，不要手工补 tag 或 Release。
+   - 发完后在一台装着上一个版本的 Windows 电脑上看它自己更新过来（第三节第 3 条的第 9、10 项）。
 7. 写 `docs/releases/<版本>.md` 时，只和一个系统有关的条目标明「Mac：」或「Windows：」，因为两边的
    「更新记录」显示的是同一份说明。
 
@@ -261,6 +281,9 @@ Azure Trusted Signing 一开始就有信誉。这段时间 INSTALL 文档里「�
 也可以把安装包提交到 <https://www.microsoft.com/wdsi/filesubmission> 请微软复核，加快这个过程。
 
 ## 四、PR
+
+后来的：#169（去掉 COM 激活器、链接启动客户端的测试）、#174（更新恢复、22H2、CI 范围）、#175（两个系统
+一起发版和各种补救）、#188（官网、登录窗口的服务器链接）。下面是最早的两个。
 
 - PR 1：本清单；服务器地址、邀请链接、测试开关、卸载、ARM、同一发布者检查、文案、文档。
 - PR 2：整条链路在 runner 上跑（安装 → 邀请码登录本地服务器 → daemon 的计划任务 → 更新 → daemon 换到
