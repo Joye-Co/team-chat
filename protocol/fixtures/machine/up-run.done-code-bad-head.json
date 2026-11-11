@@ -1,0 +1,17 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": false,
+  "description": "code.head is required",
+  "value": {
+    "t": "run.done",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 20,
+    "at": 1762128000020,
+    "status": "succeeded",
+    "durationMs": 64000,
+    "code": {
+      "branch": "main",
+      "pushed": true
+    }
+  }
+}

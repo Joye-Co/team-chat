@@ -1,0 +1,19 @@
+{
+  "kind": "BotRun",
+  "valid": true,
+  "description": "waits for the requester's own machine",
+  "value": {
+    "id": "01JBX0RUN000000000000000AU",
+    "botId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "status": "created",
+    "requestedBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "startedAt": 1762128001000,
+    "updatedAt": 1762128009000,
+    "phase": "waiting_computer",
+    "waitingFor": "offline",
+    "takeover": "none"
+  }
+}

@@ -68,6 +68,8 @@ export const TEXT = {
   approvalGate: (kind: string, command?: string) =>
     `需要你确认：${kind}${command ? `\n\n${command}` : ""}\n\n回复「同意」「拒绝」或「这件事里都同意」。`,
   approveRun: "这件事里都同意",
+  /** The kind's approver is the owners, and the group has none to ask: the requester is asked. */
+  approvalNoOwner: "这个群里没有管理员，先请你确认。",
   approveRunConfirm: "这件事里之后同类的操作都不再问你。",
   /** The approval card after the answer (DESIGN.md §7.10 answered): title and one record line. */
   approvalClosed: {
@@ -236,15 +238,22 @@ export function readableError(raw: string): string {
   }
 }
 
-/** "同意" / "拒绝" (and a few common forms) answer a pending approval; anything else is input. */
-export function approvalDecision(body: string): "approve" | "deny" | null {
+/**
+ * "同意" / "拒绝" answer a pending approval; anything else is input. A plain "好" or "ok" said to
+ * someone else must not approve a merge, so the common short forms ("好", "可以", "行", "ok", …)
+ * count only in a reply that quotes the approval card itself (`toCard`).
+ */
+export function approvalDecision(body: string, toCard = false): "approve" | "deny" | null {
   const t = body
     .replace(/@\S+/g, "")
     .trim()
     .toLowerCase()
     .replace(/[。.!！,，\s]+$/u, "");
-  if (["同意", "可以", "批准", "好", "好的", "行", "approve", "yes", "y", "ok"].includes(t)) return "approve";
-  if (["拒绝", "不同意", "不行", "不可以", "不要", "deny", "no", "n"].includes(t)) return "deny";
+  if (t === "同意") return "approve";
+  if (t === "拒绝" || t === "不同意") return "deny";
+  if (!toCard) return null;
+  if (["可以", "批准", "好", "好的", "行", "approve", "yes", "y", "ok"].includes(t)) return "approve";
+  if (["不行", "不可以", "不要", "deny", "no", "n"].includes(t)) return "deny";
   return null;
 }
 

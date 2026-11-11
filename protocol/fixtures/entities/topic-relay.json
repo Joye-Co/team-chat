@@ -1,0 +1,55 @@
+{
+  "kind": "Topic",
+  "valid": true,
+  "description": "two AI members, a relay at step 2 of 3",
+  "value": {
+    "id": "01JBX0TOPIC0000000000000AD",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "title": "发布 V1：检查清单 ✅",
+    "status": "in_progress",
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "rootMessageId": "01JBX0MSG000000000000000AE",
+    "lastSeq": 42,
+    "messageCount": 7,
+    "participants": [
+      {
+        "memberId": "01JBX0BOT000000000000000AC",
+        "working": false,
+        "lastRunAt": 1762128001000
+      },
+      {
+        "memberId": "01JBX0BOT000000000000000AX",
+        "working": true,
+        "lastRunAt": 1762128005000
+      }
+    ],
+    "relay": {
+      "id": "01JBX0RELAY0000000000000AZ",
+      "startedBy": "01JBX0OWNER0000000000000AA",
+      "goal": "给设置页加深色模式",
+      "current": 1,
+      "state": "running",
+      "updatedAt": 1762128005000,
+      "steps": [
+        {
+          "memberId": "01JBX0BOT000000000000000AC",
+          "note": "写",
+          "state": "done",
+          "runId": "01JBX0RUN000000000000000AU"
+        },
+        {
+          "memberId": "01JBX0BOT000000000000000AX",
+          "note": "审",
+          "state": "working",
+          "runId": "01JBX0RUN000000000000000AW"
+        },
+        {
+          "memberId": "01JBX0BOT000000000000000AC",
+          "note": "按意见改",
+          "state": "pending"
+        }
+      ]
+    }
+  }
+}

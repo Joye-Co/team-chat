@@ -206,9 +206,67 @@ describe("gated approvals", () => {
     d.close();
   });
 
+  it("count a plain 好 as input, and a 好 that replies to the approval card as the answer", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["gates"], gates: true });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    d.event(a.runId, { type: "approval.request", approvalId: "daemon-gate-1", title: "对外发布", kind: "externalPublish", command: "npm publish" });
+    const card = await waitUntil(
+      () => c.events().find((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.kind === "card")?.data.message,
+      5000,
+      "approval card",
+    );
+    // 好 / 行 / ok said in the topic: plain input for the run, nothing is approved.
+    let other = "";
+    for (const body of ["好的", "行", "ok"]) {
+      other = (await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body })).message.id;
+      await d.next((f) => f.t === "run.input" && f.text === body);
+    }
+    expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
+    // 好 that quotes another message is input too.
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "好", replyTo: { messageId: other } });
+    await d.next((f) => f.t === "run.input" && f.text.includes("好"));
+    expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
+    // 好 in a reply to the card answers it.
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "好", replyTo: { messageId: card.id } });
+    expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "daemon-gate-1", decision: "approve" });
+    c.close();
+    d.close();
+  });
+
+  it("ask the requester, and say so on the card, when the approver is the owners and the group has none", async () => {
+    const w = await world();
+    await api("/v1/settings/approvals", { method: "PATCH", token: w.owner.token, body: { approvers: { mergeMain: "owners" } } });
+    await env.DB.prepare("DELETE FROM group_members WHERE group_id = ? AND member_id = ?").bind(w.gid, w.owner.id).run();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["gates"], gates: true });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    d.event(a.runId, { type: "approval.request", approvalId: "daemon-gate-1", title: "合并到 main", kind: "mergeMain", command: "gh pr merge 3" });
+    const card = await waitUntil(
+      () => c.events().find((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.kind === "card")?.data.message,
+      5000,
+      "approval card",
+    );
+    expect(card.mentions).toEqual([w.human.id]);
+    expect(card.card.blocks[0]).toEqual({ type: "text", text: "这个群里没有管理员，先请你确认。" });
+    expect(card.body).toContain("这个群里没有管理员");
+    // The requester may answer this one.
+    await c.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:daemon-gate-1" });
+    expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "daemon-gate-1", decision: "approve" });
+    c.close();
+    d.close();
+  });
+
   it("keep the rules in the prompt and send no gates to a CLI that cannot stop commands", async () => {
     const w = await world();
-    // The daemon knows gates, its CLI (Codex) does not stop commands.
+    // The daemon knows gates, its CLI does not report that it stops commands (an older daemon).
     const { d } = await Daemon.connect(w.machineToken, { features: ["gates"] });
     const { c } = await Client.connect(w.human.token);
     await mention(c, w);

@@ -2,8 +2,9 @@
 //!
 //! Flow: `initialize` -> `session/new` -> `session/prompt`; `session/update` notifications
 //! stream the work; the `session/prompt` response (`stopReason`) ends a turn. Follow-ups are
-//! queued and sent as the next `session/prompt`. `session/request_permission` becomes an
-//! approval request. Cancel sends `session/cancel`, then kills the process group.
+//! queued and sent as the next `session/prompt`. `session/request_permission` is allowed at
+//! once unless it matches one of the run's gates, which asks a person (see [`crate::gates`]).
+//! Cancel sends `session/cancel`, then kills the process group.
 
 use super::*;
 use crate::proto::{FileChange, RunEvent, truncate};
@@ -209,6 +210,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut approval_n = 0u32;
     let mut last_stop: String;
     let mut control_open = true;
+    // Permission requests that match a gate wait here for a person: (json-rpc id, outcome).
+    let mut asks: tokio::task::JoinSet<(Value, Value)> = tokio::task::JoinSet::new();
 
     let id = ids.next_id();
     pending.insert(id, Pending::Initialize);
@@ -272,7 +275,25 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         }
                     }
                     Rpc::Request { id, method, params } => {
-                        if method == "session/request_permission" {
+                        if method == "session/request_permission" && !spec.aside {
+                            // Permission is open: only a request that matches one of the run's
+                            // gates asks a person; any other is allowed at once.
+                            let options = params["options"].as_array().cloned().unwrap_or_default();
+                            let line = permission_line(&params["toolCall"]);
+                            match spec.gates.clone().filter(|g| g.matches(&line).is_some()) {
+                                None => {
+                                    let _ = p.write_json(&json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": permission_outcome(&options, true) } })).await;
+                                }
+                                Some(g) => {
+                                    let (rid, e) = (id.clone(), emit.clone());
+                                    asks.spawn(async move {
+                                        let emit = move |ev: RunEvent| { let _ = e.send(ev); };
+                                        let ok = g.allows(&line, &emit).await;
+                                        (rid, permission_outcome(&options, ok))
+                                    });
+                                }
+                            }
+                        } else if method == "session/request_permission" {
                             approval_n += 1;
                             let aid = format!("a{approval_n}");
                             let tc = &params["toolCall"];
@@ -299,6 +320,11 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     Rpc::Other => {}
                 }
             }
+            Some(done) = asks.join_next(), if !asks.is_empty() => {
+                if let Ok((rid, outcome)) = done {
+                    let _ = p.write_json(&json!({ "jsonrpc": "2.0", "id": rid, "result": { "outcome": outcome } })).await;
+                }
+            }
             c = control.recv(), if control_open => {
                 let Some(c) = c else { control_open = false; continue };
                 match c {
@@ -312,12 +338,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     }
                     Control::Approval { approval_id, approve } => {
                         if let Some((rid, options)) = approvals.remove(&approval_id) {
-                            let want = if approve { "allow" } else { "reject" };
-                            let pick = options.iter().find(|o| o["kind"].as_str().is_some_and(|k| k.starts_with(want)));
-                            let outcome = match pick.and_then(|o| o["optionId"].as_str()) {
-                                Some(oid) => json!({ "outcome": "selected", "optionId": oid }),
-                                None => json!({ "outcome": "cancelled" }),
-                            };
+                            let outcome = permission_outcome(&options, approve);
                             let _ = p.write_json(&json!({ "jsonrpc": "2.0", "id": rid, "result": { "outcome": outcome } })).await;
                             let _ = emit.send(RunEvent::ApprovalResolved { approval_id, decision: if approve { "approve".into() } else { "deny".into() } });
                         }
@@ -351,6 +372,42 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_id: session,
         session_file: None,
         usage: None,
+    }
+}
+
+/// What the gates match for a `session/request_permission` tool call: the command of a shell
+/// tool (`rawInput.command`, a string or a list of words), else the title and the raw input.
+pub fn permission_line(tool_call: &Value) -> String {
+    let raw = &tool_call["rawInput"];
+    let command = match &raw["command"] {
+        Value::String(c) => Some(c.clone()),
+        Value::Array(words) => Some(
+            words
+                .iter()
+                .map(|w| w.as_str().map_or_else(|| w.to_string(), str::to_string))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+        _ => None,
+    };
+    let title = tool_call["title"].as_str().unwrap_or_default();
+    match command {
+        Some(c) => c,
+        None if raw.is_null() => title.to_string(),
+        None => format!("{title} {raw}"),
+    }
+}
+
+/// The `session/request_permission` outcome: the first option of the allow or the reject kind
+/// (`allow_once`, `allow_always`, `reject_once`, …), cancelled when the agent offered none.
+pub fn permission_outcome(options: &[Value], approve: bool) -> Value {
+    let want = if approve { "allow" } else { "reject" };
+    let pick = options
+        .iter()
+        .find(|o| o["kind"].as_str().is_some_and(|k| k.starts_with(want)));
+    match pick.and_then(|o| o["optionId"].as_str()) {
+        Some(oid) => json!({ "outcome": "selected", "optionId": oid }),
+        None => json!({ "outcome": "cancelled" }),
     }
 }
 

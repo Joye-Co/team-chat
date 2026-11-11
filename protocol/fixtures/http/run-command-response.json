@@ -1,0 +1,7 @@
+{
+  "kind": "RunCommandResponse",
+  "valid": true,
+  "value": {
+    "commandId": "c1"
+  }
+}

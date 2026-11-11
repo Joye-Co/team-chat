@@ -235,6 +235,7 @@ pub(super) async fn set_up(
         let req = chat_core::proto::CreateMachineRequest {
             name: computer_name(),
             labels: Some(labels.clone()),
+            personal: None,
         };
         let r = http.create_machine(&req).await.map_err(SetUpError::Api)?;
         Some(NewMachine {

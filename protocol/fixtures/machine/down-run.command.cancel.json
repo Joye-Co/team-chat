@@ -1,0 +1,9 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.command.cancel",
+    "runId": "01JBX0RUN000000000000000AU",
+    "commandId": "c1"
+  }
+}

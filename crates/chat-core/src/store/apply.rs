@@ -486,6 +486,8 @@ fn apply_one(
             owner_id,
             last_message_at,
             context_of,
+            // usable: participants and relay are not cached yet (the relay desktop work adds them).
+            ..
         }) => {
             if let Some(c) = context_of {
                 super::v11::set_topic_context(tx, topic_id, c)?;

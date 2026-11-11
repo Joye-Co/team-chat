@@ -319,14 +319,17 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - Input that reaches the daemon after the run's last turn has ended and the CLI exits is not
   taken: no `input.accepted` comes, `run.done` follows. BotDesk must then start a new run for
   that input (with the topic context in its prompt).
-- `approval.request` comes from CLIs that ask (ACP `session/request_permission`), from
-  `chat-run secret` (see **Environment**) and from gated commands (see "Gated actions"). The
+- `approval.request` comes from `chat-run secret` (see **Environment**) and from gated
+  commands (see "Gated actions"; a CLI's own permission request that matches no gate is
+  answered by the daemon at once, without one). The
   server answers `run.approval`; the daemon answers the CLI (or keeps the secret's answer, or
   lets the waiting command run or not) and emits `approval.resolved`. Since 1.2.1
   an AI member always has every permission and nothing in `daemon.toml` narrows it: Claude Code
   runs with `--permission-mode bypassPermissions` and `--allowedTools` for the shell, edit, web,
   todo and task tools and `Bash(chat-run:*)` (`-p` has nobody to ask); Codex runs with sandbox
-  `danger-full-access` and approval `never`. Only a side chat run (aside) is read-only.
+  `danger-full-access` and approval `never` (`untrusted` when the run has gates, see "Gated
+  actions"; the daemon then answers every request itself). Only a side chat run (aside) is
+  read-only.
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
   SIGTERM to the CLI's whole process group and to the tool groups below it (see **pause**),
   SIGKILL after 3 s, and ends with
@@ -437,7 +440,8 @@ How the 1.1 daemon does each one:
   itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
   says how to write the block (format, states and limits); side chat prompts do not.
 
-`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://build-mac.tailnet`).
+`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://<host>`). It is not
+how a person takes over a run: that is feature `takeover` (see "Usable features").
 It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
 doctor` reports a bad one, and the daemon does not send it). A value that redaction would
 change is not sent either.
@@ -691,16 +695,34 @@ An AI member runs with every permission; only the few kinds the team checked nee
   `run.cancel` stops the CLI as usual (the hook ends with it).
 - **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
   fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
-  run, socket gone), the command runs and the reason goes to the hook's standard error: the
-  daemon is the run's parent, so this happens only when the run is ending anyway. On Windows
-  the command is refused instead (the hook prints the deny decision), and a hook that cannot
-  start, times out or ends with an unexpected code blocks the command (`onFailure`).
-- **Codex** (`gates` absent): not gated yet. Its app-server asks
-  (`item/commandExecution/requestApproval`) only under an approval policy (`untrusted`,
-  `on-request`, `granular`) that asks for nearly every command and changes how the model works
-  with its sandbox, so the daemon would have to answer every command itself; that was not
-  checked against the real CLI. Codex runs keep approval `never`, and the server keeps the
-  rules in the prompt for them. Side chat runs and ACP / PTY runtimes are never gated.
+  run, the socket gone, the daemon restarting), the command is refused on every system: the
+  hook prints the deny decision with a reason that tells the CLI to wait a few seconds and run
+  the same command again, and the reason goes to the hook's standard error. On Windows a hook
+  that cannot start, times out or ends with an unexpected code also blocks the command
+  (`onFailure`).
+- **Codex** (`CliInfo.gates = true` on every system): a run with gates starts its thread with
+  approval policy `untrusted` (sandbox still `danger-full-access`), so the app-server asks for
+  every command that is not a known read-only one and for every file change. The daemon answers
+  each request itself, with the same matching: `item/commandExecution/requestApproval` is
+  matched as the script inside Codex's shell wrapper (`/bin/zsh -lc '<script>'`, `bash -c`,
+  `powershell -Command`, unquoted as a shell reads it); an MCP tool approval
+  (`mcpServer/elicitation/request` with `_meta.codex_approval_kind = "mcp_tool_call"`) as
+  `mcp__<server>__<tool> <tool_params JSON>`. No match: `accept` at once, no card. A match: the
+  same `approval.request` (`daemon-gate-<n>`) and wait as for Claude Code, then `accept` or
+  `decline`. File changes (`item/fileChange/requestApproval`) and requested permissions
+  (`item/permissions/requestApproval`) are granted at once. Checked with the real `codex
+  app-server` (0.159): the requests come with no delay a person would notice, an accepted
+  command and a file change run as before, a declined one does not run and the turn goes on.
+  A run without gates keeps approval `never`.
+- **ACP** (`CliInfo.gates = true` only when its `[runtimes.<name>]` sets `asks_permission =
+  true`): each `session/request_permission` is matched as the tool call's `rawInput.command` (a
+  string or a list of words), else `<title> <rawInput JSON>`. No match (or a run without
+  gates): the first `allow_*` option at once, no card. A match: the same `approval.request` and
+  wait, then the first `allow_*` or `reject_*` option. An agent that never asks (OpenCode by
+  default, any agent whose own permissions allow everything) would not be stopped, so without
+  `asks_permission` the daemon does not report `gates` for it and the server keeps the plain
+  "Team rule" paragraph in its prompt.
+- Side chat runs and the PTY runtime are never gated.
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 
@@ -768,6 +790,90 @@ MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryK
 - The memory is `pending` with source `{ kind: "run", ids: [runId] }` until the daily
   consolidation. The member's own pending lessons are already in its next runs' prompts.
 - Text is redacted before it is stored. At most 10 notes per run (`rate_limited` after that).
+
+## Usable features
+
+Additive, like the 1.1 features: the server sends a usable frame or field only to a daemon that
+reports its feature, and every new value is an open string (an unknown one is treated as the
+safe default named below). Protocol side: protocol.md, "Usable extensions".
+
+| Feature | What the daemon does |
+| --- | --- |
+| `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity and, with `source: "app"`, lets git and `gh` ask it for the person's token for each use; emits the `github` run event. |
+| `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
+| `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
+
+```ts
+// daemon -> server
+hello.machine += { runsIn?: "host" | "vm" }       // where runs execute; required with feature "github"
+run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
+RunEvent +=
+  | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
+  | { type: "hand.command", commandId, command /* 1..4000 */, by }           // feature "takeover"
+  | { type: "hand.output",  commandId, text /* <= 16 KiB per event */ }
+  | { type: "hand.result",  commandId, ok, exitCode?, ms, timedOut?,
+      error?: "not_held" | "busy" | "unsupported" }
+  | { type: "hand.summary", by, heldMs, commands, files /* <= 20 */, headFrom?, headTo? }
+
+// server -> daemon
+run.assign += { github?: RunGithub }              // feature "github"
+RunGithub = {
+  source: "app" | "machine",     // "app": git and gh get the person's token from the daemon; "machine": the machine's own sign-in; unknown = "machine"
+  memberId,                      // the person whose GitHub the run uses
+  login?,                        // with "app" when connected
+  author?: { name, email },      // absent = the machine's own git config
+  committer: { name, email },    // the AI member
+  rewriteSsh?: boolean           // rewrite git@github.com: and ssh://git@github.com/ to HTTPS, drop SSH_AUTH_SOCK
+}
+{ t: "run.pause", runId, by?, hold?: "takeover" }                  // feature "takeover"; absent hold = a pause
+{ t: "run.command", runId, commandId, command /* 1..4000 */, by }  // feature "takeover"; only while connected
+{ t: "run.command.cancel", runId, commandId }                      // feature "takeover"
+```
+
+GitHub (feature `github`), over HTTP with the machine token:
+
+```ts
+GET  /v1/machine/runs/:id/github        -> MachineGithubTokenResponse { token, login }
+POST /v1/machine/runs/:id/github/wait   MachineGithubWaitRequest { reason: "not_connected" | "invalid" } -> { ok: true }
+POST /v1/machine/runs/:id/github/rejected                                                               -> { ok: true }
+```
+
+- The token is given only for a run on the calling machine that has not ended, and only when the
+  machine may use that person's GitHub; it is fetched for each git or `gh` use and never cached,
+  written to a file, logged or put in the CLI's environment. Errors: `not_found` with reason
+  `github.not_connected`, `conflict` with `github.invalid` (GitHub refused the token), `forbidden`
+  with `github.not_allowed` (another machine, an ended run, or no right to it).
+- `/wait` reports that the run needs a GitHub the person has not connected; the server asks the
+  person once, and the run then ends waiting (its CLI stops and reports it). `/rejected` reports
+  that git got an authentication failure, so the server checks the token once.
+- The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
+  `secret`; they are never `output` run events.
+
+Take-over (feature `takeover`):
+
+- `run.pause` with `hold: "takeover"` stops the CLI as a pause does, or upgrades a pause, and the
+  daemon records the work folder (HEAD and `git status --short`) for the hand-back. `run.command`
+  is taken only while the run is held by a take-over of the same `by`; else `hand.result` with
+  `ok: false` and `error: "not_held"` (`"busy"` while another command runs). A command runs in
+  the work folder, one at a time, at most 10 minutes, with no `chat-run` and none of the run's
+  secrets. `run.resume` ends a running command, sends `hand.summary` and gives the CLI a note on
+  what the person did before `note`.
+- `hand.*` events are not the AI member's progress: they reset no stall timer and count as no
+  tool call. The server never queues `run.command` or `run.command.cancel` for a daemon that is
+  away.
+
+Other usable changes:
+
+- `run.done.code` comes from the run's worktree: its branch, its head commit and whether every
+  commit is on the remote. A daemon that cannot tell leaves it out.
+- `chat-run artifact version --parent <n>` sends `parentVersion` in the body of `artifact.version`
+  (`AddArtifactVersionRequest`).
+- `member.handoff` and `member.assign` keep their bodies and results; their errors may carry the
+  new reasons `delegation.cycle`, `delegation.stopped` and `delegation.not_for_requester`
+  (protocol.md, "Participants, chains and relays"). An older `chat-run` prints them as they come.
+- Machine ownership: a machine is the team's or one person's (protocol.md, "Roles: 所有者 and
+  personal machines"). The daemon does not know which; the server only assigns a run to a
+  personal machine when the run works for its owner.
 
 ## Raw session upload
 
@@ -907,7 +1013,8 @@ secret split over two deltas is redacted whole.
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
 `stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
-`command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
+`command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
+calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
 `shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when

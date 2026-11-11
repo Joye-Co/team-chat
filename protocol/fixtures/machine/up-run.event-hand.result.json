@@ -1,0 +1,17 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "value": {
+    "t": "run.event",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 21,
+    "at": 1762128000021,
+    "event": {
+      "type": "hand.result",
+      "commandId": "c1",
+      "ok": true,
+      "exitCode": 0,
+      "ms": 4200
+    }
+  }
+}

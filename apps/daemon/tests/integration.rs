@@ -315,6 +315,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
         kind: None,
         resume_session_id: None,
         gates: None,
+        github: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
@@ -971,6 +972,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
         &Down::RunPause {
             run_id: "p1".into(),
             by: Some("u1".into()),
+            hold: None,
         },
     )
     .await;
@@ -985,6 +987,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
         &Down::RunPause {
             run_id: "p1".into(),
             by: Some("u2".into()),
+            hold: None,
         },
     )
     .await;
@@ -1102,6 +1105,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
         &Down::RunPause {
             run_id: "p2".into(),
             by: None,
+            hold: None,
         },
     )
     .await;
@@ -1250,6 +1254,7 @@ async fn pause_and_cancel_cover_tool_children() {
         &Down::RunPause {
             run_id: "c1".into(),
             by: None,
+            hold: None,
         },
     )
     .await;
@@ -1285,6 +1290,7 @@ async fn pause_and_cancel_cover_tool_children() {
         &Down::RunPause {
             run_id: "c1".into(),
             by: None,
+            hold: None,
         },
     )
     .await;
@@ -1913,6 +1919,7 @@ async fn pause_and_cancel_cover_orphaned_tools() {
         &Down::RunPause {
             run_id: "o1".into(),
             by: None,
+            hold: None,
         },
     )
     .await;

@@ -1,0 +1,12 @@
+{
+  "kind": "Member",
+  "valid": false,
+  "description": "teamOwner is a boolean",
+  "value": {
+    "id": "01JBX0OWNER0000000000000AA",
+    "kind": "human",
+    "name": "Joye",
+    "level": "owner",
+    "teamOwner": "yes"
+  }
+}

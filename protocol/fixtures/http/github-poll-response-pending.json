@@ -1,0 +1,7 @@
+{
+  "kind": "GithubPollResponse",
+  "valid": true,
+  "value": {
+    "state": "pending"
+  }
+}
