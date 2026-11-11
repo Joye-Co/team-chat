@@ -6,7 +6,8 @@
 //! case-insensitively against each simple command of a shell line). Claude Code runs get a
 //! PreToolUse hook (`chat-run gate`, see [`hook_main`]) that sends each command of a shell tool
 //! (Bash, PowerShell, Monitor; and each MCP tool call, as `<tool name> <input JSON>`) to the
-//! daemon over the run's `chat-run` socket.
+//! daemon over the run's `chat-run` socket. Codex and ACP agents ask for approval themselves;
+//! their runtimes answer each request with the same matching ([`Gates::allows`]).
 //! A match sends `approval.request {kind, command}` and the hook waits until `run.approval`
 //! comes: approve lets the command run, deny blocks it and the CLI reads why. `scope: "run"`
 //! (这件事里都同意) lets later matches of the same kind in the run pass without asking.
@@ -38,11 +39,13 @@ const MAX_HOOK_INPUT: u64 = 1 << 20;
 /// kills a hook after its `timeout`, which the settings set to the same.
 pub const HOOK_WAIT: Duration = Duration::from_secs(24 * 3600);
 
-/// Runtime kinds whose runs stop at gated commands. Codex's app-server asks for approval only
-/// under an approval policy that asks for (almost) every command, so its runs are not gated
-/// yet and the server keeps the rules in the prompt for them.
+/// Runtime kinds whose runs stop at gated commands. Claude Code: a PreToolUse hook. Codex: the
+/// app-server runs with approval policy `untrusted` when the run has gates, so every command
+/// that is not a known read-only one comes to the daemon as an approval request, which
+/// [`Gates::allows`] answers. ACP: each `session/request_permission` of the agent is answered
+/// the same way.
 pub fn enforced_by(kind: &str) -> bool {
-    kind == "claude"
+    matches!(kind, "claude" | "codex" | "acp")
 }
 
 /// The oldest Claude Code whose runs are gated on Windows: the version the Windows tests run
@@ -53,11 +56,16 @@ pub fn enforced_by(kind: &str) -> bool {
 pub const WINDOWS_MIN_CLAUDE: [u32; 3] = [2, 1, 322];
 
 /// Whether runs of this CLI stop at gated commands (`CliInfo.gates`): `version` is the first
-/// line of its `--version`. Unix: every Claude Code. Windows: a Claude Code of at least
+/// line of its `--version`. Codex: always (the daemon answers its approval requests). ACP
+/// agents: only when `asks` (daemon.toml `asks_permission`): an agent that never sends
+/// `session/request_permission` (OpenCode by default, any agent set to allow everything) is not
+/// stopped, so the server keeps the rules in its prompt. Claude Code on Unix: always. Claude Code on Windows: one of at least
 /// [`WINDOWS_MIN_CLAUDE`]; one that is older, or that does not say its version, is not
 /// reported as gated, and the server keeps the rules in the prompt for it.
-pub fn reported_for(kind: &str, version: Option<&str>) -> bool {
-    enforced_by(kind) && (!cfg!(windows) || version.is_some_and(windows_can_gate))
+pub fn reported_for(kind: &str, version: Option<&str>, asks: bool) -> bool {
+    enforced_by(kind)
+        && (kind != "acp" || asks)
+        && (kind != "claude" || !cfg!(windows) || version.is_some_and(windows_can_gate))
 }
 
 /// True for the `--version` line of a Claude Code that is new enough for [`reported_for`]
@@ -147,6 +155,100 @@ pub fn plain_command(command: &str) -> String {
         .join(" ")
 }
 
+/// The script of a shell wrapper the way Codex reports a command (`/bin/zsh -lc 'git push
+/// origin main'`, `bash -c "…"`, `powershell.exe -NoProfile -Command '…'`): the last word, when
+/// it follows `-c`, `-lc` or `-Command` and only flags come between the shell and that one,
+/// unquoted as a POSIX shell reads it. Any other command comes back as it is.
+pub fn shell_script(command: &str) -> String {
+    match shell_words(command).as_deref() {
+        Some([shell, flags @ .., flag, script])
+            if is_shell(shell)
+                && is_script_flag(flag)
+                && flags
+                    .iter()
+                    .all(|f| f.starts_with('-') || f.starts_with('/')) =>
+        {
+            script.clone()
+        }
+        _ => command.to_string(),
+    }
+}
+
+fn is_shell(program: &str) -> bool {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let base = base.to_ascii_lowercase();
+    let base = base.strip_suffix(".exe").unwrap_or(&base);
+    matches!(
+        base,
+        "sh" | "bash" | "zsh" | "dash" | "fish" | "pwsh" | "powershell" | "cmd"
+    )
+}
+
+fn is_script_flag(flag: &str) -> bool {
+    matches!(
+        flag.to_ascii_lowercase().as_str(),
+        "-c" | "-lc" | "-ic" | "-command" | "/c"
+    )
+}
+
+/// POSIX shell words: `'…'` literal, `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and a
+/// bare `\` that escapes the next character. None when a quote is not closed.
+fn shell_words(line: &str) -> Option<Vec<String>> {
+    let mut words = vec![];
+    let mut cur = String::new();
+    let mut in_word = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                in_word = true;
+                loop {
+                    match chars.next()? {
+                        '\'' => break,
+                        ch => cur.push(ch),
+                    }
+                }
+            }
+            '"' => {
+                in_word = true;
+                loop {
+                    match chars.next()? {
+                        '"' => break,
+                        '\\' => match chars.peek() {
+                            Some(&n) if matches!(n, '"' | '\\' | '$' | '`') => {
+                                cur.push(n);
+                                chars.next();
+                            }
+                            _ => cur.push('\\'),
+                        },
+                        ch => cur.push(ch),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                }
+            }
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut cur));
+                    in_word = false;
+                }
+            }
+            c => {
+                in_word = true;
+                cur.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(cur);
+    }
+    Some(words)
+}
+
 struct Kind {
     name: String,
     patterns: Vec<Regex>,
@@ -170,6 +272,14 @@ pub struct Gates {
     asking: tokio::sync::Mutex<()>,
     /// True once the CLI ran the run's start-up hook: its hooks are on.
     alive: tokio::sync::watch::Sender<bool>,
+}
+
+impl std::fmt::Debug for Gates {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gates")
+            .field("kinds", &self.kinds())
+            .finish()
+    }
 }
 
 impl Gates {
@@ -312,6 +422,15 @@ impl Gates {
         }
     }
 
+    /// Whether the CLI may run `command` (a runtime's own approval request): true at once when
+    /// no kind matches; else as [`check`](Self::check), which asks a person and waits.
+    pub async fn allows(&self, command: &str, emit: &(dyn Fn(RunEvent) + Send + Sync)) -> bool {
+        if self.matches(command).is_none() {
+            return true;
+        }
+        self.check(&json!({ "command": command }), emit).await["result"]["decision"] == "allow"
+    }
+
     /// A `run.approval` for this module: wakes the waiting hook and returns `approval.resolved`.
     /// `all` (scope "run") lets later matches of the same kind pass. None when it is not the
     /// approval that waits.
@@ -395,25 +514,26 @@ pub fn hook_output(answer: &Value) -> Option<Value> {
     })
 }
 
-/// What the hook prints when it could not ask the daemon (`why`). Open (Unix): nothing, so
-/// the tool runs; the run would have no way to go on otherwise. Closed (Windows): the deny
-/// decision, so a command nobody could be asked about does not run.
+/// What the hook prints when it could not ask the daemon (`why`). Closed: the deny decision,
+/// so a command nobody could be asked about does not run, with a reason that tells the CLI to
+/// try again shortly (the daemon may be restarting). Open: nothing, so the tool runs.
 pub fn hook_failure(why: &str, closed: bool) -> Option<Value> {
     closed.then(|| {
         json!({ "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason":
-                format!("this command needs an approval and the daemon could not be asked: {why}"),
+            "permissionDecisionReason": format!(
+                "this command did not run: the machine could not check whether it needs a \
+person's approval ({why}). Wait a few seconds, then run the same command again."
+            ),
         } })
     })
 }
 
-/// Whether the hook refuses a command when it cannot ask the daemon. Windows: yes. The pipe
-/// and the way the hook is started are new there; a failure must not let a gated command
-/// through. Unix keeps what it has always done.
+/// Whether the hook refuses a command when it cannot ask the daemon: yes, on every system. A
+/// failure (the daemon restarting, the socket gone) must not let a gated command through.
 fn fails_closed() -> bool {
-    cfg!(windows)
+    true
 }
 
 /// The hook's answer to one hook input, as (standard output, standard error): asks the daemon
@@ -447,9 +567,8 @@ fn hook_answer(
 
 /// `chat-run gate`: Claude Code's PreToolUse hook. Reads the hook input on standard input, asks
 /// the daemon, prints the deny decision when a person declined, and exits 0. When the daemon
-/// cannot be asked, the reason goes to standard error and, on Unix, the tool runs (the run
-/// would have no way to go on otherwise); on Windows the command is refused
-/// ([`hook_failure`]).
+/// cannot be asked, the reason goes to standard error and the command is refused with a reason
+/// that tells the CLI to try again shortly ([`hook_failure`]).
 pub fn hook_main() -> i32 {
     let closed = fails_closed();
     let mut buf = Vec::new();
@@ -893,20 +1012,106 @@ mod tests {
         ] {
             assert!(!windows_can_gate(old), "{old}");
         }
-        assert!(reported_for("claude", Some("2.1.322 (Claude Code)")));
+        assert!(reported_for("claude", Some("2.1.322 (Claude Code)"), false));
         assert_eq!(
-            reported_for("claude", Some("2.1.100 (Claude Code)")),
+            reported_for("claude", Some("2.1.100 (Claude Code)"), false),
             cfg!(unix)
         );
-        assert_eq!(reported_for("claude", None), cfg!(unix));
-        assert!(!reported_for("codex", Some("2.1.322")));
-        assert!(enforced_by("claude") && !enforced_by("codex") && !enforced_by("pty"));
+        assert_eq!(reported_for("claude", None, false), cfg!(unix));
+        // Codex: the daemon answers its own approval requests, on every system.
+        assert!(reported_for("codex", Some("codex-cli 0.159.0"), false));
+        assert!(reported_for("codex", None, false));
+        // ACP: only an agent configured as one that asks (`asks_permission`); one that never
+        // asks is not stopped, so the server keeps the rules in its prompt.
+        assert!(reported_for("acp", None, true));
+        assert!(!reported_for("acp", None, false));
+        assert!(!reported_for("pty", None, true));
+        assert!(enforced_by("claude") && enforced_by("codex") && enforced_by("acp"));
+        assert!(!enforced_by("pty"));
     }
 
-    /// The hook when the daemon cannot be asked: open (Unix) prints nothing and the tool runs;
-    /// closed (Windows) prints the deny decision. Either way the reason goes to standard error.
+    /// Codex reports a command as its shell wrapper; the gates see the script inside.
     #[test]
-    fn the_hook_fails_open_on_unix_and_closed_on_windows() {
+    fn the_script_of_a_shell_wrapper_is_matched() {
+        for (wrapped, script) in [
+            (
+                "/bin/zsh -lc 'git push origin main'",
+                "git push origin main",
+            ),
+            (
+                "/bin/bash -lc 'gh pr merge 5 --squash'",
+                "gh pr merge 5 --squash",
+            ),
+            ("bash -c \"npm publish\"", "npm publish"),
+            ("/bin/zsh -lc pwd", "pwd"),
+            (
+                "/bin/zsh -lc 'echo '\"'\"'hi'\"'\"' && git push origin HEAD:main'",
+                "echo 'hi' && git push origin HEAD:main",
+            ),
+            ("powershell.exe -Command 'gh pr merge 7'", "gh pr merge 7"),
+            (
+                "powershell.exe -NoProfile -Command 'git push origin main'",
+                "git push origin main",
+            ),
+            (
+                "pwsh -NoLogo -NonInteractive -Command 'gh pr merge 8'",
+                "gh pr merge 8",
+            ),
+            ("cmd.exe /d /c \"gh pr merge 9\"", "gh pr merge 9"),
+        ] {
+            assert_eq!(shell_script(wrapped), script, "{wrapped}");
+        }
+        // Not a wrapper, or one that does not parse: as it is.
+        for plain in [
+            "git push origin main",
+            "python -c 'print(1)'",
+            "/bin/zsh -lc 'unclosed",
+            "bash -lc 'a' extra",
+            "bash script.sh -c 'a'",
+        ] {
+            assert_eq!(shell_script(plain), plain);
+        }
+        let gates = Gates::new(&defaults());
+        assert_eq!(
+            gates.matches(&shell_script("/bin/zsh -lc 'git push origin main'")),
+            Some("mergeMain")
+        );
+        assert_eq!(
+            gates.matches(&shell_script("/bin/zsh -lc 'git push origin feature'")),
+            None
+        );
+        assert_eq!(
+            gates.matches(&shell_script(
+                "powershell.exe -NoProfile -Command 'git push origin main'"
+            )),
+            Some("mergeMain")
+        );
+    }
+
+    #[tokio::test]
+    async fn allows_passes_other_commands_at_once_and_asks_for_a_match() {
+        let gates = Arc::new(Gates::new(&defaults()));
+        let (seen, emit) = emitted();
+        let emit = Arc::new(emit);
+        assert!(gates.allows("ls -la", emit.as_ref()).await);
+        assert!(seen.lock().unwrap().is_empty());
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(async move { g.allows("gh pr merge 3", e.as_ref()).await });
+        let id = requested(&seen, 0).await;
+        gates.answer(&id, false, false).unwrap();
+        assert!(!t.await.unwrap());
+        let (g, e) = (gates.clone(), emit.clone());
+        let t = tokio::spawn(async move { g.allows("gh pr merge 3", e.as_ref()).await });
+        let id = requested(&seen, 1).await;
+        gates.answer(&id, true, false).unwrap();
+        assert!(t.await.unwrap());
+    }
+
+    /// The hook when the daemon cannot be asked: closed (every system now) prints the deny
+    /// decision with a reason that says to try again; open would print nothing. Either way the
+    /// reason goes to standard error.
+    #[test]
+    fn the_hook_fails_closed_on_every_system() {
         let bash = br#"{"tool_name":"Bash","tool_input":{"command":"gh pr merge 12"}}"#;
         let down = |_: Value| Err::<Value, String>("cannot reach the daemon".into());
         let refused = |_: Value| {
@@ -943,11 +1148,18 @@ mod tests {
                 assert!(err.is_some(), "the reason is reported");
                 assert_eq!(denied(&out), closed, "{out:?}");
                 if !closed {
-                    assert_eq!(out, None, "Unix prints nothing: the tool runs");
+                    assert_eq!(out, None, "open prints nothing: the tool runs");
+                } else {
+                    let why =
+                        out.as_ref().unwrap()["hookSpecificOutput"]["permissionDecisionReason"]
+                            .as_str()
+                            .unwrap()
+                            .to_string();
+                    assert!(why.contains("run the same command again"), "{why}");
                 }
             }
         }
-        assert_eq!(fails_closed(), cfg!(windows));
+        assert!(fails_closed());
     }
 
     fn emitted() -> (Arc<Mutex<Vec<RunEvent>>>, impl Fn(RunEvent) + Send + Sync) {

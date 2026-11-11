@@ -884,7 +884,8 @@ Rules:
   sets `BotRun.resultMessageId` to it (1.1): on success a card message whose `cardV2` has
   intent `done` (see "Run fields, pause and resume"), else a short note. It sets the topic's `status`:
   `in_progress` while it works, `waiting_answer` with `waitingOn` = the requester while the run
-  asks a question (reply 同意 or 拒绝 to an approval, or press the card's buttons; only the
+  asks a question (reply 同意 or 拒绝 to an approval, or press the card's buttons; a short 好 /
+  行 / 可以 / ok counts only in a reply that quotes the approval card; only the
   requester or an owner can answer, every answer is audited as `run.approval`; when the question
   cannot be posted the answer is no), `done` on success, `blocked` with one
   short note when the run fails, its machine stays away past the lease, or no event comes for
@@ -2072,7 +2073,9 @@ Rules:
   that lists the checked actions and the spend limit and tells the CLI to ask in the topic and
   wait. With `approver: "owners"`, only owners answer the run's approvals (card or 同意/拒绝),
   and the approval card mentions and waits on the active human owners in the group instead of
-  the requester. With `"requester"` the released rule stays: the requester or an owner.
+  the requester. When the group has no such owner, the card goes to the requester instead,
+  says so in its first block (这个群里没有管理员，先请你确认。), and the requester may answer that
+  approval. With `"requester"` the released rule stays: the requester or an owner.
 - An approval without a kind (a CLI's own question, `chat-run secret`) is answered as above,
   by `approver`.
 
@@ -2086,8 +2089,11 @@ only at the moment a command would run: the machine stops the command and asks
   `run.assign.gates`: each checked kind with the default patterns below and the team's own
   `patterns` of that kind. Side chat runs get none. The run's prompt then says that the machine
   asks for these and the CLI should ask in the topic only when it does such an action another
-  way (an API call, a web page) or spends over `maxSpendCny`. A run on a CLI that cannot stop
-  commands (Codex today) keeps the plain "Team rule" paragraph. A queued run gets the gated
+  way (an API call, a web page) or spends over `maxSpendCny`. Claude Code, Codex and ACP agents
+  configured as asking for permission (daemon.toml `asks_permission`) report `gates` (the rule
+  is enforced by the daemon, not only written in the prompt); a run on a CLI that cannot stop
+  commands (the PTY runtime, an ACP agent not known to ask, an older daemon, an older Claude
+  Code on Windows) keeps the plain "Team rule" paragraph. A queued run gets the gated
   wording only when every machine with its runtime stops commands.
 - Patterns are regular expressions matched case-insensitively against each simple command of a
   shell line (split at newlines, `;`, `&&`, `||`, `|`; whitespace runs count as one space), and
@@ -2114,7 +2120,9 @@ only at the moment a command would run: the machine stops the command and asks
   approval card titled `需要你确认：<kind's 设置 name>` with the command, mentions the kind's
   approver (`approvers[kind]`, else `approver`) and has three actions: 同意 (`approve:<id>`),
   这件事里都同意 (`approveall:<id>`) and 拒绝 (`deny:<id>`). Only that approver (or an owner)
-  answers, by card or by text (同意 / 拒绝 / 这件事里都同意 or 都同意).
+  answers, by card or by text (同意 / 拒绝 / 这件事里都同意 or 都同意; a short 好 / 行 / 可以 / ok /
+  不行 counts only in a reply that quotes the card, so a 好的 said to someone else approves
+  nothing).
 - 这件事里都同意 answers `run.approval { decision: "approve", scope: "run" }`: the daemon lets
   later matches of that kind in the run pass, and BotDesk adds the kind to the run's request
   (`approvedGates`), which follow-up runs and retries of it inherit; their `run.assign.gates`

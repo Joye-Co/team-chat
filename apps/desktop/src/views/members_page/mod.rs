@@ -1492,8 +1492,37 @@ impl MembersPage {
                 .into_any_element()
             }
         };
-        page::titled_card("member-where", c::MEMBERS_WHERE, None, None, body, None, cx)
-            .into_any_element()
+        // 更换电脑…: the AI member's 常用设置 (its computer), owners only.
+        let change =
+            crate::views::settings::bot_quick::can_open(&self.services, &e.member).then(|| {
+                let (services, member) = (self.services.clone(), e.member.clone());
+                push_button(
+                    "member-where-change",
+                    c::MEMBERS_WHERE_CHANGE,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    crate::views::settings::bot_quick::open_bot_quick(
+                        services.clone(),
+                        &member,
+                        window,
+                        cx,
+                    )
+                })
+                .into_any_element()
+            });
+        page::titled_card(
+            "member-where",
+            c::MEMBERS_WHERE,
+            None,
+            change,
+            body,
+            None,
+            cx,
+        )
+        .into_any_element()
     }
 
     /// 需要你批准的事 (card): what the team's rules make an AI member ask before

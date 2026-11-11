@@ -187,6 +187,11 @@ pub struct RuntimeConfig {
     /// Ignored since 1.2.1, see `approval_policy`.
     #[serde(default)]
     pub allowed_tools: Option<String>,
+    /// ACP only: the agent sends `session/request_permission` before the tool calls it runs (its
+    /// own permissions are not set to allow everything). Only then are its runs reported as
+    /// gated (`CliInfo.gates`); otherwise the server keeps the team's rules in the prompt.
+    #[serde(default)]
+    pub asks_permission: bool,
 }
 
 impl RuntimeConfig {
@@ -291,6 +296,7 @@ impl Config {
                             sandbox: None,
                             permission_mode: None,
                             allowed_tools: None,
+                            asks_permission: false,
                         },
                     );
                 }
@@ -432,6 +438,8 @@ kind = "claude"
 # args = ["--acp"]
 # models = ["gemini-2.5-pro"]       # what settings offer; replaces the list the daemon finds
 # efforts = ["low", "high"]
+# asks_permission = true            # the agent asks before running tools: the daemon stops
+#                                   # gated commands itself (leave out for one that allows all)
 
 # [runtimes.shell]
 # kind = "pty"
@@ -471,5 +479,18 @@ mod tests {
         assert!(!super::Config::parse(&off).unwrap().self_update);
         let example = super::EXAMPLE.replace("# self_update = false", "self_update = false");
         assert!(!super::Config::parse(&example).unwrap().self_update);
+    }
+
+    /// `asks_permission` is off unless a runtime sets it.
+    #[test]
+    fn asks_permission_is_off_by_default() {
+        let c = super::Config::parse(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"t\"\n\
+             [runtimes.gemini]\nkind = \"acp\"\ncommand = \"gemini\"\nasks_permission = true\n\
+             [runtimes.opencode]\nkind = \"acp\"\ncommand = \"opencode\"\n",
+        )
+        .unwrap();
+        assert!(c.runtimes["gemini"].asks_permission);
+        assert!(!c.runtimes["opencode"].asks_permission);
     }
 }

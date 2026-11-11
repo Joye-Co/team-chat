@@ -11,6 +11,7 @@ mod account;
 mod account_phone;
 pub mod ai_service;
 pub mod appearance;
+pub(crate) mod bot_quick;
 pub(crate) mod general;
 pub mod login_item;
 pub(crate) mod machines;
