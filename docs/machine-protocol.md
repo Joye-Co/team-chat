@@ -406,7 +406,9 @@ How the 1.1 daemon does each one:
   `~/.claude`), so the run keeps its auth and model; it is mode 0600, never on the command line,
   left out when there is nothing to keep, and removed when the run ends. The tool set keeps a
   user allow rule for a command or edit tool from widening the run. Codex gets
-  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
+  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands; on Windows Codex enforces
+  it only through its own Windows sandbox, so the daemon adds `-c windows.sandbox="unelevated"`:
+  no writes, but commands still reach the network),
   and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
   each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
   working directory and the folders above it (MCP tools run outside the sandbox): each one is

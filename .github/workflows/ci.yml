@@ -216,6 +216,31 @@ jobs:
           trap 'sudo rm -f /etc/claude-code/managed-settings.json' EXIT
           TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
 
+  # The daemon's tests on the Mac, where most production daemons run: the same suites as on
+  # Linux (process groups, the Unix socket, launchd's plist, the pty) on the system's own
+  # process and file rules, with the real Claude Code and Codex CLIs (no login) against the
+  # fake model, Codex's Seatbelt sandbox among them.
+  daemon-macos:
+    name: Daemon tests (macOS)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: macos-daemon
+      - name: Install the real Claude Code and Codex CLIs
+        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
+      - name: cargo test (daemon)
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
+          TC_REQUIRE_REAL_CODEX: "1"
+        run: cargo test --locked -p daemon --no-fail-fast
+
   daemon-e2e:
     name: Daemon local e2e (Linux, fake Claude and Codex)
     needs: changes
@@ -465,10 +490,6 @@ jobs:
           TC_REQUIRE_REAL_CLI: "1"
           TC_REQUIRE_REAL_CODEX: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
-      # What Codex's own Windows sandbox did to chat-run (tests/runtimes.rs writes it down).
-      - name: Codex Windows sandbox and chat-run (what happened)
-        if: always()
-        run: cat target/tmp/codex-windows-sandbox.json || true
       # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
       # never gets the prompt of a gated run.
       - name: A gated run does not start when only managed hooks are allowed
@@ -514,6 +535,19 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "a standard user's CLI could change a read-only checkout (exit code $($p.ExitCode))" }
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
+      # What Codex's own Windows sandbox does to a command and to chat-run, with each of its
+      # settings (tests/runtimes.rs writes it down). Last, and a report only: setting up the
+      # elevated one changes this computer (sandbox accounts that may write the temp folder).
+      - name: Codex's Windows sandbox, every setting (what happened)
+        if: always()
+        shell: bash
+        env:
+          TC_REQUIRE_REAL_CODEX: "1"
+          TC_CODEX_ELEVATED_SANDBOX: "1"
+        run: |
+          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_windows_sandbox_modes codex_read_only_on_windows_report || true
+          cat target/tmp/codex-windows-sandbox.json || true
+          cat target/tmp/codex-windows-read-only.json || true
 
   # The Windows release from end to end (docs/plans/windows.zh.md, R1): a release build of the
   # app, the update helper and the daemon, the NSIS installer, a silent install with its files,

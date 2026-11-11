@@ -490,6 +490,24 @@ this machine cannot be made to stop at them (update it)",
     let _ = out.send((run_id.clone(), RunMsg::Finished));
 }
 
+/// A run's two clocks after the machine slept for `asleep`: when the CLI was last heard
+/// (`last`) and when the run's time limit ends (`deadline`). The time asleep is no silence
+/// and no part of the limit. A paused run is left as it is: handing it back moves both by the
+/// whole pause, which has the sleep in it already; moving them here too would count it twice.
+fn after_sleep(
+    last: Instant,
+    deadline: Option<tokio::time::Instant>,
+    asleep: Duration,
+    now: Instant,
+    paused: bool,
+) -> (Instant, Option<tokio::time::Instant>) {
+    if paused {
+        (last, deadline)
+    } else {
+        ((last + asleep).min(now), deadline.map(|d| d + asleep))
+    }
+}
+
 /// Pause state of a run (接管).
 struct Paused {
     since: Instant,
@@ -660,8 +678,7 @@ async fn run_runtime(
                 // of the run's time limit.
                 let now = Instant::now();
                 if let Some(asleep) = crate::sys::slept(now.duration_since(ticked), TICK) {
-                    last = (last + asleep).min(now);
-                    deadline = deadline.map(|d| d + asleep);
+                    (last, deadline) = after_sleep(last, deadline, asleep, now, paused.is_some());
                 }
                 ticked = now;
                 if paused.is_some() {
@@ -703,4 +720,33 @@ async fn run_runtime(
         outcome.error = Some("run took longer than maxDurationMs".into());
     }
     (outcome, timed_out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A sleep moves a working run's clocks by the time asleep, once. A paused run's clocks
+    /// stay: the hand-back moves them by the whole pause, sleep included.
+    #[test]
+    fn a_sleep_is_counted_once_also_for_a_paused_run() {
+        let start = Instant::now();
+        let now = start + Duration::from_secs(1000);
+        let last = start + Duration::from_secs(10);
+        let deadline = tokio::time::Instant::from_std(start + Duration::from_secs(600));
+        let asleep = Duration::from_secs(900);
+        // Working: the CLI was silent for 990 s of which 900 asleep, and the limit moves.
+        let (l, d) = after_sleep(last, Some(deadline), asleep, now, false);
+        assert_eq!(now.duration_since(l), Duration::from_secs(90));
+        assert_eq!(d, Some(deadline + asleep));
+        // Never into the future.
+        let (l, _) = after_sleep(last, None, Duration::from_secs(5000), now, false);
+        assert_eq!(l, now);
+        // Paused since `last`: nothing moves here; the hand-back adds the pause (990 s, the
+        // 900 s of sleep in it), so the limit moves by 990 s in all, not by 1890 s.
+        let (l, d) = after_sleep(last, Some(deadline), asleep, now, true);
+        assert_eq!((l, d), (last, Some(deadline)));
+        let handed_back = d.map(|d| d + now.duration_since(last));
+        assert_eq!(handed_back, Some(deadline + Duration::from_secs(990)));
+    }
 }

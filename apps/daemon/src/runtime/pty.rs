@@ -112,6 +112,10 @@ pub struct ConsoleText {
     /// The cursor's row, from 1; `rows` at most (below it the screen scrolls).
     row: u32,
     rows: u32,
+    /// How wide the screen is, and how many characters the current line of the output has:
+    /// a move to the right never goes past the screen's edge.
+    cols: u32,
+    col: u32,
     state: ConsoleState,
     /// Whether anything was written on the current line of the output.
     line_open: bool,
@@ -132,10 +136,12 @@ enum ConsoleState {
 }
 
 impl ConsoleText {
-    pub fn new(rows: u32) -> ConsoleText {
+    pub fn new(cols: u32, rows: u32) -> ConsoleText {
         ConsoleText {
             row: 1,
             rows: rows.max(1),
+            cols: cols.max(1),
+            col: 0,
             state: ConsoleState::Text,
             line_open: false,
         }
@@ -144,6 +150,7 @@ impl ConsoleText {
     fn line_break(&mut self, out: &mut String) {
         out.push('\n');
         self.line_open = false;
+        self.col = 0;
     }
 
     /// The cursor goes to `row`: on another row than the one the text is on, what comes next
@@ -169,8 +176,12 @@ impl ConsoleText {
             'B' | 'E' => self.go_to_row(self.row.saturating_add(n), out),
             'A' | 'F' => self.go_to_row(self.row.saturating_sub(n).max(1), out),
             'C' => {
-                out.extend(std::iter::repeat_n(' ', n.min(1000) as usize));
-                self.line_open = true;
+                // To the screen's edge at most: a code of a few bytes must not become
+                // thousands of spaces.
+                let n = n.min(self.cols.saturating_sub(self.col));
+                out.extend(std::iter::repeat_n(' ', n as usize));
+                self.col += n;
+                self.line_open |= n > 0;
             }
             _ => {}
         }
@@ -195,6 +206,7 @@ impl ConsoleText {
                     c => {
                         out.push(c);
                         self.line_open = true;
+                        self.col = self.col.saturating_add(1);
                         ConsoleState::Text
                     }
                 },
@@ -343,9 +355,10 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut env = spec.env.clone();
     env.retain(|(k, _)| !k.eq_ignore_ascii_case("TERM"));
     env.push(("TERM".into(), "dumb".into()));
+    const COLS: i16 = 200;
     const ROWS: i16 = 50;
     let (mut pty, mut writer, mut reader) =
-        match crate::winpty::spawn_line(&line, &spec.cwd, &env, (200, ROWS)) {
+        match crate::winpty::spawn_line(&line, &spec.cwd, &env, (COLS, ROWS)) {
             Ok(p) => p,
             Err(e) => return Outcome::failed(format!("cannot start {command}: {e}")),
         };
@@ -385,7 +398,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut exited = tokio::task::spawn_blocking(move || waiter.wait());
     let mut out = String::new();
     let mut pending = Vec::<u8>::new();
-    let mut console = ConsoleText::new(ROWS as u32);
+    let mut console = ConsoleText::new(COLS as u32, ROWS as u32);
     let mut take = |b: &[u8], out: &mut String| {
         pending.extend_from_slice(b);
         // Keep an incomplete UTF-8 tail for the next chunk.
@@ -680,7 +693,7 @@ mod tests {
     use super::*;
 
     fn lines(chunks: &[&str]) -> String {
-        let mut c = ConsoleText::new(50);
+        let mut c = ConsoleText::new(200, 50);
         chunks.iter().map(|x| c.feed(x)).collect()
     }
 
@@ -710,12 +723,18 @@ mod tests {
         );
         // At the bottom the screen scrolls: the cursor stays on the last row, each line feed
         // is still one line.
-        let mut c = ConsoleText::new(3);
+        let mut c = ConsoleText::new(200, 3);
         let text: String = ["1\r\n", "2\r\n", "3\r\n", "4\r\n", "\x1b[3;1H5\r\n", "6"]
             .iter()
             .map(|x| c.feed(x))
             .collect();
         assert_eq!(text, "1\n2\n3\n4\n5\n6");
+        // A move to the right stops at the screen's edge, however far the code says and
+        // however often it comes: a line never grows past the width by moves.
+        let far = lines(&["ab\x1b[999C\x1b[999C\x1b[5Cc\r\nd\x1b[3Ce"]);
+        assert_eq!(far, format!("ab{}c\nd   e", " ".repeat(198)));
+        let flood: String = "\x1b[999C".repeat(10_000);
+        assert!(lines(&[&flood]).len() <= 200);
         // Tabs stay, other controls go.
         assert_eq!(lines(&["a\tb\x07\x08c"]), "a\tbc");
     }

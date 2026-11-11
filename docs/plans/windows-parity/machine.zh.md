@@ -18,11 +18,12 @@
 没有人有 Windows 电脑。验证只有两条路：在 Mac 上
 `cargo check --locked --target x86_64-pc-windows-gnu -p daemon -p e2e --all-targets --features test-fakes`
 （只管编译），和 Windows CI 的 `Daemon tests (Windows)` 任务（`windows-2025`，真的 Windows，Windows 的
-代码只在那里运行）。下文「CI 跑过」都指后者。
+代码只在那里运行）。下文「CI 跑过」都指后者。daemon 的测试在三个系统的 CI 上都跑：`Rust`（Ubuntu）、
+`Daemon tests (Windows)`、`Daemon tests (macOS)`（macOS 15，真的 Claude Code 和 Codex 对着假模型）。
 
 ## 0. 缺口和它们的结局
 
-清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32），两轮评审又指出 16 个（G33 到 G48：有的是
+清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32），三轮评审又指出 19 个（G33 到 G51），修评审意见时自己又查出一个（G52：有的是
 清单第一版把没验证过的行写成了「一致」，有的是两个系统上都有的洞）。现在全部补完；剩下的只有 CI 做不到的事，在第 8 节。
 
 | 编号 | 缺口 | 结局 | 证据（都在 CI 上） |
@@ -60,10 +61,14 @@
 | G42 | `task.xml` 在注册任务之前就写下了，注册失败它还在，「用这台电脑」读成「正常」 | `task.xml` 只在注册成功之后出现；客户端的状态先问任务计划程序任务在不在（`schtasks /Query` 的退出码），再读 `task.xml` 看它跑的是哪个 daemon | `service_task.rs::a_failed_install_leaves_nothing`；`this_mac.rs` 的测试里有「有文件、没任务」读成未设置 |
 | G43 | `local-e2e.ts --service` 的自我保护太窄，清理按进程名杀：在开发者的电脑上可能覆盖他的任务、杀掉他的 daemon | 任务已存在、状态目录已存在、有同名进程在跑、`HOME` 下有配置、设了 `CHAT_DAEMON_CONFIG`，任何一条都拒绝运行；清理只杀脚本自己看见启动的进程 | 代码 |
 | G44 | `pty` 两行写着「一致」但不一致：Windows 拒绝批处理文件；输出是「画屏幕」，行会连在一起；Windows 的测试暂停后没有断言、也没在运行中途发输入 | 批处理文件能当程序；伪控制台的输出还原成行；Unix 的两个测试搬到 Windows，断言相同，另加批处理和暂停 | `runtimes.rs`：`pty_prompt_input_and_exit_code`、`pty_runs_a_batch_file`、`pty_pause_holds_and_cancel_ends_the_tree`；`pty.rs` 单元测试 |
-| G45 | 非管理员用户没被证明：CI 上那一步是「只报告」，其余的服务测试都以提升权限的管理员跑 | 那一步改成必须通过：建一个标准用户，以它的身份跑 daemon 的测试程序（见第 5 节） | `scripts/test-daemon-standard-user.ps1`，`Daemon tests (Windows)` 里的一步 |
-| G46 | `codex_sandbox_lets_chat_run_answer_without_network` 只在 Unix 上有 | Windows 上对应的事实查清并写成测试：run 用不到 Codex 的 Windows 沙箱；手动打开时它不启动任何命令（第 6 节） | `runtimes.rs::codex_windows_sandbox_and_chat_run`、`codex_on_windows_reaches_the_daemon_through_the_request_folder` |
+| G45 | 非管理员用户没被证明：CI 上那一步是「只报告」，其余的服务测试都以提升权限的管理员跑 | 那一步改成必须通过：建一个标准用户，让它经远程桌面登录到 runner 自己（一个真的登录会话），以它的身份跑 daemon 的测试程序和安装命令；计划任务是任务计划程序在这个会话里启动的（见第 5 节） | `scripts/test-daemon-standard-user.ps1`，`Daemon tests (Windows)` 里的一步 |
+| G46 | `codex_sandbox_lets_chat_run_answer_without_network` 只在 Unix 上有 | Windows 上没有对应的证明，只有查清的事实：run 用不到 Codex 的 Windows 沙箱（用户自己的配置开了也一样），这一条有测试；手动打开沙箱时，两档都没能启动 `chat-run`（第 6 节），所以「沙箱里的 `chat-run` 能用」在 Windows 上没被证明，第 8 节第 2 条留了真机步骤 | `runtimes.rs::codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox`（只证明：不卡住；每次调用要么没启动命令，要么 `chat-run` 回答了，要么报错里点了沙箱的名）、`codex_on_windows_reaches_the_daemon_through_the_request_folder` |
 | G47 | 单元测试 `a_folder_the_sandbox_will_not_write_names_the_sandbox` 只在 Unix 上跑，清单里没列 | 改成两边同一个测试 | `chat_run.rs` |
-| G48 | 电脑睡眠：Windows 的单调时钟把睡着的时间也算进去，醒来后睡了五分钟以上的 run 会被报成「卡住」，有时长上限的 run 会被当成超时停掉；连接要等三个心跳没回音才重连 | 两个系统同一段代码：计时的地方先问「上一次到这一次是不是睡过去了」，睡着的时间不算沉默、不算进时长；心跳发现睡过就立刻重连 | `integration.rs::a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled`（把一个真的 daemon 进程冻住 66 秒，三个系统） |
+| G48 | 电脑睡眠：Windows 的单调时钟把睡着的时间也算进去，醒来后睡了五分钟以上的 run 会被报成「卡住」，有时长上限的 run 会被当成超时停掉；连接要等三个心跳没回音才重连 | 三个系统同一段代码：计时的地方先问「上一次到这一次是不是睡过去了」，睡着的时间不算沉默、不算进时长；心跳发现睡过就立刻重连 | `integration.rs::a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled`（把一个真的 daemon 进程冻住 66 秒，三个系统） |
+| G49 | 暂停着的 run 遇上睡眠，Windows 上时长上限被推后两次：暂停时钟本来就停着，睡着的时间又加了一遍 | 睡着的时间只算一次：run 暂停着时不再另加（`run.rs` 的 `after_sleep`） | `run.rs` 单元测试 `a_sleep_is_counted_once_also_for_a_paused_run`（三个系统） |
+| G50 | 「是不是睡过去了」用墙上时钟判断：改系统时间、对时会被当成睡眠，连接被白白断开重连 | 心跳改读「开机以来」的时钟，它把睡着的时间算进去、不受改时间影响（Linux `CLOCK_BOOTTIME`，macOS `CLOCK_MONOTONIC`，Windows `GetTickCount64`） | `sys.rs::the_time_since_boot_moves_forward`、`integration.rs` 的冻住 66 秒那一条（三个系统）。「改时间不被当成睡眠」没有测试（CI 上不改系统时间），靠的是这三个时钟的定义 |
+| G51 | ConPTY 屏幕转成行时，「光标右移 N 格」没有上限：一个程序输出很多 `ESC[999C` 就能让一行无限变长 | 右移不超过屏幕宽度（200 列），一行的总长也封顶 | `pty.rs` 单元测试（转换的代码不分系统，三个系统的 CI 都跑） |
+| G52 | Codex 的旁聊在 Windows 上并不只读：Codex 的 `read-only` 只靠它自己的 Windows 沙箱执行，而那个沙箱默认不开，命令照样能写文件（工作目录里有 daemon 的访问列表挡着，目录外没有）。原来的测试在 Windows 上通过，是因为测试里那条写文件的命令引号写错、命令本身失败了 | 旁聊的 run 在 Windows 上打开 Codex 沙箱里不需要管理员的那一档（`windows.sandbox="unelevated"`）：写文件被拒绝，读文件照常。还剩一处不同：这一档不挡联网（见第 6 节） | `runtimes.rs::codex_read_only_sandbox_writes_nothing`（改对了命令，目录外的目标不放在临时目录下，加了「读得到文件」；三个系统）；`codex_read_only_on_windows_report` 把三种设置下的结果打在 CI 日志里 |
 
 ## 1. 上报给服务器的能力
 
@@ -117,7 +122,7 @@
 | `run` | 收到 SIGTERM / Ctrl+C 收尾 | 收到 Ctrl+C、Ctrl+Break、控制台关闭、或停止事件（`Local\<slug>-daemon-stop-<pid>`）收尾 | 一致 |
 | `run --log-file <文件>` | 没有：launchd / systemd 把输出接到日志文件 | 有：计划任务的无窗口控制台没人看得到，daemon 自己写 | 无对应（反过来的）：同一个结果，日志在文件里。Windows 启动时超过 10 MB 轮转一份；launchd 的日志从不轮转 |
 | `doctor` | CLI、版本、模型、磁盘、负载、配置问题 | 同一段代码（CI 上对着真的 CLI 跑过）。多一行 `claude shell:`，写明 Claude Code 的命令工具和钩子用 Git Bash 还是 PowerShell | 一致（G27） |
-| `install-service` | launchd（macOS）、systemd 用户服务（Linux） | 当前用户的计划任务；注册前先做启动时的检查、检查程序文件别人能不能换 | 一致（做法见 `windows.zh.md` M3）。不需要管理员权限：CI 上以标准用户注册、卸载过（G45） |
+| `install-service` | launchd（macOS）、systemd 用户服务（Linux） | 当前用户的计划任务；注册前先做启动时的检查、检查程序文件别人能不能换 | 一致（做法见 `windows.zh.md` M3）。不需要管理员权限：CI 上以标准用户、在它自己的登录会话里注册、由任务计划程序启动、卸载过（G45） |
 | `uninstall-service` | 卸载并停止 | 结束任务、让 daemon 收尾退出、删除任务 | 一致 |
 | `restart-service` | 没有：`launchctl kickstart -k`、`systemctl --user restart` 就是它 | 有：结束计划任务只结束 conhost，所以要 daemon 自己的命令 | 无对应（反过来的）：同一个结果 |
 | `repair-program <路径>` | 没有：Unix 上替换程序文件是一次原子的 `rename` | 有：计划任务的第一个动作，把更新中途断电留下的 `.old-*` 改名回去 | 无对应（反过来的） |
@@ -210,7 +215,7 @@
 | 单元测试（`src/**`） | 跑 | 跑。两个测试只在 Unix 上有，各有 Windows 的对应：`a_blocked_connect_names_the_sandbox`（socket 连不上）对 `a_blocked_pipe_names_the_sandbox`（管道打不开）；`a_long_run_folder_gets_a_short_socket_path` 对 `a_long_run_folder_gets_a_short_pipe_name`。路径规则的三个测试原来只在 Unix 上跑，现在两边都跑（G33）。`a_folder_the_sandbox_will_not_write_names_the_sandbox`（请求目录写不进去时报成沙箱）原来只在 Unix 上跑，现在两边同一个测试：Unix 去掉目录的写权限位，Windows 加一条拒绝写的访问列表项（G47）。Windows 另有专有的：访问列表、命名管道（往返、访问列表、结束后消失）、任务 XML、命令行引号、Windows 路径写法 | 一致（G33、G37） | — |
 | `tests/normalize.rs`、`redact.rs`、`chat_run.rs` | 跑 | 跑 | 一致 | — |
 | `tests/process_tree.rs` | 跑 | 跑（另有 `.cmd`、job、ConPTY 的用例） | 一致 | — |
-| `tests/runtimes.rs` | 跑 | 跑。`pty_prompt_input_and_exit_code` 两边是同一个测试（各用自己的 shell）。`pty_cancel_kills_group` 是 Unix 的，Windows 的对应是 `pty_pause_holds_and_cancel_ends_the_tree`（还多测了暂停）和 `pty_runs_a_batch_file`。`codex_sandbox_lets_chat_run_answer_without_network` 是 Unix 的（seatbelt / landlock 挡住 socket 和网络）；Windows 的对应是两个：`codex_on_windows_reaches_the_daemon_through_the_request_folder`（run 实际的情形，含用户自己的 Codex 配置打开了 Codex 的 Windows 沙箱）和 `codex_windows_sandbox_and_chat_run`（手动打开 Codex 的 Windows 沙箱会怎样，见第 6 节） | 一致（G8、G44、G46） | — |
+| `tests/runtimes.rs` | 跑 | 跑。`pty_prompt_input_and_exit_code` 两边是同一个测试（各用自己的 shell）。`pty_cancel_kills_group` 是 Unix 的，Windows 的对应是 `pty_pause_holds_and_cancel_ends_the_tree`（还多测了暂停）和 `pty_runs_a_batch_file`。`codex_sandbox_lets_chat_run_answer_without_network` 是 Unix 的（seatbelt / landlock 挡住 socket 和网络）；Windows 的对应是两个：`codex_on_windows_reaches_the_daemon_through_the_request_folder`（run 实际的情形，含用户自己的 Codex 配置打开了 Codex 的 Windows 沙箱）和 `codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox`（手动打开 Codex 的 Windows 沙箱会怎样，见第 6 节；它不证明沙箱里的 `chat-run` 能用） | run 实际的情形一致（G8、G44）；沙箱里的 `chat-run` 在 Windows 上没有证明（G46），第 8 节第 2 条 | — |
 | `tests/real_cli.rs`（真的 Claude Code，假模型） | Linux 跑（装了 CLI）；Mac 本地有 CLI 就跑 | 跑，CLI 必须在 | 一致 | — |
 | `tests/real_cli_pause.rs`（真的 Claude Code 和它的工具进程，暂停、继续、取消） | Linux 跑；Mac 本地有 CLI 就跑 | 跑 | 一致（G34） | — |
 | `apps/daemon/e2e/real-cli-pause.ts`（登录过的真 CLI、真模型，暂停十分钟） | 手动，Mac / Linux | 不能跑（读 Unix 的进程状态，要登录） | 无对应：它要一台登录过的机器。不用登录的那部分是上一行；带登录的在第 8 节 | — |
@@ -218,7 +223,7 @@
 | `tests/setup.rs`（协议 fixture、配置、doctor、worktree、镜像、清理、只读目录） | 跑 | 以前不跑。现在跑（本 PR，G7），除了 launchd 和 systemd 两个用例（Windows 的是 `service_task.rs`） | 一致 | — |
 | `tests/service_task.rs` | 不适用 | 跑（真的任务计划程序） | 无对应（反过来的）：Mac 的 launchd 只测 plist 文本 | — |
 | `scripts/test-install-daemon.ps1` | 不适用 | 跑 | 同上 | — |
-| `scripts/test-daemon-standard-user.ps1`（以没有管理员权限的用户跑 daemon 的测试） | 不适用：Mac / Linux 的 CI 用户本来就不是 root | 跑，必须通过。建一个标准用户（中等完整性级别，不在 Administrators 里），以它的身份、用它自己的用户目录跑三个测试程序：`process_tree`（run、取消、暂停、ConPTY）、`integration`（整个 daemon：run 目录、命名管道、请求目录、只读目录、审批、真 CLI）、`service_task`（计划任务） | 一致，有一处说明（G45）：这个用户在 runner 上没有登录会话，而 daemon 的任务只在用户已登录的会话里运行，所以任务计划程序会注册这个任务（带「登录时」触发器，没有走去掉触发器的退路）但不会启动它。测试这时自己按注册下来的任务定义启动它的两个动作，其余断言不变（单实例、被杀后再起、替换协议更新、重启、更新中途断电后修复、卸载后不再起）。没看到的只有「任务计划程序为标准用户启动任务」这一下；它对 runner 自己的用户是按同一份定义启动的 | 第 8 节第 8 条 |
+| `scripts/test-daemon-standard-user.ps1`（以没有管理员权限的用户跑 daemon 的测试） | 不适用：Mac / Linux 的 CI 用户本来就不是 root | 跑，必须通过。建一个标准用户（中等完整性级别，不在 Administrators 里），以它的身份、用它自己的用户目录跑三个测试程序：`process_tree`（run、取消、暂停、ConPTY）、`integration`（整个 daemon：run 目录、命名管道、请求目录、只读目录、审批、真 CLI）、`service_task`（计划任务） | 一致（G45）。脚本先让这个用户经远程桌面登录到 runner 自己（`mstsc` 连 `127.0.0.2`），得到一个真的登录会话：任务带「登录时」触发器注册，由任务计划程序在这个会话里启动，其余断言照常（单实例、被杀后再起、替换协议更新、重启、更新中途断电后修复、卸载后不再起）；随后以这个用户跑安装命令的测试（`scripts/test-install-daemon.ps1`）。登录不成时脚本退回去自己按任务定义启动动作、并跳过安装命令，日志里写明走的是哪条路；现在 CI 上走的是真会话这条。没看到的只有：用户在登录界面登录那一下触发任务 | 第 8 节第 8 条 |
 | `apps/daemon/e2e/local-e2e.ts`（`wrangler dev`、真 daemon、假 CLI） | Linux 跑 | 跑，而且 daemon 是装出来的计划任务（`--service`） | 一致（G9） | — |
 | `tools/e2e`（客户端和服务器的场景；`runs_v11` 自己扮演一台机器，不用 daemon） | 对着已部署的环境手动跑，CI 只编译 | 同。默认的密钥目录在 `~` 下，Windows 上原来找不到用户目录（`HOME` 没设），现在用 `USERPROFILE` | 一致 | 这个工具不经过 daemon，和系统无关。经过 daemon 的端到端是上一行的 `local-e2e.ts`，它也能对着已部署的环境跑（`--base-url`） |
 | 整条链（安装、任务、run、取消、两种更新、注销登录、卸载） | 没有对应的自动测试（Mac 的 launchd 只测 plist 文本） | 跑（`Daemon chain (Windows…)`） | 一致（G31；Windows 测得更多） | — |
@@ -251,8 +256,8 @@ runner 能装真的 Claude Code 和 Codex（npm），不能登录。办法是把
 | npm 的 `claude.cmd`、`codex.cmd` | `claude.cmd` 指向包里的 `bin\claude.exe`（安装时换成真的程序），daemon 解析后直接启动 exe。`codex.cmd` 是 `node bin\codex.js`，daemon 解析成 `node.exe` 加脚本，脚本再启动包里的 `codex.exe`。两边都不经过 `cmd.exe` | 读代码；CI 断言解析结果是 `.exe`、`--version` 有输出、`doctor` 报出来 |
 | 登录放在哪 | Claude Code：`<CLAUDE_CONFIG_DIR 或 %USERPROFILE%\.claude>\.credentials.json`，明文文件，和 Linux 一样。Codex：`<CODEX_HOME 或 %USERPROFILE%\.codex>\auth.json`。daemon 现有的判断就是这两个文件 | 读代码 |
 | 会话文件放在哪 | `<配置目录>\projects\<工作目录，非字母数字换成 ->\<会话 id>.jsonl`。工作目录按 CLI 自己看到的算：链接解析掉，短文件名（`RUNNER~1`）原样留着 | CI：第一次跑时文件不在 daemon 算的目录里（daemon 把短文件名展开了），改完后就在 |
-| Codex 的 Windows 沙箱 | Codex 自己的 Windows 沙箱默认不开（要在 Codex 配置里写 `[windows] sandbox`）。daemon 给 run 的是 `danger-full-access`，不论用户的 Codex 配置里开没开，这时都不加任何限制，`chat-run` 的请求目录照常用。手动把它打开会怎样：`unelevated` 那一档在 `workspace-write` 下拒绝启动任何命令（「cannot enforce split writable root sets directly; refusing to run unsandboxed」），所以不存在「沙箱里的 `chat-run`」这回事；`elevated` 那一档要管理员先装，CI 上没装 | 读代码；CI：真 Codex 的 `command/exec` 启动真 `chat-run`，请求到达 daemon，回答送回（用户配置开和不开沙箱各一遍）；手动开沙箱的那次，Codex 自己的报错原文写在 CI 的日志里 |
-| Codex 的旁聊（`read-only`） | 命令写不了文件，工作目录里外都一样 | CI：`runtimes.rs::codex_read_only_sandbox_writes_nothing`（三个系统都跑） |
+| Codex 的 Windows 沙箱 | Codex 自己的 Windows 沙箱默认不开（要在 Codex 配置里写 `[windows] sandbox`）。daemon 给 run 的是 `danger-full-access`，不论用户的 Codex 配置里开没开，这时都不加任何限制，`chat-run` 的请求目录照常用。手动把它打开会怎样：`unelevated` 那一档在 `workspace-write` 下拒绝启动任何命令（「cannot enforce split writable root sets directly; refusing to run unsandboxed」），一条命令也跑不起来；`elevated` 那一档在 runner 上（管理员身份，Codex 自己建了沙箱账户）时好时坏：有时能启动 `cmd.exe`，有时连它也启动不了（`CreateProcessWithLogonW failed: 1326`、`267`）；启动 run 目录里的 `chat-run.exe` 时被拒绝（`CreateProcessAsUserW failed: 5`；最可能是沙箱账户读不了只对用户自己开放的目录，没有再查）。两档都没能让 `chat-run` 在沙箱里跑起来，所以这里没有「沙箱里的 `chat-run` 能用」的证明；daemon 的 run 不用这个沙箱，不受影响。顺带看到：`elevated` 那一档会把它的沙箱账户的写权限加到用户的临时目录上，daemon 的程序和 run 目录不在那里 | 读代码；CI：真 Codex 的 `command/exec` 启动真 `chat-run`，请求到达 daemon，回答送回（用户配置开和不开沙箱各一遍）；手动开沙箱的两档，每次调用的回答原文在 CI 的日志里（`Daemon tests (Windows)` 的最后一步；`elevated` 单独放在最后跑，因为装它会改这台电脑） |
+| Codex 的旁聊（`read-only`） | Mac / Linux：命令写不了文件（工作目录里外都一样），Codex 的沙箱同时挡住联网。Windows：同样写不了文件、读得到文件，靠的是 daemon 给旁聊打开的 Codex 沙箱 `unelevated` 档（G52）；**不一致的一处**：这一档不挡联网，旁聊里的命令连得上网络。能挡联网的 `elevated` 档要管理员安装，在 runner 上装好后启动命令时好时坏（`CreateProcessWithLogonW failed: 1326`、`267`），所以没有用它。旁聊本来就读得到工作目录里的全部内容，多出来的风险是命令能把读到的东西发出去 | CI：`runtimes.rs::codex_read_only_sandbox_writes_nothing`（三个系统都跑）；联网那一条是 `codex_read_only_on_windows_report` 打在日志里的结果，没有断言 |
 | 登录时的浏览器 | 见第 3 节 `login_env` 一行 | 读代码；CI |
 | Git for Windows | 不需要。没有它时 Claude Code 用 PowerShell 当命令工具（2.1 起） | 更新日志；读代码 |
 
@@ -267,7 +272,7 @@ runner 能装真的 Claude Code 和 Codex（npm），不能登录。办法是把
 | 重启 | `launchctl kickstart -k` | `<daemon> restart-service`：让 daemon 收尾退出，再启动任务。期间触发器起的第二个 daemon 拿不到锁，立刻退出（G41） | 一致 | — |
 | 机器名、标签 | `scutil --get ComputerName`、`mac` | `COMPUTERNAME`、`windows` | 一致 | — |
 | 实际运行过 | 是 | 是：CI 的 `Desktop build and tests (Windows)` 里，设置页调用的那段代码（`this_mac::set_up`）对着本地服务器（`wrangler dev`）跑：按安装目录找到 daemon，以 owner 身份向服务器注册这台电脑，写配置和 token，真 daemon 注册任务并在服务器上显示在线；再点一次不会重复注册；重启后换了一个进程、重新在线；日志里没有 token；卸载后任务、进程都没了，服务器上离线 | 一致（G10） | 没覆盖的只有 `current_exe()` 这一步（测试进程不是安装好的客户端）和设置页的按钮本身 |
-| 安装命令 | 没有一条命令。`docs/bots.md` 第 6 节是手动步骤：编译或下载 daemon、用 `admin.ts machine` 登记机器、把程序和 token 拷过去、手写 `daemon.toml`、跑 `doctor` 和 `install-service`。（另一条路是装客户端点「用这台电脑」，两边都有） | 有一条：`scripts/install-daemon.ps1`（先登记机器）：https 下载、必填 SHA-256、token 不上命令行、私有目录、写配置、`doctor`、`install-service`，`-Update` 按替换协议换程序 | 不一致，Windows 多：Unix 没有一行安装。结果相同（机器装好、服务注册），Unix 那边步骤多。给 Unix 也写一条安装脚本不在这次范围里 | CI 跑过（Windows PowerShell 5.1），含以普通用户身份。设置页「添加机器」里给出 Windows 命令归客户端那条线 |
+| 安装命令 | 没有一条命令。`docs/bots.md` 第 6 节是手动步骤：编译或下载 daemon、用 `admin.ts machine` 登记机器、把程序和 token 拷过去、手写 `daemon.toml`、跑 `doctor` 和 `install-service`。（另一条路是装客户端点「用这台电脑」，两边都有） | 有一条：`scripts/install-daemon.ps1`（先登记机器）：https 下载、必填 SHA-256、token 不上命令行、私有目录、写配置、`doctor`、`install-service`，`-Update` 按替换协议换程序 | 不一致，Windows 多：Unix 没有一行安装。结果相同（机器装好、服务注册），Unix 那边步骤多。给 Unix 也写一条安装脚本不在这次范围里 | CI 跑过（Windows PowerShell 5.1）：以 runner 的管理员跑一遍，以标准用户在它自己的登录会话里再跑一遍。设置页「添加机器」里给出 Windows 命令归客户端那条线 |
 
 ## 8. 要在真机上确认
 
@@ -290,6 +295,10 @@ Windows 10），装了客户端并用 owner 登录，装了 Claude Code 和 Code
    3. 应该看到：bot 发出一张卡片（这一步走的是 `chat-run` 的请求目录），run 结束，状态是完成。
    4. 资源管理器打开 `%USERPROFILE%\<slug>-runs\runs`，最新的目录里 `work\hello.txt` 存在，
       `work` 下没有留下 `.chat-run-` 开头的目录。
+   5. 打开了 Codex 自己的 Windows 沙箱的电脑（CI 上没能证明的一种）：在 `%USERPROFILE%\.codex\config.toml` 里加两行
+      `[windows]` 和 `sandbox = "elevated"`，在终端里运行一次 `codex`，按它的提示装好沙箱（要管理员确认），
+      然后把第 2 步再做一遍。
+   6. 应该看到：和第 3、4 步一样，卡片发出、run 完成（daemon 给 run 的设置盖过这一项，run 不在沙箱里）。
 3. **暂停和继续一个已登录的 run。**
    1. @ 第 1 条的 bot：「运行这条命令并等它结束：`for i in $(seq 1 120); do date +%s >> ticks.txt; sleep 1; done`」
       （没装 Git for Windows 的电脑换成 `1..120 | % { Get-Date -UFormat %s >> ticks.txt; Start-Sleep 1 }`）。
@@ -310,7 +319,10 @@ Windows 10），装了客户端并用 owner 登录，装了 Claude Code 和 Code
    1. 发第 3 条的命令，run 开始十秒后让电脑睡眠，等六分钟（超过 `stall_minutes`），唤醒并登录。
    2. 应该看到：机器十秒内回到在线；这个 run 还在进行，没有被标成「卡住」，也没有失败；`ticks.txt` 接着涨
       （中间缺了睡着的那几分钟），最后 run 正常结束。
-   3. 如果团队给 run 设了时长上限：睡着的时间不算在内，run 不会一醒来就因为超时被停。
+   3. 时长上限（每个 run 的上限是服务器定的两小时，没有设置项；这一步要两个多小时，可以放着过夜）：把第 3 条
+      命令里的 `120` 换成 `600` 再发一次，run 开始十秒后让电脑睡眠，两小时十分钟后唤醒并登录。
+   4. 应该看到：run 没有因为超时被停，状态仍是进行中；`ticks.txt` 接着涨到 600 行，run 正常结束。
+      （睡着的时间不算进上限。CI 上这一条是单元测试和「冻住 daemon 进程」的测试，没有真的睡眠。）
 7. **一次真的重启。**
    1. 重启电脑，登录，不打开客户端。
    2. 应该看到：一分钟内，另一台设备的机器页里这台机器在线。
@@ -320,8 +332,9 @@ Windows 10），装了客户端并用 owner 登录，装了 Claude Code 和 Code
    1. 设置 › 账户 › 其他用户，新建一个本地账户，类型是「标准用户」。用它登录 Windows。
    2. 装客户端（装到这个用户自己的目录，不会要管理员密码），登录团队，点「用这台电脑」。
    3. 应该看到：不弹 UAC，机器出现并在线。重复第 1 条的第 3 到 6 步，结果相同。
-   4. （CI 上以标准用户跑过 daemon 的测试和计划任务；没有跑过的是：标准用户的真实登录会话里，任务在
-      「登录时」被触发。）
+   4. 注销再登录这个账户，不打开客户端。应该看到：一分钟内机器在团队里重新在线（任务在「登录时」被触发）。
+   5. （CI 上标准用户经远程桌面登录后跑过 daemon 的测试、安装命令，任务是任务计划程序启动的；没有跑过的是
+      在登录界面登录触发任务，和客户端的「用这台电脑」按钮在标准账户下。）
 9. **Windows 10 22H2。** 在一台 Windows 10 电脑上做第 1、3、4 条，结果相同。（CI 是 Windows Server 2025；
    `conhost.exe --headless` 和 ConPTY 在 Windows 10 上的表现没见过。）
 10. **没装 Git for Windows 的电脑。** 做第 1、3、4 条（第 3 条用 PowerShell 的那条命令），结果相同。区别是
