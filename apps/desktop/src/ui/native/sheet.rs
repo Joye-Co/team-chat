@@ -67,7 +67,7 @@ pub fn native_sheet(dialog: Dialog, width: SheetWidth, cx: &App) -> Dialog {
     let k = native_colors(cx);
     dialog
         .entrance(SHEET_ENTRANCE)
-        .margin_top(metrics::TOOLBAR_ROW)
+        .margin_top(super::window_chrome::sheet_top())
         .width(width.px())
         .close_button(false)
         .keyboard(true)

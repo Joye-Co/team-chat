@@ -253,7 +253,7 @@ fn close_sheet() -> full::CloseFn {
 /// The height of the viewer sheet: from under the toolbar row to 48 above the window's
 /// bottom edge, at most 760.
 fn sheet_height(window: &Window) -> Pixels {
-    (window.viewport_size().height - metrics::TOOLBAR_ROW - space::S48)
+    (window.viewport_size().height - crate::ui::native::window_chrome::sheet_top() - space::S48)
         .min(px(760.))
         .max(px(320.))
 }
