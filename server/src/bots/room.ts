@@ -418,6 +418,33 @@ function dmPeer(sql: SqlStorage, authorId: string): string | undefined {
     .toArray()[0]?.member_id;
 }
 
+/** Newest messages of a 群聊 searched for an open card ask (接 1.8). */
+const ASK_SCAN = 200;
+
+/**
+ * 接 1.8: in a 群聊, where nothing routes a message without an @, the members whose open card ask
+ * waits on `authorId` (for example the front desk's question): the person's message goes to them.
+ */
+export function askingMembers(sql: SqlStorage, topicId: string, authorId: string, now = Date.now()): string[] {
+  if (!isMainTopicId(topicId)) return [];
+  return sql
+    .exec<{ author_id: string }>(
+      `SELECT DISTINCT m.author_id FROM (
+         SELECT author_id, ext FROM messages WHERE topic_id = ? AND deleted_at IS NULL ORDER BY created_seq DESC LIMIT ?
+       ) m, json_each(json_extract(m.ext, '$.cardState.ask.from')) f
+       WHERE json_extract(m.ext, '$.cardState.ask.status') = 'open' AND f.value = ? AND m.author_id != ?
+         AND coalesce(json_extract(m.ext, '$.cardState.ask.expiresAt'), ?) > ?`,
+      topicId,
+      ASK_SCAN,
+      authorId,
+      authorId,
+      now + 1,
+      now,
+    )
+    .toArray()
+    .map((r) => r.author_id);
+}
+
 /** Events older than this are imports (restore from the archive), not live writes: no hand-off. */
 const LIVE_WINDOW_MS = 10 * 60_000;
 /** A hand-off the desk has not accepted after this long is dropped (and logged). */
@@ -426,7 +453,13 @@ const RETRY_MAX_MS = 5 * 60_000;
 
 type OutboxCard = { botId: string; messageId: string; actionId: string; actorId: string };
 /** `done`: the bots that already took the message (a retry skips them). */
-type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & { mentions: string[]; blockRefs?: BlockRef[]; done?: string[] };
+type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & {
+  mentions: string[];
+  blockRefs?: BlockRef[];
+  done?: string[];
+  /** The members it was routed to on its first delivery (a retry goes to the same ones). */
+  targets?: { id: string; mentioned: boolean }[];
+};
 /**
  * The card as it was answered: the author may edit it before the hand-off is delivered.
  * `anonymous`: the card is private (cards2/privacy), so the run gets no actor; such a row holds
@@ -494,7 +527,13 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   const message = (event.data as { message: Message }).message;
   if (message.kind === "system") return;
   const owner = routingOwner(sql, message.topicId);
-  if (message.mentions.length === 0 && (!owner || owner === message.authorId) && !dmPeer(sql, message.authorId)) return;
+  if (
+    message.mentions.length === 0 &&
+    (!owner || owner === message.authorId) &&
+    !dmPeer(sql, message.authorId) &&
+    askingMembers(sql, message.topicId, message.authorId).length === 0
+  )
+    return;
   const payload: OutboxMessage = {
     topicId: message.topicId,
     messageId: message.id,
@@ -524,8 +563,21 @@ interface DeliverContext {
   wakeAt(at: number): void;
 }
 
-/** Hands one outbox row to the bot's desk. Throws when it must be tried again. */
-async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
+/**
+ * One outbox row's hand-offs: the members it goes to and how it goes to one of them. `route`
+ * waits for the topic's earlier hand-offs before a message without an @ is routed (the routing
+ * owner may change when one of them starts a run). Null: nobody gets the row. Throws when it
+ * must be tried again.
+ */
+interface Plan {
+  targets: string[];
+  done: string[];
+  send(id: string): Promise<unknown>;
+  record(done: string[]): void;
+}
+
+async function plan(c: DeliverContext, row: OutboxRow, route: () => Promise<void>): Promise<Plan | null> {
+  const single = (botId: string, send: () => Promise<unknown>): Plan => ({ targets: [botId], done: [], send, record: () => {} });
   if (row.kind === "card") {
     const p = JSON.parse(row.payload) as OutboxCard;
     // Who pressed: BotDesk takes an approval only from a person who may answer it.
@@ -538,36 +590,52 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
       actorKind: who && !who.deactivated ? (who.kind as "human" | "bot") : null,
       actorLevel: who && !who.deactivated ? (who.level as "owner" | "member") : null,
     };
-    await deskStub(c.env, p.botId).cardAction(p.botId, press);
-    return;
+    return single(p.botId, () => deskStub(c.env, p.botId).cardAction(p.botId, press));
   }
-  if (row.kind === "artifact") return;
-  if (row.kind === "answer") return deliverAnswer(c, row);
+  if (row.kind === "artifact") return null;
+  if (row.kind === "answer") {
+    const a = JSON.parse(row.payload) as OutboxAnswer;
+    const args = await answerArgs(c, row, a);
+    return args ? single(a.botId, () => deskStub(c.env, a.botId).cardAnswer(a.botId, args)) : null;
+  }
   const m = JSON.parse(row.payload) as OutboxMessage;
-  // The routing owner now (a run may have started in the topic since the message was written).
-  const owner = routingOwner(c.sql, m.topicId);
   const peer = dmPeer(c.sql, m.authorId);
+  // A message without an @ goes where the topic routes it once the earlier hand-offs are done.
+  if (!m.targets && m.mentions.length === 0 && !peer) await route();
+  // The routing owner now (a run may have started in the topic since the message was written).
+  const owner = m.targets ? null : routingOwner(c.sql, m.topicId);
   const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
   const parsed = parseExt(ext);
   const quoted = parsed.replyTo?.authorId;
-  // A message without an @ that quotes a participant or answers its approval goes to that member.
-  const addressed = m.mentions.length === 0 && !peer ? addressedParticipants(c.sql, m.topicId, m.authorId, m.body, quoted) : [];
-  if (m.mentions.length === 0 && !owner && !peer && addressed.length === 0) return;
+  // A message without an @ that quotes a participant or answers its approval goes to that member;
+  // in a 群聊, one that an open card ask waits on goes to the member that asked (接 1.8).
+  const addressed =
+    !m.targets && m.mentions.length === 0 && !peer
+      ? [...addressedParticipants(c.sql, m.topicId, m.authorId, m.body, quoted), ...askingMembers(c.sql, m.topicId, m.authorId)]
+      : [];
+  if (!m.targets && m.mentions.length === 0 && !owner && !peer && addressed.length === 0) return null;
   const byId = await memberInfo(c.env.DB, [m.authorId, ...m.mentions, ...addressed, ...(owner ? [owner] : []), ...(peer ? [peer] : [])]);
   // A bot's messages never reach another bot: no loops.
   const author = byId.get(m.authorId);
-  if (!author || author.kind !== "human" || author.deactivated) return;
-  const targets = messageTargets(
-    m,
-    owner,
-    peer,
-    (id) => {
-      const x = byId.get(id);
-      return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
-    },
-    addressed,
-  );
-  if (targets.length === 0) return;
+  if (!author || author.kind !== "human" || author.deactivated) return null;
+  // Routed once: a retry goes to the same members (and keeps their order with later rows).
+  const targets =
+    m.targets ??
+    messageTargets(
+      m,
+      owner,
+      peer,
+      (id) => {
+        const x = byId.get(id);
+        return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
+      },
+      addressed,
+    );
+  if (targets.length === 0) return null;
+  if (!m.targets) {
+    m.targets = targets;
+    c.sql.exec("UPDATE bot_outbox SET payload = ? WHERE id = ?", JSON.stringify(m), row.id);
+  }
   const base: TopicMessage = {
     groupId: c.groupId,
     topicId: m.topicId,
@@ -586,15 +654,23 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
   const carried = requestExt(parsed);
   if (carried) base.ext = carried;
   if (peer) base.dm = true;
-  await handOffEach(targets, m.done ?? [], (t) => deskStub(c.env, t.id).onMessage(t.id, { ...base, mentioned: t.mentioned }), (done) => {
-    if (targets.length > 1) c.sql.exec("UPDATE bot_outbox SET payload = ? WHERE id = ?", JSON.stringify({ ...m, done }), row.id);
-  });
+  const mentioned = new Map(targets.map((t) => [t.id, t.mentioned]));
+  return {
+    targets: targets.map((t) => t.id),
+    done: m.done ?? [],
+    send: (id) => deskStub(c.env, id).onMessage(id, { ...base, mentioned: mentioned.get(id) === true }),
+    record: (done) => {
+      m.done = done;
+      if (targets.length > 1) c.sql.exec("UPDATE bot_outbox SET payload = ? WHERE id = ?", JSON.stringify(m), row.id);
+    },
+  };
 }
 
 /**
- * Each member gets its own hand-off: every target not yet done is tried, one that took it is
- * not handed it again on a retry, and one member's failure does not hold back the others (the
- * row is retried for the failed ones only).
+ * Each member gets its own hand-off, all at once (接 1.9): every target not yet done is tried,
+ * one that took it is not handed it again on a retry, and one member's failure does not hold
+ * back the others (the row is retried for the failed ones only). A real failure is thrown before
+ * a {@link LaneWaits}.
  */
 export async function handOffEach<T extends { id: string }>(
   targets: T[],
@@ -603,19 +679,17 @@ export async function handOffEach<T extends { id: string }>(
   record: (done: string[]) => void,
 ): Promise<void> {
   const done = new Set(alreadyDone);
-  let failure: unknown = null;
-  for (const t of targets) {
-    if (done.has(t.id)) continue;
-    try {
-      await send(t);
-    } catch (err) {
-      failure ??= err;
-      continue;
-    }
-    done.add(t.id);
-    record([...done]);
-  }
-  if (failure !== null) throw failure;
+  const results = await Promise.allSettled(
+    targets
+      .filter((t) => !done.has(t.id))
+      .map(async (t) => {
+        await send(t);
+        done.add(t.id);
+        record([...done]);
+      }),
+  );
+  const failed = results.flatMap((r) => (r.status === "rejected" ? [r.reason as unknown] : []));
+  if (failed.length > 0) throw failed.find((e) => !(e instanceof LaneWaits)) ?? failed[0];
 }
 
 /**
@@ -653,14 +727,13 @@ function currentTally(sql: SqlStorage, messageId: string): Record<string, number
   return (JSON.parse(row.ext) as { cardState?: { tally?: Record<string, number> } }).cardState?.tally;
 }
 
-/** A card answer, to the runner bot that made the card. */
-async function deliverAnswer(c: DeliverContext, row: OutboxRow): Promise<void> {
-  const a = JSON.parse(row.payload) as OutboxAnswer;
+/** A card answer, for the runner bot that made the card; null for anyone else. */
+async function answerArgs(c: DeliverContext, row: OutboxRow, a: OutboxAnswer): Promise<CardAnswerIn | null> {
   const voter = answerActor(c.sql, a);
   const byId = await memberInfo(c.env.DB, [a.botId, voter]);
   const bot = byId.get(a.botId);
   // SDK bots and people read the stored event; only runner bots need a hand-off.
-  if (!bot || bot.kind !== "bot" || !bot.runner || bot.deactivated) return;
+  if (!bot || bot.kind !== "bot" || !bot.runner || bot.deactivated) return null;
   const who = byId.get(voter);
   const args: CardAnswerIn = {
     groupId: c.groupId,
@@ -678,60 +751,187 @@ async function deliverAnswer(c: DeliverContext, row: OutboxRow): Promise<void> {
     const tally = currentTally(c.sql, a.answer.messageId);
     if (tally) args.tally = tally;
   }
-  await deskStub(c.env, a.botId).cardAnswer(a.botId, args);
+  return args;
 }
 
-/** Rooms with a drain running (one per room object; the alarm and hooks share it). */
-const draining = new WeakSet<SqlStorage>();
+/**
+ * 接 1.9: hand-offs run in lanes, one per (topic, member): in order within a lane, lanes at the
+ * same time, so one member that thinks (a front desk call takes up to 30 s) does not hold back
+ * the others. Per room object: the rows being delivered, each lane's tail and each topic's
+ * routing step (the rows of a topic are routed in order, so they join each lane in order).
+ */
+interface Lane {
+  tail: Promise<void>;
+  pending: number;
+  /** The row whose hand-off failed in this lane; later hand-offs wait until its retry is stored. */
+  failedBy: number | null;
+}
+interface DrainState {
+  inflight: Set<number>;
+  lanes: Map<string, Lane>;
+  topics: Map<string, Promise<unknown>>;
+}
+const drains = new WeakMap<SqlStorage, DrainState>();
+
+/** A hand-off that waits for an earlier row of its lane (no attempt is counted). */
+export class LaneWaits extends Error {
+  constructor() {
+    super("an earlier hand-off of this lane waits for its retry");
+  }
+}
+
+function drainState(sql: SqlStorage): DrainState {
+  let st = drains.get(sql);
+  if (!st) {
+    st = { inflight: new Set(), lanes: new Map(), topics: new Map() };
+    drains.set(sql, st);
+  }
+  return st;
+}
+
+const laneKey = (topicId: string, memberId: string) => `${topicId}\u0000${memberId}`;
+
+/** Runs `fn` after the earlier hand-offs of the lane; it waits instead while an earlier one failed. */
+function onLane(st: DrainState, key: string, rowId: number, fn: () => Promise<unknown>): Promise<void> {
+  let lane = st.lanes.get(key);
+  if (!lane) {
+    lane = { tail: Promise.resolve(), pending: 0, failedBy: null };
+    st.lanes.set(key, lane);
+  }
+  const l = lane;
+  l.pending++;
+  const run = l.tail.then(async () => {
+    if (l.failedBy !== null) throw new LaneWaits();
+    try {
+      await fn();
+    } catch (err) {
+      l.failedBy = rowId;
+      throw err;
+    }
+  });
+  l.tail = run.then(
+    () => {},
+    () => {},
+  );
+  void l.tail.then(() => {
+    l.pending--;
+    if (l.pending === 0 && l.failedBy === null && st.lanes.get(key) === l) st.lanes.delete(key);
+  });
+  return run;
+}
+
+/** After a row's retry is stored: the stored row holds its lanes from now on. */
+function releaseLanes(st: DrainState, rowId: number): void {
+  for (const [key, lane] of st.lanes) {
+    if (lane.failedBy !== rowId) continue;
+    lane.failedBy = null;
+    if (lane.pending === 0) st.lanes.delete(key);
+  }
+}
+
+/** Waits for the topic's hand-offs under way. */
+async function topicIdle(st: DrainState, topicId: string): Promise<void> {
+  const prefix = laneKey(topicId, "");
+  await Promise.all([...st.lanes].filter(([k]) => k.startsWith(prefix)).map(([, l]) => l.tail));
+}
 
 /**
- * Delivers every due outbox row in order. A failure delays the later rows of the same topic
- * (their order matters to the run) and schedules a retry with backoff through the alarm.
+ * The lanes held by rows that wait for a retry (their members not yet done); a row that was never
+ * routed holds its whole topic.
+ */
+function heldLanes(sql: SqlStorage, now: number): { lanes: Set<string>; topics: Set<string> } {
+  const lanes = new Set<string>();
+  const topics = new Set<string>();
+  for (const r of sql.exec<OutboxRow>("SELECT * FROM bot_outbox WHERE next_at > ?", now).toArray()) {
+    const p = JSON.parse(r.payload) as { botId?: string; targets?: { id: string }[]; done?: string[] };
+    if (r.kind !== "message" && p.botId) {
+      lanes.add(laneKey(r.topic_id, p.botId));
+      continue;
+    }
+    if (r.kind !== "message" || !p.targets) {
+      topics.add(r.topic_id);
+      continue;
+    }
+    for (const t of p.targets) if (!(p.done ?? []).includes(t.id)) lanes.add(laneKey(r.topic_id, t.id));
+  }
+  return { lanes, topics };
+}
+
+/** Delivers one row through its lanes, then deletes it, or stores its retry. */
+async function deliverRow(c: DeliverContext, st: DrainState, row: OutboxRow, held: Set<string>): Promise<void> {
+  try {
+    // The rows of a topic are routed one after another, so their hand-offs join each lane in order.
+    const step = (st.topics.get(row.topic_id) ?? Promise.resolve()).then(async () => {
+      const p = await plan(c, row, () => topicIdle(st, row.topic_id));
+      if (!p) return null;
+      const started = new Map<string, Promise<void>>();
+      for (const id of p.targets) {
+        if (p.done.includes(id)) continue;
+        const key = laneKey(row.topic_id, id);
+        const go = held.has(key) ? Promise.reject(new LaneWaits()) : onLane(st, key, row.id, () => p.send(id));
+        go.catch(() => {});
+        started.set(id, go);
+      }
+      return { p, started };
+    });
+    const tail = step.catch(() => {});
+    st.topics.set(row.topic_id, tail);
+    void tail.then(() => {
+      if (st.topics.get(row.topic_id) === tail) st.topics.delete(row.topic_id);
+    });
+    const routed = await step;
+    if (routed) {
+      const { p, started } = routed;
+      await handOffEach(
+        p.targets.map((id) => ({ id })),
+        p.done,
+        (t) => started.get(t.id) ?? Promise.resolve(),
+        (done) => p.record(done),
+      );
+    }
+    c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
+  } catch (err) {
+    // Behind an earlier row of the same member: it stays due and goes after that one.
+    if (err instanceof LaneWaits) return;
+    const attempts = row.attempts + 1;
+    if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
+      c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
+      c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });
+      return;
+    }
+    const wait = Math.min(1000 * 2 ** Math.min(attempts, 20), RETRY_MAX_MS);
+    c.sql.exec("UPDATE bot_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, Date.now() + wait, row.id);
+    c.log.warn("bot hand-off failed; will retry", { err, kind: row.kind, topicId: row.topic_id, attempts });
+  } finally {
+    releaseLanes(st, row.id);
+    st.inflight.delete(row.id);
+  }
+}
+
+/**
+ * Delivers every due outbox row (接 1.9): each as soon as its lanes are free, in order within a
+ * (topic, member) lane. A failure holds the later rows of the same lane (their order matters to
+ * the run) and schedules a retry with backoff through the alarm.
  */
 export async function drainOutbox(c: DeliverContext): Promise<void> {
-  if (draining.has(c.sql)) return;
-  draining.add(c.sql);
-  try {
-    // Rows written while a delivery was in flight are picked up by the next pass.
-    for (let pass = 0; pass < 10; pass++) {
-      const now = Date.now();
-      const due = c.sql
-        .exec<OutboxRow>("SELECT * FROM bot_outbox WHERE next_at <= ? ORDER BY id LIMIT 100", now)
-        .toArray();
-      if (due.length === 0) break;
-      const blocked = new Set(
-        c.sql
-          .exec<{ topic_id: string }>("SELECT DISTINCT topic_id FROM bot_outbox WHERE next_at > ?", now)
-          .toArray()
-          .map((r) => r.topic_id),
-      );
-      let delivered = 0;
-      for (const row of due) {
-        if (blocked.has(row.topic_id)) continue;
-        try {
-          await deliver(c, row);
-          c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
-          delivered++;
-        } catch (err) {
-          blocked.add(row.topic_id);
-          const attempts = row.attempts + 1;
-          if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
-            c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
-            c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });
-            continue;
-          }
-          const wait = Math.min(1000 * 2 ** Math.min(attempts, 20), RETRY_MAX_MS);
-          c.sql.exec("UPDATE bot_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, Date.now() + wait, row.id);
-          c.log.warn("bot hand-off failed; will retry", { err, kind: row.kind, topicId: row.topic_id, attempts });
-        }
-      }
-      if (delivered === 0) break;
-    }
-  } finally {
-    draining.delete(c.sql);
+  const st = drainState(c.sql);
+  const now = Date.now();
+  const held = heldLanes(c.sql, now);
+  const due = c.sql.exec<OutboxRow>("SELECT * FROM bot_outbox WHERE next_at <= ? ORDER BY id LIMIT 200", now).toArray();
+  const jobs: Promise<void>[] = [];
+  for (const row of due) {
+    if (st.inflight.has(row.id)) continue;
+    if (held.topics.has(row.topic_id)) continue;
+    st.inflight.add(row.id);
+    jobs.push(deliverRow(c, st, row, held.lanes));
   }
-  const next = c.sql.exec<{ at: number | null }>("SELECT MIN(next_at) AS at FROM bot_outbox").toArray()[0]?.at;
-  if (next !== null && next !== undefined) c.wakeAt(Math.max(next, Date.now() + 1000));
+  await Promise.all(jobs);
+  // Rows under way are not due again: the drain that runs them wakes the room when they fail.
+  let next: number | null = null;
+  for (const r of c.sql.exec<{ id: number; next_at: number }>("SELECT id, next_at FROM bot_outbox").toArray()) {
+    if (!st.inflight.has(r.id) && (next === null || r.next_at < next)) next = r.next_at;
+  }
+  if (next !== null) c.wakeAt(Math.max(next, Date.now() + 1000));
 }
 
 const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered"]);

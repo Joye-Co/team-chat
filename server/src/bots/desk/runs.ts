@@ -11,7 +11,7 @@ import { policyPrompt, runGates } from "../../settings/rules";
 import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, whyNoMachine } from "../dispatch";
 import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
-import { type Brief, briefText } from "../../agent/frontdesk";
+import { type Brief, briefText, isNewTask } from "../../agent/frontdesk";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
@@ -79,14 +79,19 @@ export abstract class DeskRuns extends DeskCore {
     followUps: { authorId: string; body: string }[] = [],
     retryOf?: string,
     brief?: Brief,
+    opts: { newTask?: boolean } = {},
   ): Promise<void> {
     const botId = this.botId as string;
     const runner = await loadRunner(this.env.DB, botId);
     if (!runner?.enabled) return;
+    // 3.2: whether a request in a chat area is in a DM (a card answer or a live event does not say).
+    const dm = isMainTopicId(m.topicId) && !followUpOf && !retryOf && (m.dm === true || (await this.isDm(m.groupId)));
     const claim = unwrap(
       await roomStub(this.env, m.groupId).rpc(m.groupId, "bots.claim", this.actor(), { topicId: m.topicId }),
     ) as ClaimResult;
-    if (this.activeRun(m.topicId)) return; // Raced with another message.
+    if (this.startBlocked(m.topicId)) return; // Raced with another message.
+    // 接 1.5: a request next to a running one in a chat area is its own piece of work.
+    const alongside = isMainTopicId(m.topicId) && this.activeRun(m.topicId) !== undefined;
 
     const now = Date.now();
     const runId = ulid(now);
@@ -108,11 +113,14 @@ export abstract class DeskRuns extends DeskCore {
       retryOf ?? null,
     );
     // Run context: in the 群聊 only a follow-up, or a request that quotes this bot, continues
-    // the bot's last session; any other request is a new piece of work.
+    // the bot's last session; any other request is a new piece of work. 接 3.2: in a DM's chat
+    // area the next request continues it unless it is said to be new work (新任务, or the front
+    // desk says so). 接 1.5: a request next to a running one never shares that run's session.
     const quotesBot = m.replyToAuthorId === botId || (m.refs ?? []).some((x) => x.fromId === botId);
     // 盯活: a restart says whether it continues the session and which machines it leaves out.
     const how = retryOf ? this.restartOf(retryOf) : null;
-    if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot && !how?.sameSession) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
+    const newWork = dm ? opts.newTask === true || isNewTask(m.body) : !quotesBot;
+    if (isMainTopicId(m.topicId) && !followUpOf && !how?.sameSession && (alongside || newWork)) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
     if (how?.exclude && how.exclude.length > 0) this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(how.exclude), runId);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one. A follow-up or a
@@ -310,18 +318,33 @@ export abstract class DeskRuns extends DeskCore {
     return pickMachine(usable, runner, Date.now(), excluded);
   }
 
-  /** The topic's last ended run of the same kind and runtime with a CLI session, if any. */
+  /**
+   * The session the run continues: a follow-up or a retry continues its own run's session (with
+   * several runs in a chat area the newest ended run may be another request's); any other run the
+   * topic's last ended run of the same kind. Only with a CLI session on the same runtime.
+   */
   protected lastSession(r: RunRow, runner: BotRunner): RunRow | undefined {
     if (r.fresh) return undefined;
-    const prev = this.sql
-      .exec<RunRow>(
-        "SELECT * FROM runs WHERE topic_id = ? AND id != ? AND ended_at IS NOT NULL AND kind IS ? ORDER BY created_at DESC LIMIT 1",
-        r.topic_id,
-        r.id,
-        r.kind,
-      )
-      .toArray()[0] as RunRow | undefined;
+    const of = r.follow_up_of ?? r.retry_of;
+    const own = of ? this.run(of) : undefined;
+    const prev =
+      own && own.ended_at !== null
+        ? own
+        : (this.sql
+            .exec<RunRow>(
+              "SELECT * FROM runs WHERE topic_id = ? AND id != ? AND ended_at IS NOT NULL AND kind IS ? ORDER BY created_at DESC LIMIT 1",
+              r.topic_id,
+              r.id,
+              r.kind,
+            )
+            .toArray()[0] as RunRow | undefined);
     return prev?.session_id && prev.machine_id && prev.runtime === runner.runtime && !prev.external ? prev : undefined;
+  }
+
+  /** Whether the group is a DM (接 3.2). */
+  protected async isDm(groupId: string): Promise<boolean> {
+    const row = await this.env.DB.prepare("SELECT kind FROM groups WHERE id = ?").bind(groupId).first<{ kind: string }>();
+    return row?.kind === "dm";
   }
 
   /** The run's prompts (Run context): the topic within the budget, and what is new for a resumed session. */

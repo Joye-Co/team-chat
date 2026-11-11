@@ -26,6 +26,8 @@ export const Decision = z.object({
   confidence: z.number().min(0).max(1).default(0),
   reply: z.string().max(MAX_REPLY_CHARS).optional(),
   brief: Brief.optional(),
+  /** 接 3.2, dispatch in a DM: the request is new work, so the executor starts a fresh session. */
+  newTask: z.boolean().optional(),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -53,6 +55,11 @@ export const DECIDE_TOOL: ToolSpec = {
           notes: { type: "string", description: "What the executor must know: constraints, decisions, message ids (m …) and file ids (f …) worth reading." },
         },
         required: ["goal"],
+      },
+      newTask: {
+        type: "boolean",
+        description:
+          "For dispatch in a direct conversation: true when the request is new work unrelated to the earlier work in this conversation (the executor starts a fresh session); false when it continues that work.",
       },
     },
     required: ["action", "reason", "confidence"],
@@ -136,6 +143,16 @@ export async function decide(cfg: ModelConfig, input: DecideInput, opts: CallOpt
   if (!res.ok) return { decision: { action: "dispatch", reason: "", confidence: 0 }, fallback: `model error: ${res.error}`, ms, system, prompt };
   const s = settle(res.input);
   return { ...s, ms, system, prompt, ...(res.usage ? { usage: res.usage } : {}) };
+}
+
+/**
+ * 接 3.2: words that start a new piece of work in a DM's chat area (without a front desk), at the
+ * start of the message: the next request there otherwise continues the member's last session.
+ */
+const NEW_TASK = /^(?:新任务|新的任务|另一个任务|换个任务|开个新任务|重新开始|从头开始|new task\b)/iu;
+
+export function isNewTask(body: string): boolean {
+  return NEW_TASK.test(body.replace(/@\S+/g, "").trim());
 }
 
 /** The work order as the executor's prompt shows it. */
