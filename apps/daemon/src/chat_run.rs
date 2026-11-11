@@ -63,6 +63,7 @@ const OPS: &[&str] = &[
     output_op::DESK_NOTE,
     output_op::MEMBER_HANDOFF,
     output_op::MEMBER_ASSIGN,
+    output_op::RUN_REPORT,
 ];
 
 /// The note the CLI gets in its system prompt (Claude Code `--append-system-prompt`, Codex
@@ -112,7 +113,10 @@ declare the events with `--events events.json` and use the page bridge `window.t
 `chat-run artifact data` sends the state back to every open copy. When your run ends, your last \
 message becomes the result card, shown with the 产出 at its top: say in one or two sentences what \
 you made, then only what the reader still has to do or check. Do not retell what the 产出 \
-already shows and do not list the steps you took. A card is a Card v2 \
+already shows and do not list the steps you took; do not post a done card yourself. Before you stop, \
+say how it ended with `chat-run report --state done|blocked|waiting --text <one line>`: blocked when \
+you cannot go on without something (a key, an access, a decision), waiting when you asked a person \
+and wait for the answer. A card is a Card v2 \
 document `{{\"v\":2,\"rev\":1,\"intent\":\"done\"|\"working\"|\"ask\",\"title\":…,\"fallback\":…,\"blocks\":[…]}}`; block \
 types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help` shows more.",
         name = crate::product::name(),
@@ -935,6 +939,7 @@ pub const USAGE: &str = "usage:
   chat-run decisions list [--limit <1-100>]
   chat-run member list
   chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source <messageId>]
+  chat-run report --state done|blocked|waiting --text <text>
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
 prints its JSON Schema (no daemon needed). ops.json is a list of
@@ -942,10 +947,13 @@ patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, f
 产出 come from the run's working folder only; a folder's entry is index.html unless --entry
 says otherwise. The prompt carries only part of the topic: topic history (oldest first, seqs
 exclusive), topic message (the whole message), search (this topic, or every topic of the
-group with --group) and file get (into --out, else .chat-files/<fileId>/ of the working
-folder) read the rest. --topic reads another topic of the run's group, never another group.
+group with --group) and file get (into --out in the working folder, else downloads/<fileId>/
+of the run's folder, outside the working folder; the result's path says where) read the rest.
+--topic reads another topic of the run's group, never another group.
 artifact get prints the 产出's versions and the entry file's text when it is text; --out also
-writes the entry file there (inside the working folder). Each command waits up to 15 s (topic and search: 30 s; file
+writes the entry file there (inside the working folder). report says how the work ended (done,
+blocked: cannot go on without something, waiting: for a person's answer); the latest report
+counts when the run ends. Each command waits up to 15 s (topic and search: 30 s; file
 upload/get and artifact create/version: 5 minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
 sandbox.blocked. `chat-run secret` prints only the value (exit 0), or the error on standard
@@ -1128,6 +1136,7 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &args[2..],
             &["id", "out"],
         ),
+        ["report", ..] => (output_op::RUN_REPORT, &args[1..], &["state", "text"]),
         _ => return Err("unknown command".into()),
     };
     let f = Flags::parse(rest, allowed)?;
@@ -1382,6 +1391,25 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             if let Some(n) = f.opt("notes") {
                 put("notes", json!(n));
             }
+        }
+        output_op::RUN_REPORT => {
+            // 接 4.2: how the work ended; the latest report counts when the run ends.
+            let state = f.req("state")?;
+            if !crate::proto::RUN_REPORT_STATES.contains(&state) {
+                return Err(format!(
+                    "--state must be one of {}",
+                    crate::proto::RUN_REPORT_STATES.join(", ")
+                ));
+            }
+            let text = f.req("text")?.trim();
+            if text.is_empty() || text.chars().count() > crate::proto::MAX_RUN_REPORT_CHARS {
+                return Err(format!(
+                    "--text needs 1-{} characters",
+                    crate::proto::MAX_RUN_REPORT_CHARS
+                ));
+            }
+            put("state", json!(state));
+            put("text", json!(text));
         }
         output_op::DESK_NOTE => {
             // `--text ""` clears the note.
@@ -1711,6 +1739,44 @@ mod tests {
 
     fn args(s: &[&str]) -> Vec<String> {
         s.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn report_command_builds_its_body_and_checks_state_and_text() {
+        let (op, body) = request(&args(&[
+            "report",
+            "--state",
+            "blocked",
+            "--text",
+            "  需要 staging 的数据库密码 ",
+        ]))
+        .unwrap();
+        assert_eq!(op, "run.report");
+        assert_eq!(
+            body,
+            json!({ "state": "blocked", "text": "需要 staging 的数据库密码" })
+        );
+        for state in ["done", "waiting"] {
+            assert_eq!(
+                request(&args(&["report", "--state", state, "--text", "x"]))
+                    .unwrap()
+                    .1["state"],
+                state
+            );
+        }
+        let long = "长".repeat(2001);
+        for bad in [
+            &["report", "--state", "stuck", "--text", "x"][..],
+            &["report", "--state", "done"],
+            &["report", "--state", "done", "--text", "  "],
+            &["report", "--text", "x"],
+            &["report", "--state", "done", "--text", &long],
+        ] {
+            assert!(request(&args(bad)).is_err(), "{bad:?}");
+        }
+        assert!(OPS.contains(&"run.report"));
+        assert!(USAGE.contains("chat-run report --state done|blocked|waiting --text"));
+        assert!(note().contains("chat-run report --state done|blocked|waiting"));
     }
 
     #[test]

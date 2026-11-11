@@ -36,6 +36,10 @@ pub struct Local {
     /// The run's working folder; only files inside it are sent.
     pub root: PathBuf,
     pub redactor: Arc<Redactor>,
+    /// Where `chat-run file get` puts a file without `--out`: `<run folder>/downloads`, outside
+    /// the working folder, so a download never ends up in the member's branch. None: the old
+    /// `<working folder>/.chat-files`.
+    pub downloads: Option<PathBuf>,
 }
 
 pub(crate) fn err(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value {

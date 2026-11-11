@@ -227,7 +227,7 @@ impl CodexNormalizer {
                     ok: exit == Some(0) && item["status"].as_str() != Some("failed"),
                     output: item["aggregatedOutput"]
                         .as_str()
-                        .map(|o| truncate(o, OUTPUT_LIMIT)),
+                        .map(super::truncate_output),
                     exit_code: exit,
                 }]
             }
@@ -243,7 +243,7 @@ impl CodexNormalizer {
                     item_id: id,
                     turn_id,
                     ok,
-                    output: Some(truncate(&out, OUTPUT_LIMIT)),
+                    output: Some(super::truncate_output(&out)),
                     exit_code: None,
                 }]
             }
