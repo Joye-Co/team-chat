@@ -1835,6 +1835,8 @@ mod tests {
         assert_eq!(MONO_FONT_FAMILY, *MONO_FONT_STACK.last().unwrap());
         #[cfg(target_os = "macos")]
         assert_eq!((FONT_FAMILY, MONO_FONT_FAMILY), (".SystemUIFont", "Menlo"));
+        #[cfg(target_os = "windows")]
+        assert_eq!((FONT_FAMILY, MONO_FONT_FAMILY), ("Segoe UI", "Consolas"));
     }
 
     // --- v12/shell ---
