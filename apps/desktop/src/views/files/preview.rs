@@ -405,7 +405,10 @@ pub fn quick_look_settled(_: &App) -> bool {
             SAVED.set(OPENED.get());
             if let Some(png) = super::preview_handler::screen_probe() {
                 let _ = std::fs::create_dir_all(&dir);
-                let file = std::path::Path::new(&dir).join("quick-look-handler-on-screen.png");
+                // One file per capture (the light scene, then the dark one).
+                let n = std::fs::read_dir(&dir).map_or(0, |d| d.count());
+                let file = std::path::Path::new(&dir)
+                    .join(format!("quick-look-handler-on-screen-{n}.png"));
                 let _ = std::fs::write(file, png);
             }
         }

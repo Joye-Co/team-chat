@@ -7,8 +7,14 @@
 //! The handler is created as a local server: it runs out of process, in the system's
 //! `prevhost.exe` at low integrity, which is how Windows previews files it does not
 //! trust. It gets the file as a read-only stream (or its path, for the few handlers that
-//! want one) and a child window of the app's window to draw in; the app places that child
-//! over the sheet's body every frame. Closing the sheet unloads the handler.
+//! want one) and a window to draw in.
+//!
+//! That window is a popup the app's window owns, placed exactly over the sheet's body
+//! every frame, not a child of the app's window: GPUI presents through a flip-model swap
+//! chain, which covers whatever a child window draws with GDI (as these handlers do; a
+//! WebView2 child brings its own surface and is not affected). An owned popup has its
+//! own surface, stays above its owner, hides with it and never takes the focus or a
+//! taskbar button. Closing the sheet unloads the handler and destroys the popup.
 //!
 //! Only files 打开 would hand to the system come here ([`previewable`]): a type Windows
 //! would run is never given to a handler.
@@ -18,7 +24,8 @@ use std::path::Path;
 use gpui::{AnyElement, App, ElementId, IntoElement as _, Styled as _, Window, canvas};
 use windows::{
     Win32::{
-        Foundation::{HWND, RECT},
+        Foundation::{HWND, POINT, RECT},
+        Graphics::Gdi::ClientToScreen,
         System::Com::{
             CLSCTX_LOCAL_SERVER, CLSIDFromString, CoCreateInstance, IStream, STGM_READ,
             STGM_SHARE_DENY_NONE,
@@ -31,8 +38,8 @@ use windows::{
                 SHCreateItemFromParsingName, SHCreateStreamOnFileEx,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DestroyWindow, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
-                WINDOW_EX_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_VISIBLE,
+                CreateWindowExW, DestroyWindow, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
+                SetWindowPos, WS_CLIPCHILDREN, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
             },
         },
     },
@@ -72,6 +79,7 @@ pub fn handler_clsid(path: &Path) -> Option<GUID> {
 
 /// A preview handler drawing a file into a child of the app's window.
 pub struct Host {
+    owner: HWND,
     child: HWND,
     handler: IPreviewHandler,
     placed: std::cell::Cell<(i32, i32, i32, i32)>,
@@ -91,11 +99,12 @@ impl Host {
             let handler: IPreviewHandler =
                 CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER).ok()?;
             initialize(&handler, path)?;
+            // For a popup the "parent" argument is its owner.
             let child = CreateWindowExW(
-                WINDOW_EX_STYLE(0),
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 w!("STATIC"),
                 PCWSTR::null(),
-                WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+                WS_POPUP | WS_CLIPCHILDREN,
                 0,
                 0,
                 1,
@@ -122,6 +131,7 @@ impl Host {
                 return None;
             }
             Some(Self {
+                owner: parent,
                 child,
                 handler,
                 placed: std::cell::Cell::new((0, 0, 1, 1)),
@@ -129,31 +139,41 @@ impl Host {
         }
     }
 
-    /// Puts the preview at this rectangle of the parent's client area, in pixels.
+    /// Puts the preview over this rectangle of the owner's client area, in pixels, and
+    /// shows it. Called every frame: the popup follows the owner when it moves.
     pub fn place(&self, x: i32, y: i32, width: i32, height: i32) {
         let (width, height) = (width.max(1), height.max(1));
+        let mut origin = POINT { x, y };
+        // SAFETY: the owner is a live window of this thread; the point is valid.
+        unsafe {
+            let _ = ClientToScreen(self.owner, &mut origin);
+        }
         PLACED.set(self.child.0 as isize);
-        if self.placed.replace((x, y, width, height)) == (x, y, width, height) {
+        let now = (origin.x, origin.y, width, height);
+        let before = self.placed.replace(now);
+        if before == now {
             return;
         }
-        let rect = RECT {
-            left: 0,
-            top: 0,
-            right: width,
-            bottom: height,
-        };
-        // SAFETY: the child is this host's live window; the rectangle outlives the call.
+        // SAFETY: the popup is this host's live window; the rectangle outlives the call.
         unsafe {
             let _ = SetWindowPos(
                 self.child,
                 None,
-                x,
-                y,
+                origin.x,
+                origin.y,
                 width,
                 height,
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
-            let _ = self.handler.SetRect(&rect);
+            if (before.2, before.3) != (width, height) {
+                let rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: width,
+                    bottom: height,
+                };
+                let _ = self.handler.SetRect(&rect);
+            }
         }
     }
 
@@ -205,7 +225,7 @@ thread_local! {
 /// the others first.
 pub fn screen_probe() -> Option<Vec<u8>> {
     use windows::Win32::UI::WindowsAndMessaging::{
-        GA_ROOT, GetAncestor, HWND_TOPMOST, IsWindow, SWP_NOMOVE, SWP_NOSIZE,
+        GW_OWNER, GetWindow, HWND_TOPMOST, IsWindow, SWP_NOMOVE, SWP_NOSIZE,
     };
     let child = HWND(PLACED.get() as *mut _);
     // SAFETY: the handle is checked before use; the calls only raise the app's window.
@@ -214,7 +234,7 @@ pub fn screen_probe() -> Option<Vec<u8>> {
             return None;
         }
         let _ = SetWindowPos(
-            GetAncestor(child, GA_ROOT),
+            GetWindow(child, GW_OWNER).unwrap_or(child),
             Some(HWND_TOPMOST),
             0,
             0,
@@ -249,13 +269,18 @@ pub fn body(
                 let scale = window.scale_factor();
                 let px = |v: gpui::Pixels| (f32::from(v) * scale).round() as i32;
                 if let Some(host) = &shown.read(cx).0 {
+                    // Not over the sheet's rounded bottom corners.
+                    let corner = crate::ui::native::metrics::SHEET_RADIUS;
                     host.place(
                         px(bounds.origin.x),
                         px(bounds.origin.y),
                         px(bounds.size.width),
-                        px(bounds.size.height),
+                        px(bounds.size.height - corner),
                     );
                 }
+                // The popup is a window of its own: follow the app's window while the
+                // preview is open (a move draws no frame by itself).
+                window.request_animation_frame();
             },
             |_, _, _, _| {},
         )
@@ -270,7 +295,8 @@ mod tests {
         Foundation::LPARAM,
         System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
         UI::WindowsAndMessaging::{
-            DispatchMessageW, EnumChildWindows, MSG, PM_REMOVE, PeekMessageW, WS_OVERLAPPEDWINDOW,
+            DispatchMessageW, EnumChildWindows, MSG, PM_REMOVE, PeekMessageW, WINDOW_EX_STYLE,
+            WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         },
     };
 
@@ -312,7 +338,7 @@ mod tests {
     }
 
     /// The system's own handler for a type the app has no viewer for (RTF, which every
-    /// Windows previews) is found, takes the file and draws into the app's child window.
+    /// Windows previews) is found, takes the file and draws into the app's preview window.
     /// A system without that handler says so and is skipped.
     #[test]
     fn the_system_handler_draws_a_file_the_app_has_no_viewer_for() {
@@ -378,7 +404,10 @@ mod tests {
             }
             let drawn = children(host.child());
             println!("windows the handler made in the app's child: {drawn}");
-            assert!(drawn > 0, "the handler put its view into the child window");
+            assert!(
+                drawn > 0,
+                "the handler put its view into the preview window"
+            );
             // What is on the screen where the preview is: the page's text, drawn by
             // the handler's process (a capture of the app's window would not show it).
             let (x, y, w, h) =
