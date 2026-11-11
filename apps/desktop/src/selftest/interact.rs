@@ -86,7 +86,8 @@ const STEPS: &[(&str, Steps)] = &[
         "state-focus-artifact-row",
         keys(&["shift-tab", "shift-tab", "up", "up", "up", "down"]),
     ),
-    ("state-hover-settings-row", hover(320., 713., 300)),
+    // (The 通知 pane lost its 按群设置 navigation row when 群 and 话题 got their own
+    // notification settings; its rows are switches and pop-ups now, with no row hover.)
     ("state-focus-diagram-node", keys(&["tab", "tab"])),
     // --- end v16/c-cards ---
     // --- v16/tail2 ---

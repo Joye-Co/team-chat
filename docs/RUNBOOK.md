@@ -141,19 +141,63 @@ The **Release** workflow (`.github/workflows/release.yml`, Actions tab, manual) 
 local release.
 
 ```sh
-gh workflow run release.yml --ref <branch> -f version=<v>                 # dry run on any branch
-gh workflow run release.yml --ref main -f version=<v> -f mode=release     # the release
-gh workflow run release.yml --ref main -f version=<v> -f mode=upload-only # upload again
+gh workflow run release.yml --ref <branch> -f version=<v>                  # dry run on any branch
+gh workflow run release.yml --ref main -f version=<v> -f mode=release      # the release
+gh workflow run release.yml --ref main -f version=<v> -f mode=upload-only  # upload again
+gh workflow run release.yml --ref main -f version=<v> -f mode=windows-only # add the installer
 ```
 
-- `dry-run` (default): preflight and plan, then builds, signs and checks the DMG and the daemon
-  (against the previous release's DMG too) and keeps them as a workflow artifact for 7 days.
-  Nothing is committed, tagged or uploaded. "would stop" lines name what a release would refuse.
+Add `-f windows_unsigned=true` to `release` and `windows-only` while no Windows code signing is
+set up (below): without it they refuse to run.
+
+A release is one thing for both systems. The Windows job runs first (build, sign, install,
+uninstall, and the update from the previous release with the daemon running); the macOS job
+publishes only when it is green, and it creates the GitHub Release with the DMG and the
+installer together, then uploads the DMG and the installer to production. A Windows build that
+fails stops the release before anything is public: fix it on `main` and start the release again.
+
+- `dry-run` (default): preflight and plan, then builds, signs and checks the DMG, the daemon
+  (against the previous release's DMG too) and the Windows installer, and keeps them as workflow
+  artifacts for 7 days. Nothing is committed, tagged or uploaded. "would stop" lines name what a
+  release would refuse.
 - `release` (main only): `chore(release): v<v>` on `main`, tag `v<v>`, GitHub Release with the
-  DMG and the daemon, then `PUT /v1/admin/releases/<v>` on production.
+  DMG, the installer and the daemons, then `PUT /v1/admin/releases/<v>` and
+  `PUT /v1/admin/releases/<v>/assets/windows` on production.
   The release commit is pushed with the workflow token, which starts no CI run on `main`.
-- `upload-only` (main only): downloads the DMG of release `v<v>`, checks it against the release's SHA-256 digest (`scripts/check-release-digest.sh`) and uploads
-  it to production again.
+  Both jobs build the commit the run was started on, and the release commit goes on top of it:
+  a commit that reaches `main` while the Windows job runs (about half an hour) stops the release
+  at the macOS job's preflight ("HEAD is not origin/main"), before anything is public. Start it
+  again.
+- `upload-only` (main only): `scripts/release.sh <v> --reupload`. Downloads the DMG and the
+  installer of release `v<v>`, checks them against the release's SHA-256 digests and uploads
+  each to production. A file production already has with the same content counts as done; both
+  are tried; one that is missing on GitHub or refused fails the run.
+- `windows-only` (main only): for a release that exists without a Windows installer. Builds and
+  tests the installer from the release's tag (never from what reached `main` since), then
+  gives it to production and to the GitHub Release (`scripts/release.sh <v> --add-windows`).
+
+When a release stops half way:
+
+| What happened | What is public | Repair |
+| --- | --- | --- |
+| The Windows job failed | nothing | fix on `main`, `mode=release` again |
+| The macOS job failed before the tag (build, signing, "HEAD is not origin/main") | nothing | fix or just start `mode=release` again |
+| It failed between the tag and the GitHub Release (the tag `v<v>` is on `main`, the release does not exist) | the tag | `mode=release` again: the run sees the tag without a release and resumes from it (`release.sh --resume`: both jobs build the tag, no new commit) |
+| The GitHub Release exists, an upload to production failed (the DMG arrived, the installer did not, or neither) | the GitHub Release; Mac apps may update already | `mode=upload-only`; it sends what is missing and passes over what is there |
+| Production answered 404 to an upload | the GitHub Release | the server has no release routes yet: deploy it, then `mode=upload-only` |
+| Production answers 409 in `upload-only` | | production has *another* file for that version (or is a server from before it accepted the same file twice: deploy it). A published file is never replaced: withdraw the version and release a higher one |
+| The release was made for the Mac alone | DMG only | `mode=windows-only` |
+
+**The Mac alone, in an emergency.** `-f mode=release -f release_mac_without_windows=true`
+skips the Windows job and publishes the DMG without an installer (`release.sh
+--without-windows`). Use it only when a Mac fix cannot wait for a Windows runner outage or a
+broken Windows build. Windows apps are offered nothing for that version; the run says so in a
+warning and in its summary. Add the installer as soon as the Windows build works:
+`-f mode=windows-only`.
+
+On a Mac, `scripts/release.sh <v>` asks for the same: `--windows-installer <setup.exe>` (take
+it from the artifact `windows-installer-<v>` of a dry run of that commit), or
+`--without-windows`; `--resume`, `--reupload` and `--add-windows` are the repairs above.
 
 Repository secrets (Settings, Secrets and variables, Actions). The workflow never prints them:
 
@@ -174,52 +218,48 @@ belong to the certificate; a non-prerelease release and `upload-only` also refus
 
 ### Windows installer
 
-The same workflow builds the Windows installer on a Windows runner (job **Windows installer**:
-`scripts/build-windows-installer.sh`, then `scripts/test-windows-installer.sh`, which installs,
-checks, starts and uninstalls it there) in the modes `dry-run` and `release`, and keeps it as
-the artifact `windows-installer-<v>`. In `release` the job **Publish the Windows installer**
-adds `<name>-<v>-setup.exe` and the Windows daemon to the GitHub Release and uploads it with
-`scripts/release.sh <v> --env production --upload-only --platform windows`
-(`PUT /v1/admin/releases/<v>/assets/windows`); `upload-only` uploads the installer of the GitHub
-Release again. A prerelease has no Windows installer.
+The job **Windows installer** (`scripts/build-windows-installer.sh`, then
+`scripts/test-windows-installer.sh` and `scripts/test-windows-update.sh <previous> <new>`) runs
+in the modes `dry-run`, `release` and `windows-only` and keeps the installer and the Windows
+daemon as the artifact `windows-installer-<v>`. The update test installs the previous release's
+installer on the runner, signs in to a local server, makes the runner a machine and lets that
+app update itself to the new build: the previous release's own update helper decides whether it
+takes the new installer, so a publisher it would refuse fails the release there. A prerelease
+gets its installer on the GitHub Release only, as it gets its DMG.
 
-- Deploy the server before the first release with a Windows installer: an older server answers
-  404 to the upload (the script says so and the release still succeeds), and Windows apps are
-  then offered nothing until the upload is repeated with `mode=upload-only`.
-- The Windows build failed but the Mac release went out: fix it on `main`, then use
-  **Re-run failed jobs** on that run. The Windows job sets the version in its own working tree,
-  so it builds the same version again.
-- Code signing is optional. Without it the installer is unsigned and Windows shows the
-  SmartScreen warning ([INSTALL.md](INSTALL.md#windows)). To sign, add two secrets; the workflow
-  imports the certificate into the runner user's store for the run and signs the programs, the
-  uninstaller and the installer with `signtool` and a time stamp:
+- Deploy the server before a release: an older server answers 404 to the installer's upload
+  (the script says so and goes on), and Windows apps are then offered nothing until the upload
+  is repeated with `mode=upload-only`.
+- Code signing. Without it the installer is unsigned and Windows shows the SmartScreen warning
+  ([INSTALL.md](INSTALL.md#windows)); a release then runs only with `-f windows_unsigned=true`,
+  as a Mac release refuses to run without its certificate. Two ways to sign; the workflow signs
+  the programs, the uninstaller and the installer and the tests check every signature:
 
   | Secret | Value |
   | --- | --- |
-  | `WINDOWS_SIGN_PFX_BASE64` | the code-signing certificate with its private key as a PFX file, base64 on one line |
+  | `WINDOWS_SIGN_PFX_BASE64` | a certificate with its private key as a PFX file, base64 on one line |
   | `WINDOWS_SIGN_PASSWORD` | the password of the PFX |
+  | `WINDOWS_SIGN_CMD` | instead of the PFX, for a certificate whose key lives in a cloud key store or on a token (as certificates are issued now): a command that signs the file given as its last argument (`scripts/windows/sign.sh`) |
+  | `WINDOWS_SIGN_ENV` | with `WINDOWS_SIGN_CMD`: the environment the command needs, one `NAME=value` per line (the key store's credentials); every value is masked in the logs |
 
-  A certificate whose key lives in a cloud key store or on a hardware token has no PFX: set
-  `WINDOWS_SIGN_CMD` for the build step instead (`scripts/windows/sign.sh`).
+  The command's program must be on the Windows runner: put its install step in the job
+  `windows` of `.github/workflows/release-jobs.yml`, before "Set up code signing".
 - Once a release is signed, the app's update helper only installs an update with a valid
   signature of the same publisher (the certificate's subject). So keep signing every later
   release, with a certificate of the same subject; an unsigned or differently signed installer
-  is refused and the installed version stays. Users of an unsigned version take a signed update
-  without any step. Use a certificate Windows trusts: an app signed with a certificate the
-  user's computer does not trust (self-signed) only takes updates signed with that very
-  certificate, so it cannot be renewed. If the helper cannot read a signature at all (PowerShell
-  is blocked on the computer), it installs nothing.
+  is refused and the installed version stays, and the update test of the release fails first.
+  Users of an unsigned version take a signed update without any step. Use a certificate Windows
+  trusts: an app signed with a certificate the user's computer does not trust (self-signed)
+  only takes updates signed with that very certificate, so it cannot be renewed. If the helper
+  cannot read a signature at all (PowerShell is blocked on the computer), it installs nothing.
 - An update that is cut short (sign-out, power cut, the helper killed) is undone at the user's
   next sign-in, at the next start of the app or before the next update, from the journal
   `%APPDATA%\<bundle id>\updates\update-journal.json`; `update.log` next to it says what
-  happened. To run it by hand: `"<updates folder>\<slug>-update-run.exe" --recover "<journal>"`.
+  happened. A recovery that cannot finish registers itself for the following sign-in again. To
+  run it by hand: `"<updates folder>\<slug>-update-run.exe" --recover "<journal>"`.
 - Withdrawing a version (`withdraw-release`) withdraws its Windows installer too.
-- Once releases are signed, the job compares the new installer with the one of the previous
-  GitHub Release (`scripts/test-windows-installer.sh --same-as`) and fails before anything is
-  published when installed apps would refuse it (another publisher, or no signature after a
-  signed release).
-- The steps only a person can do (getting the certificate, the first real release, the look
-  on a real Windows computer, SmartScreen reputation) are in
+- The steps only a person can do (getting the certificate, the look on a real Windows
+  computer, SmartScreen reputation) are in
   [plans/windows-parity/release.zh.md](plans/windows-parity/release.zh.md), section 三.
 
 ## Bad app release

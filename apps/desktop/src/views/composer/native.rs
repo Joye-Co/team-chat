@@ -293,7 +293,12 @@ impl ComposerView {
                 self.render_refs(cx),
                 &ref_labels,
             ));
-            for file in self.files.clone() {
+            // Images show as thumbnails in one row (above the chips); other files as chips.
+            let images: Vec<_> = self.files.iter().filter(|f| f.is_image).cloned().collect();
+            if !images.is_empty() {
+                above.push(self.render_image_thumbs(images, cx));
+            }
+            for file in self.files.clone().into_iter().filter(|f| !f.is_image) {
                 let id = file.id.clone();
                 chips.push(
                     self.render_chip(
@@ -476,6 +481,98 @@ impl ComposerView {
                     )
                     .children(self.render_mentions(window, cx)),
             )
+            .into_any_element()
+    }
+}
+
+thread_local! {
+    /// Decoded clipboard pictures of the composer, by pending file id (the bytes would be
+    /// hashed again every frame otherwise).
+    static PASTED: std::cell::RefCell<std::collections::HashMap<String, std::sync::Arc<gpui::Image>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+impl ComposerView {
+    /// The images not sent yet, as square thumbnails with a remove button on each (Messages,
+    /// Slack): what is going out is seen, not only named.
+    fn render_image_thumbs(
+        &self,
+        images: Vec<crate::data::PendingFile>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::ui::native::tokens::{gallery, radius};
+        use gpui::{ObjectFit, StyledImage as _, img};
+        use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
+        let k = native_colors(cx);
+        let side = gallery::DRAFT_THUMB;
+        let live: std::collections::HashSet<String> = images.iter().map(|f| f.id.clone()).collect();
+        PASTED.with_borrow_mut(|m| m.retain(|id, _| live.contains(id)));
+        let thumbs = images.into_iter().map(|file| {
+            let picture: AnyElement = match &file.source {
+                NewFile::Path(path) => img(path.clone())
+                    .size_full()
+                    .rounded(radius::ITEM)
+                    .object_fit(ObjectFit::Cover)
+                    .into_any_element(),
+                NewFile::Image { mime, bytes, .. } => {
+                    let image = PASTED.with_borrow_mut(|m| {
+                        m.entry(file.id.clone())
+                            .or_insert_with(|| {
+                                std::sync::Arc::new(gpui::Image::from_bytes(
+                                    gpui::ImageFormat::from_mime_type(mime)
+                                        .unwrap_or(gpui::ImageFormat::Png),
+                                    bytes.to_vec(),
+                                ))
+                            })
+                            .clone()
+                    });
+                    img(image)
+                        .size_full()
+                        .rounded(radius::ITEM)
+                        .object_fit(ObjectFit::Cover)
+                        .into_any_element()
+                }
+            };
+            let id = file.id.clone();
+            let remove = Button::new(ElementId::Name(SharedString::from(format!(
+                "image-remove-{}",
+                file.id
+            ))))
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .color(gpui::hsla(0., 0., 0., 0.55))
+                    .foreground(gpui::white())
+                    .hover(gpui::hsla(0., 0., 0., 0.75))
+                    .active(gpui::hsla(0., 0., 0., 0.85)),
+            )
+            .icon(ui::button_glyph(Sym::Close, px(10.), px(20.)))
+            .with_size(px(20.))
+            .size(px(20.))
+            .rounded_full()
+            .tooltip(crate::copy::files::DRAFT_IMAGE_REMOVE)
+            .on_click(cx.listener(move |this, _, _, cx| this.remove_file(&id, cx)));
+            div()
+                .id(ElementId::Name(SharedString::from(format!(
+                    "image-draft-{}",
+                    file.id
+                ))))
+                .relative()
+                .flex_none()
+                .size(side)
+                .rounded(radius::ITEM)
+                .border_1()
+                .border_color(k.separator)
+                .bg(k.fill)
+                .child(picture)
+                .child(div().absolute().top(px(-6.)).right(px(-6.)).child(remove))
+        });
+        div()
+            .flex()
+            .flex_wrap()
+            .gap(space::S8)
+            .pt(px(6.))
+            .pr(px(6.))
+            .children(thumbs)
             .into_any_element()
     }
 }

@@ -19,6 +19,73 @@ pub struct FilesPreview {
     group_id: String,
     topic_id: String,
     image: Option<PathBuf>,
+    /// The gallery samples, by file id.
+    pictures: Vec<(String, PathBuf)>,
+}
+
+/// The gallery samples: (file id, width, height) of a message with three pictures and one
+/// with eleven (the mosaic and its `+N`).
+const PICTURES: &[(&str, u32, u32)] = &[
+    ("f-pic-a1", 900, 1200),
+    ("f-pic-a2", 1000, 1000),
+    ("f-pic-a3", 1200, 800),
+    ("f-pic-b1", 390, 844),
+    ("f-pic-b2", 390, 844),
+    ("f-pic-b3", 390, 844),
+    ("f-pic-b4", 390, 844),
+    ("f-pic-b5", 390, 844),
+    ("f-pic-b6", 390, 844),
+    ("f-pic-b7", 390, 844),
+    ("f-pic-b8", 390, 844),
+    ("f-pic-b9", 390, 844),
+    ("f-pic-b10", 390, 844),
+    ("f-pic-b11", 390, 844),
+];
+
+fn picture(i: usize) -> FileAttachment {
+    let (id, w, h) = PICTURES[i];
+    FileAttachment {
+        file_id: id.into(),
+        name: format!("{}.png", id.trim_start_matches("f-pic-")),
+        size: 600_000 + i as u64 * 37_000,
+        mime: "image/png".into(),
+        width: Some(w),
+        height: Some(h),
+        sha256: format!("{:064x}", 0xA000 + i),
+    }
+}
+
+/// A sample picture in a few colours (a gradient and a disc), drawn once per run.
+fn draw_picture(i: usize) -> Option<PathBuf> {
+    const COLORS: &[([u8; 3], [u8; 3])] = &[
+        ([255, 154, 139], [255, 106, 136]),
+        ([79, 172, 254], [0, 242, 254]),
+        ([67, 233, 123], [56, 249, 215]),
+        ([250, 112, 154], [254, 225, 64]),
+        ([48, 207, 208], [51, 8, 103]),
+        ([161, 140, 209], [251, 194, 235]),
+    ];
+    let (id, w, h) = PICTURES[i];
+    let path = std::env::temp_dir().join(format!("team-chat-gallery-{id}.png"));
+    if !path.is_file() {
+        let (w, h) = (w / 2, h / 2);
+        let (a, b) = COLORS[i % COLORS.len()];
+        let (cx, cy, r) = (w as f32 * 0.4, h as f32 * 0.4, w.min(h) as f32 * 0.25);
+        let img = image::RgbImage::from_fn(w, h, |x, y| {
+            let t = y as f32 / h as f32;
+            let mut c = [0u8; 3];
+            for k in 0..3 {
+                c[k] = (a[k] as f32 + (b[k] as f32 - a[k] as f32) * t) as u8;
+            }
+            let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+            if dx * dx + dy * dy < r * r {
+                c = [255, 243, 210];
+            }
+            image::Rgb(c)
+        });
+        img.save(&path).ok()?;
+    }
+    Some(path)
 }
 
 const ARTIFACT: &str = "a-preview";
@@ -76,11 +143,15 @@ impl FilesPreview {
             });
             let _ = img.save(&image);
         }
+        let pictures = (0..PICTURES.len())
+            .filter_map(|i| Some((PICTURES[i].0.to_string(), draw_picture(i)?)))
+            .collect();
         Arc::new(Self {
             inner,
             group_id: group.map(|g| g.id).unwrap_or_default(),
             topic_id: topic.map(|t| t.id).unwrap_or_default(),
             image: image.is_file().then_some(image),
+            pictures,
         })
     }
 
@@ -136,6 +207,20 @@ impl FilesPreview {
             artifact_id: ARTIFACT.into(),
             version: 2,
         }];
+        let mut g1 = base(
+            "pv-g1",
+            &other,
+            "海报出了三版：A 竖版、B 方图、C 横版",
+            now - 240_000,
+        );
+        g1.attachments = (0..3).map(picture).collect();
+        let mut g2 = base(
+            "pv-g2",
+            &other,
+            "App Store 截图 11 张，按顺序",
+            now - 120_000,
+        );
+        g2.attachments = (3..PICTURES.len()).map(picture).collect();
         let mut c = base("", &me, "", now - 10_000);
         c.client_msg_id = "pv-up".into();
         c.send_state = SendState::Pending;
@@ -145,7 +230,7 @@ impl FilesPreview {
             sha256: String::new(),
             ..sheet()
         }];
-        vec![a, b, c]
+        vec![a, b, g1, g2, c]
     }
 }
 
@@ -242,6 +327,9 @@ impl ChatProvider for FilesPreview {
         }
     }
     fn thumbnail(&self, _g: &str, _t: &str, file: &FileAttachment) -> Option<PathBuf> {
+        if let Some((_, p)) = self.pictures.iter().find(|(id, _)| *id == file.file_id) {
+            return Some(p.clone());
+        }
         (file.file_id == "f-photo")
             .then(|| self.image.clone())
             .flatten()
@@ -420,6 +508,34 @@ fn open_quick_look_of(
                     cx,
                 );
             }
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// The `files-lightbox` scene: the `files` scene with the image viewer open on the second
+/// of the three posters (the bar, the side buttons, the filmstrip).
+pub fn open_lightbox(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open(services, content, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            let Some(root) = crate::app::root_view(window, cx) else {
+                return;
+            };
+            let provider = root.read(cx).provider();
+            let topic = FilesPreview::new(provider.clone());
+            let opening = super::lightbox::Opening {
+                group_id: topic.group_id.clone(),
+                topic_id: topic.topic_id.clone(),
+                message_id: "pv-g1".into(),
+                file: picture(1),
+                provider,
+            };
+            root.update(cx, |root, cx| root.open_lightbox(opening, window, cx));
         })
         .map_err(|e| e.to_string())?;
     Ok(handle)

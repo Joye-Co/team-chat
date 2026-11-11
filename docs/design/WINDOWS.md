@@ -27,9 +27,10 @@ real machine shows otherwise.
   `fill-hover`, and the close button's hover is Windows' red (`#C42B1C`) with a white glyph: the
   one place a Windows system color enters the palette. An inactive window draws the glyphs in
   `tertiary`. A window that cannot be resized (登录, 设置) dims the maximize button.
-- The leading edge of the toolbar row follows the Mac's full-screen layout, which also has no
-  lights (NATIVE.md §2, Sidebar): the sidebar toggle sits at x 16 and the search row moves up
-  onto the title line.
+- The sidebar keeps the windowed Mac's layout (NATIVE.md §2, Sidebar): the top row with the
+  filter and 新话题 at its trailing end, the search field with the whole width under it. Only
+  the lights are missing from that row, so the sidebar toggle sits at its leading edge (x 16)
+  instead of after them. Full screen (F11) uses the Mac's full-screen layout.
 - The strip is the drag area except over controls, as a title bar is in every Windows app; the
   toolbar row under it does not move the window. Double-click maximizes;
   the system menu opens on Alt+Space and on a right-click of the strip. Hovering the maximize
@@ -332,8 +333,9 @@ Only compiled.
 
 ## 9. What the system decides
 
-- Light or dark follows the system's app mode. The accent is graphite: Windows always has an
-  accent color (blue by default), and following it would end the black-and-white finish.
+- Light or dark follows the system's app mode. The accent follows the accent color the person
+  chose in Windows' settings, as on the Mac; the two blues Windows ships with count as "not
+  chosen" and give graphite, so a fresh system keeps the black-and-white finish.
 - Reduce Motion follows 设置 › 辅助功能 › 视觉效果 › 动画效果 (`SPI_GETCLIENTAREAANIMATION`).
 - Display scale: every size is in device-independent pixels; check 100 %, 125 %, 150 % and
   200 %, and a window dragged between two displays of different scale.

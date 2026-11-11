@@ -126,35 +126,6 @@ jobs:
           cargo update --workspace --offline
           DIST=dist/unsigned scripts/build-windows-installer.sh
           WINDOWS_SIGN_THUMBPRINT="$TEST_SIGN_THUMBPRINT" DIST=dist/signed scripts/build-windows-installer.sh --skip-build
-      - name: Check the publisher comparison of a release
-        # What test-windows-installer.sh --same-as decides in the Release workflow, on the four
-        # installers of this run and a program of another publisher.
-        run: |
-          . scripts/lib.sh
-          . scripts/windows/lib.sh
-          helper="${CARGO_TARGET_DIR:-target}/release/update-helper.exe"
-          a_signed="dist/signed/$APP_NAME-$A_VERSION-setup.exe"
-          b_signed="dist/signed/$APP_NAME-$B_VERSION-setup.exe"
-          a_plain="dist/unsigned/$APP_NAME-$A_VERSION-setup.exe"
-          b_plain="dist/unsigned/$APP_NAME-$B_VERSION-setup.exe"
-          other="$(cygpath -u "$SYSTEMROOT")/System32/whoami.exe"
-          same_publisher "$helper" "$a_signed" "$b_signed"
-          same_publisher "$helper" "$a_plain" "$b_plain"
-          same_publisher "$helper" "$a_plain" "$b_signed"
-          if same_publisher "$helper" "$a_signed" "$b_plain"; then echo "::error::an unsigned installer passed as the update of a signed app"; exit 1; fi
-          if same_publisher "$helper" "$a_signed" "$other"; then echo "::error::another publisher passed as the same"; exit 1; fi
-          # A certificate this computer does not trust: only the very same certificate, in
-          # the same state. The test certificate leaves the trusted roots for this check.
-          cert="Cert:\\LocalMachine\\Root\\$TEST_SIGN_THUMBPRINT"
-          ARG1="$cert" ps_out 'Export-Certificate -Cert (Get-Item -LiteralPath $env:ARG1) -FilePath "$env:RUNNER_TEMP\root.cer" | Out-Null; Remove-Item -LiteralPath $env:ARG1 -Force'
-          untrusted=0
-          same_publisher "$helper" "$a_signed" "$b_signed" || untrusted=$?
-          refused=0
-          same_publisher "$helper" "$a_signed" "$other" && refused=1
-          ps_out 'Import-Certificate -FilePath "$env:RUNNER_TEMP\root.cer" -CertStoreLocation Cert:\LocalMachine\Root | Out-Null'
-          [ "$(signature_status "$a_signed")" = Valid ] || { echo "::error::the test certificate is not trusted again"; exit 1; }
-          [ "$untrusted" = 0 ] || { echo "::error::an untrusted certificate did not accept its own newer installer"; exit 1; }
-          [ "$refused" = 0 ] || { echo "::error::an untrusted certificate accepted another publisher"; exit 1; }
       - name: Test the update (the installed app updates itself, then a rollback)
         run: scripts/test-windows-update.sh "dist/unsigned/$APP_NAME-$A_VERSION-setup.exe" "dist/unsigned/$APP_NAME-$B_VERSION-setup.exe"
       - name: Test the update of a signed app

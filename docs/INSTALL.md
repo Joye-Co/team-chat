@@ -196,12 +196,15 @@ program did at each step; send it too.
 - `scripts/build-dmg.sh` builds `dist/<name>-<version>.dmg` and its `.sha256`;
   `scripts/test-dmg.sh` checks the DMG without opening the app.
 - `scripts/build-daemon.sh` builds the machine daemon into `dist/`.
-- `scripts/release.sh <version> [--env staging|production] [--notes <file>] [--dry-run]`
+- `scripts/release.sh <version> [--env staging|production] [--notes <file>] --windows-installer <setup.exe> [--dry-run]`
   sets the version, builds and checks everything, tags `v<version>` on main, creates the GitHub
-  Release, and uploads the DMG to the server. The admin secret comes from
-  `~/.config/team-chat/<env>/admin-secret` (mode 600). Run it with `--dry-run` first. If the
+  Release with the DMG and the Windows installer together, and uploads both to the server. A
+  release is for both systems: without the installer it stops before it changes anything
+  (`--without-windows` publishes the Mac alone on purpose; `--add-windows <setup.exe>` adds the
+  installer to that release later). The admin secret comes from
+  `~/.config/team-chat/<env>/admin-secret` (mode 600). Run it with `--dry-run` first. If an
   upload fails or the server has no release endpoint yet, retry later with
-  `scripts/release.sh <version> --env <env> --upload-only`.
+  `scripts/release.sh <version> --env <env> --upload-only [--platform windows]`.
 - Windows: `scripts/build-windows-installer.sh` (Git Bash on Windows, NSIS) builds
   `dist/<name>-<version>-setup.exe` and its `.sha256`; `scripts/test-windows-installer.sh`
   installs it silently, checks files, registry and shortcut, starts the app and uninstalls;

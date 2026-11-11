@@ -16,7 +16,7 @@
 
 证据来源：逐个读了范围内所有按平台分支的代码（`cfg(target_os)`、`cfg(windows)`、`cfg!(…)`、直接读
 `modifiers.platform` 的地方、每个 macOS 框架调用）；在这台 Mac 和 Windows CI（`windows-2025`，100% 缩放，软件渲染）
-上各跑了全部 270 个截图场景，浅色深色各一遍，逐对比较；按 `docs/PRODUCT.md` 的功能逐项读到 GPUI 的 Windows
+上各跑了全部截图场景（第一轮 270 个，现在 273 个），浅色深色各一遍，逐对比较；按 `docs/PRODUCT.md` 的功能逐项读到 GPUI 的 Windows
 平台实现（`gpui-pre-windows 0.3.10`）。
 
 ## 1. 进程和窗口
@@ -31,9 +31,9 @@
 | 产出窗口里页面的浅色深色 | 跟随应用的选择 | 跟随系统，不跟随应用里选的浅色 / 深色 | 已修（#162） | 打开时和主题变化时设置页面的 `prefers-color-scheme` |
 | 系统画的菜单（托盘菜单、窗口的系统菜单）、系统控件的下拉列表 | 跟随应用的选择（`NSApp.appearance`） | 跟随系统 | 已修（#162） | `uxtheme` 的 `SetPreferredAppMode`（序号 135，资源管理器、终端、记事本都在用）：应用选深色就强制深色，选浅色就强制浅色，跟随系统就跟随 |
 | 打开外部链接、接管前的确认 | `NSAlert`，按钮是「打开」「取消」，回车是「打开」 | 系统消息框，按钮是系统语言的「确定 / 取消」（英文系统是 OK / Cancel） | 已修（#162） | 任务对话框（`TaskDialogIndirect`），按钮是应用自己的「打开」「取消」。和 Mac 有一处故意不同：**默认按钮是「取消」**，而且对话框出现后的 0.7 秒内「打开」按不动。这个对话框是页面离开沙箱的唯一出口，什么时候弹由页面决定，它可以趁用户正在打字时弹出来，已经按下去的 Enter、空格或点击不能变成「打开」。有测试（`the_link_dialog_cancels_by_default_and_holds_its_agree_button`）。进程没有通用控件 6 时退回消息框，默认也是取消 |
-| 关闭主窗口的快捷键 | ⌘W 关主窗口，应用留在 Dock | Ctrl+W 对主窗口无效（写这段代码时还没有托盘） | 系统集成清单 | 已告知：托盘图标显示时应用在关窗后留在托盘，这时 Ctrl+W 应该和 Mac 一样关主窗口。判断托盘状态的代码在 `views/nav` |
+| 关闭主窗口的快捷键 | ⌘W 关主窗口，应用留在 Dock | 托盘图标显示时 Ctrl+W 关主窗口，应用留在托盘；托盘隐藏时不关（关了应用就退出了） | 一样（系统集成那边改的，`app.rs` 里按 `nav::close_command_closes` 判断） | Dock 图标在 Mac 上总在；Windows 上「关了窗还能回来」取决于托盘图标 |
 | 再次启动应用 | 回到已运行的那个 | 起第二个进程 | 系统集成清单 | 那边在做单实例（`provider/instance.rs`） |
-| 系统强调色 | 跟随系统设置 | 固定石墨色 | 没有对应 | Windows 总有一个强调色（默认蓝），接了就不是黑白规范。计划里已定；`WINDOWS.md` §9 改成石墨色 |
+| 系统强调色 | 跟随系统设置；没选过就是石墨色 | 跟随系统里选的强调色；Windows 自带的两种蓝算「没选过」，也是石墨色（`theme.rs` 的 `read_system_accent`、`chosen_accent`、`watch_system_accent`） | 一样（系统集成那边改的） | 一台新 Windows 总有强调色（默认蓝），照搬就不是黑白规范了；所以只有用户自己选过的颜色才用 |
 | 减弱动画、高对比度 | `NSWorkspace` | `SPI_GETCLIENTAREAANIMATION`、`SPI_GETHIGHCONTRAST` | 一样 | |
 | 数据、缓存、下载目录 | `~/Library/…`、`~/Downloads` | `%APPDATA%`、`%LOCALAPPDATA%`、`%USERPROFILE%\Downloads` | 已修（#166） | 「下载」取系统登记的位置（`FOLDERID_Downloads`，用户可能把它移到别的盘）。存不进去时提示「没能存到「下载」」：原来两个系统都静默失败，这条提示 Mac 上也会出现（只在出错时） |
 
@@ -89,7 +89,7 @@
 | 中文输入法（输入框） | 候选窗贴着光标；候选时 Enter 上屏不发送 | 走 GPUI 的 Windows 输入法实现（`WM_IME_*`，候选窗定位在光标处）；候选中的按键是 `VK_PROCESSKEY`，GPUI 不当成按键分发，输入框自己也检查「正在组字」再决定发不发送（`views/composer.rs`） | 真机 | 第 7 节第 1 条。代码路径齐全，但候选窗位置和 Enter 的行为只有真的输入法能验证 |
 | 实时查看：终端、回放、计划、缩略图 | 右侧面板里看 AI 成员在做什么 | 同一份代码，全部是 GPUI 画的文字和图片，没有按平台分支 | 一样 | 场景 `live`、`core-live`、`live-takeover`、`panel-run`、`panel-plan`、`panel-failed` 在 Windows 上通过，逐对比较只有字体和内容区矮 32 的差别。只有「接管」里的 `vnc:` 地址不同，见下一行 |
 | 团队管理「添加电脑」的说明 | 「在 Mac 或 Linux 上…」 | 同一句话 | 已修（#166） | 文案加上 Windows。对话框里的安装命令（现在只有 bash 的）在 `views/settings` 和 `provider`，归系统集成清单 |
-| 抓手光标（图的查看器拖动） | 手形 | 箭头 | 没有对应 | Windows 没有系统的抓手光标，GPUI 的 Windows 层把它画成箭头；拖动本身一样 |
+| 抓手光标（图的查看器拖动） | 张开的手 | 箭头 | 没有对应，已做替代（#178） | Windows 没有抓手光标；GPUI 的 Windows 层只有箭头、I 形、十字、手、调整大小和禁止这几种。用系统的手形（`IDC_HAND`）表示「可以拖」；拖动本身一样 |
 
 ## 3a. 按平台分支的代码
 
@@ -99,12 +99,18 @@
 | --- | --- | --- | --- |
 | `main.rs`：`secondary!`、`command_key`、`mod win32` | ⌘ | Ctrl | 一样 |
 | `app.rs`：`cmd-q` 只在 Mac 绑；`ctrl-cmd-s` / `ctrl-alt-s`；⌥Tab 只在 Mac 绑；Ctrl+Shift+Z、Shift+Insert、Ctrl+Insert 只在 Windows 绑 | | | 一样（第 2 节） |
-| `app.rs`：主窗口吞掉 `CloseWindow`（非 Mac） | ⌘W 关主窗口 | 不关 | 系统集成清单 |
+| `app.rs`：主窗口的 `CloseWindow`（非 Mac） | ⌘W 关主窗口 | 托盘图标显示时关，隐藏时不关 | 一样（第 1 节） |
 | `paths.rs`：主目录、数据、缓存、下载 | `~/Library/…` | `%APPDATA%` 等，下载取 `FOLDERID_Downloads` | 一样（#166） |
 | `theme.rs`：`set_app_appearance` | `NSApp.appearance` | `SetPreferredAppMode` | 已修（#162） |
 | `theme.rs`：字体栈、`MEDIUM_WEIGHT` | 系统字体、Menlo、501 | Segoe UI Variable / Segoe UI、微软雅黑、Cascadia Mono / Consolas、499 | 一样（`WINDOWS.md` §4） |
-| `theme.rs`：系统强调色 | 跟随系统 | 石墨色 | 没有对应（第 1 节） |
-| `ui/native/tokens.rs`：`TRAFFIC_LIGHTS_INSET` | 84，给红绿灯留位置 | 56，没有红绿灯，用全屏时的排法 | 一样（标题栏差别） |
+| `theme.rs`：系统强调色（`read_system_accent`、`watch_system_accent`） | `NSColor.controlAccentColor` | `UISettings` 的强调色，自带的两种蓝当作没选 | 一样（第 1 节） |
+| `ui/native/tokens.rs`：`TRAFFIC_LIGHTS_INSET`；`app.rs` 的 `sidebar_toggle_x` | 84，给红绿灯留位置；侧栏开关在红绿灯后面 | 56；没有红绿灯，侧栏开关在最左边。侧栏其余部分和 Mac 窗口状态下一样（工具在顶行右端，搜索框占整行） | 已修（#178）：原来用的是 Mac 全屏时的排法（搜索框缩成一小块挤在顶行），现在只差红绿灯 |
+| `copy/mod.rs`：`per_system` | Mac 的说法（Mac、访达、菜单栏、⌘） | Windows 的说法（电脑、资源管理器、通知区域、Ctrl） | 一样（按系统的写法；目录测试检查两套都没有多余空格） |
+| `main.rs`：`windows_subsystem = "windows"` | 不适用 | 发布版不带控制台窗口 | 一样 |
+| `selftest/mod.rs`：激活策略、装菜单、`exit_now` | 不占 Dock、不抢焦点；菜单在系统菜单栏 | 把菜单装进窗口的标题条；其余相同 | 一样（只影响自测） |
+| `selftest/capture.rs`：`keep_frames`、`undo_clamp`、`frame_size` | 撤销 AppKit 把窗口限制在屏幕内 | 空实现：Windows 不限制，CI 把屏幕设成 1920×1080 | 没有对应（第 5 节） |
+| `ui/sf_symbols/asset.rs`：`screens_scale` | 按最大的屏幕缩放比栅格化 SF Symbols | 固定返回 2，但 Windows 不走这条路：图标是 SVG，由 GPUI 按窗口实际缩放比画 | 一样；100% 在 CI 截图里是清晰的，125%、150% 真机确认（第 7 节） |
+| `crates/artifact-view/src/page.rs`：`rules_ready`、`NO_NETWORK_SCRIPT` | WebKit 的内容规则表编好之前不加载页面 | 没有规则表：WebView2 靠请求过滤和死代理断网，页面一创建就能加载 | 一样（两边跑同一套隔离测试） |
 | `ui/native/window_chrome.rs` | 不画 | 32 高的标题条 | 一样（标题栏差别） |
 | `ui/motion.rs`：减弱动画、高对比度 | `NSWorkspace` | `SystemParametersInfo` | 一样 |
 | `ui/sf_symbols/**` | SF Symbols | Lucide SVG | 一样（`WINDOWS.md` §5） |
@@ -130,18 +136,19 @@
 
 ## 4. 截图对比
 
-两边各 270 个场景、浅色深色，共 540 对，每一对都看过（上 Mac、下 Windows 拼在一起）。不算差别的：标题条和窗口
+第一轮两边各 270 个场景、浅色深色，共 540 对，每一对都看过（上 Mac、下 Windows 拼在一起）。不算差别的：标题条和窗口
 按钮、内容整体下移 32、字体和图标集本身、表情的画法、AI 成员头像（开源构建没有私有图包，CI 上是字母）、
 默认服务器（开源构建没有，登录的出错场景停在「连接服务器」这一步）、表情的常用顺序（Mac 上读到了本机真实的使用记录）。
 
-每个场景一行的明细在 [interface-scenes.zh.md](interface-scenes.zh.md)（270 个场景：Mac、Windows、第一轮看到的差别、现在的状态）。
+每个场景一行的明细在 [interface-scenes.zh.md](interface-scenes.zh.md)（由 `scripts/windows-scene-table.ts` 从两边的 `screenshots.json` 生成，场景数和 run 号写在它的开头）。
 
-修完 #156 到 #167 之后的一轮是 run 43000800678（`windows_scenes=all`，产物 `windows-screenshots`）。失败的场景：
+最后一轮是 run 43020519758（`windows_scenes=all`，产物 `windows-screenshots`，在 #176 的分支上）；下面那张「看哪张」的表里的图，在 run 43000800678 和这一轮里都有。失败的场景：
 
 | 场景 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
-| `artifact_ask_pending`、`state-hover-settings-row` | 失败 | 失败 | 两边都失败，和 Windows 无关（`main` 上就是这样） |
-| `web-embed-scrolled` | 通过 | 全量那一轮失败：「the inline page did not load」；改完后通过（run 43011129892） | 已修（#167） | 场景打开时停在长话题的末尾，页面有没有一条边露在视口里取决于内容区高度；Windows 的内容区矮 32，页面一开始完全在视口外，不算「显示」。场景现在先把页面滚进来。和应用本身无关 |
+| `artifact_ask_pending` | 原来失败 | 原来失败 | 已修（#178）：话题样例变长之后，页面一打开就滚到了视口上方，按钮点不到（两边都一样）。场景现在先把页面滚进来再点；Mac 上通过，Windows 看新一轮 |
+| `state-hover-settings-row` | 原来失败 | 原来失败 | 场景删掉了（#178）：它悬停的「按群设置」那一行在通知设置搬到群和话题页之后就不存在了，通知页现在只有开关和下拉框，没有行悬停 |
+| `web-embed-scrolled` | 通过 | 原来失败：「the inline page did not load」；最后一轮通过 | 已修（#171） | 场景打开时停在长话题的末尾，页面有没有一条边露在视口里取决于内容区高度；Windows 的内容区矮 32，页面一开始完全在视口外，不算「显示」。场景现在先把页面滚进来。和应用本身无关 |
 | `live-takeover`（浅色） | 那一次没等到帧（偶发） | 通过 | 一样 |
 
 已修的行对应的截图（都在上面那个产物里，下载后看过）：
@@ -177,16 +184,17 @@
 | 内嵌页面的滚动条 | 没有（浮动的细滚动条） | Chromium 的经典滚动条，带箭头，深色下是白的 | 已修（#162） | 见第 3 节 |
 | 内嵌页面里的等宽字 | 等宽西文字体 | 中文系统上落到宽的中文等宽字体（页面只写了 `Menlo, monospace`） | 已修（#162） | 页面是给两个系统写的，常常只写苹果的字体名。Windows 上给每个页面注入字体别名：`-apple-system`、`PingFang SC`、`Menlo`、`SF Mono` 等指到 Segoe UI、微软雅黑、Cascadia Mono、Consolas |
 | 内嵌页面的深色（`artifact-page-back` 深色） | 深色 | 白底 | 已修（#162） | 除了 profile 的设置，再直接设这个页面的 `prefers-color-scheme`（DevTools 协议） |
-| 内嵌页面在截图里是空白（第一轮的 `web-embed`、`compose-extend`） | 有内容 | 截图那一刻页面还没画出来 | 已修（#171） | 是截图抢在页面前面，不是用户会看到的空白：从屏幕上读、等 4 秒的 6 张（`screen/web-embed-*`、`screen/artifact-pane-v2-*`、`screen/compose-extend-*`）页面全部在。截图自测现在等每个显示着的页面画完第一帧再截（页面用两次 `requestAnimationFrame` 报告，只在 Windows 上需要）。CI 没有显卡，整个进程的第一个页面最长用了 46 秒，等待放宽到 60 秒并记录用时；真机上的用时见第 7 节 |
+| 内嵌页面在截图里是空白（`web-embed` 的两个页面；第一轮还有 `compose-extend`） | 有内容 | 普通截图（`PrintWindow`）里有时是空白 | 一样（截图方法的限制）；真机确认 | 不是用户会看到的空白。同一轮里从屏幕上读的截图（`screen/web-embed-light`、`screen/web-embed-dark`、`screen/artifact-pane-v2-*`、`screen/compose-extend-*`，run 43020519758）页面全部在，浅色深色都对。`PrintWindow` 是向每个窗口要画面，另一个进程的 WebView2 子窗口不一定给；#176 让截图先等页面画完第一帧（两次 `requestAnimationFrame`），`compose-extend` 之后都有了，`web-embed` 仍然时有时无，所以内嵌页面以 `screen/` 那一遍为准。CI 没有显卡，整个进程的第一个页面最长用了 46 秒，等待放宽到 60 秒并记录用时；真机上的用时见第 7 节 |
 | 页面里的音频控件（`web-embed`） | WebKit 的深色控件条 | Chromium 自己的控件 | 已修（#162）；样子没有对应 | 页面的 `color-scheme` 和 `prefers-color-scheme` 跟随主题，深色下控件是深色（`screen/web-embed-dark`）。控件本身是两个浏览器引擎各自的，长得不一样 |
-| 产出缩略图（`artifacts-grid`） | 页面上一次显示时的样子，缩小放进格子 | 同样的做法；第一轮里右边有一条滚动条，起始位置比 Mac 低一段 | 滚动条已修（#171）；起始位置真机确认 | 缩略图就是页面上一次在屏幕上时的快照。滚动条：页面里的滚动条改成只在指针在页面上时出现，快照里不再有。起始位置不同是因为两边「上一次显示」时页面滚动到的位置不同，我没有查到是哪个场景滚动了它；真机上看第 7 节第 15 条 |
+| 产出缩略图（`artifacts-grid`） | 页面上一次显示时的样子，缩小放进格子 | 同样的做法；第一轮里右边有一条滚动条，起始位置比 Mac 低一段 | 滚动条已修（#176）；起始位置真机确认 | 缩略图就是页面上一次在屏幕上时的快照。滚动条：页面里的滚动条改成只在指针在页面上时出现，快照里不再有。起始位置不同是因为两边「上一次显示」时页面滚动到的位置不同，我没有查到是哪个场景滚动了它；真机上看第 7 节第 15 条 |
+| 图的查看器（`diagram-viewer`）：图按 80% 显示、右边和下边超出、有横向滚动条、「[连不上时]」压在 loop 框的上边线上 | 同样 | 同样 | 一样 | 用现在的代码在这台 Mac 上重截了同一个场景，和 Windows 那张逐项对过：缩放 80%、三个参与者的位置、loop 框和「[连不上时]」的重叠、横向滚动条的长度两边一致。这是图本身的排版（Mermaid 的时序图把条件文字放在框线上，查看器窗口比图窄），不是 Windows 的字体造成的；量字和画字用的是同一个页面里的同一套字体 |
 | 群资料里人的头像（`group-chat-info`） | 字母是常规字重 | 字母是粗体，整个圆看起来发黑 | 已修（#156） | 同第一行（500 字重） |
 | 表情 | Apple Color Emoji | Segoe UI Emoji，同样大小的格子里图形略小一点，样子不同 | 一样 | 系统的表情字体 |
 | 「群说明」等设置里的窗口高度、设置的标题出现两次、设置的分页没有文字 | | 设置窗口比内容矮 32，最后一行被切 | 系统集成清单 | 已告知（`views/settings` 归那边） |
 | Tab 键先走到窗口里的菜单栏 | 菜单不在窗口里 | 焦点环落在菜单「显示」上 | 系统集成清单 | 已告知：Windows 的菜单用 Alt 进入，不该在 Tab 顺序里 |
 | 文件右键菜单里的「快速查看」、手动安装更新的说明里的「访达」「应用程序」 | | Mac 的说法留在 Windows 上 | 系统集成、发布清单 | 已告知 |
 | 非活动窗口的标题条（`window-inactive`） | 红绿灯变灰 | 工具栏和标题变灰了，标题条里的菜单和窗口按钮没有变 | 已修（#162） | 非活动窗口的菜单和窗口按钮变淡 |
-| 卡片样例窗、`interact_*`、`artifact-quiet-page` 这些自测专用的窗口 | 有红绿灯 | 没有标题条 | 已修（#171） | 这些窗口也套上标题条（`window_chrome::Framed`），和应用里的窗口一致；场景 `cards-v2-states`、`interact_notes`、`artifact-quiet-page` |
+| 卡片样例窗、`interact_*`、`artifact-quiet-page` 这些自测专用的窗口 | 有红绿灯 | 没有标题条 | 已修（#176） | 这些窗口也套上标题条（`window_chrome::Framed`），和应用里的窗口一致；看 `cards-v2-states-light`、`artifact-quiet-page-light`、`compose-extend-light` |
 | 全角标点「」（）【】｜“” | 苹方的标点靠近文字 | 微软雅黑的标点占满一格，前后空隙大，个别行因此多折一行 | 没有对应 | 字体本身的差别 |
 | 文字宽度：个别句子在 Windows 上多折一行（登录页副标题、更新说明、卡片提示） | | 微软雅黑比苹方宽 | 一样（没有被切的） | 布局按内容自适应，多折一行时下面的内容跟着下移。逐个看过会折行的场景（`login-email`、`whats-new`、`update-notes`、`interact_report_rev1`、`topic`）：没有文字被切或重叠。第一轮里 `whats-new` 的脚注被切是当时那一版更新说明更长；现在的内容在两边都完整（和这台 Mac 上重新截的图比过），弹窗本身有最大高度和滚动 |
 | 内容区矮 32 带来的：消息列表第一行被日期标签压住、右侧面板最后一块看不全 | | 窗口同样大时内容少 32 | 一样（标题栏差别） | 和把 Mac 窗口拉矮 32 是同一个结果 |
@@ -197,7 +205,7 @@
 
 | 项 | Mac | Windows | 状态 | 做法 |
 | --- | --- | --- | --- | --- |
-| 截图自测 | `screencapture -l` | `PrintWindow`，270 个场景 CI 上都能跑 | 一样 | CI 默认只跑 22 个主要场景，`windows_scenes=all` 手动跑全部 |
+| 截图自测 | `screencapture -l` | `PrintWindow`，全部场景 CI 上都能跑 | 一样 | CI 默认只跑 24 个主要场景（`scripts/windows-screenshots.sh` 的 `main_screens`），`windows_scenes=all` 手动跑全部 |
 | 截图时输入框显示光标（`draw_as_key`） | 窗口当作 key window 画 | 空实现，输入框按非活动窗口画 | 已修（#156） | Windows 上自测把窗口真的激活（CI 上没有人在用） |
 | 截图前核对窗口大小（`frame_size`、`undo_clamp`） | 撤销 AppKit 把窗口限制在屏幕内 | 空实现 | 没有对应 | AppKit 的这个限制 Windows 没有；CI 把屏幕设成 1920×1080，每张 PNG 的尺寸写在 `selftest.log` 里，这次 540 张都和 Mac 的点数一致 |
 | `views/media/poster.rs` 的视频封面测试 | 断言 | 不断言 | 已修（#167） | Windows 上也断言有封面和时长 |
@@ -242,3 +250,8 @@ CI 是 Windows Server 2025、100% 缩放、软件渲染、没有人操作。下�
 14. **输入框的光标**：点进任何输入框都有闪烁的光标（截图里 Windows 的输入框多数没有光标，因为自测的
     窗口不一定拿得到前台）。
 15. **产出缩略图**：打开一个页面产出看一眼再回到产出列表的图标视图，缩略图应该是页面从顶部开始的样子。
+16. **贴靠布局**：鼠标悬停在最大化按钮上，Windows 11 弹出贴靠布局；Win+←、Win+→、Win+↑ 把窗口贴到
+    半屏和最大化，最大化时四周没有多出来的边。
+17. **有显卡时的渲染**：CI 是软件渲染。在有独立显卡和只有核显的电脑上各看一遍主窗口：滚动消息列表流畅，
+    拖动窗口大小时内嵌页面跟得上，深色下没有闪白。
+18. **图标的清晰度**：125% 和 150% 缩放下侧栏和工具栏的图标线条清晰，没有发虚。
