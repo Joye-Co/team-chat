@@ -206,6 +206,8 @@ struct CardView: View {
     @State private var editingDraft: String?
     @State private var missing: String?
     @State private var approving: CardDoc.Action?
+    /// Confirmed in the sheet; sent once the sheet is gone, so Face ID is not asked mid-dismiss.
+    @State private var confirmedAction: CardDoc.Action?
     @State private var authFailed = false
     @State private var seeded = false
 
@@ -217,8 +219,13 @@ struct CardView: View {
                 .onAppear { reload(); seed(doc) }
                 .onChange(of: model.topicTicks) { reload() }
                 .onChange(of: model.ticks["card:\(message.id)"]) { reload() }
-                .sheet(item: $approving) { action in
-                    ApproveSheet(doc: doc, action: action) { send(action, doc: doc, approved: true) }
+                .sheet(item: $approving, onDismiss: {
+                    if let action = confirmedAction {
+                        confirmedAction = nil
+                        send(action, doc: doc, approved: true)
+                    }
+                }) { action in
+                    ApproveSheet(doc: doc, action: action) { confirmedAction = action }
                         .presentationDetents([.medium, .large])
                 }
         } else {
@@ -812,8 +819,8 @@ private struct ApproveSheet: View {
             Spacer(minLength: 0)
             VStack(spacing: 8) {
                 Button {
-                    dismiss()
                     confirmed()
+                    dismiss()
                 } label: {
                     Label(action.label, systemImage: doc.guarded(action) ? "faceid" : "checkmark")
                         .font(.body.weight(.semibold))

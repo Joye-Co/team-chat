@@ -250,7 +250,7 @@ struct HandOffSheet: View {
                             HStack(spacing: 14) {
                                 ForEach(candidates, id: \.id) { m in memberChip(m) }
                             }
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 6).padding(.horizontal, 4)
                         }
                     }
                     if let member {

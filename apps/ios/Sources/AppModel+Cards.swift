@@ -45,9 +45,15 @@ extension AppModel {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            NSLog("owner check unavailable: %ld", error?.code ?? 0)
             return (error as? LAError)?.code == .passcodeNotSet
         }
-        return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+        do {
+            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+        } catch {
+            NSLog("owner check failed: %ld", (error as NSError).code)
+            return false
+        }
     }
 
     static func json(_ value: Any) -> String? {
