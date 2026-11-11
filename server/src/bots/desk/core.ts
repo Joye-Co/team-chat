@@ -114,6 +114,11 @@ export type RunRow = {
   open_tools: number;
   /** Runs in a row the desk continued because the CLI only promised work. */
   auto_continues: number;
+  // desk-machine-away (盯 1.1, 盯 1.3)
+  /** Since when the run waits for its machine to come back; null while the machine is there. */
+  away_since: number | null;
+  /** How far the desk got with a silent piece of work: 1 = restarted in the same session, 2 = moved to another machine. Carried over. */
+  stall_step: number;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -124,8 +129,8 @@ export function sessionIdOf(v: unknown): string | null {
 export const ACTIVE = "ended_at IS NULL";
 /** Runs waiting for a free machine (排队): created, no machine yet, queued. */
 export const QUEUED = "ended_at IS NULL AND status = 'created' AND machine_id IS NULL AND queued_at IS NOT NULL";
-/** A queued run that gets no machine this long after it was queued fails. */
-export const QUEUE_MAX_MS = 60 * 60_000;
+/** A queued run that gets no machine this long after it was queued fails (机 2.2: a computer may be closed overnight). */
+export const QUEUE_MAX_MS = 24 * 60 * 60_000;
 /** How often the desk tries its queued runs again (machines free up in other desks too). */
 export const QUEUE_RETRY_MS = 15_000;
 /** A run still `created` with no machine this long after it was made failed to start. */
@@ -396,6 +401,15 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `
             ALTER TABLE decisions ADD COLUMN system TEXT;
             ALTER TABLE decisions ADD COLUMN input TEXT;
+          `,
+        },
+        {
+          // 盯 1.1, 盯 1.3: a run waits for a machine that went away, and a silent run is
+          // restarted in its own session before it moves. Old rows: NULL / 0.
+          name: "desk-machine-away",
+          up: `
+            ALTER TABLE runs ADD COLUMN away_since INTEGER;
+            ALTER TABLE runs ADD COLUMN stall_step INTEGER NOT NULL DEFAULT 0;
           `,
         },
       ]);

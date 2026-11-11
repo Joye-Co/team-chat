@@ -9,7 +9,9 @@ import {
   approvalDecision,
   candidates,
   isHealthy,
+  isOnline,
   labelsMatch,
+  whyNoMachine,
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
@@ -99,6 +101,22 @@ describe("dispatch rules", () => {
     // The pinned machine still has to be healthy and have the runtime.
     expect(candidates([other, { ...pinned, connected: false }], r, now)).toEqual([]);
     expect(candidates([other], r, now)).toEqual([]);
+  });
+
+  it("tell why no machine takes a run: none, runtime, busy, offline (by name) or disk", () => {
+    const pinned = { ...runner, machineId: "m3" };
+    expect(whyNoMachine([], runner, now)).toEqual({ why: "none" });
+    expect(whyNoMachine([{ ...base, labels: ["linux"] }], runner, now)).toEqual({ why: "none" });
+    // A machine that never said hello is not set up yet.
+    expect(whyNoMachine([{ ...base, clis: undefined, connected: false, lastHeartbeatAt: undefined }], runner, now)).toEqual({ why: "none" });
+    expect(whyNoMachine([{ ...base, clis: [{ runtime: "claude", kind: "claude", command: "claude", available: true }] }], runner, now)).toEqual({ why: "runtime" });
+    expect(whyNoMachine([{ ...base, runningRuns: ["a", "b"] }], runner, now)).toEqual({ why: "busy" });
+    expect(whyNoMachine([{ ...base, id: "m3", name: "Joye 的 Mac", connected: false, lastHeartbeatAt: now - 10 * 60_000 }], pinned, now)).toEqual({ why: "offline", names: ["Joye 的 Mac"] });
+    // A busy machine wins over an offline one: the run waits for a slot.
+    expect(whyNoMachine([{ ...base, runningRuns: ["a", "b"] }, { ...base, id: "m2", name: "b", connected: false }], runner, now)).toEqual({ why: "busy" });
+    expect(whyNoMachine([{ ...base, health: { ...HEALTH, diskFreeBytes: 1e9 } }], runner, now)).toEqual({ why: "disk" });
+    expect(isOnline({ ...base, health: { ...HEALTH, diskFreeBytes: 1e9 } }, now)).toBe(true);
+    expect(isOnline({ ...base, lastHeartbeatAt: now - 91_000 }, now)).toBe(false);
   });
 
   it("read approval answers", () => {
@@ -484,7 +502,7 @@ describe("runner-backed bots", () => {
     const { d: low } = await Daemon.connect(w2.machineToken, { health: { diskFreeBytes: 1e9 } });
     const { c: c2 } = await Client.connect(w2.human.token);
     const t2 = await mention(c2, w2);
-    await waitUntil(() => botMessages(c2, t2, w2.bot.id).some((m) => m.body === TEXT.noMachine), 5000, "no machine note");
+    await waitUntil(() => botMessages(c2, t2, w2.bot.id).some((m) => m.body === TEXT.noDisk), 5000, "low disk note");
     expect(low.frames.filter((f) => f.t === "run.assign")).toHaveLength(0);
     c.close();
     c2.close();
@@ -504,7 +522,7 @@ describe("runner-backed bots", () => {
     d.close();
   });
 
-  it("keep a run through a reconnect, and block it when the machine stays away past the lease", async () => {
+  it("keep a run through a reconnect and past the lease while the machine is away, and block it when the daemon comes back without it", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
     const { c } = await Client.connect(w.human.token);
@@ -525,16 +543,33 @@ describe("runner-backed bots", () => {
     d2.close();
     await waitUntil(() => d2.closed, 5000, "closed");
 
-    // Away past the lease: the run is blocked with one note, never run again. (盯活 first runs
-    // it again elsewhere by itself, supervise.test.ts; here its tries are spent.)
+    // Away past the lease (盯 1.1): the only machine is waited for, the run stays open.
     await runInDurableObject(deskOf(w.bot.id), (_o, state) => {
       state.storage.sql.exec("UPDATE runs SET interventions = 3 WHERE id = ?", runId);
     });
-    await runInDurableObject(linkOf(w.machineId), (_o, state) => {
-      state.storage.sql.exec("UPDATE runs SET lease_until = ? WHERE run_id = ?", Date.now() - 1, runId);
-    });
+    const expire = () =>
+      runInDurableObject(linkOf(w.machineId), (_o, state) => {
+        state.storage.sql.exec("UPDATE runs SET lease_until = ? WHERE run_id = ?", Date.now() - 1, runId);
+      });
+    await expire();
+    await runDurableObjectAlarm(linkOf(w.machineId));
+    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.machineAway("mac-mini")), 5000, "away note");
+    const lease = await runInDurableObject(linkOf(w.machineId), (_o, state) =>
+      state.storage.sql.exec<{ state: string; lease_until: number }>("SELECT state, lease_until FROM runs WHERE run_id = ?", runId).one(),
+    );
+    expect(lease.state).toBe("accepted");
+    expect(lease.lease_until).toBeGreaterThan(Date.now());
+    expect(botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.lost)).toBe(false);
+
+    // The daemon comes back without the run (it lost it): at the next lease end it is blocked
+    // with one note, never run again (its tries are spent).
+    const { d: d4, welcome: back } = await Daemon.connect(w.machineToken, { runs: [] });
+    expect(back.runs).toEqual([{ runId, ackedSeq: s1 + 1 }]);
+    await expire();
     await runDurableObjectAlarm(linkOf(w.machineId));
     await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.lost), 5000, "lost note");
+    d4.close();
+    await waitUntil(() => d4.closed, 5000, "closed");
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "blocked", 5000, "blocked");
     const run = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "blocked");
     expect(run.data.run.endedAt).toBeTypeOf("number");
@@ -577,13 +612,15 @@ describe("runner-backed bots", () => {
     });
     expect(alarm).toBeTypeOf("number");
     await runDurableObjectAlarm(deskOf(w.bot.id));
-    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.gaveUp), 5000, "stall note");
+    // 盯 1.12: the note names the true silence and the tries that happened.
+    const gaveUp = TEXT.gaveUp(10, ["提醒"]);
+    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === gaveUp), 5000, "stall note");
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "blocked", 5000, "blocked");
     // A second alarm does not post a second note.
     await runDurableObjectAlarm(deskOf(w.bot.id));
     d.event(runId, { type: "status", state: "running" });
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "in_progress", 5000, "recovered");
-    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.body === TEXT.gaveUp)).toHaveLength(1);
+    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.body === gaveUp)).toHaveLength(1);
     c.close();
     d.close();
   });
@@ -1006,7 +1043,7 @@ describe("runner-backed bots: review fixes", () => {
     d.close();
   });
 
-  it("not count the daemon's own stall report as progress", async () => {
+  it("not count the daemon's own stall report as progress, nor act on it (盯 1.3)", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
     const { c } = await Client.connect(w.human.token);
@@ -1020,11 +1057,14 @@ describe("runner-backed bots: review fixes", () => {
     });
     const s = d.event(runId, { type: "status", state: "stalled" });
     await d.acked(runId, s);
-    await waitUntil(() => topicStatuses(c, topicId).at(-1) === "blocked", 5000, "blocked");
+    await new Promise((r) => setTimeout(r, 200));
+    // A signal only: no restart, no note; the desk's own clock decides.
+    expect(topicStatuses(c, topicId).at(-1)).toBe("in_progress");
+    expect(d.frames.filter((f) => f.t === "run.cancel")).toHaveLength(0);
     const row = await runInDurableObject(deskOf(w.bot.id), (_o, state) =>
-      state.storage.sql.exec("SELECT last_event_at, stalled FROM runs WHERE id = ?", runId).one(),
+      state.storage.sql.exec("SELECT last_event_at, stalled, ended_at FROM runs WHERE id = ?", runId).one(),
     );
-    expect(row).toEqual({ last_event_at: before, stalled: 1 });
+    expect(row).toEqual({ last_event_at: before, stalled: 0, ended_at: null });
     c.close();
     d.close();
   });

@@ -32,11 +32,27 @@ export const CONTEXT_TOOLS_RULE =
 
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {
-  noMachine: "现在没有空闲的电脑能接手，请稍后再 @我。",
-  lost: "卡住了：处理中断了（电脑离线太久），这次没有完成。需要的话请再 @我。",
-  stalled: "卡住了：10 分钟没有进展。",
-  /** After the desk's own tries (盯活): told once. */
-  gaveUp: "卡住了：我自己试了几次（提醒、换电脑重来）还是没有进展，需要你看一下。",
+  /** No computer is set up for this member at all (机 2.10: each reason has its own text). */
+  noMachine: "现在没有能接手的电脑，给我配好电脑后再 @我。",
+  noRuntime: "没有电脑装了我用的运行方式，这次没有开始。装好后再 @我。",
+  noDisk: "电脑的磁盘空间不够，这次没有开始。清出空间后再 @我。",
+  /** The member's computers are offline: the run waits (排队) and starts when one comes online. */
+  waitOffline: (names: string[]) => `${names.join("、")} 不在线，等它上线后自动开始；不需要了可以停止。`,
+  /** A queued run that waited too long, by the reason it waited. */
+  queueExpired: (hours: number, offline?: string[]) =>
+    offline && offline.length > 0
+      ? `等了 ${hours} 小时，${offline.join("、")} 还是没上线，这次没有开始。需要的话请再 @我。`
+      : `排了 ${hours} 小时还没轮到空闲的电脑，这次没有开始。需要的话请再 @我。`,
+  /** The run's computer went away: the run waits for it (盯 1.1). */
+  machineAway: (name: string) => `${name} 不在线了，等它回来接着做；不需要了可以停止。`,
+  machineBack: (name: string) => `${name} 回来了，接着做。`,
+  machineMoved: (name: string, minutes: number) => `${name} ${minutes} 分钟没回来，换一台电脑重新做。`,
+  /** The computer is back but no longer has the run, or it was removed. */
+  lost: "卡住了：电脑上的这次处理中断了，没有完成。需要的话请再 @我。",
+  stalled: (minutes: number) => `卡住了：${minutes} 分钟没有进展。`,
+  /** After the desk's own tries (盯活), named as they happened: told once. */
+  gaveUp: (minutes: number, tries: string[]) =>
+    tries.length > 0 ? `卡住了：${minutes} 分钟没有进展，我自己试过（${tries.join("、")}）还是不行，需要你看一下。` : `卡住了：${minutes} 分钟没有进展，需要你看一下。`,
   progress: "进行中…",
   done: "完成了。",
   failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),
@@ -141,6 +157,27 @@ export function pickMachine(
   exclude: string[] = [],
 ): MachineView | null {
   return candidates(machines, runner, now, exclude)[0] ?? null;
+}
+
+/** Connected with a recent heartbeat (free disk aside). */
+export function isOnline(m: MachineView, now: number): boolean {
+  return !m.revoked && m.connected && m.lastHeartbeatAt !== undefined && now - m.lastHeartbeatAt <= HEARTBEAT_STALE_MS;
+}
+
+/** Why no machine takes a run right now (机 2.10). `busy` and `offline` wait; the rest fail. */
+export type NoMachine = { why: "none" } | { why: "runtime" } | { why: "disk" } | { why: "busy" } | { why: "offline"; names: string[] };
+
+export function whyNoMachine(machines: MachineView[], runner: Pick<BotRunner, "labels" | "runtime" | "machineId">, now: number): NoMachine {
+  const mine = machines.filter((m) => !m.revoked && (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)));
+  // A machine that never said hello is not set up yet.
+  const known = mine.filter((m) => m.clis !== undefined);
+  if (known.length === 0) return { why: "none" };
+  const able = known.filter((m) => hasRuntime(m, runner.runtime));
+  if (able.length === 0) return { why: "runtime" };
+  if (able.some((m) => isHealthy(m, now))) return { why: "busy" };
+  const away = able.filter((m) => !isOnline(m, now));
+  if (away.length > 0) return { why: "offline", names: away.map((m) => m.name) };
+  return { why: "disk" };
 }
 
 export function toMachine(m: MachineView, createdBy: string, createdAt: number, now: number): Machine {

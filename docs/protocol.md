@@ -877,13 +877,16 @@ Rules:
   10 minutes, after the desk's own tries (see "Supervision") (the daemon's own `status: stalled` report marks it blocked at once and does not
   count as progress). A blocked run that sends events again goes back to `running`. A run that
   never reaches a machine ends as `failed` after 2 minutes.
-- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), the run
+- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), or
+  offline (a machine that said hello once, for example a runner pinned to one machine whose
+  computer is closed; the bot posts one note naming the computer it waits for), the run
   waits instead of failing: it stays `created` with no `machineId` and gets `queuedAt` and
   `queuePosition` (1-based among the bot's queued runs, oldest first), stored with `run.updated`.
   When a run of the bot ends, and every 15 s, the oldest queued run gets a free machine; the
   runs behind it get a `run.updated` with their new place. A queued run is not failed by the
-  2-minute rule; it fails with the "no free machine" note after 60 minutes. With no machine
-  that could ever take it (labels, runtime, health), the run fails at once as before. Readers:
+  2-minute rule; it fails after 24 hours with a note that says what it waited for. With no
+  machine that could ever take it (labels, runtime, free disk), the run fails at once with a
+  note that names the reason. Readers:
   "created with no `machineId`" and `queuedAt` = 排队 at `queuePosition`.
 - Input left over when a run ends starts a follow-up run, at most 5 in a row; then the bot
   posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the

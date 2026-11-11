@@ -10,7 +10,6 @@ import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
-import { TOOL_STALL_MS } from "../../agent/supervise";
 import { retroAfterRun } from "../../memory/retro";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
@@ -23,6 +22,8 @@ export abstract class DeskEvents extends DeskRuns {
   protected abstract watchTool(r: RunRow, title: string): Promise<void>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
   protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
+  /** 盯 1.1 (stall.ts): the machine of a run that waited for it is back. */
+  protected abstract machineBack(r: RunRow): Promise<void>;
 
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {
@@ -76,10 +77,13 @@ export abstract class DeskEvents extends DeskRuns {
     const progressed = frames.some((f) => f.t !== "run.event" || !isStallStatus(f.event));
     const stallReported = frames.some((f) => f.t === "run.event" && isStallStatus(f.event) && (f.event as { state?: unknown }).state === "stalled");
     if (!progressed) {
-      // A daemon that reports a stall while the CLI waits for a long step (a test run): not yet.
-      if (stallReported && !(r.open_tools > 0 && now - r.last_event_at < TOOL_STALL_MS)) await this.markStalled(r);
+      // 盯 1.3: the daemon's stall report is a signal only. The desk's own order (nudge, wait,
+      // restart in the same session, another machine) decides; the report never restarts a run.
+      if (stallReported) this.log.info("supervise", { runId: r.id, why: "daemon reports stalled", silentMs: now - r.last_event_at });
       return;
     }
+    // Frames from a machine the run waited for: it is back (盯 1.1).
+    if (r.away_since !== null) await this.machineBack(r);
     this.sql.exec("UPDATE runs SET last_event_at = ?, nudged = 0 WHERE id = ?", now, r.id);
     r.last_event_at = now;
     r.nudged = 0;
