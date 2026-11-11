@@ -37,6 +37,16 @@ struct SignInFlow: View {
     var body: some View {
         NavigationStack(path: $path) {
             LoginStartScreen(server: $server) { path.append($0) }
+                .safeAreaInset(edge: .top) {
+                    if let notice = model.notice {
+                        Label(notice, systemImage: "exclamationmark.circle.fill")
+                            .font(.footnote).foregroundStyle(Theme.waiting)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.rowRadius))
+                            .padding(.horizontal, 24)
+                    }
+                }
                 .navigationDestination(for: Step.self) { step in
                     switch step {
                     case .email: EmailScreen(server: $server, email: $email) { path.append($0) }

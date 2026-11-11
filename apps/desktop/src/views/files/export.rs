@@ -38,6 +38,11 @@ gpui::actions!(files, [QuickLook]);
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("space", QuickLook, None)]);
     cx.on_action(|_: &QuickLook, cx| {
+        // Space closes the open preview first, wherever the pointer is.
+        #[cfg(not(target_os = "macos"))]
+        if super::quick_look::close_if_open(cx) {
+            return;
+        }
         let active = cx.active_window().map(|w| w.window_id());
         match hovered(active) {
             Some(target) => quick_look(&target, cx),
@@ -216,11 +221,23 @@ fn failed(template: &str, name: &str, error: FileError, cx: &mut App) {
 
 // --- Quick Look -----------------------------------------------------------------------
 
-/// Previews the file in the Quick Look panel (closes the panel when it is open).
+/// Previews the file (closes the preview when it is open): in the Quick Look panel on
+/// macOS, in the app's own viewer elsewhere ([`super::quick_look`]).
 pub fn quick_look(target: &FileRef, cx: &mut App) {
+    #[cfg(target_os = "macos")]
     target.with_local(cx, |local, _| {
         super::native::toggle_quick_look(local.preview)
     });
+    #[cfg(not(target_os = "macos"))]
+    {
+        if super::quick_look::close_if_open(cx) {
+            return;
+        }
+        let shown = target.clone();
+        target.with_local(cx, move |local, cx| {
+            super::quick_look::show(&shown, local, cx)
+        });
+    }
 }
 
 thread_local! {
@@ -399,9 +416,22 @@ fn copy_to(local: &Local, dest: &Path) -> std::io::Result<()> {
 pub fn share(target: &FileRef, at: Point<Pixels>, window: &mut Window, cx: &mut App) {
     let handle = window.window_handle();
     target.with_local(cx, move |local, cx| {
+        #[cfg(not(target_os = "windows"))]
         let _ = handle.update(cx, |_, window, _| {
             super::native::share(vec![local.item], at, window)
         });
+        // Windows centers its share UI on the window; `at` has no use there.
+        #[cfg(target_os = "windows")]
+        {
+            let _ = at;
+            let hwnd = handle
+                .update(cx, |_, window, _| crate::win32::hwnd(window))
+                .ok()
+                .flatten();
+            if let Some(hwnd) = hwnd {
+                super::native::win_share::share(vec![local.item], hwnd.0 as isize, cx);
+            }
+        }
     });
 }
 
@@ -490,8 +520,14 @@ where
             set_hovered(&hover, *on, window.window_handle().window_id())
         })
         .on_action(move |_: &QuickLook, _, cx| quick_look(&look, cx))
-        .on_drag(drag, |d: &FileDrag, _, _, cx| {
+        .on_drag(drag, |d: &FileDrag, _, window, cx| {
             d.target.prefetch(cx);
+            // GPUI's Windows platform cannot take the drag out of the window: the app
+            // does (`external_drag_payload` below is what macOS uses).
+            #[cfg(target_os = "windows")]
+            super::win_drag::watch(d.target.clone(), window, cx);
+            #[cfg(not(target_os = "windows"))]
+            let _ = window;
             let (name, icon) = (d.name.clone(), d.icon);
             cx.new(|_| DragGhost { name, icon })
         })

@@ -21,7 +21,7 @@ use crate::{
         native::{
             Alert, AlertTone, Empty, NativeTextField, NativeType as _, PushSize, PushStyle,
             Segment, Segmented, TruncText, card_surface, native_colors, progress, push_button,
-            tokens::{avatar, height, monitor as t, radius, space, text},
+            tokens::{avatar, height, layout, monitor as t, radius, space, text},
         },
     },
     views::settings::widgets::answer,
@@ -669,20 +669,31 @@ impl AdminView {
                 .right_0()
                 .top(relative(frac * 0.86));
             // GPUI's Direct3D renderer draws nothing for a dashed border on a box
-            // without a height (seen in the Windows screenshots): the same 2 on,
-            // 1 off dashes as boxes there.
+            // without a height (seen in the Windows screenshots): there the same
+            // dashes are painted as quads across whatever width the chart has.
             if cfg!(target_os = "windows") {
-                line.h(gpui::px(1.))
-                    .flex()
-                    .gap(gpui::px(1.))
-                    .overflow_hidden()
-                    .children((0..400).map(|_| {
-                        div()
-                            .flex_none()
-                            .w(gpui::px(2.))
-                            .h(gpui::px(1.))
-                            .bg(k.amber)
-                    }))
+                let ink = k.amber;
+                line.h(layout::BORDER).child(
+                    gpui::canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            let (dash, gap) = layout::RULE_DASH;
+                            let mut x = bounds.left();
+                            while x < bounds.right() {
+                                let width = dash.min(bounds.right() - x);
+                                window.paint_quad(gpui::fill(
+                                    gpui::Bounds::new(
+                                        gpui::point(x, bounds.top()),
+                                        gpui::size(width, layout::BORDER),
+                                    ),
+                                    ink,
+                                ));
+                                x += dash + gap;
+                            }
+                        },
+                    )
+                    .size_full(),
+                )
             } else {
                 line.border_t_1().border_dashed().border_color(k.amber)
             }

@@ -10,6 +10,7 @@ enum Route: Hashable {
     case member(id: String)
     case artifact(id: String)
     case me
+    case notifySettings
     case groupInfo(group: String)
     case topicInfo(group: String, topic: String)
     case run(id: String)
@@ -27,6 +28,7 @@ struct RouteView: View {
         case .member(let id): MemberScreen(memberId: id)
         case .artifact(let id): ArtifactScreen(artifactId: id)
         case .me: MeScreen()
+        case .notifySettings: NotifySettingsScreen()
         case .groupInfo(let group): GroupInfoScreen(groupId: group)
         case .topicInfo(let group, let topic): TopicInfoScreen(groupId: group, topicId: topic)
         case .run(let id): RunScreen(runId: id)

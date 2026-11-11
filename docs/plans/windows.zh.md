@@ -179,10 +179,11 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
   `QuitMode::Explicit`，关窗后程序留在托盘（和 Mac 一样），用托盘菜单的「退出」退出；图标被隐藏或没加上时
   保持默认，关掉最后一个窗口就退出，不会留下一个找不到的进程。
 - GPUI 的 `hide_other_apps` 在 Windows 上是 `unimplemented!()`，调到就崩；对应的动作现在只在 macOS 注册。
-- 系统强调色没有接：Windows 总有一个强调色（默认蓝），接了就不再是黑白规范，所以保持石墨色。
+- 系统强调色：当时没有接（Windows 总有一个强调色，默认蓝，接了就不再是黑白规范）。后来按 WINDOWS.md §9 接上了，
+  出厂的默认蓝当作「没选」仍是石墨色，见 `windows-parity/system.zh.md` 第 8 节。
 - 外观跟随系统不用改：`window.appearance()` 和它的变化通知在 Windows 上由 GPUI 提供。
 
-这部分还没做的：
+这部分还没做的（下面每一项后来都补上了，逐项对照和做法见 [windows-parity/system.zh.md](windows-parity/system.zh.md)）：
 
 - `window_menu_bar` 还没有放进主窗口标题栏（标题栏在窗口那部分工作里），放进去之前菜单在窗口里没有入口。
 - 快捷键没有动，`menus.rs` 里仍是 `cmd-…`，随整套键位一起映射。

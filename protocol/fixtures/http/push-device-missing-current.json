@@ -1,0 +1,13 @@
+{
+  "kind": "PushDevice",
+  "valid": false,
+  "description": "current is required",
+  "value": {
+    "id": "01JBX0PUSH00000000000000AA",
+    "platform": "apns",
+    "appId": "dev.example.chat",
+    "environment": "production",
+    "createdAt": 1762128000000,
+    "updatedAt": 1762128001000
+  }
+}

@@ -10,6 +10,9 @@ pub mod export;
 pub mod extra;
 pub mod native;
 pub mod preview;
+pub mod quick_look;
+#[cfg(target_os = "windows")]
+mod win_drag;
 
 use std::{path::Path, sync::Arc};
 

@@ -485,6 +485,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open_menu,
     },
     Scene {
+        name: "files-quick-look",
+        about: "Space on a file off the Mac: the app's viewer as a sheet (the Mac shows Quick Look)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look,
+    },
+    Scene {
         name: "cards",
         about: "The 话题 of sample cards: status, fields, table, progress, list, code and actions",
         start: Start::SignedIn,

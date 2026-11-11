@@ -1,0 +1,7 @@
+{
+  "kind": "RemovePushDeviceResponse",
+  "valid": true,
+  "value": {
+    "removed": 1
+  }
+}
