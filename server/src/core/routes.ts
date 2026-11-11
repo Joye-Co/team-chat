@@ -358,6 +358,8 @@ export function registerCoreRoutes(): void {
         const m = await getMember(env.DB, req.memberId);
         if (!m) throw new ApiError("not_found", "member not found");
         if (m.deactivated) throw new ApiError("invalid", "reactivate the member first");
+        // Redeeming the code signs in as the target, so a code for another admin is 所有者 only.
+        if (m.level === "owner" && m.id !== a.memberId) requireTeamOwner(a, "only a team owner can sign in as an admin");
         Object.assign(req, { name: m.name, kind: m.kind, level: m.level, role: m.role ?? undefined });
       } else if (req.level === "owner") {
         // A new admin (person or AI member) is a role change: 所有者 only. Invited people arrive

@@ -1,8 +1,8 @@
 // Usable, three roles (docs/plans/usable/design-roles.zh.md, unit R1): 所有者 (teamOwner),
 // 管理员 (level "owner") and 普通成员 (level "member").
-import { env } from "cloudflare:test";
+import { SELF, env } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
-import { api, createMember, protocolViolations } from "./helpers";
+import { BASE, api, createMember, protocolViolations } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
@@ -140,6 +140,23 @@ describe("roles", () => {
     }
     expect((await row(other.id))?.deactivated).toBe(0);
 
+    // Avatars too: changing or removing an admin's or the 所有者's is the 所有者's.
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 1, 2, 3]);
+    const avatar = (token: string, id: string, method: "PUT" | "DELETE") =>
+      SELF.fetch(`${BASE}/v1/members/${id}/avatar`, { method, headers: { authorization: `Bearer ${token}` }, body: method === "PUT" ? PNG : undefined });
+    for (const id of [owner.id, other.id]) {
+      for (const method of ["PUT", "DELETE"] as const) {
+        const r = await avatar(admin.token, id, method);
+        expect(r.status, `${method} ${id}`).toBe(403);
+        expect(((await r.json()) as any).error.reason).toBe("role.owner_only");
+      }
+    }
+    expect((await avatar(admin.token, admin.id, "PUT")).status).toBe(200);
+    expect((await avatar(admin.token, m.id, "PUT")).status).toBe(200);
+    expect((await avatar(admin.token, m.id, "DELETE")).status).toBe(200);
+    expect((await avatar(owner.token, other.id, "PUT")).status).toBe(200);
+    expect((await avatar(owner.token, other.id, "DELETE")).status).toBe(200);
+
     // Members and AI members: any admin.
     expect((await patch(admin.token, m.id, { name: "Renamed", weeklyBudgetCents: 100 })).status).toBe(200);
     expect((await api("/v1/tokens/revoke", { token: admin.token, body: { memberId: bot.id } })).status).toBe(200);
@@ -178,9 +195,17 @@ describe("invites", () => {
     expect(redeemed.body.member.level).toBe("owner");
     expect(redeemed.body.member.teamOwner).toBeUndefined();
 
-    // A sign-in code for an admin or the 所有者: any admin; the role stays.
-    for (const target of [owner, admin]) {
+    // A sign-in code signs in as its target, so one for another admin or the 所有者 is the
+    // 所有者's; an admin still gets one for members and for itself. The role stays.
+    const other = await createMember({ level: "owner", teamOwner: false });
+    for (const target of [owner, other]) {
       const r = await invite(admin.token, { name: "x", kind: "human", level: "member", memberId: target.id });
+      expect(r.status).toBe(403);
+      expect(reason(r)).toBe("role.owner_only");
+    }
+    expect((await invite(admin.token, { name: "x", kind: "human", level: "member", memberId: m.id })).status).toBe(200);
+    for (const [caller, target] of [[owner, admin], [owner, owner], [admin, admin]]) {
+      const r = await invite(caller.token, { name: "x", kind: "human", level: "member", memberId: target.id });
       expect(r.status).toBe(200);
       const back = await api("/v1/auth/redeem", { body: { inviteCode: r.body.code, deviceName: "Mac 2" } });
       expect(back.status).toBe(200);
