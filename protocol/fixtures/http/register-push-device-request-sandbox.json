@@ -1,0 +1,11 @@
+{
+  "kind": "RegisterPushDeviceRequest",
+  "valid": true,
+  "description": "development build",
+  "value": {
+    "platform": "apns",
+    "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "appId": "dev.example.chat",
+    "environment": "sandbox"
+  }
+}

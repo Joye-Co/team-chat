@@ -2167,6 +2167,58 @@ Rules:
   instead (read by tests with `GET /v1/admin/email-outbox?email=…` and the `x-admin-secret`
   header), and is never sent or logged.
 
+## Push
+
+Phones get notifications through the platform's push service while the app is not connected.
+The server sends a push for the same decision as the `notify` field of a live event frame
+("Notifications"), after the member's notification settings ("Notification settings").
+
+```ts
+PushPlatform = "apns"
+PushEnvironment = "production" | "sandbox"            // development builds use sandbox tokens
+RegisterPushDeviceRequest = { platform, token /* lower-case hex, 32..400 */, appId /* bundle id */, environment }
+PushDevice = { id, platform, appId, environment, createdAt, updatedAt, current }   // never the token
+PushDevicesResponse = { devices: PushDevice[] }
+RemovePushDeviceResponse = { removed: number }
+BadgeResponse = { waiting: number }                   // topics whose waitingOn has me (等你)
+AnswerCardRequest = { rev, actionId, clientEventId? }
+PushData = { v: 1, reason: NotifyReason, notifyEvent?: NotifyEvent, groupId, topicId?, messageId?, seq,
+             ask?: { messageId, rev, actions: { id, label }[] /* 1..3 */ } }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/me/push-devices` | member | `RegisterPushDeviceRequest` | `PushDevice`; one device per push token: registering a known token moves it to this sign-in |
+| `GET /v1/me/push-devices` | member | | `PushDevicesResponse`, my devices; `current` = registered with this request's token |
+| `DELETE /v1/me/push-devices` | member | | `RemovePushDeviceResponse`: removes the devices of this request's sign-in (turning push off, signing out) |
+| `DELETE /v1/me/push-devices/:id` | member, own | | `RemovePushDeviceResponse`; an unknown or another member's id is `not_found` |
+| `GET /v1/me/badge` | member | | `BadgeResponse` |
+| `POST /v1/groups/:id/messages/:messageId/answer` | member of the group | `AnswerCardRequest` | `CardEventAck`: the same as the `card.answer` frame (same checks, audit and events), for a notification action without a socket |
+
+Rules:
+
+- A device belongs to the sign-in (token) that registered it. Revoking that token (signing out,
+  `DELETE /v1/me/devices/:id`, deactivation) stops its pushes and the device is removed. A
+  device whose token the push service rejects as no longer valid (APNs 410, or 400
+  `BadDeviceToken`) is removed.
+- A device gets no push while its own sign-in has an open connection (the app is in front and
+  shows the event itself). Other connections of the member do not hold pushes back.
+- APNs payload: `aps.alert` `{ title, body }` (the group or the 成员, and a short text; the app's
+  notification extension may replace it from its cache), `aps.badge` = `BadgeResponse.waiting`,
+  `aps.sound` `"default"`, `aps.thread-id` = topic id (or group id), `aps.mutable-content: 1`,
+  and `tc: PushData`. `apns-collapse-id` = the topic id (a newer push for the same topic
+  replaces the older one). A push with `ask` has `aps.category` `"tc.ask.<messageId>.<rev>"`: the
+  app registers that category with the ask's answers as buttons (its notification extension
+  when the push arrives) and adds 打开.
+- `ask` is set for an open card ask of the topic (`reason` `waiting`, or a `mention` on the ask
+  message) when the card's footer actions can be pressed without more input: kind `submit` or
+  `reject`, no `confirm`, no `inputs`, style not `danger`, role not `approve`, and the ask has no
+  `irreversible`. Otherwise there is no `ask` and the only action is to open the app.
+- When the badge changes without a notification (an answer elsewhere), the server sends a
+  badge-only push (`aps.badge` alone, priority 5) to each device.
+- The server signs APNs requests with a token key (ES256 JWT) from Worker secrets. Without the
+  secrets it stores devices but sends nothing.
+
 ## Password sign-in
 
 A person may add a password and then sign in with the sign-in email and that password. The

@@ -18,6 +18,7 @@ mod auth;
 mod devices;
 mod files;
 mod pages;
+mod push;
 mod token;
 
 pub use auth::{
@@ -27,6 +28,10 @@ pub use auth::{
 };
 pub use devices::{DeviceItem, OfferState, PasswordState, SignInOffer, device_kind};
 pub use pages::*;
+pub use push::{
+    NotifyPrefs, PushActionItem, PushInfo, answer_from_notification, notify_prefs, parse_push,
+    push_badge, register_push_device, set_notify_prefs, unregister_push_device,
+};
 pub use token::{clear_token, load_token, save_token};
 
 uniffi::setup_scaffolding!();

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 /// Owns the `ChatClient`. The lists every screen shows (群, 成员, the connection) are published
 /// here; a chat reads its own messages and reads them again when its topic's tick changes.
@@ -54,6 +55,8 @@ final class AppModel: ObservableObject {
     }
 
     func signOut() {
+        if let saved = Session.saved() { Task.detached { PushCenter.forget(server: saved.server, token: saved.token) } }
+        UNUserNotificationCenter.current().setBadgeCount(0)
         client?.stop()
         client = nil
         Session.clear()
@@ -159,6 +162,7 @@ final class AppModel: ObservableObject {
 
     func send(_ body: String, group: String, topic: String, mentions: [String], quote: String?) {
         _ = try? client?.send(groupId: group, topicId: topic, body: body, mentions: mentions, quoteId: quote)
+        offerNotificationsAfterSend()
     }
 
     func retry(_ id: String) {
