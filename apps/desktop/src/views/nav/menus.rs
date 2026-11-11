@@ -486,8 +486,18 @@ pub fn install(cx: &mut App) {
     // the process's AppUserModelID at the moment it is committed: the id must be set
     // first, or the list lands under the default identity and the app's taskbar button
     // never shows it.
+    //
+    // GPUI commits the list on a background thread, which has COM only while the process
+    // has a multithreaded apartment: join it first (for good), or the commit fails and
+    // the taskbar button has no tasks.
     #[cfg(target_os = "windows")]
-    cx.set_app_identity(crate::provider::session::app_id(), env!("PRODUCT_NAME"));
+    {
+        cx.set_app_identity(crate::provider::session::app_id(), env!("PRODUCT_NAME"));
+        // SAFETY: only raises the process's apartment count; never released.
+        if let Err(error) = unsafe { windows::Win32::System::Com::CoIncrementMTAUsage() } {
+            tracing::warn!(%error, "no multithreaded apartment for the jump list");
+        }
+    }
     cx.set_dock_menu(dock_menu());
 }
 
