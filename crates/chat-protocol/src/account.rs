@@ -251,7 +251,8 @@ impl SignInLink {
             None => (text, None),
         };
         let norm = normalize_sign_in_code(code);
-        let crockford = |c: char| c.is_ascii_digit() || (c.is_ascii_uppercase() && !"ILOU".contains(c));
+        let crockford =
+            |c: char| c.is_ascii_digit() || (c.is_ascii_uppercase() && !"ILOU".contains(c));
         if norm.chars().count() != 8 || !norm.chars().all(crockford) {
             return None;
         }
