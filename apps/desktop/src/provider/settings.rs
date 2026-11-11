@@ -298,6 +298,26 @@ impl CoreProvider {
         let Some(me) = self.my_id() else {
             return reply_now(Err(AdminError::Offline));
         };
+        self.upload_member_avatar_inner(me, path)
+    }
+
+    pub(super) fn remove_member_avatar_inner(&self, id: String) -> AdminReply<Member> {
+        self.request(move |client, _| async move {
+            let m = client
+                .remove_avatar(&id)
+                .await
+                .map_err(|_| AdminError::Other)?
+                .map_err(|e| admin_error(&e))?;
+            let online = client.is_online(&m.id);
+            Ok(convert::member(&m, online))
+        })
+    }
+
+    pub(super) fn upload_member_avatar_inner(
+        &self,
+        me: String,
+        path: PathBuf,
+    ) -> AdminReply<Member> {
         self.request(move |client, _| async move {
             let read = super::tokio_blocking(move || -> Result<Vec<u8>, AdminError> {
                 let len = std::fs::metadata(&path)
@@ -324,7 +344,8 @@ impl CoreProvider {
                 .await
                 .map_err(|_| AdminError::Other)?
                 .map_err(|e| admin_error(&e))?;
-            Ok(convert::member(&m, true))
+            let online = client.is_online(&m.id);
+            Ok(convert::member(&m, online))
         })
     }
 

@@ -2011,6 +2011,14 @@ impl ChatProvider for CoreProvider {
         self.upload_avatar_inner(path)
     }
 
+    fn upload_member_avatar(&self, member_id: &str, path: PathBuf) -> AdminReply<Member> {
+        self.upload_member_avatar_inner(member_id.to_string(), path)
+    }
+
+    fn remove_member_avatar(&self, member_id: &str) -> AdminReply<Member> {
+        self.remove_member_avatar_inner(member_id.to_string())
+    }
+
     fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
         self.create_invite_inner(request)
     }

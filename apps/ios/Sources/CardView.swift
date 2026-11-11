@@ -564,11 +564,12 @@ struct CardView: View {
         }
     }
 
-    /// Solid red only for the step that cannot be undone; any other "danger" action (a plain
-    /// 拒绝) is a quiet button with red text, so the options of a choice look alike.
+    /// No red fill in a card (DESIGN.md §7.5: `danger` only in the confirm sheet). The action
+    /// that goes ahead with an irreversible step is the card's primary; its confirm sheet says
+    /// what cannot be undone. Any other "danger" action is a quiet button with red text.
     private func look(_ a: CardDoc.Action, _ doc: CardDoc) -> String {
         if a.declines { return "default" }
-        if a.style == "danger" { return doc.irreversible != nil && !a.declines ? "danger" : "dangerText" }
+        if a.style == "danger" { return doc.irreversible != nil ? "primary" : "dangerText" }
         return a.style
     }
 

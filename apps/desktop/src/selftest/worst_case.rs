@@ -1232,6 +1232,12 @@ impl ChatProvider for WorstCase {
     fn rename_group(&self, group_id: &str, name: String) -> AdminReply<()> {
         self.inner.rename_group(group_id, name)
     }
+    fn upload_member_avatar(&self, member_id: &str, path: PathBuf) -> AdminReply<Member> {
+        self.inner.upload_member_avatar(member_id, path)
+    }
+    fn remove_member_avatar(&self, member_id: &str) -> AdminReply<Member> {
+        self.inner.remove_member_avatar(member_id)
+    }
     fn set_member_character(
         &self,
         member_id: &str,
