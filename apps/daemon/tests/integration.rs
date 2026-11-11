@@ -1884,8 +1884,8 @@ async fn an_acp_member_takes_a_task_follows_up_and_continues() {
     assert!(got.ends_with(request), "{got}");
     assert!(got.contains("chat-run"), "the run note: {got}");
     assert_eq!(
-        first["cwd"].as_str().unwrap(),
-        work_of(tmp.path(), "a1").to_string_lossy()
+        Path::new(first["cwd"].as_str().unwrap()),
+        work_of(tmp.path(), "a1")
     );
 
     // Path 4: the work is visible as it goes, a follow-up during the turn is the next prompt,
@@ -1965,10 +1965,8 @@ async fn an_acp_member_takes_a_task_follows_up_and_continues() {
         text.starts_with("acp: remembered [") && text.contains(request),
         "{text}"
     );
-    assert!(
-        text.ends_with(&format!("in {}", work_of(tmp.path(), "a1").display())),
-        "{text}"
-    );
+    let cwd = text.rsplit_once(" in ").map(|(_, c)| c).unwrap_or_default();
+    assert_eq!(Path::new(cwd), work_of(tmp.path(), "a1"), "{text}");
     // The replayed history is not reported as this run's messages.
     assert!(!events(&fr).iter().any(|e| matches!(
         e,
