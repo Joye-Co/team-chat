@@ -348,6 +348,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_about,
     },
     Scene {
+        name: "about",
+        about: "The 关于 window off the Mac (the Mac shows the system's about panel): icon, name, version",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |_, _, cx| crate::views::nav::about::open_window(false, cx),
+    },
+    Scene {
         name: "settings-ai-service",
         about: "Settings: 通用 › AI 服务 (owner) after 测试连接 with the saved DeepSeek key",
         start: Start::SignedIn,
