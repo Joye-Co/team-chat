@@ -256,18 +256,30 @@ async fn acp_follow_up_is_next_prompt() {
     );
 }
 
-#[cfg(unix)]
+/// The `pty` kind: the prompt reaches the program, what it prints comes back as its lines,
+/// text sent to the run while it works is typed into the terminal, and the exit code is the
+/// program's. The same program on both systems, in each one's shell.
 #[tokio::test]
 async fn pty_prompt_input_and_exit_code() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(
-        dir.path(),
-        "pty",
+    #[cfg(unix)]
+    let (shell, args) = (
         "/bin/sh",
-        &["-c", "echo start:{prompt}; read x; echo got:$x; exit 3"],
-        "hi",
+        vec!["-c", "echo start:{prompt}; read x; echo got:$x; exit 3"],
     );
+    #[cfg(windows)]
+    let (shell, args) = (
+        "cmd.exe",
+        vec![
+            "/d",
+            "/v:on",
+            "/c",
+            "echo start:{prompt}& set /p x=& echo got:!x!& exit 3",
+        ],
+    );
+    let s = spec(dir.path(), "pty", shell, &args, "hi");
     let mut sent = false;
+    let mut accepted = false;
     let (o, _evs) = drive(s, |e| match e {
         RunEvent::MessageDelta { text, .. } if text.contains("start:hi") && !sent => {
             sent = true;
@@ -276,13 +288,219 @@ async fn pty_prompt_input_and_exit_code() {
                 text: "abc".into(),
             })
         }
+        RunEvent::InputAccepted { input_id } if input_id == "i" => {
+            accepted = true;
+            None
+        }
         _ => None,
     })
     .await;
+    assert!(accepted, "the input was taken");
     assert_eq!(o.status, Status::Failed);
     assert_eq!(o.exit_code, Some(3));
-    assert!(o.result_text.unwrap().contains("got:abc"));
+    let text = o.result_text.unwrap();
+    assert!(text.contains("got:abc"), "{text:?}");
+    // Lines, as the program wrote them (a Windows console sends a screen, not lines).
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    assert!(lines.contains(&"got:abc"), "{lines:?}");
     assert!(dir.path().join("pty.log").is_file());
+}
+
+/// Windows: a batch file is a `pty` program like any other. Its arguments arrive as they
+/// were given (a prompt with spaces, `&`, `%` and quotes is one argument, not commands), what
+/// is typed goes to the program the batch file reads with, and its exit code is the run's.
+#[cfg(windows)]
+#[tokio::test]
+async fn pty_runs_a_batch_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("agent with space.cmd");
+    std::fs::write(
+        &script,
+        "@echo off\r\necho arg1:\"%~1\"\r\necho arg2:\"%~2\"\r\nset /p line=\r\necho got:%line%\r\nexit /b 5\r\n",
+    )
+    .unwrap();
+    let prompt = "hello world & echo injected > injected.txt | 100% %PATH% \"q\"";
+    let s = spec(
+        dir.path(),
+        "pty",
+        &script.to_string_lossy(),
+        &["{prompt}", "second arg"],
+        prompt,
+    );
+    let work = s.cwd.clone();
+    let mut sent = false;
+    let (o, _evs) = drive(s, |e| match e {
+        RunEvent::MessageDelta { text, .. } if text.contains("arg2:") && !sent => {
+            sent = true;
+            Some(Control::Input {
+                input_id: "i".into(),
+                text: "typed".into(),
+            })
+        }
+        _ => None,
+    })
+    .await;
+    let raw = std::fs::read_to_string(dir.path().join("pty.log")).unwrap_or_default();
+    assert_eq!(o.exit_code, Some(5), "{o:?} raw: {raw:?}");
+    assert_eq!(o.status, Status::Failed);
+    let text = o.result_text.unwrap();
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    // `%~1` gives a quote inside the argument back doubled: that is the batch file's own
+    // reading; every other character is as it was given.
+    let arg1 = format!("arg1:\"{}\"", prompt.replace('"', "\"\""));
+    assert!(lines.contains(&arg1.as_str()), "{lines:?} raw: {raw:?}");
+    assert!(lines.contains(&"arg2:\"second arg\""), "{lines:?}");
+    assert!(lines.contains(&"got:typed"), "{lines:?}");
+    assert!(
+        !work.join("injected.txt").exists(),
+        "the prompt ran as a command"
+    );
+
+    // An argument with a line break cannot be written for a batch file: the run says so.
+    let s = spec(
+        &dir.path().join("r2"),
+        "pty",
+        &script.to_string_lossy(),
+        &["{prompt}"],
+        "two\nlines",
+    );
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Failed);
+    assert!(
+        o.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("line break"),
+        "{o:?}"
+    );
+}
+
+/// Windows: 接管 really stops a `pty` run (every thread of the program and of what it started
+/// is suspended and nothing is written), handing it back lets it go on, and a cancel ends the
+/// program and what it started. Unix: `pty_cancel_kills_group` and the pause cases of
+/// `tests/integration.rs`.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pty_pause_holds_and_cancel_ends_the_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("ticker.py");
+    std::fs::write(
+        &script,
+        "import os, subprocess, sys, time\n\
+kid = subprocess.Popen([sys.executable, '-c', \"import time\\nwhile True:\\n    open('kid.ticks', 'a').write('x\\\\n')\\n    time.sleep(0.05)\"])\n\
+open('pids', 'w').write('%d %d' % (os.getpid(), kid.pid))\n\
+print('ready', flush=True)\n\
+while True:\n    open('own.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n",
+    )
+    .unwrap();
+    let s = spec(dir.path(), "pty", &script.to_string_lossy(), &[], "go");
+    let (work, run_dir, exec) = (s.cwd.clone(), s.run_dir.clone(), s.exec.clone());
+    let rt = runtime::for_kind("pty").unwrap();
+    let (etx, _erx) = mpsc::unbounded_channel();
+    let (ctx, crx) = mpsc::unbounded_channel();
+    let run = tokio::spawn(rt.start(s, etx, crx));
+    let ticks = [work.join("own.ticks"), work.join("kid.ticks")];
+    let sizes = || -> Vec<u64> {
+        ticks
+            .iter()
+            .map(|f| std::fs::metadata(f).map_or(0, |m| m.len()))
+            .collect()
+    };
+    let wait = |what: &'static str, done: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + Duration::from_secs(60);
+        while !done() {
+            assert!(std::time::Instant::now() < end, "timed out: {what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    wait("both processes tick", &|| sizes().iter().all(|n| *n > 10));
+    let pids: Vec<u32> = std::fs::read_to_string(work.join("pids"))
+        .unwrap()
+        .split_whitespace()
+        .map(|p| p.parse().unwrap())
+        .collect();
+    assert_eq!(pids.len(), 2);
+
+    let paused = exec.stop(&run_dir).expect("a pty run can be stopped");
+    // A write that had begun may still land.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let held = sizes();
+    for pid in &pids {
+        assert_eq!(
+            procs::stopped(*pid),
+            Some(true),
+            "process {pid} is not stopped"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(sizes(), held, "a paused run made progress");
+    paused.resume();
+    wait("both processes tick again", &|| {
+        sizes().iter().zip(&held).all(|(now, then)| now > then)
+    });
+    assert_eq!(procs::stopped(pids[0]), Some(false));
+
+    ctx.send(Control::Cancel).unwrap();
+    let o = tokio::time::timeout(Duration::from_secs(20), run)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    wait("the program and its child end", &|| {
+        pids.iter().all(|p| procs::stopped(*p).is_none())
+    });
+    let end = sizes();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(sizes(), end, "something of the run still writes");
+}
+
+/// Windows: whether a process is stopped, for the pause tests.
+#[cfg(windows)]
+mod procs {
+    /// `Some(true)` when every thread of the process `pid` is suspended (a suspend that is
+    /// taken back at once tells the count before it), `Some(false)` when one runs, `None` when
+    /// the process is gone.
+    pub fn stopped(pid: u32) -> Option<bool> {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
+        };
+        if !daemon::winjob::pid_alive(pid) {
+            return None;
+        }
+        let (mut threads, mut running) = (0, 0);
+        // SAFETY: a snapshot of the system's threads, read entry by entry into a struct of the
+        // size the call is told; each thread handle is closed again.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            assert_ne!(snap, INVALID_HANDLE_VALUE);
+            let mut e: THREADENTRY32 = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let mut more = Thread32First(snap, &mut e) != 0;
+            while more {
+                if e.th32OwnerProcessID == pid {
+                    let t = OpenThread(THREAD_SUSPEND_RESUME, 0, e.th32ThreadID);
+                    if !t.is_null() {
+                        threads += 1;
+                        let before = SuspendThread(t);
+                        if before != u32::MAX {
+                            ResumeThread(t);
+                            if before == 0 {
+                                running += 1;
+                            }
+                        }
+                        CloseHandle(t);
+                    }
+                }
+                more = Thread32Next(snap, &mut e) != 0;
+            }
+            CloseHandle(snap);
+        }
+        (threads > 0).then_some(running == 0)
+    }
 }
 
 #[cfg(unix)]
@@ -572,17 +790,29 @@ fn codex_exec(
     ] {
         writeln!(stdin, "{m}").unwrap();
     }
-    let mut line = String::new();
-    let result = loop {
-        line.clear();
-        assert!(
-            out.read_line(&mut line).unwrap() > 0,
-            "codex app-server ended"
-        );
-        let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
-        if v["id"] == 2 {
-            break v;
+    // The answer, or after two minutes none (the reader is a thread of its own, so a server
+    // that says nothing cannot hold the test).
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if out.read_line(&mut line).unwrap_or(0) == 0 {
+                return;
+            }
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+            if v["id"] == 2 {
+                let _ = tx.send(v);
+                return;
+            }
         }
+    });
+    let result = match rx.recv_timeout(Duration::from_secs(120)) {
+        Ok(v) => v,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => serde_json::json!({
+            "id": 2, "error": { "message": "codex app-server gave no answer in 120 s" } }),
+        Err(_) => serde_json::json!({
+            "id": 2, "error": { "message": "codex app-server ended without an answer" } }),
     };
     let _ = p.kill();
     let _ = p.wait();
@@ -728,6 +958,105 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     assert!(out.starts_with("closed"), "{net}");
 }
 
+/// A folder that is not under the temp folder (Codex's sandboxes count the temp folder as
+/// writable): under the user's local application data on Windows.
+fn outside_temp() -> tempfile::TempDir {
+    match std::env::var_os("LOCALAPPDATA").filter(|_| cfg!(windows)) {
+        Some(local) => tempfile::tempdir_in(local).unwrap(),
+        None => tempfile::tempdir().unwrap(),
+    }
+}
+
+/// The settings of Codex's own Windows sandbox a report test tries. `elevated` only when
+/// `TC_CODEX_ELEVATED_SANDBOX` is set: its setup changes the computer (it makes sandbox
+/// accounts and lets them write the user's temp folder, after which the daemon rightly
+/// refuses run folders there), so CI tries it in a last step of its own.
+#[cfg(windows)]
+fn windows_sandbox_modes(always: &[&'static str]) -> Vec<&'static str> {
+    let mut modes = always.to_vec();
+    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_some() {
+        modes.push("elevated");
+    }
+    modes
+}
+
+/// Windows: what Codex's `read-only` does to a command with each setting of Codex's own
+/// Windows sandbox (none, `unelevated`, `elevated`): a write in the working folder, a write
+/// outside it and outside the temp folder, reading a file, and a connection to a port of this
+/// computer. Written to
+/// `codex-windows-read-only.json` in the test folder (CI prints it). Asserts nothing but that
+/// no call hangs; [`codex_read_only_sandbox_writes_nothing`] asserts for what the daemon sends.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_read_only_on_windows_report() {
+    let Some(codex) = real_codex() else { return };
+    let mut report = serde_json::Map::new();
+    for mode in windows_sandbox_modes(&["none", "unelevated"]) {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("codex-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let s = spec(tmp.path(), "codex", "codex", &[], "hi");
+        std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
+        let mut args: Vec<String> = ["app-server", "-c", "sandbox_mode=\"read-only\""]
+            .map(String::from)
+            .into();
+        args.extend(["-c".into(), "approval_policy=\"never\"".into()]);
+        if mode != "none" {
+            args.extend(["-c".into(), format!("windows.sandbox=\"{mode}\"")]);
+        }
+        let outside = outside_temp();
+        let inside_file = s.cwd.join("written.txt");
+        let outside_file = outside.path().join("written.txt");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut calls = serde_json::Map::new();
+        for (what, line) in [
+            (
+                "a write in the working folder",
+                format!("echo x> {}", inside_file.display()),
+            ),
+            (
+                "a write outside it",
+                format!("echo x> {}", outside_file.display()),
+            ),
+            ("reading a file", "type seed.txt".to_string()),
+            (
+                "a connection to a local port",
+                format!("curl.exe -s -m 5 http://127.0.0.1:{port}/"),
+            ),
+        ] {
+            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
+            let (codex, args, home, cwd) =
+                (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+            let answer = tokio::task::spawn_blocking(move || {
+                codex_exec(&codex, &args, &home, &cwd, &command, serde_json::json!({}))
+            })
+            .await
+            .unwrap();
+            calls.insert(what.into(), answer);
+        }
+        calls.insert(
+            "the file in the working folder exists".into(),
+            inside_file.exists().into(),
+        );
+        calls.insert(
+            "the file outside exists".into(),
+            outside_file.exists().into(),
+        );
+        calls.insert(
+            "the connection arrived".into(),
+            listener.accept().is_ok().into(),
+        );
+        report.insert(mode.into(), calls.into());
+    }
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-read-only.json"),
+        serde_json::to_string_pretty(&report).unwrap(),
+    )
+    .unwrap();
+}
+
 /// A side chat run of Codex is read-only on every system: with the sandbox the daemon sends
 /// for it (`read-only`, approval `never`) the real CLI does not let a command write a file,
 /// in the working folder or outside it. Through `command/exec` (the server's sandbox, no
@@ -748,7 +1077,29 @@ async fn codex_read_only_sandbox_writes_nothing() {
     let mut args = runtime::codex::app_server_args(&s).unwrap();
     args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
     args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
-    let outside = tempfile::tempdir().unwrap();
+    // Reading works: a side chat answers from the files.
+    std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
+    let read: Vec<String> = if cfg!(windows) {
+        vec!["cmd.exe".into(), "/c".into(), "type seed.txt".into()]
+    } else {
+        vec!["/bin/sh".into(), "-c".into(), "cat seed.txt".into()]
+    };
+    let out = {
+        let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+        tokio::task::spawn_blocking(move || {
+            codex_exec(&codex, &args, &home, &cwd, &read, serde_json::json!({}))
+        })
+        .await
+        .unwrap()
+    };
+    assert!(
+        out["result"]["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("seed-text"),
+        "{out}"
+    );
+    let outside = outside_temp();
     for target in [
         s.cwd.join("written.txt"),
         outside.path().join("written.txt"),
@@ -757,7 +1108,8 @@ async fn codex_read_only_sandbox_writes_nothing() {
             vec![
                 "cmd.exe".into(),
                 "/c".into(),
-                format!("echo x> \"{}\"", target.display()),
+                // No quotes: the path has no space, and cmd.exe reads quotes its own way.
+                format!("echo x> {}", target.display()),
             ]
         } else {
             vec![
@@ -788,9 +1140,23 @@ async fn codex_read_only_sandbox_writes_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_on_windows_reaches_the_daemon_through_the_request_folder() {
     let Some(codex) = real_codex() else { return };
+    // Also for a user whose own Codex config turns Codex's Windows sandbox on: a run has full
+    // access whatever the config says, so the sandbox is not used for it.
+    for user_config in ["", "[windows]\nsandbox = \"unelevated\"\n"] {
+        codex_reaches_the_daemon_through_the_request_folder(&codex, user_config).await;
+    }
+}
+
+#[cfg(windows)]
+async fn codex_reaches_the_daemon_through_the_request_folder(
+    codex: &daemon::health::Launch,
+    user_config: &str,
+) {
+    let codex = codex.clone();
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("config.toml"), user_config).unwrap();
     let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
     s.note = Some(daemon::chat_run::note());
     assert!(runtime::codex::chat_run_works(&s));
@@ -923,6 +1289,182 @@ fn the_session_folder_has_the_names_the_cli_can_use() {
         Some(config.join("projects").join(&names[0]).join("s1.jsonl"))
     );
     assert!(!prepare_resume(&config, &cwd, "gone"));
+}
+
+/// Windows: what Codex's own Windows sandbox does when a user turns it on by hand (it is off
+/// unless the user's Codex config says otherwise, and the daemon's runs do not use it: they
+/// have full access). Both of its modes, with `workspace-write`, through `command/exec` of the
+/// real CLI: a write outside the working folder, then the real `chat-run` client against the
+/// run's named pipe and against the request folder. What each call answered is written to
+/// `codex-windows-sandbox.json` in the test folder (CI prints it).
+///
+/// This does not prove that `chat-run` works inside that sandbox. It proves what is there to
+/// see without a person: no call hangs, and each one either starts nothing (the sandbox
+/// refuses to run the command), or `chat-run` answers, or it names the sandbox as what blocks
+/// it. Seen with Codex 0.167.1: the unelevated mode starts no command at all ("cannot enforce
+/// split writable root sets directly; refusing to run unsandboxed"); what the elevated mode
+/// did on the runner is in the file.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox() {
+    let Some(codex) = real_codex() else { return };
+    let mut report = serde_json::Map::new();
+    for mode in windows_sandbox_modes(&["unelevated"]) {
+        report.insert(mode.into(), codex_windows_sandbox_mode(&codex, mode).await);
+    }
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-sandbox.json"),
+        serde_json::to_string_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    for (mode, calls) in &report {
+        for what in [
+            "chat-run through the named pipe",
+            "chat-run through the request folder",
+        ] {
+            let outcome = calls[what]["outcome"].as_str().unwrap_or_default();
+            assert!(
+                [
+                    "the command was not started",
+                    "chat-run answered",
+                    "chat-run named the sandbox"
+                ]
+                .contains(&outcome),
+                "{mode}, {what}: {}",
+                calls[what]
+            );
+        }
+    }
+}
+
+/// One mode of [`codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox`]: each call's
+/// answer and what it amounts to.
+#[cfg(windows)]
+async fn codex_windows_sandbox_mode(
+    codex: &daemon::health::Launch,
+    mode: &str,
+) -> serde_json::Value {
+    let codex = codex.clone();
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.note = Some(daemon::chat_run::note());
+    let mut args = runtime::codex::app_server_args(&s).unwrap();
+    args.extend([
+        "-c".to_string(),
+        "sandbox_mode=\"workspace-write\"".to_string(),
+        "-c".to_string(),
+        format!("windows.sandbox=\"{mode}\""),
+    ]);
+    daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
+    let outputs = std::sync::Arc::new(daemon::chat_run::Outputs::default());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let tx2 = tx.clone();
+    let server = daemon::chat_run::Server::start(
+        daemon::chat_run::socket_path(tmp.path()),
+        outputs.clone(),
+        move |e| {
+            let _ = tx2.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    let spool = daemon::chat_run::Spool::start(
+        daemon::chat_run::spool_dir(&s.cwd, "x1"),
+        outputs.clone(),
+        move |e| {
+            let _ = tx.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    // The daemon's side: every request that arrives is answered.
+    let answering = {
+        let outputs = outputs.clone();
+        tokio::spawn(async move {
+            while let Some(ev) = rx.recv().await {
+                if let RunEvent::Output { output_id, .. } = ev {
+                    outputs.resolve(daemon::proto::RunOutputResult {
+                        run_id: "r1".into(),
+                        output_id,
+                        ok: true,
+                        result: Some(serde_json::json!({ "resolved": true })),
+                        error: None,
+                    });
+                }
+            }
+        })
+    };
+    let chat_run: Vec<String> = [
+        bin.join(daemon::chat_run::link_name())
+            .to_string_lossy()
+            .to_string(),
+        "resolve".into(),
+        "--event".into(),
+        "EV1".into(),
+        "--result".into(),
+        "ignored".into(),
+    ]
+    .into();
+    let exec = |command: Vec<String>, env: serde_json::Value| {
+        let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+        tokio::task::spawn_blocking(move || codex_exec(&codex, &args, &home, &cwd, &command, env))
+    };
+    let outside = outside_temp();
+    let target = outside.path().join("written.txt");
+    let write = exec(
+        vec![
+            "cmd.exe".into(),
+            "/c".into(),
+            // No quotes: the path has no space, and cmd.exe reads quotes its own way.
+            format!("echo x> {}", target.display()),
+        ],
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+    let pipe = exec(
+        chat_run.clone(),
+        serde_json::json!({ "CHAT_RUN_SOCKET": server.path().to_string_lossy() }),
+    )
+    .await
+    .unwrap();
+    let folder = exec(
+        chat_run,
+        serde_json::json!({ "CHAT_RUN_DIR": spool.path().to_string_lossy() }),
+    )
+    .await
+    .unwrap();
+    drop((server, spool));
+    let _ = tokio::time::timeout(Duration::from_secs(5), answering).await;
+    let outcome = |answer: &serde_json::Value| {
+        let stdout = answer["result"]["stdout"].as_str().unwrap_or_default();
+        if answer.get("error").is_some_and(|e| !e.is_null()) {
+            "the command was not started"
+        } else if answer["result"]["exitCode"] == 0 && stdout.contains("resolved") {
+            "chat-run answered"
+        } else if stdout.contains("sandbox.blocked") {
+            "chat-run named the sandbox"
+        } else {
+            "something else"
+        }
+    };
+    serde_json::json!({
+        "a write outside the working folder": {
+            "outcome": if write.get("error").is_some_and(|e| !e.is_null()) {
+                "the command was not started"
+            } else if target.exists() {
+                "the file was written: no sandbox was in effect"
+            } else {
+                "the command ran and the file was not written"
+            },
+            "answer": write,
+        },
+        "chat-run through the named pipe": { "outcome": outcome(&pipe), "answer": pipe },
+        "chat-run through the request folder": { "outcome": outcome(&folder), "answer": folder },
+    })
 }
 
 /// A Codex run always has full access, whatever `daemon.toml` says, so `chat-run` always works

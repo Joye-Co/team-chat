@@ -75,6 +75,14 @@ for (const w of [32, 88]) {
 }
 render(MASTER, join(LOGIN, "app-icon-88.png"), 88, 88);
 render(MASTER, join(LOGIN, "app-icon-88@2x.png"), 88, 88, 2);
+// The icon cropped to its body with no baked shadow (72 pt, 2x only), for light and dark surfaces.
+render(join(SRC, "icon-bare.svg"), join(LOGIN, "app-icon-72@2x.png"), 72, 72, 2);
+render(join(SRC, "icon-bare-dark.svg"), join(LOGIN, "app-icon-dark-72@2x.png"), 72, 72, 2);
+
+// 3b. The iPhone app icon (full bleed, 1024 px) and the homepage's icons (256 px, light and dark page).
+render(join(SRC, "icon-ios.svg"), join(ROOT, "apps/ios/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png"), 1024, 1024);
+render(MASTER, join(ROOT, "apps/website/src/img/icon.png"), 256, 256);
+render(join(ROOT, "docs/design/brand/icon-dark.svg"), join(ROOT, "apps/website/src/img/icon-dark.png"), 256, 256);
 
 // 4. DMG window background: 660 x 400 pt, one TIFF with the 1x and 2x images.
 const DMG = join(HERE, "dmg");

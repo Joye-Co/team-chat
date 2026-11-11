@@ -170,6 +170,117 @@ mod windows {
             .is_ok_and(|o| o.status.success())
     }
 
+    /// True where the user of this test has no logon session of its own (CI starts the test
+    /// as a standard user with other credentials). A task of the daemon runs only in its
+    /// user's logon session, so there the Task Scheduler registers it and never starts it.
+    fn no_logon_session() -> bool {
+        std::env::var_os("TC_NO_LOGON_SESSION").is_some()
+    }
+
+    /// The Task Scheduler's part, played by the test where the user has no logon session:
+    /// while the task is registered and no instance of it runs, run its actions in order
+    /// (the first to its end, the last stays), read from the definition that was registered.
+    /// The same rule as the task's triggers with "one instance only", once a second instead
+    /// of once a minute. It ends with the test.
+    struct Scheduler {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for Scheduler {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    /// (program, arguments) of each action of the task definition in `file`.
+    fn actions(file: &Path) -> Vec<(String, String)> {
+        let bytes = std::fs::read(file).unwrap();
+        let units: Vec<u16> = bytes[2..]
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let text = String::from_utf16_lossy(&units);
+        // The declaration names UTF-16; the text here is already decoded.
+        let text = text.replacen("encoding=\"UTF-16\"", "", 1);
+        let doc = roxmltree::Document::parse(&text).expect("the task definition is XML");
+        doc.descendants()
+            .filter(|n| n.tag_name().name() == "Exec")
+            .map(|exec| {
+                let part = |name: &str| {
+                    exec.children()
+                        .find(|c| c.tag_name().name() == name)
+                        .and_then(|c| c.text())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                (part("Command"), part("Arguments"))
+            })
+            .collect()
+    }
+
+    fn play_scheduler(name: &str, file: &Path) -> Option<Scheduler> {
+        use std::os::windows::process::CommandExt as _;
+        if !no_logon_session() {
+            return None;
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (stopped, name, file) = (stop.clone(), name.to_string(), file.to_path_buf());
+        let thread = std::thread::spawn(move || {
+            let mut running: Option<std::process::Child> = None;
+            while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_secs(1));
+                if running
+                    .as_mut()
+                    .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+                {
+                    continue;
+                }
+                running = None;
+                if !service::task_exists(&name) || !file.is_file() {
+                    continue;
+                }
+                let actions = actions(&file);
+                for (i, (program, arguments)) in actions.iter().enumerate() {
+                    // The scheduler starts an action without standard streams. A console host
+                    // that is given some takes them for a terminal to talk to, and ends when
+                    // its input ends: so it gets an input that stays open (the pipe lives as
+                    // long as the child value) and nowhere to write.
+                    let mut cmd = Command::new(program);
+                    cmd.raw_arg(arguments)
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null());
+                    let Ok(mut child) = cmd.spawn() else {
+                        continue;
+                    };
+                    if i + 1 < actions.len() {
+                        // To its end (`wait` would close the input first).
+                        let end = Instant::now() + Duration::from_secs(30);
+                        while matches!(child.try_wait(), Ok(None)) && Instant::now() < end {
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    } else {
+                        running = Some(child);
+                    }
+                }
+            }
+            if let Some(mut c) = running {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        });
+        Some(Scheduler {
+            stop,
+            thread: Some(thread),
+        })
+    }
+
     /// Removes the task when the test fails half way.
     struct Cleanup {
         name: String,
@@ -198,7 +309,7 @@ mod windows {
     /// (as the Task Scheduler can, while the first shuts down) ends at once and leaves the
     /// first one's pid file alone; with another config it runs.
     pub fn a_second_daemon_of_the_config_does_not_run() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = own_folder();
         let exe = tmp.path().join("stand-in-2.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
         let start = |dir: &str| {
@@ -265,7 +376,7 @@ mod windows {
     /// An install whose task cannot be registered leaves nothing: no definition file (the
     /// app reads it as "this computer is set up"), no repair copy, no folder.
     pub fn a_failed_install_leaves_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = own_folder();
         let dir = tmp.path().join("state");
         let exe = tmp.path().join("stand-in-3.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
@@ -283,6 +394,17 @@ mod windows {
             "nothing left: {:?}",
             std::fs::read_dir(&dir).map(|d| d.count())
         );
+    }
+
+    /// A folder for a test's program and state, where a person's programs are: under the
+    /// user's own local application data. Not the temp folder: other tools add their own
+    /// accounts to it (Codex's elevated sandbox gives its sandbox user write access there),
+    /// and a program in a folder another account can change is rightly refused.
+    fn own_folder() -> tempfile::TempDir {
+        match std::env::var_os("LOCALAPPDATA") {
+            Some(local) => tempfile::tempdir_in(local).unwrap(),
+            None => tempfile::tempdir().unwrap(),
+        }
     }
 
     /// A program that other users of the computer can replace is not registered: the task
@@ -309,7 +431,7 @@ mod windows {
     }
 
     pub fn the_task_keeps_the_daemon_running() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = own_folder();
         let dir = tmp.path().join("with space & more");
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("stand-in.exe");
@@ -326,6 +448,9 @@ mod windows {
         let file = service::install_task(&name, &exe, &config, &dir, true).expect("install");
         assert!(file.is_file());
         assert!(service::task_exists(&name));
+        // Where this user has no logon session the Task Scheduler never starts the task: the
+        // test starts its actions the way the scheduler would.
+        let _scheduler = play_scheduler(&name, &file);
         // Registered as written, with the logon trigger for this user's security id (not the
         // fallback without it).
         let definition: Vec<u16> = std::fs::read(&file).unwrap()[2..]
@@ -337,7 +462,7 @@ mod windows {
         assert!(first.console, "the daemon has a console (a headless one)");
 
         // One instance: asking for another start changes nothing.
-        assert!(schtasks(&["/Run", "/TN", &name]));
+        assert!(schtasks(&["/Run", "/TN", &name]) || no_logon_session());
         std::thread::sleep(Duration::from_secs(5));
         assert_eq!(read_state(&config).map(|r| r.pid), Some(first.pid));
 

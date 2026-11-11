@@ -253,6 +253,57 @@ pub fn disk(path: &Path) -> (u64, u64) {
     }
 }
 
+/// How long the machine was asleep (or this process was not run at all) between two ticks
+/// of a timer with the period `period` that came `between` apart: what is over the period,
+/// when that is more than a pause the scheduler or a busy machine explains. None for an
+/// ordinary tick.
+///
+/// A closed lid stops every clock a program can wait on, but not what the program measures
+/// afterwards: on Windows a monotonic clock counts the time asleep, on Unix a stopped process
+/// sees the time it was stopped. Whoever times "nothing happened for five minutes" or "the
+/// server has been silent" asks this first.
+pub fn slept(
+    between: std::time::Duration,
+    period: std::time::Duration,
+) -> Option<std::time::Duration> {
+    const LATE: std::time::Duration = std::time::Duration::from_secs(20);
+    (between > period + LATE).then(|| between - period)
+}
+
+/// How long the machine has been up, counting the time it was asleep, on a clock that a
+/// change of the date does not move (an NTP correction, a person setting the time). The
+/// clock a program asks "did the machine sleep since I last looked?": `Instant` does not
+/// count the sleep on Unix, and the date can jump for other reasons.
+/// Linux `CLOCK_BOOTTIME`, macOS `CLOCK_MONOTONIC` (its continuous time), Windows the tick
+/// count.
+pub fn since_boot() -> std::time::Duration {
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "linux")]
+        const CLOCK: libc::clockid_t = libc::CLOCK_BOOTTIME;
+        #[cfg(not(target_os = "linux"))]
+        const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
+        let mut t = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: the out pointer is a valid timespec.
+        if unsafe { libc::clock_gettime(CLOCK, &mut t) } != 0 {
+            return std::time::Duration::ZERO;
+        }
+        std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: plain call without arguments.
+        std::time::Duration::from_millis(unsafe {
+            windows_sys::Win32::System::SystemInformation::GetTickCount64()
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    std::time::Duration::ZERO
+}
+
 /// The 1, 5 and 15 minute load averages. Windows keeps none, so the daemon keeps its own
 /// ([`windows_load`]). The first call there measures for half a second and starts all three
 /// averages at what it saw, so the first report of a daemon (and `doctor`, which asks once) is
@@ -541,6 +592,37 @@ pub fn windows_plain_path(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The clock that counts sleep moves forward and does not stand still.
+    #[test]
+    fn the_time_since_boot_moves_forward() {
+        let a = since_boot();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let b = since_boot();
+        assert!(a > std::time::Duration::ZERO, "{a:?}");
+        assert!(
+            b > a && b - a < std::time::Duration::from_secs(5),
+            "{a:?} {b:?}"
+        );
+    }
+
+    /// A tick that comes on time, or a little late, is a tick; one that comes much later
+    /// than its period means the machine slept for the rest.
+    #[test]
+    fn a_tick_that_is_far_too_late_means_the_machine_slept() {
+        use std::time::Duration as D;
+        assert_eq!(slept(D::from_secs(15), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(0), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(34), D::from_secs(15)), None);
+        assert_eq!(
+            slept(D::from_secs(36), D::from_secs(15)),
+            Some(D::from_secs(21))
+        );
+        assert_eq!(
+            slept(D::from_secs(8 * 3600), D::from_secs(30)),
+            Some(D::from_secs(8 * 3600 - 30))
+        );
+    }
 
     /// A steady load of two busy processors is 2.0 after a few windows, on each average at
     /// its own pace, and falls back to nothing when the machine goes idle.

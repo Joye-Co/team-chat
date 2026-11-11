@@ -1,0 +1,76 @@
+{
+  "name": "jojo-friends avatar pack",
+  "version": "0.2.0",
+  "license": {
+    "code": "MIT",
+    "art": "CC-BY-4.0"
+  },
+  "attribution": "Jojo & Friends by Joye Huang, https://github.com/joyehuang/jojo-friends, CC BY 4.0",
+  "characters": [
+    "jojo",
+    "h02",
+    "h03",
+    "h04",
+    "h05",
+    "h06",
+    "o01",
+    "o02",
+    "o03",
+    "o04",
+    "o05",
+    "o06",
+    "o07",
+    "o08",
+    "o09",
+    "o10",
+    "o11",
+    "o12",
+    "o13",
+    "o14",
+    "o15",
+    "o16",
+    "o17",
+    "o18",
+    "o19",
+    "o20"
+  ],
+  "emotions": [
+    "calm",
+    "focus",
+    "think",
+    "puzzled",
+    "curious",
+    "happy",
+    "laugh",
+    "smug",
+    "shy",
+    "celebrate",
+    "surprised",
+    "angry",
+    "sleepy",
+    "aggrieved",
+    "cry",
+    "sob"
+  ],
+  "statuses": [
+    "idle",
+    "working",
+    "needs-input",
+    "success",
+    "error",
+    "offline"
+  ],
+  "sizes": [
+    16,
+    20,
+    24,
+    32,
+    48,
+    64,
+    128
+  ],
+  "files": {
+    "emotion": "<id>/<emotion>-<px>.svg",
+    "offline": "<id>/offline-<px>.svg"
+  }
+}

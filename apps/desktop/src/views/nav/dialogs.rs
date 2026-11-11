@@ -1248,6 +1248,9 @@ fn leave(services: &Services, group_id: &str, cx: &mut App) {
             .into_iter()
             .find(|g| g.id != group_id)
             .map(|g| g.id);
+        services
+            .nav
+            .update(cx, |nav, _| nav.forget_gone(|g, _| g != group_id));
         services.nav.update(cx, |nav, cx| match next {
             Some(g) => nav.open_group_chat(g, cx),
             None => {

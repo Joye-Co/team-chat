@@ -26,13 +26,13 @@ Member = {
   level: "owner" | "member"    // owner = full admin
   avatarUrl?: string | null
   deactivated?: boolean
-  character?: CharacterId | null // the avatar's character from the optional character pack; absent or null = none
+  character?: CharacterId | null // the avatar's character (Jojo & Friends avatar pack); absent or null = none
   reportsTo?: string           // 1.1: the member it reports to (汇报给); absent = nobody
   weeklyBudgetCents?: number   // 1.1: weekly spending limit in US cents (限额), 0..100,000,000; absent = none
 }
 
 CharacterId = "jojo" | "h02" | "h03" | "h04" | "h05" | "h06"
-            | "o01" | "o02" | ... | "o20"   // the 26 character pack ids, lower case
+            | "o01" | "o02" | ... | "o20"   // the 26 Jojo & Friends character ids, lower case
 
 Group = {
   id: string
@@ -477,6 +477,7 @@ file's group.
 | `GET /v1/files/:id/content` | | the bytes; supports `Range` (206) |
 | `PUT /v1/members/:id/avatar` | raw image bytes | `Member` (new `avatarUrl`) |
 | `GET /v1/members/:id/avatar` | | the image |
+| `DELETE /v1/members/:id/avatar` | | `Member` (`avatarUrl: null`) |
 
 ```ts
 FileMeta = { id, groupId, topicId?: string | null, name, size, mime, sha256, width?, height?,
@@ -510,7 +511,9 @@ Rules:
   `image/webp`. Files are never served as `text/html` inline from the API origin.
 - Avatars: self or an owner; `image/png`, `image/jpeg` or `image/webp`, at most 1 MiB. The server
   sets `avatarUrl` to `/v1/members/:id/avatar?v=<n>` (absolute) and pushes a `directory` frame with
-  the member. Reading an avatar needs a member token.
+  the member. Reading an avatar needs a member token. `DELETE` (same callers) removes the image,
+  sets `avatarUrl` to null and pushes the member again; a member without one gets it unchanged.
+  An AI member with an avatar is drawn with it instead of its character.
 
 ## 产出 (artifacts)
 
@@ -568,7 +571,7 @@ Rules:
   connections. Every change is audited and pushed to every connection as `directory` with the
   changed `members`.
 - `character` is owner only (`forbidden` for a member, also on self); `null` clears it. Only
-  the 26 character pack ids are accepted (`invalid` otherwise); a new id is a protocol change,
+  the 26 Jojo & Friends character ids are accepted (`invalid` otherwise); a new id is a protocol change,
   because clients bundle the images and reject unknown ids. Clients draw the character with the
   member's live status (idle, working, needs-input, success, error, offline); members without
   one keep their initial avatar. `welcome`, `directory`, `GET /v1/members` and `GET /v1/me`
@@ -904,7 +907,10 @@ stops trying, and the topic gets one note.
 
 - **Silent 5 minutes**: one `run.input` to the CLI (`inputId` `desk-nudge-…`) asking where it
   stands. It is not a member's message, so it never starts a follow-up run. Any event clears it.
-- **Silent 10 minutes, the daemon's `stalled` report, or the machine gone** (no heartbeat for
+  A run with a `tool.call` that has no `tool.result` yet waits for a step it started (a build, a
+  test run): it gets no nudge, and it counts as silent only after 30 minutes. A run out of tries
+  gets no nudge either.
+- **Silent 10 minutes (30 with a step open), the daemon's `stalled` report, or the machine gone** (no heartbeat for
   2 minutes, or `runLost` past the lease): the run is cancelled without a message (`cancelled`,
   summary `restarted: …`), and its request starts again with the same work order on a healthy
   machine. The topic hears nothing. Out of tries, the old behavior applies: `blocked` with one

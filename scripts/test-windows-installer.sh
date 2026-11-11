@@ -80,6 +80,18 @@ check "silent install" silent_install "$SETUP"
 check "app installed" test -f "$EXE"
 check "update helper installed" test -f "$DIR/$SLUG-update.exe"
 check "uninstaller installed" test -f "$DIR/uninstall.exe"
+# The names the product had before (product.json formerNames) stay as second names of the
+# app's program: the update helper of an app installed under such a name starts
+# <former name>.exe after the installer, and rolls the update back when it is missing.
+FORMER=()
+while IFS= read -r former; do [ -z "$former" ] || FORMER+=("$former"); done < <(jq -r '.formerNames // [] | .[]' "$ROOT/product.json" | tr -d '\r')
+former_names_hold() {
+  for former in ${FORMER[@]+"${FORMER[@]}"}; do
+    check "former name $former.exe is the app's program" cmp -s "$EXE" "$DIR/$former.exe"
+    check "no Start menu shortcut of $former" test ! -e "$(dirname "$(start_menu_shortcut)")/$former.lnk"
+  done
+}
+former_names_hold
 # The installed update helper says whether an app of the previous release would take this
 # installer: the rule of a real update, asked before the release goes out.
 if [ -n "$SAME_AS" ]; then
@@ -87,6 +99,8 @@ if [ -n "$SAME_AS" ]; then
 fi
 if [ "${DAEMON:-1}" = 1 ]; then check "machine daemon installed" test -f "$DIR/$SLUG-daemon.exe"; fi
 printf 'install log:\n'; sed 's/^/      /' "$DIR/install.log" 2>/dev/null || true
+# The installer refuses a Windows older than the one the docs promise (10 version 22H2).
+check "the installer asks for Windows 10 22H2" grep -q '^!define MIN_BUILD 19045$' "$ROOT/scripts/windows/installer.nsi"
 check "install log: version" grep -qx "version $VERSION" <(tr -d '\r' <"$DIR/install.log")
 # The runtime is there already (found) or the bootstrapper put it there (exit 0).
 check "install log: WebView2 runtime" grep -Eq '^webview2 (found [0-9.]+|bootstrapper exit 0)$' <(tr -d '\r' <"$DIR/install.log")
@@ -107,7 +121,9 @@ check "icon resource" is "$(ARG1="$(cygpath -w "$EXE")" \
   ARG2='[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint ExtractIconExW(string file, int index, IntPtr[] large, IntPtr[] small, uint count);' \
   ps_out 'Add-Type -Namespace W -Name Shell -MemberDefinition $env:ARG2; [W.Shell]::ExtractIconExW($env:ARG1, -1, $null, $null, 0) -ge 1')" True
 if [ "${EXPECT_SIGNED:-0}" = 1 ]; then
-  for f in "$EXE" "$DIR/$SLUG-update.exe" "$DIR/uninstall.exe"; do
+  signed=("$EXE" "$DIR/$SLUG-update.exe" "$DIR/uninstall.exe")
+  if [ "${DAEMON:-1}" = 1 ]; then signed+=("$DIR/$SLUG-daemon.exe"); fi
+  for f in "${signed[@]}"; do
     check "signature of $(basename "$f")" is "$(signature_status "$f")" Valid
   done
 fi
@@ -173,9 +189,22 @@ if [ "${SKIP_WINDOW:-0}" != 1 ]; then
   [ "$RC" = 0 ] || tail -n 20 "$WORK/screenshot.log"
 fi
 
+# An install made under a former name: its program and its shortcut are there, the app's own
+# program is not. The installer over it leaves the new program under both names.
+for former in ${FORMER[@]+"${FORMER[@]}"}; do
+  rm -f "$DIR/$former.exe"
+  echo "the program of an earlier version" >"$DIR/$former.exe"
+  echo "an earlier shortcut" >"$(dirname "$(start_menu_shortcut)")/$former.lnk"
+done
 # A second install over the first works and keeps the folder.
 check "reinstall over itself" silent_install "$SETUP"
 check "still installed" test -f "$EXE"
+former_names_hold
+for former in ${FORMER[@]+"${FORMER[@]}"}; do
+  "$DIR/$former.exe" --selftest-installed --report "$(cygpath -m "$WORK/installed-$former.json")" && RC=0 || RC=$?
+  check "the app starts as $former.exe" is "$RC" 0
+  check "$former.exe reports this version" is "$(jq -r .version "$WORK/installed-$former.json" 2>/dev/null)" "$VERSION"
+done
 
 # What a person who used the app has besides the install: 登录时打开 turned on (the Run value
 # and Task Manager's record of it), the caches, and their data. The uninstall removes the

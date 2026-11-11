@@ -131,9 +131,9 @@ mod linux {
     }
 
     fn mount_share(host_ip: &str, guest_ip: &str, m: &Mount) -> std::io::Result<()> {
-        std::fs::create_dir_all(&m.path)?;
+        std::fs::create_dir_all(m.target())?;
         let source = cstr(&format!("{host_ip}:{}", m.path))?;
-        let target = cstr(&m.path)?;
+        let target = cstr(m.target())?;
         let fstype = cstr("nfs4")?;
         let data = cstr(&format!(
             "vers=4.2,addr={host_ip},clientaddr={guest_ip},hard,proto=tcp,timeo=600,retrans=2"
@@ -152,7 +152,7 @@ mod linux {
         };
         if rc != 0 {
             let e = std::io::Error::last_os_error();
-            return Err(std::io::Error::other(format!("mount {}: {e}", m.path)));
+            return Err(std::io::Error::other(format!("mount {}: {e}", m.target())));
         }
         Ok(())
     }
@@ -279,7 +279,8 @@ mod linux {
         send: &(impl Fn(Tag, &[u8]) -> std::io::Result<()> + Clone + Send + 'static),
     ) -> std::io::Result<(i32, Option<std::process::ChildStdin>)> {
         let mut mounts = start.mounts.clone();
-        mounts.sort_by_key(|m| m.path.len());
+        // Outer folders first: the CLIs' folders go on top of the bot's home folder.
+        mounts.sort_by_key(|m| m.target().len());
         for m in &mounts {
             mount_share(&start.host_ip, &start.guest_ip, m)?;
         }

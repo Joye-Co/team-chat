@@ -451,6 +451,19 @@ describe("avatars", () => {
     const tooBig = await raw(`/v1/members/${member.id}/avatar`, { method: "PUT", token: member.token, body: big });
     expect(tooBig.status).toBe(413);
   });
+
+  it("removes an avatar for the member or an owner", async () => {
+    const { owner, member, outsider } = await setup();
+    await raw(`/v1/members/${member.id}/avatar`, { method: "PUT", token: owner.token, body: PNG });
+    expect((await raw(`/v1/members/${member.id}/avatar`, { method: "DELETE", token: outsider.token })).status).toBe(403);
+    const del = await raw(`/v1/members/${member.id}/avatar`, { method: "DELETE", token: owner.token });
+    expect(del.status).toBe(200);
+    expect(((await del.json()) as any).avatarUrl).toBeNull();
+    expect((await raw(`/v1/members/${member.id}/avatar`, { token: member.token })).status).toBe(404);
+    expect((await api("/v1/me", { token: member.token })).body.avatarUrl).toBeNull();
+    const again = await raw(`/v1/members/${member.id}/avatar`, { method: "DELETE", token: member.token });
+    expect(again.status).toBe(200);
+  });
 });
 
 async function gzip(text: string): Promise<Uint8Array> {

@@ -134,13 +134,31 @@
 按钮、内容整体下移 32、字体和图标集本身、表情的画法、AI 成员头像（开源构建没有私有图包，CI 上是字母）、
 默认服务器（开源构建没有，登录的出错场景停在「连接服务器」这一步）、表情的常用顺序（Mac 上读到了本机真实的使用记录）。
 
-失败的场景：
+每个场景一行的明细在 [interface-scenes.zh.md](interface-scenes.zh.md)（270 个场景：Mac、Windows、第一轮看到的差别、现在的状态）。
+
+修完 #156 到 #167 之后的一轮是 run 43000800678（`windows_scenes=all`，产物 `windows-screenshots`）。失败的场景：
 
 | 场景 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
 | `artifact_ask_pending`、`state-hover-settings-row` | 失败 | 失败 | 两边都失败，和 Windows 无关（`main` 上就是这样） |
-| `web-embed-scrolled` | 通过 | 失败：「the inline page did not load」 | 待修 |
-| `live-takeover`（浅色） | 这次没等到帧（偶发） | 通过 | 一样 |
+| `web-embed-scrolled` | 通过 | 全量那一轮失败：「the inline page did not load」；改完后通过（run 43011129892） | 已修（#167） | 场景打开时停在长话题的末尾，页面有没有一条边露在视口里取决于内容区高度；Windows 的内容区矮 32，页面一开始完全在视口外，不算「显示」。场景现在先把页面滚进来。和应用本身无关 |
+| `live-takeover`（浅色） | 那一次没等到帧（偶发） | 通过 | 一样 |
+
+已修的行对应的截图（都在上面那个产物里，下载后看过）：
+
+| 改了什么 | 看哪张 |
+| --- | --- |
+| 500 字重不再是粗体（工具栏按钮、表头、标签、头像字母） | `main-light`、`core-side-chat-light`、`group-chat-info-light` |
+| 对话框、查看器、命令面板挂在工具栏行下面 | `new-topic-light`、`leave-group-light`、`diagram-viewer-light`、`switcher-light`、`group-purpose-light` |
+| 团队管理：页标题是黑的、侧栏末行完整、预算虚线 | `admin-usage-light`、`admin-usage-dark` |
+| 悬停落在对的行；没有标题条的窗口不偏移 | `state-hover-message-light`、`state-hover-page-row-light`、`state-card-tooltip-light`、`state-card-option-hover-light` |
+| 页脚的键写成 Enter、Esc | `switcher-light`、`ask-light` |
+| 页面的细滚动条、等宽字是 Consolas | `artifact-pane-v2-light`、`artifact-v2-light` |
+| 页面跟随深色 | `artifact-page-back-dark` |
+| 非活动窗口的标题条变淡 | `window-inactive-dark` 对比 `main-dark`（标题条那 32 行的像素不同） |
+| 产出窗口：标题栏颜色、应用图标、下拉框和展开的列表、页面深色 | `artifact-window-light`、`artifact-window-dark`、`artifact-window-dark-versions`（真应用，`desktop --artifact-window`） |
+| 页面有焦点时的应用快捷键、打字算操作、右键菜单、链接对话框 | 没有截图：`artifact-view-windows` 产物里的 `embed/report.json`（`hostKeyGivesTheHostTheKeyboard`、`pageHearsNeitherTheHostKeyNorWhatFollows`、`typedKeyIsPageInput`）和 `win.rs` 的测试 |
+| 截图、粘贴、复制图片、下载目录、`vnc:` | 没有截图：`ui/clipboard.rs`、`views/composer/tests.rs`、`win.rs` 的测试（Windows CI 上跑） |
 
 看到的差别（同一个原因的合成一行）：
 
@@ -159,18 +177,18 @@
 | 内嵌页面的滚动条 | 没有（浮动的细滚动条） | Chromium 的经典滚动条，带箭头，深色下是白的 | 已修（#162） | 见第 3 节 |
 | 内嵌页面里的等宽字 | 等宽西文字体 | 中文系统上落到宽的中文等宽字体（页面只写了 `Menlo, monospace`） | 已修（#162） | 页面是给两个系统写的，常常只写苹果的字体名。Windows 上给每个页面注入字体别名：`-apple-system`、`PingFang SC`、`Menlo`、`SF Mono` 等指到 Segoe UI、微软雅黑、Cascadia Mono、Consolas |
 | 内嵌页面的深色（`artifact-page-back` 深色） | 深色 | 白底 | 已修（#162） | 除了 profile 的设置，再直接设这个页面的 `prefers-color-scheme`（DevTools 协议） |
-| 内嵌页面偶尔是空白（`web-embed` 右侧面板、`compose-extend` 浅色） | 有内容 | 截图时页面还没画出来 | 待修 | 先确认是不是只是 CI 上软件渲染慢 |
-| 页面里的音频控件（`web-embed-scrolled`） | WebKit 的深色控件条 | Chromium 默认的控件，深色下是白的 | 待修（#162） | 页面的 `color-scheme` 跟随主题 |
-| 产出缩略图（`artifacts-grid`） | 整页缩小 | 页面顶部被裁掉，右边有一条滚动条 | 待修（#162） | |
+| 内嵌页面在截图里是空白（第一轮的 `web-embed`、`compose-extend`） | 有内容 | 截图那一刻页面还没画出来 | 已修（#171） | 是截图抢在页面前面，不是用户会看到的空白：从屏幕上读、等 4 秒的 6 张（`screen/web-embed-*`、`screen/artifact-pane-v2-*`、`screen/compose-extend-*`）页面全部在。截图自测现在等每个显示着的页面画完第一帧再截（页面用两次 `requestAnimationFrame` 报告，只在 Windows 上需要）。CI 没有显卡，整个进程的第一个页面最长用了 46 秒，等待放宽到 60 秒并记录用时；真机上的用时见第 7 节 |
+| 页面里的音频控件（`web-embed`） | WebKit 的深色控件条 | Chromium 自己的控件 | 已修（#162）；样子没有对应 | 页面的 `color-scheme` 和 `prefers-color-scheme` 跟随主题，深色下控件是深色（`screen/web-embed-dark`）。控件本身是两个浏览器引擎各自的，长得不一样 |
+| 产出缩略图（`artifacts-grid`） | 页面上一次显示时的样子，缩小放进格子 | 同样的做法；第一轮里右边有一条滚动条，起始位置比 Mac 低一段 | 滚动条已修（#171）；起始位置真机确认 | 缩略图就是页面上一次在屏幕上时的快照。滚动条：页面里的滚动条改成只在指针在页面上时出现，快照里不再有。起始位置不同是因为两边「上一次显示」时页面滚动到的位置不同，我没有查到是哪个场景滚动了它；真机上看第 7 节第 15 条 |
 | 群资料里人的头像（`group-chat-info`） | 字母是常规字重 | 字母是粗体，整个圆看起来发黑 | 已修（#156） | 同第一行（500 字重） |
 | 表情 | Apple Color Emoji | Segoe UI Emoji，同样大小的格子里图形略小一点，样子不同 | 一样 | 系统的表情字体 |
 | 「群说明」等设置里的窗口高度、设置的标题出现两次、设置的分页没有文字 | | 设置窗口比内容矮 32，最后一行被切 | 系统集成清单 | 已告知（`views/settings` 归那边） |
 | Tab 键先走到窗口里的菜单栏 | 菜单不在窗口里 | 焦点环落在菜单「显示」上 | 系统集成清单 | 已告知：Windows 的菜单用 Alt 进入，不该在 Tab 顺序里 |
 | 文件右键菜单里的「快速查看」、手动安装更新的说明里的「访达」「应用程序」 | | Mac 的说法留在 Windows 上 | 系统集成、发布清单 | 已告知 |
 | 非活动窗口的标题条（`window-inactive`） | 红绿灯变灰 | 工具栏和标题变灰了，标题条里的菜单和窗口按钮没有变 | 已修（#162） | 非活动窗口的菜单和窗口按钮变淡 |
-| 卡片样例窗、`interact_*`、`artifact-quiet-page` 这些自测专用的窗口 | 有红绿灯 | 没有标题条 | 待修（小） | 只在自测里出现的窗口，也套上标题条，截图才和别的窗口一致 |
+| 卡片样例窗、`interact_*`、`artifact-quiet-page` 这些自测专用的窗口 | 有红绿灯 | 没有标题条 | 已修（#171） | 这些窗口也套上标题条（`window_chrome::Framed`），和应用里的窗口一致；场景 `cards-v2-states`、`interact_notes`、`artifact-quiet-page` |
 | 全角标点「」（）【】｜“” | 苹方的标点靠近文字 | 微软雅黑的标点占满一格，前后空隙大，个别行因此多折一行 | 没有对应 | 字体本身的差别 |
-| 文字宽度：个别句子在 Windows 上多折一行（登录页副标题、更新说明、卡片提示） | | 微软雅黑比苹方宽 | 没有对应 | 布局是按内容自适应的；`whats-new` 的脚注被切掉要修（待修） |
+| 文字宽度：个别句子在 Windows 上多折一行（登录页副标题、更新说明、卡片提示） | | 微软雅黑比苹方宽 | 一样（没有被切的） | 布局按内容自适应，多折一行时下面的内容跟着下移。逐个看过会折行的场景（`login-email`、`whats-new`、`update-notes`、`interact_report_rev1`、`topic`）：没有文字被切或重叠。第一轮里 `whats-new` 的脚注被切是当时那一版更新说明更长；现在的内容在两边都完整（和这台 Mac 上重新截的图比过），弹窗本身有最大高度和滚动 |
 | 内容区矮 32 带来的：消息列表第一行被日期标签压住、右侧面板最后一块看不全 | | 窗口同样大时内容少 32 | 一样（标题栏差别） | 和把 Mac 窗口拉矮 32 是同一个结果 |
 | 文字边缘 | 灰度抗锯齿 | ClearType 的彩色边 | 一样 | Windows 自己的文字渲染 |
 | 图（Mermaid）排版略大、个别标签有灰框 | | Chromium 和 WebKit 量字的差别 | 真机 | |
@@ -219,3 +237,8 @@ CI 是 Windows Server 2025、100% 缩放、软件渲染、没有人操作。下�
     Segoe UI，两者一样重。
 12. **图**：流程图、时序图在话题里显示完整，文字不被节点边框切掉；查看器里 Ctrl 加滚轮、Ctrl+=、Ctrl+-、
     Ctrl+0 和小键盘的 + - 都能缩放。
+13. **第一次打开页面**：启动应用后第一次打开带页面的话题或产出，页面应该在一两秒内出现（CI 的软件渲染
+    下第一个页面最长用了 46 秒，之后的是 0 到 3 秒）。
+14. **输入框的光标**：点进任何输入框都有闪烁的光标（截图里 Windows 的输入框多数没有光标，因为自测的
+    窗口不一定拿得到前台）。
+15. **产出缩略图**：打开一个页面产出看一眼再回到产出列表的图标视图，缩略图应该是页面从顶部开始的样子。

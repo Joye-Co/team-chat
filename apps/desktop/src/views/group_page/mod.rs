@@ -694,8 +694,10 @@ impl Render for GroupPage {
                 ));
             }
         }
+        // One scroll place per 群: GPUI keeps it by element id, so a shared
+        // id opened every 群 at the place the last one was left.
         let list = div()
-            .id("group-main")
+            .id(gpui::ElementId::Name(format!("group-main-{g}").into()))
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()

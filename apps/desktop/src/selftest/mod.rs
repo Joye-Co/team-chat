@@ -71,6 +71,55 @@ struct Options {
     settle: Duration,
 }
 
+/// Waits until every embedded page that is on screen has painted. "Ready" is the page's
+/// load; its first picture comes later, by seconds on a computer without a graphics card
+/// (the Windows CI runner), and a capture in between shows an empty frame where a person
+/// would see the page a moment later. A page tells that it painted with two animation
+/// frames (the browser runs them only when it draws). Windows only: WebKit's views are
+/// part of the window's own layer tree and are there with its next frame.
+async fn wait_for_first_paint(cx: &mut AsyncApp) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    const MARK: &str = "window.__tcPainted || (window.__tcPainted = 0, \
+        requestAnimationFrame(function () { requestAnimationFrame(function () { \
+        window.__tcPainted = 1; }); })); String(window.__tcPainted)";
+    let waiting = Instant::now();
+    while waiting.elapsed() < Duration::from_secs(15) {
+        let pages: Vec<_> = cx.update(|cx| {
+            crate::ui::web_embed::live(cx)
+                .into_iter()
+                .filter(|page| page.read(cx).shown())
+                .collect()
+        });
+        let mut waiting_for = 0;
+        for page in &pages {
+            let (tx, rx) = futures::channel::oneshot::channel();
+            cx.update(|cx| {
+                page.read(cx).evaluate_text(MARK, move |text| {
+                    let _ = tx.send(text);
+                })
+            });
+            if rx.await.ok().flatten().as_deref() != Some("1") {
+                waiting_for += 1;
+            }
+        }
+        if waiting_for == 0 {
+            // The frame the page drew still has to reach the screen.
+            if !pages.is_empty() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(400))
+                    .await;
+            }
+            return;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+    eprintln!("an embedded page did not paint within 15 s");
+}
+
 /// How long a scene's native content (a web page) may take to draw.
 const NATIVE_READY: Duration = Duration::from_secs(60);
 
@@ -530,6 +579,7 @@ async fn shoot(
                 scene.name,
                 waiting.elapsed().as_secs_f32()
             );
+            wait_for_first_paint(cx).await;
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
@@ -548,6 +598,8 @@ async fn shoot(
             let _ = next_frame(handle, cx).await;
             let _ = next_frame(handle, cx).await;
         }
+        // Also for a scene without a readiness check of its own (a page in a card).
+        wait_for_first_paint(cx).await;
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;

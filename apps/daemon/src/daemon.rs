@@ -76,6 +76,9 @@ pub struct Daemon {
     welcomed: bool,
     connecting: bool,
     backoff_ms: u64,
+    /// When the last heartbeat tick came, on the clock that counts the time the machine was
+    /// asleep and that a change of the date does not move ([`crate::sys::since_boot`]).
+    last_beat: Duration,
     next_connect: tokio::time::Instant,
     last_rx: Instant,
     link_tx: mpsc::UnboundedSender<LinkEvent>,
@@ -124,6 +127,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         welcomed: false,
         connecting: false,
         backoff_ms: 500,
+        last_beat: crate::sys::since_boot(),
         next_connect: tokio::time::Instant::now(),
         last_rx: Instant::now(),
         link_tx,
@@ -876,6 +880,24 @@ impl Daemon {
     }
 
     fn heartbeat(&mut self, hb: Duration) {
+        // The machine was asleep since the last tick: the connection it had is dead on the
+        // server's side, whatever the socket still says. Connect again now, not after three
+        // silent heartbeats or what is left of a long wait between attempts.
+        let now = crate::sys::since_boot();
+        let between = now.saturating_sub(self.last_beat);
+        self.last_beat = now;
+        if let Some(asleep) = crate::sys::slept(between, hb) {
+            log!(
+                "the machine was asleep for {} s: connecting again",
+                asleep.as_secs()
+            );
+            if self.link.is_some() || self.connecting {
+                self.drop_link("the machine was asleep");
+            }
+            self.backoff_ms = 500;
+            self.next_connect = tokio::time::Instant::now();
+            return;
+        }
         if self.link.is_some() && self.last_rx.elapsed() > hb * 3 {
             self.drop_link("no frames from server");
             return;

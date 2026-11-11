@@ -10,7 +10,7 @@
 //! - Bots are rounded-square tiles (radius 0.25 x size) in the bot's tint,
 //!   with its character at its live status fitted inside
 //!   (`characters::tile`). A member whose character has no art in this
-//!   build (no optional character pack) draws its initial, as if it had no
+//!   build draws its initial, as if it had no
 //!   character: a bot in its squircle, a person in its circle. The status shows as a pip with the size and
 //!   offset of a person's presence dot, only for working, needs-input and
 //!   error; callers that already show a status label skip `presence`.
@@ -120,7 +120,7 @@ impl MemberAvatar {
         self
     }
 
-    /// Draws the character at a fixed status.
+    /// Draws the character at a fixed status, with its default face.
     pub fn status(mut self, status: CharacterStatus) -> Self {
         self.status_override = Some(status);
         self
@@ -151,12 +151,50 @@ impl RenderOnce for MemberAvatar {
                 .bg(color)
         };
 
+        // The provider gives the downloaded file; a remote URL is not drawn (it needs the
+        // token), so the fallback shows until the file is on disk.
+        let local = self
+            .photo
+            .as_deref()
+            .map(|p| p.strip_prefix("file://").unwrap_or(p))
+            .filter(|p| is_local_file(p))
+            .map(str::to_string);
+
+        // An AI member with an uploaded photo: the photo in the agent squircle,
+        // in place of its character.
+        if self.bot
+            && let Some(path) = &local
+        {
+            return div()
+                .relative()
+                .flex_none()
+                .size(size)
+                .when(self.dimmed, |el| el.opacity(0.5))
+                .child(
+                    div()
+                        .size(size)
+                        .rounded(theme::radius::bot(size))
+                        .bg(k.avatar_bg)
+                        .shadow(k.tile_edge())
+                        .when(self.selected, |el| el.border_1().border_color(k.tile_ring))
+                        .overflow_hidden()
+                        .child(
+                            Avatar::new()
+                                .src(std::path::PathBuf::from(path))
+                                .size(size)
+                                .border_0()
+                                .rounded(theme::radius::bot(size)),
+                        ),
+                )
+                .into_any_element();
+        }
+
         // Bots: a tinted tile with the fitted character.
         if self.bot || self.character.is_some() {
-            let status = match (&self.character, self.status_override) {
-                (_, Some(s)) => s,
-                (Some((_, member)), None) => StatusBoard::status(cx, member),
-                (None, None) => CharacterStatus::Idle,
+            let look: characters::Look = match (&self.character, self.status_override) {
+                (_, Some(s)) => s.into(),
+                (Some((_, member)), None) => StatusBoard::look(cx, member),
+                (None, None) => CharacterStatus::Idle.into(),
             };
             // v3: the named member tint (`--c-<name>`), by name when it is
             // a roster name, else by the roster character, else by id.
@@ -201,7 +239,7 @@ impl RenderOnce for MemberAvatar {
                     )
                     .into_any_element();
             };
-            let art = characters::tile::tile_image(*c, status, size, window.scale_factor())
+            let art = characters::tile::tile_image(*c, look, size, window.scale_factor())
                 .into_any_element();
             let _ = (self.show_status, surface, &dot);
             return div()
@@ -229,14 +267,6 @@ impl RenderOnce for MemberAvatar {
         let text = monogram(&self.name, size);
         let font = initial_size(size);
         let line = size;
-        // The provider gives the downloaded file; a remote URL is not drawn (it needs the
-        // token), so the monogram shows until the file is on disk.
-        let local = self
-            .photo
-            .as_deref()
-            .map(|p| p.strip_prefix("file://").unwrap_or(p))
-            .filter(|p| is_local_file(p))
-            .map(str::to_string);
         let face = match local {
             Some(path) => Avatar::new()
                 .src(std::path::PathBuf::from(path))

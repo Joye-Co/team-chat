@@ -37,6 +37,8 @@ SetCompressor /SOLID lzma
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
 !define APP_ID_KEY "Software\Classes\AppUserModelId\${APP_ID}"
 !define SCHEME_KEY "Software\Classes\${SCHEME}"
+; Windows 10 version 22H2.
+!define MIN_BUILD 19045
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 !define STARTUP_APPROVED_KEY "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 ; The WebView2 Runtime's entry in Edge Update.
@@ -75,8 +77,8 @@ VIAddVersionKey /LANG=0 "ProductVersion" "${VERSION}"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
-LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10 或更高版本。"
-LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 or later."
+LangString NeedWindows10 ${LANG_SIMPCHINESE} "${NAME} 需要 64 位的 Windows 10（22H2）或 Windows 11。请先更新 Windows。"
+LangString NeedWindows10 ${LANG_ENGLISH} "${NAME} needs 64-bit Windows 10 (version 22H2) or Windows 11. Update Windows first."
 LangString NeedWindows11OnArm ${LANG_SIMPCHINESE} "在 ARM 芯片的电脑上，${NAME} 需要 Windows 11（Windows 10 不能运行 64 位 x86 程序）。"
 LangString NeedWindows11OnArm ${LANG_ENGLISH} "On a computer with an ARM processor, ${NAME} needs Windows 11 (Windows 10 cannot run 64-bit x86 programs)."
 LangString QuitAppFirst ${LANG_SIMPCHINESE} "${NAME} 还在运行。请先退出，再点「重试」。"
@@ -92,15 +94,15 @@ Var Log
   ${EndIf}
 !macroend
 
-; Stops until the app's program can be written, which means it does not run. A silent run
-; does not wait: it ends with exit code 2.
-!macro CheckAppClosed
+; Stops until the program FILE of the app can be written, which means it does not run. A silent
+; run does not wait: it ends with exit code 2.
+!macro CheckClosed FILE
   ${Do}
-    ${IfNot} ${FileExists} "$INSTDIR\${APP_EXE}"
+    ${IfNot} ${FileExists} "$INSTDIR\${FILE}"
       ${ExitDo}
     ${EndIf}
     ClearErrors
-    FileOpen $0 "$INSTDIR\${APP_EXE}" a
+    FileOpen $0 "$INSTDIR\${FILE}" a
     ${IfNot} ${Errors}
       FileClose $0
       ${ExitDo}
@@ -109,6 +111,39 @@ Var Log
     Abort
   ${Loop}
 !macroend
+
+; The names the product had before (product.json formerNames). An app installed under one of
+; them has that name in its update helper, its shortcut and its sign-in entry: the helper
+; starts <former name>.exe after the installer and rolls the update back when that file is
+; missing. So every former name stays as a second name of the app's program, and its Start
+; menu shortcut goes. FORMER_NSH defines the macro FormerNames, which runs its argument (one
+; of the macros below) once for each former name.
+!macro FormerNameClosed OLD
+  !insertmacro CheckClosed "${OLD}.exe"
+!macroend
+!macro FormerNameInstall OLD
+  Delete "$INSTDIR\${OLD}.exe"
+  ; A hard link: the same file under a second name, no second copy on the disk.
+  System::Call 'kernel32::CreateHardLinkW(w "$INSTDIR\${OLD}.exe", w "$INSTDIR\${APP_EXE}", p 0) i .r1'
+  ${If} $1 == 0
+    CopyFiles /SILENT "$INSTDIR\${APP_EXE}" "$INSTDIR\${OLD}.exe"
+    !insertmacro Log "former name ${OLD}.exe: copy"
+  ${Else}
+    !insertmacro Log "former name ${OLD}.exe: link"
+  ${EndIf}
+  Delete "$SMPROGRAMS\${OLD}.lnk"
+!macroend
+!macro FormerNameUninstall OLD
+  Delete "$INSTDIR\${OLD}.exe"
+  Delete "$SMPROGRAMS\${OLD}.lnk"
+  DeleteRegValue HKCU "${RUN_KEY}Once" "${OLD}.update-recovery"
+!macroend
+!ifdef FORMER_NSH
+  !include "${FORMER_NSH}"
+!else
+  !macro FormerNames ACTION
+  !macroend
+!endif
 
 Function .onInit
   StrCpy $IsUpdate "0"
@@ -119,8 +154,11 @@ Function .onInit
   ${IfNot} ${Errors}
     StrCpy $IsUpdate "1"
   ${EndIf}
+  ; 64-bit Windows 10 version 22H2 (build 19045) or later, as docs/INSTALL.md says: the
+  ; oldest Windows 10 that still gets fixes, and the one the app is built against. Every
+  ; Windows 11 has a higher build.
   ${IfNot} ${RunningX64}
-  ${OrIfNot} ${AtLeastWin10}
+  ${OrIfNot} ${AtLeastBuild} ${MIN_BUILD}
     MessageBox MB_OK|MB_ICONSTOP "$(NeedWindows10)" /SD IDOK
     Abort
   ${EndIf}
@@ -136,7 +174,8 @@ FunctionEnd
 Section "Install"
   ; The update helper has waited for the app and emptied the folder already.
   ${If} $IsUpdate == "0"
-    !insertmacro CheckAppClosed
+    !insertmacro CheckClosed "${APP_EXE}"
+    !insertmacro FormerNames FormerNameClosed
   ${EndIf}
 
   SetOutPath "$INSTDIR"
@@ -203,6 +242,8 @@ Section "Install"
     !endif
   ${EndIf}
 
+  !insertmacro FormerNames FormerNameInstall
+
   ; Start menu shortcut with the AppUserModelID: Windows shows the app's notifications
   ; under the shortcut that carries the id the app sets for its process.
   nsExec::Exec '"$INSTDIR\${HELPER_EXE}" --shortcut "$SMPROGRAMS\${NAME}.lnk" --target "$INSTDIR\${APP_EXE}" --app-id "${APP_ID}"'
@@ -241,7 +282,8 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-  !insertmacro CheckAppClosed
+  !insertmacro CheckClosed "${APP_EXE}"
+  !insertmacro FormerNames FormerNameClosed
   !ifdef HAS_DAEMON
     ; The machine daemon of this install: remove its task (用这台电脑), then stop it; nothing
     ; else has this file name.
@@ -261,15 +303,18 @@ Section "Uninstall"
     FindClose $2
   !endif
   Delete "$INSTDIR\${APP_EXE}"
+  !insertmacro FormerNames FormerNameUninstall
   Delete "$INSTDIR\${HELPER_EXE}"
   Delete "$INSTDIR\${INSTALL_LOG}"
   Delete "$INSTDIR\${UNINSTALLER}"
   ; Only the files the installer wrote, then the folder when nothing else is in it.
   RMDir "$INSTDIR"
 
-  ; Backups an update left next to the install folder (.<NAME>.old-<version>).
+  ; Backups an update left next to the install folder (.<folder>.old-<version>). The folder
+  ; keeps the name the app was first installed under.
   ${GetParent} "$INSTDIR" $1
-  FindFirst $2 $3 "$1\.${NAME}.old-*"
+  ${GetFileName} "$INSTDIR" $4
+  FindFirst $2 $3 "$1\.$4.old-*"
   ${DoWhile} $3 != ""
     RMDir /r "$1\$3"
     FindNext $2 $3

@@ -174,7 +174,7 @@ if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; th
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
 # release_ops: a release embeds only the server URLs (the 正式服务器 / 测试服务器 menu), never
-# the local character pack or roster. Builds against an ops dir that holds servers.json alone,
+# the local roster (the character art is in the repository). Builds against an ops dir that holds servers.json alone,
 # from TC_SERVERS_JSON (the Release workflow) or the ops checkout's deploy/servers.json.
 release_ops() {
   local dir="$ROOT/.tmp/release-ops"

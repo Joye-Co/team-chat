@@ -7,12 +7,13 @@
 //! - `deploy/servers.json` (`{"e2e": "…", "staging": "…", "production": "…"}`) gives the server
 //!   URLs PRODUCT_STAGING_URL and PRODUCT_PRODUCTION_URL. Without it they come from a `servers`
 //!   key in product.json when there is one, else they are empty (the app then hides them).
-//! - `characters/<id>/<status>-<px>.svg` and `characters/boxes.json`, the optional character
-//!   pack, become `character_assets.rs` (an embedded table that `src/characters/assets.rs`
-//!   serves through the app's asset source) and `character_boxes.rs`. Without the pack both
-//!   are empty and members with a character draw their initial instead.
 //! - `roster/roster.json` becomes `bot_roster.rs`, the default character of a new bot by name.
 //!   Without it the table is empty.
+//!
+//! The character art is in the repository: `assets/characters/` (the Jojo & Friends avatar pack,
+//! CC BY 4.0, vendored by `scripts/characters/sync.sh`) becomes `character_assets.rs`, an embedded
+//! table that `src/characters/assets.rs` serves through the app's asset source, and
+//! `character_boxes.rs`.
 //!
 //! On Windows it also compiles the exe's icon and version resources (`embed_windows_resources`).
 //!
@@ -53,7 +54,7 @@ fn main() {
         let value = servers[key].as_str().unwrap_or("");
         println!("cargo:rustc-env={var}={value}");
     }
-    embed_characters(ops.as_deref());
+    embed_characters(&manifest.join("assets/characters"));
     embed_roster(ops.as_deref());
     embed_release_notes(&manifest);
     embed_windows_resources(&manifest, json["name"].as_str().unwrap_or_default());
@@ -150,34 +151,27 @@ fn embed_release_notes(manifest: &Path) {
     write_out("release_notes.rs", out);
 }
 
-/// `(asset path, bytes)` for every `characters/<id>/<status>-<px>.svg` of the optional
-/// character pack, sorted by path, and the pack's `boxes.json`. Both are empty without it.
-fn embed_characters(ops: Option<&Path>) {
+/// `(asset path, bytes)` for every `characters/<id>/<face>-<px>.svg` of the vendored avatar
+/// pack, sorted by path, and the pack's `boxes.json`.
+fn embed_characters(root: &Path) {
+    println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
-    let mut boxes = None;
-    if let Some(root) = ops.map(|o| o.join("characters")).filter(|r| r.is_dir()) {
-        println!("cargo:rerun-if-changed={}", root.display());
-        for dir in fs::read_dir(&root).expect("read the character pack") {
-            let dir = dir.unwrap().path();
-            if !dir.is_dir() {
-                continue;
-            }
-            println!("cargo:rerun-if-changed={}", dir.display());
-            for file in fs::read_dir(&dir).unwrap() {
-                let file = file.unwrap().path();
-                if file.extension().is_some_and(|e| e == "svg") {
-                    let rel = file.strip_prefix(&root).unwrap();
-                    let rel = format!("characters/{}", rel.to_string_lossy().replace('\\', "/"));
-                    files.push((rel, file));
-                }
-            }
+    for dir in fs::read_dir(root).expect("read assets/characters") {
+        let dir = dir.unwrap().path();
+        if !dir.is_dir() {
+            continue;
         }
-        let path = root.join("boxes.json");
-        if path.is_file() {
-            println!("cargo:rerun-if-changed={}", path.display());
-            boxes = Some(path);
+        println!("cargo:rerun-if-changed={}", dir.display());
+        for file in fs::read_dir(&dir).unwrap() {
+            let file = file.unwrap().path();
+            if file.extension().is_some_and(|e| e == "svg") {
+                let rel = file.strip_prefix(root).unwrap();
+                let rel = format!("characters/{}", rel.to_string_lossy().replace('\\', "/"));
+                files.push((rel, file));
+            }
         }
     }
+    assert!(!files.is_empty(), "no character art in {}", root.display());
     files.sort();
     let mut out = String::from("pub static FILES: &[(&str, &[u8])] = &[\n");
     for (path, file) in &files {
@@ -188,14 +182,15 @@ fn embed_characters(ops: Option<&Path>) {
     }
     out.push_str("];\n");
     write_out("character_assets.rs", out);
-    let boxes = match boxes {
-        Some(path) => format!(
+    let boxes = root.join("boxes.json");
+    println!("cargo:rerun-if-changed={}", boxes.display());
+    write_out(
+        "character_boxes.rs",
+        format!(
             "pub static BOXES_JSON: &str = include_str!({:?});\n",
-            path.display().to_string()
+            boxes.display().to_string()
         ),
-        None => "pub static BOXES_JSON: &str = \"{}\";\n".to_string(),
-    };
-    write_out("character_boxes.rs", boxes);
+    );
 }
 
 /// `(lowercase name, character id)` for every bot of `roster/roster.json`; empty without it.
