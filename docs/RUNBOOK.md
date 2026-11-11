@@ -214,6 +214,13 @@ Release again. A prerelease has no Windows installer.
   `%APPDATA%\<bundle id>\updates\update-journal.json`; `update.log` next to it says what
   happened. To run it by hand: `"<updates folder>\<slug>-update-run.exe" --recover "<journal>"`.
 - Withdrawing a version (`withdraw-release`) withdraws its Windows installer too.
+- Once releases are signed, the job compares the new installer with the one of the previous
+  GitHub Release (`scripts/test-windows-installer.sh --same-as`) and fails before anything is
+  published when installed apps would refuse it (another publisher, or no signature after a
+  signed release).
+- The steps only a person can do (getting the certificate, the first real release, the look
+  on a real Windows computer, SmartScreen reputation) are in
+  [plans/windows-parity/release.zh.md](plans/windows-parity/release.zh.md), section 三.
 
 ## Bad app release
 
