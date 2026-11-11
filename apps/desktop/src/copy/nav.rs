@@ -102,6 +102,8 @@ crate::copy! {
     // app menu
     MENU_ABOUT = "关于 {product}",
     ABOUT_VERSION = "版本 {version}",
+    // The art licence asks for this credit (CC BY 4.0).
+    ABOUT_CREDITS = "成员头像：Jojo & Friends，作者 Joye Huang（CC BY 4.0）",
     MENU_HIDE = "隐藏 {product}",
     MENU_HIDE_OTHERS = "隐藏其他",
     MENU_SHOW_ALL = "全部显示",
